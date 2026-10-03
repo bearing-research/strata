@@ -83,7 +83,7 @@ class TestUse:
     def test_a_provenance_hit_is_a_use(self, store):
         key = _ready(store)
         provenance = store.get_artifact(*key).provenance_hash
-        assert _row(store, *key)["last_used_at"] is None
+        _set(store, *key, last_used_at=None)
 
         store.find_by_provenance(provenance)
 
@@ -92,6 +92,7 @@ class TestUse:
     @pytest.mark.parametrize("read", ["read_blob", "open_blob_reader"])
     def test_reading_the_bytes_is_a_use(self, store, read):
         key = _ready(store)
+        _set(store, *key, last_used_at=None)
 
         result = getattr(store, read)(*key)
         if read == "open_blob_reader":
@@ -113,6 +114,7 @@ class TestUse:
     def test_hashing_the_bytes_is_not_a_use(self, store):
         """Finalize and verify hash every version; neither is anyone using it."""
         key = _ready(store)  # finalize computed the digest
+        _set(store, *key, last_used_at=None)
 
         store.blob_digest(*key)
         store.verify_artifacts()
@@ -135,10 +137,45 @@ class TestUse:
             def __getattr__(self, name):
                 return getattr(self._conn, name)
 
+        _set(store, *key, last_used_at=None)
         monkeypatch.setattr(store, "_get_connection", lambda: Refusing(real()))
 
         assert store.read_blob(*key) == b"x" * 100
         assert _row(store, *key)["last_used_at"] is None
+
+    @pytest.mark.parametrize("finalize", ["finalize_artifact", "finalize_and_set_name"])
+    def test_finishing_a_build_is_a_use(self, store, finalize):
+        """A build that ran for hours must not finalize looking idle since it started, the first
+        thing a sweep under the byte cap would collect.
+        """
+        artifact_id = str(uuid.uuid4())
+        version = store.create_artifact(artifact_id, "prov-long", minted=True)
+        _set(store, artifact_id, version, created_at=time.time() - 3 * 3600)
+        store.write_blob(artifact_id, version, b"x" * 100)
+
+        getattr(store, finalize)(artifact_id, version, "{}", 1, 100)
+
+        assert _row(store, artifact_id, version)["last_used_at"] == pytest.approx(
+            time.time(), abs=60
+        )
+        assert store.garbage_collect(max_bytes=50, min_idle_seconds=3600)["deleted_count"] == 0
+
+    def test_a_canonical_promotion_is_a_use(self, store):
+        """A notebook output deduped against another id and promoted back is as fresh."""
+        store.create_artifact("nb_a_cell_c_var_x", "prov-shared")
+        store.write_blob("nb_a_cell_c_var_x", 1, b"x")
+        store.finalize_artifact("nb_a_cell_c_var_x", 1, "{}", 1, 1)
+        store.create_artifact("nb_b_cell_c_var_x", "prov-shared")
+        _set(store, "nb_b_cell_c_var_x", 1, created_at=0.0)
+        store.write_blob("nb_b_cell_c_var_x", 1, b"x")
+        deduped = store.finalize_artifact("nb_b_cell_c_var_x", 1, "{}", 1, 1)
+        assert deduped.id == "nb_a_cell_c_var_x"
+
+        store.force_finalize_canonical("nb_b_cell_c_var_x", 1, "{}", 1, 1)
+
+        assert _row(store, "nb_b_cell_c_var_x", 1)["last_used_at"] == pytest.approx(
+            time.time(), abs=60
+        )
 
 
 class TestMinted:
@@ -159,6 +196,7 @@ class TestMinted:
         store = ArtifactStore(tmp_path / "old")
         minted = _ready(store)
         named = _ready(store, "nb_abc_cell_def_var_model")
+        _set(store, *minted, created_at=time.time() - 40 * DAY)
         conn = sqlite3.connect(store.db_path)
         conn.execute("UPDATE schema_version SET version = ?", (_LATEST_SCHEMA_VERSION - 1,))
         conn.execute("ALTER TABLE artifact_versions DROP COLUMN minted")
@@ -170,7 +208,12 @@ class TestMinted:
 
         assert _row(reopened, *minted)["minted"] == 1
         assert _row(reopened, *named)["minted"] == 0
-        assert _row(reopened, *minted)["last_used_at"] is None
+        # The release before recorded no use, so a result it used yesterday must not be
+        # collected by the first sweep for looking as old as its creation.
+        assert _row(reopened, *minted)["last_used_at"] == pytest.approx(time.time(), abs=60)
+        assert (
+            reopened.garbage_collect(max_idle_days=30, min_idle_seconds=3600)["deleted_count"] == 0
+        )
 
 
 class TestWhatIsCollected:
@@ -270,6 +313,75 @@ class TestWhatIsCollected:
 
         assert not _exists(store, (artifact_id, 1))
         assert not _exists(store, (artifact_id, 2))
+
+    @pytest.mark.parametrize("meanwhile", ["hit", "pin", "alias"])
+    def test_a_use_or_hold_during_the_sweep_keeps_the_version(self, store, monkeypatch, meanwhile):
+        """The sweep chooses, walks the protected chains, then deletes; whatever lands in between
+        must count, or a cache hit is handed a version whose bytes are about to go.
+        """
+        key = _ready(store)
+        _last_used(store, key, 40 * DAY)
+        provenance = store.get_artifact(*key).provenance_hash
+        chosen_then = ArtifactStore._without_version_gaps
+
+        def act_after_choosing(conn, chosen):
+            if meanwhile == "hit":
+                store.find_by_provenance(provenance)
+            elif meanwhile == "pin":
+                store.pin_artifact(*key, "review")
+            else:
+                store.set_name("model", *key)
+                store.set_alias("model", "champion", *key)
+                store.delete_name("model")
+            return chosen_then(conn, chosen)
+
+        monkeypatch.setattr(
+            ArtifactStore, "_without_version_gaps", staticmethod(act_after_choosing)
+        )
+
+        result = store.garbage_collect(max_idle_days=30, min_idle_seconds=3600)
+
+        assert result["deleted_count"] == 0
+        assert _exists(store, key)
+        assert store.read_blob(*key) == b"x" * 100
+
+    def test_a_large_sweep_commits_in_batches(self, store, monkeypatch):
+        """One transaction over a 100k-row sweep held SQLite's write lock for seconds, and every
+        create_artifact waited behind it.
+        """
+        import strata.artifact_store as artifact_store_module
+
+        monkeypatch.setattr(artifact_store_module, "_GC_DELETE_BATCH", 2)
+        monkeypatch.setattr(artifact_store_module, "_GC_BATCH_PAUSE_SECONDS", 0.0)
+        keys = [_ready(store) for _ in range(5)]
+        for key in keys:
+            _last_used(store, key, 40 * DAY)
+        real = store._get_connection
+        deletes_per_commit: list[int] = []
+
+        class Counting:
+            def __init__(self, conn):
+                self._conn = conn
+                self._deletes = 0
+
+            def execute(self, sql, *args):
+                if sql.strip().startswith("DELETE FROM artifact_versions"):
+                    self._deletes += 1
+                return self._conn.execute(sql, *args)
+
+            def commit(self):
+                deletes_per_commit.append(self._deletes)
+                self._deletes = 0
+                self._conn.commit()
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        monkeypatch.setattr(store, "_get_connection", lambda: Counting(real()))
+
+        assert store.garbage_collect(max_idle_days=30)["deleted_count"] == 5
+        assert sum(deletes_per_commit) == 5
+        assert max(deletes_per_commit) == 2
 
     def test_a_dry_run_names_what_would_go_and_deletes_nothing(self, store):
         idle = _ready(store)
@@ -698,6 +810,46 @@ class TestNotebookStores:
         self._open(notebook, monkeypatch, config)
 
         assert all(_exists(store, (self.OUTPUT, v)) for v in range(1, 6))
+
+    def test_a_write_a_crash_left_stops_holding_what_it_read(self, tmp_path):
+        """A crash between create and finalize leaves a ``building`` row, a root that would
+        keep every input behind it for good.
+        """
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "artifacts")
+        store = manager.artifact_store
+        up = "nb_nb_cell_up_var_x"
+        _values(store, up, 1)
+        ref = f"{up}@v=1"
+        crashed = store.create_artifact(
+            "nb_nb_cell_dn_var_y", "prov-dn", input_versions={f"strata://artifact/{ref}": ref}
+        )
+        _set(store, "nb_nb_cell_dn_var_y", crashed, created_at=time.time() - 2 * 3600)
+        for version in range(2, 6):
+            store.create_artifact(up, f"prov-{up}-{version}")
+            store.write_blob(up, version, b"x")
+            store.finalize_artifact(up, version, "{}", 1, 1)
+
+        manager.prune(keep_superseded=1, min_idle_seconds=0)
+
+        assert store.get_artifact("nb_nb_cell_dn_var_y", crashed).state == "failed"
+        assert not _exists(store, (up, 1))
+
+    def test_a_dead_writes_temp_file_goes_and_a_live_one_stays(self, store):
+        import os
+
+        dead = store.blobs_dir / "nb_x@v=1.arrow.k3j2.tmp"
+        live = store.blobs_dir / "nb_x@v=2.arrow.q9z1.tmp"
+        for path in (dead, live):
+            path.write_bytes(b"partial")
+        two_hours_ago = time.time() - 2 * 3600
+        os.utime(dead, (two_hours_ago, two_hours_ago))
+
+        store.garbage_collect(max_idle_days=30)
+
+        assert not dead.exists()
+        assert live.exists()
 
     def test_the_setting_reads_from_the_environment(self, tmp_path, monkeypatch):
         from strata.config import StrataConfig

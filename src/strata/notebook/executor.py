@@ -34,7 +34,7 @@ import httpx
 # Stdlib json, not orjson: executor.py is imported via ``strata.config`` and must load
 # with core deps only (orjson is in the ``[notebook]`` extra, absent from the Docker
 # image). Batch frames are small dicts.
-from strata.artifact_store import ArtifactVersion, get_artifact_store
+from strata.artifact_store import ArtifactVersion, StagedVersion, get_artifact_store
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook import console_relay
@@ -4271,6 +4271,8 @@ class CellExecutor:
             return True
 
         all_stored = True
+        staged: list[StagedVersion] = []
+        staged_names: list[tuple[str, str]] = []
 
         # ``.rds`` is R-only (harness.R's RDS fallback), with its own content_type so
         # consumers recognize it without scanning bytes.
@@ -4324,7 +4326,7 @@ class CellExecutor:
                     output_dir,
                 )
                 all_stored = False
-                continue
+                break
 
             try:
                 with open(output_file, "rb") as f:
@@ -4333,33 +4335,24 @@ class CellExecutor:
                 content_type = content_type_map.get(ext, "pickle/object")
                 var_provenance = derive_subkey(provenance_hash, var_name)
 
-                artifact_version = artifact_mgr.store_cell_output(
-                    cell_id=cell_id,
-                    variable_name=var_name,
-                    blob_data=blob_data,
-                    content_type=content_type,
-                    provenance_hash=var_provenance,
-                    input_versions=input_versions,
-                    source_hash=source_hash,
-                    source=source,
-                    env_hash=env_hash,
-                    variant=variant,
-                    build_env=build_env,
-                    build_duration_ms=build_duration_ms,
-                    hardware=hardware,
+                staged.append(
+                    artifact_mgr.stage_cell_output(
+                        cell_id=cell_id,
+                        variable_name=var_name,
+                        blob_data=blob_data,
+                        content_type=content_type,
+                        provenance_hash=var_provenance,
+                        input_versions=input_versions,
+                        source_hash=source_hash,
+                        source=source,
+                        env_hash=env_hash,
+                        variant=variant,
+                        build_env=build_env,
+                        build_duration_ms=build_duration_ms,
+                        hardware=hardware,
+                    )
                 )
-                uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
-                cell.artifact_uris[var_name] = uri
-                cell.artifact_uri = uri  # backward compat
-                logger.info(
-                    "Stored output %s for cell %s as %s@v=%d (%d bytes, %s)",
-                    var_name,
-                    cell_id,
-                    artifact_version.id,
-                    artifact_version.version,
-                    len(blob_data),
-                    content_type,
-                )
+                staged_names.append((var_name, content_type))
             except Exception:
                 logger.exception(
                     "Failed to store output %s for cell %s",
@@ -4367,8 +4360,34 @@ class CellExecutor:
                     cell_id,
                 )
                 all_stored = False
+                break
 
-        return all_stored
+        # One run's outputs become current together or not at all: a downstream cell
+        # must never read one variable from this run and another from an earlier one.
+        try:
+            if not all_stored:
+                artifact_mgr.discard_cell_outputs(staged)
+                return False
+            stored = artifact_mgr.finalize_cell_outputs(staged)
+        except Exception:
+            logger.exception("Failed to store the outputs of cell %s", cell_id)
+            return False
+
+        for (var_name, content_type), artifact_version in zip(staged_names, stored, strict=True):
+            uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
+            cell.artifact_uris[var_name] = uri
+            cell.artifact_uri = uri  # backward compat
+            logger.info(
+                "Stored output %s for cell %s as %s@v=%d (%d bytes, %s)",
+                var_name,
+                cell_id,
+                artifact_version.id,
+                artifact_version.version,
+                artifact_version.byte_size or 0,
+                content_type,
+            )
+
+        return True
 
     def _store_console_outputs(
         self,
@@ -5222,20 +5241,22 @@ class CellExecutor:
         # Record inputs so a training loop's output has a lineage graph.
         loop_input_versions = self._input_refs(cell_id)
 
-        canonical_artifact = artifact_mgr.store_cell_output(
-            cell_id=cell_id,
-            variable_name=loop.carry,
-            blob_data=carry_blob,
-            content_type=carry_content_type,
-            provenance_hash=carry_var_provenance,
-            input_versions=loop_input_versions,
-            source_hash=source_hash,
-            source=source,
-            env_hash=env_hash,
-            build_env=loop_build_env,
-            build_duration_ms=loop_duration_ms,
-        )
-        canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
+        # Staged, then finalized with the extra outputs below so all become current together.
+        staged = [
+            artifact_mgr.stage_cell_output(
+                cell_id=cell_id,
+                variable_name=loop.carry,
+                blob_data=carry_blob,
+                content_type=carry_content_type,
+                provenance_hash=carry_var_provenance,
+                input_versions=loop_input_versions,
+                source_hash=source_hash,
+                source=source,
+                env_hash=env_hash,
+                build_env=loop_build_env,
+                build_duration_ms=loop_duration_ms,
+            )
+        ]
 
         # Same canonical ids and per-variable provenance as non-loop outputs.
         extra_outputs: dict[str, Any] = {}
@@ -5250,18 +5271,20 @@ class CellExecutor:
                 )
                 continue
             extra_blob, extra_content_type = captured
-            artifact_mgr.store_cell_output(
-                cell_id=cell_id,
-                variable_name=extra_var,
-                blob_data=extra_blob,
-                content_type=extra_content_type,
-                provenance_hash=derive_subkey(cell_provenance, extra_var),
-                input_versions=loop_input_versions,
-                source_hash=source_hash,
-                source=source,
-                env_hash=env_hash,
-                build_env=loop_build_env,
-                build_duration_ms=loop_duration_ms,
+            staged.append(
+                artifact_mgr.stage_cell_output(
+                    cell_id=cell_id,
+                    variable_name=extra_var,
+                    blob_data=extra_blob,
+                    content_type=extra_content_type,
+                    provenance_hash=derive_subkey(cell_provenance, extra_var),
+                    input_versions=loop_input_versions,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                    build_env=loop_build_env,
+                    build_duration_ms=loop_duration_ms,
+                )
             )
             extra_outputs[extra_var] = {
                 "content_type": extra_content_type,
@@ -5269,6 +5292,9 @@ class CellExecutor:
                     f"{extra_var}{self._LOOP_CONTENT_TYPE_EXT.get(extra_content_type, '.pickle')}"
                 ),
             }
+
+        canonical_artifact = artifact_mgr.finalize_cell_outputs(staged)[0]
+        canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
 
         # Lets ``compute_staleness`` hit the "uncached ready" path for leaf loop cells.
         self.session.record_successful_execution_provenance(

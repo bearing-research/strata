@@ -144,6 +144,18 @@ class ArtifactVersion:
 
 
 @dataclass(frozen=True)
+class StagedVersion:
+    """A ``building`` version whose bytes are written, waiting to be made ready."""
+
+    artifact_id: str
+    version: int
+    schema_json: str
+    row_count: int
+    byte_size: int
+    content_sha256: str
+
+
+@dataclass(frozen=True)
 class ImportedArtifact:
     """Where an imported record landed in the destination store.
 
@@ -451,6 +463,14 @@ def _add_import_staging(conn: StoreConnection, dialect: SqlDialect) -> None:
 # recorded time can be this far behind the last real use.
 _USE_RESOLUTION_SECONDS = 300.0
 
+# Versions garbage_collect deletes per transaction, and how long it leaves SQLite's write
+# lock free between them.
+_GC_DELETE_BATCH = 1000
+_GC_BATCH_PAUSE_SECONDS = 0.1
+
+# How long a temp file goes untouched before a sweep takes it for a dead write's.
+_ABANDONED_WRITE_SECONDS = 3600.0
+
 # A sweep over its byte cap collects down to this fraction of it, so the next
 # write does not put it straight back over (the row-group cache does the same).
 _EVICT_TO_FRACTION = 0.8
@@ -462,13 +482,16 @@ _MINTED_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
 def _add_use_and_minted(conn: StoreConnection, dialect: SqlDialect) -> None:
     """Add ``last_used_at`` and ``minted``, which retention keys on.
 
-    ``last_used_at`` NULL reads as ``created_at``. ``minted`` marks an id the store
-    made up for one computation, whose latest version may be collected. Existing
-    rows are backfilled by shape: uuid4 ids are minted, ``nb_...`` ids are not, so
-    a caller-chosen uuid-shaped id may be recomputed after a long idle.
+    ``last_used_at`` NULL reads as ``created_at``. Existing rows start their idle
+    clock at the upgrade, since earlier releases recorded no use and a result used
+    yesterday would otherwise look as old as its creation. ``minted`` marks an id the
+    store made up for one computation, whose latest version may be collected.
+    Existing rows are backfilled by shape: uuid4 ids are minted, ``nb_...`` ids are
+    not, so a caller-chosen uuid-shaped id may be recomputed after a long idle.
     """
     if not dialect.column_exists(conn, "artifact_versions", "last_used_at"):
         conn.execute(f"ALTER TABLE artifact_versions ADD COLUMN last_used_at {dialect.float_type}")
+        conn.execute("UPDATE artifact_versions SET last_used_at = ?", (time.time(),))
     if not dialect.column_exists(conn, "artifact_versions", "minted"):
         conn.execute(
             "ALTER TABLE artifact_versions "
@@ -509,7 +532,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     principal TEXT,  -- Principal ID that created this artifact
     content_sha256 TEXT,  -- Digest of the stored bytes (see migration 1)
     blob_attempt TEXT,  -- Build attempt whose bytes this reads; NULL = shared key (migration 4)
-    last_used_at REAL,  -- Last hit or read; NULL = never since created (migration 6)
+    last_used_at REAL,  -- Last finalize, hit or read; NULL reads as created_at (migration 6)
     minted INTEGER NOT NULL DEFAULT 0,  -- 1 = the store made up the id (migration 6)
     PRIMARY KEY (id, version)
 );
@@ -1368,10 +1391,21 @@ class ArtifactStore:
                     """
                     UPDATE artifact_versions
                     SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                        content_sha256 = ?, blob_attempt = ?
+                        content_sha256 = ?, blob_attempt = ?, last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
-                    (schema_json, row_count, byte_size, digest, blob_attempt, artifact_id, version),
+                    (
+                        schema_json,
+                        row_count,
+                        byte_size,
+                        digest,
+                        blob_attempt,
+                        # Idle time counts from now: a long build would otherwise finalize
+                        # looking idle since it started and be the first a sweep collects.
+                        time.time(),
+                        artifact_id,
+                        version,
+                    ),
                 )
                 if cursor.rowcount == 0:
                     # Another process may have finalized it.
@@ -1596,10 +1630,11 @@ class ArtifactStore:
                     SET state = 'ready',
                         schema_json = ?,
                         row_count = ?,
-                        byte_size = ?
+                        byte_size = ?,
+                        last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'failed'
                     """,
-                    (schema_json, row_count, byte_size, artifact_id, version),
+                    (schema_json, row_count, byte_size, time.time(), artifact_id, version),
                 )
                 conn.commit()
                 break
@@ -1612,6 +1647,74 @@ class ArtifactStore:
             finally:
                 conn.close()
         return self.get_artifact(artifact_id, version)
+
+    def finalize_canonical_together(
+        self, staged: list[StagedVersion]
+    ) -> list[ArtifactVersion | None]:
+        """Make several ``building`` versions ready in one transaction, all or none.
+
+        For the outputs of one notebook cell run: finalized one at a time, a crash in
+        between would leave values from two runs current together. Each becomes the
+        single ready row for its ``(tenant, provenance_hash)`` under its own id,
+        superseding any other, as :meth:`force_finalize_canonical` does.
+
+        Raises:
+            ValueError: If a version is not found or not in "building" state.
+        """
+        if not staged:
+            return []
+        # Retried for the same race force_finalize_canonical retries.
+        for attempt in range(_CANONICAL_PROMOTE_ATTEMPTS):
+            conn = self._get_connection()
+            try:
+                self._dialect.begin_write(conn, staged[0].artifact_id)
+                now = time.time()
+                for item in staged:
+                    row = conn.execute(
+                        "SELECT provenance_hash, tenant, state FROM artifact_versions "
+                        "WHERE id = ? AND version = ?",
+                        (item.artifact_id, item.version),
+                    ).fetchone()
+                    if row is None or row["state"] != "building":
+                        conn.rollback()
+                        raise ValueError(
+                            f"Artifact {item.artifact_id}@v={item.version} not in building state"
+                        )
+                    conn.execute(
+                        """
+                        UPDATE artifact_versions SET state = 'superseded'
+                        WHERE provenance_hash = ? AND state = 'ready'
+                          AND COALESCE(tenant, '') = COALESCE(?, '')
+                          AND NOT (id = ? AND version = ?)
+                        """,
+                        (row["provenance_hash"], row["tenant"], item.artifact_id, item.version),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE artifact_versions
+                        SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
+                            content_sha256 = ?, last_used_at = ?
+                        WHERE id = ? AND version = ?
+                        """,
+                        (
+                            item.schema_json,
+                            item.row_count,
+                            item.byte_size,
+                            item.content_sha256,
+                            now,
+                            item.artifact_id,
+                            item.version,
+                        ),
+                    )
+                conn.commit()
+                break
+            except self._dialect.integrity_error:
+                conn.rollback()
+                if attempt == _CANONICAL_PROMOTE_ATTEMPTS - 1:
+                    raise
+            finally:
+                conn.close()
+        return [self.get_artifact(item.artifact_id, item.version) for item in staged]
 
     def finalize_and_set_name(
         self,
@@ -1719,10 +1822,18 @@ class ArtifactStore:
                     """
                     UPDATE artifact_versions
                     SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                        blob_attempt = ?
+                        blob_attempt = ?, last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
-                    (schema_json, row_count, byte_size, blob_attempt, artifact_id, version),
+                    (
+                        schema_json,
+                        row_count,
+                        byte_size,
+                        blob_attempt,
+                        time.time(),
+                        artifact_id,
+                        version,
+                    ),
                 )
                 if cursor.rowcount == 0:
                     # Another process may have finalized it.
@@ -4029,8 +4140,42 @@ class ArtifactStore:
             # 'ready' rows whose blob is gone after a crash or a raising backend, a corrupt store;
             # losing a blob whose row is gone only wastes bytes.
             collected: list[tuple[str, int]] = []
-            for row in chosen.values():
+            for position, row in enumerate(chosen.values()):
+                # Committed in batches: one transaction over a large sweep holds SQLite's write
+                # lock long enough to stall every writer behind it.
+                if position and position % _GC_DELETE_BATCH == 0:
+                    conn.commit()
+                    if self._dialect.name == "sqlite":
+                        # A waiting writer polls the lock (up to every 100 ms) rather than
+                        # queueing, so it only gets in if the lock stays free that long.
+                        time.sleep(_GC_BATCH_PAUSE_SECONDS)
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
+
+                # Re-checked here, not trusted from the SELECT: a hit or a new hold during the
+                # sweep keeps the version. The no-op UPDATE also locks the row, so a use cannot
+                # land between this check and the DELETE.
+                claimed = conn.execute(
+                    """
+                    UPDATE artifact_versions SET state = state
+                    WHERE id = ? AND version = ? AND COALESCE(last_used_at, created_at) <= ?
+                      AND NOT EXISTS (SELECT 1 FROM artifact_names n
+                                      WHERE n.artifact_id = ? AND n.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM artifact_aliases a
+                                      WHERE a.artifact_id = ? AND a.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM artifact_pins p
+                                      WHERE p.artifact_id = ? AND p.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM artifact_publications pub
+                                      WHERE pub.artifact_id = ? AND pub.version = ?)
+                    """,
+                    (artifact_id, version, row["used"], *(artifact_id, version) * 4),
+                )
+                if claimed.rowcount == 0:
+                    logger.info(
+                        "garbage_collect: keeping %s@v=%d, used or held since it was selected.",
+                        artifact_id,
+                        version,
+                    )
+                    continue
 
                 self._delete_version_children(conn, artifact_id, version)
                 try:
@@ -4059,6 +4204,10 @@ class ArtifactStore:
             conn.commit()
         finally:
             conn.close()
+
+        removed = self.blob_store.remove_stale_temp_files(_ABANDONED_WRITE_SECONDS)
+        if removed:
+            logger.info("garbage_collect: removed %d temp file(s) of abandoned writes", removed)
 
         # Best-effort blob cleanup after the metadata is durably gone; a failure only orphans bytes.
         #
@@ -4195,8 +4344,9 @@ class ArtifactStore:
     def sweep_zombie_builds(self, max_age_seconds: float = 3600) -> int:
         """Mark ``building`` artifacts older than ``max_age_seconds`` as failed; return the count.
 
-        Startup only: it demotes every old enough ``building`` row unconditionally,
-        which is safe only before the build runner accepts work.
+        It demotes every old enough ``building`` row unconditionally, which is safe
+        only where no live writer holds one that long: a server before its build
+        runner accepts work, or a notebook's own store.
         """
         conn = self._get_connection()
         try:

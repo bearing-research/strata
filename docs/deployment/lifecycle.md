@@ -111,8 +111,8 @@ A version is collected only when nothing holds it:
   built from. A notebook stores each cell output under its own id and reads the
   latest version back, so that version stays. An id the store made up for one
   `materialize` has no such value;
-- it has not been used in the last hour: a cache hit, a read of its data, or a
-  request that names it as an input all count.
+- it has not been used in the last hour: finishing its build, a cache hit, a
+  read of its data, or a request that names it as an input all count.
 
 So **an unnamed result is a cache entry**. Its URI keeps working while it is
 used, and once it is collected the same request computes it again. To keep a
@@ -169,9 +169,14 @@ A **notebook's own** artifact store (`.strata/artifacts/`) keeps each cell
 output's current value plus its three most recent earlier values, so reverting
 a recent edit is still a cache hit. Older values are pruned in the background
 each time the server opens the notebook, including a reopen of a notebook that
-is already open. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
+is already open, and a value a crash left half-written for over an hour is
+marked failed then. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
 to keep more, or to `0` to keep every value. Deleting the notebook deletes its
 store.
+
+Every sweep, of either store, also removes the temporary files of blob writes
+that died part way (a killed process), once they have gone untouched for an
+hour.
 
 ## Cleaning up the Iceberg row-group cache
 

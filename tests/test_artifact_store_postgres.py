@@ -290,6 +290,27 @@ class TestCanonicalPromotion:
         assert promoted.id == "a2"
         assert promoted.state == "ready"
 
+    def test_a_runs_outputs_finalize_together_or_not_at_all(self, store):
+        from strata.artifact_store import StagedVersion
+
+        first = store.create_artifact("a1", "shared-prov", _spec())
+        store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
+        x = StagedVersion(
+            "a2", store.create_artifact("a2", "shared-prov", _spec()), "{}", 0, 0, "d"
+        )
+        y = StagedVersion("a3", store.create_artifact("a3", "prov-y", _spec()), "{}", 0, 0, "d")
+        z = StagedVersion("a4", store.create_artifact("a4", "prov-z", _spec()), "{}", 0, 0, "d")
+        store.fail_artifact("a4", z.version)
+
+        with pytest.raises(ValueError, match="building"):
+            store.finalize_canonical_together([y, z])
+        assert store.get_artifact("a3", y.version).state == "building"
+
+        finalized = store.finalize_canonical_together([x, y])
+
+        assert [(v.id, v.state) for v in finalized] == [("a2", "ready"), ("a3", "ready")]
+        assert store.get_artifact("a1", first).state == "superseded"
+
 
 class TestGarbageCollection:
     def test_the_current_value_survives_a_rebuild_in_flight(self, store):
@@ -355,9 +376,52 @@ class TestGarbageCollection:
             conn.close()
         assert row["last_used_at"] == pytest.approx(time.time(), abs=60)
 
+    def test_a_hit_during_the_sweep_keeps_the_version(self, store, monkeypatch):
+        """Another node's cache hit commits while this sweep is between choosing and deleting."""
+        artifact = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e03"
+        self._ready(store, artifact, "prov-hit", minted=True)
+        self._last_used(store, artifact, 7200)
+        chosen_then = ArtifactStore._without_version_gaps
+
+        def hit_after_choosing(conn, chosen):
+            # Its own thread, so its own pooled connection and transaction.
+            hit = threading.Thread(target=store.find_by_provenance, args=("prov-hit",))
+            hit.start()
+            hit.join()
+            return chosen_then(conn, chosen)
+
+        monkeypatch.setattr(
+            ArtifactStore, "_without_version_gaps", staticmethod(hit_after_choosing)
+        )
+
+        result = store.garbage_collect(max_idle_days=0, min_idle_seconds=3600)
+
+        assert result["deleted_count"] == 0
+        assert store.get_artifact(artifact, 1) is not None
+
 
 class TestConnectionPool:
     """A bounded pool is only safe here because acquisition is re-entrant."""
+
+    def test_reads_return_their_connection_without_a_pool_warning(self, store, caplog):
+        """psycopg_pool warns and rolls back whenever a connection comes back mid-transaction,
+        which every read did, burying real warnings under one per call.
+        """
+        import logging
+
+        version = store.create_artifact("warn-a", "warn-p", _spec())
+        store.write_blob("warn-a", version, b"x")
+        store.finalize_artifact("warn-a", version, "{}", row_count=0, byte_size=1)
+
+        with caplog.at_level(logging.WARNING, logger="psycopg.pool"):
+            store.get_artifact("warn-a", version)
+            store.get_latest_version("warn-a")
+            store.find_by_provenance("warn-p")
+            store.read_blob("warn-a", version)
+            store.list_artifacts()
+            store.stats()
+
+        assert [r.getMessage() for r in caplog.records if r.name.startswith("psycopg")] == []
 
     def test_nested_acquisition_reuses_one_pooled_connection(self, postgres_dsn):
         dialect = PostgresDialect(postgres_dsn)

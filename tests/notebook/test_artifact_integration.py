@@ -526,3 +526,96 @@ class TestLineageRefShape:
         # resolves to it.
         assert mine.artifact_store.get_artifact(ours.id, ours.version).state == "superseded"
         assert mine.artifact_store.find_by_provenance(provenance).id != ours.id
+
+
+class TestOneRunsOutputsTogether:
+    """A cell's outputs from one run become current together, or none of them do.
+
+    Finalized one at a time, a crash between two outputs left one variable from the new run and
+    the other from the run before, and a downstream cell read both as current.
+    """
+
+    class _Crash(BaseException):
+        """Stands in for the process dying: nothing in the store path catches it."""
+
+    @staticmethod
+    def _session(tmp_path: Path):
+        from strata.notebook.dag import NotebookDag
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        notebook = create_notebook(tmp_path, "together", initialize_environment=False)
+        add_cell_to_notebook(notebook, "a", None)
+        write_cell(notebook, "a", "model = {}\nmetric = {}\n")
+        session = NotebookSession(parse_notebook(notebook), notebook)
+        session.dag = NotebookDag(consumed_variables={"a": {"model", "metric"}})
+        return session
+
+    @staticmethod
+    def _run(executor, output_dir: Path, run: int, *, write_metric: bool = True) -> bool:
+        output_dir.mkdir(exist_ok=True)
+        for stale in output_dir.iterdir():
+            stale.unlink()
+        (output_dir / "model.json").write_text(f'{{"run": {run}}}')
+        if write_metric:
+            (output_dir / "metric.json").write_text(f'{{"run": {run}}}')
+        return executor._store_outputs("a", output_dir, "prov" + "0" * 60, [])
+
+    @staticmethod
+    def _current(session) -> dict[str, bytes]:
+        manager = session.get_artifact_manager()
+        current = {}
+        for var in ("model", "metric"):
+            artifact_id = manager.cell_artifact_id("a", var)
+            latest = manager.artifact_store.get_latest_version(artifact_id)
+            current[var] = manager.artifact_store.read_blob(artifact_id, latest.version)
+        return current
+
+    def test_a_crash_between_two_outputs_leaves_the_earlier_run_current(
+        self, tmp_path, monkeypatch
+    ):
+        from strata.blob_store import LocalBlobStore
+        from strata.notebook.executor import CellExecutor
+
+        session = self._session(tmp_path)
+        executor = CellExecutor(session)
+        assert self._run(executor, tmp_path / "out", 1)
+
+        real_write = LocalBlobStore.write_blob
+        writes = []
+
+        def write_then_die(self, artifact_id, version, data):
+            writes.append(artifact_id)
+            if len(writes) == 2:
+                raise TestOneRunsOutputsTogether._Crash
+            return real_write(self, artifact_id, version, data)
+
+        monkeypatch.setattr(LocalBlobStore, "write_blob", write_then_die)
+        with pytest.raises(self._Crash):
+            self._run(executor, tmp_path / "out", 2)
+        monkeypatch.undo()
+
+        assert self._current(session) == {"model": b'{"run": 1}', "metric": b'{"run": 1}'}
+
+    def test_a_missing_output_stores_none_of_the_run(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+
+        session = self._session(tmp_path)
+        executor = CellExecutor(session)
+        assert self._run(executor, tmp_path / "out", 1)
+
+        assert not self._run(executor, tmp_path / "out", 2, write_metric=False)
+
+        assert self._current(session) == {"model": b'{"run": 1}', "metric": b'{"run": 1}'}
+
+    def test_a_complete_run_replaces_both(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+
+        session = self._session(tmp_path)
+        executor = CellExecutor(session)
+        assert self._run(executor, tmp_path / "out", 1)
+
+        assert self._run(executor, tmp_path / "out", 2)
+
+        assert self._current(session) == {"model": b'{"run": 2}', "metric": b'{"run": 2}'}

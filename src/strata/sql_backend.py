@@ -480,7 +480,17 @@ class PostgresDialect:
             raw.close()
             return
 
-        # putconn rolls back an open transaction so it cannot leak to the next borrower.
+        # Every read leaves a transaction open (psycopg begins one implicitly). The pool would
+        # roll it back too, but with a WARNING per returned connection.
+        import psycopg
+        from psycopg.pq import TransactionStatus
+
+        if raw.info.transaction_status in (TransactionStatus.INTRANS, TransactionStatus.INERROR):
+            try:
+                raw.rollback()
+            except psycopg.Error as exc:
+                # putconn discards a connection it cannot reset.
+                logger.debug("rolling back a returned connection failed: %s", exc)
         pool.putconn(raw)
 
     def close(self) -> None:
