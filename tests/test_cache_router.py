@@ -446,7 +446,9 @@ class TestWarmTakesTheScanIdentity:
         lake_state._cache_warmer = CacheWarmer(
             planner=planner, fetcher=MagicMock(), metrics=MagicMock()
         )
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
             resp = await client.post(
                 "/v1/cache/warm/async",
                 json={"tables": ["file:///wh#allowed.events"]},
@@ -528,7 +530,9 @@ class TestWarmJobsAreTenantScoped:
         owner, other = self._headers("team-a"), self._headers("team-b")
         admin = self._headers("team-b", "admin:*")
         try:
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://testserver"
+            ) as client:
                 started = await client.post(
                     "/v1/cache/warm/async", json={"tables": ["file:///wh#team.t"]}, headers=owner
                 )
