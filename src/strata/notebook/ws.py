@@ -3025,6 +3025,8 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
             payload["display"] = result.display_output
     else:
         payload["error"] = result.error
+        if result.error_code:
+            payload["error_code"] = result.error_code
         if result.suggest_install:
             payload["suggest_install"] = result.suggest_install
             # Picks the install endpoint (uv vs install.packages).

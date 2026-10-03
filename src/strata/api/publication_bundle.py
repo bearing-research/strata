@@ -31,6 +31,11 @@ BUNDLE_EXTENSIONS = {
 }
 
 
+def payload_filename(content_type: str) -> str:
+    """The name the published bytes take inside a bundle."""
+    return f"artifact{BUNDLE_EXTENSIONS.get(content_type, '.bin')}"
+
+
 def write_bundle(
     store: ArtifactStore,
     artifact: ArtifactVersion,
@@ -63,7 +68,7 @@ def write_bundle(
         raise ValueError(f"{artifact.id}@v={artifact.version} has no stored bytes to archive")
 
     content_type = content_type_of(artifact)
-    filename = f"artifact{BUNDLE_EXTENSIONS.get(content_type, '.bin')}"
+    filename = payload_filename(content_type)
 
     lineage = ArtifactService().build_lineage(
         store,
@@ -110,6 +115,20 @@ def write_bundle(
         ),
         encoding="utf-8",
     )
+    parquet_name = _write_parquet_companion(store, artifact, dest)
+    companions = (
+        [
+            {
+                "file": parquet_name,
+                "content_type": PARQUET_CONTENT_TYPE,
+                "sha256": hashlib.sha256((dest / parquet_name).read_bytes()).hexdigest(),
+                "note": "The same rows as the archived bytes, in Parquet.",
+            }
+        ]
+        if parquet_name is not None
+        else []
+    )
+    _name_bundle_files(dest, filename, companions)
     # RO-Crate turns the chain into data a repository such as Zenodo can index.
     (dest / "ro-crate-metadata.json").write_text(
         json.dumps(
@@ -120,13 +139,12 @@ def write_bundle(
                 content_type=content_type,
                 payload_id=filename,
                 include_descriptor=True,
+                companions=companions,
             ),
             indent=2,
         ),
         encoding="utf-8",
     )
-    parquet_name = _write_parquet_companion(store, artifact, dest)
-    _name_bundle_files(dest, filename, parquet_name)
 
     (dest / "README.md").write_text(
         _bundle_readme(publication, artifact, filename, digest, parquet_name),
@@ -139,6 +157,8 @@ def write_bundle(
     written += ["manifest.json", "ro-crate-metadata.json", "README.md"]
     return written
 
+
+PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
 
 # A tabular artifact larger than this is archived without its Parquet copy. Fixed, so a
 # publication's archive stays the same bytes on every build.
@@ -269,7 +289,7 @@ def _write_parquet_companion(
     return "artifact.parquet"
 
 
-def _name_bundle_files(dest: Path, filename: str, parquet_name: str | None) -> None:
+def _name_bundle_files(dest: Path, filename: str, companions: list[dict[str, str]]) -> None:
     """Name the payload file in ``manifest.json`` and give any companion its own digest.
 
     With more than one file, a digest that does not say what it covers is ambiguous.
@@ -277,16 +297,16 @@ def _name_bundle_files(dest: Path, filename: str, parquet_name: str | None) -> N
     manifest_path = dest / "manifest.json"
     record = json.loads(manifest_path.read_text(encoding="utf-8"))
     record["content_file"] = filename
-    if parquet_name is not None:
-        record["additional_files"] = [
-            {
-                "file": parquet_name,
-                "content_type": "application/vnd.apache.parquet",
-                "sha256": hashlib.sha256((dest / parquet_name).read_bytes()).hexdigest(),
-                "note": "The same rows as the archived bytes, in Parquet.",
-            }
-        ]
+    if companions:
+        record["additional_files"] = companions
     manifest_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+
+def companion_digests(archive: Path) -> dict[str, str]:
+    """``{sha256: filename}`` for the companion files listed in a built archive's manifest."""
+    with zipfile.ZipFile(archive) as bundle:
+        record = json.loads(bundle.read("manifest.json"))
+    return {entry["sha256"]: entry["file"] for entry in record.get("additional_files", [])}
 
 
 def _bundle_readme(

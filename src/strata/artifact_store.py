@@ -2655,8 +2655,9 @@ class ArtifactStore:
         tenant: str | None = None,
         authors: list[dict[str, str]] | None = None,
         external_ids: list[dict[str, str]] | None = None,
+        actor: str | None = None,
     ) -> Publication | None:
-        """Set a publication's authors and external ids after the fact.
+        """Set a publication's authors and external ids after the fact (audited as ``credit``).
 
         Never touches the artifact binding. ``None`` leaves a column alone; an empty
         list clears it. Returns the updated publication, or ``None`` if the token is
@@ -2680,9 +2681,25 @@ class ArtifactStore:
                     "WHERE token = ? AND tenant = ?",
                     (*params, token, effective_tenant),
                 )
-                conn.commit()
                 if cursor.rowcount == 0:
+                    conn.commit()
                     return None
+                bound = conn.execute(
+                    "SELECT artifact_id, version FROM artifact_publications "
+                    "WHERE token = ? AND tenant = ?",
+                    (token, effective_tenant),
+                ).fetchone()
+                self._audit_in_connection(
+                    conn,
+                    action="credit",
+                    artifact_id=bound["artifact_id"],
+                    to_version=bound["version"],
+                    key="token",
+                    value=token,
+                    actor=actor,
+                    tenant=effective_tenant,
+                )
+                conn.commit()
             row = conn.execute(
                 "SELECT * FROM artifact_publications WHERE token = ? AND tenant = ?",
                 (token, effective_tenant),

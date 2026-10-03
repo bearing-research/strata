@@ -220,7 +220,15 @@ Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
 
 - **`sha256=<digest>` pins the bytes.** The digest is the fingerprint, checked
   without the network while the cached copy matches. If the URL serves anything
-  else, the cell fails with both digests.
+  else, the cell fails with both digests and the error code
+  `fetch_pin_mismatch` (`error_code` on the WebSocket `cell_error` frame, the
+  REST and MCP run results, and the `strata run --format json` entry), so a
+  client can tell a moved pin from any other failure without reading the text.
+  `strata cell pin-fetch <notebook_dir> <cell_id> [NAME ...]` writes the pin for
+  you: it sets `sha256=` on each named fetch (all of the cell's by default) to
+  the digest of the bytes the notebook last downloaded, keeping the line's other
+  options. Run the cell first so there are bytes to pin. After a mismatch,
+  running it again accepts what the URL serves now.
 - **`refetch=stale`** (default) checks the URL with a conditional GET
   (`ETag` / `Last-Modified`): at most once a minute while staleness is being
   recomputed, and always right before the cell runs, so what a run records is
@@ -229,9 +237,10 @@ Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
 - **`refetch=always`** downloads again on every check, ignoring validators.
 
 Each artifact the cell stores records the URL and the digest of the bytes the
-run read as one of its inputs. That record is how a
-[publication](publishing.md) page and its RO-Crate list the URL under
-"External inputs". A snapshot export lists every fetch with whether it is
+run read as one of its inputs, and when those bytes were downloaded. That
+record is how a [publication](publishing.md) page lists the URL under
+"External inputs" with its digest and retrieval time, and its RO-Crate gives
+the URL's `File` node an `sdDatePublished`. A snapshot export lists every fetch with whether it is
 pinned, so an unpinned one can be flagged before the snapshot is shared.
 
 Only `http` and `https` are fetched. In service mode every redirect hop passes

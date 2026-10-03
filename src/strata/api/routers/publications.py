@@ -14,12 +14,13 @@ from __future__ import annotations
 import asyncio
 import json
 from html import escape
+from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from strata.api.badge import badge_for
 from strata.api.dependencies import (
@@ -29,7 +30,12 @@ from strata.api.dependencies import (
     require_scope,
 )
 from strata.api.provenance_ld import build_crate
-from strata.api.publication_bundle import cached_bundle_zip, drop_cached_bundles
+from strata.api.publication_bundle import (
+    cached_bundle_zip,
+    companion_digests,
+    drop_cached_bundles,
+    payload_filename,
+)
 from strata.api.publication_page import (
     build_record,
     content_type_of,
@@ -69,9 +75,13 @@ class PublishRequest(BaseModel):
 class PublicationCreditsRequest(BaseModel):
     """What a publication can be told after it exists.
 
-    No ``artifact_id`` or ``version``, so the binding cannot be changed. A field
-    left ``None`` is untouched; an empty list clears it.
+    No ``artifact_id`` or ``version``, so the binding cannot be changed; the route
+    refuses either key rather than ignore it. A field left ``None`` is untouched; an
+    empty list clears it.
     """
+
+    # Extra keys are kept so the route can see a repoint attempt.
+    model_config = ConfigDict(extra="allow")
 
     authors: list[Author] | None = None
     external_ids: list[ExternalId] | None = None
@@ -172,15 +182,26 @@ async def update_publication_credits(
     request: PublicationCreditsRequest,
     store: ReadStore,
     tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
 ):
     """Record who wrote a publication and what identifies it (e.g. a DOI).
 
     Separate from publishing because a DOI usually arrives after the token. It
-    cannot repoint the token to another artifact or version.
+    cannot repoint the token to another artifact or version, and refuses to try.
     """
+    repoint = sorted({"artifact_id", "version"} & set(request.model_extra or {}))
+    if repoint:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"A publication's {' and '.join(repoint)} cannot change; "
+                "publish the other version for a new link"
+            ),
+        )
     publication = store.update_publication_credits(
         token,
         tenant=tenant_filter,
+        actor=principal.id if principal is not None else None,
         authors=(
             [a.model_dump(exclude_none=True) for a in request.authors]
             if request.authors is not None
@@ -365,6 +386,18 @@ async def publication_data(token: str, store: ReadStore):
 _archive_locks: dict[str, asyncio.Lock] = {}
 
 
+async def _built_archive(store, artifact, publication) -> tuple[Path, str]:
+    """The publication's archive, built off the loop and once per record: anyone with the link
+    can ask."""
+    async with _archive_locks.setdefault(publication.token, asyncio.Lock()):
+        try:
+            return await asyncio.to_thread(
+                cached_bundle_zip, store, artifact, publication=publication
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.get("/p/{token}/archive.zip")
 async def publication_archive(token: str, store: ReadStore):
     """The self-contained bundle as a zip, as ``strata artifact archive`` writes it.
@@ -376,16 +409,7 @@ async def publication_archive(token: str, store: ReadStore):
     from base64 import b64encode
 
     publication, artifact = _load_published(store, token, require_active=True)
-
-    # Built off the loop and once per publication record: anyone with the link can ask.
-    async with _archive_locks.setdefault(token, asyncio.Lock()):
-        try:
-            path, digest = await asyncio.to_thread(
-                cached_bundle_zip, store, artifact, publication=publication
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-
+    path, digest = await _built_archive(store, artifact, publication)
     return FileResponse(
         path,
         media_type="application/zip",
@@ -397,13 +421,19 @@ async def publication_archive(token: str, store: ReadStore):
 
 
 @router.get("/p/{token}/verify")
-async def verify_publication(token: str, store: ReadStore):
+async def verify_publication(
+    token: str,
+    store: ReadStore,
+    sha256: str | None = Query(default=None, pattern="^[0-9a-fA-F]{64}$"),
+):
     """Re-read the bytes and compare against the digest recorded at publication.
 
     Detects alteration or corruption since publishing; says nothing about whether
-    the result was honestly produced.
+    the result was honestly produced. With ``sha256``, the digest of a file the
+    caller holds, it also says which of the publication's files that is: the
+    published bytes or the archive's Parquet copy.
     """
-    publication, _ = _load_published(store, token, require_active=True)
+    publication, artifact = _load_published(store, token, require_active=True)
     if not publication.content_sha256:
         raise HTTPException(
             status_code=409,
@@ -413,12 +443,24 @@ async def verify_publication(token: str, store: ReadStore):
     actual = await asyncio.to_thread(
         store.blob_digest, publication.artifact_id, publication.version
     )
-    return {
-        "matches": actual == publication.content_sha256,
+    unchanged = actual == publication.content_sha256
+    result: dict = {
+        "matches": unchanged,
         "recorded_sha256": publication.content_sha256,
         "actual_sha256": actual,
         "checks": "That the bytes are unchanged since publication. Not that they are correct.",
     }
+    if sha256 is None:
+        return result
+
+    claimed = sha256.lower()
+    if claimed == publication.content_sha256:
+        held: str | None = payload_filename(content_type_of(artifact))
+    else:
+        path, _ = await _built_archive(store, artifact, publication)
+        held = companion_digests(path).get(claimed)
+    result.update({"sha256": claimed, "file": held, "matches": unchanged and held is not None})
+    return result
 
 
 # --- Embedding: the card, and the oEmbed endpoint that unfurls a pasted link ---

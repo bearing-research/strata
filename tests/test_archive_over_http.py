@@ -350,7 +350,61 @@ class TestBuildingIt:
         assert calls == [False]
 
 
+def _verify(base_url: str, token: str, digest: str) -> httpx.Response:
+    return httpx.get(f"{base_url}/p/{token}/verify", params={"sha256": digest}, timeout=30)
+
+
+def _member_digest(base_url: str, token: str, name: str) -> str:
+    with zipfile.ZipFile(io.BytesIO(_fetch(base_url, token).content)) as bundle:
+        return hashlib.sha256(bundle.read(name)).hexdigest()
+
+
+class TestVerifyingAFileFromTheBundle:
+    """A reader holds one file of the deposit and asks whether it is this publication's."""
+
+    @pytest.mark.parametrize("name", ["artifact.arrow", "artifact.parquet"])
+    def test_either_file_is_accepted(self, served, name):
+        base_url, publication, _ = served
+        digest = _member_digest(base_url, publication.token, name)
+
+        verified = _verify(base_url, publication.token, digest.upper()).json()
+
+        assert verified["matches"] is True
+        assert verified["file"] == name
+        assert verified["sha256"] == digest
+
+    def test_a_file_from_elsewhere_is_not(self, served):
+        base_url, publication, _ = served
+
+        verified = _verify(base_url, publication.token, hashlib.sha256(b"other").hexdigest()).json()
+
+        assert verified["matches"] is False
+        assert verified["file"] is None
+        # The stored bytes are still checked and still fine.
+        assert verified["actual_sha256"] == verified["recorded_sha256"]
+
+    def test_a_malformed_digest_is_refused(self, served):
+        base_url, publication, _ = served
+
+        assert _verify(base_url, publication.token, "abc").status_code == 422
+
+
 class TestALargeTable:
+    def test_only_the_arrow_file_verifies_without_a_parquet_copy(self, served, monkeypatch):
+        """Past the cap the archive has no Parquet, so no Parquet digest can name a file of it."""
+        from strata.api import publication_bundle
+
+        base_url, publication, _ = served
+        parquet = _member_digest(base_url, publication.token, "artifact.parquet")
+        publication_bundle.drop_cached_bundles(ArtifactStore(served[2]), publication.token)
+        monkeypatch.setattr(
+            publication_bundle, "PARQUET_COMPANION_MAX_BYTES", len(_arrow_bytes()) - 1
+        )
+
+        assert _verify(base_url, publication.token, parquet).json()["file"] is None
+        arrow = hashlib.sha256(_arrow_bytes()).hexdigest()
+        assert _verify(base_url, publication.token, arrow).json()["file"] == "artifact.arrow"
+
     def test_it_is_archived_without_its_parquet_copy(self, served, monkeypatch, tmp_path):
         """The Parquet rendering holds the whole table in memory, so past a fixed size the Arrow
         file stands alone, and the route and the CLI still agree byte for byte.

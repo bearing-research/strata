@@ -211,6 +211,28 @@ def remove_annotation_directive(source: str, key: str) -> str:
     return result + sep if source.endswith("\n") else result
 
 
+def pin_fetch_directives(source: str, digests: dict[str, str]) -> str:
+    """Return *source* with ``sha256=`` set on each ``# @fetch <name>`` named in *digests*.
+
+    ``digests`` maps a fetch name to the digest to pin. An existing pin is replaced
+    and every other option on the line is kept.
+    """
+    sep = _line_sep(source)
+    lines = source.splitlines()
+    for i in range(_leading_block_end(lines)):
+        directive = parse_annotation_directive(lines[i])
+        if directive is None or directive[0] != "fetch":
+            continue
+        spec = _parse_fetch_annotation(directive[1])
+        if spec is None or spec.name not in digests:
+            continue
+        options = [part for part in directive[1].split()[2:] if not part.startswith("sha256=")]
+        value = " ".join([spec.name, spec.url, f"sha256={digests[spec.name]}", *options])
+        lines[i] = _format_directive("fetch", value)
+    result = sep.join(lines)
+    return result + sep if source.endswith("\n") else result
+
+
 @dataclass
 class CellAnnotations:
     """Parsed annotations from a cell's leading comment block."""

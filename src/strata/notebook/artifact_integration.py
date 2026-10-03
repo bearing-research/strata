@@ -334,6 +334,22 @@ class NotebookArtifactManager:
             results.append((suffix, artifact))
         return results
 
+    def cell_output_digests(self, cell_id: str) -> list[dict[str, Any]]:
+        """Each of a cell's outputs with the digest of its bytes, sorted by name.
+
+        A row stored before digests existed is filled from its blob here; ``None``
+        only when it has no blob.
+        """
+        return [
+            {
+                "name": name,
+                "artifact_id": artifact.id,
+                "version": artifact.version,
+                "content_sha256": self.artifact_store.content_digest(artifact.id, artifact.version),
+            }
+            for name, artifact in sorted(self.list_cell_artifacts(cell_id))
+        ]
+
     def get_artifact_info(self, artifact_id: str, version: int) -> ArtifactInfo | None:
         """Get lightweight artifact info for API responses."""
         artifact = self.artifact_store.get_artifact(artifact_id, version)

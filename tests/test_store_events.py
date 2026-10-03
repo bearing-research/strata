@@ -52,6 +52,28 @@ class TestTheSequence:
         )
         assert (withdraw["value"], withdraw["actor"]) == (publication.token, "ben")
 
+    def test_a_credit_change_is_an_event(self, store):
+        """A DOI or author list arriving later is news to a follower mirroring the page."""
+        _ready(store, "fig")
+        publication = store.publish_artifact("fig", 1)
+        store.update_publication_credits(
+            publication.token, external_ids=[{"scheme": "doi", "value": "10.1/x"}], actor="ana"
+        )
+
+        credit = store.read_events()[-1]
+
+        assert credit["action"] == "credit"
+        assert (credit["artifact_id"], credit["to_version"]) == ("fig", 1)
+        assert (credit["key"], credit["value"], credit["actor"]) == (
+            "token",
+            publication.token,
+            "ana",
+        )
+
+    def test_a_credit_change_to_an_unknown_token_is_not_an_event(self, store):
+        assert store.update_publication_credits("nope", authors=[]) is None
+        assert store.read_events() == []
+
     def test_what_changes_nothing_is_not_an_event(self, store):
         """Republishing returns the existing grant and re-revoking fails; neither is recorded."""
         _ready(store, "fig")

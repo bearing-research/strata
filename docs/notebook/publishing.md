@@ -175,9 +175,11 @@ declaring files that are not there is a claim no validator would catch.
 
 A step that read a URL through [`@fetch`](annotations.md#fetch) names it as
 an input. On the page it appears under "External inputs" with the digest of the
-bytes read and when the reading step ran. In the crate it is a `File` whose
-`@id` is the URL, with that `sha256`. The digest describes what was read, and
-the URL may serve something else now.
+bytes read, when they were retrieved, and when the reading step ran. In the
+crate it is a `File` whose `@id` is the URL, with that `sha256` and the
+retrieval time as `sdDatePublished`. The digest describes what was read, and
+the URL may serve something else now. A step stored before retrieval times were
+recorded shows only when it ran.
 
 ## Embedding it elsewhere
 
@@ -229,9 +231,18 @@ figure3-bundle/
 A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
 also carries `artifact.parquet`, the same rows in a format a data repository
 indexes. The manifest's digest covers the Arrow file; the Parquet file carries
-its own. A table whose Arrow file is over 128 MiB is archived without the
-Parquet copy, since converting it holds the whole table in memory. The limit is
-fixed, so it never makes one publication's archive differ between builds.
+its own, in the manifest's `additional_files` and as a second `File` in the
+RO-Crate, so a repository reading the crate sees both. A table whose Arrow file
+is over 128 MiB is archived without the Parquet copy, since converting it holds
+the whole table in memory; neither the manifest nor the crate then lists one.
+The limit is fixed, so it never makes one publication's archive differ between
+builds.
+
+Whichever file a reader kept, the server can say whether it is this
+publication's. `GET /p/<token>/verify?sha256=<digest of the file>` answers with
+`file` naming it (`artifact.arrow` or `artifact.parquet`, or `null` for a file
+from elsewhere) and `matches` true only when it names one and the stored bytes
+are unchanged. The Parquet digest is the one in the archive the server serves.
 
 Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.
@@ -331,9 +342,15 @@ JSON record and the archive `manifest.json` carry the entries, and the
 RO-Crate's root dataset gets the DOI as its `identifier`, which is what an
 ingesting repository indexes on.
 
-The patch cannot repoint the token. `artifact_id` and `version` are not fields
-of the request, because a citation whose target could change under the reader
-would be worthless.
+The patch cannot repoint the token, because a citation whose target could
+change under the reader would be worthless. A body naming `artifact_id` or
+`version` is refused with a 400 rather than half-applied, so a caller never
+reads a 200 as "the link now shows the other version". To cite another version,
+publish it for its own link.
+
+Each patch is recorded on the store's event feed (`GET /v1/events`) as a
+`credit` event with the token in `value`, beside `publish` and `withdraw`, so a
+service mirroring the page learns of a new DOI without polling.
 
 ## Copying a chain into another store
 
@@ -366,14 +383,14 @@ the bytes as `data`, which is what the CLI sends.
 | --- | --- | --- |
 | `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. Idempotent: republishing returns the existing token. |
 | `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw. |
-| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at. |
+| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at: `artifact_id` or `version` in the body is a 400. |
 | `GET /v1/publications` | yes | List this tenant's live links (`?include_revoked=true` adds withdrawn ones). |
 | `PUT /v1/artifacts/import/blobs/{content_sha256}` | yes (`artifacts:write`) | Upload a version's bytes ahead of its record. |
 | `POST /v1/artifacts/import` | yes (`artifacts:write`) | Import a version, keeping its id and number. |
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |
 | `GET /p/{token}/archive.zip` | **no** | The archived bundle as a zip, with a `Content-Digest` header. |
-| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. |
+| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow or Parquet) a digest names. |
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
 | `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |

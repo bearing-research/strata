@@ -41,15 +41,19 @@ def _input_version_to_artifact_ref(
     return (f"strata://artifact/{artifact_id}@v={version}", artifact_id, version)
 
 
-def _leaf_node(input_uri: str, input_version: str) -> LineageNode:
+def _leaf_node(input_uri: str, input_version: str, fetched_at: float | None) -> LineageNode:
     """An input that is not an artifact in this store.
 
     A notebook records a fetched URL against the digest of the bytes it read
-    (``sha256:<hex>``); anything else is a table, versioned by its snapshot.
+    (``sha256:<hex>``), and when the reader recorded the download, that time;
+    anything else is a table, versioned by its snapshot.
     """
     if input_version.startswith("sha256:"):
         return LineageNode(
-            uri=input_uri, type="fetch", content_sha256=input_version.removeprefix("sha256:")
+            uri=input_uri,
+            type="fetch",
+            content_sha256=input_version.removeprefix("sha256:"),
+            created_at=fetched_at,
         )
     return LineageNode(uri=input_uri, type="table")
 
@@ -79,6 +83,8 @@ class BuildMetadata(NamedTuple):
     build_duration_ms: int = 0
     env_hash: str = ""
     source: str = ""
+    # ``{url: unix time}`` each fetched input was downloaded.
+    fetched_at: dict[str, float] = {}
 
 
 def _build_metadata(transform_spec: str | None) -> BuildMetadata:
@@ -95,12 +101,23 @@ def _build_metadata(transform_spec: str | None) -> BuildMetadata:
         duration = int(params.get("build_duration_ms") or 0)
     except (TypeError, ValueError):
         duration = 0
+    try:
+        fetched_at = json.loads(params.get("fetched_at") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        fetched_at = {}
     return BuildMetadata(
         build_env=str(params.get("build_env") or ""),
         build_duration_ms=duration,
         env_hash=str(params.get("env_hash") or ""),
         source=str(params.get("source") or ""),
+        fetched_at=fetched_at if isinstance(fetched_at, dict) else {},
     )
+
+
+def _fetch_time(meta: BuildMetadata, url: str) -> float | None:
+    """When the reader downloaded *url*, or ``None`` if it recorded no usable time."""
+    value = meta.fetched_at.get(url)
+    return float(value) if isinstance(value, int | float) else None
 
 
 def _load_input_versions(input_versions: str | None) -> dict[str, str]:
@@ -172,7 +189,9 @@ class ArtifactService:
                 queue.append((resolved_uri, inp_artifact_id, inp_version, 1))
             elif input_uri not in visited:
                 visited.add(input_uri)
-                nodes[input_uri] = _leaf_node(input_uri, input_version)
+                nodes[input_uri] = _leaf_node(
+                    input_uri, input_version, _fetch_time(root_meta, input_uri)
+                )
 
         # BFS over transitive dependencies.
         max_depth_reached = 0
@@ -241,7 +260,9 @@ class ArtifactService:
                     queue.append((resolved_uri, nested_id, nested_ver, depth + 1))
                 elif inp_uri not in visited:
                     visited.add(inp_uri)
-                    nodes[inp_uri] = _leaf_node(inp_uri, inp_version)
+                    nodes[inp_uri] = _leaf_node(
+                        inp_uri, inp_version, _fetch_time(input_meta, inp_uri)
+                    )
 
         return ArtifactLineageResponse(
             artifact_uri=artifact_uri,

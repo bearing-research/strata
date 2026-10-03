@@ -275,6 +275,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
         print()
 
     executor = CellExecutor(session)
+    # The report gives every cell a digest, so a leaf keeps what it defines.
+    executor.store_leaf_outputs = True
     cell_by_id = {c.id: c for c in session.notebook_state.cells}
     results: list[dict[str, Any]] = []
     failed_cells: set[str] = set()
@@ -390,6 +392,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
                 entry["mutation_warnings"] = [dict(w) for w in result.mutation_warnings]
             if not result.success:
                 entry["error"] = result.error or "cell failed"
+                if result.error_code:
+                    entry["error_code"] = result.error_code
                 failed_cells.add(cell_id)
             else:
                 # Makes two run reports comparable: identical "green" JSON can hide different
@@ -430,16 +434,7 @@ def _cell_identity(session, cell, cell_id: str) -> dict[str, Any]:
     if cell.last_provenance_hash:
         identity["provenance_hash"] = cell.last_provenance_hash
 
-    manager = session.get_artifact_manager()
-    outputs = [
-        {
-            "name": name,
-            "artifact_id": artifact.id,
-            "version": artifact.version,
-            "content_sha256": artifact.content_sha256,
-        }
-        for name, artifact in sorted(manager.list_cell_artifacts(cell_id))
-    ]
+    outputs = session.get_artifact_manager().cell_output_digests(cell_id)
     if outputs:
         identity["outputs"] = outputs
     return identity
@@ -1209,6 +1204,19 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     annotate_p.add_argument("--format", choices=["human", "json"], default="json")
     annotate_p.set_defaults(func=cell_annotate_main)
 
+    pin_p = sub.add_parser(
+        "pin-fetch",
+        help="Pin a cell's `# @fetch` inputs to the bytes last downloaded (writes sha256=)",
+    )
+    pin_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    pin_p.add_argument("cell_id", help="Cell id whose fetches to pin")
+    pin_p.add_argument(
+        "names", nargs="*", metavar="NAME", help="Fetch names to pin (default: all in the cell)"
+    )
+    pin_p.add_argument("--author", default=None, help="Who to credit for the edit")
+    pin_p.add_argument("--format", choices=["human", "json"], default="json")
+    pin_p.set_defaults(func=cell_pin_fetch_main)
+
     # `strata cell` with no action → help.
     parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
 
@@ -1498,6 +1506,64 @@ def cell_mv_main(args: argparse.Namespace) -> int:
 
 def _valid_annotation_key(key: str) -> bool:
     return bool(key) and all(c.isalnum() or c == "_" for c in key)
+
+
+def cell_pin_fetch_main(args: argparse.Namespace) -> int:
+    """Write ``sha256=`` into a cell's ``# @fetch`` lines from the notebook's fetch cache.
+
+    Local only: the digests are those of the bytes this notebook last downloaded
+    (``.strata/fetch/``), the ones a run would read. Re-pinning after a
+    ``fetch_pin_mismatch`` accepts the bytes the URL serves now.
+    """
+    from strata.notebook.annotations import parse_annotations, pin_fetch_directives
+    from strata.notebook.fetch import FetchCache
+    from strata.notebook.ops import NotebookOpsError
+
+    ops = _open_local_ops(args.notebook_dir, author=args.author)
+    if ops is None:
+        return 2
+    try:
+        cell = ops.get_cell(args.cell_id)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+
+    specs = parse_annotations(cell.source).fetches
+    unknown = sorted(set(args.names) - {spec.name for spec in specs})
+    if unknown:
+        print(
+            f"error: cell {args.cell_id} has no @fetch named {', '.join(unknown)}", file=sys.stderr
+        )
+        return 2
+    wanted = [spec for spec in specs if not args.names or spec.name in args.names]
+    if not wanted:
+        print(f"error: cell {args.cell_id} has no @fetch to pin", file=sys.stderr)
+        return 2
+
+    cache = FetchCache(Path(args.notebook_dir).expanduser().resolve())
+    pinned: list[dict[str, str]] = []
+    for spec in wanted:
+        recorded = cache.recorded(spec.url)
+        if recorded is None:
+            print(
+                f"error: nothing downloaded yet for @fetch {spec.name} ({spec.url}); "
+                "run the cell first",
+                file=sys.stderr,
+            )
+            return 2
+        pinned.append({"name": spec.name, "url": spec.url, "sha256": recorded.sha256})
+
+    source = pin_fetch_directives(cell.source, {p["name"]: p["sha256"] for p in pinned})
+    if source != cell.source:
+        try:
+            cell = ops.edit_cell(args.cell_id, source)
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+    if args.format == "json":
+        _emit_json({"cell": cell.model_dump(mode="json"), "pinned": pinned})
+    else:
+        for p in pinned:
+            print(f"pinned {p['name']}  sha256={p['sha256']}")
+    return 0
 
 
 def cell_annotate_main(args: argparse.Namespace) -> int:

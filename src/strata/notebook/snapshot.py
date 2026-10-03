@@ -54,6 +54,7 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
             if cell_file.is_file():
                 archive.write(cell_file, f"cells/{cell_file.name}")
 
+    manager = session.get_artifact_manager()
     provenance: dict[str, Any] = {
         "notebook_id": session.notebook_state.id,
         "lockfile_hash": compute_lockfile_hash(nb_dir),
@@ -65,6 +66,8 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
                 "references": cell.references,
                 "status": cell.status.value if hasattr(cell.status, "value") else str(cell.status),
                 "artifact_uri": cell.artifact_uri,
+                # Lets a rerun's report be compared with this export output by output.
+                "outputs": manager.cell_output_digests(cell.id),
             }
             for cell in session.notebook_state.cells
         },

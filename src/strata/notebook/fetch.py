@@ -72,9 +72,14 @@ def _safe_filename(name: str) -> str:
 class FetchError(RuntimeError):
     """A declared fetch could not produce bytes the cell may use."""
 
+    # What a client matches on (``error_code`` of the cell's result); ``None`` for no code.
+    code: str | None = None
+
 
 class FetchPinMismatch(FetchError):
     """The URL served bytes that differ from the pinned digest."""
+
+    code = "fetch_pin_mismatch"
 
     def __init__(self, spec: FetchSpec, actual: str):
         self.expected = spec.sha256 or ""
@@ -89,6 +94,8 @@ class FetchPinMismatch(FetchError):
 class FetchedBytes:
     path: Path
     sha256: str
+    # When these bytes were downloaded (a 304 recheck keeps the original time).
+    fetched_at: float | None = None
 
     def fingerprint(self, spec: FetchSpec) -> str:
         return f"{spec.name}:fetch:{spec.url}:{self.sha256}"
@@ -215,8 +222,8 @@ class FetchCache:
                     target = self._blob_path(sha, spec.url)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(partial, target)
-                    self._record(spec.url, sha, response, None, filename=target.name)
-                    return FetchedBytes(path=target, sha256=sha)
+                    entry = self._record(spec.url, sha, response, None, filename=target.name)
+                    return FetchedBytes(path=target, sha256=sha, fetched_at=entry["fetched_at"])
             raise FetchError(
                 f"@fetch {spec.name}: {spec.url} redirected more than {MAX_REDIRECTS} times"
             )
@@ -255,7 +262,9 @@ class FetchCache:
             path = self._contained(sha, _safe_filename(str(record.get("filename", ""))))
         except FetchError:
             return None
-        return FetchedBytes(path=path, sha256=sha) if path.is_file() else None
+        if not path.is_file():
+            return None
+        return FetchedBytes(path=path, sha256=sha, fetched_at=record.get("fetched_at"))
 
     def _contained(self, sha: str, filename: str) -> Path:
         """``<root>/<sha>/<filename>``, refused unless it stays under the root.
@@ -287,7 +296,8 @@ class FetchCache:
         previous: dict | None,
         *,
         filename: str | None = None,
-    ) -> None:
+    ) -> dict:
+        """Record what *url* served; return the entry written."""
         index = self._index()
         now = self._clock()
         entry = dict(previous or {})
@@ -308,3 +318,4 @@ class FetchCache:
         tmp = self._index_path().with_suffix(".tmp")
         tmp.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self._index_path())
+        return entry

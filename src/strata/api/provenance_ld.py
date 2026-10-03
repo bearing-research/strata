@@ -5,7 +5,8 @@ inlined on the hosted page, so the machine-readable account cannot drift from th
 
 Mapping:
 
-- The published artifact is the payload: a ``File`` with its digest.
+- The published artifact is the payload: a ``File`` with its digest. A bundle's Parquet
+  copy is a second ``File`` with its own digest.
 - Every upstream step is a ``CreativeWork``, not a ``File``: its bytes are not in the
   crate, and listing it as a present file would be a lie a validator cannot catch.
 - Each execution is a ``CreateAction`` (``instrument`` = cell source as
@@ -74,13 +75,16 @@ def build_crate(
     content_type: str,
     payload_id: str,
     include_descriptor: bool,
+    companions: list[dict[str, str]] | None = None,
 ) -> dict:
     """Build the RO-Crate graph.
 
     ``payload_id`` addresses the payload: a filename inside a bundle, or the absolute ``/data``
     URL for the hosted page. ``include_descriptor`` adds the ``ro-crate-metadata.json``
-    self-description a deposited crate must carry.
+    self-description a deposited crate must carry. ``companions`` are other renderings of the
+    payload shipped beside it (``{file, content_type, sha256}``, as in ``manifest.json``).
     """
+    companions = companions or []
     graph: list[dict] = []
 
     if include_descriptor:
@@ -123,7 +127,7 @@ def build_crate(
                 # Author order carries meaning. ``published_by`` is the fallback
                 # for publications made before authors existed.
                 "author": _authors_of(publication),
-                "hasPart": [{"@id": payload_id}],
+                "hasPart": [{"@id": payload_id}, *({"@id": c["file"]} for c in companions)],
                 "mainEntity": {"@id": payload_id},
                 "mentions": [{"@id": _action_id(node)} for node in steps],
             }
@@ -143,6 +147,18 @@ def build_crate(
             }
         )
     )
+
+    for companion in companions:
+        graph.append(
+            {
+                "@id": companion["file"],
+                "@type": "File",
+                "name": f"{root_id} ({companion['file']})",
+                "encodingFormat": companion["content_type"],
+                "sha256": companion["sha256"],
+                "description": f"The same rows as {payload_id}, in another format.",
+            }
+        )
 
     for node in upstream:
         graph.append(
@@ -173,6 +189,8 @@ def build_crate(
                         "name": node.uri,
                         "sha256": node.content_sha256,
                         "description": "Bytes read from this URL when the step ran.",
+                        # RO-Crate's term for when a web data entity was retrieved.
+                        "sdDatePublished": _iso(node.created_at),
                     }
                 )
             )
