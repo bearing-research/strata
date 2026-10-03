@@ -2301,7 +2301,8 @@ Submitting a job whose result already exists boots a machine and recomputes
 it, so the caller checks <code>find_by_provenance</code> <em>before</em> submitting. Getting
 that order wrong bills customers for cache hits.</p>
 <p><strong>It is not the metering layer.</strong> The pool records one <code>UsageEvent</code> per
-terminal job, including failures, with a monotonic duration. What is billable,
+terminal job, including failures and cancels, with a monotonic duration. A job
+cancelled before it reached a machine ran for no time and has none. What is billable,
 and at what price, is decided above it.</p>
 <p><strong>It does not keep machines warm on purpose.</strong> <code>start_scaler()</code> stops
 machines idle past their type's <code>cool_down_seconds</code>, and nothing else in the
@@ -2407,6 +2408,10 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 <td>The raw result bytes; 409 while the job is not finished, 404 for another tenant's job</td>
 </tr>
 <tr>
+<td><code>POST /v1/jobs/{id}/cancel</code></td>
+<td>Cancel a job that has not finished; body <code>{"build_id": "..."}</code>. 200 with the job, 409 if it finished another way, 404 for another tenant's job</td>
+</tr>
+<tr>
 <td><code>GET /v1/machine-types</code></td>
 <td>What a caller may ask for: the catalogue an annotation resolves against. <code>env</code> and <code>provider_options</code> values read <code>&lt;redacted&gt;</code> without the admin token</td>
 </tr>
@@ -2452,7 +2457,29 @@ time on the machine. The machine's work then sits under that span, which sits
 under the caller's.</p>
 <p>A job that fails <strong>on the worker</strong> comes back as 502, and one that times out
 as 504. The caller has to be able to tell "your code raised" from "we could
-not run it".</p>
+not run it". A cancelled job comes back as 409 with <code>"state": "cancelled"</code>.</p>
+<p><strong>Cancelling a job stops the job, not the machine.</strong> <code>POST
+/v1/jobs/{id}/cancel</code> marks the job <code>cancelled</code> at once, so a
+<code>POST /v1/jobs/sync</code> waiting on it returns straight away. What else happens
+depends on how far the job got:</p>
+<ul>
+<li><strong>Queued, or handed to a machine but not yet sent:</strong> it never reaches a
+  machine and is not metered. The cancel and the dispatch are conditional
+  updates on the same row, so a job cancelled through one pool process is
+  never started by another.</li>
+<li><strong>Running:</strong> the pool posts <code>/v1/executions/{build_id}/cancel</code> to the
+  machine running it, with that machine's token. The payload is opaque to the
+  pool, so the caller names the build in the request body (letters, digits,
+  <code>-</code> and <code>_</code>). When the machine's execute call answers, the process running
+  the job records a usage event for the time it ran, with
+  <code>terminal_state: "cancelled"</code>, and the machine goes back to warm for the next
+  job. The cancel stands even if the machine finished first: its result is
+  dropped. A machine that ignores the cancel runs the job out, and one that
+  never answers is retired at the job's timeout, as any other.</li>
+</ul>
+<p>Cancelling a job that is already cancelled answers 200 again, so a retry is
+safe. A job that completed, failed or timed out is a 409, like a result asked
+for too early.</p>
 <p>Every route but <code>/health</code> requires <code>Authorization: Bearer &lt;api_token&gt;</code> (the
 admin token is accepted wherever the API token is), and every job route
 requires <code>X-Strata-Tenant</code>, reads included. So do the worker and usage
@@ -2595,6 +2622,10 @@ be self-describing: the pool forwards it verbatim and sets no content type.</p>
 </tr>
 </tbody>
 </table>
+<p>A worker that also serves <code>POST /v1/executions/{build_id}/cancel</code> behind the
+same token, as <code>strata-worker</code> does, can have a running job cancelled without
+losing the machine. One that does not answers the cancel with an error, and
+the job runs out.</p>
 <p>The token is minted per machine before it boots and passed in its
 environment. Without that check, <code>/execute</code> is an unauthenticated
 remote-code-execution endpoint, survivable only while the machine is bound to
