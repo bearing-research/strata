@@ -6,7 +6,8 @@ without it every machine bills forever. There is no warm floor and no retry: if
 the only booting worker fails, its jobs wait for the next submit of that type.
 
 A machine is retired whenever the pool cannot vouch for what runs on it
-(unreachable, timed out, orphaned job), since remote work cannot be cancelled.
+(unreachable, timed out, orphaned job). A cancelled job's machine is told to stop
+the build (`cancel`) and goes back to warm once it answers.
 
 Several processes may share one store, each with its own `instance_id`. Every
 dispatch and start is a claim in the store, and each process leases what it acts
@@ -17,6 +18,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import socket
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator
@@ -43,6 +45,9 @@ logger = logging.getLogger(__name__)
 
 _HEALTH_POLL_SECONDS = 0.5
 _LEASE_SECONDS = 30.0
+_CANCEL_TIMEOUT_SECONDS = 5.0
+# The build id lands in the machine's URL path, so it must not be able to leave it.
+_BUILD_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 __all__ = ["Pool", "WORKER_TOKEN_ENV"]
 
@@ -214,6 +219,54 @@ class Pool:
             if self._monotonic() >= deadline:
                 raise TimeoutError(f"job {job_id} did not finish within {timeout}s")
             await asyncio.sleep(0.01)
+
+    async def cancel(self, job_id: str, build_id: str) -> Job:
+        """Cancel a job that has not finished; return it as it now stands.
+
+        A job not yet running never reaches a machine. A running job's machine is
+        asked to stop *build_id* (the payload is opaque, so the caller names the
+        build) and goes back to warm once its execute call answers; the process
+        running the job meters the time it ran. A job that already finished is
+        returned unchanged. Raises ValueError for a malformed build id and
+        KeyError for an unknown job.
+        """
+        if not _BUILD_ID.fullmatch(build_id):
+            raise ValueError(f"invalid build id: {build_id!r}")
+        cancelled = self.store.cancel_job(job_id, "cancelled", self._wall())
+        job = self.store.get_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        # started_at is written with ``running``, so without it nothing reached the machine.
+        if cancelled and job.started_at is not None:
+            await self._cancel_on_machine(job, build_id)
+        return job
+
+    async def _cancel_on_machine(self, job: Job, build_id: str) -> None:
+        """Ask the machine running *job* to stop *build_id*.
+
+        Best effort: a machine that never stops is bounded by the job's timeout,
+        which retires it.
+        """
+        worker = self.store.get_worker(job.worker_id) if job.worker_id is not None else None
+        # A machine already released has nothing of this job's left to stop.
+        if worker is None or worker.endpoint is None or worker.current_job_id != job.id:
+            return
+        extra = {"job_id": job.id, "worker_id": worker.id, "build_id": build_id}
+        try:
+            response = await self._client.post(
+                f"{worker.endpoint}/v1/executions/{build_id}/cancel",
+                headers={"Authorization": f"Bearer {worker.auth_token}"},
+                timeout=_CANCEL_TIMEOUT_SECONDS,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "could not reach a machine to cancel its job", extra={**extra, "error": str(exc)}
+            )
+            return
+        if response.status_code >= 400:
+            logger.warning(
+                "a machine refused a cancel", extra={**extra, "status_code": response.status_code}
+            )
 
     # --- dispatch ---
 
@@ -413,19 +466,22 @@ class Pool:
             job.timeout_seconds if job.timeout_seconds is not None else spec.job_timeout_seconds
         )
 
-        # Another process may have reclaimed this job after this one stalled past its lease.
-        # Writing ``running`` over its terminal row would leave it running forever: nothing
-        # reclaims a row with no lease owner.
-        current = self.store.get_job(job.id)
-        if current is None or current.state not in (JobState.DISPATCHED, JobState.RUNNING):
+        # Another process may have reclaimed this job after this one stalled past its lease,
+        # or the job was cancelled. Writing ``running`` over its terminal row would leave it
+        # running forever: nothing reclaims a row with no lease owner.
+        job.started_at = self._wall()
+        if not self.store.start_job(job):
+            if self.store.settle_cancelled_job(job.id, self.instance_id):
+                # Cancelled before it reached the machine: nothing ran, so nothing is metered.
+                await self._return_to_warm(worker, job)
+                return
+            current = self.store.get_job(job.id)
             logger.info(
                 "job is no longer ours to run",
                 extra={"job_id": job.id, "state": None if current is None else current.state.value},
             )
             return
         job.state = JobState.RUNNING
-        job.started_at = self._wall()
-        self.store.save_job(job)
         started_at_mono = self._monotonic()
 
         keep_worker = False
@@ -484,14 +540,19 @@ class Pool:
         taken_over = False
         try:
             if not self.store.finish_job(job, self.instance_id):
-                # This process missed renewals for longer than a lease, and another one failed
-                # the job and is stopping the machine. Its answer stands; ours would bill twice.
-                taken_over = True
-                logger.warning(
-                    "another pool process took over a job before it finished",
-                    extra={"job_id": job.id, "worker_id": worker.id},
-                )
-                return
+                if self.store.settle_cancelled_job(job.id, self.instance_id):
+                    # The cancel stands over whatever the machine answered; the time still bills.
+                    job.state = JobState.CANCELLED
+                else:
+                    # This process missed renewals for longer than a lease, and another one
+                    # failed the job and is stopping the machine. Its answer stands; ours would
+                    # bill twice.
+                    taken_over = True
+                    logger.warning(
+                        "another pool process took over a job before it finished",
+                        extra={"job_id": job.id, "worker_id": worker.id},
+                    )
+                    return
             self.store.record_usage(
                 UsageEvent(
                     id=new_id("usage"),
@@ -511,17 +572,21 @@ class Pool:
             # process's to stop.
             if not taken_over:
                 if keep_worker:
-                    worker.last_active_at = self._wall()
-                    if self.store.release_worker(worker, self.instance_id):
-                        worker.state = WorkerState.WARM
-                        worker.current_job_id = None
-                        worker.lease_owner = None
-                        worker.lease_expires_at = None
-                    await self._drain(job.machine_type, job.tenant_id)
+                    await self._return_to_warm(worker, job)
                 else:
                     await self._stop_worker(worker)
                     # The freed slot belongs to whoever is waiting, not only to this job's tenant.
                     await self._offer_freed_capacity()
+
+    async def _return_to_warm(self, worker: Worker, job: Job) -> None:
+        """Hand a machine that is done with *job* back to the warm fleet, then refill it."""
+        worker.last_active_at = self._wall()
+        if self.store.release_worker(worker, self.instance_id):
+            worker.state = WorkerState.WARM
+            worker.current_job_id = None
+            worker.lease_owner = None
+            worker.lease_expires_at = None
+        await self._drain(job.machine_type, job.tenant_id)
 
     @contextlib.contextmanager
     def _execution_span(self, job: Job, worker: Worker) -> Iterator[dict[str, str]]:

@@ -10,11 +10,11 @@ import logging
 from dataclasses import asdict
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from strata_pool.pool import Pool
-from strata_pool.types import Job, JobState, MachineType, UsageEvent, Worker
+from strata_pool.types import TERMINAL_JOB_STATES, Job, JobState, MachineType, UsageEvent, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -213,9 +213,31 @@ def create_app(
     async def get_job_result(job_id: str, tenant_id: Annotated[str, Depends(tenant)]) -> Response:
         """The raw result bytes, once there are any."""
         job = tenant_job(job_id, tenant_id)
-        if job.state not in (JobState.COMPLETED, JobState.FAILED, JobState.TIMED_OUT):
+        if job.state not in TERMINAL_JOB_STATES:
             raise HTTPException(status_code=409, detail=f"job is {job.state.value}")
         return _terminal_response(job)
+
+    @app.post("/v1/jobs/{job_id}/cancel", dependencies=guard)
+    async def cancel_job(
+        job_id: str,
+        build_id: Annotated[str, Body(embed=True)],
+        tenant_id: Annotated[str, Depends(tenant)],
+    ) -> dict:
+        """Cancel a job that has not finished; its machine stays warm.
+
+        The body is `{"build_id": ...}`: the build the payload carries, which the
+        pool cannot read from a payload it treats as opaque. Cancelling a
+        cancelled job answers 200 again, so a retry is safe. A job that finished
+        another way is a 409, like a result asked for too early.
+        """
+        tenant_job(job_id, tenant_id)
+        try:
+            job = await pool.cancel(job_id, build_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if job.state is not JobState.CANCELLED:
+            raise HTTPException(status_code=409, detail=f"job is {job.state.value}")
+        return _job_json(job)
 
     @app.get("/v1/machine-types", dependencies=guard)
     async def list_machine_types(
@@ -286,11 +308,12 @@ async def _submit(pool: Pool, **kwargs) -> Job:
 
 
 def _terminal_response(job: Job) -> Response:
-    """Map a finished job onto a status code: 200, 502 for a failed job, 504 for a timeout.
+    """Map a finished job onto a status code: 200, 502 for a failed job, 504 for a
+    timeout, 409 for a cancelled one.
 
     Never 500: the caller must tell "your code raised" from "the pool could not run it".
     """
     if job.state is JobState.COMPLETED:
         return Response(content=job.result or b"", media_type="application/octet-stream")
-    status = 504 if job.state is JobState.TIMED_OUT else 502
+    status = {JobState.TIMED_OUT: 504, JobState.CANCELLED: 409}.get(job.state, 502)
     return JSONResponse({"state": job.state.value, "error": job.error}, status_code=status)

@@ -39,10 +39,14 @@ class JobState(enum.StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+    """Cancelled through `Pool.cancel` before it finished. A running job keeps its
+    lease until its machine answers, so the process running it can still meter
+    it and return the machine to warm."""
 
 
 TERMINAL_JOB_STATES = frozenset(
-    {JobState.COMPLETED, JobState.FAILED, JobState.TIMED_OUT},
+    {JobState.COMPLETED, JobState.FAILED, JobState.TIMED_OUT, JobState.CANCELLED},
 )
 
 

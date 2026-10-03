@@ -110,7 +110,8 @@ it, so the caller checks `find_by_provenance` *before* submitting. Getting
 that order wrong bills customers for cache hits.
 
 **It is not the metering layer.** The pool records one `UsageEvent` per
-terminal job, including failures, with a monotonic duration. What is billable,
+terminal job, including failures and cancels, with a monotonic duration. A job
+cancelled before it reached a machine ran for no time and has none. What is billable,
 and at what price, is decided above it.
 
 **It does not keep machines warm on purpose.** `start_scaler()` stops
@@ -176,6 +177,7 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `POST /v1/jobs/sync` | Queue and block. 200 with the result bytes, or 202 and an id if `wait_seconds` runs out |
 | `GET /v1/jobs/{id}` | Status, without the payload or result; 404 for another tenant's job |
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished, 404 for another tenant's job |
+| `POST /v1/jobs/{id}/cancel` | Cancel a job that has not finished; body `{"build_id": "..."}`. 200 with the job, 409 if it finished another way, 404 for another tenant's job |
 | `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against. `env` and `provider_options` values read `<redacted>` without the admin token |
 | `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it. Admin token only |
 | `GET /v1/workers` | The caller's tenant's machines, without their credentials; the admin token sees the whole fleet, or one tenant with `?tenant_id=` |
@@ -210,7 +212,30 @@ under the caller's.
 
 A job that fails **on the worker** comes back as 502, and one that times out
 as 504. The caller has to be able to tell "your code raised" from "we could
-not run it".
+not run it". A cancelled job comes back as 409 with `"state": "cancelled"`.
+
+**Cancelling a job stops the job, not the machine.** `POST
+/v1/jobs/{id}/cancel` marks the job `cancelled` at once, so a
+`POST /v1/jobs/sync` waiting on it returns straight away. What else happens
+depends on how far the job got:
+
+- **Queued, or handed to a machine but not yet sent:** it never reaches a
+  machine and is not metered. The cancel and the dispatch are conditional
+  updates on the same row, so a job cancelled through one pool process is
+  never started by another.
+- **Running:** the pool posts `/v1/executions/{build_id}/cancel` to the
+  machine running it, with that machine's token. The payload is opaque to the
+  pool, so the caller names the build in the request body (letters, digits,
+  `-` and `_`). When the machine's execute call answers, the process running
+  the job records a usage event for the time it ran, with
+  `terminal_state: "cancelled"`, and the machine goes back to warm for the next
+  job. The cancel stands even if the machine finished first: its result is
+  dropped. A machine that ignores the cancel runs the job out, and one that
+  never answers is retired at the job's timeout, as any other.
+
+Cancelling a job that is already cancelled answers 200 again, so a retry is
+safe. A job that completed, failed or timed out is a 409, like a result asked
+for too early.
 
 Every route but `/health` requires `Authorization: Bearer <api_token>` (the
 admin token is accepted wherever the API token is), and every job route
@@ -365,6 +390,11 @@ The pool remains image-agnostic. Anything holding up these four points works:
 | `GET /health` → 200 when ready | No auth. It is polled before the machine is trusted with anything, and it reveals nothing secret (`strata-worker` reports its capabilities and hardware) |
 | `POST /execute` → 200 with the result body | The request body is the job payload, opaque to the pool |
 | Require `Authorization: Bearer $STRATA_WORKER_TOKEN` on `/execute` | Reject anything else with 401 |
+
+A worker that also serves `POST /v1/executions/{build_id}/cancel` behind the
+same token, as `strata-worker` does, can have a running job cancelled without
+losing the machine. One that does not answers the cancel with an error, and
+the job runs out.
 
 The token is minted per machine before it boots and passed in its
 environment. Without that check, `/execute` is an unauthenticated

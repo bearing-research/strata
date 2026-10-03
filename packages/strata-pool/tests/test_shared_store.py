@@ -160,6 +160,37 @@ class TestTwoProcesses:
 
         assert len(a.backend.started) + len(b.backend.started) == 3
 
+    async def test_a_cancel_through_one_process_stops_a_job_another_runs(self, make_pool):
+        """The process running the job settles it: it meters the time and keeps the machine."""
+        killed = asyncio.Event()
+
+        async def worker(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/cancel"):
+                killed.set()
+                return httpx.Response(200, json={"cancelled": True})
+            await killed.wait()
+            return httpx.Response(500, text="harness killed")
+
+        workers = FakeWorkers(worker)
+        a = make_pool("a", workers=workers)
+        b = make_pool("b", workers=workers)
+
+        job = await a.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+        await _until(lambda: a.store.get_job(job.id).state is JobState.RUNNING)
+        cancelled = await b.cancel(job.id, "build-1")
+
+        assert cancelled.state is JobState.CANCELLED
+        machine = b.store.get_worker(cancelled.worker_id)
+        cancel = workers.requests[-1]
+        assert cancel.url.path == "/v1/executions/build-1/cancel"
+        assert cancel.headers["Authorization"] == f"Bearer {machine.auth_token}"
+
+        await _until(lambda: b.store.get_worker(machine.id).state is WorkerState.WARM)
+        assert a.backend.stopped == [] and b.backend.stopped == []
+        [event] = b.store.list_usage()
+        assert (event.job_id, event.terminal_state) == (job.id, JobState.CANCELLED)
+        assert b.store.get_job(job.id).lease_owner is None
+
     async def test_a_dead_process_s_job_fails_and_its_machine_stops_once_its_lease_expires(
         self, make_pool
     ):
@@ -319,6 +350,36 @@ class TestTheStore:
         assert second.claim_dispatch(machines[1], job, "b", 100.0) is False
         assert second.get_job("j").worker_id == "w1"
         assert second.get_worker("w2").state is WorkerState.WARM, "the losing claim rolled back"
+
+    def test_a_job_cancelled_through_one_connection_cannot_be_claimed_through_another(
+        self, open_store
+    ):
+        first, second = open_store(), open_store()
+        worker = Worker(
+            id="w1",
+            machine_type="cpu",
+            tenant_id="acme",
+            backend="fake",
+            state=WorkerState.WARM,
+            created_at=1.0,
+        )
+        first.save_worker(worker)
+        job = Job(
+            id="j",
+            tenant_id="acme",
+            machine_type="cpu",
+            payload=b"x",
+            state=JobState.QUEUED,
+            submitted_at=1.0,
+        )
+        first.save_job(job)
+
+        assert second.cancel_job("j", "cancelled", 2.0) is True
+        assert first.claim_dispatch(worker, job, "a", 100.0) is False
+        assert first.get_worker("w1").state is WorkerState.WARM, "the losing claim rolled back"
+        assert first.get_job("j").state is JobState.CANCELLED
+        assert second.cancel_job("j", "cancelled", 3.0) is False, "a finished job stays as it is"
+        assert first.get_job("j").completed_at == 2.0
 
     def test_concurrent_reservations_never_exceed_demand(self, open_store):
         """Threads with their own connections, so the store's serialization is under test."""

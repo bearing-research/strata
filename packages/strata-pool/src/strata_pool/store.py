@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     machine_type TEXT NOT NULL,
     priority INTEGER NOT NULL DEFAULT 0,
     state TEXT NOT NULL CHECK (state IN
-        ('queued','dispatched','running','completed','failed','timed_out')),
+        ('queued','dispatched','running','completed','failed','timed_out','cancelled')),
     session_id TEXT,
     worker_id TEXT,
     timeout_seconds REAL,
@@ -249,7 +249,13 @@ class Store(Protocol):
 
     def count_queued(self, machine_type: str, tenant_id: str) -> int: ...
 
+    def start_job(self, job: Job) -> bool: ...
+
     def finish_job(self, job: Job, owner: str) -> bool: ...
+
+    def cancel_job(self, job_id: str, error: str, completed_at: float) -> bool: ...
+
+    def settle_cancelled_job(self, job_id: str, owner: str) -> bool: ...
 
     def fail_job(
         self,
@@ -660,6 +666,14 @@ class _SqlStore:
         rows = self._all("SELECT DISTINCT machine_type FROM jobs WHERE state = 'queued'")
         return [row["machine_type"] for row in rows]
 
+    def start_job(self, job: Job) -> bool:
+        """Mark a dispatched job running, unless it was cancelled or failed meanwhile."""
+        return self._changed(
+            "UPDATE jobs SET state = 'running', started_at = ? "
+            "WHERE id = ? AND state IN ('dispatched', 'running')",
+            (job.started_at, job.id),
+        )
+
     def finish_job(self, job: Job, owner: str) -> bool:
         """Record a job's outcome, if the caller still holds it.
 
@@ -671,6 +685,27 @@ class _SqlStore:
             "lease_owner = NULL, lease_expires_at = NULL "
             "WHERE id = ? AND state IN ('dispatched', 'running') AND lease_owner = ?",
             (job.state.value, job.result, job.error, job.completed_at, job.id, owner),
+        )
+
+    def cancel_job(self, job_id: str, error: str, completed_at: float) -> bool:
+        """Cancel a job that has not finished; whether it had not.
+
+        Conditional on the state, so a queued job loses to `claim_dispatch` or wins
+        outright. The lease is left alone: the process running the job still holds
+        it, and `settle_cancelled_job` releases it once the machine answers.
+        """
+        return self._changed(
+            "UPDATE jobs SET state = 'cancelled', error = ?, completed_at = ? "
+            "WHERE id = ? AND state IN ('queued', 'dispatched', 'running')",
+            (error, completed_at, job_id),
+        )
+
+    def settle_cancelled_job(self, job_id: str, owner: str) -> bool:
+        """Drop the caller's lease on a job cancelled while it held it; whether it did."""
+        return self._changed(
+            "UPDATE jobs SET lease_owner = NULL, lease_expires_at = NULL "
+            "WHERE id = ? AND state = 'cancelled' AND lease_owner = ?",
+            (job_id, owner),
         )
 
     def fail_job(

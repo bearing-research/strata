@@ -4,6 +4,7 @@ Driven through `httpx.ASGITransport` on the test's own loop, not `TestClient`
 (a portal thread with its own loop): the pool's tasks belong to their creating loop.
 """
 
+import asyncio
 import os
 
 import httpx
@@ -200,6 +201,108 @@ class TestJobReadsAreTenantScoped:
             response = await api.get(path, headers=no_tenant)
             assert response.status_code == 400
             assert "X-Strata-Tenant" in response.json()["detail"]
+
+
+class TestCancel:
+    async def _queued_job(self, api) -> str:
+        api.pool.backend = FakeBackend(never_healthy=True)
+        accepted = await api.post("/v1/jobs?machine_type=gpu", content=b"work", headers=AUTH)
+        return accepted.json()["id"]
+
+    async def test_a_queued_job_is_cancelled_and_reads_as_cancelled(self, api):
+        job_id = await self._queued_job(api)
+
+        response = await api.post(
+            f"/v1/jobs/{job_id}/cancel", json={"build_id": "build-1"}, headers=AUTH
+        )
+
+        assert response.status_code == 200
+        assert response.json()["state"] == "cancelled"
+        status = await api.get(f"/v1/jobs/{job_id}", headers=AUTH)
+        assert status.json()["state"] == "cancelled"
+        result = await api.get(f"/v1/jobs/{job_id}/result", headers=AUTH)
+        assert result.status_code == 409
+        assert result.json()["state"] == "cancelled"
+
+    async def test_cancelling_twice_answers_the_same(self, api):
+        job_id = await self._queued_job(api)
+        body = {"build_id": "build-1"}
+
+        await api.post(f"/v1/jobs/{job_id}/cancel", json=body, headers=AUTH)
+        again = await api.post(f"/v1/jobs/{job_id}/cancel", json=body, headers=AUTH)
+
+        assert again.status_code == 200
+        assert again.json()["state"] == "cancelled"
+
+    async def test_another_tenant_cannot_cancel_a_job(self, api):
+        job_id = await self._queued_job(api)
+        globex = {"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"}
+
+        response = await api.post(
+            f"/v1/jobs/{job_id}/cancel", json={"build_id": "build-1"}, headers=globex
+        )
+
+        assert response.status_code == 404
+        assert api.pool.store.get_job(job_id).state.value == "queued"
+
+    async def test_a_finished_job_is_a_conflict(self, api):
+        accepted = await api.post("/v1/jobs?machine_type=cpu", content=b"work", headers=AUTH)
+        job_id = accepted.json()["id"]
+        await api.pool.wait(job_id)
+
+        response = await api.post(
+            f"/v1/jobs/{job_id}/cancel", json={"build_id": "build-1"}, headers=AUTH
+        )
+
+        assert response.status_code == 409
+        assert "completed" in response.json()["detail"]
+        result = await api.get(f"/v1/jobs/{job_id}/result", headers=AUTH)
+        assert result.content == b"done:work"
+
+    async def test_the_build_id_is_required_and_checked(self, api):
+        job_id = await self._queued_job(api)
+
+        missing = await api.post(f"/v1/jobs/{job_id}/cancel", json={}, headers=AUTH)
+        escaping = await api.post(
+            f"/v1/jobs/{job_id}/cancel", json={"build_id": "../execute"}, headers=AUTH
+        )
+
+        assert missing.status_code == 422
+        assert escaping.status_code == 400
+        assert api.pool.store.get_job(job_id).state.value == "queued"
+
+    async def test_a_sync_submit_returns_as_soon_as_its_job_is_cancelled(self, api):
+        """Even while the machine has not yet answered: the wait is for the job, not the machine."""
+        executing = asyncio.Event()
+        release = asyncio.Event()
+        cancels: list[httpx.Request] = []
+
+        async def worker(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/cancel"):
+                cancels.append(request)
+                return httpx.Response(200, json={"cancelled": True})
+            executing.set()
+            await release.wait()
+            return httpx.Response(500, text="harness killed")
+
+        api.pool._client = httpx.AsyncClient(transport=httpx.MockTransport(worker))
+        waiting = asyncio.create_task(
+            api.post("/v1/jobs/sync?machine_type=cpu&wait_seconds=30", content=b"x", headers=AUTH)
+        )
+        await executing.wait()
+        [job] = api.pool.store.list_jobs()
+
+        cancel = await api.post(
+            f"/v1/jobs/{job.id}/cancel", json={"build_id": "build-1"}, headers=AUTH
+        )
+        response = await waiting
+
+        assert cancel.status_code == 200
+        assert response.status_code == 409
+        assert response.json()["state"] == "cancelled"
+        assert not release.is_set(), "the sync wait ended before the machine answered"
+        assert [request.url.path for request in cancels] == ["/v1/executions/build-1/cancel"]
+        release.set()
 
 
 class TestAuth:

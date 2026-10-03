@@ -341,7 +341,7 @@ change.
 
 ## `POST /v1/executions/{build_id}/cancel`
 
-Stops the harness running `build_id`, and every process it started, if it is still running. Answers `{"build_id": "...", "cancelled": true}`, or `"cancelled": false` when nothing by that id is running, which is a normal answer rather than an error: the cell may have finished before the cancel arrived. The server calls it when a remote cell is cancelled or times out.
+Stops the harness running `build_id`, and every process it started, if it is still running. Answers `{"build_id": "...", "cancelled": true}`, or `"cancelled": false` when nothing by that id is running, which is a normal answer rather than an error: the cell may have finished before the cancel arrived. The server calls it when a remote cell is cancelled or times out, and `strata-pool` calls it with the machine's token when a running job is cancelled through `POST /v1/jobs/{id}/cancel`.
 
 ## `POST /execute` (worker-pool alias)
 
