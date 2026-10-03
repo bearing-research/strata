@@ -377,7 +377,7 @@ class TestABundleWritesOnlyIntoTheNotebook:
         assert not (target / "PWNED.txt").exists()
 
     def test_a_member_outside_the_committed_set_is_not_written(self, ran, tmp_path):
-        """Only ``cells/`` and the three lock files are written; other members are ignored."""
+        """Only the committed set is written; other members are ignored."""
         evil = self._bundle_with(tmp_path, "sitecustomize.py", ran)
         target = tmp_path / "dst" / "nb"
 
@@ -479,3 +479,17 @@ class TestWidgetSelections:
         controls = next(c for c in payload["cells"] if c["id"] == "controls")
         assert controls["widget"]["values"] == {"alpha": 0.25}
         assert controls["widget"]["descriptors"][0]["default"] == 0.5
+
+
+def test_cell_tests_and_the_notebook_s_gitignore_round_trip(ran, tmp_path):
+    """The committed set comes back whole, the notebook's own .gitignore included."""
+    tests_dir = ran / "cells" / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_rows.py").write_text("def test_rows(): pass\n")
+    (ran / ".gitignore").write_text("# mine\n.strata/\n")
+
+    imported = import_snapshot(_export(ran, tmp_path / "snap.zip"), tmp_path / "dst")
+
+    restored = imported.notebook_dir
+    assert (restored / "cells" / "tests" / "test_rows.py").read_text() == "def test_rows(): pass\n"
+    assert (restored / ".gitignore").read_text() == "# mine\n.strata/\n"

@@ -35,24 +35,15 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
     Shared by the route and ``strata export`` so they agree on what a bundle is.
     """
     from strata.notebook.env import compute_lockfile_hash
+    from strata.notebook.layout import committed_paths
     from strata.notebook.provenance import compute_source_hash
 
     # Local import: routes imports this module.
     from strata.notebook.routes import _format_dag
 
     nb_dir = session.path
-    # renv.lock is in the env hash; without it no imported R cell matches its
-    # artifacts.
-    for name in ("notebook.toml", "pyproject.toml", "uv.lock", "renv.lock"):
-        member = nb_dir / name
-        if member.exists():
-            archive.write(member, name)
-
-    cells_dir = nb_dir / "cells"
-    if cells_dir.is_dir():
-        for cell_file in sorted(cells_dir.glob("*")):
-            if cell_file.is_file():
-                archive.write(cell_file, f"cells/{cell_file.name}")
+    for relative in committed_paths(nb_dir):
+        archive.write(nb_dir / relative, relative.as_posix())
 
     provenance: dict[str, Any] = {
         "notebook_id": session.notebook_state.id,

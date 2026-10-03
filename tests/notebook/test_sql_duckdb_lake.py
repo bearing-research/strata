@@ -270,6 +270,49 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     assert lake.fingerprints == [f"{_lake_name('lake:taxi.trips')}:table:lake:taxi.trips:7"]
 
 
+class TestACatalogCredential:
+    """A catalog's named credential resolves against the notebook's env, as a mount's does."""
+
+    @staticmethod
+    def _resolve(tmp_path, monkeypatch, credentials):
+        from strata.notebook import tables
+        from strata.notebook.sql.adapter import QualifiedTable
+        from strata.notebook.sql.lake import resolve_lake
+
+        nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+        session.notebook_state.env = {"LAKE_TOKEN": "from-the-vault"}
+        config = StrataConfig(
+            catalogs={"lake": {"type": "rest", "uri": "http://catalog", "credential": "lake-ro"}},
+            notebook_credentials=credentials,
+        )
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(tables, "fingerprint_tables", lambda specs, cfg: ([], {}))
+        monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg: 7)
+        return resolve_lake(
+            session,
+            "c1",
+            "",
+            session.notebook_state.connections[0],
+            [QualifiedTable("lake", "taxi", "trips")],
+        )
+
+    def test_its_fields_become_catalog_properties(self, tmp_path, monkeypatch):
+        lake = self._resolve(tmp_path, monkeypatch, {"lake-ro": {"token": "${LAKE_TOKEN}"}})
+
+        assert lake.spec.catalog_properties == {
+            "type": "rest",
+            "uri": "http://catalog",
+            "token": "from-the-vault",
+        }
+
+    def test_a_missing_one_fails_naming_it(self, tmp_path, monkeypatch):
+        from strata.notebook.sql.lake import LakeError
+
+        with pytest.raises(LakeError, match="credential 'lake-ro' is not defined"):
+            self._resolve(tmp_path, monkeypatch, {})
+
+
 def test_the_catalogs_s3_secret_reaches_only_its_warehouse():
     from strata.notebook.sql.drivers.duckdb import _attach_catalog
 

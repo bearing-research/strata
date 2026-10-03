@@ -136,6 +136,22 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 
 The `@mount` annotation takes the name too: `# @mount raw s3://lab-bucket/raw ro credential=lab-bucket`.
 
+A named catalog in the server's `STRATA_CATALOGS` takes the same key, so the
+catalog's secrets (a SQL catalog's database URI, a REST token, `s3.*` keys)
+stay out of the catalog config:
+
+```bash
+STRATA_CATALOGS='{"lake": {"type": "sql", "warehouse": "s3://lake/wh", "credential": "lake-db"}}'
+STRATA_NOTEBOOK_CREDENTIALS='{"lake-db": {"uri": "${LAKE_DSN}", "s3.access-key-id": "${LAKE_KEY}"}}'
+```
+
+Its fields become pyiceberg catalog properties, beneath the catalog's own keys.
+`@table` and scans resolve the references against the server's environment; a
+DuckDB cell attaching the catalog resolves them against the notebook's first, as
+a mount does. A missing name fails the read with a message naming it. The
+catalog's credential is not part of provenance: a table read is already keyed
+by its snapshot.
+
 ## `[[workers]]` - Remote worker registry
 
 ```toml
@@ -284,10 +300,15 @@ The committed set is:
 - everything under `cells/`, including cell tests
 - the `.gitignore` itself
 
+The `.mcp.json` and `CLAUDE.md` that `strata agent` writes are ignored: each
+launch rewrites them with the server's port and the session id, so they
+describe one machine's run rather than the notebook.
+
 The rules live in `strata.notebook.layout`: `committed_paths()` returns the
 set for a given directory and `IGNORED_PATTERNS` is what the `.gitignore`
 contains, so this list is a rendering of the code rather than a second source
-that drifts from it.
+that drifts from it. The ZIP and snapshot exports carry exactly
+`committed_paths()`, and `strata import` writes those files back.
 
 ## Round-trip safety
 

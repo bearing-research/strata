@@ -156,6 +156,55 @@ class TestScanningByName:
         assert calls == ["north:taxi.trips"]
 
 
+@windows
+class TestANamedCredential:
+    """A catalog names a credential, so its config carries no secret."""
+
+    @staticmethod
+    def _configured(tmp_path, credentials):
+        props, catalog = _sql_catalog(tmp_path, "north")
+        catalog.create_namespace("taxi")
+        catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())])).append(
+            pa.table({"id": [1, 2]})
+        )
+        uri = props.pop("uri")
+        cache = tmp_path / "cache"
+        cache.mkdir(exist_ok=True)
+        config = StrataConfig(
+            cache_dir=cache,
+            catalogs={"north": {**props, "credential": "north-db"}},
+            notebook_credentials=credentials,
+        )
+        return config, uri
+
+    def test_the_credential_supplies_the_catalog_s_properties(self, tmp_path, monkeypatch):
+        config, uri = self._configured(
+            tmp_path, {"north-db": {"uri": "${NORTH_URI}", "s3.access-key-id": "${NORTH_KEY}"}}
+        )
+        monkeypatch.setenv("NORTH_URI", uri)
+        monkeypatch.setenv("NORTH_KEY", "from-the-vault")
+        seen = []
+        monkeypatch.setattr(
+            lake_files,
+            "register_vended_credentials",
+            lambda location, properties: seen.append(properties),
+        )
+
+        assert _rows(config, "north:taxi.trips") == [1, 2]
+        assert "uri" not in config.catalogs["north"]
+        assert seen[0]["s3.access-key-id"] == "from-the-vault"
+        assert "credential" not in seen[0]
+
+    def test_a_missing_credential_fails_naming_it(self, tmp_path):
+        from strata.notebook.models import TableSpec
+        from strata.notebook.tables import resolve_table_snapshot
+
+        config, _ = self._configured(tmp_path, {})
+
+        with pytest.raises(ValueError, match="credential 'north-db' is not defined"):
+            resolve_table_snapshot(TableSpec(name="trips", uri="north:taxi.trips"), config)
+
+
 class TestFileRouting:
     def test_vended_credentials_read_files_under_their_location(self, monkeypatch):
         opened = []

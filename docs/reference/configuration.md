@@ -135,7 +135,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 
 | Variable             | Default | Description                          |
 | -------------------- | ------- | ------------------------------------ |
-| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite path for metadata persistence |
+| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite catalog an `s3://` warehouse URI uses when no catalog `uri` is set. It is on this server's disk, so other readers of the bucket do not see it |
 
 ## Catalog
 
@@ -143,8 +143,15 @@ Two constraints are enforced at startup rather than papered over at runtime:
 | ---------------------------- | --------- | ------------------------------------------------------------------------------------------------- |
 | `STRATA_CATALOG_NAME`        | `default` | Iceberg catalog name                                                                              |
 | `STRATA_CATALOG_PROPERTIES`  | `{}`      | PyIceberg catalog properties (JSON object via env; `[tool.strata.catalog_properties]` in pyproject) |
-| `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files |
+| `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files. An entry's `credential` names one in `STRATA_NOTEBOOK_CREDENTIALS` whose fields fill its properties, so no secret is written here (see [Named credentials](notebook-toml.md#named-credentials)) |
 | `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject. Environment only |
+
+A SQL catalog (no `type`, or `type = "sql"`) whose `warehouse` is in object
+storage (`s3://`, `gs://`, `abfss://`, any scheme but `file://`) needs a `uri`,
+in `catalog_properties`, in a `STRATA_CATALOGS` entry, or in the named
+credential that entry names. Without one its tables
+would be in a SQLite file on this server's disk, so the server refuses to start
+and names the setting.
 
 ## S3 Storage
 
@@ -495,7 +502,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | `STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL` | `true` | With a caller's principal in context (service mode), send its id as `X-Strata-Principal` to the remote store in place of the one in the static headers, so team-cache attribution, promotions and registry approvals from a shared server name the member. `false` keeps the static identity for every request. |
 | `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED` | `false`                    | Consult the remote store on a **local cache miss**, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires `STRATA_NOTEBOOK_REMOTE_STORE_URL`; enabling it without one is rejected at startup rather than left silently inert. |
 | `STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH` | `all` | What the cache offers *outward*: `all` (every downstream-consumed variable of every successful cell), `promoted` (nothing automatically: `strata artifact promote` is how a result reaches the team; pulls are unchanged), or `off` (no offers and no pulls, without unsetting the URL a cell's ambient client still needs). Use `promoted` on a personal server, where offering everything means every intermediate a researcher computes lands in the team's store whether or not they meant to share it. |
-| `STRATA_NOTEBOOK_CREDENTIALS` | `{}` | Named credentials as a JSON object, `{name: {field: value}}`. A mount or connection in `notebook.toml` references one with `credential = "<name>"`, so no secret is committed. Values are usually `${VAR}`, resolved against the notebook's environment (where a secret manager puts fetched secrets) and then the server's. A mount's fields become fsspec storage options, a connection's become driver auth. The name is part of provenance; the values are not, so rotation invalidates nothing. See [Named credentials](notebook-toml.md#named-credentials). |
+| `STRATA_NOTEBOOK_CREDENTIALS` | `{}` | Named credentials as a JSON object, `{name: {field: value}}`. A mount or connection in `notebook.toml`, or a catalog in `STRATA_CATALOGS`, references one with `credential = "<name>"`, so no secret is committed. Values are usually `${VAR}`, resolved against the notebook's environment (where a secret manager puts fetched secrets) and then the server's. A mount's fields become fsspec storage options, a connection's become driver auth, a catalog's become pyiceberg catalog properties. The name is part of provenance; the values are not, so rotation invalidates nothing. See [Named credentials](notebook-toml.md#named-credentials). |
 | `STRATA_NOTEBOOK_MOUNT_CREDENTIALS` | `{}` | A default credential per mount URI scheme as JSON, e.g. `{"s3": "org-bucket"}`, applied to mounts that name none. |
 | `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS` | `[]` | Hosts `@fetch`, and a prompt cell's `[ai] base_url` from `notebook.toml`, may reach even on a private address (an internal data server or model server). Public hosts need no entry; in service mode, private, loopback and link-local addresses are refused unless listed. Personal mode allows them, so `localhost` works on a laptop. Comma-separated exact names, or a leading dot for a suffix (`.internal`). Same rule as `STRATA_WORKER_ALLOWED_HOSTS`, and applied to every redirect hop. |
 | `STRATA_NOTEBOOK_CELL_LOCK_SECONDS` | `5.0` | How long the last person to change a notebook cell holds it. An edit by someone else inside the window is refused with `cell_locked` and the holder's name, over the WebSocket and over REST, unless it sends `force`. One identity never contends with itself, so a single user in several tabs is unaffected. `0` turns the soft lock off. See the [client protocol](notebook-protocol.md#presence-and-soft-locks). |

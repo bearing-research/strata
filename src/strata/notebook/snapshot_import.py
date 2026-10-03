@@ -333,7 +333,7 @@ def _write_committed_files(
             target = _member_target(dest, name)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(archive.read(name))
-        elif name in ("pyproject.toml", "uv.lock", "renv.lock"):
+        elif name in ("pyproject.toml", "uv.lock", "renv.lock", ".gitignore"):
             (dest / name).write_bytes(archive.read(name))
 
     changed = False
@@ -349,7 +349,7 @@ def _write_committed_files(
         # Verbatim when unchanged, preserving a hand-edited notebook.toml's comments and layout.
         (dest / "notebook.toml").write_bytes(archive.read("notebook.toml"))
 
-    # Keep the imported .strata/ out of git, as `strata new` does.
+    # Keep the imported .strata/ out of git, as `strata new` does, if the bundle had none.
     write_gitignore(dest)
 
 

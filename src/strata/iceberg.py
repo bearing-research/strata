@@ -168,7 +168,15 @@ class PyIcebergCatalog:
         with self._lock:
             catalog = self._catalogs.get(key)
             if catalog is None:
-                catalog = load_catalog(name, **self.config.catalogs[name])
+                from strata.notebook.credentials import (
+                    CredentialResolver,
+                    resolve_catalog_properties,
+                )
+
+                properties = resolve_catalog_properties(
+                    self.config.catalogs[name], CredentialResolver.from_config(self.config)
+                )
+                catalog = load_catalog(name, **properties)
                 self._catalogs[key] = catalog
         return catalog
 

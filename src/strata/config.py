@@ -749,6 +749,34 @@ class StrataConfig(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def validate_catalog_uris(self) -> StrataConfig:
+        """Reject an object-store warehouse whose SQL catalog has no ``uri``.
+
+        Without one the catalog is SQLite on this server's disk, invisible to
+        every other reader of the bucket.
+        """
+        configured = {"catalog_properties": self.catalog_properties}
+        configured.update({f"catalogs.{name}": props for name, props in self.catalogs.items()})
+        for where, props in configured.items():
+            warehouse = props.get("warehouse", "")
+            credential = self.notebook_credentials.get(props.get("credential", ""), {})
+            if (
+                "://" in warehouse
+                and not warehouse.startswith("file://")
+                and props.get("type", "sql") == "sql"
+                and "uri" not in props
+                and "uri" not in credential
+            ):
+                raise ValueError(
+                    f"{where} has the object-store warehouse {warehouse} but no "
+                    "catalog uri, so its tables would live in a SQLite catalog on "
+                    "this server's disk. Set the catalog database's uri (for "
+                    "catalog_properties, STRATA_CATALOG_URI), e.g. "
+                    "postgresql://user:pass@host/iceberg_catalog."
+                )
+        return self
+
+    @model_validator(mode="after")
     def reject_a_remote_store_that_is_this_server(self) -> StrataConfig:
         """Reject a ``notebook_remote_store_url`` naming this server.
 

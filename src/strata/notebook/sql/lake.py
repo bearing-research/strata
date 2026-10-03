@@ -138,7 +138,19 @@ def resolve_lake(
         properties = (getattr(config, "catalogs", None) or {}).get(catalog)
         if properties is None:
             raise LakeError(f"catalog {catalog!r} is not configured on this server")
-        update["catalog_properties"] = dict(properties)
+        from strata.notebook.credentials import (
+            CredentialError,
+            CredentialResolver,
+            resolve_catalog_properties,
+        )
+
+        try:
+            update["catalog_properties"] = resolve_catalog_properties(
+                properties,
+                CredentialResolver.from_config(config, env=dict(session.notebook_state.env)),
+            )
+        except CredentialError as exc:
+            raise LakeError(f"catalog {catalog!r}: {exc}") from exc
         from strata.notebook.tables import fingerprint_tables, resolve_table_snapshot
 
         specs = _catalog_tables(catalog, tables)

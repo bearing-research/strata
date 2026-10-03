@@ -220,3 +220,137 @@ class TestInACentralStore:
             else _import(base, _record(), headers=reader)
         )
         assert response.status_code == 403
+
+
+def _chain(directory):
+    """A notebook's two-step chain: rows, and a figure drawn from them."""
+    from strata.notebook.artifact_integration import NotebookArtifactManager
+
+    manager = NotebookArtifactManager("nb", artifact_dir=directory)
+    rows = manager.store_cell_output(
+        cell_id="c1",
+        variable_name="rows",
+        blob_data=b"[1, 2]",
+        content_type="json/object",
+        provenance_hash="a1" * 32,
+        input_versions={},
+        source="rows = [1, 2]",
+    )
+    ref = f"{rows.id}@v={rows.version}"
+    figure = manager.store_cell_output(
+        cell_id="c2",
+        variable_name="__display__0",
+        blob_data=b"PNG",
+        content_type="image/png",
+        provenance_hash="b2" * 32,
+        input_versions={f"strata://artifact/{ref}": ref},
+        source="plt.plot(rows)",
+    )
+    return rows, figure
+
+
+def _publish_to(base: str, local, ref: str, tenant: str | None = None) -> int:
+    import argparse
+
+    from strata.artifact_cli import cmd_publish
+
+    scopes = "artifacts:write artifacts:publish"
+    headers = [f"{k}: {v}" for k, v in _headers(tenant, scopes=scopes).items()] if tenant else None
+    return cmd_publish(
+        argparse.Namespace(
+            ref=ref,
+            artifact_dir=str(local),
+            format="human",
+            title=None,
+            author=None,
+            here=False,
+            into=None,
+            to_url=base,
+            header=headers,
+            max_depth=10,
+        )
+    )
+
+
+def _row_count(artifact_dir) -> int:
+    conn = ArtifactStore(artifact_dir)._get_connection()
+    try:
+        return conn.execute("SELECT COUNT(*) FROM artifact_versions").fetchone()[0]
+    finally:
+        conn.close()
+
+
+class TestPublishTo:
+    """``strata artifact publish --to`` uses the staged import and remaps a clash."""
+
+    def test_the_bytes_are_staged_and_the_record_posted_as_json(
+        self, served, tmp_path, monkeypatch
+    ):
+        base, artifact_dir = served
+        _, figure = _chain(tmp_path / "notebook")
+        calls = []
+        bodies = []
+        real_put, real_post = httpx.put, httpx.post
+
+        def put(url, **kwargs):
+            calls.append(("PUT", url.removeprefix(base), sorted(kwargs)))
+            bodies.append(kwargs["content"])
+            return real_put(url, **kwargs)
+
+        def post(url, **kwargs):
+            calls.append(("POST", url.removeprefix(base), sorted(kwargs)))
+            return real_post(url, **kwargs)
+
+        monkeypatch.setattr(httpx, "put", put)
+        monkeypatch.setattr(httpx, "post", post)
+
+        assert _publish_to(base, tmp_path / "notebook", figure.id) == 0
+
+        imports = [(verb, path, keys) for verb, path, keys in calls if "/import" in path]
+        assert [verb for verb, _, _ in imports] == ["PUT", "POST", "PUT", "POST"]
+        assert all(path.startswith("/v1/artifacts/import/blobs/") for v, path, _ in imports[::2])
+        assert all("json" in keys and "files" not in keys for _, _, keys in imports[1::2])
+        # Streamed from a spooled file, never the artifact's bytes held whole.
+        assert not any(isinstance(body, bytes) for body in bodies)
+        store = ArtifactStore(artifact_dir)
+        assert store.read_blob(figure.id, figure.version) == b"PNG"
+        assert store.get_artifact(figure.id, figure.version).content_sha256 == (
+            hashlib.sha256(b"PNG").hexdigest()
+        )
+
+    def test_a_chain_another_tenant_holds_lands_as_this_tenants_copy(self, central, tmp_path):
+        """Every edge resolves on the copy and every provenance hash is unchanged."""
+        from strata.services.artifact import ArtifactService
+
+        base, artifact_dir = central
+        rows, figure = _chain(tmp_path / "notebook")
+        assert _publish_to(base, tmp_path / "notebook", figure.id, tenant="team-a") == 0
+
+        assert _publish_to(base, tmp_path / "notebook", figure.id, tenant="team-b") == 0
+
+        store = ArtifactStore(artifact_dir)
+        theirs = store.find_by_provenance(figure.provenance_hash, "team-b")
+        assert theirs is not None and theirs.id != figure.id
+        lineage = ArtifactService().build_lineage(
+            store,
+            artifact=theirs,
+            artifact_id=theirs.id,
+            version=theirs.version,
+            tenant_filter="team-b",
+            max_depth=10,
+        )
+        nodes = [store.get_artifact(n.artifact_id, n.version) for n in lineage.nodes]
+        assert [n.provenance_hash for n in nodes] == [figure.provenance_hash, rows.provenance_hash]
+        assert all(n.tenant == "team-b" for n in nodes)
+        assert len(store.list_publications("team-a")) == len(store.list_publications("team-b")) == 1
+
+    def test_publishing_the_same_chain_again_writes_nothing(self, central, tmp_path):
+        base, artifact_dir = central
+        _, figure = _chain(tmp_path / "notebook")
+        _publish_to(base, tmp_path / "notebook", figure.id, tenant="team-a")
+        _publish_to(base, tmp_path / "notebook", figure.id, tenant="team-b")
+        before = _row_count(artifact_dir)
+
+        assert _publish_to(base, tmp_path / "notebook", figure.id, tenant="team-b") == 0
+
+        assert _row_count(artifact_dir) == before == 4

@@ -1,7 +1,7 @@
 """Named credentials: data sources configured once, referenced by name.
 
-A mount or connection says ``credential = "lab-bucket"`` and never carries a
-secret. ``notebook_credentials`` maps each name to fields (fsspec
+A mount, connection or catalog says ``credential = "lab-bucket"`` and never
+carries a secret. ``notebook_credentials`` maps each name to fields (fsspec
 ``storage_options`` or driver ``auth``) whose values are ``${VAR}`` references::
 
     STRATA_NOTEBOOK_CREDENTIALS='{"lab-bucket": {"key": "${LAB_AWS_KEY}",
@@ -97,6 +97,17 @@ class CredentialResolver:
             merged.update(self.resolve(credential))
         merged.update(options)
         return merged
+
+
+def resolve_catalog_properties(
+    properties: Mapping[str, str], resolver: CredentialResolver
+) -> dict[str, str]:
+    """A catalog's pyiceberg properties with its ``credential`` resolved beneath its own keys."""
+    props = dict(properties)
+    name = props.pop("credential", None)
+    if not name:
+        return props
+    return {**resolver.resolve(name), **props}
 
 
 def credential_identity(credential: str | None) -> str:
