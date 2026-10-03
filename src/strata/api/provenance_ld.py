@@ -189,6 +189,8 @@ def build_crate(
                         "name": node.uri,
                         "sha256": node.content_sha256,
                         "description": "Bytes read from this URL when the step ran.",
+                        # RO-Crate's term for when a web data entity was retrieved.
+                        "sdDatePublished": _iso(node.created_at),
                     }
                 )
             )

@@ -216,6 +216,93 @@ class TestPins:
         assert hashlib.sha256(origin.body).hexdigest() in str(caught.value)
 
 
+class TestPinning:
+    """Writing ``sha256=`` into the annotation, so nobody copies a digest by hand."""
+
+    def test_the_pin_is_written_and_other_options_kept(self):
+        from strata.notebook.annotations import pin_fetch_directives
+
+        source = (
+            "# @name zones\n"
+            "# @fetch zones https://x.test/z.csv refetch=never\n"
+            "# @fetch other https://x.test/o.csv\n"
+            "rows = 1\n"
+        )
+
+        pinned = pin_fetch_directives(source, {"zones": "a" * 64})
+
+        (spec, other) = parse_annotations(pinned).fetches
+        assert (spec.name, spec.sha256, spec.refetch) == ("zones", "a" * 64, "never")
+        assert other.sha256 is None
+        assert pinned.endswith("rows = 1\n")
+        assert pinned.splitlines()[0] == "# @name zones"
+
+    def test_an_existing_pin_is_replaced(self):
+        from strata.notebook.annotations import pin_fetch_directives
+
+        source = f"# @fetch zones https://x.test/z.csv sha256={'a' * 64}\nrows = 1"
+
+        pinned = pin_fetch_directives(source, {"zones": "b" * 64})
+
+        assert pinned.count("sha256=") == 1
+        assert parse_annotations(pinned).fetches[0].sha256 == "b" * 64
+
+    def _notebook(self, tmp_path, url: str):
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "Pinning", initialize_environment=False)
+        add_cell_to_notebook(nb, "c1", None)
+        write_cell(nb, "c1", f"# @fetch zones {url} refetch=never\nrows = 1\n")
+        return nb
+
+    def test_the_command_pins_to_the_bytes_last_downloaded(self, tmp_path, origin, capsys):
+        import json
+
+        from strata.notebook.cli import cell_pin_fetch_main
+
+        nb = self._notebook(tmp_path, origin.url())
+        digest = (
+            FetchCache(nb, allowed_hosts=("127.0.0.1",))
+            .resolve(FetchSpec(name="zones", url=origin.url()))
+            .sha256
+        )
+        args = SimpleNamespace(
+            notebook_dir=str(nb), cell_id="c1", names=[], author=None, format="json"
+        )
+
+        assert cell_pin_fetch_main(args) == 0
+
+        out = json.loads(capsys.readouterr().out)
+        assert out["pinned"] == [{"name": "zones", "url": origin.url(), "sha256": digest}]
+        source = (nb / "cells" / "c1.py").read_text()
+        (spec,) = parse_annotations(source).fetches
+        assert (spec.sha256, spec.refetch) == (digest, "never")
+
+    def test_nothing_downloaded_is_refused_and_the_cell_is_untouched(self, tmp_path, capsys):
+        from strata.notebook.cli import cell_pin_fetch_main
+
+        nb = self._notebook(tmp_path, "https://x.test/z.csv")
+        before = (nb / "cells" / "c1.py").read_text()
+        args = SimpleNamespace(
+            notebook_dir=str(nb), cell_id="c1", names=["zones"], author=None, format="json"
+        )
+
+        assert cell_pin_fetch_main(args) == 2
+        assert "run the cell first" in capsys.readouterr().err
+        assert (nb / "cells" / "c1.py").read_text() == before
+
+    def test_an_unknown_name_is_refused(self, tmp_path, capsys):
+        from strata.notebook.cli import cell_pin_fetch_main
+
+        nb = self._notebook(tmp_path, "https://x.test/z.csv")
+        args = SimpleNamespace(
+            notebook_dir=str(nb), cell_id="c1", names=["nope"], author=None, format="json"
+        )
+
+        assert cell_pin_fetch_main(args) == 2
+        assert "nope" in capsys.readouterr().err
+
+
 class TestTheGuard:
     def test_a_private_address_is_refused_unless_its_host_is_named(self, tmp_path, origin):
         with pytest.raises(FetchError, match="non-routable"):
@@ -364,6 +451,59 @@ class TestInACell:
         assert result.success is False
         assert pin in result.error
         assert hashlib.sha256(origin.body).hexdigest() in result.error
+
+    async def test_a_pin_mismatch_carries_a_code_on_every_surface(
+        self, tmp_path, origin, monkeypatch
+    ):
+        """A client branches on the code, not on the wording of the message."""
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.ops import _run_result_from_wire
+        from strata.notebook.ws import _execution_result_payload
+
+        source = f"# @fetch zones {origin.url()} sha256={'1' * 64}\nrows = 1"
+        session = self._session(tmp_path, source, monkeypatch)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.error_code == "fetch_pin_mismatch"
+        assert _execution_result_payload("c1", result)["error_code"] == "fetch_pin_mismatch"
+        wire = result.to_dict()
+        assert wire["error_code"] == "fetch_pin_mismatch"
+        assert _run_result_from_wire(wire).error_code == "fetch_pin_mismatch"
+
+    async def test_an_unreachable_fetch_is_not_a_pin_mismatch(self, tmp_path, monkeypatch):
+        from strata.notebook.executor import CellExecutor
+
+        # Port 1 refuses the connection at once.
+        source = f"# @fetch zones http://127.0.0.1:1/zones.csv sha256={'1' * 64}\nrows = 1"
+        session = self._session(tmp_path, source, monkeypatch)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success is False
+        assert result.error_code is None
+        assert "error_code" not in result.to_dict()
+
+    async def test_the_artifact_records_when_the_bytes_were_downloaded(
+        self, tmp_path, origin, monkeypatch
+    ):
+        """A recheck answered 304 keeps the original download time: the bytes are that old."""
+        import json
+
+        from strata.notebook.executor import CellExecutor
+
+        source = f"# @fetch zones {origin.url()}\nrows = len(zones.read_bytes())"
+        session = self._session(tmp_path, source, monkeypatch)
+        assert (await CellExecutor(session).execute_cell("c1", source)).success
+        index = json.loads((session.path / ".strata" / "fetch" / "index.json").read_text())
+        downloaded = index[origin.url()]["fetched_at"]
+
+        rerun = await CellExecutor(session).execute_cell_force("c1", source)
+
+        assert rerun.success, rerun.error
+        assert origin.requests[-1][1].get("If-None-Match")
+        (node,) = [n for n in self._lineage_of(session, "c1").nodes if n.type == "fetch"]
+        assert node.created_at == downloaded
 
     @staticmethod
     def _lineage_of(session, cell_id: str):

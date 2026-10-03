@@ -175,9 +175,11 @@ declaring files that are not there is a claim no validator would catch.
 
 A step that read a URL through [`@fetch`](annotations.md#fetch) names it as
 an input. On the page it appears under "External inputs" with the digest of the
-bytes read and when the reading step ran. In the crate it is a `File` whose
-`@id` is the URL, with that `sha256`. The digest describes what was read, and
-the URL may serve something else now.
+bytes read, when they were retrieved, and when the reading step ran. In the
+crate it is a `File` whose `@id` is the URL, with that `sha256` and the
+retrieval time as `sdDatePublished`. The digest describes what was read, and
+the URL may serve something else now. A step stored before retrieval times were
+recorded shows only when it ran.
 
 ## Embedding it elsewhere
 

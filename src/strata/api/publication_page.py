@@ -138,7 +138,7 @@ def _artifact_label(node) -> str:
 
 
 def _external_inputs(fetches, lineage) -> str:
-    """Render the URLs steps read from, with digest and the reading step's time.
+    """Render the URLs steps read from: digest, when the bytes were retrieved, and who read them.
 
     The URL is printed, never linked: a stored record is not trusted to hold only
     ``https``.
@@ -161,6 +161,7 @@ def _external_inputs(fetches, lineage) -> str:
                 [
                     ("URL", _code(node.uri)),
                     ("Content digest (SHA-256)", _code(node.content_sha256 or "")),
+                    ("Retrieved", escape(_when(node.created_at)) if node.created_at else ""),
                     *(
                         (
                             "Read by",

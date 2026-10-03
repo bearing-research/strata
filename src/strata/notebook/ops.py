@@ -153,6 +153,8 @@ class RunResult(BaseModel):
     execution_method: str
     duration_ms: float
     error: str | None = None
+    # A stable name for the failure, e.g. ``fetch_pin_mismatch``; ``None`` when it has none.
+    error_code: str | None = None
     stdout: str = ""
     stderr: str = ""
 
@@ -494,6 +496,7 @@ class LocalNotebookOps:
             execution_method=result.execution_method,
             duration_ms=result.duration_ms,
             error=result.error,
+            error_code=result.error_code,
             stdout=result.stdout,
             stderr=result.stderr,
         )
@@ -1259,6 +1262,7 @@ def _run_result_from_wire(data: dict[str, Any]) -> RunResult:
         execution_method=data.get("execution_method") or "",
         duration_ms=data.get("duration_ms", 0.0),
         error=data.get("error"),
+        error_code=data.get("error_code"),
         stdout=data.get("stdout") or "",
         stderr=data.get("stderr") or "",
     )

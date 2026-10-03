@@ -44,7 +44,8 @@ run.
 finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
-`error` / `reason` where applicable). For a cell that produces an output
+`error` / `reason` where applicable, and `error_code` when the failure has a
+stable name, such as `fetch_pin_mismatch`). For a cell that produces an output
 artifact, a cache hit replays that artifact without re-emitting console
 output, so `stdout` can be absent on warm runs (`--force` re-executes). A
 leaf cell that only `print`s is different: its stdout/stderr are cached by
@@ -290,6 +291,7 @@ strata cell edit     <notebook_dir> <cell_id> --file body.py     # replace a cel
 strata cell rm       <notebook_dir> <cell_id>                     # delete a cell
 strata cell mv       <notebook_dir> <cell_id> --to <index>        # reorder (0-based)
 strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout
+strata cell pin-fetch <notebook_dir> <cell_id> [NAME ...]        # write sha256= into @fetch lines
 strata dep add       <notebook_dir> <package>                     # uv add
 strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
@@ -306,7 +308,13 @@ with `cell run`). `cell annotate` splices `# @key` [annotations](annotations.md)
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
-the source directly for repeatable `mount` / `table` / `env`. Dependency
+the source directly for repeatable `mount` / `table` / `env`. `cell pin-fetch`
+pins a cell's [`@fetch`](annotations.md#fetch) inputs: it writes `sha256=` with
+the digest of the bytes the notebook last downloaded into each named fetch line
+(every fetch in the cell when no name is given) and prints the cell and a
+`pinned` list of `{name, url, sha256}`. It reads the notebook's own fetch
+cache, so it takes a local directory, not `--server`; a fetch with nothing
+downloaded yet is an error until the cell has run. Dependency
 commands run `uv add` / `uv remove` and report whether the lockfile changed. All
 take `--format json|human` and use the shared exit codes (`0` ok, `1` operation
 failure such as an unknown cell or a failed `uv` resolve, `2` invocation error).
