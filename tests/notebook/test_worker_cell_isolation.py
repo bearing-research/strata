@@ -127,7 +127,7 @@ class TestWhereTheServerPolls:
         with pytest.raises(RemoteExecutionError) as raised:
             await executor._await_accepted_job(
                 accepted,
-                manifest_execute_url="http://worker/v1/execute-manifest",
+                submit_url="http://worker/v1/execute-manifest",
                 headers={"Authorization": "Bearer worker-token"},
                 worker_spec=worker,
                 timeout_seconds=30.0,
@@ -151,12 +151,12 @@ class TestWhereTheServerPolls:
         async def _fail(self, *args, **kwargs):
             raise httpx.ConnectError("connection reset")
 
-        monkeypatch.setattr(httpx.AsyncClient, "get", _fail)
+        monkeypatch.setattr(httpx.AsyncClient, "send", _fail)
 
         with pytest.raises(RemoteExecutionError) as raised:
             await executor._await_accepted_job(
                 accepted,
-                manifest_execute_url="http://worker/v1/execute-manifest",
+                submit_url="http://worker/v1/execute-manifest",
                 headers={},
                 worker_spec=worker,
                 timeout_seconds=30.0,

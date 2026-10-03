@@ -2508,6 +2508,42 @@ class CellExecutor:
         if worker_token:
             headers["Authorization"] = f"Bearer {worker_token}"
         bundle_path = output_dir / "notebook-output-bundle.tar"
+        build_id = str(metadata["build_id"])
+
+        async def _receive_bundle(response: httpx.Response) -> None:
+            if response.status_code == 408:
+                raise RemoteExecutionError(
+                    cell_timeout_message(timeout_seconds),
+                    remote_error_code="TIMEOUT",
+                )
+            if response.status_code != 200:
+                await response.aread()
+                detail = self._extract_remote_error(response)
+                raise RemoteExecutionError(
+                    f"Remote executor '{worker_spec.name}' returned "
+                    f"{response.status_code}: {detail}",
+                    remote_error_code="EXECUTOR_HTTP_ERROR",
+                )
+
+            protocol = response.headers.get(EXECUTOR_PROTOCOL_HEADER)
+            if protocol and protocol != EXECUTOR_PROTOCOL_VERSION:
+                raise RemoteExecutionError(
+                    f"Remote executor '{worker_spec.name}' returned unsupported "
+                    f"protocol version {protocol!r}",
+                    remote_error_code="PROTOCOL_ERROR",
+                )
+            notebook_protocol = response.headers.get("X-Strata-Notebook-Executor-Protocol")
+            if notebook_protocol and notebook_protocol != NOTEBOOK_EXECUTOR_PROTOCOL_VERSION:
+                raise RemoteExecutionError(
+                    f"Remote executor '{worker_spec.name}' returned unsupported "
+                    f"notebook protocol version {notebook_protocol!r}",
+                    remote_error_code="PROTOCOL_ERROR",
+                )
+
+            with open(bundle_path, "wb") as f:
+                async for chunk in response.aiter_bytes():
+                    f.write(chunk)
+
         try:
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:
@@ -2517,51 +2553,38 @@ class CellExecutor:
                         files=files,
                         headers=headers,
                     ) as response:
-                        if response.status_code == 408:
-                            raise RemoteExecutionError(
-                                cell_timeout_message(timeout_seconds),
-                                remote_error_code="TIMEOUT",
-                            )
-                        if response.status_code != 200:
+                        if response.status_code == 202:
                             await response.aread()
-                            detail = self._extract_remote_error(response)
+                        else:
+                            await _receive_bundle(response)
+                if response.status_code == 202:
+                    # A dispatcher booting a machine: its wait does not count against the cell.
+                    finished = await self._await_accepted_job(
+                        response,
+                        submit_url=executor_url,
+                        headers=headers,
+                        timeout_seconds=timeout_seconds,
+                        cancel=lambda: self._cancel_remote_execution(
+                            executor_url, build_id, worker_token
+                        ),
+                        worker_spec=worker_spec,
+                        cell_id=cell_id,
+                        receive_bundle=_receive_bundle,
+                    )
+                    if not bundle_path.exists():
+                        if finished.status_code == 200:
                             raise RemoteExecutionError(
-                                f"Remote executor '{worker_spec.name}' returned "
-                                f"{response.status_code}: {detail}",
-                                remote_error_code="EXECUTOR_HTTP_ERROR",
-                            )
-
-                        protocol = response.headers.get(EXECUTOR_PROTOCOL_HEADER)
-                        if protocol and protocol != EXECUTOR_PROTOCOL_VERSION:
-                            raise RemoteExecutionError(
-                                f"Remote executor '{worker_spec.name}' returned unsupported "
-                                f"protocol version {protocol!r}",
+                                f"Remote executor '{worker_spec.name}' finished the job "
+                                "without answering the output bundle",
                                 remote_error_code="PROTOCOL_ERROR",
                             )
-                        notebook_protocol = response.headers.get(
-                            "X-Strata-Notebook-Executor-Protocol"
-                        )
-                        if (
-                            notebook_protocol
-                            and notebook_protocol != NOTEBOOK_EXECUTOR_PROTOCOL_VERSION
-                        ):
-                            raise RemoteExecutionError(
-                                f"Remote executor '{worker_spec.name}' returned unsupported "
-                                f"notebook protocol version {notebook_protocol!r}",
-                                remote_error_code="PROTOCOL_ERROR",
-                            )
-
-                        with open(bundle_path, "wb") as f:
-                            async for chunk in response.aiter_bytes():
-                                f.write(chunk)
+                        await _receive_bundle(finished)
             except asyncio.CancelledError:
                 # No build row to mark failed here, so cancelling only reclaims the machine, which
                 # would otherwise finish the cell for a gone caller. Shielded: runs inside the
                 # propagating cancellation.
                 await asyncio.shield(
-                    self._cancel_remote_execution(
-                        executor_url, str(metadata["build_id"]), worker_token
-                    )
+                    self._cancel_remote_execution(executor_url, build_id, worker_token)
                 )
                 raise
             except httpx.TimeoutException as exc:
@@ -2789,7 +2812,7 @@ class CellExecutor:
                 if response.status_code == 202:
                     response = await self._await_accepted_job(
                         response,
-                        manifest_execute_url=manifest_execute_url,
+                        submit_url=manifest_execute_url,
                         headers=headers,
                         timeout_seconds=timeout_seconds,
                         cancel=lambda: self._cancel_remote_execution(
@@ -2986,12 +3009,13 @@ class CellExecutor:
         self,
         accepted: httpx.Response,
         *,
-        manifest_execute_url: str,
+        submit_url: str,
         headers: dict[str, str],
         timeout_seconds: float,
         cancel: Callable[[], Awaitable[None]],
         worker_spec: Any,
         cell_id: str | None,
+        receive_bundle: Callable[[httpx.Response], Awaitable[None]] | None = None,
     ) -> httpx.Response:
         """Follow a job a worker accepted with 202 until it finishes.
 
@@ -3001,6 +3025,9 @@ class CellExecutor:
         answers ``{"state": ...}`` (``queued``/``provisioning``/``starting``,
         ``running``, then ``finished``/``failed`` with ``status_code`` and
         ``result`` or ``error``); that response is handled as a synchronous one.
+        With ``receive_bundle`` (the direct transport), a finished job's URL
+        answers the output bundle itself as ``application/x-tar``; it is
+        streamed to ``receive_bundle`` and that reply returned.
         """
         try:
             body = accepted.json()
@@ -3014,9 +3041,9 @@ class CellExecutor:
                 remote_build_state="failed",
                 remote_error_code="PROTOCOL_ERROR",
             )
-        job_url = urljoin(manifest_execute_url, job_url)
-        if urlsplit(job_url)[:2] != urlsplit(manifest_execute_url)[:2]:
-            # The job lives on the worker the manifest went to; polling an absolute URL elsewhere
+        job_url = urljoin(submit_url, job_url)
+        if urlsplit(job_url)[:2] != urlsplit(submit_url)[:2]:
+            # The job lives on the worker the request went to; polling an absolute URL elsewhere
             # would send the worker's token to a host of its choosing. Stop the job first.
             await cancel()
             raise RemoteExecutionError(
@@ -3035,7 +3062,17 @@ class CellExecutor:
         async with httpx.AsyncClient(timeout=30.0) as client:
             while True:
                 try:
-                    reply = await client.get(job_url, headers=headers)
+                    async with client.stream("GET", job_url, headers=headers) as reply:
+                        if (
+                            receive_bundle is not None
+                            and reply.status_code == 200
+                            and reply.headers.get("content-type", "").startswith(
+                                "application/x-tar"
+                            )
+                        ):
+                            await receive_bundle(reply)
+                            return reply
+                        await reply.aread()
                 except httpx.HTTPError as exc:
                     # The job outlives this request; a failed poll must stop it or the machine runs
                     # on for a build already marked failed.
