@@ -103,6 +103,21 @@ class TestTabularArtifact:
             == hashlib.sha256((dest / "artifact.parquet").read_bytes()).hexdigest()
         )
 
+    def test_the_ro_crate_lists_it_with_its_digest(self, tmp_path):
+        """A repository reads the crate, not the manifest; an unlisted file is invisible to it."""
+        dest = _archive(tmp_path, "rows", _arrow_bytes())
+        graph = json.loads((dest / "ro-crate-metadata.json").read_text())["@graph"]
+
+        root = next(n for n in graph if n["@id"] == "./")
+        parquet = next(n for n in graph if n["@id"] == "artifact.parquet")
+        assert {"@id": "artifact.parquet"} in root["hasPart"]
+        assert parquet["@type"] == "File"
+        assert parquet["encodingFormat"] == "application/vnd.apache.parquet"
+        assert (
+            parquet["sha256"]
+            == hashlib.sha256((dest / "artifact.parquet").read_bytes()).hexdigest()
+        )
+
     def test_the_readme_names_it(self, tmp_path):
         """The bundle explains itself to whoever opens it."""
         dest = _archive(tmp_path, "rows", _arrow_bytes())
@@ -124,3 +139,10 @@ class TestNonTabularArtifact:
         manifest = json.loads((dest / "manifest.json").read_text())
 
         assert "additional_files" not in manifest
+
+    def test_the_ro_crate_lists_only_the_payload(self, tmp_path):
+        dest = _archive(tmp_path, "fig", b"\x89PNG\r\n\x1a\n figure")
+        graph = json.loads((dest / "ro-crate-metadata.json").read_text())["@graph"]
+
+        root = next(n for n in graph if n["@id"] == "./")
+        assert root["hasPart"] == [{"@id": root["mainEntity"]["@id"]}]

@@ -229,9 +229,18 @@ figure3-bundle/
 A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
 also carries `artifact.parquet`, the same rows in a format a data repository
 indexes. The manifest's digest covers the Arrow file; the Parquet file carries
-its own. A table whose Arrow file is over 128 MiB is archived without the
-Parquet copy, since converting it holds the whole table in memory. The limit is
-fixed, so it never makes one publication's archive differ between builds.
+its own, in the manifest's `additional_files` and as a second `File` in the
+RO-Crate, so a repository reading the crate sees both. A table whose Arrow file
+is over 128 MiB is archived without the Parquet copy, since converting it holds
+the whole table in memory; neither the manifest nor the crate then lists one.
+The limit is fixed, so it never makes one publication's archive differ between
+builds.
+
+Whichever file a reader kept, the server can say whether it is this
+publication's. `GET /p/<token>/verify?sha256=<digest of the file>` answers with
+`file` naming it (`artifact.arrow` or `artifact.parquet`, or `null` for a file
+from elsewhere) and `matches` true only when it names one and the stored bytes
+are unchanged. The Parquet digest is the one in the archive the server serves.
 
 Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.
@@ -379,7 +388,7 @@ the bytes as `data`, which is what the CLI sends.
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |
 | `GET /p/{token}/archive.zip` | **no** | The archived bundle as a zip, with a `Content-Digest` header. |
-| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. |
+| `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. `?sha256=` also says which bundle file (Arrow or Parquet) a digest names. |
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
 | `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |
