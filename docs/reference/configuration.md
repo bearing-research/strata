@@ -135,7 +135,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 
 | Variable             | Default | Description                          |
 | -------------------- | ------- | ------------------------------------ |
-| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite path for metadata persistence |
+| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite catalog an `s3://` warehouse URI uses when no catalog `uri` is set. It is on this server's disk, so other readers of the bucket do not see it |
 
 ## Catalog
 
@@ -145,6 +145,12 @@ Two constraints are enforced at startup rather than papered over at runtime:
 | `STRATA_CATALOG_PROPERTIES`  | `{}`      | PyIceberg catalog properties (JSON object via env; `[tool.strata.catalog_properties]` in pyproject) |
 | `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files |
 | `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject. Environment only |
+
+A SQL catalog (no `type`, or `type = "sql"`) whose `warehouse` is in object
+storage (`s3://`, `gs://`, `abfss://`, any scheme but `file://`) needs a `uri`,
+in `catalog_properties` or in a `STRATA_CATALOGS` entry. Without one its tables
+would be in a SQLite file on this server's disk, so the server refuses to start
+and names the setting.
 
 ## S3 Storage
 

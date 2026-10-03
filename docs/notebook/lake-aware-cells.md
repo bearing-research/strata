@@ -79,6 +79,14 @@ The **table URI** is `<warehouse>#<namespace>.<table>` - here
 `STRATA_CATALOGS` is written `<catalog>:<namespace>.<table>` instead (see the
 [`@table` reference](annotations.md#table)).
 
+Strata finds a local warehouse's tables in `<warehouse>/catalog.db`. An object
+store has no such file, so for an `s3://` warehouse set the catalog database
+with `STRATA_CATALOG_URI`; without it the catalog is SQLite at
+`STRATA_METADATA_DB` on the server's own disk, which no other reader of the
+bucket sees. A configured warehouse (`warehouse` in `catalog_properties` or in
+a named SQL catalog) in object storage with no `uri` stops the server at
+startup ([Catalog settings](../reference/configuration.md#catalog)).
+
 ## Step 2 - Declare a lake-aware cell
 
 In a notebook cell, declare the table and scan it with the cell's

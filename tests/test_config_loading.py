@@ -194,6 +194,42 @@ class TestNestedConfigMerge:
         }
 
 
+class TestObjectStoreWarehouseNeedsACatalogUri:
+    """Without a uri, an object-store warehouse's catalog is SQLite on the server's disk."""
+
+    @pytest.mark.parametrize("warehouse", ["s3://lake/wh", "gs://lake/wh", "abfss://c@a/wh"])
+    def test_a_warehouse_without_a_uri_refuses_to_load(self, monkeypatch, tmp_path, warehouse):
+        _pyproject(monkeypatch, {"catalog_properties": {"type": "sql", "warehouse": warehouse}})
+
+        with pytest.raises(ValueError, match="catalog_properties .* no catalog uri"):
+            StrataConfig.load(cache_dir=tmp_path / "c")
+
+    def test_a_named_catalog_without_a_uri_refuses_to_load(self, tmp_path):
+        with pytest.raises(ValueError, match="catalogs.lake .* no catalog uri"):
+            StrataConfig(cache_dir=tmp_path / "c", catalogs={"lake": {"warehouse": "s3://l/wh"}})
+
+    def test_the_catalog_uri_env_var_satisfies_it(self, monkeypatch, tmp_path):
+        _pyproject(monkeypatch, {"catalog_properties": {"warehouse": "s3://lake/wh"}})
+        monkeypatch.setenv("STRATA_CATALOG_URI", "postgresql://host/db")
+
+        config = StrataConfig.load(cache_dir=tmp_path / "c")
+
+        assert config.catalog_properties["uri"] == "postgresql://host/db"
+
+    @pytest.mark.parametrize(
+        "props",
+        [
+            {"type": "glue", "warehouse": "s3://lake/wh"},
+            {"warehouse": "file:///srv/wh"},
+            {"warehouse": "/srv/wh"},
+        ],
+    )
+    def test_catalogs_that_need_no_uri_load(self, tmp_path, props):
+        config = StrataConfig(cache_dir=tmp_path / "c", catalog_properties=props)
+
+        assert config.catalog_properties == props
+
+
 class TestGCSBucketLocationRename:
     """``STRATA_GCS_PROJECT_ID`` still reaches ``default_bucket_location``.
 
