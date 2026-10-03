@@ -754,7 +754,11 @@ class TestFetchStaysOffTheEventLoop:
 
         resp = tc.post(f"/v1/notebooks/{session_id}/secret-manager/refresh")
 
-        assert resp.json()["env"]["API_KEY"] == "sk-1"
+        # Clients get the mask; the fetched value is held server-side.
+        assert resp.json()["env"]["API_KEY"] == MASKED_ENV_VALUE
+        from strata.notebook.routes import get_session_manager
+
+        assert get_session_manager().get_session(session_id).notebook_state.env["API_KEY"] == "sk-1"
         assert [call["on_event_loop"] for call in provider.calls] == [False]
 
     def test_a_structural_edit_reuses_the_last_fetch(self, client) -> None:
@@ -787,7 +791,11 @@ class TestFetchStaysOffTheEventLoop:
 
         assert resp.status_code == 200, resp.text
         assert len(provider.calls) == 2
-        assert resp.json()["env"]["API_KEY"] == "sk-1"
+        # Clients get the mask; the fetched value is held server-side.
+        assert resp.json()["env"]["API_KEY"] == MASKED_ENV_VALUE
+        from strata.notebook.routes import get_session_manager
+
+        assert get_session_manager().get_session(session_id).notebook_state.env["API_KEY"] == "sk-1"
 
     async def test_a_silent_provider_is_given_up_on(self, tmp_path, monkeypatch) -> None:
         import threading
