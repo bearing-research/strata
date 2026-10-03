@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -11,23 +12,23 @@ from types import SimpleNamespace
 
 import pytest
 
+from strata.notebook.env import uv_lock_key
 from strata.notebook.env_backend import UvBackend, get_backend
 from strata.notebook.shared_env import COMPLETE_MARKER, SharedEnvBackend, collect
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the link is a symlink")
 
-_PYPROJECT = f"""[project]
-name = "nb"
-version = "0.1.0"
-requires-python = ">={sys.version_info.major}.{sys.version_info.minor}"
-dependencies = []
-"""
+_PYTHON = f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
-def _notebook(parent: Path, name: str) -> Path:
+def _notebook(parent: Path, name: str, extra: str = "") -> Path:
+    """A notebook whose project is named after it, as ``strata new`` writes."""
     notebook = parent / name
     notebook.mkdir()
-    (notebook / "pyproject.toml").write_text(_PYPROJECT)
+    (notebook / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "0.1.0"\n'
+        f'requires-python = ">={_PYTHON}"\ndependencies = []\n{extra}'
+    )
     return notebook
 
 
@@ -189,6 +190,117 @@ def test_the_key_names_the_interpreter_build(tmp_path):
     assert backend.key("cpython 3.13.1  macosx-14-arm64") != backend.key(
         "cpython 3.13.2  macosx-14-arm64"
     )
+
+
+def _lock(
+    project: str,
+    *,
+    six: str = "1.17.0",
+    marker: str = "",
+    requires_python: str = ">=3.12",
+    source: str = 'virtual = "."',
+) -> str:
+    """A ``uv.lock`` for a notebook *project* depending on six, in uv's name order."""
+    dependency = '{ name = "six"' + (f', marker = "{marker}"' if marker else "") + " }"
+    root = (
+        f'[[package]]\nname = "{project}"\nversion = "0.1.0"\nsource = {{ {source} }}\n'
+        f"dependencies = [\n    {dependency},\n]\n\n"
+        f'[package.metadata]\nrequires-dist = [{{ name = "six", specifier = ">=1" }}]\n'
+    )
+    six_entry = (
+        f'[[package]]\nname = "six"\nversion = "{six}"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+        f'wheels = [{{ url = "https://example/six-{six}.whl", hash = "sha256:{six}" }}]\n'
+    )
+    entries = sorted([(project, root), ("six", six_entry)])
+    header = f'version = 1\nrevision = 3\nrequires-python = "{requires_python}"\n\n'
+    return header + "\n".join(entry for _, entry in entries)
+
+
+class TestTheLockKey:
+    """The key names what a lock installs, not which notebook's project it belongs to."""
+
+    def test_notebooks_named_apart_with_the_same_packages_get_one_key(self):
+        assert _lock("alpha") != _lock("zeta")
+        assert uv_lock_key(_lock("alpha")) == uv_lock_key(_lock("zeta"))
+
+    def test_an_installed_project_and_a_virtual_one_get_one_key(self):
+        # The shared environment never installs the project itself.
+        assert uv_lock_key(_lock("alpha", source='editable = "."')) == uv_lock_key(_lock("zeta"))
+
+    @pytest.mark.parametrize(
+        "changed",
+        [
+            {"six": "1.16.0"},
+            {"marker": "sys_platform == 'linux'"},
+            {"requires_python": ">=3.13"},
+        ],
+        ids=["package-version", "dependency-marker", "requires-python"],
+    )
+    def test_anything_that_changes_the_install_changes_the_key(self, changed):
+        assert uv_lock_key(_lock("alpha", **changed)) != uv_lock_key(_lock("alpha"))
+
+    def test_a_worker_is_sent_the_same_key_for_both(self, tmp_path):
+        from strata.notebook.worker_env import _validated, environment_spec
+
+        specs = []
+        for name in ("alpha", "zeta"):
+            notebook = _notebook(tmp_path, name)
+            (notebook / "uv.lock").write_text(_lock(name))
+            specs.append(environment_spec(notebook, None))
+
+        assert specs[0]["key"] == specs[1]["key"]
+        assert all(_validated(spec)["key"] == spec["key"] for spec in specs)
+
+
+def _imports_tinydep(notebook: Path) -> bool:
+    ran = subprocess.run(
+        [str(notebook / ".venv" / "bin" / "python"), "-c", "import tinydep"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return ran.returncode == 0
+
+
+def test_notebooks_named_apart_with_the_same_dependencies_share_one_environment_and_run(
+    tmp_path, shared
+):
+    package = _package(tmp_path)
+    alpha, zeta = _notebook(tmp_path, "alpha"), _notebook(tmp_path, "zeta")
+
+    built = get_backend(alpha).add(str(package), timeout=180)
+    linked = get_backend(zeta).add(str(package), timeout=180)
+
+    assert built.success, built.error
+    assert linked.success, linked.error
+    assert (alpha / "uv.lock").read_text() != (zeta / "uv.lock").read_text()
+    assert _linked(alpha) == _linked(zeta)
+    assert "uv sync" not in linked.operation_log.command, "the second notebook installed"
+    assert _imports_tinydep(alpha)
+    assert _imports_tinydep(zeta)
+
+
+def test_the_shared_environment_does_not_install_a_notebook_s_own_project(tmp_path, shared):
+    packaged = _notebook(
+        tmp_path,
+        "packaged",
+        extra='\n[build-system]\nrequires = ["uv_build>=0.8"]\nbuild-backend = "uv_build"\n',
+    )
+    (packaged / "src" / "packaged").mkdir(parents=True)
+    (packaged / "src" / "packaged" / "__init__.py").write_text("")
+    plain = _notebook(tmp_path, "plain")
+
+    synced = get_backend(packaged).sync(python_version=None, timeout=180)
+
+    assert synced.success, synced.error
+    site_packages = list(_linked(packaged).glob("lib/python*/site-packages/*"))
+    assert site_packages, "nothing was installed at all"
+    assert not [path for path in site_packages if path.name.startswith("packaged")], (
+        "a notebook's own project went into an environment other notebooks link to"
+    )
+    assert get_backend(plain).sync(python_version=None, timeout=180).success
+    assert _linked(plain) == _linked(packaged)
 
 
 class TestTheSweepOnlyTakesWhatItBuilt:

@@ -2,9 +2,9 @@
 
 Selected with ``notebook_env_backend = "shared"``. Environments live under
 ``notebook_shared_env_dir``, one directory per key, and a notebook's ``.venv``
-is a symlink to its key's directory (POSIX only). The key hashes the raw
-``uv.lock`` bytes with the exact interpreter build and platform tag; not the
-provenance env hash, which omits the dev group.
+is a symlink to its key's directory (POSIX only). The key hashes the
+``uv.lock`` without the notebook project's own entry (``uv_lock_key``) with the
+exact interpreter build and platform tag; not the provenance env hash.
 
 A shared environment is never changed in place: ``add``/``remove`` edit the
 notebook's files, then sync into another key and move only that link.
@@ -35,6 +35,7 @@ from strata.notebook.dependencies import (
     resolve_uv,
     run_uv_command_streaming,
 )
+from strata.notebook.env import uv_lock_key
 from strata.notebook.env_backend import _StreamCallback
 
 # Written last on success: a directory without it is a dead sync to redo.
@@ -133,7 +134,7 @@ class SharedEnvBackend:
 
     def key(self, build: str) -> str:
         """The environment key for the notebook's current lock and *build*."""
-        lock = hashlib.sha256((self.notebook_dir / "uv.lock").read_bytes()).hexdigest()
+        lock = uv_lock_key((self.notebook_dir / "uv.lock").read_text())
         return hashlib.sha256(f"{lock}\n{build}".encode()).hexdigest()[:32]
 
     # --- linking ---
@@ -169,7 +170,8 @@ class SharedEnvBackend:
         return interpreter, key, _key_lock(self.root, key)
 
     def _install_args(self, interpreter: Path) -> list[str]:
-        return ["sync", "--frozen", "--python", str(interpreter)]
+        # The key leaves the notebook's own project out, so the environment must too.
+        return ["sync", "--frozen", "--no-install-project", "--python", str(interpreter)]
 
     def _install_env(self, key: str) -> dict[str, str]:
         return {"UV_PROJECT_ENVIRONMENT": str(self.root / key)}

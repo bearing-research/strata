@@ -2,7 +2,7 @@
 
 A server sends the notebook's lock with the cell::
 
-    {"key": "<sha256 of uv.lock>", "python": "3.13",
+    {"key": "<uv_lock_key of uv.lock>", "python": "3.13",
      "lockfile": "<uv.lock>", "pyproject": "<pyproject.toml>"}
 
 and the worker runs the cell in that exact environment, built once per lock and
@@ -23,12 +23,15 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import filelock
 import httpx
+
+from strata.notebook.env import uv_lock_key
 
 ENV_ROOT_VAR = "STRATA_WORKER_ENV_ROOT"
 REGISTRY_VAR = "STRATA_WORKER_ENV_REGISTRY_URL"
@@ -68,7 +71,11 @@ def _validated(spec: Any) -> dict[str, str]:
     pyproject = spec.get("pyproject")
     if not isinstance(lockfile, str) or not isinstance(pyproject, str):
         raise WorkerEnvironmentError("environment needs lockfile and pyproject text")
-    if hashlib.sha256(lockfile.encode()).hexdigest() != key:
+    try:
+        matches = uv_lock_key(lockfile) == key
+    except tomllib.TOMLDecodeError as exc:
+        raise WorkerEnvironmentError(f"environment.lockfile is not TOML: {exc}") from exc
+    if not matches:
         raise WorkerEnvironmentError("environment.lockfile does not match environment.key")
     python = spec.get("python")
     return {
@@ -198,7 +205,7 @@ def environment_spec(notebook_dir: Path, python: str | None) -> dict[str, str] |
         return None
     lock_text = lockfile.read_text()
     return {
-        "key": hashlib.sha256(lock_text.encode()).hexdigest(),
+        "key": uv_lock_key(lock_text),
         "python": python or "",
         "lockfile": lock_text,
         "pyproject": pyproject.read_text(),
