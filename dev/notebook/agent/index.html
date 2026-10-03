@@ -2460,8 +2460,10 @@ store:</p>
   <code>&lt;!-- strata:agent:end --&gt;</code> markers is managed; your own notes in the same file
   are preserved and rewritten around.</li>
 </ul>
-<p>Both are safe to commit; they make the notebook agent-ready for anyone who
-clones it.</p>
+<p>Neither is part of the notebook's committed set. The <code>.gitignore</code> that
+<code>strata new</code> writes ignores both, since every launch rewrites them with this
+machine's port and session id, and exports leave them out. Anyone who clones
+the notebook runs <code>strata agent</code> to get their own.</p>
 <h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

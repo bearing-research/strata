@@ -2497,8 +2497,9 @@ format.</p>
 </tbody>
 </table>
 <h2 id="snapshots">Snapshots<a class="headerlink" href="#snapshots" title="Permanent link">&para;</a></h2>
-<p><code>--to snapshot</code> writes a zip rather than a rendering: the committed files, the
-per-cell runtime state (including each cell's last failure and the source it
+<p><code>--to snapshot</code> writes a zip rather than a rendering: the committed files
+(exactly the <a href="../../reference/notebook-toml/#what-to-commit">committed set</a>,
+cell tests and <code>.gitignore</code> included), the per-cell runtime state (including each cell's last failure and the source it
 was about, and what a widget's controls were set to), and as many artifact
 bytes as you ask for. <code>strata
 import &lt;file&gt;.zip</code> unpacks one back into a notebook directory (see

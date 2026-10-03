@@ -2948,7 +2948,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tr>
 <td><code>STRATA_METADATA_DB</code></td>
 <td><code>~/.strata/meta.sqlite</code></td>
-<td>SQLite path for metadata persistence</td>
+<td>SQLite catalog an <code>s3://</code> warehouse URI uses when no catalog <code>uri</code> is set. It is on this server's disk, so other readers of the bucket do not see it</td>
 </tr>
 </tbody>
 </table>
@@ -2975,7 +2975,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tr>
 <td><code>STRATA_CATALOGS</code></td>
 <td><code>{}</code></td>
-<td>Named catalogs: a JSON object of name to PyIceberg catalog properties (<code>[tool.strata.catalogs.&lt;name&gt;]</code> in pyproject), e.g. <code>{"lake": {"type": "rest", "uri": "https://catalog.example"}}</code>. A table in one is <code>&lt;name&gt;:&lt;namespace&gt;.&lt;table&gt;</code>, for <code>@table</code> and scans alike. Credentials a REST catalog vends for a table are used to read that table's files</td>
+<td>Named catalogs: a JSON object of name to PyIceberg catalog properties (<code>[tool.strata.catalogs.&lt;name&gt;]</code> in pyproject), e.g. <code>{"lake": {"type": "rest", "uri": "https://catalog.example"}}</code>. A table in one is <code>&lt;name&gt;:&lt;namespace&gt;.&lt;table&gt;</code>, for <code>@table</code> and scans alike. Credentials a REST catalog vends for a table are used to read that table's files. An entry's <code>credential</code> names one in <code>STRATA_NOTEBOOK_CREDENTIALS</code> whose fields fill its properties, so no secret is written here (see <a href="../notebook-toml/#named-credentials">Named credentials</a>)</td>
 </tr>
 <tr>
 <td><code>STRATA_CATALOG_URI</code></td>
@@ -2984,6 +2984,12 @@ normal work as overload and walk the tier down to its floor.</p>
 </tr>
 </tbody>
 </table>
+<p>A SQL catalog (no <code>type</code>, or <code>type = "sql"</code>) whose <code>warehouse</code> is in object
+storage (<code>s3://</code>, <code>gs://</code>, <code>abfss://</code>, any scheme but <code>file://</code>) needs a <code>uri</code>,
+in <code>catalog_properties</code>, in a <code>STRATA_CATALOGS</code> entry, or in the named
+credential that entry names. Without one its tables
+would be in a SQLite file on this server's disk, so the server refuses to start
+and names the setting.</p>
 <h2 id="s3-storage">S3 Storage<a class="headerlink" href="#s3-storage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3654,7 +3660,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_NOTEBOOK_CREDENTIALS</code></td>
 <td><code>{}</code></td>
-<td>Named credentials as a JSON object, <code>{name: {field: value}}</code>. A mount or connection in <code>notebook.toml</code> references one with <code>credential = "&lt;name&gt;"</code>, so no secret is committed. Values are usually <code>${VAR}</code>, resolved against the notebook's environment (where a secret manager puts fetched secrets) and then the server's. A mount's fields become fsspec storage options, a connection's become driver auth. The name is part of provenance; the values are not, so rotation invalidates nothing. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
+<td>Named credentials as a JSON object, <code>{name: {field: value}}</code>. A mount or connection in <code>notebook.toml</code>, or a catalog in <code>STRATA_CATALOGS</code>, references one with <code>credential = "&lt;name&gt;"</code>, so no secret is committed. Values are usually <code>${VAR}</code>, resolved against the notebook's environment (where a secret manager puts fetched secrets) and then the server's. A mount's fields become fsspec storage options, a connection's become driver auth, a catalog's become pyiceberg catalog properties. The name is part of provenance; the values are not, so rotation invalidates nothing. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code></td>

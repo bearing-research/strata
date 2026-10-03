@@ -2519,8 +2519,8 @@ would be worthless.</p>
 store its cells wrote to. When those are different machines, the chain is
 imported into the serving store first, ancestors before descendants, keeping
 each version's id and number so its lineage edges still resolve.
-<code>strata artifact publish --to &lt;url&gt;</code> does this for you. A service doing it
-over HTTP uploads each version's bytes, then its record:</p>
+<code>strata artifact publish --to &lt;url&gt;</code> does this for you, and a service doing it
+over HTTP does the same: upload each version's bytes, then its record:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>PUT  /v1/artifacts/import/blobs/{content_sha256}     the bytes, checked against the digest; 201
 <a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>POST /v1/artifacts/import                    {"id": ..., "version": ..., "provenance_hash": ...,
 <a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>                                              "created_at": ..., "content_sha256": ...,
@@ -2533,7 +2533,14 @@ The import stamps the caller's tenant on the row, answers 409 for a version
 another tenant or another computation holds unless <code>?remap=true</code> is set, and is
 idempotent: repeating a finished import writes nothing and needs no new upload.
 The same route also takes a multipart body with the record as <code>metadata</code> and
-the bytes as <code>data</code>, which is what the CLI sends.</p>
+the bytes as <code>data</code>, which holds the whole artifact in memory on both sides.</p>
+<p><code>publish --to</code> streams each artifact's bytes from a file to the upload route
+and sets <code>remap</code>. So a chain another tenant on the target already holds (or a
+version id a different computation took there) lands as a copy under a fresh
+id, <code>&lt;id&gt;@import=&lt;8 hex&gt;</code>, in the caller's tenant. Each copy keeps its
+provenance hash, and the CLI points every descendant's lineage edges at the
+ids its ancestors landed on, so the published page resolves every step.
+Publishing the same chain again writes nothing.</p>
 <h2 id="http">HTTP<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

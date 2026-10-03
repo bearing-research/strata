@@ -2494,16 +2494,28 @@
 <li>A remote worker resolves names against its own <code>STRATA_NOTEBOOK_CREDENTIALS</code>; only the name travels in the dispatch.</li>
 </ul>
 <p>The <code>@mount</code> annotation takes the name too: <code># @mount raw s3://lab-bucket/raw ro credential=lab-bucket</code>.</p>
+<p>A named catalog in the server's <code>STRATA_CATALOGS</code> takes the same key, so the
+catalog's secrets (a SQL catalog's database URI, a REST token, <code>s3.*</code> keys)
+stay out of the catalog config:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">STRATA_CATALOGS</span><span class="o">=</span><span class="s1">'{"lake": {"type": "sql", "warehouse": "s3://lake/wh", "credential": "lake-db"}}'</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">STRATA_NOTEBOOK_CREDENTIALS</span><span class="o">=</span><span class="s1">'{"lake-db": {"uri": "${LAKE_DSN}", "s3.access-key-id": "${LAKE_KEY}"}}'</span>
+</code></pre></div>
+<p>Its fields become pyiceberg catalog properties, beneath the catalog's own keys.
+<code>@table</code> and scans resolve the references against the server's environment; a
+DuckDB cell attaching the catalog resolves them against the notebook's first, as
+a mount does. A missing name fails the read with a message naming it. The
+catalog's credential is not part of provenance: a table read is already keyed
+by its snapshot.</p>
 <h2 id="workers-remote-worker-registry"><code>[[workers]]</code> - Remote worker registry<a class="headerlink" href="#workers-remote-worker-registry" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[[workers]]</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"fly-cpu"</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"executor"</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"fly-cpu-v1"</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">[workers.config]</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://my-strata-worker.fly.dev/v1/execute"</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"direct"</span>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"STRATA_FLY_WORKER_TOKEN"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[[workers]]</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"fly-cpu"</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"executor"</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"fly-cpu-v1"</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="k">[workers.config]</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://my-strata-worker.fly.dev/v1/execute"</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"direct"</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"STRATA_FLY_WORKER_TOKEN"</span>
 </code></pre></div>
 <table>
 <thead>
@@ -2537,18 +2549,18 @@
 </tbody>
 </table>
 <h2 id="connectionsname-named-database-connections"><code>[connections.&lt;name&gt;]</code> - Named database connections<a class="headerlink" href="#connectionsname-named-database-connections" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[connections.warehouse]</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">driver</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"postgresql"</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"warehouse.internal"</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">database</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"analytics"</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="k">[connections.warehouse.auth]</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"${WAREHOUSE_USER}"</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">password</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"${WAREHOUSE_PASSWORD}"</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="k">[connections.warehouse.options]</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="n">application_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"strata"</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="n">connect_timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">[connections.warehouse]</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">driver</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"postgresql"</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"warehouse.internal"</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">database</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"analytics"</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">[connections.warehouse.auth]</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"${WAREHOUSE_USER}"</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="n">password</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"${WAREHOUSE_PASSWORD}"</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="k">[connections.warehouse.options]</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="n">application_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"strata"</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="n">connect_timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
 </code></pre></div>
 <p>SQL cells reference these by name via <code># @sql connection=&lt;name&gt;</code>.</p>
 <table>
@@ -2604,10 +2616,10 @@
 </table>
 <p><strong>Malformed connection preservation.</strong> If a <code>[connections.&lt;name&gt;]</code> block fails validation (bad name, missing <code>driver</code>, etc.), its body is written back verbatim under the same <code>[connections.&lt;name&gt;]</code> table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.</p>
 <h2 id="variant_group-active-variant-pointers"><code>[[variant_group]]</code> - Active-variant pointers<a class="headerlink" href="#variant_group-active-variant-pointers" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">[[variant_group]]</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"model_choice"</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"logistic"</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"sweep"</span><span class="w">                </span><span class="c1"># optional; absent means "switch"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[[variant_group]]</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"model_choice"</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"logistic"</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"sweep"</span><span class="w">                </span><span class="c1"># optional; absent means "switch"</span>
 </code></pre></div>
 <p>Cells declare group membership via <code># @variant &lt;group&gt; &lt;name&gt;</code> in their source. This block records which member is currently active - only the active cell participates in the DAG.</p>
 <table>
@@ -2637,27 +2649,27 @@
 </tbody>
 </table>
 <h2 id="cells-cell-registry"><code>[[cells]]</code> - Cell registry<a class="headerlink" href="#cells-cell-registry" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[[cells]]</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"a1b2c3d4"</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"a1b2c3d4.py"</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"python"</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="k">[[cells]]</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"e5f6g7h8"</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"e5f6g7h8.py"</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"python"</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">200</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="n">worker</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"fly-cpu"</span><span class="w">            </span><span class="c1"># cell-level override of notebook default</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="n">timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">600</span><span class="w">                 </span><span class="c1"># cell-level override</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">  </span><span class="k">[cells.env]</span><span class="w">                 </span><span class="c1"># cell-level env additions (same blanking rules)</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="w">  </span><span class="n">CUDA_VISIBLE_DEVICES</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0"</span>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="w">  </span><span class="k">[[cells.mounts]]</span><span class="w">            </span><span class="c1"># cell-level mount additions</span>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="w">  </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"model_weights"</span>
-<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="w">  </span><span class="n">uri</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"s3://my-models/bge-large"</span>
-<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="w">  </span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ro"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">[[cells]]</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"a1b2c3d4"</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"a1b2c3d4.py"</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"python"</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="k">[[cells]]</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"e5f6g7h8"</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="n">file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"e5f6g7h8.py"</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="n">language</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"python"</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="n">order</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">200</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="n">worker</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"fly-cpu"</span><span class="w">            </span><span class="c1"># cell-level override of notebook default</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="n">timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">600</span><span class="w">                 </span><span class="c1"># cell-level override</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="w">  </span><span class="k">[cells.env]</span><span class="w">                 </span><span class="c1"># cell-level env additions (same blanking rules)</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="w">  </span><span class="n">CUDA_VISIBLE_DEVICES</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0"</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="w">  </span><span class="k">[[cells.mounts]]</span><span class="w">            </span><span class="c1"># cell-level mount additions</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="w">  </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"model_weights"</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="w">  </span><span class="n">uri</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"s3://my-models/bge-large"</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="w">  </span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ro"</span>
 </code></pre></div>
 <table>
 <thead>
@@ -2773,10 +2785,14 @@ one; <code>strata new --no-git</code> skips it.</p>
 <li>everything under <code>cells/</code>, including cell tests</li>
 <li>the <code>.gitignore</code> itself</li>
 </ul>
+<p>The <code>.mcp.json</code> and <code>CLAUDE.md</code> that <code>strata agent</code> writes are ignored: each
+launch rewrites them with the server's port and the session id, so they
+describe one machine's run rather than the notebook.</p>
 <p>The rules live in <code>strata.notebook.layout</code>: <code>committed_paths()</code> returns the
 set for a given directory and <code>IGNORED_PATTERNS</code> is what the <code>.gitignore</code>
 contains, so this list is a rendering of the code rather than a second source
-that drifts from it.</p>
+that drifts from it. The ZIP and snapshot exports carry exactly
+<code>committed_paths()</code>, and <code>strata import</code> writes those files back.</p>
 <h2 id="round-trip-safety">Round-trip safety<a class="headerlink" href="#round-trip-safety" title="Permanent link">&para;</a></h2>
 <p>The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. A malformed <code>[connections.&lt;name&gt;]</code> block (no <code>driver</code>, etc.) is likewise written back verbatim under its own <code>[connections.&lt;name&gt;]</code> table so you don't lose the data while you debug.</p>
 
