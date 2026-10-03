@@ -102,6 +102,11 @@ class SessionPresence:
             return None
         return editor[0]
 
+    def holds_lock(self, window_seconds: float) -> bool:
+        """Whether anyone changed any cell within the window."""
+        now = self._clock()
+        return any(now - at < window_seconds for _principal, at in self._editors.values())
+
     def record_edit(self, cell_id: str, principal: str) -> None:
         self._editors[cell_id] = (principal, self._clock())
 

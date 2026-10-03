@@ -44,7 +44,11 @@ import type {
   RegistryName,
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
-import type { PresenceEntryModel, PresencePayload } from '../types/ws-payloads.generated'
+import type {
+  PresenceEntryModel,
+  PresencePayload,
+  SessionClosedPayload,
+} from '../types/ws-payloads.generated'
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
@@ -63,6 +67,8 @@ const FALLBACK_NOTEBOOK_PARENT_PATH = '/tmp/strata-notebooks'
 
 const connected = ref(false)
 const connectError = ref<string | null>(null)
+// Set when the server closes this session (idle, limits, memory); the page offers to reopen.
+const sessionClosed = ref<SessionClosedPayload | null>(null)
 
 // --- Store -----------------------------------------------------------------
 
@@ -2441,6 +2447,13 @@ function initializeWebSocket() {
       presenceYou.value = p.you
     })
 
+    wsInstance.onMessage('session_closed', (msg: WsMessage) => {
+      sessionClosed.value = msg.payload as SessionClosedPayload
+      connected.value = false
+      // The session is gone, so reconnecting would only be refused.
+      wsInstance?.disconnect()
+    })
+
     wsInstance.connect()
   }
 }
@@ -2453,6 +2466,7 @@ async function waitForWebSocket(timeoutMs: number = 5000): Promise<void> {
 }
 
 function cleanupWebSocket() {
+  sessionClosed.value = null
   if (wsInstance) {
     wsInstance.cleanup()
     wsInstance = null
@@ -3437,6 +3451,7 @@ export function useNotebook() {
     cellMap,
     connected,
     connectError,
+    sessionClosed,
     // Lifecycle
     boot,
     openNotebook,

@@ -224,9 +224,7 @@ async def _run_cell(
     if mode not in ("normal", "rerun", "force"):
         raise ValueError(f"unknown run mode {mode!r} (normal|rerun|force)")
 
-    session = session_manager.get_session(session_id)
-    if session is None:
-        raise ValueError(f"no open notebook session {session_id!r}; call list_notebooks first")
+    session = _live_session(session_manager, session_id)
     if session.notebook_state.get_cell(cell_id) is None:
         raise NotebookOpsError(f"no cell with id {cell_id!r}")
 
@@ -268,9 +266,7 @@ async def _set_widget_value(
     from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
     from strata.notebook.ws import NotebookBusyError, apply_widget_values, execute_cell_exclusive
 
-    session = session_manager.get_session(session_id)
-    if session is None:
-        raise ValueError(f"no open notebook session {session_id!r}; call list_notebooks first")
+    session = _live_session(session_manager, session_id)
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None:
         raise NotebookOpsError(f"no cell with id {cell_id!r}")
@@ -371,6 +367,8 @@ def _live_session(session_manager: SessionManager, session_id: str):
     session = session_manager.get_session(session_id)
     if session is None:
         raise ValueError(f"no open notebook session {session_id!r}; call list_notebooks first")
+    # An agent's tool call is someone working in the notebook.
+    session.touch()
     return session
 
 

@@ -14,7 +14,7 @@ import threading
 import time as _time
 import tomllib
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -98,6 +98,7 @@ if TYPE_CHECKING:
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.secret_manager import SecretFetchResult
+    from strata.notebook.ws_payloads import SessionClosedReason
 
 logger = logging.getLogger(__name__)
 _ENVIRONMENT_JOB_HISTORY_LIMIT = 8
@@ -280,7 +281,11 @@ class NotebookSession:
         self.warm_pool: WarmProcessPool | None = None
         self.r_warm_pool: WarmProcessPool | None = None
 
-        self.last_accessed: float = _time.time()
+        # The manager swaps in its own clock, so tests can age a session.
+        self.activity_clock: Callable[[], float] = _time.time
+        self.last_accessed: float = self.activity_clock()
+        # (principal, tenant) of whoever opened it; open reuses it only for them.
+        self.opened_by: tuple[str, str | None] | None = None
 
         # Seeded from ``.strata/runtime.json`` so the cache-savings figure survives a restart.
         self.execution_history: dict[str, list[ExecutionSample]] = (
@@ -409,8 +414,8 @@ class NotebookSession:
         self.environment_last_sync_duration_ms = None
 
     def touch(self) -> None:
-        """Record recent activity for TTL accounting."""
-        self.last_accessed = _time.time()
+        """Record user activity (an edit, a run, a focus) for idle accounting."""
+        self.last_accessed = self.activity_clock()
 
     def set_variant_active(self, group: str, variant_name: str) -> None:
         """Switch the active variant for ``group``.
@@ -2570,6 +2575,8 @@ class NotebookSession:
 
     def _should_start_warm_pool(self) -> bool:
         """Return whether the notebook has a stable enough runtime for warm workers."""
+        if _session_setting("notebook_warm_pool_size") == 0:
+            return False
         if self.has_active_environment_mutation():
             return False
         return self.environment_sync_state in {"ready", "fallback"}
@@ -2583,7 +2590,7 @@ class NotebookSession:
 
         self.warm_pool = WarmProcessPool(
             notebook_dir=self.path,
-            pool_size=2,
+            pool_size=_session_setting("notebook_warm_pool_size"),
             python_executable=self.venv_python or Path("python"),
         )
         try:
@@ -2621,7 +2628,7 @@ class NotebookSession:
         pool_worker = Path(__file__).parent / "languages" / "r" / "pool_worker.R"
         self.r_warm_pool = WarmProcessPool(
             notebook_dir=self.path,
-            pool_size=2,
+            pool_size=_session_setting("notebook_warm_pool_size"),
             worker_command=[rscript, str(pool_worker), str(self.path)],
             # R startup + renv activation can take far longer than Python's warm-up.
             ready_timeout_seconds=60.0,
@@ -3414,23 +3421,60 @@ def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread
     return thread
 
 
+def _session_setting(name: str) -> Any:
+    """A ``notebook_*`` session setting from the server's config, or its default."""
+    from strata.config import StrataConfig
+
+    default = StrataConfig.model_fields[name].default
+    try:
+        from strata.server import get_state
+
+        config = get_state().config
+    except RuntimeError:
+        return default
+    return getattr(config, name, default)
+
+
+def available_memory_mb() -> int | None:
+    """The host's ``MemAvailable`` in MiB, or ``None`` where ``/proc/meminfo`` is absent."""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as meminfo:
+            for line in meminfo:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except FileNotFoundError:
+        return None
+    return None
+
+
 class SessionManager:
     """Manages open notebook sessions by ID.
 
-    Sessions are evicted after ``SESSION_TTL_SECONDS`` of inactivity or, oldest
-    first, when ``MAX_SESSIONS`` is exceeded.
+    A session nobody has edited, run or focused for ``notebook_session_ttl_seconds``
+    is closed, as are the least recently used beyond ``notebook_max_sessions``, and,
+    with ``notebook_session_min_available_mb`` set, idle ones while memory is short.
+    A session with a running cell, a soft lock or a quiesce hold is never closed.
     """
 
-    MAX_SESSIONS = 50
-    SESSION_TTL_SECONDS = 4 * 3600
-
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] = _time.time,
+        available_memory_mb: Callable[[], int | None] = available_memory_mb,
+    ):
         self._sessions: dict[str, NotebookSession] = {}
+        self._clock = clock
+        self._available_memory_mb = available_memory_mb
+        self._memory_unreadable_logged = False
 
-    def _find_session_by_path(self, directory: Path) -> NotebookSession | None:
-        """Return an existing live session for *directory*, if any."""
+    def _find_session_by_path(
+        self, directory: Path, opened_by: tuple[str, str | None] | None
+    ) -> NotebookSession | None:
+        """Return a live session for *directory* that *opened_by* opened, if any."""
         target = Path(directory).resolve()
         for session in self._sessions.values():
+            if session.opened_by != opened_by:
+                continue
             try:
                 if session.path.resolve() == target:
                     return session
@@ -3445,6 +3489,7 @@ class SessionManager:
         skip_initial_venv_sync: bool = False,
         defer_initial_venv_sync: bool = False,
         reuse_existing: bool = False,
+        opened_by: tuple[str, str | None] | None = None,
         timing: NotebookTimingRecorder | None = None,
     ) -> NotebookSession:
         """Open a notebook directory and return its session.
@@ -3455,13 +3500,15 @@ class SessionManager:
             defer_initial_venv_sync: Sync nothing during open: when the environment
                 needs a ``uv sync`` or ``renv`` restore, mark it pending for the caller
                 to run as an environment job.
-            reuse_existing: Return an already-open session for the same path.
+            reuse_existing: Return an already-open session for the same path that
+                the same ``opened_by`` opened.
+            opened_by: ``(principal, tenant)`` of the caller, recorded on a new session.
             timing: Request timing recorder for internal phases.
         """
-        self._evict_stale()
+        self._evict_stale(making_room=True)
 
         if reuse_existing:
-            existing = self._find_session_by_path(Path(directory))
+            existing = self._find_session_by_path(Path(directory), opened_by)
             if existing is not None:
                 if existing._has_active_execution():
                     existing.touch()
@@ -3561,7 +3608,7 @@ class SessionManager:
 
                     session.warm_pool = WarmProcessPool(
                         notebook_dir=Path(directory),
-                        pool_size=2,
+                        pool_size=_session_setting("notebook_warm_pool_size"),
                         python_executable=session.venv_python or Path("python"),
                     )
                     # Don't block notebook open.
@@ -3578,7 +3625,7 @@ class SessionManager:
 
                         session.warm_pool = WarmProcessPool(
                             notebook_dir=Path(directory),
-                            pool_size=2,
+                            pool_size=_session_setting("notebook_warm_pool_size"),
                             python_executable=session.venv_python or Path("python"),
                         )
                         # Don't block notebook open.
@@ -3604,77 +3651,132 @@ class SessionManager:
             with timing.phase("session_staleness"):
                 session.compute_staleness()
 
+        session.opened_by = opened_by
+        session.activity_clock = self._clock
+        session.touch()
         self._sessions[session.id] = session
         return session
 
     def get_session(self, session_id: str) -> NotebookSession | None:
-        """Get a session by ID, or None, updating its last-accessed time."""
-        session = self._sessions.get(session_id)
-        if session is not None:
-            session.touch()
-        return session
+        """Get a session by ID, or None. A lookup is not activity; callers touch."""
+        return self._sessions.get(session_id)
 
-    def _has_active_websocket(self, session_id: str) -> bool:
-        """Return whether a notebook session currently has connected sockets."""
-        try:
-            from strata.notebook.ws import _notebook_connections
-        except Exception:
+    def _closable(self, session: NotebookSession) -> bool:
+        """Whether closing *session* now loses nothing but its warm processes."""
+        from strata.notebook.presence import lock_window_seconds
+        from strata.notebook.quiesce import execution_block
+
+        if session._has_active_execution() or session.has_active_environment_mutation():
             return False
-        return bool(_notebook_connections.get(session_id))
+        if session.presence.holds_lock(lock_window_seconds()):
+            return False
+        return execution_block(session.path) is None
 
-    def _evict_stale(self) -> None:
-        """Remove sessions not accessed within TTL and enforce max count."""
-        now = _time.time()
-        stale = [
-            sid
-            for sid, s in self._sessions.items()
-            if (
-                not self._has_active_websocket(sid)
-                and now - s.last_accessed > self.SESSION_TTL_SECONDS
-            )
-        ]
-        for sid in stale:
-            logger.info("Evicting stale session %s", sid)
-            self.close_session(sid)
+    def _least_recently_used(self) -> str | None:
+        """The closable session with the oldest activity, if any."""
+        closable = [s for s in self._sessions.values() if self._closable(s)]
+        if not closable:
+            return None
+        return min(closable, key=lambda s: s.last_accessed).id
 
-        while len(self._sessions) >= self.MAX_SESSIONS:
-            evictable = [sid for sid in self._sessions if not self._has_active_websocket(sid)]
-            if not evictable:
+    def _evict_stale(self, *, making_room: bool = False) -> None:
+        """Close idle sessions, then the least recently used beyond the maximum.
+
+        With *making_room*, one under the maximum, for the session about to open.
+        """
+        now = self._clock()
+        ttl = _session_setting("notebook_session_ttl_seconds")
+        for sid, session in list(self._sessions.items()):
+            if session._has_active_execution():
+                # Idleness starts when the run ends, not when it was asked for.
+                session.touch()
+            elif now - session.last_accessed > ttl and self._closable(session):
+                logger.info("Closing session %s: idle for %ds", sid, now - session.last_accessed)
+                self.close_session(sid, reason="idle")
+
+        limit = _session_setting("notebook_max_sessions") - (1 if making_room else 0)
+        while len(self._sessions) > limit:
+            oldest_id = self._least_recently_used()
+            if oldest_id is None:
                 logger.warning(
-                    "Session limit exceeded (%d) but all sessions have active websockets",
-                    len(self._sessions),
+                    "Session limit exceeded (%d) but every session is busy", len(self._sessions)
                 )
                 break
-            oldest_id = min(evictable, key=lambda sid: self._sessions[sid].last_accessed)
-            logger.info("Evicting oldest session %s (max %d reached)", oldest_id, self.MAX_SESSIONS)
-            self.close_session(oldest_id)
+            logger.info("Closing session %s: over the limit of %d", oldest_id, limit)
+            self.close_session(oldest_id, reason="session_limit")
 
-    def close_session(self, session_id: str) -> None:
-        """Close a session and release its resources."""
+    async def relieve_memory_pressure(self) -> None:
+        """Close the least recently used idle sessions while memory is below the floor."""
+        floor = _session_setting("notebook_session_min_available_mb")
+        if floor is None:
+            return
+        while True:
+            available = await asyncio.to_thread(self._available_memory_mb)
+            if available is None:
+                if not self._memory_unreadable_logged:
+                    self._memory_unreadable_logged = True
+                    logger.warning(
+                        "notebook_session_min_available_mb is set, but this host has no "
+                        "/proc/meminfo; sessions are not closed for memory"
+                    )
+                return
+            if available >= floor:
+                return
+            victim = self._least_recently_used()
+            if victim is None:
+                logger.warning(
+                    "Available memory %d MB is below %d MB and no session is idle",
+                    available,
+                    floor,
+                )
+                return
+            logger.info("Closing session %s: available memory %d MB", victim, available)
+            # Wait for its processes to exit, so the next reading sees the memory back.
+            await asyncio.gather(
+                *self.close_session(victim, reason="memory"), return_exceptions=True
+            )
+
+    async def sweep(self) -> None:
+        """The periodic pass: idle, over-limit and memory-pressure closes."""
+        self._evict_stale()
+        await self.relieve_memory_pressure()
+
+    def close_session(
+        self, session_id: str, *, reason: SessionClosedReason = "closed"
+    ) -> list[asyncio.Task]:
+        """Close a session, tell its clients why, and release its warm processes.
+
+        Returns the tasks still finishing that (the notice, the pool drains).
+        """
         session = self._sessions.pop(session_id, None)
         if session is None:
-            return
-        # The outbound sequence counter outlives a disconnect, and this is every way a
-        # session ends (delete routes, TTL sweep, eviction). Local import: ws imports this.
-        from strata.notebook.ws import forget_notebook_execution_state
+            return []
+        # Local import: ws imports this.
+        from strata.notebook.ws import end_session_clients, forget_notebook_execution_state
 
+        tasks: list[asyncio.Task] = []
+        # Before the forget below: the notice takes the session's next sequence.
+        notice = end_session_clients(session_id, reason)
+        if notice is not None:
+            tasks.append(notice)
+        # The outbound sequence counter outlives a disconnect, and this is every way a
+        # session ends (delete and close routes, the sweep).
         forget_notebook_execution_state(session_id)
         for pool in (session.warm_pool, session.r_warm_pool):
             if pool is None:
                 continue
-            import asyncio
-
             drain = getattr(pool, "drain", None)
             shutdown_nowait = getattr(pool, "shutdown_nowait", None)
             try:
                 if callable(drain):
-                    asyncio.get_running_loop().create_task(drain())
+                    tasks.append(asyncio.get_running_loop().create_task(drain()))
             except RuntimeError:
                 if callable(shutdown_nowait):
                     shutdown_nowait()
             else:
                 if not callable(drain) and callable(shutdown_nowait):
                     shutdown_nowait()
+        return tasks
 
     def list_sessions(self) -> list[str]:
         """List all open session IDs."""

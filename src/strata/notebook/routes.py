@@ -43,7 +43,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
 )
 from strata.notebook.quiesce import NotebookQuiesced
-from strata.notebook.scopes import required_scope_for_route
+from strata.notebook.scopes import NOTEBOOK_SCOPE_READ, required_scope_for_route
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
@@ -143,6 +143,11 @@ def get_notebook_session(notebook_id: str, request: Request) -> NotebookSession:
     if session is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
     _require_owner(session.notebook_state.owner, _caller_identity(request))
+    # An edit or a run keeps the session open; a read does not, or a poller would.
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    if required_scope_for_route(request.method, path) != NOTEBOOK_SCOPE_READ:
+        session.touch()
     return session
 
 
@@ -170,16 +175,27 @@ def _require_personal_mode_session_api() -> None:
         )
 
 
-def _reuse_open_session_by_path() -> bool:
-    """Enable path-based session reuse only in personal mode."""
+def _reuse_open_session_by_path() -> tuple[bool, tuple[str, str | None] | None]:
+    """Whether open may return a live session for the path, and whose.
+
+    Service mode has no per-session owner check, so a session id is all that keeps
+    one member out of another's live session: reuse only one the caller opened.
+    """
     try:
         from strata.server import get_state
 
         state = get_state()
     except RuntimeError:
-        return True
+        return True, None
 
-    return state.config.deployment_mode == "personal"
+    if state.config.deployment_mode == "personal":
+        return True, None
+    from strata.auth import get_principal
+
+    principal = get_principal()
+    if principal is None:
+        return False, None
+    return True, (principal.id, principal.tenant)
 
 
 def _get_notebook_storage_root() -> Path | None:
@@ -833,10 +849,14 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
             if not notebook_path.exists():
                 raise HTTPException(status_code=404, detail="Notebook directory not found")
 
+        reuse_existing, opened_by = _reuse_open_session_by_path()
         with timing.phase("session_open"):
+            # Make room before this notebook's processes start.
+            await _session_manager.relieve_memory_pressure()
             session = _session_manager.open_notebook(
                 notebook_path,
-                reuse_existing=_reuse_open_session_by_path(),
+                reuse_existing=reuse_existing,
+                opened_by=opened_by,
                 defer_initial_venv_sync=True,
                 timing=timing,
             )
@@ -1441,6 +1461,26 @@ async def release_project(path: str, request: Request) -> dict:
     return {"path": str(root), "released": quiesce.release(root)}
 
 
+@router.post("/{notebook_id}/close")
+async def close_notebook_session(notebook_id: str, session: SessionDep) -> dict:
+    """Close a session and stop its warm processes, keeping the notebook.
+
+    Connected clients get ``session_closed``. Refused while a cell runs or the
+    environment is changing.
+    """
+    if session.has_active_environment_mutation():
+        _raise_environment_busy(
+            session, "Closing the session is blocked while an environment update is in progress."
+        )
+    if session._has_active_execution():
+        raise HTTPException(
+            status_code=409,
+            detail="Closing the session is blocked while notebook execution is running.",
+        )
+    _session_manager.close_session(session.id, reason="closed")
+    return {"closed": True, "session_id": notebook_id, "path": str(session.path)}
+
+
 @router.delete("/{notebook_id}")
 async def delete_notebook(notebook_id: str, session: SessionDep) -> dict:
     """Delete a notebook directory and all notebook-owned runtime state."""
@@ -1461,7 +1501,7 @@ async def delete_notebook(notebook_id: str, session: SessionDep) -> dict:
     notebook_path = session.path.resolve()
     notebook_name = session.notebook_state.name
 
-    _session_manager.close_session(session.id)
+    _session_manager.close_session(session.id, reason="deleted")
 
     try:
         delete_notebook_directory(notebook_path)
@@ -1651,7 +1691,8 @@ async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Req
     if metadata is not None:
         _require_owner(metadata.get("owner"), _caller_identity(request))
 
-    existing = _session_manager._find_session_by_path(notebook_path)
+    # Personal mode only, where no session records an opener.
+    existing = _session_manager._find_session_by_path(notebook_path, None)
     if existing is not None:
         if existing.has_active_environment_mutation():
             _raise_environment_busy(
@@ -1663,7 +1704,7 @@ async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Req
                 status_code=409,
                 detail="Notebook deletion is blocked while notebook execution is running.",
             )
-        _session_manager.close_session(existing.id)
+        _session_manager.close_session(existing.id, reason="deleted")
 
     try:
         delete_notebook_directory(notebook_path.resolve())

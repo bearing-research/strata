@@ -414,6 +414,17 @@ class StrataConfig(BaseSettings):
     # is forced. 0 turns the soft lock off.
     notebook_cell_lock_seconds: Annotated[float, Field(ge=0)] = 5.0
 
+    # Open notebook sessions. Each open notebook keeps this many pre-spawned
+    # Python (and R) processes; 0 turns the pools off. A session nobody has
+    # edited, run or focused for the TTL is closed, with a tab connected or
+    # not, and beyond the maximum the least recently used are closed. With the
+    # memory floor set (Linux), idle sessions are closed while the host's
+    # available memory is below it. Closing loses only the warm processes.
+    notebook_warm_pool_size: Annotated[int, Field(ge=0)] = 2
+    notebook_session_ttl_seconds: Annotated[float, Field(gt=0)] = 4 * 3600.0
+    notebook_max_sessions: Annotated[int, Field(gt=0)] = 50
+    notebook_session_min_available_mb: Annotated[int, Field(gt=0)] | None = None
+
     # LLM settings for prompt cells (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None

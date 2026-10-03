@@ -136,6 +136,7 @@ EXPECTED_ROUTES = [
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/outputs/{index}/blob", "GET", 1),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/tests", "POST", 1),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/tests", "PUT", 1),
+    ("/v1/notebooks/{notebook_id}/close", "POST", 1),
     ("/v1/notebooks/{notebook_id}/connections", "GET", 1),
     ("/v1/notebooks/{notebook_id}/connections", "PUT", 1),
     ("/v1/notebooks/{notebook_id}/connections/{name}/schema", "GET", 1),

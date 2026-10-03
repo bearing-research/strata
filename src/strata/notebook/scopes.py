@@ -88,6 +88,8 @@ _WRITE_ROUTES = frozenset(
         ("POST", "/v1/notebooks/import-snapshot"),
         ("POST", "/v1/notebooks/{notebook_id}/quiesce"),
         ("POST", "/v1/notebooks/{notebook_id}/release"),
+        # The inverse of open, which needs write: a reader cannot end others' sessions.
+        ("POST", "/v1/notebooks/{notebook_id}/close"),
         ("DELETE", "/v1/notebooks/{notebook_id}"),
         ("POST", "/v1/notebooks/recents/validate"),
         ("POST", "/v1/notebooks/delete-by-path"),
