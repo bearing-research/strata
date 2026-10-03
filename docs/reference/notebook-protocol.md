@@ -112,6 +112,10 @@ enforcement is symmetric across REST and WS, with no opt-outs.
 - `/open`, `/create` and `/discover` work in service mode. What is
   personal-mode-only is narrower: the two path-keyed deletes and the two
   `/sessions` routes, which return `403 Forbidden` elsewhere.
+- `/open` returns the session the same principal already has open on that
+  path, and never another principal's: service mode has no per-session owner
+  check, so a session id is what keeps members out of each other's live
+  sessions. Without a principal, every open starts a new session.
 - Every route on the `/v1/notebooks` and `/v1/projects` routers is scope
   gated under principal auth, by the same `notebook:read` /
   `notebook:write` / `notebook:execute` table that checks the frames below
@@ -186,6 +190,47 @@ What this means for a client:
 
 See [WebSocket Protocol → Reconnection semantics](websocket.md#reconnection-semantics)
 for the message-level detail.
+
+## Session lifetime and `session_closed`
+
+An open session holds the notebook's warm processes
+(`STRATA_NOTEBOOK_WARM_POOL_SIZE` per pool). Closing one loses nothing else:
+`runtime.json` and the notebook's artifact store hold what it computed, so
+reopening it restores every result. The server closes a session when:
+
+- **Nobody used it for `STRATA_NOTEBOOK_SESSION_TTL_SECONDS`** (default four
+  hours), whether or not a tab is connected. Use is an edit, a run or a focus:
+  a frame that needs `notebook:write` or `notebook:execute`, `cell_focus`, a
+  REST call above `notebook:read`, or an MCP tool call. `notebook_sync`,
+  previews, profiling requests, unknown frames, WebSocket pings and REST reads
+  do not count, so a tab left open does not keep its session forever. A
+  running cell does: idleness starts when the run ends.
+- **More than `STRATA_NOTEBOOK_MAX_SESSIONS` are open.** The least recently
+  used goes first.
+- **Available memory is below `STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB`**
+  (off by default; Linux only). The least recently used goes first, one at a
+  time, until memory is above the floor or nothing idle is left. Checked
+  before each open and every minute.
+- **A client asks:** `POST /v1/notebooks/{session_id}/close` closes it without
+  touching the notebook (`409` while a cell runs or the environment is
+  changing). `DELETE /v1/notebooks/{session_id}` closes it as it deletes.
+
+A server pass every minute applies the first three. None of them closes a
+session with a running cell, an environment job, a cell soft lock still held,
+or a [quiesce](rest-api.md) hold. Before the socket closes (code `1000`,
+`Session closed`), each client gets a `session_closed` frame:
+
+```json
+{"type": "session_closed", "seq": 41, "payload": {
+  "reason": "idle",
+  "message": "This notebook was closed after a period without activity."
+}}
+```
+
+`reason` is `idle`, `session_limit`, `memory`, `closed` or `deleted`. Do not
+reconnect to the old `session_id` (the upgrade closes with `1008 Notebook not
+found`); reopen the notebook by path with `POST /v1/notebooks/open`, which
+starts a new session. The browser shows the message with a Reopen button.
 
 ## Message types
 

@@ -48,6 +48,7 @@ const {
   variantDisplayCellId,
   connected,
   connectError,
+  sessionClosed,
   environmentMutationActive,
   workerDefinitionsEditable,
   workerModeKnown,
@@ -228,7 +229,9 @@ const serviceReconnectBlocked = computed(() =>
 const reconnectHeading = computed(() =>
   serviceReconnectBlocked.value
     ? 'Service mode does not restore live sessions by URL'
-    : 'Reconnect unavailable',
+    : sessionClosed.value
+      ? 'Notebook closed'
+      : 'Reconnect unavailable',
 )
 const reconnectSummary = computed(() =>
   serviceReconnectBlocked.value
@@ -289,6 +292,17 @@ watch(
     await connectToSession(newId)
   },
 )
+
+// The server closed the session: say why and offer the existing reopen-by-path flow.
+watch(sessionClosed, (closed) => {
+  // Deleting from this page navigates home on its own.
+  if (!closed || deletingNotebook.value) return
+  reconnectError.value = closed.message
+  recoveryPath.value =
+    closed.reason === 'deleted'
+      ? null
+      : routeNotebookPath.value || findBySessionId(props.sessionId)?.path || null
+})
 
 async function connectToSession(sessionId: string) {
   loading.value = true

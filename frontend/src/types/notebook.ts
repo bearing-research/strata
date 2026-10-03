@@ -770,6 +770,7 @@ export type WsServerMessageType =
   | 'impact_preview' // Run impact preview (upstream + downstream effects)
   | 'profiling_summary' // Notebook profiling summary
   | 'presence' // Who is on the session and which cell each is on
+  | 'session_closed' // The server closed this session; offer to reopen
   | 'inspect_result' // Result of an inspect REPL evaluation
   | 'notebook_status' // Batch status update (e.g., after open or env change)
   | 'notebook_state' // Full state sync (reconnection)

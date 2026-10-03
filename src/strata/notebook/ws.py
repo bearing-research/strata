@@ -63,11 +63,13 @@ from strata.notebook.ws_payloads import (
     error_payload,
     impact_preview_payload,
     profiling_summary_payload,
+    session_closed_payload,
 )
 
 if TYPE_CHECKING:
     from strata.notebook.cascade import CascadePlan
     from strata.notebook.session import NotebookSession
+    from strata.notebook.ws_payloads import SessionClosedReason
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +198,39 @@ def forget_notebook_execution_state(notebook_id: str) -> None:
     has to reach its own cleanup, which closes the inspect sessions behind it.
     """
     _notebook_execution_state.pop(notebook_id, None)
+
+
+def end_session_clients(notebook_id: str, reason: SessionClosedReason) -> asyncio.Task | None:
+    """Send ``session_closed`` to a closing session's sockets, then close them.
+
+    Builds the frame now, so it takes the sequence before the session's state is
+    forgotten. ``None`` when nobody is connected or there is no loop to send on.
+    """
+    sockets = list(_notebook_connections.get(notebook_id, ()))
+    if not sockets:
+        return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    text = _json_encode(
+        _make_message(
+            MessageType.SESSION_CLOSED,
+            next_notebook_sequence(notebook_id),
+            session_closed_payload(reason),
+        )
+    )
+
+    async def _send_and_close() -> None:
+        for websocket in sockets:
+            try:
+                await websocket.send_text(text)
+                await websocket.close(code=1000, reason="Session closed")
+            except Exception as exc:
+                # A socket already gone has nothing left to tell.
+                logger.debug("Could not tell a client its session closed: %s", exc)
+
+    return loop.create_task(_send_and_close())
 
 
 def next_notebook_sequence(notebook_id: str) -> int:
@@ -740,6 +775,17 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     return origin is None or _origin_is_allowed(websocket, origin)
 
 
+def _is_user_activity(msg_type: str) -> bool:
+    """An edit, a run or a focus keeps a session open; reads and syncs do not.
+
+    A tab left open can sync or poll forever, so those would never let it go idle.
+    """
+    return (
+        msg_type == MessageType.CELL_FOCUS
+        or required_scope_for_frame(msg_type) != NOTEBOOK_SCOPE_READ
+    )
+
+
 @router.websocket("/ws/{notebook_id}")
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
@@ -791,12 +837,13 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
         while True:
             data = await websocket.receive_text()
             msg = _json_decode(data)
-            session.touch()
 
             msg_type = msg.get("type")
             payload = msg.get("payload", {})
 
             handler = _C2S_HANDLERS.get(msg_type) if isinstance(msg_type, str) else None
+            if handler is not None and _is_user_activity(msg_type):
+                session.touch()
             if handler is None:
                 await websocket.send_text(
                     _json_encode(
