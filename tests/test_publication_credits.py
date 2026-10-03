@@ -223,6 +223,44 @@ class TestTheRoute:
 
         assert response.status_code == 422
 
+    @pytest.mark.parametrize(
+        "repoint", [{"artifact_id": "other"}, {"version": 2}, {"artifact_id": "x", "version": 1}]
+    )
+    def test_a_repoint_is_refused_not_ignored(self, served, repoint):
+        """A 200 would tell the caller the link now shows what it asked for."""
+        base_url, store, version = served
+        published = httpx.post(
+            f"{base_url}/v1/artifacts/fig/v/{version}/publish", json={}, timeout=10
+        ).json()
+
+        response = httpx.patch(
+            f"{base_url}/v1/publications/{published['token']}",
+            json={"authors": [{"name": "F. Li"}], **repoint},
+            timeout=10,
+        )
+
+        assert response.status_code == 400
+        reloaded = store.get_publication(published["token"])
+        assert (reloaded.artifact_id, reloaded.version, reloaded.authors) == ("fig", version, ())
+
+    def test_a_patch_is_on_the_events_feed(self, served):
+        base_url, _, version = served
+        published = httpx.post(
+            f"{base_url}/v1/artifacts/fig/v/{version}/publish", json={}, timeout=10
+        ).json()
+        httpx.patch(
+            f"{base_url}/v1/publications/{published['token']}",
+            json={"external_ids": [{"scheme": "doi", "value": "10.5281/zenodo.1"}]},
+            timeout=10,
+        ).raise_for_status()
+
+        events = httpx.get(f"{base_url}/v1/events", timeout=10).json()["events"]
+
+        assert [(e["action"], e["value"]) for e in events] == [
+            ("publish", published["token"]),
+            ("credit", published["token"]),
+        ]
+
     def test_patching_an_unknown_token_is_a_404(self, served):
         base_url, _, _ = served
 

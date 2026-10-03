@@ -331,9 +331,15 @@ JSON record and the archive `manifest.json` carry the entries, and the
 RO-Crate's root dataset gets the DOI as its `identifier`, which is what an
 ingesting repository indexes on.
 
-The patch cannot repoint the token. `artifact_id` and `version` are not fields
-of the request, because a citation whose target could change under the reader
-would be worthless.
+The patch cannot repoint the token, because a citation whose target could
+change under the reader would be worthless. A body naming `artifact_id` or
+`version` is refused with a 400 rather than half-applied, so a caller never
+reads a 200 as "the link now shows the other version". To cite another version,
+publish it for its own link.
+
+Each patch is recorded on the store's event feed (`GET /v1/events`) as a
+`credit` event with the token in `value`, beside `publish` and `withdraw`, so a
+service mirroring the page learns of a new DOI without polling.
 
 ## Copying a chain into another store
 
@@ -366,7 +372,7 @@ the bytes as `data`, which is what the CLI sends.
 | --- | --- | --- |
 | `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. Idempotent: republishing returns the existing token. |
 | `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw. |
-| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at. |
+| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at: `artifact_id` or `version` in the body is a 400. |
 | `GET /v1/publications` | yes | List this tenant's live links (`?include_revoked=true` adds withdrawn ones). |
 | `PUT /v1/artifacts/import/blobs/{content_sha256}` | yes (`artifacts:write`) | Upload a version's bytes ahead of its record. |
 | `POST /v1/artifacts/import` | yes (`artifacts:write`) | Import a version, keeping its id and number. |

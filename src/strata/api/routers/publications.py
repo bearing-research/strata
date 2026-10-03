@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from strata.api.badge import badge_for
 from strata.api.dependencies import (
@@ -69,9 +69,13 @@ class PublishRequest(BaseModel):
 class PublicationCreditsRequest(BaseModel):
     """What a publication can be told after it exists.
 
-    No ``artifact_id`` or ``version``, so the binding cannot be changed. A field
-    left ``None`` is untouched; an empty list clears it.
+    No ``artifact_id`` or ``version``, so the binding cannot be changed; the route
+    refuses either key rather than ignore it. A field left ``None`` is untouched; an
+    empty list clears it.
     """
+
+    # Extra keys are kept so the route can see a repoint attempt.
+    model_config = ConfigDict(extra="allow")
 
     authors: list[Author] | None = None
     external_ids: list[ExternalId] | None = None
@@ -172,15 +176,26 @@ async def update_publication_credits(
     request: PublicationCreditsRequest,
     store: ReadStore,
     tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
 ):
     """Record who wrote a publication and what identifies it (e.g. a DOI).
 
     Separate from publishing because a DOI usually arrives after the token. It
-    cannot repoint the token to another artifact or version.
+    cannot repoint the token to another artifact or version, and refuses to try.
     """
+    repoint = sorted({"artifact_id", "version"} & set(request.model_extra or {}))
+    if repoint:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"A publication's {' and '.join(repoint)} cannot change; "
+                "publish the other version for a new link"
+            ),
+        )
     publication = store.update_publication_credits(
         token,
         tenant=tenant_filter,
+        actor=principal.id if principal is not None else None,
         authors=(
             [a.model_dump(exclude_none=True) for a in request.authors]
             if request.authors is not None
