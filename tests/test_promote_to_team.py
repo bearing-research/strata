@@ -35,6 +35,10 @@ def team_store(tmp_path, team_dir):
 @pytest.fixture
 def chain(tmp_path):
     """A two-cell notebook: an upstream, and a figure that consumes it."""
+    return _store_chain(tmp_path)
+
+
+def _store_chain(tmp_path):
     manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "notebook")
     upstream = manager.store_cell_output(
         cell_id="c1",
@@ -133,6 +137,24 @@ class TestIntoACentralStore:
         )
         assert mine.status_code == 200
         assert theirs.status_code == 404
+
+    def test_each_step_keeps_the_member_who_computed_it(self, central, tmp_path):
+        """Bob ran the cells on a shared server; Alice promoting them does not make them hers."""
+        from strata.auth import principal_context
+        from strata.types import Principal
+
+        with principal_context(Principal(id="bob")):
+            bobs = _store_chain(tmp_path)
+        base, artifact_dir = central
+
+        assert _promote(bobs, base, header=self._listener("org1")) == 0
+
+        store = ArtifactStore(artifact_dir)
+        for key in ("upstream", "figure"):
+            assert bobs[key].principal == "bob", key
+            landed = store.get_artifact(bobs[key].id, bobs[key].version)
+            assert landed is not None, key
+            assert landed.principal == "bob", key
 
     def test_a_member_without_the_write_scope_promotes_nothing(self, central, chain):
         base, artifact_dir = central

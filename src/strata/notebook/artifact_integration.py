@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from strata.artifact_store import ArtifactStore, StagedVersion, TransformSpec
+from strata.auth import get_principal
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
 
@@ -27,6 +29,20 @@ if TYPE_CHECKING:
 # A cell run creates and finalizes its outputs in one pass, and no build runner writes
 # here, so a ``building`` row this old was left by a crash.
 _ABANDONED_BUILD_SECONDS = 3600.0
+
+
+class _Default(Enum):
+    CALLER = "caller"
+
+
+def caller_principal_id() -> str | None:
+    """The id of the member a run is for: set in service mode, ``None`` in personal mode.
+
+    A run is a task the triggering request created, which copies that request's
+    context, so this is the member who asked even after their request has returned.
+    """
+    principal = get_principal()
+    return principal.id if principal is not None else None
 
 
 class NotebookArtifactManager:
@@ -177,7 +193,7 @@ class NotebookArtifactManager:
         variant: str | None = None,
         build_env: str = "",
         build_duration_ms: float = 0.0,
-        principal: str | None = None,
+        principal: str | None | Literal[_Default.CALLER] = _Default.CALLER,
         hardware: dict[str, Any] | None = None,
         extra_params: dict[str, str] | None = None,
     ) -> StagedVersion:
@@ -200,13 +216,16 @@ class NotebookArtifactManager:
                 cache say what a hit saved. Zero when unrecorded.
             hardware: The machine a worker reported (``strata.notebook.hardware``).
                 Recorded, never hashed, like ``build_env``. Absent for a local run.
-            principal: Who computed the bytes, when known: normally ``None`` for a
-                local run, set for a result pulled from a shared store.
+            principal: Who computed the bytes. Defaults to the member the run is
+                for (``caller_principal_id``); a result pulled from a shared store
+                passes its publisher, even when that is ``None``.
         """
         # Artifacts live under the notebook dir: a write during a copy would
         # leave the copy's runtime.json and artifacts out of step.
         assert_writable(self.artifact_dir)
         artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration, variant)
+        if principal is _Default.CALLER:
+            principal = caller_principal_id()
 
         params: dict[str, str] = {
             "cell_id": cell_id,

@@ -257,6 +257,31 @@ async def test_no_schema_means_no_retries(tmp_path):
     assert len(calls) == 1
 
 
+@pytest.mark.asyncio
+async def test_the_response_is_stored_under_the_member_who_ran_it(tmp_path):
+    from strata.auth import principal_context
+    from strata.notebook.llm import LlmConfig
+    from strata.notebook.prompt_executor import execute_prompt_cell
+    from strata.types import Principal
+
+    session = _prompt_session(tmp_path, "Give me anything.")
+    fake, _ = _fake_llm_returning("an answer")
+    cfg = LlmConfig(base_url="https://api.openai.com/v1", api_key="sk", model="m")
+
+    with (
+        mock.patch("strata.notebook.prompt_executor.chat_completion", fake),
+        principal_context(Principal(id="alice")),
+    ):
+        result = await execute_prompt_cell(
+            session, "p1", session.notebook_state.cells[0].source, cfg
+        )
+
+    assert result["success"] is True
+    store = session.get_artifact_manager().artifact_store
+    (stored,) = store.list_latest_by_id_prefix(f"nb_{session.notebook_state.id}_cell_p1_")
+    assert stored.principal == "alice"
+
+
 # Streaming: deltas via on_delta, retry frames, fallbacks
 
 
