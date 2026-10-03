@@ -2310,8 +2310,8 @@ nothing needs, least recently used first:</p>
   built from. A notebook stores each cell output under its own id and reads the
   latest version back, so that version stays. An id the store made up for one
   <code>materialize</code> has no such value;</li>
-<li>it has not been used in the last hour: a cache hit, a read of its data, or a
-  request that names it as an input all count.</li>
+<li>it has not been used in the last hour: finishing its build, a cache hit, a
+  read of its data, or a request that names it as an input all count.</li>
 </ul>
 <p>So <strong>an unnamed result is a cache entry</strong>. Its URI keeps working while it is
 used, and once it is collected the same request computes it again. To keep a
@@ -2354,9 +2354,13 @@ the caller's tenant.</p>
 output's current value plus its three most recent earlier values, so reverting
 a recent edit is still a cache hit. Older values are pruned in the background
 each time the server opens the notebook, including a reopen of a notebook that
-is already open. Set <code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code>
+is already open, and a value a crash left half-written for over an hour is
+marked failed then. Set <code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code>
 to keep more, or to <code>0</code> to keep every value. Deleting the notebook deletes its
 store.</p>
+<p>Every sweep, of either store, also removes the temporary files of blob writes
+that died part way (a killed process), once they have gone untouched for an
+hour.</p>
 <h2 id="cleaning-up-the-iceberg-row-group-cache">Cleaning up the Iceberg row-group cache<a class="headerlink" href="#cleaning-up-the-iceberg-row-group-cache" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">'http://localhost:8765/v1/cache/clear'</span>
 </code></pre></div>

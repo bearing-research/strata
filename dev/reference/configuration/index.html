@@ -2807,7 +2807,7 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_STREAM_STATE_TTL_SECONDS</code></td>
 <td><code>300.0</code></td>
-<td>How long a completed/abandoned stream's state lingers before cleanup</td>
+<td>How long a completed/abandoned stream's state lingers before cleanup. A <code>mode="stream"</code> miss whose stream is never fetched in that time is marked <code>failed</code>, and the same request later computes it again</td>
 </tr>
 </tbody>
 </table>
