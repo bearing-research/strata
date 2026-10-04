@@ -426,7 +426,8 @@ STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true
 
 It works because a cell's provenance key -
 `sha256(sorted_input_hashes + source_hash + env_hash)` - contains no notebook id
-and no cell id. Two people running the same source over the same inputs in the
+and no cell id, and `env_hash` leaves out the notebook's own project name in
+`uv.lock`. Two people running the same source over the same inputs in the
 same environment already arrive at the same hash; the store just had no way to
 be asked.
 
