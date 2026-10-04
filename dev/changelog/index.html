@@ -3435,6 +3435,25 @@ no route serves files from outside the frontend.</p>
 <li>strata-pool: the jobs table's state CHECK gains <code>cancelled</code>. A pool database
   created before this rejects a cancel until that constraint is updated or the
   database recreated.</li>
+<li>Cell provenance no longer includes the notebook's own project name, so
+  cells in a notebook whose <code>uv.lock</code> has no dev group re-run once.</li>
+<li>Workers fetch prebuilt environments from
+  <code>STRATA_WORKER_ENV_REGISTRY_URL/&lt;key&gt;/&lt;interpreter&gt;/&lt;platform&gt;</code> and rebuild
+  their local environments once; a registry on the old <code>&lt;url&gt;/&lt;key&gt;</code> path
+  must move (until then every dispatch builds locally).</li>
+<li>Workers and servers upgrade together for three more wire changes: console
+  chunks carry a required <code>seq</code>, a signed manifest's <code>output</code> carries <code>method</code>
+  (Azure uploads are a PUT), and R cells carry an <code>environment</code> block. An R
+  notebook with an <code>renv.lock</code> is refused on a worker that does not advertise
+  <code>locked_r_environments</code>.</li>
+<li>strata-pool: the stored catalogue gains a <code>version</code> column; an existing pool
+  store needs <code>ALTER TABLE catalogue ADD COLUMN version INTEGER NOT NULL
+  DEFAULT 0</code> or a fresh store.</li>
+<li><code>PUT /v1/notebooks/{id}/workers</code> and <code>strata worker add</code> refuse an unknown
+  transport; a worker saved as <code>transport = "http"</code> should be <code>"direct"</code>.</li>
+<li>Service mode: a table URI whose warehouse is in object storage needs a
+  catalog <code>uri</code>; MCP tools reach only sessions of the caller's tenant; the
+  Prometheus scrape leaves out per-table series under principal auth.</li>
 <li>Service mode: a table URI whose warehouse is in object storage needs a
   catalog <code>uri</code> (<code>STRATA_CATALOG_URI</code>); without one, scans, cache warming and
   export to a table answer 400 instead of using a SQLite catalog on the
@@ -3532,6 +3551,45 @@ no route serves files from outside the frontend.</p>
   the archive has one, and <code>GET /p/{token}/verify?sha256=</code> names the bundle
   file a digest matches. Each credit edit is a <code>credit</code> event on
   <code>/v1/events</code>.</li>
+<li><strong>Snapshots carry fetched bytes.</strong> An <code>include=all</code> snapshot carries the
+  notebook's fetched files and index, so a pinned or <code>refetch=never</code> fetch
+  runs from an imported copy without its URL. Import checks every fetched file
+  against its digest and the fetch cache's path rules.</li>
+<li><strong>Presigned URLs for GCS, Azure and S3 roles.</strong> <code>STRATA_ARTIFACT_PRESIGNED_URLS</code>
+  now presigns for GCS (V4 URLs and a size-limited POST policy, from a
+  service-account key or IAM signBlob), Azure (blob SAS from the account key or
+  a user delegation key) and S3 stores whose credentials come from an instance
+  role. New extras <code>s3</code> and <code>gcs</code>. A configured <code>STRATA_AZURE_SAS_TOKEN</code> is never
+  handed to workers.</li>
+<li><strong>Environment registry by build.</strong> A worker fetches a prebuilt locked
+  environment from <code>&lt;registry&gt;/&lt;key&gt;/&lt;interpreter&gt;/&lt;platform&gt;</code>, so one registry
+  serves every Python build and platform, and builds locally on a 404.</li>
+<li><strong>R environments on workers.</strong> A <code>strata-worker</code> whose R has renv restores the
+  notebook's <code>renv.lock</code> once per lock and R build and runs R cells against
+  that library, advertising <code>locked_r_environments</code>; the registry serves R
+  libraries at <code>&lt;registry&gt;/r/&lt;key&gt;/&lt;R version&gt;/&lt;platform&gt;</code>. The R worker image
+  installs renv.</li>
+<li><strong>Live remote console across nodes.</strong> Worker console chunks carry a <code>seq</code> and
+  are shown in order and once each; opening a notebook mid-run shows the last
+  64 KiB a remote cell printed; with <code>STRATA_NODE_ADVERTISED_URL</code> set, chunks
+  that land on another node reach the session through the shared build store.</li>
+<li><strong>Dataset lineage.</strong> A <code># @dataset</code> read copies the dataset version with its
+  inputs and the steps behind it (up to 10 deep), so lineage walks past the
+  dataset, and the Registry tab shows which notebook cells read each name
+  ("Read by"; <code>readers</code> on <code>/v1/registry/summary</code> and the notebook artifacts
+  route). <code>GET /v1/artifacts/{id}/v/{n}</code> returns <code>input_versions</code>.</li>
+<li><strong>DuckDB cells reach more lakes.</strong> Connections attach AWS Glue catalogs, read
+  <code>gs://</code> and <code>az://</code> mounts through the mount's own filesystem, and on a
+  personal server use catalogs defined in notebook.toml (<code>[catalogs.&lt;name&gt;]</code>).
+  <code># @cache snapshot</code> works on DuckDB catalog cells, pinning the Iceberg
+  snapshots the first run read.</li>
+<li><strong>The publication page shows the snapshot horizon</strong> for a Snowflake or BigQuery
+  <code># @cache snapshot</code> step: the warehouse state's moment and how long it stays
+  queryable.</li>
+<li><strong>strata-pool:</strong> a catalogue set on one pool process reaches every process on
+  the same store; <code>pool.queue</code> and <code>pool.boot</code> spans join the submitter's trace.</li>
+<li>The generic reference executor reports its hardware on <code>GET /health</code>.</li>
+<li><code>benchmarks/capacity_sweep.py --no-server</code> takes <code>--table-uri</code>.</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3601,6 +3659,24 @@ no route serves files from outside the frontend.</p>
   session only for the member who opened it.</li>
 <li><code>PATCH /v1/publications/{token}</code> refuses <code>artifact_id</code> and <code>version</code> with a
   400 instead of ignoring them.</li>
+<li><strong>Identical cells share results across notebooks.</strong> The provenance env hash
+  leaves out the notebook's own project name, so two notebooks with the same
+  resolved dependencies get the same provenance and share team-cache hits.</li>
+<li><strong>MCP is scoped by tenant.</strong> On a service-mode server a session records the
+  tenant that opened, created or imported it, and an MCP caller of another
+  tenant neither lists nor reaches it (<code>admin:*</code> sees all).</li>
+<li><strong>MCP errors reach the agent.</strong> A tool call that fails for a reason the agent
+  can act on returns that reason instead of a bare "Error executing tool".</li>
+<li>A generic <code>STRATA_AI_API_KEY</code> in a notebook's environment overrides the
+  server's key, as documented.</li>
+<li>A failed transform build records the executor's <code>error_message</code>.</li>
+<li><code>/metrics/prometheus</code> leaves out <code>strata_table_*</code> series under principal auth.</li>
+<li>In service mode a table URI with an object-store warehouse and no catalog
+  <code>uri</code> is refused with a 400 naming <code>STRATA_CATALOG_URI</code>, on scans, cache
+  warming, export and transform inputs (which used to start a build that could
+  only fail).</li>
+<li><code>gs://</code> and <code>abfs://</code> warehouse catalogs read with the server's
+  <code>STRATA_GCS_*</code> and <code>STRATA_AZURE_*</code> settings.</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3868,6 +3944,27 @@ no route serves files from outside the frontend.</p>
 <li>A personal server read a <code>gs://</code>, <code>az://</code> or <code>abfs://</code> warehouse with no
   catalog <code>uri</code> through a SQLite file at a malformed local path and failed
   with a 500; it now uses the <code>STRATA_METADATA_DB</code> catalog, as <code>s3://</code> does.</li>
+<li>A remote cell's console streamed to nobody: chunks were addressed to the
+  notebook id instead of the session. It now shows as it prints.</li>
+<li>A SQL cell binds datetime, date, time, Decimal, UUID and bytes values (and
+  numpy scalars) from an upstream Python cell.</li>
+<li>A secret typed this session survives a session reload (changing the timeout,
+  workers, mounts, adding or renaming a cell, reopening).</li>
+<li>A worker app hosted outside <code>strata-worker</code> (Modal, any ASGI host) takes its
+  token and credentials out of its environment.</li>
+<li><code>strata worker add --transport</code>, MCP <code>add_worker</code> and the REST worker PUT
+  refuse an unknown transport; the worker editor keeps <code>manifest</code>/<code>build</code>
+  workers signed instead of saving them as <code>direct</code>.</li>
+<li>A malformed table URI is a 400 and a table missing from its catalog a 404,
+  instead of 500s; cache warm refuses a malformed URI up front.</li>
+<li>A local warehouse directory that does not exist and an unknown snapshot id
+  are 404s, and a projected column the table lacks is a 400 naming it, instead
+  of 500s.</li>
+<li>Promote, publish and snapshot import rewrite the version on a
+  <code>strata://name/</code> input when its artifact lands under another id.</li>
+<li>The hardware probe answers on Windows.</li>
+<li>The docs no longer list <code>az://</code> as a warehouse scheme (pyiceberg cannot read
+  one); use <code>abfs://</code>.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
