@@ -489,7 +489,7 @@ class StrataConfig(BaseSettings):
     # this server. Off by default: the output then arrives as a form upload
     # (url + fields), which a worker older than this does not send.
     artifact_presigned_urls: bool = False
-    # How long a signed dispatch may wait for its job to start running when the
+    # How long a remote dispatch may wait for its job to start running when the
     # worker (or a pool in front of it) answers 202 with a job to poll. Separate
     # from the cell's own timeout, which starts only once the job is running, so
     # a cold machine does not spend the cell's budget booting.
