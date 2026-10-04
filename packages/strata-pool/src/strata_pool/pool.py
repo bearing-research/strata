@@ -89,6 +89,8 @@ class Pool:
         self.store = store
         self.backend = backend
         self.machine_types = {mt.name: mt for mt in machine_types}
+        # The stored catalogue's version this process last applied; None until it applies one.
+        self._catalogue_version: int | None = None
         # Types dropped from the catalogue while machines of them still run,
         # kept only for the cool-down those machines retire on.
         self._retired_types: dict[str, MachineType] = {}
@@ -142,6 +144,24 @@ class Pool:
                 await self._drain(machine_type, tenant_id)
                 await self._ensure_capacity(machine_type, tenant_id)
 
+    async def sync_catalogue(self) -> bool:
+        """Apply the stored catalogue if another write set it since this process last looked.
+
+        Once a catalogue is stored it replaces the one the pool was built with.
+        Every submit and scaler pass calls this, so a change made through any
+        process sharing the store reaches all of them. Returns whether it applied one.
+        """
+        version = self.store.catalogue_version()
+        if version is None or version == self._catalogue_version:
+            return False
+        machine_types = self.store.load_machine_types()
+        if machine_types is None:
+            return False
+        # Set before the first await, so a concurrent caller does not apply it twice.
+        self._catalogue_version = version
+        await self.replace_machine_types(machine_types)
+        return True
+
     def _fail_jobs_without_a_type(self) -> None:
         """Queued work for a type the catalogue no longer names can never run."""
         for machine_type in self.store.queued_machine_types():
@@ -183,6 +203,7 @@ class Pool:
         be slow. The pool knows nothing of Strata's cache: every submit runs.
         Raises ValueError for an unknown machine type.
         """
+        await self.sync_catalogue()
         if machine_type not in self.machine_types:
             raise ValueError(f"unknown machine type: {machine_type!r}")
 
@@ -299,9 +320,22 @@ class Pool:
                 return True
 
     def _assign(self, worker: Worker, job: Job) -> bool:
-        expires = self._wall() + self.lease_seconds
+        now = self._wall()
+        expires = now + self.lease_seconds
         if not self.store.claim_dispatch(worker, job, self.instance_id, expires):
             return False
+        self._record_span(
+            "pool.queue",
+            job.trace_context,
+            job.submitted_at,
+            now,
+            {
+                "job_id": job.id,
+                "machine_type": job.machine_type,
+                "tenant_id": job.tenant_id,
+                "worker_id": worker.id,
+            },
+        )
         worker.state = WorkerState.BUSY
         worker.current_job_id = job.id
         worker.session_id = job.session_id
@@ -361,7 +395,10 @@ class Pool:
                 return
             if outcome != "reserved":
                 return
-            await self._start_worker(spec, worker)
+            # The boot is traced under the job first in line, the one it most likely serves.
+            await self._start_worker(
+                spec, worker, self.store.next_queued_job(machine_type, tenant_id)
+            )
 
     async def _offer_freed_capacity(self) -> None:
         """Hand freed headroom to any tenant waiting on it.
@@ -372,8 +409,10 @@ class Pool:
             for tenant_id in self.store.queued_tenants(machine_type):
                 await self._ensure_capacity(machine_type, tenant_id)
 
-    async def _start_worker(self, spec: MachineType, worker: Worker) -> None:
+    async def _start_worker(self, spec: MachineType, worker: Worker, waiting: Job | None) -> None:
         """Provision the machine *worker* reserved, then poll it to warm in the background.
+
+        The boot's span joins *waiting*'s trace.
 
         The row exists before the backend call, but a crash after the provider
         creates the machine still leaks it: backends cannot list their machines.
@@ -391,6 +430,7 @@ class Pool:
                 extra={"machine_type": spec.name, "worker_id": worker.id},
             )
             self.store.delete_worker(worker.id)
+            self._boot_span(worker, waiting, error="the backend failed to start the machine")
             return
 
         worker.backend_id = provisioned.backend_id
@@ -417,9 +457,11 @@ class Pool:
             )
             await self.backend.stop(provisioned.backend_id)
             return
-        self._spawn(self._await_boot(worker, spec, provisioned.endpoint))
+        self._spawn(self._await_boot(worker, spec, provisioned.endpoint, waiting))
 
-    async def _await_boot(self, worker: Worker, spec: MachineType, endpoint: str) -> None:
+    async def _await_boot(
+        self, worker: Worker, spec: MachineType, endpoint: str, waiting: Job | None
+    ) -> None:
         deadline = self._monotonic() + spec.boot_timeout_seconds
         healthy = warmed = False
         async with self._holding(worker_id=worker.id):
@@ -440,6 +482,7 @@ class Pool:
             worker.state = WorkerState.WARM
             worker.lease_owner = None
             worker.lease_expires_at = None
+            self._boot_span(worker, waiting)
             logger.info(
                 "worker is warm",
                 extra={"worker_id": worker.id, "machine_type": spec.name},
@@ -455,6 +498,7 @@ class Pool:
                 "boot_timeout_seconds": spec.boot_timeout_seconds,
             },
         )
+        self._boot_span(worker, waiting, error=f"did not boot within {spec.boot_timeout_seconds}s")
         await self._stop_worker(worker)
 
     # --- execution ---
@@ -614,6 +658,54 @@ class Pool:
             carrier: dict[str, str] = {}
             inject(carrier)
             yield carrier
+
+    def _boot_span(self, worker: Worker, waiting: Job | None, *, error: str | None = None) -> None:
+        attributes = {
+            "worker_id": worker.id,
+            "machine_type": worker.machine_type,
+            "tenant_id": worker.tenant_id,
+            "backend": worker.backend,
+        }
+        if waiting is not None:
+            attributes["job_id"] = waiting.id
+        self._record_span(
+            "pool.boot",
+            waiting.trace_context if waiting is not None else {},
+            worker.created_at,
+            self._wall(),
+            attributes,
+            error=error,
+        )
+
+    def _record_span(
+        self,
+        name: str,
+        trace_context: dict[str, str],
+        start: float,
+        end: float,
+        attributes: dict[str, str],
+        *,
+        error: str | None = None,
+    ) -> None:
+        """Record a finished span from wall-clock times, under the submitter's trace.
+
+        After the fact, because its start may have been written by another process.
+        """
+        try:
+            from opentelemetry import trace
+            from opentelemetry.propagate import extract
+        except ImportError:
+            return
+        tracer = self._tracer or trace.get_tracer("strata_pool")
+        span = tracer.start_span(
+            name,
+            context=extract(trace_context),
+            attributes=attributes,
+            start_time=int(start * 1e9),
+        )
+        if error is not None:
+            span.set_status(trace.Status(trace.StatusCode.ERROR, error))
+        span.end(end_time=int(end * 1e9))
 
     async def _stop_worker(self, worker: Worker) -> bool:
         """Deallocate a machine and delete its row; return whether this process stopped it.
@@ -946,6 +1038,7 @@ class Pool:
         while True:
             await asyncio.sleep(interval_seconds)
             try:
+                await self.sync_catalogue()
                 await self.reclaim_expired_leases()
                 await self.reap_idle_workers()
                 await self.probe_warm_workers()

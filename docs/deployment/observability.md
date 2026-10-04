@@ -78,8 +78,10 @@ server opens `notebook.dispatch` with `worker`, `build_id`,
 `notebook_id` and `cell_id`, and sends its W3C `traceparent` in
 the request headers and the build manifest. The worker's
 `worker.execute` span is its child. When the job goes through
-`strata-pool`, the pool's own span sits between the two if the pool
-has OpenTelemetry installed. Each process exports to its own
+`strata-pool`, and the pool has OpenTelemetry installed, its
+`pool.execute` span sits between the two, and `pool.queue` (from
+submit to dispatch) and `pool.boot` (a machine started for the job)
+sit beside it under the dispatch. Each process exports to its own
 `OTEL_EXPORTER_OTLP_ENDPOINT`, and the backend joins the spans by
 trace id.
 

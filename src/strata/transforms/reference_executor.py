@@ -63,7 +63,8 @@ class BaseExecutor(ABC):
         pass
 
     def health_check(self) -> dict:
-        """Return health status and capabilities; override to add checks."""
+        """Return health status, capabilities and the machine's hardware; override to add checks."""
+        from strata.notebook.hardware import hardware_report
         from strata.types import EXECUTOR_PROTOCOL_VERSION
 
         return {
@@ -72,6 +73,7 @@ class BaseExecutor(ABC):
                 "protocol_versions": [EXECUTOR_PROTOCOL_VERSION],
                 "transform_refs": self.get_transform_refs(),
             },
+            "hardware": hardware_report(),
         }
 
 
@@ -189,9 +191,10 @@ def create_executor_app(executor: BaseExecutor | None = None):
         version="1.0.0",
     )
 
+    # Sync, so FastAPI runs it off the event loop: the first hardware probe runs nvidia-smi.
     @app.get("/health")
-    async def health():
-        """Health check endpoint returning executor capabilities."""
+    def health():
+        """Health check endpoint returning executor capabilities and hardware."""
         return executor.health_check()
 
     @app.post("/v1/execute")

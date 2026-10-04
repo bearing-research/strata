@@ -1,6 +1,7 @@
 """Strata Executor Protocol v1: types, the reference executor, headers and HTTP."""
 
 import json
+import os
 import threading
 
 import httpx
@@ -408,6 +409,34 @@ class TestExecutorHTTPIntegration:
         assert data["status"] == "healthy"
         assert "v1" in data["capabilities"]["protocol_versions"]
         assert "duckdb_sql@v1" in data["capabilities"]["transform_refs"]
+
+    def test_health_reports_the_machines_accelerators(self, executor_server, tmp_path, monkeypatch):
+        """A fake ``nvidia-smi`` on ``PATH`` stands in for the driver."""
+        from strata.notebook import hardware
+
+        smi = tmp_path / "nvidia-smi"
+        smi.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "--query-gpu=name,memory.total,driver_version" ]; then\n'
+            '  echo "NVIDIA H100 80GB HBM3, 81559, 550.54.15"\n'
+            "  exit 0\n"
+            "fi\n"
+            'echo "| Driver Version: 550.54.15   CUDA Version: 12.4 |"\n'
+        )
+        smi.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+        hardware.hardware_report.cache_clear()
+        try:
+            data = httpx.get(f"{executor_server['base_url']}/health").json()
+        finally:
+            hardware.hardware_report.cache_clear()
+
+        assert data["hardware"]["accelerators"] == [
+            {"name": "NVIDIA H100 80GB HBM3", "memory_mb": 81559, "driver": "550.54.15"}
+        ]
+        assert data["hardware"]["cuda"] == "12.4"
+        assert data["hardware"]["cpus"] >= 1
+        assert ExecutorHealthResponse(**data).hardware == data["hardware"]
 
     def test_execute_simple_query(self, executor_server):
         base_url = executor_server["base_url"]

@@ -40,7 +40,7 @@ async def _start_idle_machine(pool, tenant_id: str = "acme") -> None:
         lease_expires_at=pool._wall() + pool.lease_seconds,
     )
     pool.store.save_worker(worker)
-    await pool._start_worker(spec, worker)
+    await pool._start_worker(spec, worker, None)
 
 
 def _spec(**kwargs) -> MachineType:

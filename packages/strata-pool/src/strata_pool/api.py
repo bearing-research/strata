@@ -120,9 +120,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         # The catalogue last set over the API outlives the process that set
         # it; the one this process was constructed with is only the default.
-        saved = pool.store.load_machine_types()
-        if saved is not None:
-            await pool.replace_machine_types(saved)
+        await pool.sync_catalogue()
         # Reconcile before serving: machines from a previous process are
         # either still reachable or still billing.
         await pool.recover()
@@ -254,7 +252,9 @@ def create_app(
         """Replace the whole machine-type catalogue, without a restart.
 
         The body is the full list in the shape `GET` returns; types left out are
-        removed. The catalogue is persisted and survives a restart.
+        removed. The catalogue is persisted and survives a restart, and every
+        pool process over the same store applies it on its next submit or
+        scaler pass.
         """
         body = await request.json()
         if not isinstance(body, list):
@@ -269,7 +269,7 @@ def create_app(
         # Stored first: a catalogue that applied but was not saved would
         # silently revert at the next restart.
         pool.store.save_machine_types(specs)
-        await pool.replace_machine_types(specs)
+        await pool.sync_catalogue()
         return [asdict(spec) for spec in pool.machine_types.values()]
 
     @app.get("/v1/workers", dependencies=guard)
