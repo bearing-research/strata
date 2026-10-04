@@ -152,9 +152,9 @@ Two executor protocols:
 
 ### Where to look
 
-HTTP layer: `server.py` (app + lifespan/middleware, plus the
-materialize/streams handlers); per-domain routers in `api/routers/`
-(`cache`, `debug`, `registry`, `metrics_health`, `admin`, `artifacts`,
+HTTP layer: `server.py` (app + lifespan/middleware and the shared artifact
+gates); per-domain routers in `api/routers/` (`materialize`, `streams`,
+`cache`, `debug`, `registry`, `metrics_health`, `admin`, `artifacts`,
 `names`, `builds`); typed mode/auth/tenant gates in `api/dependencies.py`;
 pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
 Data plane: `types.py`, `planner.py`, `cache.py`, `fetcher.py`, `metadata_*.py`,
