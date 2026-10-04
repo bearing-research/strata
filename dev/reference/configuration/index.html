@@ -2659,6 +2659,11 @@ authentication. This is a startup error, not a warning:</p>
 <td>Origin readers reach this server on; set it behind a reverse proxy so published-artifact embed URLs are the public ones</td>
 </tr>
 <tr>
+<td><code>STRATA_PUBLIC_BASE_PATH</code></td>
+<td><em>(empty)</em></td>
+<td>Path a reverse proxy serves this server under (<code>/o/acme/lab</code>), whether or not the proxy strips it. The UI, its WebSocket, the API docs and publication links carry it. Empty means the root. See <a href="../../deployment/modes/#serving-under-a-path">Serving under a path</a></td>
+</tr>
+<tr>
 <td><code>STRATA_DEPLOYMENT_MODE</code></td>
 <td><code>personal</code></td>
 <td><code>personal</code> or <code>service</code></td>

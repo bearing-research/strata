@@ -2428,7 +2428,10 @@ still governs the notebook app view.</p>
 use. The URLs in an embed are consumed by someone else's page, and a server
 that only knows its internal origin will advertise an oEmbed endpoint nobody
 can reach and reject the public link a wiki pastes. Unset, the request's own
-origin is used, which is right for a directly-reachable server.</p>
+origin is used, which is right for a directly-reachable server.
+A proxy that serves Strata under a path also needs <code>STRATA_PUBLIC_BASE_PATH</code>
+(<a href="../../deployment/modes/#serving-under-a-path">Serving under a path</a>); every
+link on the page and in the card then carries it.</p>
 <h2 id="archiving-the-copy-that-needs-no-server">Archiving: the copy that needs no server<a class="headerlink" href="#archiving-the-copy-that-needs-no-server" title="Permanent link">&para;</a></h2>
 <p>A hosted link resolves for as long as your server does. A URL printed in a
 paper outlives most servers, so there is a second form:</p>

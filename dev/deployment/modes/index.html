@@ -1804,6 +1804,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#serving-under-a-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serving under a path
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2130,6 +2141,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#serving-under-a-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serving under a path
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2415,7 +2437,25 @@ service-mode errors name the setting to add.</p>
 <li><code>artifact_blob_backend</code>, local / s3 / gcs / azure</li>
 <li>Tracing, logging, S3 / GCS / Azure credentials</li>
 <li>Cache size, cache directory, metadata DB path</li>
+<li><code>public_base_url</code> and <code>public_base_path</code>, the address readers reach the server on (below)</li>
 </ul>
+<h2 id="serving-under-a-path">Serving under a path<a class="headerlink" href="#serving-under-a-path" title="Permanent link">&para;</a></h2>
+<p>A reverse proxy can serve Strata at a path such as
+<code>https://app.example.com/o/acme/lab/</code> instead of a hostname of its own. Tell
+Strata the path:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">STRATA_PUBLIC_BASE_PATH</span><span class="o">=</span>/o/acme/lab
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">STRATA_PUBLIC_BASE_URL</span><span class="o">=</span>https://app.example.com<span class="w">   </span><span class="c1"># origin only; the path comes from above</span>
+</code></pre></div>
+<p>The proxy may strip the prefix before forwarding or pass it through; both
+reach the same routes. The notebook UI, its WebSocket, the API docs, signed
+build URLs and every link on a <a href="../../notebook/publishing/">publication</a> page
+carry the prefix. Open the UI with the trailing slash
+(<code>https://app.example.com/o/acme/lab/</code>), since its assets load relative to
+the page. The prefix's first segment must not be one of Strata's own
+(<code>v1</code>, <code>p</code>, <code>assets</code>, <code>docs</code>, <code>health</code>), or a stripped request is read as
+already carrying it.</p>
+<p>Clients take the full URL, path included (<code>https://app.example.com/o/acme/lab</code>):
+the CLI's <code>--server</code>, the TUI and <code>strata_client</code> all append their routes to it.</p>
 
 
 
