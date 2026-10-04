@@ -3435,6 +3435,10 @@ no route serves files from outside the frontend.</p>
 <li>strata-pool: the jobs table's state CHECK gains <code>cancelled</code>. A pool database
   created before this rejects a cancel until that constraint is updated or the
   database recreated.</li>
+<li>Service mode: a table URI whose warehouse is in object storage needs a
+  catalog <code>uri</code> (<code>STRATA_CATALOG_URI</code>); without one, scans, cache warming and
+  export to a table answer 400 instead of using a SQLite catalog on the
+  server's disk.</li>
 </ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3861,6 +3865,9 @@ no route serves files from outside the frontend.</p>
 <li>The terminal viewer reconnected into a refusal when the server closed its
   session. It now stops, shows why, and <code>r</code> reopens the notebook by path (with
   <code>--session ID</code> it says to run <code>strata watch PATH</code>).</li>
+<li>A personal server read a <code>gs://</code>, <code>az://</code> or <code>abfs://</code> warehouse with no
+  catalog <code>uri</code> through a SQLite file at a malformed local path and failed
+  with a 500; it now uses the <code>STRATA_METADATA_DB</code> catalog, as <code>s3://</code> does.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three

@@ -2948,7 +2948,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tr>
 <td><code>STRATA_METADATA_DB</code></td>
 <td><code>~/.strata/meta.sqlite</code></td>
-<td>SQLite catalog an <code>s3://</code> warehouse URI uses when no catalog <code>uri</code> is set. It is on this server's disk, so other readers of the bucket do not see it</td>
+<td>SQLite catalog a personal server uses for an object-store warehouse URI (<code>s3://</code>, <code>gs://</code>, <code>az://</code>, <code>abfs://</code>) when no catalog <code>uri</code> is set. It is on this server's disk, so other readers of the bucket do not see it. A service refuses such a URI instead (see <a href="#catalog">Catalog</a>)</td>
 </tr>
 </tbody>
 </table>
@@ -2990,6 +2990,12 @@ in <code>catalog_properties</code>, in a <code>STRATA_CATALOGS</code> entry, or 
 credential that entry names. Without one its tables
 would be in a SQLite file on this server's disk, so the server refuses to start
 and names the setting.</p>
+<p>A warehouse named only in a request's table URI (<code>s3://bucket/wh#ns.table</code>)
+is not known at startup. With no catalog <code>uri</code> set, a service
+(<code>STRATA_DEPLOYMENT_MODE=service</code>) refuses such a URI in any object store with
+a 400 naming <code>STRATA_CATALOG_URI</code>, on scans, cache warming and export to a
+table. A personal server keeps the catalog in <code>STRATA_METADATA_DB</code>, so it can
+write its own tables there; nothing else reading the bucket sees them.</p>
 <h2 id="s3-storage">S3 Storage<a class="headerlink" href="#s3-storage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
