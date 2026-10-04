@@ -758,7 +758,8 @@ async def metrics_prometheus():
     # Model tokens, by who used them. Absent until the first model call.
     from strata.notebook.llm.usage import llm_usage
 
-    usage = llm_usage()
+    # Under principal auth who called a model is not for an unauthenticated scraper.
+    usage = llm_usage(by_principal=not principal_auth)
     if usage:
         for field, name, help_text in (
             ("calls", "strata_ai_calls_total", "Model calls"),
@@ -769,8 +770,8 @@ async def metrics_prometheus():
             for row in usage:
                 labels = (
                     f'tenant="{_prom_label(row.tenant)}",'
-                    f'principal="{_prom_label(row.principal)}",'
-                    f'model="{_prom_label(row.model)}"'
+                    + ("" if principal_auth else f'principal="{_prom_label(row.principal)}",')
+                    + f'model="{_prom_label(row.model)}"'
                 )
                 lines.append(f"{name}{{{labels}}} {getattr(row, field)}")
 
