@@ -36,8 +36,8 @@ def setup():
         yield client, Path(tmpdir)
 
 
-def _build_warehouse(tmp: Path):
-    """One-table Iceberg warehouse; returns (table, table_uri)."""
+def _build_warehouse(tmp: Path, *, empty: bool = False):
+    """One-table Iceberg warehouse, written once unless *empty*; returns (table, table_uri)."""
     import pyarrow as pa
     from pyiceberg.catalog.sql import SqlCatalog
     from pyiceberg.schema import Schema
@@ -55,7 +55,8 @@ def _build_warehouse(tmp: Path):
     catalog.create_namespace("db")
     schema = Schema(NestedField(1, "id", LongType(), required=False))
     table = catalog.create_table("db.events", schema)
-    table.append(pa.table({"id": pa.array([1, 2, 3], type=pa.int64())}))
+    if not empty:
+        table.append(pa.table({"id": pa.array([1, 2, 3], type=pa.int64())}))
     return table, f"file://{warehouse_path}#db.events"
 
 
@@ -180,6 +181,31 @@ class TestTableStaleness:
             staleness = session.compute_staleness()
             assert staleness["c1"].status == CellStatus.READY
             assert staleness["c2"].status == CellStatus.READY
+
+
+class TestEmptyTable:
+    def test_a_table_never_written_injects_no_snapshot_and_is_never_cached(self, setup):
+        client, tmp = setup
+        table, uri = _build_warehouse(tmp, empty=True)
+
+        nb = NotebookBuilder(tmp).add_cell(
+            "c1", f"# @table events {uri}\nsnap = str(events_snapshot)"
+        )
+
+        with open_notebook_session(client, nb.path) as (sid, _session):
+            with ws_connect(client, sid) as ws:
+                first = execute_cell_and_wait(ws, "c1")
+                assert first["type"] == "cell_output", first
+                assert first["payload"]["outputs"]["snap"]["preview"] == "None"
+                again = execute_cell_and_wait(ws, "c1")
+                assert again["payload"]["cache_hit"] is False
+
+                _append_row(table)
+
+                written = execute_cell_and_wait(ws, "c1")
+                assert written["payload"]["outputs"]["snap"]["preview"] == str(
+                    table.current_snapshot().snapshot_id
+                )
 
 
 class TestTableErrors:

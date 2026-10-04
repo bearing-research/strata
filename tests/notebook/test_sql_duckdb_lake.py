@@ -272,6 +272,34 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     assert lake.fingerprints == [f"{_lake_name('lake:taxi.trips')}:table:lake:taxi.trips:7"]
 
 
+def test_a_table_never_written_is_read_unpinned_and_never_cached(tmp_path, monkeypatch):
+    from strata.notebook import tables
+    from strata.notebook.sql.adapter import QualifiedTable
+    from strata.notebook.sql.lake import resolve_lake
+
+    nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    name = _lake_name("lake:taxi.trips")
+    monkeypatch.setattr(tables, "fingerprint_tables", lambda specs, cfg: ([], {name: None}))
+
+    def resolve():
+        return resolve_lake(
+            session,
+            "c1",
+            "",
+            session.notebook_state.connections[0],
+            [QualifiedTable("lake", "taxi", "trips")],
+        )
+
+    first, second = resolve(), resolve()
+
+    assert first.snapshots == {}
+    assert first.fingerprints[0].startswith(f"{name}:table:empty:")
+    assert first.fingerprints != second.fingerprints
+
+
 class TestACatalogCredential:
     """A catalog's named credential resolves against the notebook's env, as a mount's does."""
 

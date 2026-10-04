@@ -1036,6 +1036,10 @@ POST /v1/materialize
 }
 ```
 
+A table with no snapshots yet streams zero rows with the table's schema
+(projected by `columns`). Nothing read from it is reused: each request is a
+miss, as is a transform that takes the table as an input.
+
 ### Get Stream
 
 ```

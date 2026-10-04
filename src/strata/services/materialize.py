@@ -8,6 +8,7 @@ after applying the table ACL.
 from __future__ import annotations
 
 import re
+import uuid
 from typing import TYPE_CHECKING, NamedTuple
 
 from pyiceberg.exceptions import NoSuchTableError
@@ -30,8 +31,11 @@ def table_input_version(plan: ReadPlan) -> str:
     """The version a table input records: its snapshot and schema id.
 
     A schema change makes no snapshot, so the snapshot alone would let a transform
-    hit an artifact built against the old columns.
+    hit an artifact built against the old columns. A table with no snapshots has no
+    version, so it gets a fresh one each time and nothing built from it dedups.
     """
+    if plan.snapshot_id is None:
+        return f"empty:{uuid.uuid4().hex}:{plan.schema_id}"
     return f"{plan.snapshot_id}:{plan.schema_id}"
 
 
@@ -143,7 +147,7 @@ class MaterializeService:
     def compute_identity_provenance(
         self,
         table_identity: str,
-        snapshot_id: int,
+        snapshot_id: int | None,
         columns: list[str] | None,
         filters: list,
         schema_id: int | None,
@@ -152,14 +156,16 @@ class MaterializeService:
 
         Covers table identity, snapshot, ``schema_id`` (a schema change makes no
         snapshot), the sorted projection and the normalized filters, so the same query
-        dedups to the same artifact.
+        dedups to the same artifact. A table with no snapshots (``snapshot_id`` None)
+        has nothing to key a result on, so its hash is unique per call and never dedups.
         """
         import hashlib
 
         from strata.types import compute_filter_fingerprint
 
         hasher = hashlib.sha256()
-        hasher.update(f"table:{table_identity}@{snapshot_id}".encode())
+        snapshot = snapshot_id if snapshot_id is not None else f"empty:{uuid.uuid4().hex}"
+        hasher.update(f"table:{table_identity}@{snapshot}".encode())
         hasher.update(f"schema:{schema_id}".encode())
         hasher.update(b"executor:scan@v1")
         if columns:

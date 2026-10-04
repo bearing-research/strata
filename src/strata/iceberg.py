@@ -34,8 +34,11 @@ class CatalogProvider(Protocol):
         """Load the Iceberg table named by ``table_uri``."""
         ...
 
-    def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int:
-        """Resolve the snapshot id to read (the current snapshot if ``None``)."""
+    def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int | None:
+        """Resolve the snapshot id to read (the current snapshot if ``None``).
+
+        None when no snapshot was asked for and the table has none.
+        """
         ...
 
 
@@ -344,15 +347,16 @@ class PyIcebergCatalog:
             self._invalidate_catalog(warehouse_path)
             return self._get_catalog(warehouse_path).load_table(table_id)
 
-    def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int:
+    def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int | None:
         """Resolve the snapshot id to read (the current one when ``snapshot_id`` is ``None``).
+
+        Returns None when ``snapshot_id`` is ``None`` and the table has no snapshots
+        (created, never written).
 
         Raises
         ------
         SnapshotNotFound
             If ``snapshot_id`` is absent from the table.
-        ValueError
-            If the table has no snapshots.
         """
         if snapshot_id is not None:
             snapshot = table.snapshot_by_id(snapshot_id)
@@ -361,9 +365,7 @@ class PyIcebergCatalog:
             return snapshot_id
 
         current = table.current_snapshot()
-        if current is None:
-            raise ValueError("Table has no snapshots")
-        return current.snapshot_id
+        return None if current is None else current.snapshot_id
 
     def create_table_if_not_exists(
         self,

@@ -329,6 +329,9 @@ art = strata.materialize(
 URI string - and `<name>_snapshot` - the snapshot id resolved when the cell's
 provenance was computed. Passing `<name>_snapshot` to the scan makes the cell
 fully deterministic: it reads exactly the snapshot its provenance recorded.
+For a table with no snapshots yet, `<name>_snapshot` is `None` (a scan reads
+it as zero rows) and the cell is never served from the cache, so it sees the
+table's first write.
 
 Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is one of the forms
 `client.materialize` accepts:
