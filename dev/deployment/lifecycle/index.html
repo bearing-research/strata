@@ -2208,7 +2208,7 @@
 <tr>
 <td><strong>Iceberg row-group cache</strong></td>
 <td><code>~/.strata/cache/</code></td>
-<td>Arrow-IPC files keyed by Parquet row-group. The Parquet/Iceberg metadata cache sits beside it at <code>~/.strata/meta.sqlite</code> (or <code>STRATA_METADATA_DB</code> if set)</td>
+<td>Arrow-IPC files keyed by Parquet row-group, and the Parquet/Iceberg metadata cache in <code>metadata.sqlite</code> inside it (a cache clear keeps it)</td>
 <td>Optional - purely a perf cache, safe to delete</td>
 </tr>
 <tr>
@@ -2219,6 +2219,10 @@
 </tr>
 </tbody>
 </table>
+<p>A personal server that reads an object-store warehouse with no catalog <code>uri</code> keeps
+that warehouse's Iceberg catalog in SQLite at <code>~/.strata/meta.sqlite</code> (or
+<code>STRATA_METADATA_DB</code>). It holds those tables' definitions, not a cache: back it
+up if you write tables that way.</p>
 <p>Inside each notebook directory:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mynotebook/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── notebook.toml             # committed config - schema: notebook-toml.md
