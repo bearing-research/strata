@@ -135,7 +135,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 
 | Variable             | Default | Description                          |
 | -------------------- | ------- | ------------------------------------ |
-| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite catalog a personal server uses for an object-store warehouse URI (`s3://`, `gs://`, `az://`, `abfs://`) when no catalog `uri` is set. It is on this server's disk, so other readers of the bucket do not see it. A service refuses such a URI instead (see [Catalog](#catalog)) |
+| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite catalog a personal server uses for an object-store warehouse URI (`s3://`, `gs://`, `abfs://`, `abfss://`) when no catalog `uri` is set. It is on this server's disk, so other readers of the bucket do not see it. A service refuses such a URI instead (see [Catalog](#catalog)) |
 
 ## Catalog
 

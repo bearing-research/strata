@@ -80,7 +80,7 @@ The **table URI** is `<warehouse>#<namespace>.<table>` - here
 [`@table` reference](annotations.md#table)).
 
 Strata finds a local warehouse's tables in `<warehouse>/catalog.db`. An object
-store (`s3://`, `gs://`, `az://`) has no such file, so set the catalog database
+store (`s3://`, `gs://`, `abfs://`) has no such file, so set the catalog database
 with `STRATA_CATALOG_URI`. Without it, a personal server keeps the catalog in
 SQLite at `STRATA_METADATA_DB` on its own disk, which no other reader of the
 bucket sees, and a service refuses the table, naming the setting. Either

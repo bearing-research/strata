@@ -337,7 +337,7 @@ Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is one of the forms
 - `<namespace>.<table>`, a table in the server's default catalog.
 
 The warehouse may be local or on S3, GCS (`gs://`) or Azure (`abfs://`,
-`abfss://`, `az://`); files on GCS and Azure are read with the same
+`abfss://`; pyiceberg has no `az://` catalog support); files on GCS and Azure are read with the same
 `STRATA_GCS_*` and `STRATA_AZURE_*` settings the artifact blob store uses. The
 name must be a valid Python identifier.
 
