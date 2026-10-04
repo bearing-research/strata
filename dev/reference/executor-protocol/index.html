@@ -2667,11 +2667,12 @@ A worker that answers <code>200</code> directly needs no change.</p>
 <a id="__codelineno-6-32" name="__codelineno-6-32" href="#__codelineno-6-32"></a><span class="w">  </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a><span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/artifacts/upload?...&amp;signature=..."</span><span class="p">,</span>
 <a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a><span class="w">    </span><span class="nt">"max_bytes"</span><span class="p">:</span><span class="w"> </span><span class="mi">1073741824</span><span class="p">,</span>
-<a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a><span class="w">    </span><span class="nt">"expires_at"</span><span class="p">:</span><span class="w"> </span><span class="mf">1789455608.2</span>
-<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a><span class="w">  </span><span class="nt">"finalize_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/finalize?..."</span><span class="p">,</span>
-<a id="__codelineno-6-38" name="__codelineno-6-38" href="#__codelineno-6-38"></a><span class="w">  </span><span class="nt">"log_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/log?..."</span>
-<a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a><span class="p">}</span>
+<a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a><span class="w">    </span><span class="nt">"expires_at"</span><span class="p">:</span><span class="w"> </span><span class="mf">1789455608.2</span><span class="p">,</span>
+<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a><span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span>
+<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-6-38" name="__codelineno-6-38" href="#__codelineno-6-38"></a><span class="w">  </span><span class="nt">"finalize_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/finalize?..."</span><span class="p">,</span>
+<a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a><span class="w">  </span><span class="nt">"log_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/log?..."</span>
+<a id="__codelineno-6-40" name="__codelineno-6-40" href="#__codelineno-6-40"></a><span class="p">}</span>
 </code></pre></div>
 <p>Each URL is a signed capability that expires at <code>expires_at</code>; <code>output.max_bytes</code>
 caps the upload. Fetching a build's manifest again (<code>GET
@@ -2680,14 +2681,44 @@ finalize URLs of every earlier manifest, so an executor still holding an old
 one can no longer publish. Each manifest's upload lands under its own key, and
 bytes that are never finalized are removed by the server's build runner once
 the build is over and the upload URL has expired.</p>
-<p>With <code>STRATA_ARTIFACT_PRESIGNED_URLS</code> on and an S3 blob store the server can sign
-for, the input URLs and <code>output.url</code> point straight at the object store: SigV4
-query URLs for inputs, and for the output a POST policy URL with the form
-<code>fields</code> to send. The policy bounds the body with <code>content-length-range</code>, so S3
-refuses an oversized upload itself, and finalize checks the size again before
-publishing. <code>finalize_url</code> and <code>log_url</code> stay Strata routes. Without it, or when
-the store cannot sign (a local disk, or S3 credentials held only by an instance
-role inside PyArrow), every URL is a Strata route and <code>output</code> has no <code>fields</code>.</p>
+<p>With <code>STRATA_ARTIFACT_PRESIGNED_URLS</code> on and a blob store the server can sign
+for, the input URLs and <code>output.url</code> point straight at the object store.
+<code>finalize_url</code> and <code>log_url</code> stay Strata routes, and finalize checks the
+output's size against <code>output.max_bytes</code> before publishing.</p>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Inputs</th>
+<th>Output</th>
+<th>Signs with</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S3</td>
+<td>SigV4 query URLs</td>
+<td>POST policy: <code>fields</code>, bounded by <code>content-length-range</code></td>
+<td>An access key pair (config or <code>AWS_ACCESS_KEY_ID</code>), else a role through botocore (instance profile, ECS task role, web identity; the <code>s3</code> extra). The role's session token goes in the URL, and a URL stops working when that token expires.</td>
+</tr>
+<tr>
+<td>GCS</td>
+<td>V4 signed URLs</td>
+<td>V4 POST policy: <code>fields</code>, bounded by <code>content-length-range</code></td>
+<td>A service-account key (<code>STRATA_GCS_CREDENTIALS_JSON</code> or <code>GOOGLE_APPLICATION_CREDENTIALS</code>), else, on GCE or GKE workload identity, the IAM <code>signBlob</code> API as the attached service account, which needs <code>roles/iam.serviceAccountTokenCreator</code> on itself. Needs the <code>gcs</code> extra.</td>
+</tr>
+<tr>
+<td>Azure</td>
+<td>Read-only blob SAS</td>
+<td>Create/write blob SAS: <code>method</code> <code>PUT</code> with <code>headers</code></td>
+<td>The account key (<code>STRATA_AZURE_ACCOUNT_KEY</code> or a connection string that holds it), else a user delegation key for <code>STRATA_AZURE_USE_DEFAULT_CREDENTIAL</code>, which needs the Storage Blob Delegator role. A PUT cannot bound its body, so only finalize enforces <code>max_bytes</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Without the setting, or when the store cannot sign (a local disk, anonymous
+access, a configured <code>STRATA_AZURE_SAS_TOKEN</code>, which is never handed to a
+worker, or GCS user credentials with no service account), every URL is a Strata
+route and <code>output</code> has neither <code>fields</code> nor <code>headers</code>.</p>
 <p><code>principal</code>, <code>tenant</code>, <code>notebook_id</code>, <code>cell_id</code> and <code>cell_provenance_hash</code> say
 who ran the cell and which cell of which notebook the build is for, so a
 dispatcher can attribute and match a job from the manifest alone rather than
@@ -2709,7 +2740,7 @@ carries the context in the request headers only.</p>
 <ol>
 <li>For each entry in <code>metadata.params.input_specs</code>, look up its <code>uri</code> in <code>inputs[]</code> and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (declared via <code>Content-Length</code> or measured during stream) are rejected with <code>413</code>.</li>
 <li>Run the cell in a subprocess (same as <code>/v1/execute</code>). While it runs, <code>POST</code> each chunk of console output as the raw body to <code>log_url</code> with <code>&amp;stream=stdout</code> or <code>&amp;stream=stderr</code> appended, so the notebook shows it live. <code>log_url</code> is optional: a worker that ignores it still delivers the console in the bundle.</li>
-<li>Upload the resulting output bundle to <code>output.url</code>. Without <code>output.fields</code>, <code>POST</code> the bundle as the raw body with <code>Content-Type: application/x-tar</code> (a Strata route). With <code>output.fields</code>, it is a presigned object-store upload: <code>POST</code> a multipart form containing each field plus the bundle as the <code>file</code> part (S3 answers <code>204</code>).</li>
+<li>Upload the resulting output bundle to <code>output.url</code>. With <code>output.fields</code>, it is a presigned form upload (S3, GCS): <code>POST</code> a multipart form containing each field plus the bundle as the <code>file</code> part (S3 and GCS answer <code>204</code>). With <code>output.method</code> <code>PUT</code> (Azure), <code>PUT</code> the bundle as the raw body with <code>output.headers</code> and <code>Content-Length</code> (Azure answers <code>201</code>). Otherwise <code>POST</code> the bundle as the raw body with <code>Content-Type: application/x-tar</code> (a Strata route).</li>
 <li><code>POST {"output_format": "notebook-output-bundle@v1"}</code> to <code>finalize_url</code>.</li>
 <li>Return the <code>finalize</code> response body to the caller.</li>
 </ol>
