@@ -183,7 +183,7 @@ class HelpScreen(ModalScreen[None]):
         ("f", "Toggle follow mode (auto-select the running cell)"),
         ("d", "Show the notebook DAG"),
         ("i", "Enlarge the selected cell's image output"),
-        ("r", "Force an immediate resync (also auto-resyncs in the background)"),
+        ("r", "Force an immediate resync; after the server closed the session, reopen it"),
         ("ctrl+← / ctrl+→", "Resize the cell-list ↔ detail boundary"),
         ("ctrl+↑ / ctrl+↓", "Resize the top ↔ bottom detail boundary"),
         ("ctrl+x", "Reset the panel layout to defaults"),
@@ -299,6 +299,8 @@ class NotebookTUI(App[None]):
         self._render_sig: tuple[Any, ...] = ()
         # Follow mode: auto-select the cell that starts running.
         self._follow = True
+        # The ``session_closed`` payload once the server ends this session.
+        self._session_closed: dict[str, Any] | None = None
 
         self._cells_pct = _DEFAULT_CELLS_PCT
         self._top_pct = _DEFAULT_TOP_PCT
@@ -399,11 +401,40 @@ class NotebookTUI(App[None]):
                 "`POST /v1/notebooks/open`), or pass --notebook <path>."
             )
         if len(sessions) == 1:
-            return str(sessions[0].get("session_id"))
-        return await self.push_screen_wait(SessionPickerScreen(sessions))
+            sid = str(sessions[0].get("session_id"))
+        else:
+            sid = await self.push_screen_wait(SessionPickerScreen(sessions))
+        # Kept so a session the server closes can be reopened by path.
+        paths = {str(s.get("session_id")): s.get("path") for s in sessions}
+        self._notebook_path = paths.get(sid) or None
+        return sid
 
     async def action_refresh(self) -> None:
+        if self._session_closed is not None:
+            self._reopen()
+            return
         await self._send_sync()
+
+    def _reopen(self) -> None:
+        """Open the closed notebook again by path, as a new session."""
+        if not self._notebook_path:
+            self._notify_closed()
+            return
+        self.run_worker(
+            self._reopen_and_attach(self._notebook_path), name="bootstrap", exclusive=True
+        )
+
+    async def _reopen_and_attach(self, path: str) -> None:
+        self._set_connection("reopening…")
+        try:
+            data = await self._client.open_notebook(path)
+        except TuiClientError as exc:
+            self._set_connection("session closed  ·  r to reopen")
+            self.notify(str(exc), severity="error", title="Reopen failed")
+            return
+        self._session_closed = None
+        self._session_id = str(data["session_id"])
+        await self._ws_loop(self._session_id)
 
     def action_show_dag(self) -> None:
         """Open the layered DAG view of the current cells/edges."""
@@ -446,7 +477,8 @@ class NotebookTUI(App[None]):
     async def _ws_loop(self, session_id: str) -> None:
         url = self._client.ws_url(session_id)
         backoff = 1.0
-        while True:
+        # A closed session refuses reconnects, so ``session_closed`` ends the loop.
+        while self._session_closed is None:
             try:
                 # max_size=None: display outputs routinely exceed the 1 MiB
                 # default, and a 1009 close becomes a reconnect storm as the
@@ -466,9 +498,12 @@ class NotebookTUI(App[None]):
                 raise
             except Exception as exc:  # noqa: BLE001 — any drop → reconnect with backoff
                 self._ws = None
+                if self._session_closed is not None:
+                    break
                 self._set_connection(f"reconnecting… ({type(exc).__name__})")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 10.0)
+        self._ws = None
 
     async def _send_sync(self) -> None:
         if self._ws is None:
@@ -494,6 +529,10 @@ class NotebookTUI(App[None]):
             self._rebuild_cells()
             self._render_status()
             return
+        if msg_type == "session_closed":
+            self._session_closed = payload
+            self._notify_closed()
+            return
         changed = self.vm.apply_frame(msg_type, payload)
         for cid in changed:
             self._refresh_cell(cid)
@@ -507,6 +546,25 @@ class NotebookTUI(App[None]):
         self._render_status()
         if msg_type.startswith("agent_"):
             self._render_agent()
+
+    def _notify_closed(self) -> None:
+        """Say the server closed the session, why, and how to get it back."""
+        closed = self._session_closed or {}
+        reason = closed.get("reason")
+        if self._notebook_path:
+            self._set_connection(f"session closed ({reason})  ·  r to reopen")
+            hint = "Press r to reopen it."
+        else:
+            self._set_connection(f"session closed ({reason})")
+            hint = "Reopen it with `strata watch PATH` (or in the web UI) to start a new session."
+        message = closed.get("message")
+        self.notify(
+            f"{message} {hint}",
+            title="Session closed",
+            severity="warning",
+            timeout=60,
+            markup=False,
+        )
 
     # -- rendering -----------------------------------------------------------
 

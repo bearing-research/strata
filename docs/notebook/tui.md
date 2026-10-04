@@ -148,7 +148,7 @@ in the terminal.
 | `f` | Toggle **follow mode** (auto-select the running cell) |
 | `d` | Show the notebook **DAG** (layered ASCII; `Esc`/`d`/`q` to close) |
 | `i` | Enlarge the selected cell's **image** output to full screen (`Esc`/`i`/`q` to close) |
-| `r` | Force an immediate resync (the viewer also auto-resyncs in the background) |
+| `r` | Force an immediate resync (the viewer also auto-resyncs in the background); after the server closed the session, reopen it |
 | `Ctrl`+`←` / `Ctrl`+`→` | Resize the **cell-list ↔ detail** boundary |
 | `Ctrl`+`↑` / `Ctrl`+`↓` | Resize the **top ↔ bottom** detail boundary |
 | `Ctrl`+`x` | Reset the panel layout to defaults |
@@ -188,6 +188,21 @@ the two-second load never executes again.](../assets/tui-cache-payoff.gif)
 `load` sleeps two seconds on purpose in the
 [quickstart](../getting-started/notebook.md); that is what makes the point
 legible. It is the step you would notice re-running, and it does not.
+
+## When the server closes the session
+
+The server closes a session nobody has used for a while, when too many are
+open, when memory runs low, or when someone closes or deletes the notebook (see
+[Session lifetime](../reference/notebook-protocol.md#session-lifetime-and-session_closed)).
+The viewer then stops reconnecting, shows why in a notification, and keeps
+`session closed (<reason>)` in its header. Unless the notebook was deleted, its
+results stay on disk.
+
+If the viewer knows the notebook's path (you passed `--notebook`, or it
+attached a session from the list or the picker), press `r` to reopen it as a
+new session and keep watching. Attached with `--session ID`, it does not know
+the path: run `strata watch PATH` (or open the notebook in the web UI) to start
+a new session.
 
 ## Options
 

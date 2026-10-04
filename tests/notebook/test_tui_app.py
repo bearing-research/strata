@@ -809,3 +809,134 @@ async def test_time_column_widens_for_a_live_timing_update(monkeypatch):
 
         assert table.get_cell("a", time_col.key) == "cached"
         assert time_col.content_width >= len("cached")
+
+
+class _Reconnected(BaseException):
+    """Escapes the WS loop's broad except, so a reconnect fails the test instead of looping."""
+
+
+class _FakeWS:
+    """A server socket that sends *frames* and then closes cleanly (code 1000)."""
+
+    def __init__(self, frames: list[dict]) -> None:
+        self._frames = frames
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    async def send(self, data: str) -> None:
+        return None
+
+    async def __aiter__(self):
+        for frame in self._frames:
+            yield json.dumps(frame)
+
+
+def _session_closed_frame(reason: str, message: str) -> dict:
+    return {
+        "type": "session_closed",
+        "seq": 9,
+        "ts": "t",
+        "payload": {"reason": reason, "message": message},
+    }
+
+
+@pytest.mark.asyncio
+async def test_session_closed_stops_reconnecting_and_says_why(monkeypatch):
+    """The server refuses a reconnect to a closed session with 1008, so the viewer must not try."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+    urls: list[str] = []
+
+    def fake_connect(url, **kwargs):
+        urls.append(url)
+        if len(urls) > 1:
+            raise _Reconnected(url)
+        return _FakeWS([_session_closed_frame("idle", "Closed after a period without activity.")])
+
+    monkeypatch.setattr("strata.notebook.tui.app.websockets.connect", fake_connect)
+    notes: list[str] = []
+    monkeypatch.setattr(NotebookTUI, "notify", lambda self, message, **kw: notes.append(message))
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="sid-1")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await app._ws_loop("sid-1")
+        await pilot.pause()
+
+        assert len(urls) == 1
+        assert app._ws is None
+        assert "session closed (idle)" in app.sub_title
+        assert len(notes) == 1
+        assert "Closed after a period without activity." in notes[0]
+        # Attached by id: no path to reopen, so it says how to get the notebook back.
+        assert "strata watch PATH" in notes[0]
+
+
+class _FakeOpenClient(TuiClient):
+    """TuiClient whose ``POST /open`` hands out a fresh session id."""
+
+    def __init__(self) -> None:
+        super().__init__("http://localhost:8765")
+        self.opened: list[str] = []
+
+    async def open_notebook(self, path: str) -> dict:
+        self.opened.append(path)
+        return {"session_id": f"sid-{len(self.opened)}"}
+
+
+@pytest.mark.asyncio
+async def test_r_reopens_a_closed_session_by_path(monkeypatch):
+    urls: list[str] = []
+
+    def fake_connect(url, **kwargs):
+        urls.append(url)
+        if urls.count(url) > 1:
+            raise _Reconnected(url)
+        return _FakeWS([_session_closed_frame("session_limit", "Too many open notebooks.")])
+
+    monkeypatch.setattr("strata.notebook.tui.app.websockets.connect", fake_connect)
+    notes: list[str] = []
+    monkeypatch.setattr(NotebookTUI, "notify", lambda self, message, **kw: notes.append(message))
+
+    client = _FakeOpenClient()
+    app = NotebookTUI(client=client, notebook_path="/nb/demo")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _wait(pilot, lambda: len(notes) == 1)
+        assert urls == ["ws://localhost:8765/v1/notebooks/ws/sid-1"]
+        assert "session closed (session_limit)" in app.sub_title
+        assert notes[0] == "Too many open notebooks. Press r to reopen it."
+
+        await pilot.press("r")
+        await _wait(pilot, lambda: len(notes) == 2)
+
+        assert client.opened == ["/nb/demo", "/nb/demo"]
+        assert urls[-1] == "ws://localhost:8765/v1/notebooks/ws/sid-2"
+        assert app._session_id == "sid-2"
+        assert len(urls) == 2
+
+
+@pytest.mark.asyncio
+async def test_auto_attached_session_keeps_its_path_for_reopen(monkeypatch):
+    """Attaching the only listed session remembers its path, so a close offers `r`."""
+    monkeypatch.setattr(
+        "strata.notebook.tui.app.websockets.connect",
+        lambda url, **kw: _FakeWS([_session_closed_frame("idle", "Idle.")]),
+    )
+    notes: list[str] = []
+    monkeypatch.setattr(NotebookTUI, "notify", lambda self, message, **kw: notes.append(message))
+
+    class _Listed(_FakeOpenClient):
+        async def list_sessions(self) -> list[dict]:
+            return [{"session_id": "sid-9", "name": "nb", "path": "/nb/listed"}]
+
+    app = NotebookTUI(client=_Listed())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _wait(pilot, lambda: len(notes) == 1)
+        assert app._notebook_path == "/nb/listed"
+        assert notes == ["Idle. Press r to reopen it."]
