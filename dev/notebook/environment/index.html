@@ -2399,6 +2399,10 @@ lockfile instead. They live under <code>STRATA_NOTEBOOK_SHARED_ENV_DIR</code>, b
   package updates that notebook's <code>pyproject.toml</code> and <code>uv.lock</code> without
   syncing, then syncs, which lands in another environment and moves only that
   notebook's link. The other notebooks keep theirs.</li>
+<li><strong>One install at a time per environment.</strong> A notebook that needs an
+  environment another notebook is still installing (an import opened straight
+  away on a new server, say) waits for that install in its own environment
+  job, then only links. The server keeps answering other requests meanwhile.</li>
 <li><strong>Clean-up.</strong> An environment no notebook links to is removed once it has
   gone unused for <code>STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS</code> (default 7), by an
   hourly sweep in the server or by <code>strata env gc</code>. An environment a notebook
