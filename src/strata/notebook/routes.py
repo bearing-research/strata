@@ -951,9 +951,11 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
         if req.starter_cell:
             with timing.phase("create_starter_cell"):
                 add_cell_to_notebook(notebook_dir, str(uuid.uuid4()))
+        _, opened_by = _reuse_open_session_by_path()
         with timing.phase("session_open"):
             session = _session_manager.open_notebook(
                 notebook_dir,
+                opened_by=opened_by,
                 defer_initial_venv_sync=True,
                 timing=timing,
             )
@@ -1147,9 +1149,11 @@ async def import_jupyter_notebook(
                 raise HTTPException(status_code=400, detail=f"Import failed: {exc}")
 
     # So the frontend can navigate to it immediately, as `create_new_notebook` does.
+    _, opened_by = _reuse_open_session_by_path()
     with timing.phase("session_open"):
         session = _session_manager.open_notebook(
             result.notebook_dir,
+            opened_by=opened_by,
             defer_initial_venv_sync=True,
             timing=timing,
         )
@@ -1288,9 +1292,11 @@ async def import_snapshot_bundle(
             except FileExistsError as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
 
+    _, opened_by = _reuse_open_session_by_path()
     with timing.phase("session_open"):
         session = _session_manager.open_notebook(
             result.notebook_dir,
+            opened_by=opened_by,
             defer_initial_venv_sync=True,
             timing=timing,
         )

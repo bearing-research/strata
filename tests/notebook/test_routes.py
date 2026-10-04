@@ -372,6 +372,40 @@ def test_create_notebook_endpoint(client, tmp_path):
     assert "create_notebook" in response.headers["Server-Timing"]
 
 
+@pytest.mark.parametrize("route", ["create", "import"])
+def test_a_new_notebooks_session_records_its_creators_tenant(app, monkeypatch, tmp_path, route):
+    """MCP hides a session from other tenants by the tenant recorded here."""
+    from strata.auth import principal_context
+    from strata.types import Principal
+
+    set_server_state(monkeypatch, deployment_mode="service", notebook_storage_dir=tmp_path)
+    opened: dict[str, object] = {}
+    real_open = get_session_manager().open_notebook
+
+    def recording_open(directory, **kwargs):
+        opened["opened_by"] = kwargs.get("opened_by")
+        return real_open(directory, **kwargs)
+
+    monkeypatch.setattr(get_session_manager(), "open_notebook", recording_open)
+
+    async def as_ana(scope, receive, send):
+        with principal_context(Principal(id="ana", tenant="acme")):
+            await app(scope, receive, send)
+
+    client = TestClient(as_ana)
+    if route == "create":
+        response = client.post(
+            "/v1/notebooks/create", json={"parent_path": str(tmp_path), "name": "nb"}
+        )
+    else:
+        response = client.post(
+            "/v1/notebooks/import", files={"file": ("nb.ipynb", _ipynb_bytes([_code("x = 1\n")]))}
+        )
+
+    assert response.status_code == 200, response.text
+    assert opened["opened_by"] == ("ana", "acme")
+
+
 def test_create_notebook_endpoint_defers_initial_environment_sync(client, monkeypatch):
     """Fresh notebook creation bootstraps the initial env as a background job."""
     captured: dict[str, object] = {}
@@ -421,6 +455,7 @@ def test_create_notebook_endpoint_defers_initial_environment_sync(client, monkey
         *,
         skip_initial_venv_sync=False,
         defer_initial_venv_sync=False,
+        opened_by=None,
         timing=None,
     ):
         captured["directory"] = directory

@@ -140,6 +140,37 @@ async def test_two_callers_on_one_server_each_act_as_themselves(served):
     assert json.loads(_text(ben))["created_by"] == "ben"
 
 
+async def test_another_tenants_session_is_neither_listed_nor_usable(served):
+    url, session = served
+    session.opened_by = ("ana", "acme")
+    outsider = {**_headers("gus", "notebook:read notebook:write"), "X-Tenant-ID": "globex"}
+    member = {**_headers("bea", "notebook:read"), "X-Tenant-ID": "acme"}
+
+    listed = await _call(url, outsider, "list_notebooks", {})
+    read = await _call(url, outsider, "get_notebook", {"session_id": session.id})
+    edit = await _call(url, outsider, "add_cell", {"session_id": session.id, "source": "z = 1"})
+    own = await _call(url, member, "get_notebook", {"session_id": session.id})
+    own_list = await _call(url, member, "list_notebooks", {})
+
+    assert not listed.is_error
+    assert session.id not in _text(listed)
+    assert read.is_error
+    assert edit.is_error
+    assert len(session.notebook_state.cells) == 1
+    assert not own.is_error, _text(own)
+    assert session.id in _text(own_list)
+
+
+async def test_an_admin_sees_every_tenants_session(served):
+    url, session = served
+    session.opened_by = ("ana", "acme")
+    admin = {**_headers("root", "admin:*"), "X-Tenant-ID": "ops"}
+
+    listed = await _call(url, admin, "list_notebooks", {})
+
+    assert session.id in _text(listed)
+
+
 async def test_a_call_without_valid_credentials_is_refused(served):
     url, _ = served
 

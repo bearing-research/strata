@@ -284,7 +284,8 @@ class NotebookSession:
         # The manager swaps in its own clock, so tests can age a session.
         self.activity_clock: Callable[[], float] = _time.time
         self.last_accessed: float = self.activity_clock()
-        # (principal, tenant) of whoever opened it; open reuses it only for them.
+        # (principal, tenant) of whoever opened it; open reuses it only for them,
+        # and MCP hides it from other tenants.
         self.opened_by: tuple[str, str | None] | None = None
 
         # Seeded from ``.strata/runtime.json`` so the cache-savings figure survives a restart.
