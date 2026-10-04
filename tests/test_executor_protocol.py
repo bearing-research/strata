@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import threading
 
 import httpx
@@ -410,6 +411,7 @@ class TestExecutorHTTPIntegration:
         assert "v1" in data["capabilities"]["protocol_versions"]
         assert "duckdb_sql@v1" in data["capabilities"]["transform_refs"]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="the fake nvidia-smi is a shell script")
     def test_health_reports_the_machines_accelerators(self, executor_server, tmp_path, monkeypatch):
         """A fake ``nvidia-smi`` on ``PATH`` stands in for the driver."""
         from strata.notebook import hardware
