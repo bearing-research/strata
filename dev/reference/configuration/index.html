@@ -3939,7 +3939,7 @@ so a key exported where the server starts does not reach every notebook.</p>
 <tr>
 <td><code>STRATA_AI_API_KEY</code></td>
 <td><code>None</code></td>
-<td>API key (generic, works with any provider). Also read from the notebook's environment, where it is used only when the server sets no key</td>
+<td>API key (generic, works with any provider). Also read from the notebook's environment, where it overrides the server's key (a provider key there wins over it)</td>
 </tr>
 <tr>
 <td><code>STRATA_AI_MAX_OUTPUT_TOKENS</code></td>

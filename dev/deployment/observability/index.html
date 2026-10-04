@@ -2402,12 +2402,14 @@ in the container). Then run a few <code>scan@v1</code> materializes against
 <code>http://localhost:8765</code> with the
 <a href="../../getting-started/core/#3-materialize-a-result">Python client</a>,
 using <code>file:///data/warehouse#&lt;namespace&gt;.&lt;table&gt;</code> as the input.</p>
-<p><code>benchmarks/capacity_sweep.py --no-server</code> is not a load source for
-this stack. It has no option for table URIs, so it sends placeholder
-table names, every request fails before any data is read, and the
-scan, cache and QoS panels stay flat. Without <code>--no-server</code>
-the sweep starts its own server on a free port and loads that one
-instead.</p>
+<p>For sustained load, point <code>benchmarks/capacity_sweep.py</code> at the stack:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>benchmarks/capacity_sweep.py<span class="w"> </span>--no-server<span class="w"> </span>--base-url<span class="w"> </span>http://localhost:8765<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span>--table-uri<span class="w"> </span><span class="s1">'file:///data/warehouse#&lt;namespace&gt;.&lt;table&gt;'</span>
+</code></pre></div>
+<p><code>--table-uri</code> is repeatable, and each table needs the columns the
+sweep's queries use: <code>id</code>, <code>ts</code>, <code>user_id</code>, <code>category</code> and <code>value</code>.
+Without <code>--no-server</code> the sweep starts its own server on a free port
+and loads that one instead.</p>
 <p>After a few scans:</p>
 <ul>
 <li><strong>Grafana</strong> (<a href="http://localhost:3000">:3000</a>) - the scan-rate,
