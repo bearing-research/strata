@@ -3813,12 +3813,12 @@ without a URL or a config, to find the server. The server does not read
 <tr>
 <td><code>STRATA_WORKER_ENV_ROOT</code></td>
 <td><code>~/.strata/worker-envs</code></td>
-<td>Where the worker keeps one locked environment per notebook <code>uv.lock</code> and interpreter build. See <a href="../executor-protocol/#the-environment-block">the <code>environment</code> block</a>.</td>
+<td>Where the worker keeps one locked environment per notebook <code>uv.lock</code> and interpreter build, and under <code>r/</code> one R library per <code>renv.lock</code> and R build. See <a href="../executor-protocol/#the-environment-block">the <code>environment</code> block</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_WORKER_ENV_REGISTRY_URL</code></td>
 <td><code>None</code></td>
-<td>Fetch a missing locked environment from <code>&lt;url&gt;/&lt;key&gt;/&lt;interpreter&gt;/&lt;platform&gt;</code> as a <code>.tar.gz</code> instead of building it with <code>uv sync</code>; a <code>404</code> is built locally. See <a href="../executor-protocol/#the-environment-block">the <code>environment</code> block</a>.</td>
+<td>Fetch a missing locked environment from <code>&lt;url&gt;/&lt;key&gt;/&lt;interpreter&gt;/&lt;platform&gt;</code> as a <code>.tar.gz</code> instead of building it with <code>uv sync</code>, and a missing R library from <code>&lt;url&gt;/r/&lt;key&gt;/&lt;R version&gt;/&lt;platform&gt;</code> instead of restoring it with renv; a <code>404</code> is built locally. See <a href="../executor-protocol/#the-environment-block">the <code>environment</code> block</a>.</td>
 </tr>
 </tbody>
 </table>
