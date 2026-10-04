@@ -3678,6 +3678,26 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>How long the last person to change a notebook cell holds it. An edit by someone else inside the window is refused with <code>cell_locked</code> and the holder's name, over the WebSocket and over REST, unless it sends <code>force</code>. One identity never contends with itself, so a single user in several tabs is unaffected. <code>0</code> turns the soft lock off. See the <a href="../notebook-protocol/#presence-and-soft-locks">client protocol</a>.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_WARM_POOL_SIZE</code></td>
+<td><code>2</code></td>
+<td>Pre-spawned processes each open notebook keeps ready, so a cell starts with its imports loaded. Applies to the Python pool and, for a notebook with R cells, the R pool. Each holds memory for as long as the notebook is open. <code>0</code> turns the pools off: cells start cold.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_SESSION_TTL_SECONDS</code></td>
+<td><code>14400</code> (4 h)</td>
+<td>An open notebook nobody has edited, run or focused for this long is closed, with a tab connected or not, and its warm processes stop. Syncs, previews and keep-alives do not count; a running cell does. Its results stay on disk and reopening restores them; a connected tab gets <code>session_closed</code> and offers to reopen. Checked every minute. See <a href="../notebook-protocol/#session-lifetime-and-session_closed">Session lifetime</a>.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_MAX_SESSIONS</code></td>
+<td><code>50</code></td>
+<td>Most notebooks open at once. Beyond it the least recently used is closed, with a tab connected or not.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB</code></td>
+<td>unset (off)</td>
+<td>When the host's available memory (<code>MemAvailable</code> in <code>/proc/meminfo</code>) is below this many MB, the least recently used open notebook is closed, one at a time, until it is above or nothing idle is left. Checked every minute and before each open. Linux only: elsewhere it logs a warning once and does nothing.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code></td>
 <td><code>[]</code> (everything)</td>
 <td>Which of the server's environment variables a cell subprocess is given. A cell is arbitrary Python, so when it is unset (the default, and right on a laptop) every member who can run a cell can read <code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code>, <code>STRATA_PROXY_TOKEN</code>, worker tokens and every data-source credential the server holds. Entries are exact names or a prefix written with a trailing <code>*</code>; the essentials a subprocess cannot start without (<code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code>, <code>UV_*</code>, …) are always included, and <code>STRATA_*</code> is dropped unless named exactly. A cell's own <code>[env]</code> and mount credentials travel in the manifest rather than the process environment, so the list stays short. Applies to every process that runs cell code: the cold, R and batch harnesses, the warm pool worker, the inspect REPL and cell tests. Not isolation on its own: a cell running as the server's user can read <code>/proc/&lt;server pid&gt;/environ</code>; see <code>STRATA_NOTEBOOK_HARNESS_USER</code>.</td>

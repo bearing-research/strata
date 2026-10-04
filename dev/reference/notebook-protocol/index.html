@@ -1571,6 +1571,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#session-lifetime-and-session_closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session lifetime and session_closed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#message-types" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2238,6 +2249,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#session-lifetime-and-session_closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session lifetime and session_closed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#message-types" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2431,6 +2453,10 @@ enforcement is symmetric across REST and WS, with no opt-outs.</p>
 <li><code>/open</code>, <code>/create</code> and <code>/discover</code> work in service mode. What is
   personal-mode-only is narrower: the two path-keyed deletes and the two
   <code>/sessions</code> routes, which return <code>403 Forbidden</code> elsewhere.</li>
+<li><code>/open</code> returns the session the same principal already has open on that
+  path, and never another principal's: service mode has no per-session owner
+  check, so a session id is what keeps members out of each other's live
+  sessions. Without a principal, every open starts a new session.</li>
 <li>Every route on the <code>/v1/notebooks</code> and <code>/v1/projects</code> routers is scope
   gated under principal auth, by the same <code>notebook:read</code> /
   <code>notebook:write</code> / <code>notebook:execute</code> table that checks the frames below</li>
@@ -2567,15 +2593,51 @@ against the preserved execution state.</p>
 </ul>
 <p>See <a href="../websocket/#reconnection-semantics">WebSocket Protocol → Reconnection semantics</a>
 for the message-level detail.</p>
+<h2 id="session-lifetime-and-session_closed">Session lifetime and <code>session_closed</code><a class="headerlink" href="#session-lifetime-and-session_closed" title="Permanent link">&para;</a></h2>
+<p>An open session holds the notebook's warm processes
+(<code>STRATA_NOTEBOOK_WARM_POOL_SIZE</code> per pool). Closing one loses nothing else:
+<code>runtime.json</code> and the notebook's artifact store hold what it computed, so
+reopening it restores every result. The server closes a session when:</p>
+<ul>
+<li><strong>Nobody used it for <code>STRATA_NOTEBOOK_SESSION_TTL_SECONDS</code></strong> (default four
+  hours), whether or not a tab is connected. Use is an edit, a run or a focus:
+  a frame that needs <code>notebook:write</code> or <code>notebook:execute</code>, <code>cell_focus</code>, a
+  REST call above <code>notebook:read</code>, or an MCP tool call. <code>notebook_sync</code>,
+  previews, profiling requests, unknown frames, WebSocket pings and REST reads
+  do not count, so a tab left open does not keep its session forever. A
+  running cell does: idleness starts when the run ends.</li>
+<li><strong>More than <code>STRATA_NOTEBOOK_MAX_SESSIONS</code> are open.</strong> The least recently
+  used goes first.</li>
+<li><strong>Available memory is below <code>STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB</code></strong>
+  (off by default; Linux only). The least recently used goes first, one at a
+  time, until memory is above the floor or nothing idle is left. Checked
+  before each open and every minute.</li>
+<li><strong>A client asks:</strong> <code>POST /v1/notebooks/{session_id}/close</code> closes it without
+  touching the notebook (<code>409</code> while a cell runs or the environment is
+  changing). <code>DELETE /v1/notebooks/{session_id}</code> closes it as it deletes.</li>
+</ul>
+<p>A server pass every minute applies the first three. None of them closes a
+session with a running cell, an environment job, a cell soft lock still held,
+or a <a href="../rest-api/">quiesce</a> hold. Before the socket closes (code <code>1000</code>,
+<code>Session closed</code>), each client gets a <code>session_closed</code> frame:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"session_closed"</span><span class="p">,</span><span class="w"> </span><span class="nt">"seq"</span><span class="p">:</span><span class="w"> </span><span class="mi">41</span><span class="p">,</span><span class="w"> </span><span class="nt">"payload"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"idle"</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"This notebook was closed after a period without activity."</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">}}</span>
+</code></pre></div>
+<p><code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code> or <code>deleted</code>. Do not
+reconnect to the old <code>session_id</code> (the upgrade closes with <code>1008 Notebook not
+found</code>); reopen the notebook by path with <code>POST /v1/notebooks/open</code>, which
+starts a new session. The browser shows the message with a Reopen button.</p>
 <h2 id="message-types">Message types<a class="headerlink" href="#message-types" title="Permanent link">&para;</a></h2>
 <p>The full list of WS frame types lives on the <a href="../websocket/">WebSocket Protocol</a>
 page. <strong>Every type corresponds to a member of
 <code>strata.notebook.protocol.MessageType</code></strong> - that enum is the canonical
 source. A non-Vue client can enumerate the full set by iterating it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata.notebook.protocol</span><span class="w"> </span><span class="kn">import</span> <span class="n">MessageType</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">for</span> <span class="n">member</span> <span class="ow">in</span> <span class="n">MessageType</span><span class="p">:</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">member</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">member</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata.notebook.protocol</span><span class="w"> </span><span class="kn">import</span> <span class="n">MessageType</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">for</span> <span class="n">member</span> <span class="ow">in</span> <span class="n">MessageType</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">member</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">member</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
 </code></pre></div>
 <p>The enum is the single source of truth; the docs are organized for
 human readability but the values match exactly. If you see a frame whose
@@ -2584,15 +2646,15 @@ human readability but the values match exactly. If you see a frame whose
 <p><code>MessageType</code> names the frames; it does not describe what rides in <code>payload</code>.
 For the frames that have a payload model, TypeScript declarations are generated
 from those models into <code>frontend/src/types/ws-payloads.generated.ts</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">isTypedFrame</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">'@/types/notebook'</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">isTypedFrame</span><span class="p">(</span><span class="nx">msg</span><span class="p">,</span><span class="w"> </span><span class="s1">'error'</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="c1">// msg.payload.code narrows to the union of known codes, without a cast</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">isTypedFrame</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">'@/types/notebook'</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">isTypedFrame</span><span class="p">(</span><span class="nx">msg</span><span class="p">,</span><span class="w"> </span><span class="s1">'error'</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="c1">// msg.payload.code narrows to the union of known codes, without a cast</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="p">}</span>
 </code></pre></div>
 <p>The file is committed, so the frontend build needs no Python step. Regenerate it
 after changing a payload model:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/generate_ws_types.py
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/generate_ws_types.py
 </code></pre></div>
 <p>A test fails if the committed file and the models disagree, so the two cannot
 drift apart quietly. Frames without a model keep <code>payload: unknown</code> and have to

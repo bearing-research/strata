@@ -1732,6 +1732,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#errors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2475,6 +2486,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#errors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2999,6 +3021,23 @@
 </tr>
 </tbody>
 </table>
+<h3 id="session">Session<a class="headerlink" href="#session" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Payload</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_closed</code></td>
+<td><code>{ "reason": "idle", "message": "..." }</code></td>
+<td>The server closed this session; the socket closes next with <code>1000</code>. <code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code> (the close route) or <code>deleted</code>. Reopen the notebook by path; see <a href="#session-lifetime">Session lifetime</a></td>
+</tr>
+</tbody>
+</table>
 <h3 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -3037,11 +3076,13 @@
 <p>A session ends when:</p>
 <ul>
 <li>the notebook is deleted (<code>DELETE /v1/notebooks/{session_id}</code>, or <code>POST /v1/notebooks/delete-by-path</code>, which closes any session open on that directory),</li>
-<li>it has had no connected WebSocket and no request for 4 hours,</li>
-<li>50 sessions are open and another notebook is opened: the least recently used session with no connected WebSocket is closed,</li>
+<li>a client closes it (<code>POST /v1/notebooks/{session_id}/close</code>), which leaves the notebook on disk,</li>
+<li>nobody has edited, run or focused anything in it for <code>STRATA_NOTEBOOK_SESSION_TTL_SECONDS</code> (default 4 hours), with a tab connected or not,</li>
+<li>more than <code>STRATA_NOTEBOOK_MAX_SESSIONS</code> (default 50) are open: the least recently used is closed,</li>
+<li><code>STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB</code> is set and the host's available memory is below it: the least recently used are closed until it is above,</li>
 <li>or the server restarts.</li>
 </ul>
-<p>The idle and count checks run when a notebook is opened, and never close a session that has a connected WebSocket. A reconnect to a closed session is refused with <code>1008</code>; call <code>POST /v1/notebooks/open</code> again for a new session ID.</p>
+<p><code>notebook_sync</code>, previews, profiling requests, unknown frames and pings are not activity; a running cell is. The checks run every minute and when a notebook is opened, and never close a session with a running cell, an environment job, a held soft lock or a quiesce hold. Connected clients get <code>session_closed</code> with the reason before the socket closes. A reconnect to a closed session is refused with <code>1008</code>; call <code>POST /v1/notebooks/open</code> again for a new session ID. See <a href="../notebook-protocol/#session-lifetime-and-session_closed">Session lifetime and <code>session_closed</code></a>.</p>
 <h3 id="cancelling-a-sql-cell">Cancelling a SQL cell<a class="headerlink" href="#cancelling-a-sql-cell" title="Permanent link">&para;</a></h3>
 <p>A cancel stops the notebook waiting for the cell: the run is abandoned, no
 result is published, the cell leaves <code>running</code>, and the next cell can start.
@@ -3075,7 +3116,7 @@ was going to cost; what it no longer costs is the notebook.</p>
 </tr>
 </tbody>
 </table>
-<p>If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with <code>1008</code>. The client should call <code>POST /v1/notebooks/open</code> to start a new session.</p>
+<p>If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with <code>1008</code>. A session closed while you are connected sends <code>session_closed</code> and then closes with <code>1000</code>. The client should call <code>POST /v1/notebooks/open</code> to start a new session.</p>
 <p>The server does not send protocol-level pings; the WebSocket library's default frame keepalive is what holds idle connections open. If your client sees no traffic for an extended period and you can't tell whether the connection is live, the safest probe is to send <code>notebook_sync</code> and watch for the response.</p>
 
 
