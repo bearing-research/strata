@@ -17,7 +17,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from strata.auth import get_principal, principal_context
-from strata.notebook.ops import LocalNotebookOps
+from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
 from strata.notebook.scopes import required_scope_for_tool
 
 if TYPE_CHECKING:
@@ -875,7 +875,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
             logger.warning(_mcp_import_failure(exc.name))
         return None
 
-    from mcp.server.mcpserver.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
     class AuthorizingMCPServer(MCPServer):
         """Every tool call runs as the caller that made it, within its scopes.
@@ -896,7 +896,13 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
             ):
                 raise ToolError(f"'{name}' requires the {required} scope")
             with principal_context(principal):
-                return await super().call_tool(name, arguments, context)
+                try:
+                    return await super().call_tool(name, arguments, context)
+                except UnexpectedToolError as exc:
+                    # The tools raise these for the agent to read; anything else stays generic.
+                    if isinstance(exc.__cause__, ValueError | NotebookOpsError):
+                        raise ToolError(f"{exc}: {exc.__cause__}") from exc.__cause__
+                    raise
 
     mcp = AuthorizingMCPServer("strata-notebook")
 

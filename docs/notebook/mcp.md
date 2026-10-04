@@ -87,6 +87,12 @@ The typical loop:
    dependencies (`add_dependency` / `remove_dependency`) - all against that
    session, while you watch it happen in the browser or the TUI.
 
+A call that fails for a reason the agent can act on (an unknown session or
+cell, a bad argument, a busy notebook) returns that reason in the tool error,
+for example `no open notebook session '…'; call list_notebooks first`. An
+unexpected server failure returns only `Error executing tool <name>`; the
+details stay in the server log.
+
 ## Tools
 
 | Tool | Description |
