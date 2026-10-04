@@ -5,9 +5,11 @@ from __future__ import annotations
 import http.server
 import io
 import json
+import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import threading
 import tomllib
@@ -293,6 +295,8 @@ class TestTheWorkerSide:
             tar.addfile(info, io.BytesIO(python))
         body = archive.getvalue()
         spec = self._spec()
+        # This interpreter, so the expected build below is the one the worker probes.
+        spec["python"] = sys.executable
         served = []
 
         class Registry(http.server.BaseHTTPRequestHandler):
@@ -319,10 +323,77 @@ class TestTheWorkerSide:
         finally:
             server.shutdown()
 
-        assert served == [f"/envs/{spec['key']}"]
+        build = f"{sys.implementation.name}-{platform.python_version()}{sys.abiflags}"
+        assert served == [f"/envs/{spec['key']}/{build}/{sysconfig.get_platform()}"], (
+            "the fetch path names the interpreter build and platform the archive was built for"
+        )
         assert prepared.installed is True
         assert again.installed is False
         assert prepared.python.exists()
+
+    @staticmethod
+    def _registry(status: int):
+        served: list[str] = []
+
+        class Registry(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                served.append(self.path)
+                self.send_response(status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *args):
+                return None
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Registry)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server, served
+
+    async def test_a_registry_miss_is_built_locally(self, tmp_path, monkeypatch):
+        nb = _notebook(tmp_path)
+        lock = (nb / "uv.lock").read_text()
+        spec = {
+            "key": uv_lock_key(lock),
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+            "lockfile": lock,
+            "pyproject": (nb / "pyproject.toml").read_text(),
+        }
+        server, served = self._registry(404)
+        monkeypatch.setenv(worker_env.ENV_ROOT_VAR, str(tmp_path / "envs"))
+        monkeypatch.setenv(
+            worker_env.REGISTRY_VAR, f"http://127.0.0.1:{server.server_address[1]}/envs"
+        )
+        try:
+            prepared = await worker_env.ensure_environment(spec)
+            again = await worker_env.ensure_environment(spec)
+        finally:
+            server.shutdown()
+
+        assert len(served) == 1 and served[0].startswith(f"/envs/{spec['key']}/")
+        assert prepared.installed is True
+        assert again.installed is False, "a locally built environment is reused, not refetched"
+        answer = subprocess.run(
+            [str(prepared.python), "-c", "import tinydep; print(tinydep.ANSWER)"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert answer.stdout.strip() == "42"
+
+    async def test_a_failing_registry_is_an_error_not_a_build(self, tmp_path, monkeypatch):
+        server, served = self._registry(500)
+        monkeypatch.setenv(worker_env.ENV_ROOT_VAR, str(tmp_path / "envs"))
+        monkeypatch.setenv(
+            worker_env.REGISTRY_VAR, f"http://127.0.0.1:{server.server_address[1]}/envs"
+        )
+        monkeypatch.setattr(worker_env, "_install", lambda *a: pytest.fail("installed"))
+        try:
+            with pytest.raises(worker_env.WorkerEnvironmentError, match="could not fetch"):
+                await worker_env.ensure_environment(self._spec())
+        finally:
+            server.shutdown()
+
+        assert len(served) == 1
 
 
 class TestAnEnvironmentIsCompleteWhenItRuns:
@@ -350,9 +421,10 @@ class TestAnEnvironmentIsCompleteWhenItRuns:
         served.mkdir()
         monkeypatch.setenv("STRATA_WORKER_ENV_ROOT", str(tmp_path / "worker-envs"))
 
-        def _fetch(registry, key, env_dir):
+        def _fetch(url, env_dir):
             with tarfile.open(archive) as tar:
                 tar.extractall(env_dir, filter="data")
+            return True
 
         monkeypatch.setattr("strata.notebook.worker_env._fetch", _fetch)
         monkeypatch.setenv("STRATA_WORKER_ENV_REGISTRY_URL", "http://registry")
@@ -376,15 +448,16 @@ class TestAnEnvironmentIsCompleteWhenItRuns:
         # A registry that has been fixed is fetched again rather than skipped.
         fetched: list[str] = []
 
-        def _good_fetch(registry, key, env_dir):
-            fetched.append(key)
+        def _good_fetch(url, env_dir):
+            fetched.append(url)
             (env_dir / "bin").mkdir(parents=True, exist_ok=True)
             (env_dir / "bin" / "python").write_text("#!/bin/sh\n")
+            return True
 
         monkeypatch.setattr("strata.notebook.worker_env._fetch", _good_fetch)
         prepared = await ensure_environment(spec)
 
-        assert fetched == [spec["key"]]
+        assert len(fetched) == 1 and fetched[0].startswith(f"http://registry/{spec['key']}/")
         assert prepared.installed is True
 
 

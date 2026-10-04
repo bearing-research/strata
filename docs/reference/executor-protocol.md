@@ -93,8 +93,15 @@ A request to a worker that advertises `locked_environments` carries the notebook
 The worker runs the cell's harness with the interpreter of that environment:
 
 - It keeps one environment per `key` and interpreter build under `STRATA_WORKER_ENV_ROOT` (default `~/.strata/worker-envs`). An environment already there is reused, so a second cell with the same lock installs nothing.
-- A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>` as a `.tar.gz` of the environment directory when that is set, and otherwise built with `uv sync --frozen` from the lock. The worker needs `uv` on its `PATH` for that.
+- A missing one is fetched from `STRATA_WORKER_ENV_REGISTRY_URL/<key>/<interpreter>/<platform>` as a `.tar.gz` of the environment directory when that is set. A registry that answers `404` has none, and the worker builds the environment itself; any other failure fails the cell. Without a registry the worker builds it, with `uv sync --frozen` from the lock. The worker needs `uv` on its `PATH` for that.
 - A lock whose key is not `key`, or that cannot be installed, fails the cell with the reason (`500`).
+
+The two last segments of a registry path name the interpreter the worker resolved for `python` (`uv python find --system <python>`), since an environment's contents depend on the build it was made with:
+
+- `<interpreter>` is `f"{sys.implementation.name}-{platform.python_version()}{sys.abiflags}"`, for example `cpython-3.13.1`, or `cpython-3.13.1t` for a free-threaded build.
+- `<platform>` is `sysconfig.get_platform()`, for example `linux-x86_64`, `linux-aarch64` or `macosx-14.0-arm64`.
+
+So one registry serves every Python build and platform, and a registry that prebuilds for a worker image runs those two expressions with the image's interpreter.
 
 **`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 
