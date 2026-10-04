@@ -286,15 +286,10 @@ def test_a_gcs_request_warehouse_reads_with_the_gcs_settings(tmp_path, fake_gcs)
     _reads_request_warehouse(config, "gs://lake/wh#taxi.trips", first)
 
 
-@pytest.mark.parametrize("file_io", ["adlfs", "pyarrow"])
-def test_an_azure_request_warehouse_reads_with_the_azure_settings(tmp_path, file_io):
-    """An ``abfs://`` URI with no catalog uri: its metadata is read with the Azure settings.
-
-    pyiceberg reads ``abfs://`` with adlfs when it is installed, else with pyarrow, which
-    takes no connection string and keeps a ``container@host`` netloc in the object path.
-    """
+@pytest.fixture
+def azurite():
+    """Azurite with a ``lake`` container."""
     from azure.storage.blob import BlobServiceClient
-    from pyiceberg.catalog.sql import SqlCatalog
     from testcontainers.community.azurite import AzuriteContainer
 
     # :latest because older Azurite rejects the installed SDK's API version.
@@ -304,37 +299,74 @@ def test_an_azure_request_warehouse_reads_with_the_azure_settings(tmp_path, file
     try:
         connection_string = container.get_connection_string()
         BlobServiceClient.from_connection_string(connection_string).create_container("lake")
-        warehouse = (
-            f"abfs://lake@{container.account_name}.dfs.core.windows.net/wh"
-            if file_io == "adlfs"
-            else "abfs://lake/wh"
-        )
-        meta = tmp_path / "meta.sqlite"
-        writer = SqlCatalog(
-            "strata",
-            uri=f"sqlite:///{meta}",
-            warehouse=warehouse,
-            **{"adls.connection-string": connection_string},
-        )
-        first = _two_snapshots(writer)
-        blob_port = container.get_exposed_port(10000)
-        settings: dict[str, Any] = (
-            {"azure_connection_string": connection_string}
-            if file_io == "adlfs"
-            else {"catalog_properties": {"py-io-impl": "pyiceberg.io.pyarrow.PyArrowFileIO"}}
-        )
-        config = StrataConfig(
-            cache_dir=tmp_path / "cache",
-            metadata_db=meta,
-            azure_account_name=container.account_name,
-            azure_account_key=container.account_key,
-            azure_endpoint_url=f"http://{container.get_container_host_ip()}:{blob_port}",
-            **settings,
-        )
-
-        _reads_request_warehouse(config, f"{warehouse}#taxi.trips", first)
+        yield container
     finally:
         container.stop()
+
+
+def _azure_writer(tmp_path, azurite, warehouse: str):
+    """A SQL catalog in ``tmp_path`` writing ``warehouse`` through adlfs."""
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    return SqlCatalog(
+        "strata",
+        uri=f"sqlite:///{tmp_path / 'meta.sqlite'}",
+        warehouse=warehouse,
+        **{"adls.connection-string": azurite.get_connection_string()},
+    )
+
+
+def _azure_config(tmp_path, azurite, **settings: Any) -> StrataConfig:
+    blob_port = azurite.get_exposed_port(10000)
+    return StrataConfig(
+        cache_dir=tmp_path / "cache",
+        metadata_db=tmp_path / "meta.sqlite",
+        azure_account_name=azurite.account_name,
+        azure_account_key=azurite.account_key,
+        azure_endpoint_url=f"http://{azurite.get_container_host_ip()}:{blob_port}",
+        **settings,
+    )
+
+
+_PYARROW_FILE_IO = {"catalog_properties": {"py-io-impl": "pyiceberg.io.pyarrow.PyArrowFileIO"}}
+
+
+@pytest.mark.parametrize("file_io", ["adlfs", "pyarrow"])
+def test_an_azure_request_warehouse_reads_with_the_azure_settings(tmp_path, azurite, file_io):
+    """An ``abfs://`` URI with no catalog uri: its metadata is read with the Azure settings.
+
+    pyiceberg reads ``abfs://`` with adlfs (and fails without it) unless ``py-io-impl``
+    names pyarrow, which takes no connection string and reads only ``abfs://<container>/``.
+    """
+    warehouse = (
+        f"abfs://lake@{azurite.account_name}.dfs.core.windows.net/wh"
+        if file_io == "adlfs"
+        else "abfs://lake/wh"
+    )
+    first = _two_snapshots(_azure_writer(tmp_path, azurite, warehouse))
+    settings: dict[str, Any] = (
+        {"azure_connection_string": azurite.get_connection_string()}
+        if file_io == "adlfs"
+        else _PYARROW_FILE_IO
+    )
+
+    _reads_request_warehouse(
+        _azure_config(tmp_path, azurite, **settings), f"{warehouse}#taxi.trips", first
+    )
+
+
+def test_pyarrow_cannot_read_a_table_recorded_under_the_account_host(tmp_path, azurite):
+    """The locations pyiceberg reads are the ones the metadata records, not the request's.
+
+    So no rewrite of the requested warehouse URI makes such a table readable without adlfs.
+    """
+    host = f"abfs://lake@{azurite.account_name}.dfs.core.windows.net/wh"
+    _two_snapshots(_azure_writer(tmp_path, azurite, host))
+    config = _azure_config(tmp_path, azurite, **_PYARROW_FILE_IO)
+
+    for warehouse in (host, "abfs://lake/wh"):
+        with pytest.raises(OSError, match=f"lake@{azurite.account_name}"):
+            ReadPlanner(config).plan(f"{warehouse}#taxi.trips")
 
 
 REST_IMAGE = "apache/iceberg-rest-fixture:1.9.2"

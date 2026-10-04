@@ -342,8 +342,11 @@ Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is one of the forms
 
 The warehouse may be local or on S3, GCS (`gs://`) or Azure (`abfs://`,
 `abfss://`; pyiceberg has no `az://` catalog support); files on GCS and Azure are read with the same
-`STRATA_GCS_*` and `STRATA_AZURE_*` settings the artifact blob store uses. The
-name must be a valid Python identifier.
+`STRATA_GCS_*` and `STRATA_AZURE_*` settings the artifact blob store uses. An
+Azure table's metadata is read with `adlfs`, or with PyArrow only when the table's
+locations have no `@<account>` host
+([Azure Storage](../reference/configuration.md#azure-storage)). The name must be a
+valid Python identifier.
 
 Catalogs are named on the server, not in `notebook.toml`, because the scan the
 cell runs happens in the server and has to resolve the same name. (A DuckDB

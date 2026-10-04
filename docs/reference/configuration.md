@@ -199,10 +199,22 @@ credential.
 The same settings read lake tables on Azure. A table named by an `abfs://` or
 `abfss://` warehouse URI (see [Catalog](#catalog)) has its metadata read with the account name, key, SAS token, connection string and
 endpoint that are set, passed to its catalog as `adls.*` properties; with no
-secret set it uses `DefaultAzureCredential`. PyIceberg reads that metadata with
-`adlfs` when it is installed, else with PyArrow, which ignores the connection
-string. A key set in `STRATA_CATALOG_PROPERTIES` overrides the one Strata
-derives.
+secret set it uses `DefaultAzureCredential`. A key set in
+`STRATA_CATALOG_PROPERTIES` overrides the one Strata derives.
+
+PyIceberg reads and writes that metadata with `adlfs`, which the `azure` extra
+does not install: without it the read fails with `No module named 'adlfs'`,
+unless `STRATA_CATALOG_PROPERTIES` sets `py-io-impl` to
+`pyiceberg.io.pyarrow.PyArrowFileIO`. PyArrow ignores the connection string and
+handles only locations of the form `abfs[s]://<container>/<path>`, with the
+account from `STRATA_AZURE_ACCOUNT_NAME`. In a location of the form
+`abfs[s]://<container>@<account>.dfs.core.windows.net/<path>` it takes
+`<container>@<account>.dfs.core.windows.net` for the container, and the request
+fails. PyIceberg follows the metadata and manifest locations the table's metadata
+records, not the warehouse URI in the request, so naming the warehouse in the
+other form changes nothing: a table written under `<container>@<account>`
+locations needs `adlfs`. One written under `abfs[s]://<container>/<path>` reads
+with either.
 
 | Variable                              | Default | Description                                        |
 | ------------------------------------- | ------- | -------------------------------------------------- |
