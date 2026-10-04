@@ -21,7 +21,7 @@ runtime_id = "df-cluster"
 
 [workers.config]
 url = "https://strata-df-cluster.fly.dev/v1/execute"
-transport = "http"
+transport = "direct"
 
 [[workers]]
 name = "gpu-fly"
@@ -30,4 +30,4 @@ runtime_id = "gpu-fly"
 
 [workers.config]
 url = "https://fangchenli--strata-gpu-worker-worker.modal.run/v1/execute"
-transport = "http"
+transport = "direct"

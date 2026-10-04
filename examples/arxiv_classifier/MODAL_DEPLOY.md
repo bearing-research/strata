@@ -55,7 +55,7 @@ backend = "executor"
 runtime_id = "gpu-fly"
 [workers.config]
 url = "https://<your-workspace>--strata-gpu-worker-gpu-executor.modal.run/v1/execute"
-transport = "http"
+transport = "direct"
 ```
 
 ## Verifying it works

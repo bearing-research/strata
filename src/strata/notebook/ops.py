@@ -669,13 +669,16 @@ class LocalNotebookOps:
         Raises
         ------
         NotebookOpsError
-            If worker definitions aren't editable (service mode), the backend or
-            fields are invalid, or an ``executor`` worker is missing ``url``.
+            If worker definitions aren't editable (service mode), the backend,
+            transport or fields are invalid, or an ``executor`` worker is missing ``url``.
         """
         from pydantic import ValidationError
 
         from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
-        from strata.notebook.workers import notebook_worker_definitions_editable
+        from strata.notebook.workers import (
+            check_worker_transport,
+            notebook_worker_definitions_editable,
+        )
         from strata.notebook.writer import update_notebook_worker, update_notebook_workers
 
         state = self._session.notebook_state
@@ -684,6 +687,7 @@ class LocalNotebookOps:
         if backend == WorkerBackendType.EXECUTOR.value and not (url or "").strip():
             raise NotebookOpsError(f"executor worker {name!r} requires a url")
         try:
+            check_worker_transport(transport)
             spec = WorkerSpec(
                 name=name,
                 backend=WorkerBackendType(backend),

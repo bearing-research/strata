@@ -48,6 +48,7 @@ from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
     build_worker_catalog_with_health,
+    check_worker_transport,
     notebook_worker_definitions_editable,
     validate_worker_assignment,
 )
@@ -2363,6 +2364,8 @@ async def update_notebook_workers_endpoint(
         )
 
     try:
+        for worker in req.workers:
+            check_worker_transport(worker.config.transport)
         update_notebook_workers(session.path, req.workers)
         session.reload()
         return {

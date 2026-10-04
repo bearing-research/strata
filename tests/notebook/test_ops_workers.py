@@ -83,6 +83,26 @@ def test_add_worker_rejects_bad_name(nb):
         LocalNotebookOps(nb).add_worker("bad name!", url=URL)
 
 
+def test_add_worker_refuses_an_unknown_transport(nb):
+    """An unknown value used to persist and then dispatch as direct."""
+    with pytest.raises(NotebookOpsError, match="unknown worker transport 'carrier-pigeon'"):
+        LocalNotebookOps(nb).add_worker("gpu", url=URL, transport="carrier-pigeon")
+    assert parse_notebook(nb).workers == []
+
+    view = LocalNotebookOps(nb).add_worker("gpu", url=URL, transport="signed")
+    assert next(w for w in view.workers if w.name == "gpu").transport == "signed"
+
+
+def test_cli_worker_add_refuses_an_unknown_transport(nb, capsys):
+    rc = main(["worker", "add", str(nb), "gpu", "--url", URL, "--transport", "http"])
+    assert rc == 1
+    assert (
+        "expected one of: build, direct, manifest, signed"
+        in json.loads(capsys.readouterr().out)["error"]
+    )
+    assert parse_notebook(nb).workers == []
+
+
 def test_remove_worker_missing_and_builtin(nb):
     ops = LocalNotebookOps(nb)
     with pytest.raises(NotebookOpsError, match="no worker named"):

@@ -10,7 +10,7 @@
 #   flyctl deploy --remote-only
 #
 # Fly prints the URL — paste it into notebook.toml as a [[workers]]
-# entry with transport = "http" and url = "<fly-url>/v1/execute".
+# entry with transport = "direct" and url = "<fly-url>/v1/execute".
 
 # Digest-pinned for reproducible builds (Scorecard Pinned-Dependencies).
 # Bump tag + digest together via `docker buildx imagetools inspect`.
