@@ -2426,9 +2426,15 @@
 <p>The worker runs the cell's harness with the interpreter of that environment:</p>
 <ul>
 <li>It keeps one environment per <code>key</code> and interpreter build under <code>STRATA_WORKER_ENV_ROOT</code> (default <code>~/.strata/worker-envs</code>). An environment already there is reused, so a second cell with the same lock installs nothing.</li>
-<li>A missing one is fetched from <code>STRATA_WORKER_ENV_REGISTRY_URL/&lt;key&gt;</code> as a <code>.tar.gz</code> of the environment directory when that is set, and otherwise built with <code>uv sync --frozen</code> from the lock. The worker needs <code>uv</code> on its <code>PATH</code> for that.</li>
+<li>A missing one is fetched from <code>STRATA_WORKER_ENV_REGISTRY_URL/&lt;key&gt;/&lt;interpreter&gt;/&lt;platform&gt;</code> as a <code>.tar.gz</code> of the environment directory when that is set. A registry that answers <code>404</code> has none, and the worker builds the environment itself; any other failure fails the cell. Without a registry the worker builds it, with <code>uv sync --frozen</code> from the lock. The worker needs <code>uv</code> on its <code>PATH</code> for that.</li>
 <li>A lock whose key is not <code>key</code>, or that cannot be installed, fails the cell with the reason (<code>500</code>).</li>
 </ul>
+<p>The two last segments of a registry path name the interpreter the worker resolved for <code>python</code> (<code>uv python find --system &lt;python&gt;</code>), since an environment's contents depend on the build it was made with:</p>
+<ul>
+<li><code>&lt;interpreter&gt;</code> is <code>f"{sys.implementation.name}-{platform.python_version()}{sys.abiflags}"</code>, for example <code>cpython-3.13.1</code>, or <code>cpython-3.13.1t</code> for a free-threaded build.</li>
+<li><code>&lt;platform&gt;</code> is <code>sysconfig.get_platform()</code>, for example <code>linux-x86_64</code>, <code>linux-aarch64</code> or <code>macosx-14.0-arm64</code>.</li>
+</ul>
+<p>So one registry serves every Python build and platform, and a registry that prebuilds for a worker image runs those two expressions with the image's interpreter.</p>
 <p><strong><code>503 Service Unavailable</code></strong> from any execution route means the worker is full: <code>max_concurrent</code> executions are in flight, or every GPU slot is taken. It carries <code>Retry-After</code> in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.</p>
 <h2 id="post-v1execute-push-model-recommended"><code>POST /v1/execute</code> (push model - recommended)<a class="headerlink" href="#post-v1execute-push-model-recommended" title="Permanent link">&para;</a></h2>
 <p>The standard executor v1 envelope. Cells and inputs are pushed inline; the worker returns the output bundle directly in the response.</p>

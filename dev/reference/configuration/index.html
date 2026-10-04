@@ -3812,7 +3812,7 @@ without a URL or a config, to find the server. The server does not read
 <tr>
 <td><code>STRATA_WORKER_ENV_REGISTRY_URL</code></td>
 <td><code>None</code></td>
-<td>Fetch a missing locked environment from <code>&lt;url&gt;/&lt;key&gt;</code> as a <code>.tar.gz</code> instead of building it with <code>uv sync</code>.</td>
+<td>Fetch a missing locked environment from <code>&lt;url&gt;/&lt;key&gt;/&lt;interpreter&gt;/&lt;platform&gt;</code> as a <code>.tar.gz</code> instead of building it with <code>uv sync</code>; a <code>404</code> is built locally. See <a href="../executor-protocol/#the-environment-block">the <code>environment</code> block</a>.</td>
 </tr>
 </tbody>
 </table>
