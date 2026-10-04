@@ -62,6 +62,14 @@ azure = [
     "azure-storage-blob>=12.20.0",
     "azure-identity>=1.25.3",
 ]
+# Presigned build-manifest URLs (STRATA_ARTIFACT_PRESIGNED_URLS) from an S3 role
+# rather than a key pair, and from GCS. Reading and writing blobs needs neither.
+s3 = [
+    "botocore>=1.35.0",
+]
+gcs = [
+    "google-cloud-storage>=3.0.0",
+]
 # Postgres metadata backend for the artifact store: only needed when several
 # Strata nodes share one store. Personal mode never needs it.
 postgres = [

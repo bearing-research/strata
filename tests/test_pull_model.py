@@ -213,6 +213,37 @@ class TestBuildManifestEndpoint:
         assert "url" in data["output"]
         assert "finalize" in data["finalize_url"]
 
+    def test_presigning_runs_off_the_event_loop(
+        self, client, config, build_store, artifact_store, monkeypatch
+    ):
+        """Presigning can call the cloud (a role, IAM signBlob), so it must not block the loop."""
+        import asyncio
+
+        config.artifact_presigned_urls = True
+        on_loop: list[bool] = []
+
+        def presign_get(artifact_id, version, ttl_seconds):
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(True)
+            except RuntimeError:
+                on_loop.append(False)
+            return None
+
+        monkeypatch.setattr(artifact_store.blob_store, "presign_get", presign_get)
+        input_version = create_test_artifact(artifact_store, "presign-in", finalize=True)
+        output_version = create_test_artifact(artifact_store, "presign-out", finalize=False)
+        build_store.create_build(
+            build_id="build-presign",
+            artifact_id="presign-out",
+            version=output_version,
+            executor_ref="duckdb_sql@v1",
+            input_uris=[f"strata://artifact/presign-in@v={input_version}"],
+        )
+
+        assert client.get("/v1/builds/build-presign/manifest").status_code == 200
+        assert on_loop == [False]
+
     def test_get_manifest_for_building_build(self, client, build_store, artifact_store):
         """A manifest is available for a build that has already started."""
         input_version = create_test_artifact(artifact_store, "input-building", finalize=True)

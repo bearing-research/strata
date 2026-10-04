@@ -66,7 +66,10 @@ class SignedUploadURL:
     fields: dict[str, str] | None = None
     """Form fields to POST with the body as the ``file`` part, when ``url`` is a
     presigned object-store upload rather than a Strata route. ``None`` means
-    POST the raw body to ``url``."""
+    send the raw body to ``url``."""
+    method: str = "POST"
+    """``PUT`` for a presigned upload that takes no form (Azure), sent with ``headers``."""
+    headers: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -100,8 +103,9 @@ class BuildManifest:
         """
         output = asdict(self.output_url)
         del output["build_id"]
-        if output["fields"] is None:
-            del output["fields"]
+        for optional in ("fields", "headers"):
+            if output[optional] is None:
+                del output[optional]
         return {
             "build_id": self.build_id,
             "metadata": self.metadata,
@@ -379,35 +383,45 @@ class URLSigner:
                 )
             )
         output_artifact = metadata.get("artifact_id"), metadata.get("version")
-        presigned_upload = (
-            blob_store.presign_post(
+        presigned_upload = presigned_put = None
+        if blob_store is not None and output_artifact[0] and output_artifact[1] is not None:
+            output_blob = (
                 attempt_blob_id(str(output_artifact[0]), attempt)
                 if attempt
-                else str(output_artifact[0]),
-                int(output_artifact[1]),
-                max_output_bytes,
-                int(url_expiry_seconds),
+                else str(output_artifact[0])
             )
-            if blob_store is not None and output_artifact[0] and output_artifact[1] is not None
-            else None
-        )
-        output_url = (
-            SignedUploadURL(
+            presigned_upload = blob_store.presign_post(
+                output_blob, int(output_artifact[1]), max_output_bytes, int(url_expiry_seconds)
+            )
+            if presigned_upload is None:
+                presigned_put = blob_store.presign_put(
+                    output_blob, int(output_artifact[1]), int(url_expiry_seconds)
+                )
+        if presigned_upload is not None:
+            output_url = SignedUploadURL(
                 url=presigned_upload[0],
                 build_id=build_id,
                 max_bytes=max_output_bytes,
                 expires_at=expires_at,
                 fields=presigned_upload[1],
             )
-            if presigned_upload is not None
-            else self.generate_upload_url(
+        elif presigned_put is not None:
+            output_url = SignedUploadURL(
+                url=presigned_put[0],
+                build_id=build_id,
+                max_bytes=max_output_bytes,
+                expires_at=expires_at,
+                method="PUT",
+                headers=presigned_put[1],
+            )
+        else:
+            output_url = self.generate_upload_url(
                 base_url=base_url,
                 build_id=build_id,
                 max_bytes=max_output_bytes,
                 expiry_seconds=url_expiry_seconds,
                 attempt=attempt,
             )
-        )
         finalize_url = self.generate_finalize_url(
             base_url=base_url,
             build_id=build_id,

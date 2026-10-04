@@ -204,7 +204,9 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
     leased = build_store.get_build(build_id) or build
 
     try:
-        manifest = build_service.assemble_manifest(
+        # Presigning can call the cloud (role credentials, IAM signBlob, a delegation key).
+        manifest = await asyncio.to_thread(
+            build_service.assemble_manifest,
             store,
             signer=state.url_signer,
             build=build,

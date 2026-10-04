@@ -1147,6 +1147,17 @@ def create_notebook_executor_app(
                                 data={str(k): str(v) for k, v in upload_fields.items()},
                                 files={"file": ("bundle.tar", bundle_file, "application/x-tar")},
                             )
+                    elif output.get("method") == "PUT":
+                        put_headers = output.get("headers") or {}
+                        upload_response = await client.put(
+                            upload_url,
+                            content=_stream_bundle_body(),
+                            headers={
+                                **{str(k): str(v) for k, v in put_headers.items()},
+                                "Content-Type": "application/x-tar",
+                                "Content-Length": str(byte_size),
+                            },
+                        )
                     else:
                         upload_response = await client.post(
                             upload_url,

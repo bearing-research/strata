@@ -1448,8 +1448,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [
@@ -3978,6 +3978,9 @@ azure = [
     { name = "azure-identity" },
     { name = "azure-storage-blob" },
 ]
+gcs = [
+    { name = "google-cloud-storage" },
+]
 mcp = [
     { name = "mcp" },
 ]
@@ -3998,6 +4001,9 @@ otel = [
 postgres = [
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
+]
+s3 = [
+    { name = "botocore" },
 ]
 sql = [
     { name = "adbc-driver-manager" },
@@ -4071,11 +4077,13 @@ requires-dist = [
     { name = "adbc-driver-sqlite", marker = "extra == 'sql-sqlite'", specifier = ">=1.0.0" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
+    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
     { name = "cloudpickle", marker = "extra == 'notebook'", specifier = ">=3.0.0" },
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "filelock", specifier = ">=3.16.0" },
+    { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
     { name = "grandalf", marker = "extra == 'tui'", specifier = ">=0.8" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "infisicalsdk", specifier = ">=1.0.16" },
@@ -4107,7 +4115,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.35.0" },
     { name = "websockets", specifier = ">=17.1" },
 ]
-provides-extras = ["otel", "azure", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp"]
+provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [
