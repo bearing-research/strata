@@ -53,6 +53,7 @@ def _catalog(warehouse) -> SqlCatalog:
 
 def _config(tmp_path):
     return SimpleNamespace(
+        deployment_mode="personal",
         catalog_properties={},
         catalog_name="strata",
         metadata_db=tmp_path / "metadata.db",
@@ -411,6 +412,26 @@ class TestWhoMayExport:
         assert response.status_code == 403
         assert response.json()["detail"]["error"] == "writes_disabled"
         assert not (tmp_path / "wh").exists(), "the table was written anyway"
+
+    def test_an_object_store_warehouse_without_a_catalog_uri_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        client, rows = self._service(
+            monkeypatch,
+            tmp_path,
+            service_writes_enabled=True,
+            metadata_db=tmp_path / "meta.sqlite",
+        )
+
+        response = client.post(
+            f"/v1/artifacts/{rows.id}/v/{rows.version}/export",
+            json={"table": "s3://lake/wh#taxi.features"},
+            headers=self._headers(),
+        )
+
+        assert response.status_code == 400, response.text
+        assert "STRATA_CATALOG_URI" in response.json()["detail"]
+        assert not (tmp_path / "meta.sqlite").exists()
 
     def test_a_table_the_caller_is_denied_is_refused(self, tmp_path, monkeypatch):
         client, rows = self._service(

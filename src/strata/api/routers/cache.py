@@ -18,6 +18,7 @@ from strata.api.dependencies import authorize_table_access, require_scope
 from strata.auth import get_principal
 from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
+from strata.iceberg import CatalogUriRequired, PyIcebergCatalog, refuse_unconfigured_warehouse
 from strata.tenant import get_tenant_id
 from strata.types import (
     Task,
@@ -132,6 +133,21 @@ def _authorize_warm_tables(table_uris: list[str]) -> None:
             authorize_table_access(table_uri, identity)
 
 
+def _refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
+    """Refuse a warm request naming a warehouse this server has no catalog for.
+
+    Checked up front so the caller gets a 400, not a per-table error or a failed job.
+    """
+    from strata.server import get_state
+
+    config = get_state().config
+    for table_uri in table_uris:
+        try:
+            refuse_unconfigured_warehouse(PyIcebergCatalog.parse_table_uri(table_uri)[0], config)
+        except CatalogUriRequired as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _warm_job_tenant() -> str | None:
     """The tenant whose warm jobs the caller sees, or ``None`` for every tenant (``admin:*``).
 
@@ -156,6 +172,7 @@ async def warm_cache_v1(request: WarmRequest):
     # Warming reads these tables into the shared cache, so it takes the same deny-first gate as the
     # scan path, before any planning or fetching.
     _authorize_warm_tables(request.tables)
+    _refuse_unconfigured_warehouses(request.tables)
 
     start_time = time.perf_counter()
     tables_warmed = 0
@@ -276,6 +293,7 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
     # Same gate as the synchronous endpoint: a background job must not be a
     # way around the table ACL.
     _authorize_warm_tables(request.tables)
+    _refuse_unconfigured_warehouses(request.tables)
 
     if state._cache_warmer is None:
         raise HTTPException(status_code=503, detail="Cache warmer not initialized")

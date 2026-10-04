@@ -59,6 +59,7 @@ from strata.fast_io import (
 )
 from strata.gc_tracker import install_gc_tracker
 from strata.health import _package_version
+from strata.iceberg import CatalogUriRequired
 from strata.json_types import JsonValue
 from strata.logging import (
     configure_logging,
@@ -2158,6 +2159,8 @@ async def _handle_identity_materialize(
         # A table Strata will not read (an unreadable delete file, too many
         # pending equality deletes): the message says why and what to do.
         raise HTTPException(status_code=422, detail=str(e)) from e
+    except CatalogUriRequired as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     max_tasks = state.config.max_tasks_per_scan
     if len(plan.tasks) > max_tasks:

@@ -83,6 +83,30 @@ def shared_catalog_stores(table_uri: str, config: StrataConfig) -> tuple[str, ..
     return ACL_STORE_NAMES
 
 
+class CatalogUriRequired(ValueError):
+    """A request names an object-store warehouse on a service with no catalog ``uri``."""
+
+
+def refuse_unconfigured_warehouse(warehouse_path: str | None, config: StrataConfig) -> None:
+    """Raise :class:`CatalogUriRequired` for a service-mode object-store warehouse with no ``uri``.
+
+    Its catalog would be SQLite on this server's disk, invisible to every other
+    reader of the bucket. A personal server keeps its own tables there.
+    """
+    if (
+        config.deployment_mode == "service"
+        and warehouse_path
+        and "://" in warehouse_path
+        and "uri" not in config.catalog_properties
+    ):
+        raise CatalogUriRequired(
+            f"This server has no catalog uri, so the tables of {warehouse_path} would "
+            "live in a SQLite catalog on this server's disk, invisible to every other "
+            "reader of the bucket. Set STRATA_CATALOG_URI on the server, e.g. "
+            "postgresql://user:pass@host/iceberg_catalog."
+        )
+
+
 def _is_connection_io_error(exc: BaseException) -> bool:
     """Return whether *exc* is a dead catalog connection (SQLITE_IOERR or its ADBC fallout).
 
@@ -109,13 +133,15 @@ class PyIcebergCatalog:
         """Return the catalog URI for a warehouse.
 
         A configured ``catalog_properties["uri"]`` (e.g. PostgreSQL) wins; otherwise
-        SQLite keyed off the warehouse path, or in-memory for ``None``.
+        an object-store warehouse uses SQLite at ``metadata_db`` (refused in service
+        mode), a local one SQLite in the warehouse, and ``None`` in-memory.
         """
         # A configured URI may name PostgreSQL, MySQL, etc.
         if "uri" in self.config.catalog_properties:
             return self.config.catalog_properties["uri"]
 
-        if warehouse_path and warehouse_path.startswith("s3://"):
+        refuse_unconfigured_warehouse(warehouse_path, self.config)
+        if warehouse_path and "://" in warehouse_path:
             return f"sqlite:///{self.config.metadata_db}"
         elif warehouse_path:
             return f"sqlite:///{Path(warehouse_path) / 'catalog.db'}"
