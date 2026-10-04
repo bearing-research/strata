@@ -10,6 +10,7 @@ then rows, then state, so an interrupted import can be retried.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -107,6 +108,9 @@ def import_snapshot(
             landed = _import_records(
                 archive, store, manifest.get("records", {}), rename, scratch=staging
             )
+
+            # The bytes each @fetch read, so a pinned fetch runs without its URL.
+            _write_fetched_bytes(archive, staging)
 
             # 2. The committed files.
             _write_committed_files(archive, staging, notebook_toml, old_id, new_id, owner)
@@ -312,6 +316,74 @@ def _ancestors_first(records: dict[str, dict[str, Any]]) -> list[str]:
             placed.add(ref)
         pending = [ref for ref in pending if ref not in placed]
     return ordered
+
+
+# --- Fetched bytes ---
+
+
+def _write_fetched_bytes(archive: zipfile.ZipFile, dest: Path) -> None:
+    """Restore ``.strata/fetch/`` from the bundle's ``fetch/`` members.
+
+    Both the files and the index are untrusted. Each file must sit where the fetch
+    cache itself would put it and hash to its directory name, since a pinned fetch
+    trusts that name without rereading the bytes. Index entries naming no carried
+    file, or with fields of the wrong type, are dropped.
+    """
+    from strata.notebook.fetch import MAX_FETCH_BYTES, FetchCache, FetchError, _safe_filename
+
+    cache = FetchCache(dest)
+    carried: set[tuple[str, str]] = set()
+    for info in archive.infolist():
+        name = info.filename
+        if not name.startswith("fetch/") or name.endswith("/") or name == "fetch/index.json":
+            continue
+        _member_target(dest, name)
+        parts = PurePosixPath(name).parts
+        if len(parts) != 3 or parts[2] != _safe_filename(parts[2]):
+            raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}")
+        sha, filename = parts[1], parts[2]
+        try:
+            target = cache._contained(sha, filename)
+        except FetchError as exc:
+            raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}") from exc
+        if info.file_size > MAX_FETCH_BYTES:
+            raise NotASnapshotError(f"the bundle's fetched file {name!r} is over the fetch cap")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        with archive.open(info) as src, open(target, "wb") as dst:
+            while chunk := src.read(_COPY_CHUNK_BYTES):
+                digest.update(chunk)
+                dst.write(chunk)
+        if digest.hexdigest() != sha:
+            raise NotASnapshotError(f"the bundle's fetched file {name!r} does not match its digest")
+        carried.add((sha, filename))
+
+    if "fetch/index.json" not in archive.namelist():
+        return
+    index = json.loads(archive.read("fetch/index.json"))
+    if not isinstance(index, dict):
+        raise NotASnapshotError("the bundle's fetch index is not an object")
+    kept: dict[str, dict[str, Any]] = {}
+    for url, entry in index.items():
+        if (
+            not isinstance(entry, dict)
+            or (entry.get("sha256"), entry.get("filename")) not in carried
+        ):
+            continue
+        # The cache reads these without guarding their types.
+        kept[url] = {
+            key: value
+            for key, value in entry.items()
+            if (key in ("sha256", "filename", "etag", "last_modified") and isinstance(value, str))
+            or (
+                key in ("checked_at", "fetched_at")
+                and isinstance(value, int | float)
+                and not isinstance(value, bool)
+            )
+        }
+    if kept:
+        cache.root.mkdir(parents=True, exist_ok=True)
+        cache._index_path().write_text(json.dumps(kept, indent=2, sort_keys=True), encoding="utf-8")
 
 
 # --- Files and state ---

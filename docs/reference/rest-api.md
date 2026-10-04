@@ -854,13 +854,15 @@ outputs/<cell id>/console.json   stdout / stderr
 artifacts.json                   per-cell provenance, timings, and every ready
                                  cell's artifacts with their content digests
 artifacts/<id>@v=<n>             the bytes, for whichever were included
+fetch/<sha256>/<file>            with include=all, the bytes each @fetch last read
+fetch/index.json                 with include=all, which URL served which bytes
 ```
 
 `include` chooses how much travels:
 
 | `include`  | Carries |
 | ---------- | ------- |
-| `all`      | Every artifact's bytes: the form for moving a project between servers. |
+| `all`      | Every artifact's bytes and the notebook's `.strata/fetch/`: the form for moving a project between servers. |
 | `selected` *(default)* | Only the cells named in `cells=a,b`; the rest are described in `artifacts.json` by id, version and digest. The form a review snapshot uses. |
 | `none`     | Description only. |
 
@@ -874,7 +876,9 @@ result is current; it just isn't here.
 `fetches` lists every `@fetch` with its cell, name, URL, `refetch` policy and
 `pinned`. `sha256` is the pin, or else the digest last read. An unpinned fetch
 is the input a snapshot cannot vouch for, since its bytes are whatever the URL
-serves at the next run, so a preflight can flag them from this list.
+serves at the next run, so a preflight can flag them from this list. A pinned
+or `refetch=never` fetch carried under `include=all` runs on the importing side
+without its URL.
 
 The same bundle offline: `strata export <path> --to snapshot --out snap.zip
 --include all`.

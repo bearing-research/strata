@@ -3,7 +3,7 @@
 The ZIP export's members plus outputs as files, per-cell provenance and timings,
 an ``artifacts.json`` of every ready cell's artifacts with digests, and the bytes
 of whichever of those the caller ``include``s (a figure for review, or every byte
-for a move between servers).
+for a move between servers, with what each ``@fetch`` read).
 """
 
 from __future__ import annotations
@@ -229,6 +229,9 @@ def write_snapshot(
                 out.write(chunk)
         written.append(f"{artifact_id}@v={version}")
 
+    if include == "all":
+        _write_fetched_bytes(session, archive)
+
     manifest = {
         # Bump when an older importer would read this bundle wrong.
         "format_version": SNAPSHOT_FORMAT_VERSION,
@@ -248,6 +251,29 @@ def write_snapshot(
 
 # Matches every other streamed read in the store.
 _BLOB_CHUNK_BYTES = 1024 * 1024
+
+
+def _write_fetched_bytes(session: NotebookSession, archive: zipfile.ZipFile) -> None:
+    """The bytes each ``@fetch`` URL last served, and the index naming them, under ``fetch/``.
+
+    Without them an imported pinned fetch needs its URL, which may have moved or gone.
+    """
+    from strata.notebook.fetch import FetchCache
+
+    cache = FetchCache(session.path)
+    index: dict[str, Any] = {}
+    members: set[str] = set()
+    for url, entry in cache._index().items():
+        fetched = cache.recorded(url)
+        if fetched is None:
+            continue
+        member = f"fetch/{fetched.sha256}/{fetched.path.name}"
+        if member not in members:
+            archive.write(fetched.path, member)
+            members.add(member)
+        index[url] = entry
+    if index:
+        archive.writestr("fetch/index.json", json.dumps(index, indent=2, sort_keys=True))
 
 
 def _artifact_ref(uri: str | None) -> tuple[str, int] | None:
