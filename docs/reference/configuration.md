@@ -586,7 +586,7 @@ so a key exported where the server starts does not reach every notebook.
 | ------------------------------ | -------- | ------------------------------------------------------------ |
 | `STRATA_AI_BASE_URL`           | `None`   | OpenAI-compatible API base URL                               |
 | `STRATA_AI_MODEL`              | `None`   | Model identifier (e.g. `claude-sonnet-4-6`, `gpt-5.4`)       |
-| `STRATA_AI_API_KEY`            | `None`   | API key (generic, works with any provider). Also read from the notebook's environment, where it is used only when the server sets no key |
+| `STRATA_AI_API_KEY`            | `None`   | API key (generic, works with any provider). Also read from the notebook's environment, where it overrides the server's key (a provider key there wins over it) |
 | `STRATA_AI_MAX_OUTPUT_TOKENS`  | `4096`   | Max output tokens requested                                  |
 | `STRATA_AI_TIMEOUT_SECONDS`    | `60.0`   | AI request timeout                                           |
 | `ANTHROPIC_API_KEY`            | `None`   | Anthropic API key, from the notebook's environment (auto-sets base URL + model) |
