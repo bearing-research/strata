@@ -18,7 +18,6 @@ from strata.api.dependencies import authorize_table_access, require_scope
 from strata.auth import get_principal
 from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
-from strata.iceberg import CatalogUriRequired, PyIcebergCatalog, refuse_unconfigured_warehouse
 from strata.tenant import get_tenant_id
 from strata.types import (
     Task,
@@ -132,21 +131,6 @@ def _authorize_warm_tables(table_uris: list[str]) -> None:
         authorize_table_access(table_uri, _table_identity_or_400(table_uri))
 
 
-def _refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
-    """Refuse a warm request naming a warehouse this server has no catalog for.
-
-    Checked up front so the caller gets a 400, not a per-table error or a failed job.
-    """
-    from strata.server import get_state
-
-    config = get_state().config
-    for table_uri in table_uris:
-        try:
-            refuse_unconfigured_warehouse(PyIcebergCatalog.parse_table_uri(table_uri)[0], config)
-        except CatalogUriRequired as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 def _warm_job_tenant() -> str | None:
     """The tenant whose warm jobs the caller sees, or ``None`` for every tenant (``admin:*``).
 
@@ -164,7 +148,7 @@ async def warm_cache_v1(request: WarmRequest):
 
     Row groups already cached count as skipped; failures are reported in ``errors``.
     """
-    from strata.server import get_state
+    from strata.server import _refuse_unconfigured_warehouses, get_state
 
     state = get_state()
 
@@ -285,7 +269,7 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
     Unlike ``POST /v1/cache/warm``, this does not block and can target a specific snapshot.
     Track progress via ``GET /v1/cache/warm/jobs/{id}``.
     """
-    from strata.server import get_state
+    from strata.server import _refuse_unconfigured_warehouses, get_state
 
     state = get_state()
 

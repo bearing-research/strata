@@ -1766,6 +1766,19 @@ def _table_identity_or_400(table_uri: str) -> TableIdentity:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
+    """Refuse with a 400 a request naming a warehouse this server has no catalog for."""
+    from strata.iceberg import PyIcebergCatalog, refuse_unconfigured_warehouse
+
+    for table_uri in table_uris:
+        try:
+            refuse_unconfigured_warehouse(
+                PyIcebergCatalog.parse_table_uri(table_uri)[0], get_state().config
+            )
+        except CatalogUriRequired as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _authorize_artifact_write() -> None:
     """Gate a write endpoint (put / set_name / set_alias / tags).
 
@@ -1845,6 +1858,8 @@ async def materialize_artifact(request: MaterializeRequest):
             # cannot bypass it.
             if e.status_code in (401, 403, 404, 422):
                 raise
+            # A warehouse with no catalog here is the server's config, not an unresolvable URI.
+            _refuse_unconfigured_warehouses([input_uri])
             input_versions[input_uri] = input_uri
 
     from strata.services.materialize import materialize_service

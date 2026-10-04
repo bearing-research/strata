@@ -166,3 +166,32 @@ class TestScanOfWhatTheTableDoesNotHave:
         response = client.post("/v1/materialize", json=body)
 
         assert response.status_code == 200, response.text
+
+
+class TestWarehouseWithNoCatalogOnAService:
+    def test_a_transform_input_is_400_naming_the_setting(
+        self, tmp_path, monkeypatch, sql_transform
+    ):
+        import strata.server as server_module
+        from strata.artifact_store import reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState, app
+
+        config = StrataConfig(
+            deployment_mode="service",
+            transforms_config={"enabled": True},
+            cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
+            metadata_db=tmp_path / "meta.sqlite",
+        )
+        monkeypatch.setattr(server_module, "_state", ServerState(config))
+        reset_artifact_store()
+        client = TestClient(app, raise_server_exceptions=False)
+        try:
+            response = client.post("/v1/materialize", json=_transform("s3://lake/wh#ns.events"))
+        finally:
+            reset_artifact_store()
+
+        assert response.status_code == 400, response.text
+        assert "STRATA_CATALOG_URI" in response.json()["detail"]
+        assert not (tmp_path / "meta.sqlite").exists()
