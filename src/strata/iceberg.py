@@ -2,11 +2,13 @@
 
 import contextlib
 import logging
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from typing import Protocol
+from urllib.parse import urlparse
 
 import pyarrow as pa
 from pyiceberg.catalog import Catalog, load_catalog
@@ -16,7 +18,9 @@ from pyiceberg.schema import Schema
 from pyiceberg.table import Table
 from pyiceberg.table.snapshots import Operation, Snapshot
 
+from strata.blob_store import _resolve_gcs_credentials
 from strata.config import StrataConfig
+from strata.lake_files import _AZURE_SCHEMES
 from strata.types import ACL_STORE_NAMES, TableIdentity
 
 logger = logging.getLogger(__name__)
@@ -124,7 +128,7 @@ class PyIcebergCatalog:
     """
 
     def __init__(self, config: StrataConfig) -> None:
-        """Initialize the provider from server config (catalog properties, S3 credentials)."""
+        """Initialize the provider from server config (catalog properties, storage credentials)."""
         self.config = config
         self._catalogs: dict[str, Catalog] = {}
         self._lock = Lock()
@@ -161,11 +165,49 @@ class PyIcebergCatalog:
             props["s3.endpoint"] = self.config.s3_endpoint_url
         return props
 
+    def _gcs_catalog_props(self) -> dict[str, str]:
+        """Return the ``gcs.*`` catalog properties for the GCS settings that are configured.
+
+        pyiceberg reads ``gs://`` with pyarrow, which takes no key-file property, so a
+        configured key is exported as ``GOOGLE_APPLICATION_CREDENTIALS`` instead.
+        """
+        props: dict[str, str] = {}
+        if self.config.gcs_default_bucket_location:
+            props["gcs.default-bucket-location"] = self.config.gcs_default_bucket_location
+        if endpoint := self.config.gcs_endpoint_override:
+            props["gcs.service.host"] = endpoint if "://" in endpoint else f"https://{endpoint}"
+        if self.config.gcs_credentials_json:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _resolve_gcs_credentials(
+                self.config.gcs_credentials_json
+            )
+        return props
+
+    def _adls_catalog_props(self) -> dict[str, str]:
+        """Return the ``adls.*`` catalog properties for the Azure settings that are configured.
+
+        With no secret set, both pyiceberg Azure FileIOs fall back to ``DefaultAzureCredential``.
+        """
+        props: dict[str, str] = {}
+        if self.config.azure_account_name:
+            props["adls.account-name"] = self.config.azure_account_name
+        if self.config.azure_account_key:
+            props["adls.account-key"] = self.config.azure_account_key
+        if self.config.azure_sas_token:
+            props["adls.sas-token"] = self.config.azure_sas_token
+        if self.config.azure_connection_string:
+            props["adls.connection-string"] = self.config.azure_connection_string
+        if self.config.azure_endpoint_url:
+            parsed = urlparse(self.config.azure_endpoint_url)
+            props["adls.blob-storage-authority"] = parsed.netloc
+            props["adls.blob-storage-scheme"] = parsed.scheme
+        return props
+
     def _build_catalog(self, warehouse_path: str | None) -> Catalog:
         """Construct a catalog for a warehouse, uncached.
 
-        A warehouse path yields a ``SqlCatalog`` (with ``s3.*`` props for ``s3://``);
-        ``None`` yields the configured default catalog, else in-memory SQLite.
+        A warehouse path yields a ``SqlCatalog`` (with the server's ``s3.*``, ``gcs.*``
+        or ``adls.*`` props for its store); ``None`` yields the configured default
+        catalog, else in-memory SQLite.
         """
         if warehouse_path:
             props: dict = {
@@ -174,6 +216,10 @@ class PyIcebergCatalog:
             }
             if warehouse_path.startswith("s3://"):
                 props.update(self._s3_catalog_props())
+            elif warehouse_path.startswith("gs://"):
+                props.update(self._gcs_catalog_props())
+            elif warehouse_path.startswith(_AZURE_SCHEMES):
+                props.update(self._adls_catalog_props())
             props.update(self.config.catalog_properties)
             return SqlCatalog("strata", **props)
 

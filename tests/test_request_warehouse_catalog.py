@@ -6,6 +6,8 @@ refuses it with a 400 naming ``STRATA_CATALOG_URI``; a personal server keeps it.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -47,6 +49,103 @@ class TestPersonalModeKeepsTheFallback:
         assert catalogs._get_default_catalog_uri(str(tmp_path / "wh")) == (
             f"sqlite:///{tmp_path / 'wh' / 'catalog.db'}"
         )
+
+
+def _store_props(catalog, prefix: str) -> dict[str, str]:
+    return {k: v for k, v in catalog.properties.items() if k.startswith(prefix)}
+
+
+class TestStoreSettingsReachTheCatalog:
+    """The warehouse's catalog reads its metadata with the server's settings for that store."""
+
+    def test_a_gcs_warehouse_gets_the_gcs_settings(self, tmp_path):
+        config = _config(
+            tmp_path,
+            "personal",
+            gcs_default_bucket_location="europe-west1",
+            gcs_endpoint_override="http://127.0.0.1:4443",
+            azure_account_name="acct",
+        )
+
+        catalog = PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+
+        assert _store_props(catalog, "gcs.") == {
+            "gcs.default-bucket-location": "europe-west1",
+            "gcs.service.host": "http://127.0.0.1:4443",
+        }
+        assert _store_props(catalog, "adls.") == {}
+
+    def test_a_bare_gcs_endpoint_gets_https(self, tmp_path):
+        config = _config(tmp_path, "personal", gcs_endpoint_override="storage.example:443")
+
+        catalog = PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+
+        assert catalog.properties["gcs.service.host"] == "https://storage.example:443"
+
+    def test_a_gcs_key_file_is_exported_for_pyarrow(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/elsewhere.json")
+        key = tmp_path / "key.json"
+        config = _config(tmp_path, "personal", gcs_credentials_json=str(key))
+
+        PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+
+        assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == str(key)
+
+    def test_a_gcs_warehouse_with_nothing_configured_gets_no_gcs_props(self, tmp_path):
+        catalog = PyIcebergCatalog(_config(tmp_path, "personal"))._build_catalog("gs://lake/wh")
+
+        assert _store_props(catalog, "gcs.") == {}
+
+    @pytest.mark.parametrize(
+        "warehouse", ["az://lake/wh", "abfs://lake@acct.dfs.core.windows.net/wh", "abfss://l@a/wh"]
+    )
+    def test_an_azure_warehouse_gets_the_azure_settings(self, tmp_path, warehouse):
+        config = _config(
+            tmp_path,
+            "personal",
+            azure_account_name="acct",
+            azure_account_key="a2V5",
+            azure_sas_token="sv=2024&sig=x",
+            azure_connection_string="AccountName=acct;AccountKey=a2V5",
+            azure_endpoint_url="http://127.0.0.1:10000",
+            gcs_endpoint_override="http://127.0.0.1:4443",
+        )
+
+        catalog = PyIcebergCatalog(config)._build_catalog(warehouse)
+
+        assert _store_props(catalog, "adls.") == {
+            "adls.account-name": "acct",
+            "adls.account-key": "a2V5",
+            "adls.sas-token": "sv=2024&sig=x",
+            "adls.connection-string": "AccountName=acct;AccountKey=a2V5",
+            "adls.blob-storage-authority": "127.0.0.1:10000",
+            "adls.blob-storage-scheme": "http",
+        }
+        assert _store_props(catalog, "gcs.") == {}
+
+    def test_an_azure_warehouse_gets_only_what_is_configured(self, tmp_path):
+        config = _config(tmp_path, "personal", azure_account_name="acct")
+
+        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@acct/wh")
+
+        assert _store_props(catalog, "adls.") == {"adls.account-name": "acct"}
+
+    def test_an_azure_warehouse_with_nothing_configured_gets_no_adls_props(self, tmp_path):
+        catalog = PyIcebergCatalog(_config(tmp_path, "personal"))._build_catalog("az://lake/wh")
+
+        assert _store_props(catalog, "adls.") == {}
+
+    def test_catalog_properties_still_win(self, tmp_path):
+        config = _config(
+            tmp_path,
+            "personal",
+            gcs_endpoint_override="http://127.0.0.1:4443",
+            catalog_properties={"gcs.service.host": "http://override:1"},
+        )
+
+        catalog = PyIcebergCatalog(config)._build_catalog("gs://lake/wh")
+
+        assert catalog.properties["gcs.service.host"] == "http://override:1"
 
 
 class TestServiceModeRefuses:

@@ -175,6 +175,14 @@ write its own tables there; nothing else reading the bucket sees them.
 Credentials for the GCS blob backend (`STRATA_ARTIFACT_BLOB_BACKEND=gcs`).
 Unset credentials fall back to Application Default Credentials.
 
+The same settings read lake tables on GCS. A table named by a `gs://`
+warehouse URI (`gs://bucket/wh#ns.table`, see [Catalog](#catalog)) has its
+metadata read with the bucket location, endpoint and service-account key,
+passed to its catalog as `gcs.*` properties. PyIceberg has no anonymous GCS access, so
+`STRATA_GCS_ANONYMOUS` covers data files only; set `gcs.oauth2.token` in
+`STRATA_CATALOG_PROPERTIES` if the catalog needs a token. A key set there
+overrides the one Strata derives.
+
 | Variable                        | Default | Description                                                      |
 | ------------------------------- | ------- | ---------------------------------------------------------------- |
 | `STRATA_GCS_DEFAULT_BUCKET_LOCATION` | `None` | GCS location new buckets default to (`US`, `europe-west1`). `STRATA_GCS_PROJECT_ID` is still accepted for it and warns: it never set a project, since `GcsFileSystem` has no project parameter |
@@ -187,6 +195,14 @@ Unset credentials fall back to Application Default Credentials.
 Credentials for the Azure blob backend (`STRATA_ARTIFACT_BLOB_BACKEND=azure`).
 Supply exactly one of connection string, account key, SAS token, or default
 credential.
+
+The same settings read lake tables on Azure. A table named by an `abfs://` or
+`abfss://` warehouse URI (see [Catalog](#catalog)) has its metadata read with the account name, key, SAS token, connection string and
+endpoint that are set, passed to its catalog as `adls.*` properties; with no
+secret set it uses `DefaultAzureCredential`. PyIceberg reads that metadata with
+`adlfs` when it is installed, else with PyArrow, which ignores the connection
+string. A key set in `STRATA_CATALOG_PROPERTIES` overrides the one Strata
+derives.
 
 | Variable                              | Default | Description                                        |
 | ------------------------------------- | ------- | -------------------------------------------------- |
