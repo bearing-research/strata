@@ -3498,7 +3498,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS</code></td>
 <td><code>600</code></td>
-<td>For a worker that answers a signed dispatch with 202: how long the job may take to start running. The cell's own timeout starts once it runs. See <a href="../executor-protocol/">Executor protocol</a>.</td>
+<td>For a worker that answers a dispatch (direct or signed) with 202: how long the job may take to start running. The cell's own timeout starts once it runs. See <a href="../executor-protocol/">Executor protocol</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_TRANSFORM_SIGNING_SECRET</code></td>
