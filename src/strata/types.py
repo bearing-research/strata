@@ -748,7 +748,7 @@ class LineageNode(BaseModel):
     ``content_sha256``) are best-effort: empty for tables, core transforms and
     older rows. ``principal`` is also empty for local notebook runs, which have
     no authenticated identity. For a ``fetch``, ``content_sha256`` is the digest
-    of the bytes read.
+    of the bytes read and ``created_at``, when recorded, the time they were downloaded.
     """
 
     uri: str

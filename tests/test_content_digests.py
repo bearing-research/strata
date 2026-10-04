@@ -273,3 +273,87 @@ class TestRunReport:
 
         assert digests(first)["rows"] == digests(second)["rows"]
         assert digests(first)["rows"] != [None]
+
+    @staticmethod
+    def _outputs(payload, cell_id):
+        cell = next(c for c in payload["cells"] if c["id"] == cell_id)
+        return {o["name"]: o["content_sha256"] for o in cell.get("outputs", [])}
+
+    def test_a_leaf_cell_reports_what_it_defines(self, tmp_path, capsys):
+        """The last cell is often the result, and nothing downstream reads it."""
+        payload = self._run(self._notebook(tmp_path, "[1, 2, 3]"), capsys)
+
+        total = self._outputs(payload, "total")
+        assert total["total"]
+
+    def test_two_notebooks_differ_at_the_leaf(self, tmp_path, capsys):
+        mine = self._run(self._notebook(tmp_path / "mine", "[1, 2, 3]"), capsys)
+        yours = self._run(self._notebook(tmp_path / "yours", "[1, 2, 4]"), capsys)
+
+        assert self._outputs(mine, "total")["total"] != self._outputs(yours, "total")["total"]
+
+    @staticmethod
+    def _run_warm(nb, capsys):
+        import json as _json
+
+        from strata.notebook.cli import run_main
+
+        assert run_main([str(nb), "--no-sync", "--format", "json"]) == 0
+        return _json.loads(capsys.readouterr().out)
+
+    @staticmethod
+    def _cache_hit(payload, cell_id):
+        return next(c for c in payload["cells"] if c["id"] == cell_id)["cache_hit"]
+
+    def test_a_cached_leaf_still_reports_its_digest(self, tmp_path, capsys):
+        """A warm rerun replays the leaf; the digest is the stored one, the same bytes."""
+        nb = self._notebook(tmp_path, "[1, 2, 3]")
+        fresh = self._run_warm(nb, capsys)
+        # The second run of a new notebook still executes; the third is the warm one.
+        self._run_warm(nb, capsys)
+
+        warm = self._run_warm(nb, capsys)
+
+        assert self._cache_hit(warm, "total") is True
+        assert self._outputs(warm, "total")["total"] == self._outputs(fresh, "total")["total"]
+
+    def test_a_row_stored_without_a_digest_is_filled_in(self, tmp_path, capsys):
+        """Results stored before digests existed still get one, read from their bytes."""
+        nb = self._notebook(tmp_path, "[1, 2, 3]")
+        first = self._run_warm(nb, capsys)
+        self._run_warm(nb, capsys)
+        store = ArtifactStore(nb / ".strata" / "artifacts")
+        conn = store._get_connection()
+        try:
+            conn.execute("UPDATE artifact_versions SET content_sha256 = NULL")
+            conn.commit()
+        finally:
+            conn.close()
+
+        warm = self._run_warm(nb, capsys)
+
+        assert self._cache_hit(warm, "rows") is True
+        assert self._outputs(warm, "rows")["rows"] == self._outputs(first, "rows")["rows"]
+        assert self._outputs(warm, "rows")["rows"] is not None
+
+    def test_the_zip_exports_provenance_carries_the_digests(self, tmp_path, capsys):
+        import io
+        import json as _json
+        import zipfile
+
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.snapshot import write_committed_files
+
+        nb = self._notebook(tmp_path, "[1, 2, 3]")
+        payload = self._run(nb, capsys)
+        session = NotebookSession(parse_notebook(nb), nb)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            write_committed_files(session, archive)
+
+        with zipfile.ZipFile(buffer) as archive:
+            cells = _json.loads(archive.read("provenance.json"))["cells"]
+
+        exported = {o["name"]: o["content_sha256"] for o in cells["rows"]["outputs"]}
+        assert exported == self._outputs(payload, "rows")

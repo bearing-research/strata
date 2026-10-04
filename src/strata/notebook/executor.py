@@ -291,6 +291,7 @@ class _CellProvenance:
     fetch_fingerprints: list[str] = field(default_factory=list)
     fetched: dict[str, Path] = field(default_factory=dict)
     fetch_error: str | None = None
+    fetch_error_code: str | None = None
     # ``@dataset`` inputs: the version each name resolved to (already in the notebook's
     # store), and why any did not.
     dataset_fingerprints: list[str] = field(default_factory=list)
@@ -315,6 +316,9 @@ class CellExecutionResult:
     display_output: dict[str, Any] | None = None
     duration_ms: float = 0
     error: str | None = None
+    # A stable name for the failure a client can match on (e.g. ``fetch_pin_mismatch``);
+    # ``None`` for failures that have none.
+    error_code: str | None = None
     # The harness's formatted traceback, kept apart from ``error`` so the UI's one-line
     # pill stays one line.
     traceback: str | None = None
@@ -393,6 +397,7 @@ class CellExecutionResult:
         payload["display"] = payload.pop("display_output")
         # Optional metadata fields are omitted from the wire when falsy.
         for opt_field in (
+            "error_code",
             "validation_retries",
             "suggest_install",
             "suggest_install_language",
@@ -498,8 +503,13 @@ class CellExecutor:
         # re-read at store time: a staleness check in between can record newer bytes than the
         # run used.
         self._fetch_refs: dict[str, dict[str, str]] = {}
+        # When each of those bytes was downloaded, ``{url: unix time}``, for the record.
+        self._fetch_times: dict[str, dict[str, float]] = {}
         # Same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``.
         self._dataset_refs: dict[str, dict[str, str]] = {}
+        # Also store the variables of a cell nothing downstream reads. Off by default: only
+        # consumed variables are kept, and a leaf's result can be large.
+        self.store_leaf_outputs = False
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
             credentials=mount_credentials,
@@ -981,10 +991,16 @@ class CellExecutor:
 
             tables += lake_tables(self.session.notebook_state, source)
         table_fingerprints, table_snapshots = await self._fingerprint_tables(tables)
-        fetch_fingerprints, fetched, fetch_refs, fetch_error = await self._resolve_fetches(
-            annotations.fetches
-        )
+        (
+            fetch_fingerprints,
+            fetched,
+            fetch_refs,
+            fetch_times,
+            fetch_error,
+            fetch_error_code,
+        ) = await self._resolve_fetches(annotations.fetches)
         self._fetch_refs[cell_id] = fetch_refs
+        self._fetch_times[cell_id] = fetch_times
         dataset_fingerprints, datasets, dataset_error = await self._resolve_datasets(
             annotations.datasets
         )
@@ -1018,6 +1034,7 @@ class CellExecutor:
             fetch_fingerprints=fetch_fingerprints,
             fetched=fetched,
             fetch_error=fetch_error,
+            fetch_error_code=fetch_error_code,
             dataset_fingerprints=dataset_fingerprints,
             datasets=datasets,
             dataset_error=dataset_error,
@@ -1150,6 +1167,7 @@ class CellExecutor:
                     cell_id=cell_id,
                     success=False,
                     error=prov.fetch_error,
+                    error_code=prov.fetch_error_code,
                     execution_method="error",
                 )
             # Likewise a dataset the registry could not resolve or hand over.
@@ -1832,6 +1850,7 @@ class CellExecutor:
                     cell_id=cell_id,
                     success=False,
                     error=prov.fetch_error,
+                    error_code=prov.fetch_error_code,
                     execution_method="error",
                 )
             worker_spec = resolve_worker_spec(self.session.notebook_state, prov.effective_worker)
@@ -3346,15 +3365,18 @@ class CellExecutor:
 
     async def _resolve_fetches(
         self, fetch_specs: list[FetchSpec]
-    ) -> tuple[list[str], dict[str, Path], dict[str, str], str | None]:
+    ) -> tuple[
+        list[str], dict[str, Path], dict[str, str], dict[str, float], str | None, str | None
+    ]:
         """Check every ``@fetch`` right before a run and fingerprint its bytes.
 
         Always rechecked (``max_age=0``) so the run records what the URL served
         when it ran. Returns fingerprints, a path per name, the lineage input per
-        URL, and the first failure, if any.
+        URL, when each URL's bytes were downloaded, and the first failure and its
+        code, if any.
         """
         if not fetch_specs:
-            return [], {}, {}, None
+            return [], {}, {}, {}, None, None
         from strata.notebook.fetch import FetchCache, FetchError, guard_settings
 
         allowed_hosts, allow_local = guard_settings(self._lake_config())
@@ -3362,7 +3384,9 @@ class CellExecutor:
         fingerprints: list[str] = []
         fetched: dict[str, Path] = {}
         refs: dict[str, str] = {}
+        times: dict[str, float] = {}
         error: str | None = None
+        error_code: str | None = None
         loop = asyncio.get_running_loop()
         for spec in sorted(fetch_specs, key=lambda item: item.name):
             try:
@@ -3370,13 +3394,21 @@ class CellExecutor:
                     None, lambda s=spec: cache.resolve(s, max_age=0)
                 )
             except FetchError as exc:
-                error = error or str(exc)
+                if error is None:
+                    error, error_code = str(exc), exc.code
                 fingerprints.append(cache.fingerprint(spec, max_age=float("inf")))
                 continue
             fingerprints.append(result.fingerprint(spec))
             fetched[spec.name] = result.path
             refs[spec.url] = f"sha256:{result.sha256}"
-        return fingerprints, fetched, refs, error
+            if result.fetched_at is not None:
+                times[spec.url] = result.fetched_at
+        return fingerprints, fetched, refs, times, error, error_code
+
+    def _fetch_params(self, cell_id: str) -> dict[str, str]:
+        """Transform params recording when each fetched input was downloaded, if any."""
+        times = self._fetch_times.get(cell_id)
+        return {"fetched_at": json.dumps(times, sort_keys=True)} if times else {}
 
     async def _resolve_datasets(
         self, dataset_specs: list[DatasetSpec]
@@ -4281,6 +4313,8 @@ class CellExecutor:
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
+        With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort.
+
         With ``variant`` set, ids get an ``@variant={name}`` suffix so fan-out
         instances do not collide.
         """
@@ -4304,7 +4338,10 @@ class CellExecutor:
             [f.name for f in output_files],
         )
 
-        if not consumed_vars:
+        # Kept for the record only: no input resolves through them, so a value that did not
+        # serialize is skipped rather than failing the cell.
+        leaf_vars = set(cell.defines) if not consumed_vars and self.store_leaf_outputs else set()
+        if not consumed_vars and not leaf_vars:
             return True
 
         all_stored = True
@@ -4334,7 +4371,7 @@ class CellExecutor:
             ".rds",
         ]
 
-        for var_name in consumed_vars:
+        for var_name in consumed_vars | leaf_vars:
             # Python writes a case-safe stem (``Data-<hash>.json``), R the plain name. Try every
             # safe-stem candidate, then the plain name only if no safe-stem file exists at all
             # (never per-ext), so a case-differing sibling like ``data.arrow`` is never taken
@@ -4352,6 +4389,8 @@ class CellExecutor:
                 if output_file is not None:
                     break
 
+            if output_file is None and var_name in leaf_vars:
+                continue
             if output_file is None:
                 logger.warning(
                     "_store_outputs %s: no output file for consumed var %s "
@@ -4387,6 +4426,7 @@ class CellExecutor:
                         build_env=build_env,
                         build_duration_ms=build_duration_ms,
                         hardware=hardware,
+                        extra_params=self._fetch_params(cell_id),
                     )
                 )
                 staged_names.append((var_name, content_type))
@@ -4396,6 +4436,8 @@ class CellExecutor:
                     var_name,
                     cell_id,
                 )
+                if var_name in leaf_vars:
+                    continue
                 all_stored = False
                 break
 
@@ -4408,12 +4450,14 @@ class CellExecutor:
             stored = artifact_mgr.finalize_cell_outputs(staged)
         except Exception:
             logger.exception("Failed to store the outputs of cell %s", cell_id)
-            return False
+            # A leaf's record is best-effort and never fails the cell.
+            return not consumed_vars
 
         for (var_name, content_type), artifact_version in zip(staged_names, stored, strict=True):
-            uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
-            cell.artifact_uris[var_name] = uri
-            cell.artifact_uri = uri  # backward compat
+            if var_name not in leaf_vars:
+                uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
+                cell.artifact_uris[var_name] = uri
+                cell.artifact_uri = uri  # backward compat
             logger.info(
                 "Stored output %s for cell %s as %s@v=%d (%d bytes, %s)",
                 var_name,
@@ -4457,6 +4501,7 @@ class CellExecutor:
             source_hash=source_hash,
             source=source,
             env_hash=env_hash,
+            extra_params=self._fetch_params(cell_id),
         )
 
     def _store_inline_display_outputs(
@@ -4511,7 +4556,10 @@ class CellExecutor:
                     source_hash=source_hash,
                     source=source,
                     env_hash=env_hash,
-                    extra_params=display_metadata_params(entry, len(display_outputs)),
+                    extra_params={
+                        **display_metadata_params(entry, len(display_outputs)),
+                        **self._fetch_params(cell_id),
+                    },
                 ).version
             entry["artifact_uri"] = f"strata://artifact/{canonical_id}@v={version}"
             stored.append(entry)
@@ -4562,7 +4610,10 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=source,
                 env_hash=env_hash,
-                extra_params=display_metadata_params(display_output, len(display_outputs)),
+                extra_params={
+                    **display_metadata_params(display_output, len(display_outputs)),
+                    **self._fetch_params(cell_id),
+                },
             )
             display_uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
             stored_display = dict(display_output)

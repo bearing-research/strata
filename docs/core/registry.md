@@ -78,8 +78,9 @@ Entries carry the actor (principal id when authenticated), the action, and
 the from → to versions. `GET /v1/registry/audit` serves the same data; the
 SDK exposes `get_registry_audit(name=..., artifact_id=...)`.
 
-Publishing an artifact and withdrawing a publication are recorded in the same
-log, as `publish` and `withdraw` with the token in `value`.
+Publishing an artifact, withdrawing a publication and changing its credits
+(authors or identifiers, `PATCH /v1/publications/{token}`) are recorded in the
+same log, as `publish`, `withdraw` and `credit` with the token in `value`.
 
 ### Following the store
 

@@ -816,7 +816,7 @@ One endpoint, four output formats:
 
 | `fmt`        | Returns                                                                                                  |
 | ------------ | -------------------------------------------------------------------------------------------------------- |
-| `zip` *(default)* | Reproducible bundle, `notebook.toml`, `pyproject.toml`, `uv.lock`, cells, `provenance.json`.        |
+| `zip` *(default)* | Reproducible bundle, `notebook.toml`, `pyproject.toml`, `uv.lock`, cells, `provenance.json`. Each cell's entry in `provenance.json` lists its stored `outputs` (`name`, `artifact_id`, `version`, `content_sha256`), the same shape as `strata run --format json`, so a rerun's report can be diffed against the export. |
 | `snapshot`   | The `zip`'s members **plus** outputs, per-cell provenance and timings, an artifact index, and bytes.      |
 | `markdown`   | Single-file rendering for sharing / docs ingestion. Same engine as `strata export`.                      |
 | `html`       | Standalone HTML with embedded CSS + Pygments syntax highlighting.                                        |

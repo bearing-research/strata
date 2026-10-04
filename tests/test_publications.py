@@ -1324,7 +1324,12 @@ class TestExternalInputs:
 
     DIGEST = "d" * 64
 
-    def _published(self, tmp_path, url: str):
+    # 2026-01-02 03:04 UTC, well before the step that read the bytes.
+    RETRIEVED = 1767323040.0
+
+    def _published(self, tmp_path, url: str, *, fetched_at: float | None = None):
+        import json
+
         from strata.notebook.artifact_integration import NotebookArtifactManager
         from strata.services.artifact import ArtifactService
 
@@ -1337,6 +1342,9 @@ class TestExternalInputs:
             provenance_hash="a" * 64,
             input_versions={url: f"sha256:{self.DIGEST}"},
             source="plt.plot(pd.read_csv(zones))",
+            extra_params=(
+                {"fetched_at": json.dumps({url: fetched_at})} if fetched_at is not None else None
+            ),
         )
         publication = manager.artifact_store.publish_artifact(figure.id, figure.version)
         lineage = ArtifactService().build_lineage(
@@ -1374,6 +1382,24 @@ class TestExternalInputs:
         # Named once, as an external input, not again as an upstream step.
         assert html.count(url) == 1
 
+    def test_the_page_says_when_the_bytes_were_retrieved(self, tmp_path):
+        """The download can predate the run by months; the run's time would misdate the data."""
+        url = "https://example.org/taxi_zones.csv"
+        publication, figure, lineage = self._published(tmp_path, url, fetched_at=self.RETRIEVED)
+
+        html = self._page(publication, figure, lineage)
+        external = html.split("<h2>External inputs</h2>", 1)[1].split("<h2>", 1)[0]
+
+        assert "Retrieved" in external
+        assert "2026-01-02 03:04 UTC" in external
+
+    def test_a_step_with_no_recorded_retrieval_claims_none(self, tmp_path):
+        url = "https://example.org/taxi_zones.csv"
+        html = self._page(*self._published(tmp_path, url))
+        external = html.split("<h2>External inputs</h2>", 1)[1].split("<h2>", 1)[0]
+
+        assert "Retrieved" not in external
+
     def test_a_hostile_url_is_printed_not_linked(self, tmp_path):
         """The record is not trusted to hold only https."""
         html = self._page(*self._published(tmp_path, "javascript:alert(1)//<script>x</script>"))
@@ -1401,6 +1427,24 @@ class TestExternalInputs:
         assert entity["sha256"] == self.DIGEST
         action = next(e for e in crate["@graph"] if e.get("@type") == "CreateAction")
         assert {"@id": url} in action["object"]
+
+    def test_the_crate_dates_the_retrieval(self, tmp_path):
+        from strata.api.provenance_ld import build_crate
+
+        url = "https://example.org/taxi_zones.csv"
+        publication, figure, lineage = self._published(tmp_path, url, fetched_at=self.RETRIEVED)
+
+        crate = build_crate(
+            publication=publication,
+            artifact=figure,
+            lineage=lineage,
+            content_type="image/png",
+            payload_id="artifact.png",
+            include_descriptor=True,
+        )
+
+        entity = next(e for e in crate["@graph"] if e["@id"] == url)
+        assert entity["sdDatePublished"].startswith("2026-01-02T03:04")
 
 
 class TestWhatPublishingRequires:

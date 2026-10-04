@@ -149,6 +149,19 @@ class TestRoundTrip:
         assert all(isinstance(entry, dict) for entry in audit)
         assert any(entry.get("name") == "model" for entry in audit)
 
+    def test_a_credit_change_is_one_event(self, store):
+        version = store.create_artifact("a1", "prov-1", _spec())
+        store.write_blob("a1", version, b"payload")
+        store.finalize_artifact("a1", version, "{}", row_count=0, byte_size=7)
+        publication = store.publish_artifact("a1", version)
+
+        store.update_publication_credits(publication.token, authors=[{"name": "F. Li"}])
+
+        assert [(e["action"], e["value"]) for e in store.read_events()] == [
+            ("publish", publication.token),
+            ("credit", publication.token),
+        ]
+
 
 class TestColumnWidths:
     """Both numeric column types are narrower in Postgres than in SQLite."""
