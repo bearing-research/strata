@@ -35,9 +35,13 @@ REST routes and the WebSocket:
 | `notebook:execute` | `run_cell`, `run_tests`, `run_snippet`, `set_widget_value`, `add_dependency`, `remove_dependency`, `connect_ssh_worker`, and any tool not listed |
 | `artifacts:publish` | `publish` |
 
-Every open session on the server is visible to any caller holding
-`notebook:read`: a server serves one organization, and the check is scopes, not
-ownership.
+Within a tenant, every open session is visible to any caller holding
+`notebook:read`: the check is scopes, not ownership. A session records the
+tenant of the caller who opened or created it, and a caller from another tenant
+neither sees it in `list_notebooks` nor reaches it by `session_id`, as with
+tenant-scoped artifacts. `admin:*` sees every tenant's sessions, and a session
+opened without a tenant is visible to all. This covers MCP only; the notebook
+REST routes and the WebSocket do not check a session's tenant.
 
 === "From PyPI"
 

@@ -197,6 +197,22 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
         )
         assert resolved.status_code == 200
 
+        # A follower of the feed sees the request and its approval; the refused
+        # approvals above changed nothing and are not on it.
+        assert _champion_events(base, "team-a") == [
+            ("alias_request_set", "alice"),
+            ("alias_approved", "frank"),
+            ("alias_set", "frank"),
+        ]
+        assert _champion_events(base, "team-b") == []
+
+
+def _champion_events(base: str, tenant: str) -> list[tuple[str, str]]:
+    """The champion alias's events on the store's feed, as one tenant's member reads it."""
+    resp = httpx.get(f"{base}/v1/events", headers=_headers(tenant, "reader"), timeout=30.0)
+    assert resp.status_code == 200, resp.text
+    return [(e["action"], e["actor"]) for e in resp.json()["events"] if e["alias"] == "champion"]
+
 
 def test_protected_alias_admin_star_is_break_glass_self_approve(tmp_path):
     """``admin:*`` is break-glass: it satisfies admin:registry and allows self-approval."""
@@ -290,6 +306,10 @@ def test_reject_requires_registry_scope(tmp_path):
             headers=_headers("team-a", "alice"),
         )
         assert gone.status_code == 404
+        assert _champion_events(base, "team-a") == [
+            ("alias_request_set", "alice"),
+            ("alias_rejected", "frank"),
+        ]
 
 
 def test_writes_to_another_tenants_artifact_answer_like_reads(tmp_path):

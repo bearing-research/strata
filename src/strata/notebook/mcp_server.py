@@ -40,11 +40,11 @@ def _resolve_ops(session_manager: SessionManager, session_id: str) -> LocalNoteb
 
 
 def _list_notebooks(session_manager: SessionManager) -> list[dict[str, Any]]:
-    """Return one ``{session_id, name, path}`` entry per open session."""
+    """Return one ``{session_id, name, path}`` entry per open session the caller may use."""
     notebooks: list[dict[str, Any]] = []
     for session_id in session_manager.list_sessions():
         session = session_manager.get_session(session_id)
-        if session is None:
+        if session is None or not _visible_to_caller(session):
             continue
         notebooks.append(
             {
@@ -362,10 +362,22 @@ async def _agent_note(session_id: str, source: str, text: str) -> None:
     )
 
 
+def _visible_to_caller(session: Any) -> bool:
+    """Whether the current caller's tenant may use *session*, as artifacts are scoped.
+
+    A session carries the tenant that opened it; a tenantless one is open to all.
+    """
+    principal = get_principal()
+    if principal is None or principal.has_scope("admin:*"):
+        return True
+    tenant = session.opened_by[1] if session.opened_by else None
+    return tenant is None or tenant == principal.tenant
+
+
 def _live_session(session_manager: SessionManager, session_id: str):
     """Return the server's warm session for *session_id*, or raise ``ValueError``."""
     session = session_manager.get_session(session_id)
-    if session is None:
+    if session is None or not _visible_to_caller(session):
         raise ValueError(f"no open notebook session {session_id!r}; call list_notebooks first")
     # An agent's tool call is someone working in the notebook.
     session.touch()
