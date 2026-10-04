@@ -592,6 +592,51 @@ class TestNotebookCatalogs:
             self._resolve(session)
 
 
+class TestCacheSnapshotOnDuckDB:
+    """Only a catalog's tables can be pinned (the pinned run: test_e2e_duckdb_lake.py)."""
+
+    @pytest.mark.asyncio
+    async def test_a_connection_without_a_catalog_is_still_refused(self, tmp_path):
+        _write_parquet(tmp_path / "raw" / "a.parquet", [1])
+        nb_dir = _notebook(
+            tmp_path,
+            {"c1": "# @sql connection=lake\n# @cache snapshot\nSELECT * FROM raw\n"},
+            'driver = "duckdb"\npath = ":memory:"\nmounts = ["raw"]',
+        )
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await _run(nb_dir, session, "c1")
+
+        assert result.success is False
+        assert "supports_snapshot=False" in result.error
+
+    @pytest.mark.asyncio
+    async def test_a_query_reading_a_mount_is_refused_naming_it(self, tmp_path):
+        _write_parquet(tmp_path / "raw" / "a.parquet", [1])
+        nb_dir = _notebook(
+            tmp_path,
+            {
+                "c1": "# @sql connection=lake\n# @cache snapshot\n"
+                "SELECT * FROM lake.taxi.trips JOIN raw USING (k)\n"
+            },
+            'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"\nmounts = ["raw"]',
+        )
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await _run(nb_dir, session, "c1")
+
+        assert result.success is False
+        assert "raw is not one" in result.error
+
+    def test_a_new_snapshot_does_not_make_the_cell_stale(self, tmp_path):
+        nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
+        state = parse_notebook(nb_dir)
+        body = "SELECT * FROM lake.taxi.trips\n"
+
+        assert lake_tables(state, f"# @sql connection=lake\n{body}")
+        assert lake_tables(state, f"# @sql connection=lake\n# @cache snapshot\n{body}") == []
+
+
 def test_a_python_notebook_needs_no_sql_extra(tmp_path):
     """Staleness and provenance of non-SQL cells must not import sqlglot."""
     import subprocess

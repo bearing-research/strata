@@ -580,7 +580,7 @@ Override the default `fingerprint` cache policy on a SQL cell.
 | `forever`         | Static salt; never invalidates from DB-side state.           |
 | `session`         | Session-unique salt; invalidates across sessions.            |
 | `ttl=<seconds>`   | `floor(now / ttl)` bucketed time-based salt.                 |
-| `snapshot`        | The result is pinned to one queryable state of the warehouse. Snowflake and BigQuery only; refused on other drivers. |
+| `snapshot`        | The result is pinned to one queryable state of the warehouse. Snowflake, BigQuery, and DuckDB over a catalog; refused on other drivers. |
 
 ```sql
 # @sql connection=warehouse
@@ -590,8 +590,9 @@ SELECT * FROM dim_country
 
 `# @cache snapshot` needs a driver whose warehouse can query a table as it
 stood at a moment in time. **Snowflake** (`AT (TIMESTAMP => ...)`) and
-**BigQuery** (`FOR SYSTEM_TIME AS OF ...`) can. DuckDB, SQLite and PostgreSQL
-cannot, and the cell is refused before any connection is opened.
+**BigQuery** (`FOR SYSTEM_TIME AS OF ...`) can, and so can a **DuckDB**
+connection with a `catalog` (see below). SQLite, PostgreSQL and DuckDB without
+a catalog cannot, and the cell is refused before any connection is opened.
 
 ```sql
 # @sql connection=warehouse
@@ -617,7 +618,26 @@ On Snowflake the horizon is the shortest `DATA_RETENTION_TIME_IN_DAYS` among
 the tables the query reads. On BigQuery it is 48 hours, the shortest time travel
 window a dataset can be configured with, since a dataset's own setting lives in
 a region-scoped view the connection does not name. After the horizon, a rerun
-works, but the recorded state can no longer be queried again. Per-driver
+works, but the recorded state can no longer be queried again. The horizon is
+also on the [publication page](publishing.md) of a result built from the cell.
+
+On a DuckDB connection over a [catalog](cells.md#duckdb-over-the-lake), the
+state is the Iceberg snapshot of each catalog table the query reads. The first
+run records those snapshot ids on its artifact and reads each table `AT
+(VERSION => id)`; later runs read the same snapshots and hit the cache, and a
+new snapshot of a table does not make the cell out of date. Only a rerun (`↻`)
+or a change to the cell moves it to the current snapshots. The run says which
+snapshots it shows:
+
+```
+State of lake.taxi.trips at snapshot 5739646342007261951.
+```
+
+Every table the query reads must be one of the catalog's, since only those have
+snapshots to read again: a query that reads a mount or a table in the
+connection's own database file is refused, naming it. An Iceberg snapshot stays
+queryable until the catalog's maintenance expires it, which Strata cannot see,
+so no horizon is recorded. Per-driver
 freshness probe details are in [SQL Cells](cells.md#per-driver-freshness).
 
 ### `@name`

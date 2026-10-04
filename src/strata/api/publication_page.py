@@ -113,6 +113,34 @@ def _when(ts: float | None) -> str:
     return datetime.datetime.fromtimestamp(ts, datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _iso_when(value: str) -> str:
+    """An ISO-8601 timestamp as ``_when`` prints one, or as given if it does not parse."""
+    try:
+        moment = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=datetime.UTC)
+    return moment.astimezone(datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _snapshot_rows(node) -> list[tuple[str, str]]:
+    """A time-travel query's moment, and until when the warehouse can replay it."""
+    if node is None or not node.snapshot_at:
+        return []
+    until = (
+        escape(_iso_when(node.snapshot_valid_until))
+        + " <span class='note'>(after this the warehouse no longer keeps that state, "
+        "so the query cannot be run against it again)</span>"
+        if node.snapshot_valid_until
+        else "<span class='note'>not recorded</span>"
+    )
+    return [
+        ("Warehouse state as of", escape(_iso_when(node.snapshot_at))),
+        ("Queryable until", until),
+    ]
+
+
 def _rows(pairs: list[tuple[str, str]]) -> str:
     body = "".join(f"<tr><td class='k'>{escape(k)}</td><td>{v}</td></tr>" for k, v in pairs if v)
     return f"<table>{body}</table>"
@@ -255,6 +283,7 @@ def render_publication(
                     "Environment",
                     escape(root.build_env) if root and root.build_env else "",
                 ),
+                *_snapshot_rows(root),
                 ("Provenance hash", _code(artifact.provenance_hash)),
                 (
                     "Content digest (SHA-256)",
@@ -297,6 +326,7 @@ def render_publication(
                     ("Author", escape(node.principal) if node.principal else ""),
                     ("Environment", escape(node.build_env)),
                     ("Environment hash", _code(node.env_hash) if node.env_hash else ""),
+                    *_snapshot_rows(node),
                 ]
             )
         )

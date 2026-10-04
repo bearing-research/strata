@@ -35,6 +35,11 @@ if TYPE_CHECKING:
     from strata.notebook.models import ConnectionSpec, NotebookState
 
 
+# Artifact transform param a ``# @cache snapshot`` cell records: the
+# ``[namespace, table, snapshot]`` rows its query read.
+PARAM_SNAPSHOT_IDS = "sql_snapshot_ids"
+
+
 class LakeError(ValueError):
     """The connection's catalog or a mount cannot be resolved."""
 
@@ -112,10 +117,13 @@ def lake_tables(notebook_state: NotebookState, source: str) -> list[TableSpec]:
     """The catalog tables a SQL cell reads, as ``@table`` declarations.
 
     Staleness and generic provenance fold these with the cell's own ``@table``
-    declarations.
+    declarations. A ``# @cache snapshot`` cell reads the snapshots it pinned, so
+    a new one does not make it stale.
     """
     annotations = parse_annotations(source)
     if annotations.sql is None or not annotations.sql.connection or annotations.sql.write:
+        return []
+    if annotations.cache is not None and annotations.cache.kind == "snapshot":
         return []
     spec = next(
         (c for c in notebook_state.connections if c.name == annotations.sql.connection), None
@@ -136,8 +144,12 @@ def resolve_lake(
     source: str,
     spec: ConnectionSpec,
     tables: list[QualifiedTable],
+    pinned: dict[tuple[str, str], int] | None = None,
 ) -> Lake:
     """Resolve the catalog, the mounts and the snapshot of every table read.
+
+    A table in *pinned* (``(namespace, table)`` to snapshot) reads that snapshot
+    rather than the current one.
 
     Raises:
         LakeError: naming what could not be resolved, rather than reading something else.
@@ -171,10 +183,13 @@ def resolve_lake(
             raise LakeError(f"catalog {catalog!r}: {exc}") from exc
         from strata.notebook.tables import fingerprint_tables, resolve_table_snapshot
 
-        specs = _catalog_tables(catalog, tables)
-        _, snapshots = fingerprint_tables(specs, config)
-        for table_spec in specs:
-            snapshot = snapshots.get(table_spec.name)
+        pinned = pinned or {}
+        specs = {_table_key(spec): spec for spec in _catalog_tables(catalog, tables)}
+        _, snapshots = fingerprint_tables(
+            [spec for key, spec in specs.items() if key not in pinned], config
+        )
+        for (namespace, name), table_spec in specs.items():
+            snapshot = pinned.get((namespace, name), snapshots.get(table_spec.name))
             if snapshot is None:
                 # Unresolved the first time: ask again, so the cell fails with the catalog's
                 # reason or reads what a retry found.
@@ -182,7 +197,6 @@ def resolve_lake(
                     snapshot = resolve_table_snapshot(table_spec, config)
                 except ValueError as exc:
                     raise LakeError(f"table {table_spec.uri}: {exc}") from exc
-            namespace, _, name = table_spec.uri.partition(":")[2].rpartition(".")
             lake.snapshots[(namespace, name)] = snapshot
             # From the snapshot the query reads, so a catalog that answered only on retry still
             # gives a reproducible hash (fingerprint_tables invents a random one otherwise).
@@ -198,6 +212,37 @@ def resolve_lake(
     if update:
         lake.spec = spec.model_copy(update=update)
     return lake
+
+
+def _table_key(table_spec: TableSpec) -> tuple[str, str]:
+    namespace, _, name = table_spec.uri.partition(":")[2].rpartition(".")
+    return namespace, name
+
+
+def snapshot_problem(catalog: str, analysis: Any) -> str | None:
+    """Why ``# @cache snapshot`` cannot pin this DuckDB query, or None.
+
+    Only the catalog's tables have snapshots that can be read again; a mount, a
+    table in the connection's own database or one named at run time can change
+    under the pin.
+    """
+    if analysis.unresolved_tables:
+        return (
+            "@cache snapshot needs every table the query reads named in it; "
+            f"{analysis.unresolved_tables[0]} is named at run time"
+        )
+    for table in analysis.tables:
+        if catalog_table(catalog, table) is None:
+            return (
+                "@cache snapshot on a DuckDB connection reads only tables of its catalog "
+                f"{catalog!r}, whose snapshots can be read again; {table.render()} is not one"
+            )
+    return None
+
+
+def snapshot_rows(snapshots: dict[tuple[str, str], int]) -> list[list[Any]]:
+    """*snapshots* as sorted ``[namespace, table, snapshot]`` rows, for JSON."""
+    return sorted([namespace, name, snapshot] for (namespace, name), snapshot in snapshots.items())
 
 
 def _table_location(table_spec: TableSpec, config: Any) -> str:

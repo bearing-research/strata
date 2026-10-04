@@ -305,6 +305,52 @@ async def test_a_gcs_or_azure_mount_is_a_view_read_with_its_storage_options(
 
 
 @pytest.mark.asyncio
+async def test_a_snapshot_cell_keeps_reading_its_snapshot_until_a_rerun(
+    tmp_path, monkeypatch, rest_catalog
+):
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    catalog, properties = rest_catalog
+    _configure(
+        monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
+    )
+    source = (
+        "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips ORDER BY id\n"
+    )
+    nb_dir = _notebook(tmp_path, source, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    first_snapshot = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
+
+    result, rows = await _run(nb_dir, session)
+    assert rows == [{"id": 1}, {"id": 2}]
+    assert f"lake.taxi.trips at snapshot {first_snapshot}" in result.stdout
+
+    catalog.load_table("taxi.trips").append(pa.table({"id": [3]}))
+    assert session.compute_staleness()["c1"].status == CellStatus.READY
+    result, rows = await _run(nb_dir, session)
+    assert result.cache_hit is True
+    assert rows == [{"id": 1}, {"id": 2}]
+
+    # Replayed, not only cached: with no cached rows to find, the run reads the pin again.
+    monkeypatch.setattr(session.get_artifact_manager(), "find_cached", lambda provenance: None)
+    replay = await execute_sql_cell(session, "c1", source)
+    assert replay["success"], replay["error"]
+    assert replay["cache_hit"] is False
+    assert _artifact_rows(session, replay["artifact_uri"]) == [{"id": 1}, {"id": 2}]
+
+    rerun = await execute_sql_cell(session, "c1", source, use_cache=False)
+    assert rerun["success"], rerun["error"]
+    assert f"at snapshot {first_snapshot}" not in rerun["stdout"]
+    assert _artifact_rows(session, rerun["artifact_uri"]) == [{"id": 1}, {"id": 2}, {"id": 3}]
+
+
+def _artifact_rows(session: NotebookSession, uri: str) -> list[dict[str, Any]]:
+    art_id, version = uri.removeprefix("strata://artifact/").rsplit("@v=", 1)
+    blob = session.get_artifact_manager().load_artifact_data(art_id, int(version))
+    return pa.ipc.open_stream(blob).read_all().to_pylist()
+
+
+@pytest.mark.asyncio
 async def test_a_read_cell_cannot_write_to_the_catalog(tmp_path, monkeypatch, rest_catalog):
     catalog, properties = rest_catalog
     _configure(
