@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from pyiceberg.exceptions import NoSuchTableError
 
 from strata.artifact_store import TransformSpec, compute_provenance_hash
+from strata.iceberg import WarehouseNotFound
 from strata.iceberg_schema import UnsupportedTableFormatError
 from strata.types import (
     ExplainMaterializeRequest,
@@ -80,8 +81,9 @@ class MaterializeService:
 
         Raises:
             InputResolutionError: malformed/unknown URI, unknown name, or a failed
-                table plan; a table its catalog does not have is 404, one Strata
-                refuses to read 422 with the planner's message.
+                table plan; a table its catalog does not have, or a local warehouse that
+                does not exist, is 404, one Strata refuses to read 422 with the planner's
+                message.
         """
         if input_uri.startswith("strata://artifact/"):
             match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
@@ -116,6 +118,8 @@ class MaterializeService:
                 raise InputResolutionError(422, str(e)) from e
             except NoSuchTableError as e:
                 raise InputResolutionError(404, f"Table not found: {input_uri}") from e
+            except WarehouseNotFound as e:
+                raise InputResolutionError(404, str(e)) from e
             except Exception as e:
                 raise InputResolutionError(
                     400, f"Could not resolve table {input_uri}: {str(e)}"

@@ -91,6 +91,14 @@ class CatalogUriRequired(ValueError):
     """A request names an object-store warehouse on a service with no catalog ``uri``."""
 
 
+class WarehouseNotFound(ValueError):
+    """A table URI names a local warehouse directory that does not exist."""
+
+
+class SnapshotNotFound(ValueError):
+    """A read names a snapshot id the table does not have."""
+
+
 def refuse_unconfigured_warehouse(warehouse_path: str | None, config: StrataConfig) -> None:
     """Raise :class:`CatalogUriRequired` for a service-mode object-store warehouse with no ``uri``.
 
@@ -297,6 +305,14 @@ class PyIcebergCatalog:
         if name is not None:
             return self._get_named_catalog(name).load_table(named_table_id)
         warehouse_path, table_id = self.parse_table_uri(table_uri)
+        if (
+            warehouse_path
+            and "://" not in warehouse_path
+            and "uri" not in self.config.catalog_properties
+            and not Path(warehouse_path).is_dir()
+        ):
+            # Its catalog is SQLite inside the directory, which cannot be opened.
+            raise WarehouseNotFound(f"Warehouse not found: {warehouse_path}")
         catalog = self._get_catalog(warehouse_path)
         try:
             return catalog.load_table(table_id)
@@ -322,13 +338,15 @@ class PyIcebergCatalog:
 
         Raises
         ------
+        SnapshotNotFound
+            If ``snapshot_id`` is absent from the table.
         ValueError
-            If ``snapshot_id`` is absent from the table, or the table has no snapshots.
+            If the table has no snapshots.
         """
         if snapshot_id is not None:
             snapshot = table.snapshot_by_id(snapshot_id)
             if snapshot is None:
-                raise ValueError(f"Snapshot {snapshot_id} not found in table")
+                raise SnapshotNotFound(f"Snapshot {snapshot_id} not found in table")
             return snapshot_id
 
         current = table.current_snapshot()

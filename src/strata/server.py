@@ -60,7 +60,7 @@ from strata.fast_io import (
 )
 from strata.gc_tracker import install_gc_tracker
 from strata.health import _package_version
-from strata.iceberg import CatalogUriRequired
+from strata.iceberg import CatalogUriRequired, SnapshotNotFound, WarehouseNotFound
 from strata.json_types import JsonValue
 from strata.logging import (
     configure_logging,
@@ -68,7 +68,7 @@ from strata.logging import (
     request_context_middleware,
 )
 from strata.metrics import MetricsCollector
-from strata.planner import ReadPlanner, UnsupportedTableFormatError
+from strata.planner import ColumnNotFound, ReadPlanner, UnsupportedTableFormatError
 from strata.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import (
     RateLimitConfig,
@@ -2170,8 +2170,10 @@ async def _handle_identity_materialize(
         # A table Strata will not read (an unreadable delete file, too many
         # pending equality deletes): the message says why and what to do.
         raise HTTPException(status_code=422, detail=str(e)) from e
-    except CatalogUriRequired as e:
+    except (CatalogUriRequired, ColumnNotFound) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except (WarehouseNotFound, SnapshotNotFound) as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except NoSuchTableError as e:
         raise HTTPException(status_code=404, detail=f"Table not found: {table_uri}") from e
 
