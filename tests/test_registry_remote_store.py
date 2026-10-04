@@ -168,8 +168,10 @@ class TestPerCellStrip:
     def _session(self, cell_ids):
         from types import SimpleNamespace
 
+        no_reads = SimpleNamespace(list_name_reads=lambda tenant=None: [])
         return SimpleNamespace(
-            notebook_state=SimpleNamespace(cells=[SimpleNamespace(id=c) for c in cell_ids])
+            notebook_state=SimpleNamespace(cells=[SimpleNamespace(id=c) for c in cell_ids]),
+            get_artifact_manager=lambda: SimpleNamespace(artifact_store=no_reads),
         )
 
     def test_the_strip_shows_what_the_cell_published_to_the_team(

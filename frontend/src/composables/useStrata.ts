@@ -7,6 +7,7 @@ import type {
   MaterializeResponse,
   MountSpec,
 } from '../types/notebook'
+import type { DatasetReader } from '../utils/datasetReaders'
 
 type UnknownObject = Record<string, unknown>
 
@@ -87,6 +88,8 @@ export interface PublishedArtifact {
 /** GET /v1/notebooks/{sid}/artifacts — keyed by cell id. */
 interface NotebookArtifactsResponse {
   cells: Record<string, PublishedArtifact[]>
+  /** Per name, this notebook's cells whose stored results read it. */
+  readers: Record<string, DatasetReader[]>
 }
 
 /** A protected-alias change awaiting approval (GET /v1/registry/pending). */
@@ -174,6 +177,8 @@ export interface RegistryName {
   uri: string
   aliases: Record<string, number>
   tags: Record<string, string>
+  /** Notebook cells whose results in the registry's store read this name. */
+  readers: DatasetReader[]
 }
 
 interface RegistrySummaryResponse {

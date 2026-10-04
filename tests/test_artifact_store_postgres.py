@@ -124,6 +124,17 @@ class TestRoundTrip:
 
         assert sorted(specs) == sorted([scan.to_json(), _spec().to_json()])
 
+    def test_name_reads_are_listed_per_tenant(self, store):
+        edges = {"strata://name/taxi/model@champion": "m@v=1"}
+        for artifact_id, tenant in (("ours", "team-a"), ("theirs", "team-b")):
+            version = store.create_artifact(
+                artifact_id, f"p-{artifact_id}", _spec(), input_versions=edges, tenant=tenant
+            )
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=0)
+
+        assert store.list_name_reads(tenant="team-a") == [("ours", "taxi/model@champion")]
+        assert [read[0] for read in store.list_name_reads()] == ["ours", "theirs"]
+
     def test_tags_and_aliases_round_trip(self, store):
         # Exercises _REGISTRY_SCHEMA_SQL, which carries the one AUTOINCREMENT
         # column in the schema (registry_audit.seq).

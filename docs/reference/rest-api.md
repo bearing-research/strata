@@ -800,10 +800,14 @@ to the UI.
 GET /v1/notebooks/{session_id}/artifacts
 ```
 
-Returns `{"cells": {<cell_id>: [...]}}`: the registry artifacts each cell
-published through the ambient `strata` client. Answered by the team store when
-`STRATA_NOTEBOOK_REMOTE_STORE_URL` is set, since that is where a cell's
-`put(name=...)` went.
+Returns `{"cells": {<cell_id>: [...]}, "readers": {<name>: [...]}}`: the
+registry artifacts each cell published through the ambient `strata` client.
+Answered by the team store when `STRATA_NOTEBOOK_REMOTE_STORE_URL` is set,
+since that is where a cell's `put(name=...)` went. `readers` is read from the
+notebook's own store: per registry name, the cells whose stored results read
+it with `# @dataset`, as `{"notebook_id", "cell_id", "reference"}`. The rows of
+`GET /v1/registry/summary` carry the same `readers` list for the results in
+the registry's store.
 
 ### Promote an Artifact
 

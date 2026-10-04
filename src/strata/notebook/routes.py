@@ -2951,7 +2951,8 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
 
     These are ``put``/``materialize`` calls with ``name=``, stamped ``nb_cell=<id>``.
     Read from whichever store the cells write to: the team store when
-    ``notebook_remote_store_url`` is set.
+    ``notebook_remote_store_url`` is set. ``readers`` lists, per name, the cells
+    whose results in this notebook's own store read it with ``# @dataset``.
     """
     from strata.api.remote_registry import forward, remote_registry
     from strata.services.registry import registry_service
@@ -2969,8 +2970,9 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
             # A tenant-scoped read, so available in service mode too.
             store = _get_artifact_store(allow_read=True)
         except HTTPException:
-            return {"cells": {}}
-        published = registry_service.artifacts_by_tag(store, "nb_cell", tenant=None)
+            published = []
+        else:
+            published = registry_service.artifacts_by_tag(store, "nb_cell", tenant=None)
 
     by_cell: dict[str, list[dict]] = {}
     for item in published:
@@ -2978,7 +2980,12 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
 
     known = {cell.id for cell in session.notebook_state.cells}
     # A stamp from a cell no longer in the notebook has nowhere to show.
-    return {"cells": {cell_id: items for cell_id, items in by_cell.items() if cell_id in known}}
+    return {
+        "cells": {cell_id: items for cell_id, items in by_cell.items() if cell_id in known},
+        "readers": registry_service.readers(
+            session.get_artifact_manager().artifact_store, tenant=None
+        ),
+    }
 
 
 @router.post("/{notebook_id}/artifacts/{artifact_id}/v/{version}/promote")

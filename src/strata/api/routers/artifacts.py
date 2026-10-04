@@ -291,6 +291,7 @@ async def get_artifact_info(
         content_sha256=artifact.content_sha256,
         provenance_hash=artifact.provenance_hash,
         transform_spec=artifact.transform_spec,
+        input_versions=artifact.input_versions,
     )
 
 

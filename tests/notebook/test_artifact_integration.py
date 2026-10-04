@@ -288,7 +288,11 @@ class TestPublishedArtifactsDashboard:
         from types import SimpleNamespace
 
         cells = [SimpleNamespace(id=cid) for cid in cell_ids]
-        return SimpleNamespace(notebook_state=SimpleNamespace(cells=cells))
+        no_reads = SimpleNamespace(list_name_reads=lambda tenant=None: [])
+        return SimpleNamespace(
+            notebook_state=SimpleNamespace(cells=cells),
+            get_artifact_manager=lambda: SimpleNamespace(artifact_store=no_reads),
+        )
 
     def test_groups_named_and_tagged_artifacts_per_cell(self, tmp_path, monkeypatch):
         import asyncio
@@ -352,7 +356,7 @@ class TestPublishedArtifactsDashboard:
         )
 
         result = asyncio.run(list_notebook_published_artifacts("sess-1", self._session(["c1"])))
-        assert result == {"cells": {}}
+        assert result == {"cells": {}, "readers": {}}
 
 
 class TestVariantArtifacts:

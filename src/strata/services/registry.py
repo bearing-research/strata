@@ -5,21 +5,26 @@ Stateless; the handler passes in the resolved tenant filter.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore
+
+# A notebook cell's output id; cell ids carry no underscore.
+_CELL_ARTIFACT_ID = re.compile(r"^nb_(?P<notebook_id>.+?)_cell_(?P<cell_id>[^_]+)_var_")
 
 
 class RegistryService:
     """Stateless registry read aggregation."""
 
     def summary(self, store: ArtifactStore, *, tenant: str | None) -> list[dict]:
-        """Rows for the dashboard names table: aliases, current version, tags and URI per name.
+        """Rows for the dashboard names table: aliases, current version, tags, URI and readers.
 
         ``tenant`` is the resolved scope (``None`` sees all). Internal ``nb_*`` tags
         are hidden.
         """
+        readers = self.readers(store, tenant=tenant)
         aliases_by_name: dict[str, dict[str, int]] = {}
         for a in store.list_aliases(None, tenant=tenant):
             aliases_by_name.setdefault(a.name, {})[a.alias] = a.version
@@ -36,9 +41,27 @@ class RegistryService:
                     "aliases": aliases_by_name.get(n.name, {}),
                     # Hide internal stamps (nb_cell) from the user-facing table.
                     "tags": {k: v for k, v in tags.items() if not k.startswith("nb_")},
+                    "readers": readers.get(n.name, []),
                 }
             )
         return rows
+
+    def readers(self, store: ArtifactStore, *, tenant: str | None) -> dict[str, list[dict]]:
+        """Per name, the notebook cells whose stored results read it (``# @dataset``).
+
+        A cell with several outputs, or several reads of one name, is listed once.
+        """
+        found: dict[str, dict[tuple[str, str], dict]] = {}
+        for artifact_id, reference in store.list_name_reads(tenant=tenant):
+            cell = _CELL_ARTIFACT_ID.match(artifact_id)
+            if cell is None:
+                continue
+            name = reference.rpartition("@")[0] if "@" in reference else reference
+            key = (cell["notebook_id"], cell["cell_id"])
+            found.setdefault(name, {}).setdefault(
+                key, {"notebook_id": key[0], "cell_id": key[1], "reference": reference}
+            )
+        return {name: list(cells.values()) for name, cells in found.items()}
 
     def artifacts_by_tag(
         self, store: ArtifactStore, key: str, value: str | None = None, *, tenant: str | None

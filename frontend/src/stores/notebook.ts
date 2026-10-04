@@ -50,6 +50,7 @@ import type {
   SessionClosedPayload,
 } from '../types/ws-payloads.generated'
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
+import type { DatasetReader } from '../utils/datasetReaders'
 import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
@@ -1617,6 +1618,8 @@ const workerHealthCheckedAt = ref<number | null>(null)
 // Registry state, loaded lazily via the server registry routes.
 const registryArtifactsByCell = ref<Record<string, PublishedArtifact[]>>({})
 const registryNames = ref<RegistryName[]>([])
+// Per name, this notebook's cells that read it, from the notebook's own store.
+const registryLocalReaders = ref<Record<string, DatasetReader[]>>({})
 const registryPending = ref<PendingChange[]>([])
 const registryAudit = ref<AuditEntry[]>([])
 const registryLoading = ref(false)
@@ -1655,6 +1658,7 @@ async function refreshRegistryAction() {
       strata.getPendingChanges(),
     ])
     registryArtifactsByCell.value = arts.cells || {}
+    registryLocalReaders.value = arts.readers || {}
     registryNames.value = summary.names || []
     registryPending.value = pending.pending || []
   } catch (err) {
@@ -3458,6 +3462,7 @@ export function useNotebook() {
     // Registry / dashboard
     registryArtifactsByCell,
     registryNames,
+    registryLocalReaders,
     registryPending,
     registryAudit,
     registryLoading,

@@ -295,7 +295,11 @@ Anything else, such as an image, arrives as a `pathlib.Path` to its bytes.
 
 Each artifact the cell stores records the name and the version it resolved to
 as an input, so lineage, in the dashboard and in `strata artifact lineage`,
-walks from a downstream result through the cell to the named version.
+walks from a downstream result through the cell to the named version. The copy
+keeps that version's own inputs, and the steps behind it, up to ten deep, are
+copied with it, so the walk goes on past the dataset to whatever made it. A
+step the registry no longer holds ends the walk there, as it does in the
+registry. The Registry tab lists, beside each name, the cells that read it.
 
 The registry is asked at most once a minute while staleness is being
 recomputed, and always right before the cell runs. A name that does not

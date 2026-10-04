@@ -608,6 +608,7 @@ class ArtifactInfoResponse(BaseModel):
             downloading; None when never recorded.
         provenance_hash: The dedup key, which a store copying the artifact must keep.
         transform_spec: Stored spec as JSON; ``params.content_type`` says how to read the bytes.
+        input_versions: Stored ``input URI -> version`` map as JSON, the edges lineage walks.
     """
 
     artifact_id: str
@@ -620,6 +621,7 @@ class ArtifactInfoResponse(BaseModel):
     content_sha256: str | None = None
     provenance_hash: str | None = None
     transform_spec: str | None = None
+    input_versions: str | None = None
 
 
 #: Marks a by-provenance 404 as a real miss. Other 404s (a server without the route, a

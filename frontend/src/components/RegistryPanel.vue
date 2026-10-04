@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
+import type { RegistryName } from '../composables/useStrata'
+import { mergeReaders, readerLabel, type DatasetReader } from '../utils/datasetReaders'
 
 const {
+  notebook,
   registryNames,
+  registryLocalReaders,
   registryPending,
   registryAudit,
   registryLoading,
@@ -79,6 +83,18 @@ function fmtTime(epoch: number): string {
   return new Date(epoch * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+const cellNames = computed(() => {
+  const names: Record<string, string> = {}
+  for (const cell of notebook.cells) {
+    if (cell.annotations?.name) names[cell.id] = cell.annotations.name
+  }
+  return names
+})
+
+function readersOf(row: RegistryName): DatasetReader[] {
+  return mergeReaders(row.readers, registryLocalReaders.value[row.name] || [])
+}
+
 function tagList(tags: Record<string, string>): string {
   return Object.entries(tags)
     .map(([k, v]) => `${k}=${v}`)
@@ -129,6 +145,7 @@ function tagList(tags: Record<string, string>): string {
             <th>Aliases</th>
             <th>Latest</th>
             <th>Tags</th>
+            <th>Read by</th>
             <th></th>
           </tr>
         </thead>
@@ -147,6 +164,15 @@ function tagList(tags: Record<string, string>): string {
             </td>
             <td class="latest">v{{ n.version }}</td>
             <td class="tags">{{ tagList(n.tags) || '—' }}</td>
+            <td class="readers">
+              <span
+                v-for="r in readersOf(n)"
+                :key="`${r.notebook_id}/${r.cell_id}`"
+                class="chip"
+                :title="`notebook ${r.notebook_id}, cell ${r.cell_id}, reads ${r.reference}`"
+                >{{ readerLabel(r, notebook.id, cellNames) }}</span
+              >
+            </td>
             <td class="promote">
               <div class="promote-wrap">
                 <button
