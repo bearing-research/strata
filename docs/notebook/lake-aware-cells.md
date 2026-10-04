@@ -80,10 +80,13 @@ The **table URI** is `<warehouse>#<namespace>.<table>` - here
 [`@table` reference](annotations.md#table)).
 
 Strata finds a local warehouse's tables in `<warehouse>/catalog.db`. An object
-store (`s3://`, `gs://`, `az://`) has no such file, so set the catalog database
+store (`s3://`, `gs://`, `abfs://`) has no such file, so set the catalog database
 with `STRATA_CATALOG_URI`. Without it, a personal server keeps the catalog in
 SQLite at `STRATA_METADATA_DB` on its own disk, which no other reader of the
-bucket sees, and a service refuses the table, naming the setting. A configured
+bucket sees, and a service refuses the table, naming the setting. Either
+catalog reads the table's metadata with the server's own S3, GCS or Azure
+settings ([GCS](../reference/configuration.md#gcs-storage),
+[Azure](../reference/configuration.md#azure-storage)). A configured
 warehouse (`warehouse` in `catalog_properties` or in a named SQL catalog) in
 object storage with no `uri` stops the server at startup
 ([Catalog settings](../reference/configuration.md#catalog)).

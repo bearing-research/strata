@@ -1,7 +1,8 @@
-"""Scanning tables from a REST catalog, a Glue catalog and a GCS warehouse.
+"""Scanning tables from a REST catalog, a Glue catalog and GCS and Azure warehouses.
 
-Uses containers for the REST catalog and fake-gcs-server, and moto Glue over MinIO data. Each test
-reads a table by catalog name, as ``@table`` and a scan do, and reads a pinned snapshot.
+Uses containers for the REST catalog, fake-gcs-server and Azurite, and moto Glue over MinIO data.
+Each test reads a table by catalog name, as ``@table`` and a scan do, or by a warehouse URI, and
+reads a pinned snapshot.
 """
 
 from __future__ import annotations
@@ -192,12 +193,9 @@ def test_a_glue_catalog_table_is_read_by_name(tmp_path, monkeypatch):
             _reads_by_name_and_pin(config, "glue", catalog, first)
 
 
-def test_a_gcs_warehouse_scans(tmp_path):
-    import urllib.request
-
-    import pyiceberg.io as io
-    from pyiceberg.catalog.sql import SqlCatalog
-
+@pytest.fixture
+def fake_gcs():
+    """fake-gcs-server with a ``lake`` bucket; its endpoint."""
     port = _free_port()
     container = DockerContainer("fsouza/fake-gcs-server:1.52.2")
     # Resumable uploads redirect to the external URL, so it must be the address this
@@ -217,28 +215,124 @@ def test_a_gcs_warehouse_scans(tmp_path):
                 method="POST",
             )
         ).read()
-        properties = {
-            "type": "sql",
-            "uri": f"sqlite:///{tmp_path / 'catalog.db'}",
-            "warehouse": "gs://lake/wh",
-            io.GCS_SERVICE_HOST: endpoint,
-            io.GCS_TOKEN: "emulator",
-            io.GCS_TOKEN_EXPIRES_AT_MS: str(int((time.time() + 86400) * 1000)),
-        }
-        catalog = SqlCatalog("lake", **{k: v for k, v in properties.items() if k != "type"})
-        first = _two_snapshots(catalog)
-        files = [
-            task.file.file_path for task in catalog.load_table("taxi.trips").scan().plan_files()
-        ]
-        assert all(path.startswith("gs://") for path in files)
+        yield endpoint
+    finally:
+        container.stop()
+
+
+def _gcs_token() -> dict[str, str]:
+    """A bearer token for fake-gcs-server, which accepts any."""
+    import pyiceberg.io as io
+
+    return {
+        io.GCS_TOKEN: "emulator",
+        io.GCS_TOKEN_EXPIRES_AT_MS: str(int((time.time() + 86400) * 1000)),
+    }
+
+
+def test_a_gcs_warehouse_scans(tmp_path, fake_gcs):
+    import pyiceberg.io as io
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    properties = {
+        "type": "sql",
+        "uri": f"sqlite:///{tmp_path / 'catalog.db'}",
+        "warehouse": "gs://lake/wh",
+        io.GCS_SERVICE_HOST: fake_gcs,
+        **_gcs_token(),
+    }
+    catalog = SqlCatalog("lake", **{k: v for k, v in properties.items() if k != "type"})
+    first = _two_snapshots(catalog)
+    files = [task.file.file_path for task in catalog.load_table("taxi.trips").scan().plan_files()]
+    assert all(path.startswith("gs://") for path in files)
+    config = StrataConfig(
+        cache_dir=tmp_path / "cache",
+        catalogs={"lake": properties},
+        gcs_anonymous=True,
+        gcs_endpoint_override=fake_gcs,
+    )
+
+    _reads_by_name_and_pin(config, "lake", catalog, first)
+
+
+def _reads_request_warehouse(config: StrataConfig, uri: str, first: int) -> None:
+    assert config.deployment_mode == "personal" and "uri" not in config.catalog_properties
+    assert _rows(config, uri) == [1, 2, 3]
+    assert _rows(config, uri, snapshot_id=first) == [1, 2]
+
+
+def test_a_gcs_request_warehouse_reads_with_the_gcs_settings(tmp_path, fake_gcs):
+    """A ``gs://`` URI with no catalog uri: its metadata is read at the configured endpoint."""
+    import pyiceberg.io as io
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    meta = tmp_path / "meta.sqlite"
+    writer = SqlCatalog(
+        "strata",
+        uri=f"sqlite:///{meta}",
+        warehouse="gs://lake/wh",
+        **{io.GCS_SERVICE_HOST: fake_gcs, **_gcs_token()},
+    )
+    first = _two_snapshots(writer)
+    config = StrataConfig(
+        cache_dir=tmp_path / "cache",
+        metadata_db=meta,
+        gcs_anonymous=True,
+        gcs_endpoint_override=fake_gcs,
+        # pyiceberg's GCS FileIO has no anonymous mode, so the catalog sends a token.
+        catalog_properties=_gcs_token(),
+    )
+
+    _reads_request_warehouse(config, "gs://lake/wh#taxi.trips", first)
+
+
+@pytest.mark.parametrize("file_io", ["adlfs", "pyarrow"])
+def test_an_azure_request_warehouse_reads_with_the_azure_settings(tmp_path, file_io):
+    """An ``abfs://`` URI with no catalog uri: its metadata is read with the Azure settings.
+
+    pyiceberg reads ``abfs://`` with adlfs when it is installed, else with pyarrow, which
+    takes no connection string and keeps a ``container@host`` netloc in the object path.
+    """
+    from azure.storage.blob import BlobServiceClient
+    from pyiceberg.catalog.sql import SqlCatalog
+    from testcontainers.community.azurite import AzuriteContainer
+
+    # :latest because older Azurite rejects the installed SDK's API version.
+    container = start_container_or_skip(
+        AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
+    )
+    try:
+        connection_string = container.get_connection_string()
+        BlobServiceClient.from_connection_string(connection_string).create_container("lake")
+        warehouse = (
+            f"abfs://lake@{container.account_name}.dfs.core.windows.net/wh"
+            if file_io == "adlfs"
+            else "abfs://lake/wh"
+        )
+        meta = tmp_path / "meta.sqlite"
+        writer = SqlCatalog(
+            "strata",
+            uri=f"sqlite:///{meta}",
+            warehouse=warehouse,
+            **{"adls.connection-string": connection_string},
+        )
+        first = _two_snapshots(writer)
+        blob_port = container.get_exposed_port(10000)
+        settings: dict[str, Any] = (
+            {"azure_connection_string": connection_string}
+            if file_io == "adlfs"
+            else {"catalog_properties": {"py-io-impl": "pyiceberg.io.pyarrow.PyArrowFileIO"}}
+        )
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
-            catalogs={"lake": properties},
-            gcs_anonymous=True,
-            gcs_endpoint_override=endpoint,
+            metadata_db=meta,
+            azure_account_name=container.account_name,
+            azure_account_key=container.account_key,
+            azure_endpoint_url=f"http://{container.get_container_host_ip()}:{blob_port}",
+            **settings,
         )
 
-        _reads_by_name_and_pin(config, "lake", catalog, first)
+        _reads_request_warehouse(config, f"{warehouse}#taxi.trips", first)
     finally:
         container.stop()
 
