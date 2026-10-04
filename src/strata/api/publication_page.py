@@ -216,12 +216,14 @@ def render_publication(
     oembed_url: str | None = None,
     json_ld: str | None = None,
     share: list[tuple[str, str]] | None = None,
+    base: str = "",
 ) -> str:
     """Render the page for one published artifact.
 
     ``bundle_filename`` switches it from hosted to archival: the same document,
     pointing at a sibling file instead of server routes. Keep that the only
-    difference so the archive cannot drift from the live page.
+    difference so the archive cannot drift from the live page. ``base`` is the
+    public origin and base path the hosted page's links start with.
     """
     title = publication.title or f"{artifact.id}@v={artifact.version}"
 
@@ -366,10 +368,10 @@ def render_publication(
             f"# {escape(publication.content_sha256 or 'no digest recorded')}</pre>"
         )
     else:
+        here = escape(f"{base}/p/{publication.token}", quote=True)
         parts.append(
-            f"<p>The bytes are at <a href='/p/{escape(publication.token)}/data'>"
-            f"/p/{escape(publication.token)}/data</a>. "
-            f"<a href='/p/{escape(publication.token)}/verify'>Verify</a> re-reads "
+            f"<p>The bytes are at <a href='{here}/data'>{here}/data</a>. "
+            f"<a href='{here}/verify'>Verify</a> re-reads "
             "them and compares against the digest recorded at publication.</p>"
         )
     parts.append(

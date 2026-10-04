@@ -8,6 +8,7 @@ import type {
   MountSpec,
 } from '../types/notebook'
 import type { DatasetReader } from '../utils/datasetReaders'
+import { BASE_PATH, strataHttpBase } from '../utils/strataBase'
 
 type UnknownObject = Record<string, unknown>
 
@@ -283,14 +284,11 @@ interface StrataFetchInit extends RequestInit {
   timeoutMs?: number
 }
 
-function resolveStrataBase(): string {
-  const configured = import.meta.env.VITE_STRATA_URL
-  if (configured) return configured
-  if (typeof window !== 'undefined') return window.location.origin
-  return 'http://localhost:8765'
-}
-
-const STRATA_BASE = resolveStrataBase()
+const STRATA_BASE = strataHttpBase(
+  import.meta.env.VITE_STRATA_URL,
+  typeof window !== 'undefined' ? window.location.origin : undefined,
+  BASE_PATH,
+)
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
