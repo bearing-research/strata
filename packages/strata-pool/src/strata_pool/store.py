@@ -109,10 +109,12 @@ CREATE INDEX IF NOT EXISTS idx_usage_tenant
 
 -- The machine-type catalogue last set over the API, so a restart serves the
 -- catalogue the operator set rather than the one the process was started with.
--- One row; absent until a catalogue is set.
+-- One row; absent until a catalogue is set. `version` counts the writes, so
+-- every process over the store can tell its copy is behind.
 CREATE TABLE IF NOT EXISTS catalogue (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    machine_types TEXT NOT NULL
+    machine_types TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -271,6 +273,8 @@ class Store(Protocol):
     def save_machine_types(self, machine_types: Iterable[MachineType]) -> None: ...
 
     def load_machine_types(self) -> list[MachineType] | None: ...
+
+    def catalogue_version(self) -> int | None: ...
 
     def record_usage(self, event: UsageEvent) -> None: ...
 
@@ -733,8 +737,9 @@ class _SqlStore:
         payload = json.dumps([asdict(spec) for spec in machine_types])
         with self._lock:
             self._run(
-                "INSERT INTO catalogue (id, machine_types) VALUES (1, ?) "
-                "ON CONFLICT(id) DO UPDATE SET machine_types = excluded.machine_types",
+                "INSERT INTO catalogue (id, machine_types, version) VALUES (1, ?, 1) "
+                "ON CONFLICT(id) DO UPDATE SET machine_types = excluded.machine_types, "
+                "version = catalogue.version + 1",
                 (payload,),
             )
 
@@ -744,6 +749,11 @@ class _SqlStore:
         if row is None:
             return None
         return [MachineType(**spec) for spec in json.loads(row["machine_types"])]
+
+    def catalogue_version(self) -> int | None:
+        """How many times a catalogue was set, or None if none ever was."""
+        row = self._one("SELECT version FROM catalogue WHERE id = 1")
+        return None if row is None else row["version"]
 
     # --- usage ---
 

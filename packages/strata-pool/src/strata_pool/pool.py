@@ -89,6 +89,8 @@ class Pool:
         self.store = store
         self.backend = backend
         self.machine_types = {mt.name: mt for mt in machine_types}
+        # The stored catalogue's version this process last applied; None until it applies one.
+        self._catalogue_version: int | None = None
         # Types dropped from the catalogue while machines of them still run,
         # kept only for the cool-down those machines retire on.
         self._retired_types: dict[str, MachineType] = {}
@@ -142,6 +144,24 @@ class Pool:
                 await self._drain(machine_type, tenant_id)
                 await self._ensure_capacity(machine_type, tenant_id)
 
+    async def sync_catalogue(self) -> bool:
+        """Apply the stored catalogue if another write set it since this process last looked.
+
+        Once a catalogue is stored it replaces the one the pool was built with.
+        Every submit and scaler pass calls this, so a change made through any
+        process sharing the store reaches all of them. Returns whether it applied one.
+        """
+        version = self.store.catalogue_version()
+        if version is None or version == self._catalogue_version:
+            return False
+        machine_types = self.store.load_machine_types()
+        if machine_types is None:
+            return False
+        # Set before the first await, so a concurrent caller does not apply it twice.
+        self._catalogue_version = version
+        await self.replace_machine_types(machine_types)
+        return True
+
     def _fail_jobs_without_a_type(self) -> None:
         """Queued work for a type the catalogue no longer names can never run."""
         for machine_type in self.store.queued_machine_types():
@@ -183,6 +203,7 @@ class Pool:
         be slow. The pool knows nothing of Strata's cache: every submit runs.
         Raises ValueError for an unknown machine type.
         """
+        await self.sync_catalogue()
         if machine_type not in self.machine_types:
             raise ValueError(f"unknown machine type: {machine_type!r}")
 
@@ -946,6 +967,7 @@ class Pool:
         while True:
             await asyncio.sleep(interval_seconds)
             try:
+                await self.sync_catalogue()
                 await self.reclaim_expired_leases()
                 await self.reap_idle_workers()
                 await self.probe_warm_workers()

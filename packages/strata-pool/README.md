@@ -98,9 +98,10 @@ within `lease_seconds` waits its old leases out instead of reclaiming them at
 once; set `instance_id` explicitly to keep that.
 
 Lease expiry is compared by wall clock across processes, so their clocks have
-to agree to well within a lease. Each process holds its catalogue in memory:
-`PUT /v1/machine-types` updates the process that served it and the stored
-catalogue, and the others pick it up when they restart.
+to agree to well within a lease. The catalogue lives in the store too:
+`PUT /v1/machine-types` to any one process reaches the others, each of which
+applies it on its next submit or scaler pass, so they agree on which machines
+run the current image.
 
 ## What it is not
 
@@ -202,7 +203,9 @@ its machines finish what they are running, then retire once idle past the
 type's cool-down. A type whose `image` changed starts new machines on the new
 image. Machines already running the old image get no new jobs and retire the
 same way. The catalogue is stored with the pool's state, and on start it
-replaces the one the process was constructed with.
+replaces the one the process was constructed with. A pool calling
+`replace_machine_types` directly changes only its own copy; `sync_catalogue`
+applies the stored one.
 
 A job submitted with W3C `traceparent` / `tracestate` headers keeps them, and
 the pool forwards them to the machine it runs on. With OpenTelemetry installed

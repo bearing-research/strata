@@ -292,6 +292,66 @@ class TestTwoProcesses:
         assert again.backend.stopped == ["a-1"]
 
 
+class TestTheCatalogueAcrossProcesses:
+    """A catalogue set through one process reaches every process over the store."""
+
+    async def _set(self, pool: Pool, catalogue: list[MachineType]) -> None:
+        # What PUT /v1/machine-types does in the process that serves it.
+        pool.store.save_machine_types(catalogue)
+        await pool.sync_catalogue()
+
+    async def test_a_type_added_through_one_process_takes_a_job_through_another(self, make_pool):
+        workers = FakeWorkers()
+        a = make_pool("a", workers=workers)
+        b = make_pool("b", workers=workers)
+
+        await self._set(a, [MachineType(name="cpu", image="w"), MachineType(name="gpu", image="g")])
+        job = await b.submit(tenant_id="acme", machine_type="gpu", payload=b"x")
+
+        assert (await b.wait(job.id)).state is JobState.COMPLETED
+
+    async def test_a_type_removed_through_one_process_is_refused_by_another(self, make_pool):
+        workers = FakeWorkers()
+        a = make_pool("a", workers=workers)
+        b = make_pool("b", workers=workers)
+
+        await self._set(a, [MachineType(name="cpu", image="w"), MachineType(name="gpu", image="g")])
+        job = await b.submit(tenant_id="acme", machine_type="cpu", payload=b"x")
+        await b.wait(job.id)
+        await self._set(a, [MachineType(name="gpu", image="g")])
+
+        with pytest.raises(ValueError, match="unknown machine type"):
+            await b.submit(tenant_id="acme", machine_type="cpu", payload=b"x")
+
+    async def test_after_an_image_change_both_processes_send_work_to_the_new_image(self, make_pool):
+        """Neither process takes the other's new-image machine for a stale one."""
+        workers = FakeWorkers()
+        a = make_pool("a", workers=workers)
+        b = make_pool("b", workers=workers)
+        first = await a.submit(tenant_id="acme", machine_type="cpu", payload=b"1")
+        await a.wait(first.id)
+
+        await self._set(a, [MachineType(name="cpu", image="w2", max_workers=2)])
+        second = await b.submit(tenant_id="acme", machine_type="cpu", payload=b"2")
+        await b.wait(second.id)
+        third = await a.submit(tenant_id="acme", machine_type="cpu", payload=b"3")
+        await a.wait(third.id)
+
+        (new,) = [w for w in a.store.list_workers() if w.image == "w2"]
+        assert a.store.get_job(second.id).worker_id == new.id
+        assert a.store.get_job(third.id).worker_id == new.id
+
+    async def test_the_scaler_brings_a_process_up_to_date_without_a_submit(self, make_pool):
+        workers = FakeWorkers()
+        a = make_pool("a", workers=workers)
+        b = make_pool("b", workers=workers)
+
+        await self._set(a, [MachineType(name="gpu", image="g")])
+        b.start_scaler(interval_seconds=0.01)
+
+        await _until(lambda: list(b.machine_types) == ["gpu"])
+
+
 class TestTheStore:
     def test_of_two_claims_on_one_warm_machine_one_wins(self, open_store):
         first, second = open_store(), open_store()
