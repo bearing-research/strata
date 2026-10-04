@@ -902,3 +902,5 @@ class ExecutorHealthResponse(BaseModel):
     version: str | None = None
     uptime_seconds: float | None = None
     active_executions: int | None = None
+    # What the machine reports about itself; a field left out is unknown.
+    hardware: dict[str, object] | None = None
