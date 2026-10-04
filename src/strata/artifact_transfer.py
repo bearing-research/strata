@@ -289,6 +289,7 @@ def remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> Arti
 
     Each edge is stored as both key ``strata://artifact/<id>@v=<n>`` (read by the
     lineage walk) and value ``<id>@v=<n>`` (read by staleness); both must move.
+    A ``strata://name/`` input keeps its name and moves only the version it resolved to.
     """
     if not record.input_versions:
         return record
@@ -296,6 +297,9 @@ def remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> Arti
     prefix = "strata://artifact/"
     moved = {}
     for uri, version in edges.items():
+        if uri.startswith("strata://name/") and version in remap:
+            moved[uri] = remap[version]
+            continue
         ref = uri[len(prefix) :] if uri.startswith(prefix) else None
         landed = remap.get(ref) if ref else None
         if landed is None:

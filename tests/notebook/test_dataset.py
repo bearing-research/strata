@@ -15,12 +15,21 @@ from strata.notebook import datasets as datasets_module
 from strata.notebook.annotations import parse_annotations
 
 
-def _store_version(store, blob: bytes, *, content_type: str | None, artifact_id="taxi-model"):
+def _store_version(
+    store,
+    blob: bytes,
+    *,
+    content_type: str | None,
+    artifact_id="taxi-model",
+    input_versions=None,
+    provenance_hash=None,
+):
     params = {"content_type": content_type} if content_type else {}
     version = store.create_artifact(
         artifact_id=artifact_id,
-        provenance_hash=hashlib.sha256(blob + artifact_id.encode()).hexdigest(),
+        provenance_hash=provenance_hash or hashlib.sha256(blob + artifact_id.encode()).hexdigest(),
         transform_spec=TransformSpec(executor="test@v1", params=params, inputs=[]),
+        input_versions=input_versions,
     )
     store.write_blob(artifact_id, version, blob)
     store.finalize_artifact(
@@ -36,6 +45,37 @@ def _store_version(store, blob: bytes, *, content_type: str | None, artifact_id=
 
 def _json_version(store, value: dict) -> int:
     return _store_version(store, json.dumps(value).encode(), content_type="json/object")
+
+
+def _model_with_history(store) -> None:
+    """``taxi/model@champion``, made from ``taxi/features`` (read by name), made from ``raw``."""
+    raw = _store_version(store, b'{"r": 1}', content_type="json/object", artifact_id="raw")
+    features = _store_version(
+        store,
+        b'{"f": 1}',
+        content_type="json/object",
+        artifact_id="features",
+        input_versions={f"strata://artifact/raw@v={raw}": f"raw@v={raw}"},
+    )
+    store.set_name("taxi/features", "features", features)
+    model = _store_version(
+        store,
+        b'{"t": 3}',
+        content_type="json/object",
+        input_versions={"strata://name/taxi/features": f"features@v={features}"},
+    )
+    store.set_alias("taxi/model", "champion", "taxi-model", model)
+
+
+def _chain(tree: dict) -> list[str]:
+    """The artifact refs down a lineage tree that has one input per step."""
+    refs = []
+    while "artifact_id" in tree:
+        refs.append(f"{tree['artifact_id']}@v={tree['version']}")
+        if len(tree["inputs"]) != 1:
+            break
+        (tree,) = tree["inputs"]
+    return refs
 
 
 class TestAnnotation:
@@ -290,6 +330,115 @@ class TestLineage:
         (model_node,) = score_node["inputs"]
         assert (model_node["artifact_id"], model_node["version"]) == ("taxi-model", 2)
 
+    async def test_lineage_reaches_the_steps_behind_the_dataset(
+        self, notebook, notebook_personal_server
+    ):
+        from strata.artifact_cli import _walk_lineage
+        from strata.notebook.executor import CellExecutor
+        from strata.services.artifact import ArtifactService
+
+        _model_with_history(notebook_personal_server["artifact_store"])
+        source = '# @dataset model taxi/model@champion\nscore = model["t"]'
+        session = notebook(source)
+
+        upstream = await CellExecutor(session).execute_cell("c1", source)
+        downstream = await CellExecutor(session).execute_cell("c2", "doubled = score * 2")
+        assert upstream.success, upstream.error
+        assert downstream.success, downstream.error
+
+        manager = session.get_artifact_manager()
+        ((_, scored),) = manager.list_cell_artifacts("c1")
+        graph = ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=scored,
+            artifact_id=scored.id,
+            version=scored.version,
+            tenant_filter=None,
+            max_depth=5,
+        )
+        steps = {(n.artifact_id, n.version) for n in graph.nodes if n.transform_ref}
+        assert {("taxi-model", 1), ("features", 1), ("raw", 1)} <= steps
+
+        ((_, doubled),) = manager.list_cell_artifacts("c2")
+        tree = _walk_lineage(manager.artifact_store, doubled, max_depth=5)
+        assert _chain(tree)[1:] == [
+            f"{scored.id}@v={scored.version}",
+            "taxi-model@v=1",
+            "features@v=1",
+            "raw@v=1",
+        ]
+
+    def test_an_ancestor_the_notebook_already_holds_is_reused(self, tmp_path):
+        from strata.artifact_cli import _walk_lineage
+        from strata.artifact_store import ArtifactStore
+        from strata.notebook.models import DatasetSpec
+
+        registry = ArtifactStore(tmp_path / "registry")
+        _model_with_history(registry)
+        notebook_store = ArtifactStore(tmp_path / "notebook")
+        # The same computation as ``features``, already here under another id.
+        features = registry.get_artifact("features", 1)
+        _store_version(
+            notebook_store,
+            b'{"f": 1}',
+            content_type="json/object",
+            artifact_id="features-here",
+            provenance_hash=features.provenance_hash,
+        )
+        local = datasets_module.LocalRegistry(registry)
+        resolved = local.resolve(DatasetSpec(name="model", dataset="taxi/model", alias="champion"))
+
+        copied = datasets_module.copy_into(local, resolved, notebook_store)
+
+        model = notebook_store.get_artifact("taxi-model", 1)
+        assert copied.local_ref == "taxi-model@v=1"
+        assert json.loads(model.input_versions) == {
+            "strata://name/taxi/features": "features-here@v=1"
+        }
+        assert notebook_store.get_artifact("features", 1) is None
+        # The row it landed on takes the lineage it lacked.
+        assert _chain(_walk_lineage(notebook_store, model, max_depth=5)) == [
+            "taxi-model@v=1",
+            "features-here@v=1",
+            "raw@v=1",
+        ]
+
+
+class TestReaders:
+    """The registry dashboard lists, per name, the notebook cells that read it."""
+
+    async def test_the_dashboard_lists_the_cells_that_read_a_name(
+        self, notebook, notebook_personal_server
+    ):
+        import httpx
+
+        from strata.artifact_transfer import copy_chain
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.routes import list_notebook_published_artifacts
+
+        registry = notebook_personal_server["artifact_store"]
+        version = _json_version(registry, {"t": 1})
+        registry.set_name("taxi/model", "taxi-model", version)
+        registry.set_alias("taxi/model", "champion", "taxi-model", version)
+        source = '# @dataset model taxi/model@champion\nscore = model["t"]'
+        session = notebook(source)
+        result = await CellExecutor(session).execute_cell("c1", source)
+        assert result.success, result.error
+        notebook_id = session.notebook_state.id
+        reader = {"notebook_id": notebook_id, "cell_id": "c1", "reference": "taxi/model@champion"}
+
+        # The notebook's own results, before anything leaves it.
+        listed = await list_notebook_published_artifacts(session.id, session)
+        assert listed["readers"] == {"taxi/model": [reader]}
+
+        # Once a result reaches the registry's store, every notebook sees the read.
+        manager = session.get_artifact_manager()
+        ((_, scored),) = manager.list_cell_artifacts("c1")
+        copy_chain(manager.artifact_store, registry, scored, max_depth=5)
+        response = httpx.get(f"{notebook_personal_server['base_url']}/v1/registry/summary")
+        rows = {row["name"]: row for row in response.json()["names"]}
+        assert rows["taxi/model"]["readers"] == [reader]
+
 
 class TestARemoteRegistry:
     """With ``notebook_remote_store_url`` set, the name resolves in that store."""
@@ -324,6 +473,28 @@ class TestARemoteRegistry:
         assert copied is not None
         assert copied.provenance_hash == registry.get_artifact("taxi-model", 1).provenance_hash
         assert _status(session, "c1") == "ready"
+
+    async def test_the_chain_behind_the_dataset_is_copied_over_http(
+        self, notebook, notebook_personal_server, monkeypatch
+    ):
+        from strata.artifact_cli import _walk_lineage
+        from strata.notebook.executor import CellExecutor
+
+        _model_with_history(notebook_personal_server["artifact_store"])
+        self._point_at(monkeypatch, notebook_personal_server["base_url"])
+        source = '# @dataset model taxi/model@champion\nscore = model["t"]'
+        session = notebook(source)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+        store = session.get_artifact_manager().artifact_store
+        ((_, scored),) = session.get_artifact_manager().list_cell_artifacts("c1")
+        assert _chain(_walk_lineage(store, scored, max_depth=5))[1:] == [
+            "taxi-model@v=1",
+            "features@v=1",
+            "raw@v=1",
+        ]
 
     async def test_an_unreachable_registry_fails_the_cell_rather_than_reading_locally(
         self, notebook, notebook_personal_server, monkeypatch

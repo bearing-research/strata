@@ -369,6 +369,37 @@ class TestArtifactStoreLineageMethods:
         assert dep_artifact.id == "dep-exact"
         assert input_ver == "base-1@v=1"
 
+    def test_list_name_reads_lists_ready_reads_in_the_tenant(self, tmp_path):
+        from strata.artifact_store import ArtifactStore, TransformSpec
+
+        store = ArtifactStore(tmp_path)
+        blob = table_to_ipc_bytes(pa.table({"x": [1]}))
+
+        def reader(artifact_id, tenant, *, finalize=True):
+            version = store.create_artifact(
+                artifact_id=artifact_id,
+                provenance_hash=f"hash-{artifact_id}",
+                transform_spec=TransformSpec(executor="e", params={}, inputs=[]),
+                input_versions={
+                    "strata://name/taxi/model@champion": "m@v=1",
+                    "strata://artifact/m@v=1": "m@v=1",
+                },
+                tenant=tenant,
+            )
+            if finalize:
+                store.write_blob(artifact_id, version, blob)
+                store.finalize_artifact(artifact_id, version, "{}", 1, len(blob))
+
+        reader("ours", "team-a")
+        reader("theirs", "team-b")
+        reader("building", "team-a", finalize=False)
+
+        assert store.list_name_reads(tenant="team-a") == [("ours", "taxi/model@champion")]
+        assert store.list_name_reads() == [
+            ("ours", "taxi/model@champion"),
+            ("theirs", "taxi/model@champion"),
+        ]
+
     def test_get_name_for_artifact_method(self, tmp_path):
         from strata.artifact_store import ArtifactStore, TransformSpec
 

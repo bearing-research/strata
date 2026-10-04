@@ -6,6 +6,8 @@ notebook's store; binds it to ``model`` like an upstream variable; and folds
 ``"<var>:dataset:<reference>:<id>@v=<n>"`` into provenance. ``name@alias`` and a
 bare name go stale when their pointer moves; ``name@v=N`` never does. A value the
 harness can read is bound as that value; anything else arrives as a ``Path``.
+The copy keeps its ``input_versions``, and the chain behind it is copied too, so
+lineage in the notebook walks past the dataset to the steps that made it.
 """
 
 from __future__ import annotations
@@ -19,11 +21,17 @@ from urllib.parse import quote
 import httpx
 
 from strata.artifact_store import ArtifactStore, ArtifactVersion
+from strata.artifact_transfer import remap_input_versions
 from strata.notebook.models import DatasetSpec
 
 STALE_CHECK_SECONDS = 60.0
 LOOKUP_TIMEOUT_SECONDS = 10.0
 DOWNLOAD_TIMEOUT_SECONDS = 300.0
+# How many steps behind a dataset are copied with it, as the lineage walk reads.
+ANCESTRY_DEPTH = 10
+
+# Input URIs whose recorded version names an artifact the lineage walk follows.
+_LINEAGE_PREFIXES = ("strata://artifact/", "strata://name/")
 
 # The content types a cell's harness reads back into a value. Anything else is
 # handed over as a file.
@@ -88,7 +96,9 @@ def content_type_of(record: ArtifactVersion) -> str:
 class Registry(Protocol):
     def resolve(self, spec: DatasetSpec) -> ResolvedDataset: ...
 
-    def download(self, resolved: ResolvedDataset) -> tuple[ArtifactVersion, bytes]: ...
+    def download(self, artifact_id: str, version: int) -> tuple[ArtifactVersion, bytes] | None:
+        """A readable version and its bytes, or ``None`` when the registry has none."""
+        ...
 
 
 class LocalRegistry:
@@ -113,12 +123,12 @@ class LocalRegistry:
             record = pinned
         return ResolvedDataset(spec=spec, artifact_id=record.id, version=record.version)
 
-    def download(self, resolved: ResolvedDataset) -> tuple[ArtifactVersion, bytes]:
-        record = self._store.get_artifact(resolved.artifact_id, resolved.version)
-        blob = self._store.read_blob(resolved.artifact_id, resolved.version)
-        if record is None or blob is None:
-            raise DatasetError(f"@dataset {resolved.spec.name}: {resolved.ref} has no stored bytes")
-        return record, blob
+    def download(self, artifact_id: str, version: int) -> tuple[ArtifactVersion, bytes] | None:
+        record = self._store.get_artifact(artifact_id, version)
+        if record is None or record.state not in ("ready", "superseded"):
+            return None
+        blob = self._store.read_blob(artifact_id, version)
+        return None if blob is None else (record, blob)
 
 
 class RemoteRegistry:
@@ -157,37 +167,39 @@ class RemoteRegistry:
             )
         if spec.version is None:
             return ResolvedDataset(spec=spec, artifact_id=artifact_id, version=int(version))
-        pinned = ResolvedDataset(spec=spec, artifact_id=artifact_id, version=spec.version)
-        self._info(pinned)
-        return pinned
+        if self._info(artifact_id, spec.version) is None:
+            raise DatasetError(
+                f"@dataset {spec.name}: {spec.dataset} has no version {spec.version}"
+            )
+        return ResolvedDataset(spec=spec, artifact_id=artifact_id, version=spec.version)
 
-    def _info(self, resolved: ResolvedDataset) -> dict[str, Any]:
-        path = f"/v1/artifacts/{quote(resolved.artifact_id, safe='')}/v/{resolved.version}"
+    def _info(self, artifact_id: str, version: int) -> dict[str, Any] | None:
+        path = f"/v1/artifacts/{quote(artifact_id, safe='')}/v/{version}"
         response = self._get(path, LOOKUP_TIMEOUT_SECONDS)
         if response.status_code == 404:
-            raise DatasetError(
-                f"@dataset {resolved.spec.name}: {resolved.spec.dataset} has no version "
-                f"{resolved.version}"
-            )
+            return None
         if response.status_code >= 400:
             raise DatasetError(
-                f"@dataset {resolved.spec.name}: the registry refused {resolved.ref} "
-                f"with HTTP {response.status_code}"
+                f"the registry refused {artifact_id}@v={version} with HTTP {response.status_code}"
             )
         return response.json()
 
-    def download(self, resolved: ResolvedDataset) -> tuple[ArtifactVersion, bytes]:
-        info = self._info(resolved)
-        path = f"/v1/artifacts/{quote(resolved.artifact_id, safe='')}/v/{resolved.version}/data"
+    def download(self, artifact_id: str, version: int) -> tuple[ArtifactVersion, bytes] | None:
+        info = self._info(artifact_id, version)
+        if info is None:
+            return None
+        path = f"/v1/artifacts/{quote(artifact_id, safe='')}/v/{version}/data"
         response = self._get(path, DOWNLOAD_TIMEOUT_SECONDS)
+        if response.status_code == 404:
+            return None
         if response.status_code >= 400 or not info.get("provenance_hash"):
             raise DatasetError(
-                f"@dataset {resolved.spec.name}: the bytes of {resolved.ref} could not be "
-                f"read (HTTP {response.status_code})"
+                f"the bytes of {artifact_id}@v={version} could not be read "
+                f"(HTTP {response.status_code})"
             )
         record = ArtifactVersion(
-            id=resolved.artifact_id,
-            version=resolved.version,
+            id=artifact_id,
+            version=version,
             state="ready",
             provenance_hash=str(info["provenance_hash"]),
             schema_json=info.get("arrow_schema"),
@@ -195,6 +207,7 @@ class RemoteRegistry:
             byte_size=info.get("byte_size"),
             created_at=info.get("created_at"),
             transform_spec=info.get("transform_spec"),
+            input_versions=info.get("input_versions"),
         )
         return record, response.content
 
@@ -217,16 +230,53 @@ def registry_for(config: Any) -> Registry:
 
 
 def copy_into(registry: Registry, resolved: ResolvedDataset, store: ArtifactStore) -> DatasetInput:
-    """Copy *resolved* into the notebook's *store* under its id and version, if absent."""
+    """Copy *resolved* and the chain behind it into the notebook's *store*, if absent."""
     local = store.get_artifact(resolved.artifact_id, resolved.version)
     if local is not None and local.state in ("ready", "superseded"):
         return DatasetInput(
             resolved=resolved, local_ref=resolved.ref, content_type=content_type_of(local)
         )
-    record, blob = registry.download(resolved)
-    # The notebook's store is untenanted, and the ancestors the registry's
-    # record names are not in it: the copy is a leaf here.
-    landed = store.import_artifact(replace(record, tenant=None, input_versions=None), blob)
-    return DatasetInput(
-        resolved=resolved, local_ref=landed.ref, content_type=content_type_of(record)
-    )
+    fetched = registry.download(resolved.artifact_id, resolved.version)
+    if fetched is None:
+        raise DatasetError(f"@dataset {resolved.spec.name}: {resolved.ref} has no stored bytes")
+    record, blob = fetched
+    landed = _land(registry, store, record, blob, depth=0, landed={})
+    return DatasetInput(resolved=resolved, local_ref=landed, content_type=content_type_of(record))
+
+
+def _land(
+    registry: Registry,
+    store: ArtifactStore,
+    record: ArtifactVersion,
+    blob: bytes,
+    *,
+    depth: int,
+    landed: dict[str, str],
+) -> str:
+    """Import *record* after its ancestors; return the ref it landed on.
+
+    An ancestor the registry cannot hand over stays a dangling edge, as it is in
+    the registry's own lineage. An edge is rewritten when its ancestor landed on a
+    row that already held the same computation.
+    """
+    edges = json.loads(record.input_versions) if record.input_versions else {}
+    if depth >= ANCESTRY_DEPTH:
+        edges = {}
+    for uri, value in edges.items():
+        ref = str(value)
+        artifact_id, sep, version = ref.partition("@v=")
+        if not uri.startswith(_LINEAGE_PREFIXES) or not sep or not version.isdigit():
+            continue
+        if ref in landed:
+            continue
+        local = store.get_artifact(artifact_id, int(version))
+        if local is not None and local.state in ("ready", "superseded"):
+            landed[ref] = ref
+            continue
+        fetched = registry.download(artifact_id, int(version))
+        if fetched is None:
+            continue
+        landed[ref] = _land(registry, store, *fetched, depth=depth + 1, landed=landed)
+    # The notebook's store is untenanted.
+    record = remap_input_versions(replace(record, tenant=None), landed)
+    return store.import_artifact(record, blob).ref

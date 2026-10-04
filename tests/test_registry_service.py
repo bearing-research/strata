@@ -9,10 +9,11 @@ from strata.services.registry import registry_service
 
 
 class _FakeStore:
-    def __init__(self, *, aliases, names, tags):
+    def __init__(self, *, aliases, names, tags, reads=()):
         self._aliases = aliases  # list of (name, alias, version)
         self._names = names  # list of (name, artifact_id, version)
         self._tags = tags  # {(artifact_id, version): {k: v}}
+        self._reads = list(reads)  # list of (artifact_id, reference)
 
     def list_aliases(self, name, *, tenant=None):
         return [SimpleNamespace(name=n, alias=a, version=v) for n, a, v in self._aliases]
@@ -22,6 +23,9 @@ class _FakeStore:
 
     def get_tags(self, artifact_id, version, *, tenant=None):
         return self._tags.get((artifact_id, version), {})
+
+    def list_name_reads(self, *, tenant=None):
+        return self._reads
 
 
 def test_summary_groups_aliases_and_hides_internal_tags():
@@ -53,3 +57,31 @@ def test_summary_name_without_aliases_gets_empty_map():
 
     assert rows[0]["aliases"] == {}
     assert rows[0]["tags"] == {}
+    assert rows[0]["readers"] == []
+
+
+def test_summary_lists_the_notebook_cells_that_read_each_name():
+    store = _FakeStore(
+        aliases=[],
+        names=[("taxi/model", "M", 2), ("taxi/features", "F", 1)],
+        tags={},
+        reads=[
+            # Two outputs of one cell read the same name: one reader.
+            ("nb_nb-1_cell_a1b2c3d4_var_score", "taxi/model@champion"),
+            ("nb_nb-1_cell_a1b2c3d4_var_error", "taxi/model@champion"),
+            ("nb_nb-2_cell_c2_var_x", "taxi/model@v=2"),
+            ("nb_nb-2_cell_c3_var_y", "taxi/features"),
+            # Not a notebook cell's output.
+            ("0f6c-uuid", "taxi/model"),
+        ],
+    )
+
+    rows = {row["name"]: row for row in registry_service.summary(store, tenant=None)}
+
+    assert rows["taxi/model"]["readers"] == [
+        {"notebook_id": "nb-1", "cell_id": "a1b2c3d4", "reference": "taxi/model@champion"},
+        {"notebook_id": "nb-2", "cell_id": "c2", "reference": "taxi/model@v=2"},
+    ]
+    assert rows["taxi/features"]["readers"] == [
+        {"notebook_id": "nb-2", "cell_id": "c3", "reference": "taxi/features"}
+    ]
