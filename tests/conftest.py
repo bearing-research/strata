@@ -133,6 +133,11 @@ def _reset_process_globals():
     # The build runner's heartbeat task is bound to the loop that started it; a
     # leftover runner breaks the next lifespan's teardown ("attached to a different loop").
     _reset_transform_singletons()
+    # Creating a worker app moves its secrets out of the environment into this
+    # global; a token left there would make a later test's worker demand auth.
+    from strata.notebook.remote_executor import _CAPTURED_SECRETS
+
+    _CAPTURED_SECRETS.clear()
 
 
 # Common utility functions

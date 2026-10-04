@@ -102,6 +102,7 @@ from strata.notebook.team_store import (
     pull_cell_outputs,
 )
 from strata.notebook.workers import (
+    SIGNED_TRANSPORTS,
     get_worker_execution_error,
     is_embedded_executor_worker,
     is_http_executor_worker,
@@ -2431,7 +2432,7 @@ class CellExecutor:
 
         worker_token = _resolve_worker_token(worker_spec)
         transport = str(worker_spec.config.transport or "direct").strip().lower()
-        if transport in {"signed", "manifest", "build"}:
+        if transport in SIGNED_TRANSPORTS:
             return await self._dispatch_http_executor_with_manifest(
                 worker_spec,
                 source,

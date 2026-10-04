@@ -471,6 +471,27 @@ def worker_supports_notebook_execution(worker: WorkerSpec | None) -> bool:
     return is_embedded_executor_worker(worker) or is_http_executor_worker(worker)
 
 
+# config.transport values an executor worker dispatches on; the last three pull by manifest.
+SIGNED_TRANSPORTS = frozenset({"signed", "manifest", "build"})
+WORKER_TRANSPORTS = frozenset({"direct", *SIGNED_TRANSPORTS})
+
+
+def check_worker_transport(transport: str | None) -> None:
+    """Refuse a ``config.transport`` the executor would not recognise.
+
+    Raises:
+        ValueError: Naming the accepted values; an unknown one would silently
+            dispatch as ``direct``.
+    """
+    if transport is None:
+        return
+    if transport.strip().lower() not in WORKER_TRANSPORTS:
+        raise ValueError(
+            f"unknown worker transport {transport!r}; "
+            f"expected one of: {', '.join(sorted(WORKER_TRANSPORTS))}"
+        )
+
+
 def worker_transport(worker: WorkerSpec) -> str:
     """Return a stable UI-facing transport label for one worker."""
     if worker.backend == WorkerBackendType.LOCAL:
@@ -481,7 +502,7 @@ def worker_transport(worker: WorkerSpec) -> str:
 
     if url.startswith("embedded://"):
         return "embedded"
-    if transport in {"signed", "manifest", "build"}:
+    if transport in SIGNED_TRANSPORTS:
         return "signed"
     if url.startswith("http://") or url.startswith("https://"):
         return "direct"

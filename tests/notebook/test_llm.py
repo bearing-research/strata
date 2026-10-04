@@ -105,6 +105,27 @@ class TestResolveLlmConfig:
             assert config.api_key == "sk-notebook"
             assert "anthropic" in config.base_url
 
+    def test_notebook_generic_key_overrides_server_key(self):
+        """The Runtime panel outranks the server, the generic key included."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = resolve_llm_config(
+                notebook_env={"STRATA_AI_API_KEY": "sk-notebook"},
+                server_config=_FakeServerConfig(
+                    ai_api_key="sk-server", ai_base_url="https://custom.api.com/v1"
+                ),
+            )
+            assert config is not None
+            assert config.api_key == "sk-notebook"
+            assert config.base_url == "https://custom.api.com/v1"
+
+    def test_notebook_provider_key_beats_its_generic_key(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = resolve_llm_config(
+                notebook_env={"STRATA_AI_API_KEY": "sk-generic", "OPENAI_API_KEY": "sk-openai"},
+            )
+            assert config is not None
+            assert config.api_key == "sk-openai"
+
     def test_server_config_layer(self):
         """Server config is the lowest-priority source of defaults."""
         with patch.dict(os.environ, {}, clear=True):

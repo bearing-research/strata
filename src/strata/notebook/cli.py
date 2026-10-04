@@ -1766,7 +1766,9 @@ def add_worker_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="Executor endpoint, e.g. http://127.0.0.1:9000/v1/execute",
     )
-    add_p.add_argument("--transport", default="direct", help="Transport (default: direct)")
+    add_p.add_argument(
+        "--transport", default="direct", help="Transport: direct or signed (default: direct)"
+    )
     add_p.add_argument(
         "--runtime-id", dest="runtime_id", help="Stable env fingerprint for provenance"
     )

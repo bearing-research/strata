@@ -95,9 +95,10 @@ def resolve_llm_config(
                 base_url = default_url
                 model = default_model
                 break
-        # Generic key: no implicit provider selection
-        if not api_key and notebook_env.get("STRATA_AI_API_KEY"):
-            api_key = notebook_env["STRATA_AI_API_KEY"]
+        else:
+            # Generic key: overrides the server's key, keeps its base_url and model.
+            if notebook_env.get("STRATA_AI_API_KEY"):
+                api_key = notebook_env["STRATA_AI_API_KEY"]
 
     # Layer 3 (highest): notebook.toml [ai] section
     notebook_base_url: str | None = None

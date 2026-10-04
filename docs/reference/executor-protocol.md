@@ -524,7 +524,7 @@ base64-encoded. A failure is a `4xx` or `5xx` with a JSON body:
 {"success": false, "error_code": "…", "error_message": "…"}
 ```
 
-Any error status fails the build.
+Any error status fails the build, and the build's error carries `error_message` (or `detail`, or the raw body), cut to 500 characters.
 
 ### Pull model
 

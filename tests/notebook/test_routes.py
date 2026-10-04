@@ -1176,6 +1176,30 @@ def test_update_notebook_workers(client, tmp_path):
     assert data["definitions_editable"] is True
 
 
+def test_update_notebook_workers_refuses_an_unknown_transport(client, tmp_path):
+    from strata.notebook.parser import parse_notebook
+
+    notebook_dir = create_notebook(tmp_path, "Worker Transport Test")
+    session_id = open_session_id(client, notebook_dir)
+
+    response = client.put(
+        f"/v1/notebooks/{session_id}/workers",
+        json={
+            "workers": [
+                {
+                    "name": "gpu",
+                    "backend": "executor",
+                    "config": {"url": "https://executor.internal/gpu", "transport": "http"},
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert "unknown worker transport 'http'" in response.json()["detail"]
+    assert parse_notebook(notebook_dir).workers == []
+
+
 def test_update_notebook_workers_forbidden_in_service_mode(
     client, service_mode_worker_state, tmp_path
 ):

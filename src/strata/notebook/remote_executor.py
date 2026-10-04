@@ -313,8 +313,8 @@ def capture_worker_secrets() -> None:
 
     A cell runs as a child under the same uid and could read them from
     ``/proc/<ppid>/environ``, so each value is zeroed in the environment block
-    before it is unset. Called by the worker entry point, so an in-process app in a
-    test still reads the environment.
+    before it is unset. Called by the app factory, so a host that mounts the app
+    itself (Modal, a custom ASGI server) is covered too; a second call is a no-op.
     """
     for name in _WORKER_SECRETS:
         value = os.environ.get(name)
@@ -410,6 +410,8 @@ def create_notebook_executor_app(
             overriding the caller's value so concurrent cells never share a GPU.
             Falls back to ``STRATA_WORKER_GPU_SLOTS``.
     """
+    # Before any cell can spawn, whoever hosts the app.
+    capture_worker_secrets()
     started_at = time.time()
     active_executions = 0
     if max_concurrent is None:

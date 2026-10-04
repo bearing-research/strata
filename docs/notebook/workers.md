@@ -468,7 +468,7 @@ strata worker default ./my-notebook fly-cpu   # omit the name, or pass local, to
 strata worker rm ./my-notebook fly-cpu
 ```
 
-`add` replaces a worker of the same name; `--transport` defaults to `direct`, and `--default` also makes it the notebook default. `rm` refuses the built-in `local` worker and clears the default if it named the removed one. Each prints the resulting worker list, as JSON by default (`--format human` for a table). In service mode the server owns worker definitions, so these commands are refused. For a box you reach over SSH, use [`add-ssh` / `rm-ssh`](#run-cells-on-a-machine-you-can-ssh-to) instead.
+`add` replaces a worker of the same name; `--transport` defaults to `direct` and must be `direct` or `signed` (`manifest` and `build` are aliases of `signed`; the MCP tool and the REST workers route refuse anything else too), and `--default` also makes it the notebook default. `rm` refuses the built-in `local` worker and clears the default if it named the removed one. Each prints the resulting worker list, as JSON by default (`--format human` for a table). In service mode the server owns worker definitions, so these commands are refused. For a box you reach over SSH, use [`add-ssh` / `rm-ssh`](#run-cells-on-a-machine-you-can-ssh-to) instead.
 
 ### Signed workers and private hosts
 
@@ -556,7 +556,7 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 
 `token_env` is preferred over `token` because the literal-token form gets committed to your notebook repo. Use `token = "..."` only for one-off local experiments.
 
-A worker with `STRATA_WORKER_TOKEN` set rejects unauthenticated requests with `401 Unauthorized`. `/health` stays open so platform health probes work without the secret. `strata-worker` takes the token out of its process environment at startup and holds it in memory, zeroing the value in the environment block the process started with, so a cell it runs cannot read it from `os.environ` or from `/proc/<ppid>/environ`. The same goes for the credential variables (`STRATA_NOTEBOOK_CREDENTIALS`, `STRATA_NOTEBOOK_MOUNT_CREDENTIALS`). An app built directly with `create_notebook_executor_app()`, as in the Modal example above, does not do this: a cell never gets these variables in its own environment, but can still read them from the serving process's `/proc/<pid>/environ`.
+A worker with `STRATA_WORKER_TOKEN` set rejects unauthenticated requests with `401 Unauthorized`. `/health` stays open so platform health probes work without the secret. The worker app takes the token out of its process environment when it is created and holds it in memory, zeroing the value in the environment block the process started with, so a cell it runs cannot read it from `os.environ` or from `/proc/<ppid>/environ`. The same goes for the credential variables (`STRATA_NOTEBOOK_CREDENTIALS`, `STRATA_NOTEBOOK_MOUNT_CREDENTIALS`). This holds for `strata-worker` and for an app built directly with `create_notebook_executor_app()`, as in the Modal example above.
 
 ## Using workers in cells
 

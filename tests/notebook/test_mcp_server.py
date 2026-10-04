@@ -474,6 +474,16 @@ async def test_worker_tools_register_default_and_remove(sm_with_session, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_add_worker_tool_refuses_an_unknown_transport(sm_with_session):
+    from strata.notebook.ops import NotebookOpsError
+
+    sm, session_id, _ = sm_with_session
+    with pytest.raises(NotebookOpsError, match="unknown worker transport 'http'"):
+        await _add_worker(sm, session_id, "gpu", "http://127.0.0.1:9000/v1/execute", "http")
+    assert [w["name"] for w in _list_workers(sm, session_id)["workers"]] == ["local"]
+
+
+@pytest.mark.asyncio
 async def test_worker_tools_missing_session_raises(sm_with_session):
     sm, _, _ = sm_with_session
     with pytest.raises(ValueError, match="no open notebook session"):

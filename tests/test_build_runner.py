@@ -699,6 +699,37 @@ class TestBuildExecution:
         assert artifact.state == "failed"
 
     @pytest.mark.asyncio
+    async def test_an_executor_error_keeps_its_message(
+        self, build_runner, artifact_store, build_store
+    ):
+        """The build error carries the executor's error_message, not only the status line."""
+        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                400,
+                json={
+                    "success": False,
+                    "error_code": "SQL_ERROR",
+                    "error_message": 'Binder Error: column "nope" not found',
+                },
+            )
+
+        real_client = httpx.AsyncClient
+        with patch(
+            "httpx.AsyncClient",
+            lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+        ):
+            await build_runner._execute_build(build_store.get_build(build_id))
+
+        build = build_store.get_build(build_id)
+        assert build.state == "failed"
+        assert build.error_code == "HTTPStatusError"
+        assert build.error_message == (
+            'Executor returned HTTP 400: Binder Error: column "nope" not found'
+        )
+
+    @pytest.mark.asyncio
     async def test_build_executor_timeout(self, build_runner, artifact_store, build_store):
         # slow_transform has a 0.1s timeout.
         artifact_id, version, build_id = create_test_artifact(

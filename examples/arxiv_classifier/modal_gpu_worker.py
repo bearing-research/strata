@@ -14,7 +14,7 @@ Deploy:
     modal deploy examples/arxiv_classifier/modal_gpu_worker.py
 
 Modal prints the URL — paste it into notebook.toml as a `[[workers]]`
-entry with `transport = "http"` and `url = "<modal-url>/v1/execute"`.
+entry with `transport = "direct"` and `url = "<modal-url>/v1/execute"`.
 """
 
 from __future__ import annotations

@@ -1,15 +1,15 @@
 """Transform registry: the allowlist of transforms that may run in service mode.
 
 Each definition matches transform refs (glob, e.g. ``pandas_script@*``) and gives the
-executor URL and resource limits. Personal mode bypasses the allowlist. Configured in
-pyproject.toml:
+executor's base URL (the runner posts to ``{executor_url}/v1/execute``) and resource
+limits. Personal mode bypasses the allowlist. Configured in pyproject.toml:
 
     [tool.strata.transforms]
     enabled = true
 
     [[tool.strata.transforms.registry]]
     ref = "duckdb_sql@v1"
-    executor_url = "http://executor:8080/execute"
+    executor_url = "http://executor:8080"
     timeout_seconds = 300
     max_output_bytes = 1073741824  # 1 GB
 """
@@ -31,14 +31,16 @@ logger = logging.getLogger(__name__)
 class TransformDefinition:
     """An approved transform: a glob ``ref`` pattern, its executor URL, and limits.
 
-    Byte limits of 0 mean unlimited. When ``requires_scope`` is set, the principal must hold
-    that scope to materialize.
+    ``max_output_bytes`` of 0 falls back to the server's
+    ``build_runner_default_max_output`` (1 GiB by default); ``max_input_bytes`` of 0 means
+    unlimited. When ``requires_scope`` is set, the principal must hold that scope to
+    materialize.
     """
 
     ref: str
     executor_url: str
     timeout_seconds: float = 300.0
-    max_output_bytes: int = 0  # 0 = unlimited
+    max_output_bytes: int = 0  # 0 = the server's default cap
     max_input_bytes: int = 0  # 0 = unlimited
     requires_scope: str | None = None
 

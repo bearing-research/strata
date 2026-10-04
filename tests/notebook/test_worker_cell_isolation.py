@@ -203,6 +203,25 @@ def test_the_workers_secrets_leave_the_environment_a_cell_can_reach(monkeypatch)
         _CAPTURED_SECRETS.clear()
 
 
+def test_a_hosted_app_takes_the_secrets_out_of_the_environment(monkeypatch):
+    """Modal mounts the app itself and never runs the entry point, so the factory scrubs."""
+    from fastapi.testclient import TestClient
+
+    from strata.notebook.remote_executor import create_notebook_executor_app
+
+    monkeypatch.setenv("STRATA_WORKER_TOKEN", "worker-bearer-token")
+    monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIALS", '{"lab": {"key": "AKIA"}}')
+
+    client = TestClient(create_notebook_executor_app())
+
+    assert "STRATA_WORKER_TOKEN" not in os.environ
+    assert "STRATA_NOTEBOOK_CREDENTIALS" not in os.environ
+    # The gate still has the token it was created with.
+    assert client.post("/v1/execute").status_code == 401
+    ok = client.post("/v1/execute", headers={"Authorization": "Bearer worker-bearer-token"})
+    assert ok.status_code != 401
+
+
 @pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="needs /proc")
 def test_a_captured_secret_is_gone_from_the_workers_environment_block():
     """``/proc/<pid>/environ`` reads the environment the process started with, which
