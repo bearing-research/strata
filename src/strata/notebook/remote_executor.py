@@ -281,6 +281,7 @@ def _positive_int_env(name: str) -> int | None:
 # as the server) and the credentials mounts and connections resolve against.
 _WORKER_SECRETS = (
     "STRATA_WORKER_TOKEN",
+    "STRATA_WORKER_CONNECT_TOKEN",
     "STRATA_NOTEBOOK_CREDENTIALS",
     "STRATA_NOTEBOOK_MOUNT_CREDENTIALS",
     "STRATA_PROXY_TOKEN",
@@ -1282,10 +1283,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=9000, help="Bind port (default: 9000)")
     parser.add_argument(
+        "--connect",
+        metavar="URL",
+        default=None,
+        help=(
+            "Bind no port: dial out to the relay at this ws:// or wss:// URL and serve "
+            "the requests it forwards, reconnecting with backoff. The relay token is "
+            "read from STRATA_WORKER_CONNECT_TOKEN, never from the command line, which "
+            "cells can read. --host and --port are ignored"
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=["debug", "info", "warning", "error"],
-        help="Uvicorn log level",
+        help="Log level",
     )
     parser.add_argument(
         "--max-concurrent",
@@ -1309,17 +1321,43 @@ def main(argv: list[str] | None = None) -> int:
     for flag, value in (("--max-concurrent", args.max_concurrent), ("--gpu-slots", args.gpu_slots)):
         if value is not None and value < 1:
             parser.error(f"{flag} must be a positive integer")
+    if args.connect is not None and not args.connect.startswith(("ws://", "wss://")):
+        parser.error("--connect takes a ws:// or wss:// URL")
 
     # Before any cell can spawn: a harness under this uid can read
     # /proc/<ppid>/environ, so secrets move from the environment into memory.
     capture_worker_secrets()
-    if parent_still_holds_secret("STRATA_WORKER_TOKEN"):
-        logger.warning(
-            "strata-worker's parent process (pid %d) still holds STRATA_WORKER_TOKEN in "
-            "its environment, where a cell can read it. Run the installed strata-worker "
-            "directly rather than through `uv run`.",
-            os.getppid(),
+    for secret in ("STRATA_WORKER_TOKEN", "STRATA_WORKER_CONNECT_TOKEN"):
+        if parent_still_holds_secret(secret):
+            logger.warning(
+                "strata-worker's parent process (pid %d) still holds %s in "
+                "its environment, where a cell can read it. Run the installed strata-worker "
+                "directly rather than through `uv run`.",
+                os.getppid(),
+                secret,
+            )
+
+    if args.connect is not None:
+        from strata.notebook.worker_connect import RelayRefusedError, run_connect
+
+        logging.basicConfig(level=args.log_level.upper())
+        if not worker_secret("STRATA_WORKER_TOKEN").strip():
+            logger.warning(
+                "strata-worker is connecting to %s WITHOUT authentication - anyone who "
+                "can reach this worker through the relay can execute code on this "
+                "machine. Set STRATA_WORKER_TOKEN (see docs/notebook/workers.md).",
+                args.connect,
+            )
+        app = create_notebook_executor_app(
+            max_concurrent=args.max_concurrent, gpu_slots=args.gpu_slots
         )
+        token = worker_secret("STRATA_WORKER_CONNECT_TOKEN").strip() or None
+        try:
+            asyncio.run(run_connect(args.connect, app, token=token))
+        except RelayRefusedError as exc:
+            logger.error("%s", exc)
+            return 1
+        return 0
 
     # Cells run arbitrary code, so a non-loopback bind without a token lets
     # anyone who reaches the port run code as this user. Make that loud.
