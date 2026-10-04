@@ -22,6 +22,8 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 
 Cells run in **the notebook's locked environment** on a `strata-worker` of this version or later: Strata sends the notebook's `uv.lock` with the cell, and the worker builds that environment once per lock (with `uv`, which the image needs) and reuses it for every later cell with the same lock. The worker advertises this as `locked_environments` in `/health`, and says `false` when `uv` is not on its `PATH`. A worker that answers without it (an older `strata-worker`, one without `uv`, or a custom worker; a `404` on `/health` counts as an answer) runs cells in its own Python environment, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into that image before launching it. A worker that cannot be asked at all (unreachable, timed out, or a `5xx` on `/health`) is refused for a notebook that has a `uv.lock`, rather than running the cell in an environment its provenance would not describe. Either way the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image. See [the `environment` block](../reference/executor-protocol.md#the-environment-block) for `STRATA_WORKER_ENV_ROOT` and a prebuilt-environment registry.
 
+R cells work the same way with the notebook's `renv.lock`: the worker restores it with `renv` into one library per lock and R build, reuses it for every later R cell with that lock, and runs the cell with that library first on R's library path. It advertises this as `locked_r_environments`, `true` when its R can load `renv`; a notebook with an `renv.lock` is refused on a worker that cannot be asked, as above. See [the R `environment` block](../reference/executor-protocol.md#the-r-environment-block).
+
 For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor Protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
 
 ## Quick start: run a worker locally
@@ -53,7 +55,7 @@ INFO:     Uvicorn running on http://0.0.0.0:9000
 curl http://localhost:9000/health
 ```
 
-Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, and `hardware` lists what the machine reports):
+Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, and `hardware` lists what the machine reports):
 
 ```json
 {
@@ -67,6 +69,7 @@ Expected response (`locked_environments` is `false` if `uv` is not on the worker
       "pull_model": true,
       "cancel": true,
       "locked_environments": true,
+      "locked_r_environments": false,
       "languages": ["python"]
     }
   },
@@ -403,7 +406,7 @@ image the pool drives with:
 docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
-For R cells, build it with R and the packages `harness.R` needs:
+For R cells, build it with R, the packages `harness.R` needs, and `renv` to restore a notebook's `renv.lock`:
 
 ```bash
 docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .

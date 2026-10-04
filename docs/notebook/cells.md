@@ -1010,7 +1010,9 @@ this version or later), under the worker's
 (`docker build -f worker.Dockerfile --build-arg WITH_R=true`). Its outputs come
 back the way a local run's do, so it is a cache hit here afterwards, a
 downstream Python cell reads its data frame, and an R-only value returns as RDS.
-The worker does not restore the notebook's `renv.lock`. An `@fetch` on an R cell
+A worker whose R has `renv` restores the notebook's `renv.lock` once per lock
+and runs the cell against that library; one without `renv` uses its own R
+library (see [Workers](workers.md)). An `@fetch` on an R cell
 is read on this machine, so an R cell with both `@fetch` and `@worker` fails;
 run it locally, or fetch in an upstream Python cell.
 
