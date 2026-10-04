@@ -211,7 +211,11 @@ A job submitted with W3C `traceparent` / `tracestate` headers keeps them, and
 the pool forwards them to the machine it runs on. With OpenTelemetry installed
 (it is not a dependency) the pool also opens a `pool.execute` span for the job's
 time on the machine. The machine's work then sits under that span, which sits
-under the caller's.
+under the caller's. Beside it, `pool.queue` covers the job's wait from submit to
+dispatch, whichever process dispatched it, and `pool.boot` a machine's start
+from the request to the provider until it answers its health check. A boot is
+traced under the job first in line for that machine, and is marked as an error
+when the machine fails to start or to boot.
 
 A job that fails **on the worker** comes back as 502, and one that times out
 as 504. The caller has to be able to tell "your code raised" from "we could
