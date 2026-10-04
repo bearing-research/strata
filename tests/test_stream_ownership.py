@@ -115,7 +115,7 @@ class TestRedirectTargetConstruction:
     def _target(self, owner_url, stream_id):
         from urllib.parse import quote
 
-        # Mirrors the construction in server.get_stream.
+        # Mirrors the construction in the streams router get_stream.
         return f"{owner_url.rstrip('/')}/v1/streams/{quote(stream_id, safe='')}"
 
     def test_ordinary_ids_are_unchanged(self):
@@ -161,7 +161,7 @@ class TestOwnerResolution:
     def test_unconfigured_node_never_redirects(self, owners, monkeypatch):
         # Single node: no lookup at all, so the common case pays nothing even if an
         # ownership table exists.
-        from strata.server import _resolve_stream_owner
+        from strata.api.routers.streams import _resolve_stream_owner
 
         owners.claim("s1", "https://node-a:8765", ttl_seconds=60)
         monkeypatch.setattr(
@@ -170,7 +170,7 @@ class TestOwnerResolution:
         assert _resolve_stream_owner(self._FakeState(None), "s1") is None
 
     def test_configured_node_resolves_a_sibling(self, owners, monkeypatch):
-        from strata.server import _resolve_stream_owner
+        from strata.api.routers.streams import _resolve_stream_owner
 
         owners.claim("s1", "https://node-a:8765", ttl_seconds=60)
         monkeypatch.setattr(
@@ -184,7 +184,7 @@ class TestOwnerResolution:
     def test_lookup_failure_degrades_to_no_redirect(self, monkeypatch):
         # A database hiccup must produce a 404, not a 500: the caller asked for a stream,
         # not for the ownership table's health.
-        from strata.server import _resolve_stream_owner
+        from strata.api.routers.streams import _resolve_stream_owner
 
         class _Broken:
             def resolve(self, *a, **k):
