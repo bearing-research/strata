@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import zipfile
 
@@ -493,3 +494,162 @@ def test_cell_tests_and_the_notebook_s_gitignore_round_trip(ran, tmp_path):
     restored = imported.notebook_dir
     assert (restored / "cells" / "tests" / "test_rows.py").read_text() == "def test_rows(): pass\n"
     assert (restored / ".gitignore").read_text() == "# mine\n.strata/\n"
+
+
+class TestFetchedBytes:
+    """An ``include=all`` bundle carries ``.strata/fetch/``, so a fetching cell imports
+    and runs on a machine that cannot reach its URL."""
+
+    @pytest.fixture
+    def fetched(self, tmp_path, capsys):
+        from strata.notebook.cli import run_main
+        from tests.notebook.test_fetch import _Origin
+
+        origin = _Origin()
+        try:
+            pin = hashlib.sha256(origin.body).hexdigest()
+            nb = create_notebook(tmp_path / "src", "Fetching", initialize_environment=False)
+            prepared_venv(nb)
+            add_cell_to_notebook(nb, "load", None)
+            write_cell(
+                nb,
+                "load",
+                f"# @fetch zones {origin.url()} sha256={pin}\n"
+                "rows = len(zones.read_text().splitlines())\n",
+            )
+            add_cell_to_notebook(nb, "frozen", "load")
+            write_cell(
+                nb,
+                "frozen",
+                f"# @fetch other {origin.url('/other.csv')} refetch=never\n"
+                "other_rows = len(other.read_text().splitlines())\n",
+            )
+            add_cell_to_notebook(nb, "total", "frozen")
+            write_cell(nb, "total", "total = rows + other_rows\nprint(total)\n")
+            assert run_main([str(nb), "--no-sync", "--format", "json"]) == 0
+            capsys.readouterr()
+            bundle = _export(nb, tmp_path / "snap.zip", include="all")
+        finally:
+            # The URL is dead from here on: the import side cannot reach it.
+            origin.close()
+            origin.server.server_close()
+        return nb, bundle
+
+    def test_the_import_hits_and_reruns_without_the_url(self, fetched, tmp_path, capsys):
+        from strata.notebook.cli import run_main
+
+        _, bundle = fetched
+        nb = import_snapshot(bundle, tmp_path / "dst").notebook_dir
+        prepared_venv(nb)
+
+        assert run_main([str(nb), "--no-sync", "--format", "json"]) == 0
+        cells = {c["id"]: c for c in json.loads(capsys.readouterr().out)["cells"]}
+        assert cells["load"]["cache_hit"] is True, cells["load"].get("error")
+        assert cells["frozen"]["cache_hit"] is True, cells["frozen"].get("error")
+
+        # An edit forces the pinned cell to run, reading the carried bytes.
+        source = (nb / "cells" / "load.py").read_text()
+        write_cell(nb, "load", source + "print('recomputed', rows)\n")
+        assert run_main([str(nb), "--no-sync", "--format", "json"]) == 0
+        cells = {c["id"]: c for c in json.loads(capsys.readouterr().out)["cells"]}
+        assert cells["load"]["cache_hit"] is False
+        assert cells["load"]["status"] == "ok", cells["load"].get("error")
+        assert cells["load"]["stdout"].strip() == "recomputed 2"
+
+    def test_only_include_all_carries_them(self, fetched, tmp_path):
+        nb, bundle = fetched
+        with zipfile.ZipFile(bundle) as archive:
+            carried = [n for n in archive.namelist() if n.startswith("fetch/")]
+        assert "fetch/index.json" in carried
+        assert len(carried) == 3, carried
+
+        for include in ("selected", "none"):
+            other = _export(nb, tmp_path / f"{include}.zip", include=include)
+            with zipfile.ZipFile(other) as archive:
+                assert not [n for n in archive.namelist() if n.startswith("fetch/")]
+
+
+def _with_members(ran, tmp_path, members: dict[str, bytes]):
+    good = _export(ran, tmp_path / "snap.zip")
+    evil = tmp_path / "evil.zip"
+    with zipfile.ZipFile(good) as src, zipfile.ZipFile(evil, "w") as dst:
+        for name in src.namelist():
+            dst.writestr(name, src.read(name))
+        for name, data in members.items():
+            dst.writestr(name, data)
+    return evil
+
+
+_PWNED_SHA = hashlib.sha256(b"pwned").hexdigest()
+
+
+class TestFetchedBytesAreUntrusted:
+    @pytest.mark.parametrize(
+        "member",
+        [
+            "fetch/../../PWNED.txt",
+            "fetch/not-a-digest/zones.csv",
+            f"fetch/{_PWNED_SHA}/deeper/zones.csv",
+            f"fetch/{_PWNED_SHA}/.zones.csv",
+            f"fetch/{_PWNED_SHA}",
+        ],
+    )
+    def test_a_file_the_cache_would_not_place_there_is_refused(self, ran, tmp_path, member):
+        evil = _with_members(ran, tmp_path, {member: b"pwned"})
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(evil, tmp_path / "dst" / "nb")
+
+        assert not (tmp_path / "dst" / "nb").exists()
+        assert not (tmp_path / "PWNED.txt").exists()
+
+    def test_bytes_that_do_not_hash_to_their_name_are_refused(self, ran, tmp_path):
+        """A pinned fetch trusts the directory name; forged bytes would satisfy the pin."""
+        evil = _with_members(ran, tmp_path, {f"fetch/{'1' * 64}/zones.csv": b"forged"})
+
+        with pytest.raises(NotASnapshotError, match="digest"):
+            import_snapshot(evil, tmp_path / "dst" / "nb")
+
+    def test_index_entries_are_kept_only_when_sound(self, ran, tmp_path):
+        from strata.notebook.fetch import FetchCache
+        from strata.notebook.models import FetchSpec
+
+        index = {
+            "https://example.org/zones.csv": {
+                "sha256": _PWNED_SHA,
+                "filename": "zones.csv",
+                # The cache would raise on a non-number while computing staleness.
+                "checked_at": "soon",
+                "etag": '"abc"',
+            },
+            "https://example.org/escape": {"sha256": _PWNED_SHA, "filename": "../../../x"},
+            "https://example.org/missing": {"sha256": "2" * 64, "filename": "gone.csv"},
+            "https://example.org/list": [],
+        }
+        evil = _with_members(
+            ran,
+            tmp_path,
+            {
+                f"fetch/{_PWNED_SHA}/zones.csv": b"pwned",
+                "fetch/index.json": json.dumps(index).encode(),
+            },
+        )
+
+        nb = import_snapshot(evil, tmp_path / "dst" / "nb").notebook_dir
+
+        restored = json.loads((nb / ".strata" / "fetch" / "index.json").read_text())
+        assert restored == {
+            "https://example.org/zones.csv": {
+                "sha256": _PWNED_SHA,
+                "filename": "zones.csv",
+                "etag": '"abc"',
+            }
+        }
+        spec = FetchSpec(name="zones", url="https://example.org/zones.csv", refetch="never")
+        assert FetchCache(nb).resolve(spec).path.read_bytes() == b"pwned"
+
+    def test_an_index_that_is_not_an_object_is_refused(self, ran, tmp_path):
+        evil = _with_members(ran, tmp_path, {"fetch/index.json": b"[]"})
+
+        with pytest.raises(NotASnapshotError, match="fetch index"):
+            import_snapshot(evil, tmp_path / "dst" / "nb")

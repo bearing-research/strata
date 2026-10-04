@@ -324,6 +324,9 @@ What you get:
 
 - **Carried cells are cache hits** before anything runs, with their outputs
   and console restored.
+- **Fetched bytes come along with `include=all`**. A cell whose `@fetch` is
+  pinned or `refetch=never` runs without reaching its URL. Each file must hash
+  to the digest it is filed under, or the import is refused.
 - **Cells the snapshot only described open idle**. They ran and their result is
   current; it just isn't here. With a team store configured, running one pulls
   it rather than recomputing, because the notebook computes the same provenance

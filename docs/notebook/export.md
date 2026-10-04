@@ -172,7 +172,7 @@ What travels is `--include`:
 
 | Value      | Carries                                                                    |
 | ---------- | -------------------------------------------------------------------------- |
-| `all`      | Every artifact. Use it to move a project between machines.                  |
+| `all`      | Every artifact, and the bytes each `@fetch` last read (`.strata/fetch/`). Use it to move a project between machines. |
 | `selected` | Only the cells named by `--cells`; the rest are described by reference. The default. |
 | `none`     | No artifact bytes: the notebook and its provenance, nothing to replay from. |
 
@@ -183,6 +183,12 @@ strata export ./my_analysis --to snapshot --include all --out my_analysis.zip
 # A review copy: one cell's results, the rest by reference
 strata export ./my_analysis --to snapshot --cells a1b2c3d4 --out review.zip
 ```
+
+With `--include all` a cell whose `@fetch` is pinned (`sha256=`) or set to
+`refetch=never` imports and runs without reaching its URL, so the bundle alone
+reproduces it after the URL has moved or gone. An unpinned `refetch=stale` or
+`refetch=always` fetch still checks its URL before every run; pin it first if
+the copy has to run offline.
 
 `--out` is required for a snapshot, since it is a zip rather than text, and it
 refuses to overwrite a path that already holds something unless you pass `--force`.

@@ -241,7 +241,9 @@ run read as one of its inputs, and when those bytes were downloaded. That
 record is how a [publication](publishing.md) page lists the URL under
 "External inputs" with its digest and retrieval time, and its RO-Crate gives
 the URL's `File` node an `sdDatePublished`. A snapshot export lists every fetch with whether it is
-pinned, so an unpinned one can be flagged before the snapshot is shared.
+pinned, so an unpinned one can be flagged before the snapshot is shared, and
+with `--include all` carries the fetched bytes, so a pinned or `refetch=never`
+fetch runs on the importing machine without its URL.
 
 Only `http` and `https` are fetched. In service mode every redirect hop passes
 the same guard as a worker's URLs: no private, loopback or link-local address
