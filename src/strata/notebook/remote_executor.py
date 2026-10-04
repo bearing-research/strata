@@ -1327,14 +1327,14 @@ def main(argv: list[str] | None = None) -> int:
     # Before any cell can spawn: a harness under this uid can read
     # /proc/<ppid>/environ, so secrets move from the environment into memory.
     capture_worker_secrets()
-    for secret in ("STRATA_WORKER_TOKEN", "STRATA_WORKER_CONNECT_TOKEN"):
-        if parent_still_holds_secret(secret):
+    for variable in ("STRATA_WORKER_TOKEN", "STRATA_WORKER_CONNECT_TOKEN"):
+        if parent_still_holds_secret(variable):
             logger.warning(
                 "strata-worker's parent process (pid %d) still holds %s in "
                 "its environment, where a cell can read it. Run the installed strata-worker "
                 "directly rather than through `uv run`.",
                 os.getppid(),
-                secret,
+                variable,
             )
 
     if args.connect is not None:
