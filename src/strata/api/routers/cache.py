@@ -14,7 +14,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
-from strata.api.dependencies import authorize_table_access, require_scope
+from strata.api.dependencies import (
+    authorize_table_access,
+    refuse_unconfigured_warehouses,
+    require_scope,
+    table_identity_or_400,
+)
 from strata.auth import get_principal
 from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
@@ -125,10 +130,8 @@ def _authorize_warm_tables(table_uris: list[str]) -> None:
     a denied table would confirm it exists. The planned identity is checked again after planning.
     A URI that names no table is a 400.
     """
-    from strata.server import _table_identity_or_400
-
     for table_uri in table_uris:
-        authorize_table_access(table_uri, _table_identity_or_400(table_uri))
+        authorize_table_access(table_uri, table_identity_or_400(table_uri))
 
 
 def _warm_job_tenant() -> str | None:
@@ -148,14 +151,14 @@ async def warm_cache_v1(request: WarmRequest):
 
     Row groups already cached count as skipped; failures are reported in ``errors``.
     """
-    from strata.server import _refuse_unconfigured_warehouses, get_state
+    from strata.server import get_state
 
     state = get_state()
 
     # Warming reads these tables into the shared cache, so it takes the same deny-first gate as the
     # scan path, before any planning or fetching.
     _authorize_warm_tables(request.tables)
-    _refuse_unconfigured_warehouses(request.tables)
+    refuse_unconfigured_warehouses(request.tables)
 
     start_time = time.perf_counter()
     tables_warmed = 0
@@ -269,14 +272,14 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
     Unlike ``POST /v1/cache/warm``, this does not block and can target a specific snapshot.
     Track progress via ``GET /v1/cache/warm/jobs/{id}``.
     """
-    from strata.server import _refuse_unconfigured_warehouses, get_state
+    from strata.server import get_state
 
     state = get_state()
 
     # Same gate as the synchronous endpoint: a background job must not be a
     # way around the table ACL.
     _authorize_warm_tables(request.tables)
-    _refuse_unconfigured_warehouses(request.tables)
+    refuse_unconfigured_warehouses(request.tables)
 
     if state._cache_warmer is None:
         raise HTTPException(status_code=503, detail="Cache warmer not initialized")

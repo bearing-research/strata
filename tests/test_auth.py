@@ -7,6 +7,7 @@ ACL deny beats allow; scan ownership is enforced; hide_forbidden_as_not_found gi
 
 import pytest
 
+from strata.api.dependencies import resolve_input_version
 from strata.auth import (
     AclEvaluator,
     get_principal,
@@ -340,11 +341,11 @@ class TestTransformInputAclParity:
     def test_denied_table_input_is_rejected_403(self, monkeypatch):
         from fastapi import HTTPException
 
-        server_module = self._patch_state(monkeypatch, namespace="secret")
+        self._patch_state(monkeypatch, namespace="secret")
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                server_module._resolve_input_version("file:///wh#secret.events")
+                resolve_input_version("file:///wh#secret.events")
             assert exc.value.status_code == 403
         finally:
             set_principal(None)
@@ -352,20 +353,20 @@ class TestTransformInputAclParity:
     def test_denied_table_input_hidden_as_404(self, monkeypatch):
         from fastapi import HTTPException
 
-        server_module = self._patch_state(monkeypatch, namespace="secret", hide_as_404=True)
+        self._patch_state(monkeypatch, namespace="secret", hide_as_404=True)
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                server_module._resolve_input_version("file:///wh#secret.events")
+                resolve_input_version("file:///wh#secret.events")
             assert exc.value.status_code == 404
         finally:
             set_principal(None)
 
     def test_allowed_table_input_resolves(self, monkeypatch):
-        server_module = self._patch_state(monkeypatch, namespace="public")
+        self._patch_state(monkeypatch, namespace="public")
         set_principal(Principal(id="analyst"))
         try:
-            assert server_module._resolve_input_version("file:///wh#public.events") == "4242:0"
+            assert resolve_input_version("file:///wh#public.events") == "4242:0"
         finally:
             set_principal(None)
 
@@ -398,7 +399,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                server_module._resolve_input_version("file:///wh#secret.events")
+                resolve_input_version("file:///wh#secret.events")
         finally:
             set_principal(None)
 
@@ -418,7 +419,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="analyst"))
         try:
             with pytest.raises(HTTPException) as exc:
-                server_module._resolve_input_version("file:///wh#public.events")
+                resolve_input_version("file:///wh#public.events")
         finally:
             set_principal(None)
 
@@ -433,7 +434,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="analyst"))
         try:
             with pytest.raises(HTTPException) as exc:
-                server_module._resolve_input_version("file:///wh#public.events")
+                resolve_input_version("file:///wh#public.events")
         finally:
             set_principal(None)
 

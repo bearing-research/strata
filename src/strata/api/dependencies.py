@@ -16,7 +16,7 @@ from fastapi import Depends, HTTPException
 # not resolve.
 from strata.artifact_store import ArtifactStore
 from strata.transforms.build_store import BuildStore
-from strata.types import Principal
+from strata.types import Principal, TableIdentity
 
 
 def read_store() -> ArtifactStore:
@@ -329,3 +329,28 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
         if store is not None:
             store.record_use(resolved.artifact.id, resolved.artifact.version)
     return resolved.version
+
+
+def table_identity_or_400(table_uri: str) -> TableIdentity:
+    """Resolve a request's table URI to its identity; a URI that names no table is a 400."""
+    from strata.iceberg import table_identity_for
+    from strata.server import get_state
+
+    try:
+        return table_identity_for(table_uri, get_state().config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
+    """Refuse with a 400 a request naming a warehouse this server has no catalog for."""
+    from strata.iceberg import CatalogUriRequired, PyIcebergCatalog, refuse_unconfigured_warehouse
+    from strata.server import get_state
+
+    for table_uri in table_uris:
+        try:
+            refuse_unconfigured_warehouse(
+                PyIcebergCatalog.parse_table_uri(table_uri)[0], get_state().config
+            )
+        except CatalogUriRequired as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
