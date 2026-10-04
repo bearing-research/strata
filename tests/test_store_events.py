@@ -115,6 +115,122 @@ class TestTheSequence:
         assert {e["tenant"] for e in store.read_events()} == {"acme", "globex"}
 
 
+class TestProtectedAliasEvents:
+    """A protected move is queued, then approved or rejected; each step is news."""
+
+    @staticmethod
+    def _alias_events(store, **kwargs):
+        return [
+            (e["action"], e["actor"], e["artifact_id"], e["to_version"])
+            for e in store.read_events(**kwargs)
+            if e["alias"] == "champion"
+        ]
+
+    def test_a_request_then_approval_appends_request_approval_and_move(self, store):
+        _ready(store, "old")
+        _ready(store, "new")
+        store.set_alias("team/model", "champion", "old", 1)
+        store.request_alias_change(
+            "team/model", "champion", "set", artifact_id="new", version=1, actor="ana"
+        )
+        store.approve_alias_change("team/model", "champion", actor="ben")
+
+        events = [e for e in store.read_events() if e["alias"] == "champion"]
+
+        assert [(e["action"], e["actor"]) for e in events] == [
+            ("alias_set", None),
+            ("alias_request_set", "ana"),
+            ("alias_approved", "ben"),
+            ("alias_set", "ben"),
+        ]
+        request, approved, moved = events[1:]
+        assert (request["artifact_id"], request["to_version"]) == ("new", 1)
+        assert (approved["artifact_id"], approved["to_version"]) == ("new", 1)
+        assert (moved["from_artifact_id"], moved["artifact_id"]) == ("old", "new")
+
+    def test_a_request_then_rejection_appends_request_and_rejection_only(self, store):
+        _ready(store, "new")
+        store.request_alias_change(
+            "team/model", "champion", "set", artifact_id="new", version=1, actor="ana"
+        )
+        store.reject_alias_change("team/model", "champion", actor="ben")
+
+        assert self._alias_events(store) == [
+            ("alias_request_set", "ana", "new", 1),
+            ("alias_rejected", "ben", "new", 1),
+        ]
+        assert store.resolve_alias("team/model", "champion") is None
+
+    def test_an_approved_delete_appends_request_approval_and_delete(self, store):
+        _ready(store, "fig")
+        store.set_alias("team/model", "champion", "fig", 1)
+        store.request_alias_change("team/model", "champion", "delete", actor="ana")
+        store.approve_alias_change("team/model", "champion", actor="ben")
+
+        events = [e for e in store.read_events() if e["alias"] == "champion"][1:]
+
+        assert [(e["action"], e["actor"]) for e in events] == [
+            ("alias_request_delete", "ana"),
+            ("alias_approved", "ben"),
+            ("alias_delete", "ben"),
+        ]
+        assert (events[-1]["from_artifact_id"], events[-1]["from_version"]) == ("fig", 1)
+
+    def test_a_refused_or_empty_decision_is_not_an_event(self, store):
+        """Nothing changed, so a follower must see nothing."""
+        _ready(store, "fig")
+        _ready(store, "gone")
+        store.set_alias("team/model", "champion", "fig", 1)
+        baseline = len(store.read_events())
+
+        # Already the live pointer: nothing queued.
+        assert not store.request_alias_change(
+            "team/model", "champion", "set", artifact_id="fig", version=1, actor="ana"
+        )
+        with pytest.raises(ValueError, match="No pending change"):
+            store.approve_alias_change("team/model", "champion", actor="ben")
+        with pytest.raises(ValueError, match="No pending change"):
+            store.reject_alias_change("team/model", "champion", actor="ben")
+        assert len(store.read_events()) == baseline
+
+        store.request_alias_change(
+            "team/model", "champion", "set", artifact_id="gone", version=1, actor="ana"
+        )
+        queued = len(store.read_events())
+        with pytest.raises(ValueError, match="Separation of duty"):
+            store.approve_alias_change(
+                "team/model", "champion", actor="ana", require_distinct_approver=True
+            )
+        assert store.delete_artifact("gone", 1)
+        after_delete = len(store.read_events())
+        with pytest.raises(ValueError, match="no longer available"):
+            store.approve_alias_change("team/model", "champion", actor="ben")
+
+        assert queued == baseline + 1
+        assert len(store.read_events()) == after_delete
+        assert store.list_pending_changes()[0]["artifact_id"] == "gone"
+
+    def test_a_tenant_follows_only_its_own_protected_moves(self, store):
+        _ready(store, "acme-fig", tenant="acme")
+        _ready(store, "globex-fig", tenant="globex")
+        for tenant in ("acme", "globex"):
+            store.request_alias_change(
+                "team/model",
+                "champion",
+                "set",
+                artifact_id=f"{tenant}-fig",
+                version=1,
+                tenant=tenant,
+                actor="ana",
+            )
+            store.approve_alias_change("team/model", "champion", tenant=tenant, actor="ben")
+
+        acme = self._alias_events(store, tenant="acme")
+
+        assert [a for a, *_ in acme] == ["alias_request_set", "alias_approved", "alias_set"]
+        assert {artifact for _, _, artifact, _ in acme} == {"acme-fig"}
+
+
 class TestTheRoute:
     @staticmethod
     def _client(store: ArtifactStore, principal: Principal | None) -> TestClient:
