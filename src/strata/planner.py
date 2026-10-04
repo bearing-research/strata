@@ -219,6 +219,10 @@ def _decode_partition_values(values: tuple[tuple[int, str, str], ...]) -> dict[i
     }
 
 
+class ColumnNotFound(ValueError):
+    """A read projects a column the table's schema does not have."""
+
+
 def _assert_projection_exists(
     columns: list[str] | None,
     table_schema,
@@ -234,7 +238,7 @@ def _assert_projection_exists(
     known = set(table_schema.names)
     missing = [c for c in columns if c not in known]
     if missing:
-        raise ValueError(
+        raise ColumnNotFound(
             f"Table {table_identity} has no column(s) {missing}. "
             f"Available columns: {sorted(known)}."
         )

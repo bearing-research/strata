@@ -60,7 +60,7 @@ from strata.fast_io import (
 )
 from strata.gc_tracker import install_gc_tracker
 from strata.health import _package_version
-from strata.iceberg import CatalogUriRequired
+from strata.iceberg import CatalogUriRequired, SnapshotNotFound, WarehouseNotFound
 from strata.json_types import JsonValue
 from strata.logging import (
     configure_logging,
@@ -68,7 +68,7 @@ from strata.logging import (
     request_context_middleware,
 )
 from strata.metrics import MetricsCollector
-from strata.planner import ReadPlanner, UnsupportedTableFormatError
+from strata.planner import ColumnNotFound, ReadPlanner, UnsupportedTableFormatError
 from strata.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import (
     RateLimitConfig,
@@ -1766,6 +1766,19 @@ def _table_identity_or_400(table_uri: str) -> TableIdentity:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
+    """Refuse with a 400 a request naming a warehouse this server has no catalog for."""
+    from strata.iceberg import PyIcebergCatalog, refuse_unconfigured_warehouse
+
+    for table_uri in table_uris:
+        try:
+            refuse_unconfigured_warehouse(
+                PyIcebergCatalog.parse_table_uri(table_uri)[0], get_state().config
+            )
+        except CatalogUriRequired as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _authorize_artifact_write() -> None:
     """Gate a write endpoint (put / set_name / set_alias / tags).
 
@@ -1845,6 +1858,8 @@ async def materialize_artifact(request: MaterializeRequest):
             # cannot bypass it.
             if e.status_code in (401, 403, 404, 422):
                 raise
+            # A warehouse with no catalog here is the server's config, not an unresolvable URI.
+            _refuse_unconfigured_warehouses([input_uri])
             input_versions[input_uri] = input_uri
 
     from strata.services.materialize import materialize_service
@@ -2170,8 +2185,10 @@ async def _handle_identity_materialize(
         # A table Strata will not read (an unreadable delete file, too many
         # pending equality deletes): the message says why and what to do.
         raise HTTPException(status_code=422, detail=str(e)) from e
-    except CatalogUriRequired as e:
+    except (CatalogUriRequired, ColumnNotFound) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except (WarehouseNotFound, SnapshotNotFound) as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except NoSuchTableError as e:
         raise HTTPException(status_code=404, detail=f"Table not found: {table_uri}") from e
 

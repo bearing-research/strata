@@ -156,8 +156,8 @@ and names the setting.
 A warehouse named only in a request's table URI (`s3://bucket/wh#ns.table`)
 is not known at startup. With no catalog `uri` set, a service
 (`STRATA_DEPLOYMENT_MODE=service`) refuses such a URI in any object store with
-a 400 naming `STRATA_CATALOG_URI`, on scans, cache warming and export to a
-table. A personal server keeps the catalog in `STRATA_METADATA_DB`, so it can
+a 400 naming `STRATA_CATALOG_URI`, on scans, transform inputs, cache warming
+and export to a table. A personal server keeps the catalog in `STRATA_METADATA_DB`, so it can
 write its own tables there; nothing else reading the bucket sees them.
 
 ## S3 Storage
