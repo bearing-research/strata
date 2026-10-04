@@ -2261,7 +2261,7 @@ up if you write tables that way.</p>
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>uv<span class="w"> </span>sync<span class="w">       </span><span class="c1"># rebuilds .venv from pyproject.toml + uv.lock</span>
 </code></pre></div>
 <p>The <code>uv.lock</code> ensures the rebuilt venv pins identical versions to the source machine. The Rust toolchain on the destination needs to match Strata's source requirements only if you're upgrading Strata at the same time; for an existing wheel install it's not needed.</p>
-<p><code>strata export &lt;dir&gt; --to snapshot --include all --out &lt;file&gt;.zip</code> packs the committed files, runtime state and every artifact into one zip, and <code>strata import &lt;file&gt;.zip</code> unpacks it on the other side. See <a href="../../notebook/export/#snapshots">Snapshots</a>.</p>
+<p><code>strata export &lt;dir&gt; --to snapshot --include all --out &lt;file&gt;.zip</code> packs the committed files, runtime state, every artifact and the bytes each <code>@fetch</code> read into one zip, and <code>strata import &lt;file&gt;.zip</code> unpacks it on the other side. See <a href="../../notebook/export/#snapshots">Snapshots</a>.</p>
 <p><strong>What doesn't transfer.</strong> Mounted external storage (<code>s3://</code>, <code>gs://</code>) is referenced by URI, so cells that use mounts work on any machine with the right credentials. Mounts with <code>file://</code> URIs pointing at machine-local paths don't.</p>
 <h2 id="deleting-a-notebook">Deleting a notebook<a class="headerlink" href="#deleting-a-notebook" title="Permanent link">&para;</a></h2>
 <p>Three options, depending on the surface:</p>

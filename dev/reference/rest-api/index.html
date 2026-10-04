@@ -4790,6 +4790,8 @@ hold, <code>502</code> when the team store refuses or cannot be reached.</p>
 <a id="__codelineno-77-3" name="__codelineno-77-3" href="#__codelineno-77-3"></a>artifacts.json                   per-cell provenance, timings, and every ready
 <a id="__codelineno-77-4" name="__codelineno-77-4" href="#__codelineno-77-4"></a>                                 cell's artifacts with their content digests
 <a id="__codelineno-77-5" name="__codelineno-77-5" href="#__codelineno-77-5"></a>artifacts/&lt;id&gt;@v=&lt;n&gt;             the bytes, for whichever were included
+<a id="__codelineno-77-6" name="__codelineno-77-6" href="#__codelineno-77-6"></a>fetch/&lt;sha256&gt;/&lt;file&gt;            with include=all, the bytes each @fetch last read
+<a id="__codelineno-77-7" name="__codelineno-77-7" href="#__codelineno-77-7"></a>fetch/index.json                 with include=all, which URL served which bytes
 </code></pre></div>
 <p><code>include</code> chooses how much travels:</p>
 <table>
@@ -4802,7 +4804,7 @@ hold, <code>502</code> when the team store refuses or cannot be reached.</p>
 <tbody>
 <tr>
 <td><code>all</code></td>
-<td>Every artifact's bytes: the form for moving a project between servers.</td>
+<td>Every artifact's bytes and the notebook's <code>.strata/fetch/</code>: the form for moving a project between servers.</td>
 </tr>
 <tr>
 <td><code>selected</code> <em>(default)</em></td>
@@ -4823,7 +4825,9 @@ result is current; it just isn't here.</p>
 <p><code>fetches</code> lists every <code>@fetch</code> with its cell, name, URL, <code>refetch</code> policy and
 <code>pinned</code>. <code>sha256</code> is the pin, or else the digest last read. An unpinned fetch
 is the input a snapshot cannot vouch for, since its bytes are whatever the URL
-serves at the next run, so a preflight can flag them from this list.</p>
+serves at the next run, so a preflight can flag them from this list. A pinned
+or <code>refetch=never</code> fetch carried under <code>include=all</code> runs on the importing side
+without its URL.</p>
 <p>The same bundle offline: <code>strata export &lt;path&gt; --to snapshot --out snap.zip
 --include all</code>.</p>
 <h2 id="runtime">Runtime<a class="headerlink" href="#runtime" title="Permanent link">&para;</a></h2>

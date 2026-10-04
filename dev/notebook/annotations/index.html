@@ -3110,7 +3110,9 @@ run read as one of its inputs, and when those bytes were downloaded. That
 record is how a <a href="../publishing/">publication</a> page lists the URL under
 "External inputs" with its digest and retrieval time, and its RO-Crate gives
 the URL's <code>File</code> node an <code>sdDatePublished</code>. A snapshot export lists every fetch with whether it is
-pinned, so an unpinned one can be flagged before the snapshot is shared.</p>
+pinned, so an unpinned one can be flagged before the snapshot is shared, and
+with <code>--include all</code> carries the fetched bytes, so a pinned or <code>refetch=never</code>
+fetch runs on the importing machine without its URL.</p>
 <p>Only <code>http</code> and <code>https</code> are fetched. In service mode every redirect hop passes
 the same guard as a worker's URLs: no private, loopback or link-local address
 unless the host is listed in <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. The

@@ -2787,6 +2787,9 @@ is extracted.</p>
 <ul>
 <li><strong>Carried cells are cache hits</strong> before anything runs, with their outputs
   and console restored.</li>
+<li><strong>Fetched bytes come along with <code>include=all</code></strong>. A cell whose <code>@fetch</code> is
+  pinned or <code>refetch=never</code> runs without reaching its URL. Each file must hash
+  to the digest it is filed under, or the import is refused.</li>
 <li><strong>Cells the snapshot only described open idle</strong>. They ran and their result is
   current; it just isn't here. With a team store configured, running one pulls
   it rather than recomputing, because the notebook computes the same provenance

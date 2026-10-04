@@ -2515,7 +2515,7 @@ import &lt;file&gt;.zip</code> unpacks one back into a notebook directory (see
 <tbody>
 <tr>
 <td><code>all</code></td>
-<td>Every artifact. Use it to move a project between machines.</td>
+<td>Every artifact, and the bytes each <code>@fetch</code> last read (<code>.strata/fetch/</code>). Use it to move a project between machines.</td>
 </tr>
 <tr>
 <td><code>selected</code></td>
@@ -2533,6 +2533,11 @@ import &lt;file&gt;.zip</code> unpacks one back into a notebook directory (see
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># A review copy: one cell's results, the rest by reference</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>strata<span class="w"> </span><span class="nb">export</span><span class="w"> </span>./my_analysis<span class="w"> </span>--to<span class="w"> </span>snapshot<span class="w"> </span>--cells<span class="w"> </span>a1b2c3d4<span class="w"> </span>--out<span class="w"> </span>review.zip
 </code></pre></div>
+<p>With <code>--include all</code> a cell whose <code>@fetch</code> is pinned (<code>sha256=</code>) or set to
+<code>refetch=never</code> imports and runs without reaching its URL, so the bundle alone
+reproduces it after the URL has moved or gone. An unpinned <code>refetch=stale</code> or
+<code>refetch=always</code> fetch still checks its URL before every run; pin it first if
+the copy has to run offline.</p>
 <p><code>--out</code> is required for a snapshot, since it is a zip rather than text, and it
 refuses to overwrite a path that already holds something unless you pass <code>--force</code>.</p>
 <h2 id="integration-mkdocs-hook">Integration: mkdocs hook<a class="headerlink" href="#integration-mkdocs-hook" title="Permanent link">&para;</a></h2>
