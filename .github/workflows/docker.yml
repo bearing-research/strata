@@ -166,6 +166,7 @@ jobs:
         run: |
           # harness.R loads jsonlite unconditionally and arrow for any data
           # frame; a worker without either accepts an R cell and fails it.
-          docker run --rm strata-worker:r Rscript -e 'library(jsonlite); library(arrow)'
+          # renv restores a notebook's renv.lock.
+          docker run --rm strata-worker:r Rscript -e 'library(jsonlite); library(arrow); library(renv)'
           uid=$(docker run --rm strata-worker:r id -u)
           test "$uid" != "0" || { echo "FAIL: worker runs as root"; exit 1; }

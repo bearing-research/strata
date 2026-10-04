@@ -49,6 +49,7 @@ Liveness + capabilities probe. No auth.
       "pull_model": true,
       "cancel": true,
       "locked_environments": true,
+      "locked_r_environments": true,
       "languages": ["python", "r"]
     }
   },
@@ -73,7 +74,9 @@ Liveness + capabilities probe. No auth.
 
 A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token and credentials out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](../deployment/service-mode.md#what-a-cell-can-read) narrows a cell there. A cell gets what its manifest carries.
 
-`languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know. An R cell carries no `environment` block.
+`languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know.
+
+`locked_r_environments: true` says the worker restores an R cell's lock, the notebook's `renv.lock`, when the request carries one ([below](#the-r-environment-block)). It works like `locked_environments`: Strata sends the R block only to a worker that advertises it, and the reference worker reports it only when its `Rscript` can load `renv`.
 
 ### The `environment` block
 
@@ -102,6 +105,32 @@ The two last segments of a registry path name the interpreter the worker resolve
 - `<platform>` is `sysconfig.get_platform()`, for example `linux-x86_64`, `linux-aarch64` or `macosx-14.0-arm64`.
 
 So one registry serves every Python build and platform, and a registry that prebuilds for a worker image runs those two expressions with the image's interpreter.
+
+### The R `environment` block
+
+An R cell sent to a worker that advertises `locked_r_environments` carries the notebook's `renv.lock` in the same places, when the notebook has one:
+
+```json
+{
+  "key": "<renv_lock_key of renv.lock>",
+  "lockfile": "<the notebook's renv.lock>"
+}
+```
+
+`key` is `strata.notebook.env.renv_lock_key(lockfile)`: the SHA-256 hex digest of the lock's UTF-8 bytes, the same digest the [shared environment backend](../notebook/environment.md#shared-environments) keys an R library by. An `renv.lock` names no project, so nothing is left out. The worker then:
+
+- Keeps one R library per `key` and R build under `STRATA_WORKER_ENV_ROOT/r`, and reuses it, so a second R cell with the same lock restores nothing.
+- Fetches a missing one from `STRATA_WORKER_ENV_REGISTRY_URL/r/<key>/<R version>/<platform>` when that is set: a `.tar.gz` whose top-level directories are the packages (`jsonlite/DESCRIPTION`, ...). A `404` is restored locally; any other failure fails the cell. Without a registry, or on a `404`, it runs `renv::restore(lockfile = ..., library = <that directory>)`, with renv's package cache in `STRATA_WORKER_ENV_ROOT/r/cache`.
+- Keeps a library only when every package in the lock's `Packages`, `renv` itself aside, has a `DESCRIPTION` in it; otherwise the cell fails and the next one fetches or restores again.
+- Runs `harness.R` with that library on `R_LIBS`, so it comes first and the image's libraries serve only what the lock does not list, such as the `jsonlite` and `arrow` the harness loads.
+- Fails the cell with the reason (`500`) for a lock whose key is not `key`, that is not JSON, or that cannot be restored.
+
+The two last segments of a registry path name the R the worker runs:
+
+- `<R version>` is `paste0("R-", R.version$major, ".", R.version$minor)`, for example `R-4.4.1`.
+- `<platform>` is `R.version$platform`, for example `x86_64-pc-linux-gnu` or `aarch64-apple-darwin20`.
+
+An archive must hold the packages themselves, not renv's links into a package cache, which unpacking refuses. R packages built from source link the system libraries of the machine that built them, which the platform does not name, so a registry should build an image's archives on that image.
 
 **`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 

@@ -2378,23 +2378,35 @@ class CellExecutor:
         unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
         return unpacked_result, unpacked_dir, "executor", resolved_mounts
 
-    async def _locked_environment(self, worker_spec: Any) -> dict[str, str] | None:
-        """The notebook's lock, for a worker that runs cells in it.
+    async def _locked_environment(
+        self, worker_spec: Any, language: str = "python"
+    ) -> dict[str, str] | None:
+        """The notebook's lock for *language*, for a worker that runs cells in it.
 
-        Only a worker whose ``/health`` advertises ``locked_environments`` gets
-        it; one that answers without it uses its own environment. A worker that
-        cannot be asked is refused for a locked notebook: otherwise the result
-        would be cached under the lock's hash for an environment it never ran in.
+        Only a worker whose ``/health`` advertises ``locked_environments`` (for
+        ``uv.lock``) or ``locked_r_environments`` (for ``renv.lock``) gets it; one
+        that answers without it uses its own environment. A worker that cannot be
+        asked is refused for a locked notebook: otherwise the result would be
+        cached under the lock's hash for an environment it never ran in.
         """
         from strata.notebook.python_versions import read_requested_python_minor
-        from strata.notebook.worker_env import environment_spec
+        from strata.notebook.worker_env import environment_spec, r_environment_spec
         from strata.notebook.workers import worker_advertises
 
-        spec = environment_spec(self.session.path, read_requested_python_minor(self.session.path))
+        if language == "r":
+            spec = r_environment_spec(self.session.path)
+            feature = "locked_r_environments"
+        elif language == "python":
+            spec = environment_spec(
+                self.session.path, read_requested_python_minor(self.session.path)
+            )
+            feature = "locked_environments"
+        else:
+            return None
         if spec is None:
             # No lock to run in, so the worker's features change nothing.
             return None
-        advertised = await worker_advertises(worker_spec, "locked_environments")
+        advertised = await worker_advertises(worker_spec, feature)
         if advertised is None:
             raise RuntimeError(
                 f"worker {worker_spec.name!r} could not be asked whether it runs cells in "
@@ -2486,14 +2498,14 @@ class CellExecutor:
             "inputs": metadata_inputs,
         }
         # Only non-Python cells name their language, so Python payloads and hashes are
-        # unchanged. The notebook's Python lock is for Python cells.
+        # unchanged.
         if language != "python":
             metadata["transform"]["params"]["language"] = language
         # Sent only when present, so a cell with neither sends the same bytes. Without them a
         # worker would skip input rebinding and mutation recapture that a local run does, under
         # the same provenance hash.
         _add_harness_params(metadata["transform"]["params"], mutation_defines, tables)
-        environment = await self._locked_environment(worker_spec) if language == "python" else None
+        environment = await self._locked_environment(worker_spec, language)
         if environment is not None:
             metadata["transform"]["params"]["environment"] = environment
 
@@ -2736,7 +2748,7 @@ class CellExecutor:
             build_params["language"] = language
         # As the v1 path. In ``params``, because they change what the cell computes.
         _add_harness_params(build_params, mutation_defines, tables)
-        environment = await self._locked_environment(worker_spec) if language == "python" else None
+        environment = await self._locked_environment(worker_spec, language)
         if environment is not None:
             build_params["environment"] = environment
         transport_provenance = hashlib.sha256(

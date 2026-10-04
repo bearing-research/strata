@@ -12,12 +12,19 @@ from ``<registry>/<key>/<interpreter>/<platform>`` as a ``.tar.gz``, and built
 locally when the registry answers 404. Workers
 advertise support in ``/health`` (``locked_environments``); the server sends
 ``environment`` only to those.
+
+An R cell's ``environment`` is ``{"key": "<renv_lock_key of renv.lock>",
+"lockfile": "<renv.lock>"}``: the worker restores it with renv into one library
+per lock and R build under ``<root>/r``, fetched first from
+``<registry>/r/<key>/<R version>/<platform>``, and runs ``harness.R`` with that
+library first on ``R_LIBS`` (``locked_r_environments``).
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -32,7 +39,7 @@ from typing import Any
 import filelock
 import httpx
 
-from strata.notebook.env import uv_lock_key
+from strata.notebook.env import renv_lock_key, uv_lock_key
 
 ENV_ROOT_VAR = "STRATA_WORKER_ENV_ROOT"
 REGISTRY_VAR = "STRATA_WORKER_ENV_REGISTRY_URL"
@@ -211,3 +218,145 @@ def environment_spec(notebook_dir: Path, python: str | None) -> dict[str, str] |
         "lockfile": lock_text,
         "pyproject": pyproject.read_text(),
     }
+
+
+# --- R: one renv library per renv.lock and R build ---
+
+R_DIR = "r"
+# The build, ``R-4.4.1 x86_64-pc-linux-gnu``: the registry path's last two segments.
+_R_PROBE = 'cat(paste0("R-", R.version$major, ".", R.version$minor), R.version$platform)'
+# The library comes from the environment, so no path is quoted into R source.
+_R_RESTORE = (
+    'renv::restore(lockfile = "renv.lock", library = Sys.getenv("STRATA_R_LIBRARY"), '
+    "prompt = FALSE)"
+)
+_renv_found: dict[str, bool] = {}
+
+
+@dataclass(frozen=True)
+class PreparedRLibrary:
+    library: Path
+    key: str
+    installed: bool
+
+
+def renv_available(rscript: str) -> bool:
+    """Whether *rscript* can load renv, which restoring a lock needs."""
+    if rscript not in _renv_found:
+        try:
+            probe = subprocess.run(
+                [rscript, "-e", 'if (!requireNamespace("renv", quietly = TRUE)) quit(status = 1)'],
+                capture_output=True,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            # Unanswered, not "no": a loaded machine must not lose the feature for good.
+            return False
+        _renv_found[rscript] = probe.returncode == 0
+    return _renv_found[rscript]
+
+
+def _validated_r(spec: Any) -> dict[str, str]:
+    if not isinstance(spec, dict):
+        raise WorkerEnvironmentError("environment must be an object")
+    key = str(spec.get("key") or "")
+    if not _KEY.match(key):
+        raise WorkerEnvironmentError("environment.key must be a sha256 hex digest")
+    lockfile = spec.get("lockfile")
+    if not isinstance(lockfile, str):
+        raise WorkerEnvironmentError("environment needs the renv.lock text")
+    try:
+        packages = json.loads(lockfile).get("Packages")
+    except (ValueError, AttributeError) as exc:
+        raise WorkerEnvironmentError(f"environment.lockfile is not an renv.lock: {exc}") from exc
+    if not isinstance(packages, dict):
+        raise WorkerEnvironmentError("environment.lockfile has no Packages")
+    if renv_lock_key(lockfile) != key:
+        raise WorkerEnvironmentError("environment.lockfile does not match environment.key")
+    return {"key": key, "lockfile": lockfile}
+
+
+def _r_build(rscript: str) -> str:
+    try:
+        return subprocess.run(
+            [rscript, "--vanilla", "-e", _R_PROBE],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        raise WorkerEnvironmentError(
+            f"could not ask this worker's R its version: {(exc.stderr or exc.stdout).strip()}"
+        ) from exc
+
+
+def _restore_r(rscript: str, lockfile: str, library: Path) -> None:
+    """``renv::restore`` the lock into *library*, with renv's package cache beside it."""
+    project = library.with_name(library.name + ".project")
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "renv.lock").write_text(lockfile)
+    library.mkdir(exist_ok=True)
+    try:
+        subprocess.run(
+            [rscript, "-e", _R_RESTORE],
+            cwd=project,
+            env={
+                **os.environ,
+                "STRATA_R_LIBRARY": str(library),
+                "RENV_PATHS_CACHE": str(library.parent / "cache"),
+            },
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise WorkerEnvironmentError(
+            f"renv::restore failed on this worker: {(exc.stderr or exc.stdout).strip()}"
+        ) from exc
+
+
+def _prepare_r(spec: dict[str, str], rscript: str) -> PreparedRLibrary:
+    build = _r_build(rscript)
+    root = env_root() / R_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    directory_key = hashlib.sha256(f"{spec['key']}\n{build}".encode()).hexdigest()[:32]
+    library = root / directory_key
+    lock = filelock.FileLock(str(root / f"{directory_key}.lock"), timeout=INSTALL_TIMEOUT_SECONDS)
+    with lock:
+        installed = False
+        if not (library / COMPLETE_MARKER).exists():
+            registry = os.environ.get(REGISTRY_VAR, "").rstrip("/")
+            url = f"{registry}/{R_DIR}/{spec['key']}/{build.replace(' ', '/')}"
+            if not registry or not _fetch(url, library):
+                _restore_r(rscript, spec["lockfile"], library)
+            # renv installs itself only on activation, so its own entry is not required.
+            missing = sorted(
+                name
+                for name in json.loads(spec["lockfile"])["Packages"]
+                if name != "renv" and not (library / name / "DESCRIPTION").exists()
+            )
+            if missing:
+                # Marked complete, a library short of the lock would never be rebuilt.
+                raise WorkerEnvironmentError(
+                    f"R library {directory_key} lacks {', '.join(missing)} from the lock"
+                )
+            (library / COMPLETE_MARKER).touch()
+            installed = True
+    return PreparedRLibrary(library=library, key=directory_key, installed=installed)
+
+
+async def ensure_r_library(spec: Any, rscript: str) -> PreparedRLibrary:
+    """The library to run an R cell against, restoring its lock if needed."""
+    return await asyncio.to_thread(_prepare_r, _validated_r(spec), rscript)
+
+
+def r_environment_spec(notebook_dir: Path) -> dict[str, str] | None:
+    """What a server sends for an R cell of *notebook_dir*, or None without ``renv.lock``."""
+    lockfile = notebook_dir / "renv.lock"
+    if not lockfile.exists():
+        return None
+    # Bytes, not read_text: newline translation would change the key.
+    text = lockfile.read_bytes().decode()
+    return {"key": renv_lock_key(text), "lockfile": text}

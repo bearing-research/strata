@@ -166,6 +166,15 @@ def uv_lock_key(lock: str) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def renv_lock_key(lock: str) -> str:
+    """The key of the R library an ``renv.lock`` restores: workers and their registry.
+
+    SHA-256 of the lock's UTF-8 bytes, as the shared backend keys it; an
+    ``renv.lock`` names no project, so no part is left out.
+    """
+    return hashlib.sha256(lock.encode()).hexdigest()
+
+
 def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
     """Fingerprint a ``uv.lock``'s runtime dependency closure, or ``None``.
 

@@ -658,9 +658,16 @@ def create_notebook_executor_app(
 
             harness_path = Path(__file__).parent / "harness.py"
             interpreter: Path | None = None
-            prepared = None
+            harness_extra = {"CUDA_VISIBLE_DEVICES": str(gpu)} if gpu is not None else {}
+            # What the bundle reports about the environment the cell ran in.
+            prepared_env: dict[str, Any] | None = None
+            from strata.notebook.worker_env import (
+                WorkerEnvironmentError,
+                ensure_environment,
+                ensure_r_library,
+            )
+
             if language == "r":
-                # R cells run under the worker's Rscript; the Python lock doesn't apply.
                 rscript = shutil.which("Rscript")
                 if rscript is None:
                     shutil.rmtree(tmpdir, ignore_errors=True)
@@ -673,6 +680,18 @@ def create_notebook_executor_app(
                     )
                 harness_path = Path(__file__).parent / "languages" / "r" / "harness.R"
                 interpreter = Path(rscript)
+                if environment is not None:
+                    try:
+                        library = await ensure_r_library(environment, rscript)
+                    except WorkerEnvironmentError as exc:
+                        shutil.rmtree(tmpdir, ignore_errors=True)
+                        return JSONResponse(
+                            status_code=500,
+                            content={"success": False, "error": f"locked environment: {exc}"},
+                        )
+                    # First on the path; the image's libraries still serve what the lock lacks.
+                    harness_extra["R_LIBS"] = str(library.library)
+                    prepared_env = {"key": library.key, "installed": library.installed}
             elif language != "python":
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 return JSONResponse(
@@ -680,8 +699,6 @@ def create_notebook_executor_app(
                     content={"success": False, "error": f"unsupported cell language {language!r}"},
                 )
             elif environment is not None:
-                from strata.notebook.worker_env import WorkerEnvironmentError, ensure_environment
-
                 try:
                     prepared = await ensure_environment(environment)
                 except WorkerEnvironmentError as exc:
@@ -691,6 +708,7 @@ def create_notebook_executor_app(
                         content={"success": False, "error": f"locked environment: {exc}"},
                     )
                 interpreter = prepared.python
+                prepared_env = {"key": prepared.key, "installed": prepared.installed}
             try:
                 result = await _run_harness(
                     harness_path,
@@ -699,7 +717,7 @@ def create_notebook_executor_app(
                     in_flight=in_flight,
                     build_id=build_id,
                     log_url=log_url,
-                    env=_cell_env({"CUDA_VISIBLE_DEVICES": str(gpu)} if gpu is not None else None),
+                    env=_cell_env(harness_extra or None),
                     interpreter=interpreter,
                 )
                 if result.get("success", False):
@@ -726,8 +744,8 @@ def create_notebook_executor_app(
             bundle_path = output_dir / "notebook-output-bundle.tar"
             # Records the machine that computed it, not only what was asked for.
             result = {**result, "hardware": await asyncio.to_thread(hardware_report)}
-            if prepared is not None:
-                result["environment"] = {"key": prepared.key, "installed": prepared.installed}
+            if prepared_env is not None:
+                result["environment"] = prepared_env
             pack_notebook_output_bundle(bundle_path, result, output_dir)
             return bundle_path, tmpdir
         except BaseException:
@@ -805,6 +823,9 @@ def create_notebook_executor_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
+        from strata.notebook.worker_env import renv_available
+
+        rscript = shutil.which("Rscript")
         return {
             "status": "healthy",
             "capabilities": {
@@ -819,7 +840,10 @@ def create_notebook_executor_app(
                     # unconditionally, a pip-installed image would fail every Python cell with 500.
                     "locked_environments": shutil.which("uv") is not None,
                     # R needs Rscript with jsonlite and arrow in its library.
-                    "languages": ["python", "r"] if shutil.which("Rscript") else ["python"],
+                    "languages": ["python", "r"] if rscript else ["python"],
+                    # Restoring an renv.lock needs renv, so probe for it as for uv.
+                    "locked_r_environments": rscript is not None
+                    and await asyncio.to_thread(renv_available, rscript),
                 },
             },
             "version": "1.0.0",
@@ -1246,7 +1270,8 @@ def main(argv: list[str] | None = None) -> int:
             "Run a Strata notebook worker: an HTTP endpoint that accepts "
             "cells and returns their outputs. With uv on PATH, a cell from a "
             "notebook with a uv.lock runs in that locked environment, built "
-            "once per lock. Otherwise cells run in the Python environment "
+            "once per lock; with renv in R's library, an R cell's renv.lock is "
+            "restored the same way. Otherwise cells run in the Python environment "
             "this process was started in, so install your workload "
             "dependencies (pandas, torch, datafusion, ...) before launching."
         ),

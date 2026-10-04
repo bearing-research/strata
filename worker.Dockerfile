@@ -45,13 +45,14 @@ RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" uv
 #
 # harness.R needs jsonlite and arrow. Debian does not package arrow and
 # compiling it takes about an hour, so both come as binaries from Posit's
-# package manager.
+# package manager. renv restores a notebook's renv.lock; without it the worker
+# reports ``locked_r_environments: false`` and R cells use this library.
 ARG WITH_R=false
 RUN if [ "$WITH_R" = "true" ]; then \
       apt-get update \
       && apt-get install -y --no-install-recommends r-base-core \
       && rm -rf /var/lib/apt/lists/* \
-      && Rscript -e 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/trixie/latest"), HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"]))); install.packages(c("jsonlite", "arrow")); for (p in c("jsonlite", "arrow")) if (!requireNamespace(p, quietly = TRUE)) stop(p, " did not install")'; \
+      && Rscript -e 'options(repos = c(CRAN = "https://packagemanager.posit.co/cran/__linux__/trixie/latest"), HTTPUserAgent = sprintf("R/%s R (%s)", getRversion(), paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"]))); install.packages(c("jsonlite", "arrow", "renv")); for (p in c("jsonlite", "arrow", "renv")) if (!requireNamespace(p, quietly = TRUE)) stop(p, " did not install")'; \
     fi
 
 # Cells run arbitrary user code, so not as root.
