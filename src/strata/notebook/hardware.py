@@ -49,6 +49,9 @@ def _cpus() -> int | None:
 
 
 def _memory_mb() -> int | None:
+    # sysconf is POSIX only; Windows reports no memory rather than failing the probe.
+    if not hasattr(os, "sysconf"):
+        return None
     try:
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024 * 1024)
     except (ValueError, OSError):

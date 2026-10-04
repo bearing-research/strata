@@ -70,6 +70,16 @@ class TestTheProbe:
         assert "accelerators" not in report
         assert "cuda" not in report
 
+    def test_without_sysconf_memory_is_unreported(self, tmp_path, monkeypatch):
+        # Windows has no os.sysconf; the probe must still answer.
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.delattr(os, "sysconf")
+
+        report = probe_hardware()
+
+        assert "memory_mb" not in report
+        assert report["cpus"] >= 1
+
     def test_a_failing_driver_is_unknown_not_empty(self, tmp_path, monkeypatch):
         _on_path(tmp_path, monkeypatch, "#!/bin/sh\necho 'NVIDIA-SMI has failed' >&2\nexit 9\n")
 
