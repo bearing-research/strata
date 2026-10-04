@@ -35,6 +35,13 @@ def spa(tmp_path: Path) -> Iterator[tuple[TestClient, Path]]:
     original_state = server_module._state
     original_routes = list(app.router.routes)
     server_module._state = ServerState(config)
+    # A built frontend (src/strata/_frontend or frontend/dist) was mounted at import;
+    # its catch-all would answer before this dist's.
+    app.router.routes[:] = [
+        route
+        for route in original_routes
+        if getattr(route, "name", None) not in ("frontend-assets", "spa_fallback")
+    ]
     _mount_frontend(app, dist)
     try:
         # No ``with``: lifespan never runs; the routes under test need no lifespan state.
