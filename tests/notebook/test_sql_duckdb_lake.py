@@ -253,8 +253,10 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
-    monkeypatch.setattr(tables, "fingerprint_tables", lambda specs, cfg: (["x:unresolved"], {}))
-    monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg: 7)
+    monkeypatch.setattr(
+        tables, "fingerprint_tables", lambda specs, cfg, env=None: (["x:unresolved"], {})
+    )
+    monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg, env=None: 7)
 
     lake = resolve_lake(
         session,
@@ -287,8 +289,8 @@ class TestACatalogCredential:
             notebook_credentials=credentials,
         )
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
-        monkeypatch.setattr(tables, "fingerprint_tables", lambda specs, cfg: ([], {}))
-        monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg: 7)
+        monkeypatch.setattr(tables, "fingerprint_tables", lambda specs, cfg, env=None: ([], {}))
+        monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg, env=None: 7)
         return resolve_lake(
             session,
             "c1",
@@ -311,6 +313,56 @@ class TestACatalogCredential:
 
         with pytest.raises(LakeError, match="credential 'lake-ro' is not defined"):
             self._resolve(tmp_path, monkeypatch, {})
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_credential_set_only_in_the_notebook_env_resolves_its_snapshots(
+    tmp_path, monkeypatch
+):
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    from strata.notebook.models import TableSpec
+    from strata.notebook.sql.adapter import QualifiedTable
+    from strata.notebook.sql.lake import resolve_lake
+
+    warehouse = tmp_path / "warehouse"
+    warehouse.mkdir()
+    db_uri = f"sqlite:///{warehouse / 'catalog.db'}"
+    catalog = SqlCatalog("lake", uri=db_uri, warehouse=warehouse.as_uri())
+    catalog.create_namespace("taxi")
+    table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
+    table.append(pa.table({"id": [1]}))
+    snapshot = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
+    source = "# @sql connection=lake\nSELECT id FROM lake.taxi.trips\n"
+    nb_dir = _notebook(
+        tmp_path, {"c1": source}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    session.notebook_state.env = {"LAKE_DB": db_uri}
+    monkeypatch.delenv("LAKE_DB", raising=False)
+    config = StrataConfig(
+        cache_dir=tmp_path / "cache",
+        catalogs={"lake": {"type": "sql", "warehouse": warehouse.as_uri(), "credential": "db"}},
+        notebook_credentials={"db": {"uri": "${LAKE_DB}"}},
+    )
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+
+    lake = resolve_lake(
+        session,
+        "c1",
+        source,
+        session.notebook_state.connections[0],
+        [QualifiedTable("lake", "taxi", "trips")],
+    )
+    staleness = session._collect_table_fingerprints(session.notebook_state.get_cell("c1"))
+    _, executed = await CellExecutor(session)._fingerprint_tables(
+        [TableSpec(name="trips", uri="lake:taxi.trips")]
+    )
+
+    assert lake.snapshots == {("taxi", "trips"): snapshot}
+    assert [f.rsplit(":", 1)[1] for f in staleness] == [str(snapshot)]
+    assert executed == {"trips": snapshot}
 
 
 def test_the_catalogs_s3_secret_reaches_only_its_warehouse():
@@ -533,12 +585,12 @@ class TestNotebookCatalogs:
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
         seen: list[dict] = []
 
-        def fingerprint(specs, cfg):
+        def fingerprint(specs, cfg, env=None):
             seen.append(dict(cfg.catalogs))
             return [], {}
 
         monkeypatch.setattr(tables, "fingerprint_tables", fingerprint)
-        monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg: 7)
+        monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg, env=None: 7)
         return session, seen
 
     @staticmethod

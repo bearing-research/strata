@@ -3522,8 +3522,9 @@ class CellExecutor:
         from strata.notebook.tables import fingerprint_tables
 
         config = config or self._lake_config()
+        env = dict(self.session.notebook_state.env)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, fingerprint_tables, table_specs, config)
+        return await loop.run_in_executor(None, fingerprint_tables, table_specs, config, env)
 
     def _lake_config(self):
         """Server config when running inside the server, else loaded fresh."""

@@ -2034,7 +2034,7 @@ class NotebookSession:
             return []
         from strata.notebook.tables import fingerprint_tables
 
-        fingerprints, _ = fingerprint_tables(tables, config)
+        fingerprints, _ = fingerprint_tables(tables, config, dict(self.notebook_state.env))
         return fingerprints
 
     def _collect_fetch_fingerprints(self, cell: Any) -> list[str]:

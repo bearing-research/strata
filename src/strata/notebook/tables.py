@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from strata.notebook.models import TableSpec
@@ -29,8 +30,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def resolve_table_snapshot(spec: TableSpec, config: StrataConfig) -> int:
+def resolve_table_snapshot(
+    spec: TableSpec, config: StrataConfig, env: Mapping[str, str] | None = None
+) -> int:
     """Resolve the snapshot id a cell should read for ``spec``: the pin, else the current one.
+
+    A named catalog's credential resolves against *env* (the notebook's) first.
 
     Raises:
         ValueError: If the table has no snapshots, or the catalog/table
@@ -42,7 +47,8 @@ def resolve_table_snapshot(spec: TableSpec, config: StrataConfig) -> int:
     from strata.iceberg import PyIcebergCatalog
 
     try:
-        catalog = PyIcebergCatalog(config)
+        # A provider per call: its catalog cache holds this notebook's secrets.
+        catalog = PyIcebergCatalog(config, env)
         table = catalog.load_table(spec.uri)
     except Exception as e:
         raise ValueError(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
@@ -54,7 +60,7 @@ def resolve_table_snapshot(spec: TableSpec, config: StrataConfig) -> int:
 
 
 def fingerprint_tables(
-    specs: list[TableSpec], config: StrataConfig
+    specs: list[TableSpec], config: StrataConfig, env: Mapping[str, str] | None = None
 ) -> tuple[list[str], dict[str, int]]:
     """Resolve every table's snapshot for provenance hashing.
 
@@ -68,7 +74,7 @@ def fingerprint_tables(
     snapshots: dict[str, int] = {}
     for spec in sorted(specs, key=lambda t: t.name):
         try:
-            snapshot_id = resolve_table_snapshot(spec, config)
+            snapshot_id = resolve_table_snapshot(spec, config, env)
         except ValueError as e:
             logger.warning(
                 "table fingerprint unresolved for %s (%s): %s",
