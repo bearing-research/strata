@@ -2186,6 +2186,11 @@ The typical loop:</p>
    dependencies (<code>add_dependency</code> / <code>remove_dependency</code>) - all against that
    session, while you watch it happen in the browser or the TUI.</li>
 </ol>
+<p>A call that fails for a reason the agent can act on (an unknown session or
+cell, a bad argument, a busy notebook) returns that reason in the tool error,
+for example <code>no open notebook session '…'; call list_notebooks first</code>. An
+unexpected server failure returns only <code>Error executing tool &lt;name&gt;</code>; the
+details stay in the server log.</p>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
