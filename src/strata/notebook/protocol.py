@@ -72,6 +72,10 @@ class MessageType(StrEnum):
     # Who is on the session and which cell each is on; sent on join, leave and focus
     # change. Payload: ``{principals: [{principal, focused_cell_id, since}], you}``.
     PRESENCE = "presence"
+    # The server closed this session (idle, over the session limit, low memory, or
+    # closed or deleted over REST); the socket closes after it. Payload:
+    # ``{reason, message}``. The notebook's files and results are intact: reopen it.
+    SESSION_CLOSED = "session_closed"
 
     # Server → Client (environment job lifecycle)
     ENVIRONMENT_JOB_STARTED = "environment_job_started"

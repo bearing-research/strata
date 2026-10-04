@@ -684,6 +684,21 @@ async def _shared_env_gc_loop(root: Path, ttl_days: float) -> None:
             logger.info("shared_env_gc_collected", removed=", ".join(result.removed))
 
 
+_NOTEBOOK_SESSION_SWEEP_SECONDS = 60.0
+
+
+async def _notebook_session_sweep_loop() -> None:
+    """Close idle, over-limit and memory-pressure notebook sessions every minute."""
+    from strata.notebook.routes import get_session_manager
+
+    while True:
+        await asyncio.sleep(_NOTEBOOK_SESSION_SWEEP_SECONDS)
+        try:
+            await get_session_manager().sweep()
+        except Exception:
+            logger.exception("notebook_session_sweep_failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -882,6 +897,8 @@ async def lifespan(app: FastAPI):
             _shared_env_gc_loop(shared_env_root(config), config.notebook_shared_env_ttl_days)
         )
 
+    session_sweep_task = asyncio.create_task(_notebook_session_sweep_loop())
+
     build_qos = None
     if config.server_transforms_enabled:
         from strata.transforms.build_qos import BuildQoS, set_build_qos
@@ -968,7 +985,7 @@ async def lifespan(app: FastAPI):
     else:
         yield
 
-    for task in (gc_task, env_gc_task):
+    for task in (gc_task, env_gc_task, session_sweep_task):
         if task is not None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

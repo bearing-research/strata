@@ -355,6 +355,38 @@ class PresencePayload(WsPayload):
     you: str
 
 
+SessionClosedReason = Literal["idle", "session_limit", "memory", "closed", "deleted"]
+
+_SESSION_CLOSED_MESSAGES: dict[SessionClosedReason, str] = {
+    "idle": "This notebook was closed after a period without activity.",
+    "session_limit": (
+        "This notebook was closed because the server reached its limit of open notebooks."
+    ),
+    "memory": "This notebook was closed because the server was low on memory.",
+    "closed": "This notebook session was closed.",
+    "deleted": "This notebook was deleted.",
+}
+
+
+class SessionClosedPayload(WsPayload):
+    """``session_closed``: the server closed this session; the socket closes next.
+
+    ``reason`` is ``idle`` (nobody edited, ran or focused for the session timeout),
+    ``session_limit``, ``memory`` (available memory fell below the configured floor),
+    ``closed`` (the close route) or ``deleted``. Nothing computed is lost.
+    """
+
+    reason: SessionClosedReason
+    message: str
+
+
+def session_closed_payload(reason: SessionClosedReason) -> dict[str, Any]:
+    """Build the wire dict for a ``session_closed`` frame."""
+    return SessionClosedPayload(reason=reason, message=_SESSION_CLOSED_MESSAGES[reason]).model_dump(
+        mode="json"
+    )
+
+
 # Typed so a mistyped code at an emit site is a type error, not a silent frontend miss.
 ErrorCode = Literal[
     "ENVIRONMENT_BUSY", "cell_busy", "cell_locked", "read_only", "insufficient_scope"
@@ -414,4 +446,5 @@ FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.IMPACT_PREVIEW: ImpactPreviewPayload,
     MessageType.PRESENCE: PresencePayload,
     MessageType.PROFILING_SUMMARY: ProfilingSummaryPayload,
+    MessageType.SESSION_CLOSED: SessionClosedPayload,
 }

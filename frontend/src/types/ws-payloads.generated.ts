@@ -215,6 +215,11 @@ export interface ProfilingSummaryPayload {
   cell_profiles: CellProfileModel[]
 }
 
+export interface SessionClosedPayload {
+  reason: 'idle' | 'session_limit' | 'memory' | 'closed' | 'deleted'
+  message: string
+}
+
 /** Frames whose payload shape is generated. Anything absent stays `unknown`. */
 export interface WsServerPayloadMap {
   cascade_progress: CascadeProgressPayload
@@ -233,6 +238,7 @@ export interface WsServerPayloadMap {
   impact_preview: ImpactPreviewPayload
   presence: PresencePayload
   profiling_summary: ProfilingSummaryPayload
+  session_closed: SessionClosedPayload
 }
 
 export type TypedWsFrame = keyof WsServerPayloadMap

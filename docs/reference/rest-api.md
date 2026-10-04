@@ -57,7 +57,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Endpoint | Required scope |
 | --- | --- |
 | Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
-| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
 | Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
@@ -169,7 +169,27 @@ POST /v1/notebooks/open
 }
 ```
 
-Returns notebook state with `session_id` and `dag`.
+Returns notebook state with `session_id` and `dag`. A session already open on
+the path is returned rather than a second one: in personal mode any open
+session, in service mode only one the same principal opened. Before opening, when
+`STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB` is set and available memory is below
+it, idle sessions are closed (see
+[Session lifetime](notebook-protocol.md#session-lifetime-and-session_closed)).
+
+### Close Notebook Session
+
+```
+POST /v1/notebooks/{session_id}/close
+```
+
+Closes the session and stops its warm processes, leaving the notebook and its
+results on disk; open it again by path to continue. Connected clients get a
+`session_closed` frame with `reason: "closed"`. `409` while a cell runs or an
+environment job is in progress. Needs `notebook:write`, the scope `open` needs.
+
+```json
+{"closed": true, "session_id": "…", "path": "/path/to/notebook"}
+```
 
 ### Import Jupyter Notebook
 
@@ -230,7 +250,8 @@ to export it again.
 DELETE /v1/notebooks/{session_id}
 ```
 
-Deletes the notebook directory and closes the session.
+Deletes the notebook directory and closes the session; connected clients get
+`session_closed` with `reason: "deleted"`.
 
 ### Quiesce and Release
 

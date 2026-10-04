@@ -155,6 +155,12 @@ All messages are JSON with this shape:
 | ---------- | ------------------------------------------------------------------------------------------------ | ----------- |
 | `presence` | `{ "principals": [{ "principal": "alice", "focused_cell_id": "c1", "since": 1789455008.4 }], "you": "bob" }` | Who is on the session and which cell each is on. Sent on connect, disconnect and focus change, and after an edit over REST |
 
+### Session
+
+| Type             | Payload                                    | Description |
+| ---------------- | ------------------------------------------ | ----------- |
+| `session_closed` | `{ "reason": "idle", "message": "..." }` | The server closed this session; the socket closes next with `1000`. `reason` is `idle`, `session_limit`, `memory`, `closed` (the close route) or `deleted`. Reopen the notebook by path; see [Session lifetime](#session-lifetime) |
+
 ### Errors
 
 | Type    | Payload              | Description    |
@@ -187,11 +193,13 @@ There is **no replay** of missed messages - events emitted while the client was 
 A session ends when:
 
 - the notebook is deleted (`DELETE /v1/notebooks/{session_id}`, or `POST /v1/notebooks/delete-by-path`, which closes any session open on that directory),
-- it has had no connected WebSocket and no request for 4 hours,
-- 50 sessions are open and another notebook is opened: the least recently used session with no connected WebSocket is closed,
+- a client closes it (`POST /v1/notebooks/{session_id}/close`), which leaves the notebook on disk,
+- nobody has edited, run or focused anything in it for `STRATA_NOTEBOOK_SESSION_TTL_SECONDS` (default 4 hours), with a tab connected or not,
+- more than `STRATA_NOTEBOOK_MAX_SESSIONS` (default 50) are open: the least recently used is closed,
+- `STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB` is set and the host's available memory is below it: the least recently used are closed until it is above,
 - or the server restarts.
 
-The idle and count checks run when a notebook is opened, and never close a session that has a connected WebSocket. A reconnect to a closed session is refused with `1008`; call `POST /v1/notebooks/open` again for a new session ID.
+`notebook_sync`, previews, profiling requests, unknown frames and pings are not activity; a running cell is. The checks run every minute and when a notebook is opened, and never close a session with a running cell, an environment job, a held soft lock or a quiesce hold. Connected clients get `session_closed` with the reason before the socket closes. A reconnect to a closed session is refused with `1008`; call `POST /v1/notebooks/open` again for a new session ID. See [Session lifetime and `session_closed`](notebook-protocol.md#session-lifetime-and-session_closed).
 
 ### Cancelling a SQL cell
 
@@ -216,6 +224,6 @@ This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style tr
 | `1008` | Policy violation - session not found, ownership mismatch in per-user personal mode, or an auth failure on the upgrade |
 | `1011` | Internal error while handling a frame |
 
-If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with `1008`. The client should call `POST /v1/notebooks/open` to start a new session.
+If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with `1008`. A session closed while you are connected sends `session_closed` and then closes with `1000`. The client should call `POST /v1/notebooks/open` to start a new session.
 
 The server does not send protocol-level pings; the WebSocket library's default frame keepalive is what holds idle connections open. If your client sees no traffic for an extended period and you can't tell whether the connection is live, the safest probe is to send `notebook_sync` and watch for the response.
