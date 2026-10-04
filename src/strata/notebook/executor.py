@@ -987,11 +987,13 @@ class CellExecutor:
         # A DuckDB cell's catalog tables are inputs like its @table ones. Imported only for
         # SQL cells: the SQL package needs the [sql] extra.
         tables = list(annotations.tables)
+        config = None
         if annotations.sql is not None:
-            from strata.notebook.sql.lake import lake_tables
+            from strata.notebook.sql.lake import lake_tables, with_notebook_catalogs
 
             tables += lake_tables(self.session.notebook_state, source)
-        table_fingerprints, table_snapshots = await self._fingerprint_tables(tables)
+            config = with_notebook_catalogs(self._lake_config(), self.session.notebook_state)
+        table_fingerprints, table_snapshots = await self._fingerprint_tables(tables, config)
         (
             fetch_fingerprints,
             fetched,
@@ -3507,18 +3509,19 @@ class CellExecutor:
     async def _fingerprint_tables(
         self,
         table_specs: list[TableSpec],
+        config: Any = None,
     ) -> tuple[list[str], dict[str, int]]:
         """Resolve table snapshots for provenance hashing (see tables.py).
 
         Catalog I/O runs off the event loop. An unreachable catalog yields a
         random fingerprint (cell shows stale) rather than raising, since this
-        also runs on notebook open.
+        also runs on notebook open. *config* defaults to the server's.
         """
         if not table_specs:
             return [], {}
         from strata.notebook.tables import fingerprint_tables
 
-        config = self._lake_config()
+        config = config or self._lake_config()
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, fingerprint_tables, table_specs, config)
 

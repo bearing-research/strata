@@ -765,6 +765,10 @@ class LineageNode(BaseModel):
     env_hash: str = ""
     source: str = ""
     content_sha256: str | None = None
+    # A time-travel SQL cell's: the warehouse moment it read, and until when that
+    # moment can be queried again (ISO-8601 UTC).
+    snapshot_at: str | None = None
+    snapshot_valid_until: str | None = None
 
 
 class LineageEdge(BaseModel):

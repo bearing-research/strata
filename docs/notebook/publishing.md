@@ -181,6 +181,13 @@ retrieval time as `sdDatePublished`. The digest describes what was read, and
 the URL may serve something else now. A step stored before retrieval times were
 recorded shows only when it ran.
 
+A Snowflake or BigQuery cell with [`# @cache snapshot`](annotations.md#cache),
+published or upstream of what is, shows the moment of the warehouse state it
+read ("Warehouse state as of") and how long the warehouse keeps that state
+("Queryable until"). Until then a reader with access to the warehouse can run
+the query against the same state; after it, they cannot. A cell stored before
+the horizon was recorded shows "not recorded".
+
 ## Embedding it elsewhere
 
 Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it

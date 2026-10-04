@@ -432,6 +432,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
             else {}
         ),
         **({"ai": toml.ai} if toml.ai else {}),
+        **({"catalogs": toml.catalogs} if toml.catalogs else {}),
         **({"secret_manager": toml.secret_manager} if toml.secret_manager else {}),
         **({"r": toml.r} if toml.r else {}),
         # Runtime state (display outputs, sync timestamps, cache) lives in

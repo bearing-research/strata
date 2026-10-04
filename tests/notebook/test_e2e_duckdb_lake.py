@@ -115,18 +115,24 @@ async def _run(nb_dir: Path, session: NotebookSession) -> tuple[Any, list[dict[s
 
 
 @pytest.mark.asyncio
+# A personal server also reads a catalog the notebook defines in [catalogs.<name>].
+@pytest.mark.parametrize("defined_in", ["server", "notebook"])
 async def test_a_duckdb_cell_reads_the_catalog_and_goes_stale_on_a_new_snapshot(
-    tmp_path, monkeypatch, rest_catalog
+    tmp_path, monkeypatch, rest_catalog, defined_in
 ):
     catalog, properties = rest_catalog
-    _configure(
-        monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
-    )
+    server_catalogs = {"lake": properties} if defined_in == "server" else {}
+    _configure(monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs=server_catalogs))
     nb_dir = _notebook(
         tmp_path,
         "# @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
         'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
     )
+    if defined_in == "notebook":
+        toml = nb_dir / "notebook.toml"
+        toml.write_text(
+            toml.read_text() + f'\n[catalogs.lake]\ntype = "rest"\nuri = "{properties["uri"]}"\n'
+        )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     cell = session.notebook_state.get_cell("c1")
     first_snapshot = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
@@ -222,6 +228,126 @@ async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path, mon
         _, rows = await _run(nb_dir, session)
 
         assert rows == [{"total": 9}]
+
+
+def _parquet(values: list[int]) -> bytes:
+    buffer = io.BytesIO()
+    pq.write_table(pa.table({"k": values}), buffer)
+    return buffer.getvalue()
+
+
+@pytest.fixture(scope="module")
+def gcs_mount():
+    """A fake-gcs-server bucket ``raw`` holding ``events/part-0.parquet``: (uri, options)."""
+    import httpx
+
+    container = DockerContainer("fsouza/fake-gcs-server:1.52.2")
+    container.with_command("-scheme http -port 4443 -public-host localhost:4443")
+    container.with_exposed_ports(4443)
+    start_container_or_skip(
+        container, label="fake-gcs-server", ready=lambda c: wait_for_logs(c, "server started at")
+    )
+    try:
+        endpoint = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(4443)}"
+        httpx.post(f"{endpoint}/storage/v1/b", params={"project": "p"}, json={"name": "raw"})
+        httpx.post(
+            f"{endpoint}/upload/storage/v1/b/raw/o",
+            params={"uploadType": "media", "name": "events/part-0.parquet"},
+            content=_parquet([4, 5]),
+        ).raise_for_status()
+        yield "gs://raw/events", {"endpoint_url": endpoint, "token": "anon", "project": "p"}
+    finally:
+        container.stop()
+
+
+@pytest.fixture(scope="module")
+def azure_mount():
+    """An Azurite container ``raw`` holding ``events/part-0.parquet``: (uri, options)."""
+    from azure.storage.blob import BlobServiceClient
+    from testcontainers.community.azurite import AzuriteContainer
+
+    container = start_container_or_skip(
+        AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
+    )
+    try:
+        client = BlobServiceClient.from_connection_string(container.get_connection_string())
+        client.create_container("raw").upload_blob("events/part-0.parquet", _parquet([4, 5]))
+        yield (
+            "az://raw/events",
+            {
+                "connection_string": container.get_connection_string(),
+                "account_name": container.account_name,
+            },
+        )
+    finally:
+        container.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["personal", "service"])
+@pytest.mark.parametrize("store", ["gcs_mount", "azure_mount"])
+async def test_a_gcs_or_azure_mount_is_a_view_read_with_its_storage_options(
+    tmp_path, monkeypatch, request, store, mode
+):
+    uri, options = request.getfixturevalue(store)
+    _configure(monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode))
+    nb_dir = _notebook(
+        tmp_path,
+        "# @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
+        'driver = "duckdb"\npath = ":memory:"\nmounts = ["events"]',
+    )
+    update_notebook_mounts(nb_dir, [MountSpec(name="events", uri=uri, options=options)])
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    _, rows = await _run(nb_dir, session)
+
+    assert rows == [{"total": 9}]
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_cell_keeps_reading_its_snapshot_until_a_rerun(
+    tmp_path, monkeypatch, rest_catalog
+):
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    catalog, properties = rest_catalog
+    _configure(
+        monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
+    )
+    source = (
+        "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips ORDER BY id\n"
+    )
+    nb_dir = _notebook(tmp_path, source, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    first_snapshot = catalog.load_table("taxi.trips").current_snapshot().snapshot_id
+
+    result, rows = await _run(nb_dir, session)
+    assert rows == [{"id": 1}, {"id": 2}]
+    assert f"lake.taxi.trips at snapshot {first_snapshot}" in result.stdout
+
+    catalog.load_table("taxi.trips").append(pa.table({"id": [3]}))
+    assert session.compute_staleness()["c1"].status == CellStatus.READY
+    result, rows = await _run(nb_dir, session)
+    assert result.cache_hit is True
+    assert rows == [{"id": 1}, {"id": 2}]
+
+    # Replayed, not only cached: with no cached rows to find, the run reads the pin again.
+    monkeypatch.setattr(session.get_artifact_manager(), "find_cached", lambda provenance: None)
+    replay = await execute_sql_cell(session, "c1", source)
+    assert replay["success"], replay["error"]
+    assert replay["cache_hit"] is False
+    assert _artifact_rows(session, replay["artifact_uri"]) == [{"id": 1}, {"id": 2}]
+
+    rerun = await execute_sql_cell(session, "c1", source, use_cache=False)
+    assert rerun["success"], rerun["error"]
+    assert f"at snapshot {first_snapshot}" not in rerun["stdout"]
+    assert _artifact_rows(session, rerun["artifact_uri"]) == [{"id": 1}, {"id": 2}, {"id": 3}]
+
+
+def _artifact_rows(session: NotebookSession, uri: str) -> list[dict[str, Any]]:
+    art_id, version = uri.removeprefix("strata://artifact/").rsplit("@v=", 1)
+    blob = session.get_artifact_manager().load_artifact_data(art_id, int(version))
+    return pa.ipc.open_stream(blob).read_all().to_pylist()
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ failure surfaces as the result dict's ``error``, as in the prompt executor.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import io
 import json
@@ -28,7 +29,16 @@ from strata.notebook.sql.analyzer import (
     rewrite_named_to_positional,
 )
 from strata.notebook.sql.bind import BindError, resolve_bind_params
-from strata.notebook.sql.lake import Lake, LakeError, lake_options, pin_snapshots, resolve_lake
+from strata.notebook.sql.lake import (
+    PARAM_SNAPSHOT_IDS,
+    Lake,
+    LakeError,
+    lake_options,
+    pin_snapshots,
+    resolve_lake,
+    snapshot_problem,
+    snapshot_rows,
+)
 from strata.notebook.sql.provenance import (
     CachePolicyError,
     compute_sql_provenance_hash,
@@ -125,10 +135,15 @@ async def execute_sql_cell(
         return _error_result(str(exc), start_time)
 
     # ---- cache policy ----------------------------------------------
+    # A catalog's tables have true snapshot ids, so a lake connection can pin them.
+    catalog, _ = lake_options(spec)
+    capabilities = adapter.capabilities
+    if catalog:
+        capabilities = dataclasses.replace(capabilities, supports_snapshot=True)
     try:
         policy = resolve_cache_policy(
             analysis.cache_policy,
-            capabilities=adapter.capabilities,
+            capabilities=capabilities,
             session_id=session.id,
         )
     except CachePolicyError as exc:
@@ -153,28 +168,14 @@ async def execute_sql_cell(
         adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
     )
 
-    # ---- the lake: catalog tables' snapshots, mounts ---------------
-    lake = None
-    if any(lake_options(spec)):
-        try:
-            lake = resolve_lake(session, cell_id, source, runtime_spec, analysis.tables)
-        except LakeError as exc:
-            return _error_result(f"connection {spec.name!r}: {exc}", start_time)
-        runtime_spec = lake.spec
-    runtime_spec = _confined(session, runtime_spec, lake)
-
-    # ---- probes (optional) -----------------------------------------
-    freshness = None
-    schema_fp = None
-    pin: SnapshotPin | None = None
-    basis: str | None = None
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id
     output_name = analysis.name
     canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{output_name}"
-    if policy.snapshot_required and supports_time_travel(adapter):
-        # The query's identity minus its read time, to reuse a prior run's
-        # timestamp: that reuse is what makes it a snapshot.
+    basis: str | None = None
+    if policy.snapshot_required:
+        # The query's identity minus the state it reads, to reuse a prior run's
+        # timestamp or snapshots: that reuse is what makes it a snapshot.
         basis = compute_sql_provenance_hash(
             query_normalized=query_normalized,
             bind_params=params,
@@ -184,6 +185,38 @@ async def execute_sql_cell(
             freshness_token=None,
             schema_fingerprint=None,
         )
+    pins_snapshots = basis is not None and bool(catalog)
+    pinned = None
+    if pins_snapshots:
+        assert catalog is not None and basis is not None
+        problem = snapshot_problem(catalog, analysis)
+        if problem is not None:
+            return _error_result(problem, start_time)
+        pinned = _previous_snapshots(artifact_mgr, canonical_id, basis) if use_cache else None
+
+    # ---- the lake: catalog tables' snapshots, mounts ---------------
+    lake = None
+    if any(lake_options(spec)):
+        try:
+            lake = resolve_lake(
+                session, cell_id, source, runtime_spec, analysis.tables, pinned=pinned
+            )
+        except LakeError as exc:
+            return _error_result(f"connection {spec.name!r}: {exc}", start_time)
+        runtime_spec = lake.spec
+    runtime_spec = _confined(session, runtime_spec, lake)
+    pinned_lake = lake if pins_snapshots else None
+
+    # ---- probes (optional) -----------------------------------------
+    freshness = None
+    schema_fp = None
+    pin: SnapshotPin | None = None
+    if pinned_lake is not None:
+        # The snapshot ids are the state; an Iceberg snapshot fixes its schema too.
+        freshness = FreshnessToken(
+            value=json.dumps(snapshot_rows(pinned_lake.snapshots)).encode(), is_snapshot=True
+        )
+    elif policy.snapshot_required and supports_time_travel(adapter) and basis is not None:
         pin = _previous_pin(artifact_mgr, canonical_id, basis) if use_cache else None
         if pin is None:
             try:
@@ -234,7 +267,7 @@ async def execute_sql_cell(
                     session=session,
                     cell_id=cell_id,
                 )
-                return _report_pin(hit, pin)
+                return _report_snapshots(_report_pin(hit, pin), pinned_lake)
 
     # ---- execute query ---------------------------------------------
     try:
@@ -271,15 +304,7 @@ async def execute_sql_cell(
         source=source,
         # Bound variables, so lineage continues past the query.
         input_versions=input_refs,
-        extra_params=(
-            {
-                PARAM_BASIS: basis,
-                PARAM_AT: pin.at,
-                **({PARAM_VALID_UNTIL: pin.valid_until} if pin.valid_until else {}),
-            }
-            if pin is not None and basis is not None
-            else None
-        ),
+        extra_params=_snapshot_params(basis, pin, pinned_lake),
     )
     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
@@ -296,7 +321,7 @@ async def execute_sql_cell(
     duration_ms = (time.time() - start_time) * 1000
     # Query results can be huge: keep the default cap.
     display_output = _table_display(table)
-    return _report_pin(
+    result = _report_pin(
         {
             "success": True,
             "outputs": {
@@ -319,6 +344,7 @@ async def execute_sql_cell(
         },
         pin,
     )
+    return _report_snapshots(result, pinned_lake)
 
 
 # --- helpers --------------------------------------------------------------
@@ -951,6 +977,53 @@ def _previous_pin(artifact_mgr: Any, canonical_id: str, basis: str) -> SnapshotP
     if params.get(PARAM_BASIS) != basis or not params.get(PARAM_AT):
         return None
     return SnapshotPin(at=params[PARAM_AT], valid_until=params.get(PARAM_VALID_UNTIL))
+
+
+def _previous_snapshots(
+    artifact_mgr: Any, canonical_id: str, basis: str
+) -> dict[tuple[str, str], int] | None:
+    """The catalog snapshots the last run of this same query read, if any."""
+    canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+    if canonical is None or not canonical.transform_spec:
+        return None
+    try:
+        params = json.loads(canonical.transform_spec).get("params") or {}
+        rows = json.loads(params.get(PARAM_SNAPSHOT_IDS) or "null")
+    except ValueError:
+        return None
+    if params.get(PARAM_BASIS) != basis or not rows:
+        return None
+    return {(namespace, name): int(snapshot) for namespace, name, snapshot in rows}
+
+
+def _snapshot_params(
+    basis: str | None, pin: SnapshotPin | None, lake: Lake | None
+) -> dict[str, str] | None:
+    """What a snapshot cell records on its artifact so a later run reads the same state."""
+    if basis is None:
+        return None
+    if pin is not None:
+        return {
+            PARAM_BASIS: basis,
+            PARAM_AT: pin.at,
+            **({PARAM_VALID_UNTIL: pin.valid_until} if pin.valid_until else {}),
+        }
+    if lake is not None:
+        return {PARAM_BASIS: basis, PARAM_SNAPSHOT_IDS: json.dumps(snapshot_rows(lake.snapshots))}
+    return None
+
+
+def _report_snapshots(result: dict[str, Any], lake: Lake | None) -> dict[str, Any]:
+    """Say which catalog snapshots a snapshot cell shows."""
+    if lake is None:
+        return result
+    catalog, _ = lake_options(lake.spec)
+    pinned = ", ".join(
+        f"{catalog}.{namespace}.{name} at snapshot {snapshot}"
+        for namespace, name, snapshot in snapshot_rows(lake.snapshots)
+    )
+    result["stdout"] = (result.get("stdout") or "") + f"State of {pinned}.\n"
+    return result
 
 
 def _take_pin(adapter: Any, spec: ConnectionSpec, tables: list[Any]) -> SnapshotPin:

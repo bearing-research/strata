@@ -85,6 +85,9 @@ class BuildMetadata(NamedTuple):
     source: str = ""
     # ``{url: unix time}`` each fetched input was downloaded.
     fetched_at: dict[str, float] = {}
+    # Recorded by a ``# @cache snapshot`` SQL cell (``notebook.sql.time_travel``).
+    snapshot_at: str | None = None
+    snapshot_valid_until: str | None = None
 
 
 def _build_metadata(transform_spec: str | None) -> BuildMetadata:
@@ -111,6 +114,8 @@ def _build_metadata(transform_spec: str | None) -> BuildMetadata:
         env_hash=str(params.get("env_hash") or ""),
         source=str(params.get("source") or ""),
         fetched_at=fetched_at if isinstance(fetched_at, dict) else {},
+        snapshot_at=params.get("sql_snapshot_at") or None,
+        snapshot_valid_until=params.get("sql_snapshot_valid_until") or None,
     )
 
 
@@ -168,6 +173,8 @@ class ArtifactService:
             env_hash=root_meta.env_hash,
             source=root_meta.source,
             content_sha256=artifact.content_sha256,
+            snapshot_at=root_meta.snapshot_at,
+            snapshot_valid_until=root_meta.snapshot_valid_until,
         )
         visited.add(artifact_uri)
 
@@ -242,6 +249,8 @@ class ArtifactService:
                 env_hash=input_meta.env_hash,
                 source=input_meta.source,
                 content_sha256=input_artifact.content_sha256,
+                snapshot_at=input_meta.snapshot_at,
+                snapshot_valid_until=input_meta.snapshot_valid_until,
             )
 
             for inp_uri, inp_version in _load_input_versions(input_artifact.input_versions).items():

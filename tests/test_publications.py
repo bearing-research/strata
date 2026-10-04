@@ -142,6 +142,8 @@ class TestPublicationPage:
         title: str | None = None,
         revoke: bool = False,
         external_ids: list[dict[str, str]] | None = None,
+        upstream_params: dict[str, str] | None = None,
+        publish_upstream: bool = False,
     ):
         from strata.api.publication_page import render_publication
         from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -156,6 +158,7 @@ class TestPublicationPage:
             provenance_hash="a" * 64,
             input_versions={},
             source=source,
+            extra_params=upstream_params,
         )
         ref = f"{upstream.id}@v={upstream.version}"
         figure = manager.store_cell_output(
@@ -167,6 +170,8 @@ class TestPublicationPage:
             input_versions={f"strata://artifact/{ref}": ref},
             source="plt.plot(rows)",
         )
+        if publish_upstream:
+            figure = upstream
         publication = manager.artifact_store.publish_artifact(
             figure.id, figure.version, title=title
         )
@@ -194,6 +199,35 @@ class TestPublicationPage:
             content_type="image/png",
             image_src=None,
         )
+
+    def test_a_snapshot_step_says_until_when_its_state_can_be_queried(self, store):
+        """A ``# @cache snapshot`` SQL cell upstream records its moment and horizon."""
+        html = self._render(
+            store,
+            source="SELECT * FROM orders",
+            upstream_params={
+                "sql_snapshot_at": "2026-09-15T10:05:00+00:00",
+                "sql_snapshot_valid_until": "2026-09-16T10:05:00+00:00",
+            },
+        )
+
+        assert "Warehouse state as of</td><td>2026-09-15 10:05 UTC" in html
+        assert "Queryable until</td><td>2026-09-16 10:05 UTC" in html
+
+    def test_a_published_snapshot_cell_says_it_of_itself(self, store):
+        html = self._render(
+            store,
+            source="SELECT * FROM orders",
+            upstream_params={"sql_snapshot_at": "2026-09-15T10:05:00+00:00"},
+            publish_upstream=True,
+        )
+
+        this_artifact = html.split("<h2>This artifact</h2>")[1].split("<h2>")[0]
+        assert "Warehouse state as of</td><td>2026-09-15 10:05 UTC" in this_artifact
+        assert "Queryable until</td><td><span class='note'>not recorded" in this_artifact
+
+    def test_a_step_without_a_snapshot_says_nothing_about_one(self, store):
+        assert "Queryable until" not in self._render(store, source="rows = []")
 
     def test_cell_source_is_escaped(self, store):
         """Cell source is user-written and the page is served unauthenticated."""

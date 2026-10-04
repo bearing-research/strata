@@ -2023,16 +2023,18 @@ class NotebookSession:
         """
         annotations = parse_annotations(cell.source)
         tables = list(annotations.tables)
+        config = self._lake_config()
         if annotations.sql is not None:
             # Only a SQL cell: the SQL package needs the [sql] extra.
-            from strata.notebook.sql.lake import lake_tables
+            from strata.notebook.sql.lake import lake_tables, with_notebook_catalogs
 
             tables += lake_tables(self.notebook_state, cell.source)
+            config = with_notebook_catalogs(config, self.notebook_state)
         if not tables:
             return []
         from strata.notebook.tables import fingerprint_tables
 
-        fingerprints, _ = fingerprint_tables(tables, self._lake_config())
+        fingerprints, _ = fingerprint_tables(tables, config)
         return fingerprints
 
     def _collect_fetch_fingerprints(self, cell: Any) -> list[str]:
