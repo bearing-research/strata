@@ -16,8 +16,9 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Buffer, Callable, Iterator
 from contextlib import contextmanager
+from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,16 @@ class BlobStore(ABC):
 
         POST the fields plus the body as the ``file`` part. A POST policy rather than a
         presigned PUT because it lets the object store refuse an oversized upload.
+        """
+        return None
+
+    def presign_put(
+        self, artifact_id: str, version: int, ttl_seconds: int
+    ) -> tuple[str, dict[str, str]] | None:
+        """Return ``(url, headers)`` to PUT the body to, or ``None``.
+
+        For stores with no form upload (Azure). Nothing bounds the body, so finalize
+        enforces the size limit after the fact.
         """
         return None
 
@@ -319,10 +330,10 @@ class S3BlobStore(BlobStore):
         return f"{self.prefix}/{blob_key}" if self.prefix else blob_key
 
     def _signing_credentials(self) -> tuple[str, str, str | None] | None:
-        """Return the keys to sign with: the configured pair, else the standard environment.
+        """Return the keys to sign with: the configured pair, the environment, else a role.
 
-        Instance-role credentials stay inside PyArrow's AWS SDK, so a store relying on
-        them cannot presign and the manifest keeps its Strata URLs.
+        PyArrow keeps the credentials it resolves to itself, so a role (instance profile,
+        ECS task, web identity) is resolved again here through botocore.
         """
         if self._anonymous:
             return None
@@ -332,7 +343,25 @@ class S3BlobStore(BlobStore):
         secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
         if access and secret:
             return access, secret, os.environ.get("AWS_SESSION_TOKEN")
-        return None
+        credentials = self._role_credentials
+        if credentials is None:
+            return None
+        # Temporary credentials: frozen refreshes them when they near expiry.
+        frozen = credentials.get_frozen_credentials()
+        return frozen.access_key, frozen.secret_key, frozen.token
+
+    @cached_property
+    def _role_credentials(self) -> Any:
+        """botocore's credential chain, resolved once (a miss probes instance metadata)."""
+        try:
+            import botocore.session
+        except ImportError:
+            logger.warning(
+                "S3 presigning with role credentials needs botocore: "
+                "pip install 'strata-notebook[s3]'; keeping Strata URLs"
+            )
+            return None
+        return botocore.session.get_session().get_credentials()
 
     def _signing_region(self) -> str:
         return (
@@ -588,6 +617,8 @@ class GCSBlobStore(BlobStore):
 
         self.bucket = bucket
         self.prefix = prefix.strip("/")
+        self._anonymous = anonymous
+        self._endpoint_override = endpoint_override
 
         kwargs = {}
         if default_bucket_location:
@@ -615,6 +646,85 @@ class GCSBlobStore(BlobStore):
         if self.prefix:
             return f"{self.bucket}/{self.prefix}/{blob_key}"
         return f"{self.bucket}/{blob_key}"
+
+    def _object_name(self, artifact_id: str, version: int) -> str:
+        return self._gcs_key(artifact_id, version).removeprefix(f"{self.bucket}/")
+
+    @cached_property
+    def _signing_client(self) -> Any:
+        """A storage client over the ambient credentials, or ``None`` if there are none."""
+        if self._anonymous:
+            return None
+        try:
+            import google.auth
+            from google.auth.exceptions import DefaultCredentialsError
+            from google.cloud import storage
+        except ImportError:
+            logger.warning(
+                "GCS presigning needs google-cloud-storage: "
+                "pip install 'strata-notebook[gcs]'; keeping Strata URLs"
+            )
+            return None
+        try:
+            credentials, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+        except DefaultCredentialsError:
+            return None
+        options = {"api_endpoint": self._endpoint_override} if self._endpoint_override else None
+        return storage.Client(project="-", credentials=credentials, client_options=options)
+
+    def _signing_kwargs(self) -> dict[str, str] | None:
+        """How to sign: locally with a key (``{}``), through IAM signBlob, or ``None``."""
+        from google.auth.credentials import Signing
+
+        if self._signing_client is None:
+            return None
+        credentials = self._signing_client._credentials
+        if isinstance(credentials, Signing):
+            return {}
+        # Workload identity and the GCE metadata server hold no key; IAM signs as the
+        # attached service account (it needs roles/iam.serviceAccountTokenCreator on itself).
+        if not hasattr(credentials, "service_account_email"):
+            return None
+        if not credentials.valid:
+            from google.auth.transport.requests import Request
+
+            credentials.refresh(Request())
+        return {
+            "service_account_email": credentials.service_account_email,
+            "access_token": credentials.token,
+        }
+
+    def presign_get(self, artifact_id: str, version: int, ttl_seconds: int) -> str | None:
+        from datetime import timedelta
+
+        signing = self._signing_kwargs()
+        if signing is None:
+            return None
+        blob = self._signing_client.bucket(self.bucket).blob(
+            self._object_name(artifact_id, version)
+        )
+        return blob.generate_signed_url(
+            version="v4", expiration=timedelta(seconds=int(ttl_seconds)), method="GET", **signing
+        )
+
+    def presign_post(
+        self, artifact_id: str, version: int, max_bytes: int, ttl_seconds: int
+    ) -> tuple[str, dict[str, str]] | None:
+        from datetime import timedelta
+
+        signing = self._signing_kwargs()
+        if signing is None:
+            return None
+        policy = self._signing_client.generate_signed_post_policy_v4(
+            self.bucket,
+            self._object_name(artifact_id, version),
+            expiration=timedelta(seconds=int(ttl_seconds)),
+            conditions=[["content-length-range", 1, int(max_bytes)]],
+            **signing,
+        )
+        return policy["url"], policy["fields"]
 
     def open_blob_reader(
         self, artifact_id: str, version: int
@@ -771,6 +881,9 @@ class AzureBlobStore(BlobStore):
         self.account_name = account_name
         self.container_name = container_name
         self.prefix = prefix.strip("/")
+        self._account_url = endpoint_url or f"https://{account_name}.blob.core.windows.net"
+        self._delegation_key: Any = None
+        self._delegation_key_expiry = 0.0
 
         if connection_string:
             self._client = ContainerClient.from_connection_string(
@@ -814,6 +927,68 @@ class AzureBlobStore(BlobStore):
         if self.prefix:
             return f"{self.prefix}/{blob_key}"
         return blob_key
+
+    def _sas_signing(self, ttl_seconds: int) -> dict[str, Any] | None:
+        """Key material for a blob SAS: the account key, a user delegation key, or ``None``.
+
+        A configured SAS token cannot mint narrower ones, and handing it out would grant
+        the worker everything it grants.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        credential = self._client.credential
+        account_key = getattr(credential, "account_key", None)
+        if account_key:
+            return {"account_key": account_key}
+        if not hasattr(credential, "get_token"):
+            return None
+        # A delegation key costs a round trip, so reuse one while it outlives the SAS.
+        if self._delegation_key is None or self._delegation_key_expiry < time.time() + ttl_seconds:
+            from azure.storage.blob import BlobServiceClient
+
+            now = datetime.now(UTC)
+            expiry = now + timedelta(seconds=ttl_seconds + 3600)
+            self._delegation_key = BlobServiceClient(
+                self._account_url, credential=credential
+            ).get_user_delegation_key(now - timedelta(minutes=5), expiry)
+            self._delegation_key_expiry = expiry.timestamp()
+        return {"user_delegation_key": self._delegation_key}
+
+    def _presign(
+        self, artifact_id: str, version: int, ttl_seconds: int, permission: Any
+    ) -> str | None:
+        from datetime import UTC, datetime, timedelta
+
+        from azure.storage.blob import generate_blob_sas
+
+        signing = self._sas_signing(int(ttl_seconds))
+        if signing is None:
+            return None
+        key = self._azure_key(artifact_id, version)
+        sas = generate_blob_sas(
+            account_name=self._client.account_name or self.account_name,
+            container_name=self.container_name,
+            blob_name=key,
+            permission=permission,
+            expiry=datetime.now(UTC) + timedelta(seconds=int(ttl_seconds)),
+            **signing,
+        )
+        return f"{self._client.get_blob_client(key).url}?{sas}"
+
+    def presign_get(self, artifact_id: str, version: int, ttl_seconds: int) -> str | None:
+        from azure.storage.blob import BlobSasPermissions
+
+        return self._presign(artifact_id, version, ttl_seconds, BlobSasPermissions(read=True))
+
+    def presign_put(
+        self, artifact_id: str, version: int, ttl_seconds: int
+    ) -> tuple[str, dict[str, str]] | None:
+        from azure.storage.blob import BlobSasPermissions
+
+        url = self._presign(
+            artifact_id, version, ttl_seconds, BlobSasPermissions(create=True, write=True)
+        )
+        return (url, {"x-ms-blob-type": "BlockBlob"}) if url is not None else None
 
     def open_blob_reader(
         self, artifact_id: str, version: int

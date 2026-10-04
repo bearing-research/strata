@@ -2784,34 +2784,39 @@ class CellExecutor:
             )
             build_store.start_build(build_id)
 
-            manifest = state.url_signer.generate_build_manifest(
-                base_url=base_url,
-                build_id=build_id,
-                metadata={
-                    "build_id": build_id,
-                    "artifact_id": artifact_id,
-                    "version": artifact_version,
-                    "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
-                    "params": build_params,
-                    # Who and what this dispatch is for, so a dispatcher can attribute the job and
-                    # dedupe submissions without a GET /v1/builds. Kept out of ``params``, which
-                    # feeds transport provenance: identity must not change what is cached.
-                    # ``cell_provenance_hash`` is the cell's own key, not the transport hash.
-                    "principal": principal_id,
-                    "tenant": tenant_id,
-                    "notebook_id": self.session.notebook_state.id,
-                    "cell_id": cell_id,
-                    "cell_provenance_hash": cell_provenance_hash,
-                    # W3C trace context, for a worker reached without the headers (a dispatcher that
-                    # forwards only the body).
-                    **trace_context,
-                },
-                input_artifacts=input_artifacts,
-                max_output_bytes=state.config.max_transform_output_bytes,
-                blob_store=(
-                    artifact_store.blob_store if state.config.artifact_presigned_urls else None
-                ),
-                url_expiry_seconds=state.config.signed_url_expiry_seconds,
+            # Presigning can call the cloud (role credentials, IAM signBlob, a delegation key).
+            manifest = (
+                await asyncio.to_thread(
+                    state.url_signer.generate_build_manifest,
+                    base_url=base_url,
+                    build_id=build_id,
+                    metadata={
+                        "build_id": build_id,
+                        "artifact_id": artifact_id,
+                        "version": artifact_version,
+                        "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+                        "params": build_params,
+                        # Who and what this dispatch is for, so a dispatcher can attribute the job
+                        # and dedupe submissions without a GET /v1/builds. Kept out of ``params``,
+                        # which feeds transport provenance: identity must not change what is
+                        # cached. ``cell_provenance_hash`` is the cell's own key, not the transport
+                        # hash.
+                        "principal": principal_id,
+                        "tenant": tenant_id,
+                        "notebook_id": self.session.notebook_state.id,
+                        "cell_id": cell_id,
+                        "cell_provenance_hash": cell_provenance_hash,
+                        # W3C trace context, for a worker reached without the headers (a
+                        # dispatcher that forwards only the body).
+                        **trace_context,
+                    },
+                    input_artifacts=input_artifacts,
+                    max_output_bytes=state.config.max_transform_output_bytes,
+                    blob_store=(
+                        artifact_store.blob_store if state.config.artifact_presigned_urls else None
+                    ),
+                    url_expiry_seconds=state.config.signed_url_expiry_seconds,
+                )
             ).to_dict()
 
             manifest_execute_url = self._manifest_execute_url(executor_url)

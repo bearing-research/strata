@@ -496,9 +496,9 @@ class StrataConfig(BaseSettings):
     # Pull model configuration
     signed_url_expiry_seconds: Annotated[float, Field(gt=0)] = 600.0
     # Put object-store URLs in build manifests where the blob store can sign
-    # them (S3 with keys it can read), so a worker's inputs and output bypass
-    # this server. Off by default: the output then arrives as a form upload
-    # (url + fields), which a worker older than this does not send.
+    # them (S3, GCS, Azure), so a worker's inputs and output bypass this
+    # server. Off by default: the output then arrives as a form upload or an
+    # Azure PUT, which a worker older than this does not send.
     artifact_presigned_urls: bool = False
     # How long a remote dispatch may wait for its job to start running when the
     # worker (or a pool in front of it) answers 202 with a job to poll. Separate

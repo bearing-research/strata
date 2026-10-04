@@ -272,7 +272,8 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
   "output": {
     "url": "https://strata.example.com/v1/artifacts/upload?...&signature=...",
     "max_bytes": 1073741824,
-    "expires_at": 1789455608.2
+    "expires_at": 1789455608.2,
+    "method": "POST"
   },
   "finalize_url": "https://strata.example.com/v1/builds/01HZJV/finalize?...",
   "log_url": "https://strata.example.com/v1/builds/01HZJV/log?..."
@@ -287,14 +288,21 @@ one can no longer publish. Each manifest's upload lands under its own key, and
 bytes that are never finalized are removed by the server's build runner once
 the build is over and the upload URL has expired.
 
-With `STRATA_ARTIFACT_PRESIGNED_URLS` on and an S3 blob store the server can sign
-for, the input URLs and `output.url` point straight at the object store: SigV4
-query URLs for inputs, and for the output a POST policy URL with the form
-`fields` to send. The policy bounds the body with `content-length-range`, so S3
-refuses an oversized upload itself, and finalize checks the size again before
-publishing. `finalize_url` and `log_url` stay Strata routes. Without it, or when
-the store cannot sign (a local disk, or S3 credentials held only by an instance
-role inside PyArrow), every URL is a Strata route and `output` has no `fields`.
+With `STRATA_ARTIFACT_PRESIGNED_URLS` on and a blob store the server can sign
+for, the input URLs and `output.url` point straight at the object store.
+`finalize_url` and `log_url` stay Strata routes, and finalize checks the
+output's size against `output.max_bytes` before publishing.
+
+| Store | Inputs | Output | Signs with |
+| --- | --- | --- | --- |
+| S3 | SigV4 query URLs | POST policy: `fields`, bounded by `content-length-range` | An access key pair (config or `AWS_ACCESS_KEY_ID`), else a role through botocore (instance profile, ECS task role, web identity; the `s3` extra). The role's session token goes in the URL, and a URL stops working when that token expires. |
+| GCS | V4 signed URLs | V4 POST policy: `fields`, bounded by `content-length-range` | A service-account key (`STRATA_GCS_CREDENTIALS_JSON` or `GOOGLE_APPLICATION_CREDENTIALS`), else, on GCE or GKE workload identity, the IAM `signBlob` API as the attached service account, which needs `roles/iam.serviceAccountTokenCreator` on itself. Needs the `gcs` extra. |
+| Azure | Read-only blob SAS | Create/write blob SAS: `method` `PUT` with `headers` | The account key (`STRATA_AZURE_ACCOUNT_KEY` or a connection string that holds it), else a user delegation key for `STRATA_AZURE_USE_DEFAULT_CREDENTIAL`, which needs the Storage Blob Delegator role. A PUT cannot bound its body, so only finalize enforces `max_bytes`. |
+
+Without the setting, or when the store cannot sign (a local disk, anonymous
+access, a configured `STRATA_AZURE_SAS_TOKEN`, which is never handed to a
+worker, or GCS user credentials with no service account), every URL is a Strata
+route and `output` has neither `fields` nor `headers`.
 
 `principal`, `tenant`, `notebook_id`, `cell_id` and `cell_provenance_hash` say
 who ran the cell and which cell of which notebook the build is for, so a
@@ -319,7 +327,7 @@ carries the context in the request headers only.
 
 1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
 2. Run the cell in a subprocess (same as `/v1/execute`). While it runs, `POST` each chunk of console output as the raw body to `log_url` with `&stream=stdout` or `&stream=stderr` appended, so the notebook shows it live. `log_url` is optional: a worker that ignores it still delivers the console in the bundle.
-3. Upload the resulting output bundle to `output.url`. Without `output.fields`, `POST` the bundle as the raw body with `Content-Type: application/x-tar` (a Strata route). With `output.fields`, it is a presigned object-store upload: `POST` a multipart form containing each field plus the bundle as the `file` part (S3 answers `204`).
+3. Upload the resulting output bundle to `output.url`. With `output.fields`, it is a presigned form upload (S3, GCS): `POST` a multipart form containing each field plus the bundle as the `file` part (S3 and GCS answer `204`). With `output.method` `PUT` (Azure), `PUT` the bundle as the raw body with `output.headers` and `Content-Length` (Azure answers `201`). Otherwise `POST` the bundle as the raw body with `Content-Type: application/x-tar` (a Strata route).
 4. `POST {"output_format": "notebook-output-bundle@v1"}` to `finalize_url`.
 5. Return the `finalize` response body to the caller.
 

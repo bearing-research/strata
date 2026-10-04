@@ -1335,6 +1335,39 @@ class Person:
         assert metadata["cell_provenance_hash"] != artifact.provenance_hash
 
     @pytest.mark.asyncio
+    async def test_the_signed_manifest_is_built_off_the_event_loop(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """Presigning can call the cloud (a role, IAM signBlob), so it must not block the loop."""
+        import asyncio
+
+        import strata.server as server_module
+
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        signer = server_module._state.url_signer
+        real = signer.generate_build_manifest
+        on_loop: list[bool] = []
+
+        def _recording(*args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(True)
+            except RuntimeError:
+                on_loop.append(False)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(signer, "generate_build_manifest", _recording)
+
+        result = await CellExecutor(sample_notebook).execute_cell("cell1", "x = 1")
+
+        assert result.success, result.error
+        assert on_loop == [False]
+
+    @pytest.mark.asyncio
     async def test_a_personal_server_says_what_but_not_who(
         self,
         sample_notebook,
