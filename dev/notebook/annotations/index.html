@@ -3089,7 +3089,15 @@ separate run; fetch in an upstream cell instead.</p>
 <ul>
 <li><strong><code>sha256=&lt;digest&gt;</code> pins the bytes.</strong> The digest is the fingerprint, checked
   without the network while the cached copy matches. If the URL serves anything
-  else, the cell fails with both digests.</li>
+  else, the cell fails with both digests and the error code
+  <code>fetch_pin_mismatch</code> (<code>error_code</code> on the WebSocket <code>cell_error</code> frame, the
+  REST and MCP run results, and the <code>strata run --format json</code> entry), so a
+  client can tell a moved pin from any other failure without reading the text.
+  <code>strata cell pin-fetch &lt;notebook_dir&gt; &lt;cell_id&gt; [NAME ...]</code> writes the pin for
+  you: it sets <code>sha256=</code> on each named fetch (all of the cell's by default) to
+  the digest of the bytes the notebook last downloaded, keeping the line's other
+  options. Run the cell first so there are bytes to pin. After a mismatch,
+  running it again accepts what the URL serves now.</li>
 <li><strong><code>refetch=stale</code></strong> (default) checks the URL with a conditional GET
   (<code>ETag</code> / <code>Last-Modified</code>): at most once a minute while staleness is being
   recomputed, and always right before the cell runs, so what a run records is
@@ -3098,9 +3106,10 @@ separate run; fetch in an upstream cell instead.</p>
 <li><strong><code>refetch=always</code></strong> downloads again on every check, ignoring validators.</li>
 </ul>
 <p>Each artifact the cell stores records the URL and the digest of the bytes the
-run read as one of its inputs. That record is how a
-<a href="../publishing/">publication</a> page and its RO-Crate list the URL under
-"External inputs". A snapshot export lists every fetch with whether it is
+run read as one of its inputs, and when those bytes were downloaded. That
+record is how a <a href="../publishing/">publication</a> page lists the URL under
+"External inputs" with its digest and retrieval time, and its RO-Crate gives
+the URL's <code>File</code> node an <code>sdDatePublished</code>. A snapshot export lists every fetch with whether it is
 pinned, so an unpinned one can be flagged before the snapshot is shared.</p>
 <p>Only <code>http</code> and <code>https</code> are fetched. In service mode every redirect hop passes
 the same guard as a worker's URLs: no private, loopback or link-local address

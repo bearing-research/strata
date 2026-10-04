@@ -4729,7 +4729,7 @@ hold, <code>502</code> when the team store refuses or cannot be reached.</p>
 <tbody>
 <tr>
 <td><code>zip</code> <em>(default)</em></td>
-<td>Reproducible bundle, <code>notebook.toml</code>, <code>pyproject.toml</code>, <code>uv.lock</code>, cells, <code>provenance.json</code>.</td>
+<td>Reproducible bundle, <code>notebook.toml</code>, <code>pyproject.toml</code>, <code>uv.lock</code>, cells, <code>provenance.json</code>. Each cell's entry in <code>provenance.json</code> lists its stored <code>outputs</code> (<code>name</code>, <code>artifact_id</code>, <code>version</code>, <code>content_sha256</code>), the same shape as <code>strata run --format json</code>, so a rerun's report can be diffed against the export.</td>
 </tr>
 <tr>
 <td><code>snapshot</code></td>

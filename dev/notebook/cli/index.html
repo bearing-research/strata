@@ -2392,7 +2392,8 @@ run.</p>
 finishes: <code>{"notebook", "success", "duration_ms", "cells": [...]}</code> with one
 entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped</code>, <code>duration_ms</code>,
 <code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> - truncated at 10k chars - and
-<code>error</code> / <code>reason</code> where applicable). For a cell that produces an output
+<code>error</code> / <code>reason</code> where applicable, and <code>error_code</code> when the failure has a
+stable name, such as <code>fetch_pin_mismatch</code>). For a cell that produces an output
 artifact, a cache hit replays that artifact without re-emitting console
 output, so <code>stdout</code> can be absent on warm runs (<code>--force</code> re-executes). A
 leaf cell that only <code>print</code>s is different: its stdout/stderr are cached by
@@ -2400,6 +2401,16 @@ provenance and replayed on a warm hit. Errors and pre-flight diagnostics go to
 stderr regardless of format. The executor's per-cell INFO logs are held back
 during a run; set <code>STRATA_LOG_LEVEL=INFO</code> to see them. Pipe stdout to <code>jq</code>:
 <code>strata run ... --format json | jq '.cells[] | select(.status == "error")'</code>.</p>
+<p>A successful cell also carries <code>provenance_hash</code> and <code>outputs</code>, one
+<code>{name, artifact_id, version, content_sha256}</code> per stored output, so two runs
+on two machines can be diffed digest by digest with no server involved.
+<code>strata run</code> stores the variables of leaf cells too (cells nothing downstream
+reads, which the notebook otherwise keeps no artifact for), so the notebook's
+final results have digests to compare; a value that cannot be serialized is
+skipped. Display outputs and a leaf's cached console appear as <code>__display__N</code>
+and <code>__console__</code>. An output stored before digests were recorded gets its
+digest computed from its bytes when the report is written. The ZIP export's
+<code>provenance.json</code> lists the same <code>outputs</code> per cell.</p>
 <h3 id="exit-codes">Exit Codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2599,8 +2610,9 @@ passed, <code>1</code> a test failed/errored, <code>2</code> pytest unavailable 
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>strata<span class="w"> </span>cell<span class="w"> </span>rm<span class="w">       </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w">                     </span><span class="c1"># delete a cell</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>strata<span class="w"> </span>cell<span class="w"> </span>mv<span class="w">       </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span>--to<span class="w"> </span>&lt;index&gt;<span class="w">        </span><span class="c1"># reorder (0-based)</span>
 <a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>strata<span class="w"> </span>cell<span class="w"> </span>annotate<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span>--set<span class="w"> </span><span class="nv">worker</span><span class="o">=</span>gpu-box<span class="w"> </span>--unset<span class="w"> </span>timeout
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>strata<span class="w"> </span>dep<span class="w"> </span>add<span class="w">       </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;package&gt;<span class="w">                     </span><span class="c1"># uv add</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>strata<span class="w"> </span>dep<span class="w"> </span>rm<span class="w">        </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;package&gt;<span class="w">                     </span><span class="c1"># uv remove</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>strata<span class="w"> </span>cell<span class="w"> </span>pin-fetch<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>NAME<span class="w"> </span>...<span class="o">]</span><span class="w">        </span><span class="c1"># write sha256= into @fetch lines</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>strata<span class="w"> </span>dep<span class="w"> </span>add<span class="w">       </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;package&gt;<span class="w">                     </span><span class="c1"># uv add</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>strata<span class="w"> </span>dep<span class="w"> </span>rm<span class="w">        </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;package&gt;<span class="w">                     </span><span class="c1"># uv remove</span>
 </code></pre></div>
 <p><code>--file -</code> reads cell source from stdin; <code>-c 'src'</code> passes the source inline
 (the two are mutually exclusive). <code>cell add</code> mints a backend-style 8-char id (the
@@ -2614,7 +2626,13 @@ with <code>cell run</code>). <code>cell annotate</code> splices <code># @key</co
 cell's source (<code>--set KEY=VALUE</code> / <code>--unset KEY</code>, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with <code>edit</code>;
 it targets scalar directives (<code>name</code>, <code>worker</code>, <code>timeout</code>, <code>model</code>, …), so edit
-the source directly for repeatable <code>mount</code> / <code>table</code> / <code>env</code>. Dependency
+the source directly for repeatable <code>mount</code> / <code>table</code> / <code>env</code>. <code>cell pin-fetch</code>
+pins a cell's <a href="../annotations/#fetch"><code>@fetch</code></a> inputs: it writes <code>sha256=</code> with
+the digest of the bytes the notebook last downloaded into each named fetch line
+(every fetch in the cell when no name is given) and prints the cell and a
+<code>pinned</code> list of <code>{name, url, sha256}</code>. It reads the notebook's own fetch
+cache, so it takes a local directory, not <code>--server</code>; a fetch with nothing
+downloaded yet is an error until the cell has run. Dependency
 commands run <code>uv add</code> / <code>uv remove</code> and report whether the lockfile changed. All
 take <code>--format json|human</code> and use the shared exit codes (<code>0</code> ok, <code>1</code> operation
 failure such as an unknown cell or a failed <code>uv</code> resolve, <code>2</code> invocation error).</p>

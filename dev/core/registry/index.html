@@ -2239,8 +2239,9 @@ land unrecorded. The audit answers "what did champion point to before?":</p>
 <p>Entries carry the actor (principal id when authenticated), the action, and
 the from → to versions. <code>GET /v1/registry/audit</code> serves the same data; the
 SDK exposes <code>get_registry_audit(name=..., artifact_id=...)</code>.</p>
-<p>Publishing an artifact and withdrawing a publication are recorded in the same
-log, as <code>publish</code> and <code>withdraw</code> with the token in <code>value</code>.</p>
+<p>Publishing an artifact, withdrawing a publication and changing its credits
+(authors or identifiers, <code>PATCH /v1/publications/{token}</code>) are recorded in the
+same log, as <code>publish</code>, <code>withdraw</code> and <code>credit</code> with the token in <code>value</code>.</p>
 <h3 id="following-the-store">Following the store<a class="headerlink" href="#following-the-store" title="Permanent link">&para;</a></h3>
 <p>Something that reacts to changes, such as a platform mirroring a registry or a
 feed of promotions, reads <code>GET /v1/events?since=&lt;seq&gt;&amp;limit=&lt;n&gt;</code>. It returns

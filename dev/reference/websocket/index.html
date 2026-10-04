@@ -2826,7 +2826,7 @@
 <tr>
 <td><code>cell_error</code></td>
 <td><code>{ "cell_id": "...", "error": "...", "suggest_install": "...", "suggest_install_language": "python" }</code></td>
-<td>Execution error. <code>suggest_install</code> names a missing package to offer installing, with <code>python</code> or <code>r</code> for which installer. A remote run adds the <code>remote_*</code> fields of <code>cell_output</code> plus <code>remote_error_code</code></td>
+<td>Execution error. <code>error_code</code>, when present, is a stable name to branch on (<code>fetch_pin_mismatch</code>: a <code># @fetch ... sha256=</code> pin no longer matches the URL's bytes). <code>suggest_install</code> names a missing package to offer installing, with <code>python</code> or <code>r</code> for which installer. A remote run adds the <code>remote_*</code> fields of <code>cell_output</code> plus <code>remote_error_code</code></td>
 </tr>
 <tr>
 <td><code>cell_iteration_progress</code></td>

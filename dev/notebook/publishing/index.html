@@ -2397,9 +2397,11 @@ listed under <code>hasPart</code>. Their bytes are deliberately not in the crate
 declaring files that are not there is a claim no validator would catch.</p>
 <p>A step that read a URL through <a href="../annotations/#fetch"><code>@fetch</code></a> names it as
 an input. On the page it appears under "External inputs" with the digest of the
-bytes read and when the reading step ran. In the crate it is a <code>File</code> whose
-<code>@id</code> is the URL, with that <code>sha256</code>. The digest describes what was read, and
-the URL may serve something else now.</p>
+bytes read, when they were retrieved, and when the reading step ran. In the
+crate it is a <code>File</code> whose <code>@id</code> is the URL, with that <code>sha256</code> and the
+retrieval time as <code>sdDatePublished</code>. The digest describes what was read, and
+the URL may serve something else now. A step stored before retrieval times were
+recorded shows only when it ran.</p>
 <h2 id="embedding-it-elsewhere">Embedding it elsewhere<a class="headerlink" href="#embedding-it-elsewhere" title="Permanent link">&para;</a></h2>
 <p>Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
 unfurls into a card: the figure, what it is, how many steps are behind it, and
@@ -2437,9 +2439,17 @@ paper outlives most servers, so there is a second form:</p>
 <p>A tabular artifact's bytes are Arrow IPC (<code>artifact.arrow</code>), and the bundle
 also carries <code>artifact.parquet</code>, the same rows in a format a data repository
 indexes. The manifest's digest covers the Arrow file; the Parquet file carries
-its own. A table whose Arrow file is over 128 MiB is archived without the
-Parquet copy, since converting it holds the whole table in memory. The limit is
-fixed, so it never makes one publication's archive differ between builds.</p>
+its own, in the manifest's <code>additional_files</code> and as a second <code>File</code> in the
+RO-Crate, so a repository reading the crate sees both. A table whose Arrow file
+is over 128 MiB is archived without the Parquet copy, since converting it holds
+the whole table in memory; neither the manifest nor the crate then lists one.
+The limit is fixed, so it never makes one publication's archive differ between
+builds.</p>
+<p>Whichever file a reader kept, the server can say whether it is this
+publication's. <code>GET /p/&lt;token&gt;/verify?sha256=&lt;digest of the file&gt;</code> answers with
+<code>file</code> naming it (<code>artifact.arrow</code> or <code>artifact.parquet</code>, or <code>null</code> for a file
+from elsewhere) and <code>matches</code> true only when it names one and the stored bytes
+are unchanged. The Parquet digest is the one in the archive the server serves.</p>
 <p>Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.</p>
 <p>A published artifact serves the same bundle as a zip:</p>
@@ -2513,9 +2523,14 @@ nobody can follow. The page grows a "Cite as" line of resolvable links, the
 JSON record and the archive <code>manifest.json</code> carry the entries, and the
 RO-Crate's root dataset gets the DOI as its <code>identifier</code>, which is what an
 ingesting repository indexes on.</p>
-<p>The patch cannot repoint the token. <code>artifact_id</code> and <code>version</code> are not fields
-of the request, because a citation whose target could change under the reader
-would be worthless.</p>
+<p>The patch cannot repoint the token, because a citation whose target could
+change under the reader would be worthless. A body naming <code>artifact_id</code> or
+<code>version</code> is refused with a 400 rather than half-applied, so a caller never
+reads a 200 as "the link now shows the other version". To cite another version,
+publish it for its own link.</p>
+<p>Each patch is recorded on the store's event feed (<code>GET /v1/events</code>) as a
+<code>credit</code> event with the token in <code>value</code>, beside <code>publish</code> and <code>withdraw</code>, so a
+service mirroring the page learns of a new DOI without polling.</p>
 <h2 id="copying-a-chain-into-another-store">Copying a chain into another store<a class="headerlink" href="#copying-a-chain-into-another-store" title="Permanent link">&para;</a></h2>
 <p>A link resolves from the store its server serves, and a chain lives in the
 store its cells wrote to. When those are different machines, the chain is
@@ -2566,7 +2581,7 @@ Publishing the same chain again writes nothing.</p>
 <tr>
 <td><code>PATCH /v1/publications/{token}</code></td>
 <td>yes (<code>artifacts:publish</code>)</td>
-<td>Set authors and external identifiers. Cannot change what the token points at.</td>
+<td>Set authors and external identifiers. Cannot change what the token points at: <code>artifact_id</code> or <code>version</code> in the body is a 400.</td>
 </tr>
 <tr>
 <td><code>GET /v1/publications</code></td>
@@ -2601,7 +2616,7 @@ Publishing the same chain again writes nothing.</p>
 <tr>
 <td><code>GET /p/{token}/verify</code></td>
 <td><strong>no</strong></td>
-<td>Re-read and compare against the recorded digest.</td>
+<td>Re-read and compare against the recorded digest. <code>?sha256=</code> also says which bundle file (Arrow or Parquet) a digest names.</td>
 </tr>
 <tr>
 <td><code>GET /p/{token}/embed</code></td>
