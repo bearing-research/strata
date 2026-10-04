@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -12,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from strata.notebook import shared_env
+from strata.notebook.dependencies import EnvironmentOperationLog, _UvCommandResult
 from strata.notebook.env import uv_lock_key
 from strata.notebook.env_backend import UvBackend, get_backend
 from strata.notebook.shared_env import COMPLETE_MARKER, SharedEnvBackend, collect
@@ -77,7 +81,7 @@ async def _sync(notebook: Path, streaming: bool):
     backend = get_backend(notebook)
     if streaming:
         return await backend.sync_streaming(python_version=None, timeout=180, on_update=None)
-    return backend.sync(python_version=None, timeout=180)
+    return await asyncio.to_thread(backend.sync, python_version=None, timeout=180)
 
 
 @pytest.mark.parametrize("streaming", [False, True], ids=["sync", "streaming"])
@@ -374,3 +378,137 @@ def test_opening_a_notebook_keeps_its_environment_in_use(tmp_path, shared, monke
     session.ensure_venv_synced()
 
     assert synced == ["backend"], "the shared backend must do the sync, not a bare uv sync"
+
+
+def _ok(command: str) -> _UvCommandResult:
+    return _UvCommandResult(
+        success=True, error=None, operation_log=EnvironmentOperationLog(command=command)
+    )
+
+
+@pytest.fixture
+async def building(shared, monkeypatch):
+    """Fake uv where every notebook maps to one key whose install waits for ``finish``,
+    so a streaming sync holds that key's lock for as long as a test needs."""
+    loop = asyncio.get_running_loop()
+    state = SimpleNamespace(
+        installing=asyncio.Event(), finish=asyncio.Event(), prepared=0, second=asyncio.Event()
+    )
+
+    def counted() -> None:
+        state.prepared += 1
+        if state.prepared == 2:
+            state.second.set()
+
+    def prepare(self, python_version):
+        self.root.mkdir(parents=True, exist_ok=True)
+        # Counted on the loop, so a loop blocked after this call never counts it.
+        loop.call_soon_threadsafe(counted)
+        return Path(sys.executable), "k", shared_env._key_lock(self.root, "k")
+
+    async def streaming(notebook_dir, args, *, env=None, **kwargs):
+        if args[0] == "sync":
+            state.installing.set()
+            await state.finish.wait()
+            python = Path(env["UV_PROJECT_ENVIRONMENT"]) / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.symlink_to(sys.executable)
+        return _ok(f"uv {args[0]}")
+
+    monkeypatch.setattr(SharedEnvBackend, "_prepare", prepare)
+    monkeypatch.setattr(shared_env, "run_uv_command_streaming", streaming)
+    monkeypatch.setattr(
+        shared_env, "_run_uv_command", lambda _dir, args, **kw: _ok(f"uv {args[0]}")
+    )
+    yield state
+    state.finish.set()
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "blocking",
+    [
+        lambda backend: backend.sync(python_version=None, timeout=60),
+        lambda backend: backend.add("tinydep", timeout=60),
+        lambda backend: backend.remove("tinydep", timeout=60),
+    ],
+    ids=["sync", "add", "remove"],
+)
+async def test_a_blocking_sync_on_the_event_loop_is_refused_while_a_streaming_one_builds(
+    tmp_path, building, blocking
+):
+    """The streaming sync releases the key's lock only once the loop runs again, so a
+    blocking sync waiting for that lock on the loop would hang it (a timeout here)."""
+    first, second = _notebook(tmp_path, "first"), _notebook(tmp_path, "second")
+    build = asyncio.create_task(
+        get_backend(first).sync_streaming(python_version=None, timeout=60, on_update=None)
+    )
+    await building.installing.wait()
+
+    with pytest.raises(RuntimeError, match="event loop"):
+        blocking(get_backend(second))
+
+    building.finish.set()
+    assert (await build).success
+
+
+@pytest.mark.timeout(30)
+async def test_opening_an_imported_notebook_while_its_environment_builds_keeps_the_server_up(
+    tmp_path, shared, building, monkeypatch
+):
+    """On a new service-mode server the import's environment job builds the key, and an
+    open of the same notebook waits for that build without stopping the event loop."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from strata.notebook.routes import router
+
+    storage = tmp_path / "notebooks"
+    storage.mkdir()
+    config = SimpleNamespace(
+        deployment_mode="service",
+        notebook_env_backend="shared",
+        notebook_shared_env_dir=shared,
+        notebook_storage_dir=storage,
+        transforms_config={},
+    )
+    monkeypatch.setattr("strata.server._state", SimpleNamespace(config=config))
+
+    async def _no_warm_pool(self):
+        return None
+
+    monkeypatch.setattr("strata.notebook.pool.WarmProcessPool.start", _no_warm_pool)
+    app = FastAPI()
+    app.include_router(router)
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    ipynb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [{"cell_type": "code", "metadata": {}, "outputs": [], "source": ["x = 1\n"]}],
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        imported = await client.post(
+            "/v1/notebooks/import", files={"file": ("demo.ipynb", json.dumps(ipynb))}
+        )
+        assert imported.status_code == 200, imported.text
+        # The import's environment job is installing the key, holding its lock.
+        await building.installing.wait()
+
+        opening = asyncio.create_task(
+            client.post("/v1/notebooks/open", json={"path": imported.json()["path"]})
+        )
+        await building.second.wait()
+        assert (await client.get("/health")).status_code == 200
+        assert not opening.done(), "the open waits for the build it shares"
+
+        building.finish.set()
+        opened = await opening
+
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["environment"]["sync_state"] == "ready"
+    assert opened.json()["session_id"] != imported.json()["session_id"]
