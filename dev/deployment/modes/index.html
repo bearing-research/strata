@@ -2215,12 +2215,6 @@ between three shapes.</p>
 <td>Unrestricted</td>
 </tr>
 <tr>
-<td><strong>Used by Strata's hosted preview</strong></td>
-<td>–</td>
-<td>Yes (Fly.io + Cloudflare Access)</td>
-<td>–</td>
-</tr>
-<tr>
 <td><strong>Use in production for sharing?</strong></td>
 <td>No: anyone on the network can write</td>
 <td>Only behind a real auth proxy, small trusted group</td>
@@ -2243,9 +2237,8 @@ shared?). The flags that follow are the consequences.</p>
   isolation (artifact store is shared), but each user gets their
   own list in "Open existing." See <a href="#sharing-personal-mode-with-a-small-group">Sharing personal mode with a
   small group</a> below.
-  This is what Strata's own hosted preview at
-  <a href="https://strata-notebook.fly.dev">strata-notebook.fly.dev</a> runs.
-  See <a href="../fly/">Fly.io deployment</a> for the deployment recipe.</li>
+  See <a href="../fly/">Fly.io deployment</a> for a recipe that hosts personal
+  mode.</li>
 <li><strong>Service</strong>: hosting Strata for users you can't fully trust, or
   with sensitive data, or with multi-tenant isolation requirements.
   Reads are tenant-scoped and ACL-gated; writes are off by default

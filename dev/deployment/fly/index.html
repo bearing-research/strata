@@ -2129,19 +2129,18 @@
 
 
 <h1 id="flyio-deployment">Fly.io Deployment<a class="headerlink" href="#flyio-deployment" title="Permanent link">&para;</a></h1>
-<p>Strata's hosted preview runs on <a href="https://fly.io">Fly.io</a> at <a href="https://strata-notebook.fly.dev">strata-notebook.fly.dev</a>. This page describes how to replicate that setup for your own single-tenant deployment.</p>
+<p>This page deploys Strata on <a href="https://fly.io">Fly.io</a> as a single-tenant, personal-mode server, from the template <code>fly.example.toml</code> at the repository root.</p>
 <h2 id="trust-model">Trust model<a class="headerlink" href="#trust-model" title="Permanent link">&para;</a></h2>
 <div class="admonition warning">
 <p class="admonition-title">Read before deploying to a public URL</p>
-<p>The <code>fly.toml</code> in this repo deploys Strata in <strong>personal mode</strong> with
+<p><code>fly.example.toml</code> deploys Strata in <strong>personal mode</strong> with
 <code>STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"</code>. Personal mode
 has no authentication and enables write endpoints (create / delete
 notebooks, upload artifacts). Anyone who reaches the Fly app's URL
 can use it.</p>
 <p>This is fine for: a personal scratch instance behind a URL you
-don't share, a hosted demo (like Strata's own preview), or a
-deployment fronted by an authenticating proxy (Cloudflare Access,
-Pomerium, etc.).</p>
+don't share, a hosted demo, or a deployment fronted by an
+authenticating proxy (Cloudflare Access, Pomerium, etc.).</p>
 <p>This is <strong>not</strong> appropriate for: shared team deployments without
 an auth proxy, anything with sensitive data, anything you'd be
 upset about a stranger writing to. For those, use
@@ -2153,35 +2152,46 @@ comparison.</p>
 <ul>
 <li><a href="https://fly.io/docs/flyctl/install/">Fly CLI</a> installed (<code>brew install flyctl</code> on macOS).</li>
 <li><code>fly auth login</code> completed (opens a browser; one-time).</li>
-<li>A Fly.io account with a payment method on file. The shipped
-  <code>fly.toml</code> runs one <code>shared-cpu-4x</code> VM with 2 GB of memory. It
-  suspends idle machines but keeps one running, so it does not scale to
-  zero unless you change <code>min_machines_running</code>. See
+<li>A Fly.io account with a payment method on file. The template runs
+  one <code>shared-cpu-4x</code> VM with 2 GB of memory. It suspends idle machines
+  but keeps one running, so it does not scale to zero unless you change
+  <code>min_machines_running</code>. See
   <a href="https://fly.io/docs/about/pricing/">Fly pricing</a> for what that costs.</li>
 </ul>
 <h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
-<p>App names are global on Fly, and the <code>app</code> in the shipped <code>fly.toml</code>
-is this project's own. Pick a name, set <code>app = "&lt;your-app-name&gt;"</code> in
-<code>fly.toml</code>, then:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># First time</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>fly<span class="w"> </span>apps<span class="w"> </span>create<span class="w"> </span>&lt;your-app-name&gt;
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>fly<span class="w"> </span>deploy
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Subsequent deploys</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>fly<span class="w"> </span>deploy
+<p>From the repository root, copy the template to <code>fly.toml</code> (gitignored,
+so your values stay out of commits):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cp<span class="w"> </span>fly.example.toml<span class="w"> </span>fly.toml
+</code></pre></div>
+<p>Replace its placeholders:</p>
+<ul>
+<li><code>app</code>: your app name. App names are global on Fly, so pick one nobody
+  has taken.</li>
+<li><code>primary_region</code>: the region the machine and its volume live in
+  (<code>fly platform regions</code> lists the codes).</li>
+<li><code>STRATA_ALLOWED_HOSTS</code>: <code>&lt;your-app-name&gt;.fly.dev</code>, plus any custom
+  domain.</li>
+</ul>
+<p>Then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># First time</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>fly<span class="w"> </span>apps<span class="w"> </span>create<span class="w"> </span>&lt;your-app-name&gt;<span class="w">   </span><span class="c1"># add --org &lt;org&gt; for an organization other than your personal one</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>fly<span class="w"> </span>deploy
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Subsequent deploys</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>fly<span class="w"> </span>deploy
 </code></pre></div>
 <p>The volume defined in <code>[[mounts]]</code> (<code>strata_data</code>, 5 GB auto-extending to
 20 GB) is created automatically on first deploy, no separate
 <code>fly volumes create</code> step needed.</p>
 <h2 id="verify">Verify<a class="headerlink" href="#verify" title="Permanent link">&para;</a></h2>
 <p>After <code>fly deploy</code> reports success:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>https://&lt;your-app-name&gt;.fly.dev/health
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>https://&lt;your-app-name&gt;.fly.dev/health
 </code></pre></div>
 <p>Expected response: exactly <code>{"status":"ok"}</code>. The detailed views are <code>/health/dependencies</code> and <code>/health/ready</code>. If you get a
 504 or connection error, run <code>fly logs</code> to inspect the startup -
 the most common cause is a cold-start delay on the first request.</p>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
-<p>The <code>fly.toml</code> at the repo root configures:</p>
+<p>The template configures:</p>
 <ul>
 <li><strong>VM size</strong>: <code>shared-cpu-4x</code> with 2 GB RAM</li>
 <li><strong>Auto-scaling</strong>: machines suspend when idle, auto-start on requests</li>
@@ -2189,19 +2199,13 @@ the most common cause is a cold-start delay on the first request.</p>
 <li><strong>Health check</strong>: HTTP on <code>/health</code> every 15 s</li>
 </ul>
 <h2 id="key-environment-variables">Key environment variables<a class="headerlink" href="#key-environment-variables" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[env]</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="n">STRATA_DEPLOYMENT_MODE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"personal"</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="n">STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"true"</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="n">STRATA_ALLOWED_HOSTS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"strata-notebook.fly.dev"</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="n">STRATA_PERSONAL_MODE_USER_HEADER</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Cf-Access-Authenticated-User-Email"</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="n">STRATA_NOTEBOOK_PYTHON_VERSIONS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'["3.12","3.13"]'</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="n">UV_PYTHON_DOWNLOADS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"automatic"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[env]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="n">STRATA_DEPLOYMENT_MODE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"personal"</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="n">STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"true"</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="n">STRATA_ALLOWED_HOSTS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"&lt;your-app-name&gt;.fly.dev"</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="n">STRATA_NOTEBOOK_PYTHON_VERSIONS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'["3.12","3.13"]'</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="n">UV_PYTHON_DOWNLOADS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"automatic"</span>
 </code></pre></div>
-<p><code>STRATA_PERSONAL_MODE_USER_HEADER</code> turns on per-user notebook scoping when
-Cloudflare Access (or another authenticating proxy) injects that header; see
-<a href="../modes/#sharing-personal-mode-with-a-small-group">Sharing personal mode with a small group</a>.
-Without a proxy in front, requests carry no such header and the instance
-behaves as single-user.</p>
 <p><code>STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</code> is what lets personal-mode
 bind to <code>0.0.0.0</code> instead of loopback only - without it, Strata
 refuses to start on a Fly machine because the Fly proxy can't reach
@@ -2213,9 +2217,9 @@ listed here, which keeps DNS-rebinding pages out; a request for any
 other <code>Host</code> gets a 400. Set it to <code>&lt;your-app-name&gt;.fly.dev</code> and add
 any custom domain, comma-separated.</p>
 <h2 id="monitoring">Monitoring<a class="headerlink" href="#monitoring" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>fly<span class="w"> </span>logs<span class="w">          </span><span class="c1"># Stream logs</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>fly<span class="w"> </span>status<span class="w">        </span><span class="c1"># Machine status</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>fly<span class="w"> </span>ssh<span class="w"> </span>console<span class="w">   </span><span class="c1"># SSH into the machine</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>fly<span class="w"> </span>logs<span class="w">          </span><span class="c1"># Stream logs</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>fly<span class="w"> </span>status<span class="w">        </span><span class="c1"># Machine status</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>fly<span class="w"> </span>ssh<span class="w"> </span>console<span class="w">   </span><span class="c1"># SSH into the machine</span>
 </code></pre></div>
 
 
