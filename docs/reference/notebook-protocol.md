@@ -230,7 +230,9 @@ or a [quiesce](rest-api.md) hold. Before the socket closes (code `1000`,
 `reason` is `idle`, `session_limit`, `memory`, `closed` or `deleted`. Do not
 reconnect to the old `session_id` (the upgrade closes with `1008 Notebook not
 found`); reopen the notebook by path with `POST /v1/notebooks/open`, which
-starts a new session. The browser shows the message with a Reopen button.
+starts a new session. The browser shows the message with a Reopen button;
+the [terminal viewer](../notebook/tui.md#when-the-server-closes-the-session)
+shows it in a notification and reopens on `r`.
 
 ## Message types
 

@@ -510,6 +510,9 @@ no route serves files from outside the frontend.
 - Opening a notebook while its imported environment was still building in
   shared mode could hang the whole server; a blocking shared-environment sync
   now refuses to run on the event loop.
+- The terminal viewer reconnected into a refusal when the server closed its
+  session. It now stops, shows why, and `r` reopens the notebook by path (with
+  `--session ID` it says to run `strata watch PATH`).
 
 
 ## 0.8.0 - 2026-09-27
