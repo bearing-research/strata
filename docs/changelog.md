@@ -70,6 +70,23 @@ no route serves files from outside the frontend.
   `/v1/usage` and `/v1/workers` return only the caller's tenant.
 - Cells whose `[env]` held a blanked secret re-run once, since that empty
   value no longer reaches them.
+- Shared environments are keyed by what the lock installs, not the raw
+  `uv.lock` (which carried the project's name): existing shared environments
+  are rebuilt once and the old ones swept. The executor protocol's
+  `environment.key` changed the same way, so servers and workers (and any
+  registry addressing environments by key) upgrade together.
+- A configured SQL catalog whose warehouse is in object storage now needs a
+  `uri` (`STRATA_CATALOG_URI`, or the entry's own): the server refuses to start
+  rather than keep the catalog in SQLite on its own disk.
+- Notebook sessions with no edits, runs or focus for 4 hours are closed even
+  with a tab open (`STRATA_NOTEBOOK_SESSION_TTL_SECONDS`); the tab offers to
+  reopen.
+- `.mcp.json` and `CLAUDE.md` are ignored in new notebooks and left out of
+  exports; an existing notebook's `.gitignore` is not changed.
+- strata-pool: the jobs table's state CHECK gains `cancelled`. A pool database
+  created before this rejects a cancel until that constraint is updated or the
+  database recreated.
+
 
 ### Added
 
@@ -130,6 +147,40 @@ no route serves files from outside the frontend.
   its default from files that predate it, and an identity-partition column a
   file omits (a Hive-layout file registered with `add_files`) reads the
   file's partition value, as pyiceberg reads it.
+- **Notebook sessions have limits.** Idle sessions close after
+  `STRATA_NOTEBOOK_SESSION_TTL_SECONDS` (4 hours), at most
+  `STRATA_NOTEBOOK_MAX_SESSIONS` (50) stay open, and with
+  `STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB` set the least recently used idle
+  session closes when available memory drops below it. A sweep applies them
+  every minute. Edits, runs, cell focus and MCP calls count as activity; a
+  session running a cell or an environment job is never closed.
+  `STRATA_NOTEBOOK_WARM_POOL_SIZE` sets the warm pool (0 turns it off). A
+  closed session tells its clients with a `session_closed` frame, and the
+  browser offers to reopen. `POST /v1/notebooks/{id}/close` closes a session
+  and keeps the notebook.
+- **A worker can answer a direct cell with 202.** `POST /v1/execute` may
+  return a `job_url`; the server polls it, a machine's boot no longer counts
+  against the cell's timeout, and the finished job's URL returns the bundle.
+- **strata-pool jobs can be cancelled.** `POST /v1/jobs/{id}/cancel` stops a
+  queued job before any machine starts, and a running one on its machine,
+  which returns to warm. The job ends `cancelled`.
+- **Results record who computed them.** On a server that authenticates its
+  callers, every artifact a notebook run stores records the member who started
+  the run, so promoted and published results name who computed each step.
+- **`strata cell pin-fetch`** writes `sha256=` pins for a cell's fetches from
+  the local fetch cache. A pin mismatch carries `error_code:
+  fetch_pin_mismatch`, and publication pages and RO-Crates show when fetched
+  bytes were retrieved.
+- **Named catalogs take a credential.** A `STRATA_CATALOGS` entry accepts
+  `credential = "<name>"`, resolved from `STRATA_NOTEBOOK_CREDENTIALS`.
+- **Every cell has a digest.** `strata run` stores leaf cells' variables too,
+  so `--format json` reports a digest for the final result, and the ZIP
+  export's `provenance.json` lists each cell's output digests.
+- **Archives verify either file.** The RO-Crate lists `artifact.parquet` when
+  the archive has one, and `GET /p/{token}/verify?sha256=` names the bundle
+  file a digest matches. Each credit edit is a `credit` event on
+  `/v1/events`.
+
 
 ### Changed
 
@@ -187,6 +238,19 @@ no route serves files from outside the frontend.
   turns `javascript:` and similar link targets into `#`.
 - **`strata run` keeps notebook INFO logs off stderr**; `STRATA_LOG_LEVEL`
   brings them back.
+- **Notebooks share an environment whatever their names.** In shared mode,
+  notebooks with the same resolved dependencies link one environment, and the
+  notebook's own project is never installed into it.
+- **Exports carry the committed set.** Snapshot and ZIP exports include
+  `cells/tests/` and the notebook's `.gitignore`, and import restores it.
+- **`publish --to` streams and remaps.** Uploads go through the staged import
+  route instead of memory, and a chain another tenant already holds lands as
+  remapped copies instead of a 409. `promote --to` also streams.
+- **Service mode reuses only your own session.** Opening a path reuses a live
+  session only for the member who opened it.
+- `PATCH /v1/publications/{token}` refuses `artifact_id` and `version` with a
+  400 instead of ignoring them.
+
 
 ### Security
 
@@ -445,6 +509,10 @@ no route serves files from outside the frontend.
   `Cache-Control: no-cache`, every response carries
   `X-Content-Type-Options: nosniff`, and strata-client and strata-pool ship
   their LICENSE.
+- Opening a notebook while its imported environment was still building in
+  shared mode could hang the whole server; a blocking shared-environment sync
+  now refuses to run on the event loop.
+
 
 ## 0.8.0 - 2026-09-27
 
