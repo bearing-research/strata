@@ -2292,9 +2292,10 @@ trade is that a generated name is new on every start, so a process restarted
 within <code>lease_seconds</code> waits its old leases out instead of reclaiming them at
 once; set <code>instance_id</code> explicitly to keep that.</p>
 <p>Lease expiry is compared by wall clock across processes, so their clocks have
-to agree to well within a lease. Each process holds its catalogue in memory:
-<code>PUT /v1/machine-types</code> updates the process that served it and the stored
-catalogue, and the others pick it up when they restart.</p>
+to agree to well within a lease. The catalogue lives in the store too:
+<code>PUT /v1/machine-types</code> to any one process reaches the others, each of which
+applies it on its next submit or scaler pass, so they agree on which machines
+run the current image.</p>
 <h2 id="what-it-is-not">What it is not<a class="headerlink" href="#what-it-is-not" title="Permanent link">&para;</a></h2>
 <p><strong>It is not a cache.</strong> The pool has no idea Strata deduplicates work.
 Submitting a job whose result already exists boots a machine and recomputes
@@ -2449,12 +2450,18 @@ its machines finish what they are running, then retire once idle past the
 type's cool-down. A type whose <code>image</code> changed starts new machines on the new
 image. Machines already running the old image get no new jobs and retire the
 same way. The catalogue is stored with the pool's state, and on start it
-replaces the one the process was constructed with.</p>
+replaces the one the process was constructed with. A pool calling
+<code>replace_machine_types</code> directly changes only its own copy; <code>sync_catalogue</code>
+applies the stored one.</p>
 <p>A job submitted with W3C <code>traceparent</code> / <code>tracestate</code> headers keeps them, and
 the pool forwards them to the machine it runs on. With OpenTelemetry installed
 (it is not a dependency) the pool also opens a <code>pool.execute</code> span for the job's
 time on the machine. The machine's work then sits under that span, which sits
-under the caller's.</p>
+under the caller's. Beside it, <code>pool.queue</code> covers the job's wait from submit to
+dispatch, whichever process dispatched it, and <code>pool.boot</code> a machine's start
+from the request to the provider until it answers its health check. A boot is
+traced under the job first in line for that machine, and is marked as an error
+when the machine fails to start or to boot.</p>
 <p>A job that fails <strong>on the worker</strong> comes back as 502, and one that times out
 as 504. The caller has to be able to tell "your code raised" from "we could
 not run it". A cancelled job comes back as 409 with <code>"state": "cancelled"</code>.</p>
