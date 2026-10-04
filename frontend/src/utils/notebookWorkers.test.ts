@@ -8,6 +8,7 @@ import {
   workerNeedsAttention,
   summarizeRemoteExecutionState,
   summarizeWorkerCatalog,
+  editorWorkerTransport,
   effectiveWorkerNameForCell,
   isRemoteExecutorLikelyUnreachable,
   resolveEffectiveWorkerEntry,
@@ -50,6 +51,15 @@ test('workerTransportLabel classifies local, embedded, direct, and signed worker
     ),
     'signed',
   )
+})
+
+test('editorWorkerTransport keeps the signed aliases signed', () => {
+  for (const transport of ['signed', 'manifest', 'build', ' Manifest ']) {
+    assert.equal(editorWorkerTransport(transport), 'signed', transport)
+  }
+  for (const transport of ['direct', undefined, null, '']) {
+    assert.equal(editorWorkerTransport(transport), 'direct', String(transport))
+  }
 })
 
 test('resolveEffectiveWorkerEntry returns synthetic local and configured remote workers', () => {

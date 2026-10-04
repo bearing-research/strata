@@ -180,6 +180,41 @@ async def test_a_call_without_valid_credentials_is_refused(served):
     assert "notebook:read" in _text(forged)
 
 
+async def test_the_agent_reads_why_a_call_failed(served):
+    url, session = served
+    caller = _headers("ana", "notebook:read notebook:execute")
+
+    unknown = await _call(url, caller, "status", {"session_id": "nope"})
+    bad_mode = await _call(
+        url, caller, "run_cell", {"session_id": session.id, "cell_id": "a", "mode": "fast"}
+    )
+    no_cell = await _call(url, caller, "run_cell", {"session_id": session.id, "cell_id": "zz"})
+
+    assert unknown.is_error
+    assert "no open notebook session 'nope'; call list_notebooks first" in _text(unknown)
+    assert bad_mode.is_error
+    assert "unknown run mode 'fast'" in _text(bad_mode)
+    assert no_cell.is_error
+    assert "no cell with id 'zz'" in _text(no_cell)
+
+
+async def test_an_internal_failure_stays_generic(served, monkeypatch):
+    import strata.notebook.mcp_server as mcp_server
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("secret internals")
+
+    monkeypatch.setattr(mcp_server, "_status", crash)
+    url, session = served
+
+    result = await _call(
+        url, _headers("ana", "notebook:read"), "status", {"session_id": session.id}
+    )
+
+    assert result.is_error
+    assert _text(result) == "Error executing tool status"
+
+
 def test_every_tool_is_classified():
     """A new tool must be classified explicitly rather than default to notebook:execute."""
     import asyncio

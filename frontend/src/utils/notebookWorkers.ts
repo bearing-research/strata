@@ -30,6 +30,19 @@ export function resolveEffectiveWorkerEntry(
   return availableWorkers.find((worker) => worker.name === effectiveName) ?? null
 }
 
+// Mirrors SIGNED_TRANSPORTS in workers.py: aliases of the signed-URL pull path.
+const SIGNED_TRANSPORTS = new Set(['signed', 'manifest', 'build'])
+
+export function editorWorkerTransport(transport: unknown): 'direct' | 'signed' {
+  return SIGNED_TRANSPORTS.has(
+    String(transport || 'direct')
+      .trim()
+      .toLowerCase(),
+  )
+    ? 'signed'
+    : 'direct'
+}
+
 export function workerTransportLabel(
   worker: Pick<WorkerCatalogEntry, 'backend' | 'config' | 'transport'>,
 ): string {
@@ -40,9 +53,7 @@ export function workerTransportLabel(
     .trim()
     .toLowerCase()
   if (url.startsWith('embedded://')) return 'embedded'
-  if (transport === 'signed' || transport === 'manifest' || transport === 'build') {
-    return 'signed'
-  }
+  if (SIGNED_TRANSPORTS.has(transport)) return 'signed'
   if (url.startsWith('http://') || url.startsWith('https://')) return 'direct'
   return 'executor'
 }
