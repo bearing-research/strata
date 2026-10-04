@@ -2878,7 +2878,8 @@ next teammate hits.</p>
 </code></pre></div>
 <p>It works because a cell's provenance key -
 <code>sha256(sorted_input_hashes + source_hash + env_hash)</code> - contains no notebook id
-and no cell id. Two people running the same source over the same inputs in the
+and no cell id, and <code>env_hash</code> leaves out the notebook's own project name in
+<code>uv.lock</code>. Two people running the same source over the same inputs in the
 same environment already arrive at the same hash; the store just had no way to
 be asked.</p>
 <p>Lineage answers the follow-up. Opening a result's lineage (from the cell's
