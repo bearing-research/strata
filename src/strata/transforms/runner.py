@@ -823,7 +823,12 @@ class BuildRunner:
                     # raised HTTPStatusError carries the executor's message.
                     if response.status_code >= 400:
                         await response.aread()
-                    response.raise_for_status()
+                        raise httpx.HTTPStatusError(
+                            f"Executor returned HTTP {response.status_code}: "
+                            f"{_executor_error_text(response)}",
+                            request=response.request,
+                            response=response,
+                        )
 
                     # Executors may send base64-encoded logs in EXECUTOR_LOGS_HEADER.
                     from strata.types import EXECUTOR_LOGS_HEADER
@@ -867,6 +872,16 @@ class BuildRunner:
         schema_json = schema.to_string()
 
         return schema_json, row_count
+
+
+def _executor_error_text(response: httpx.Response, limit: int = 500) -> str:
+    """The executor's reason from an error body: ``error_message``, ``detail``, or the text."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    message = (body.get("error_message") or body.get("detail")) if isinstance(body, dict) else None
+    return str(message or response.text or "(empty body)")[:limit]
 
 
 _runner: BuildRunner | None = None
