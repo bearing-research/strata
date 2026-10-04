@@ -56,6 +56,11 @@ families include:
 - **Per tenant**: `strata_tenant_scans_total`,
   `strata_tenant_cache_hit_rate` and `strata_tenant_bytes_total`, labelled
   by `tenant`, once a tenant has made a request
+- **Per table**: `strata_table_scans_total`, `strata_table_latency_p95_ms`
+  and `strata_table_cache_hit_rate`, labelled by `table`, for the 20 most
+  scanned tables. Left out under principal auth (`trusted_proxy` or
+  `api_key`): the route is unauthenticated for scrapers, and table names,
+  which span tenants, are `admin:*` data there (`GET /metrics/tables`)
 - **AI**: `strata_ai_calls_total`, `strata_ai_input_tokens_total` and
   `strata_ai_output_tokens_total`, labelled by `tenant`, `principal` and
   `model`. Counted from each provider response a prompt cell receives. The

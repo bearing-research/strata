@@ -1049,3 +1049,7 @@ GET /health
 GET /metrics
 GET /metrics/prometheus
 ```
+
+Both are unauthenticated, for scrapers. Under principal auth
+`/metrics/prometheus` leaves out the per-table series, since table names are
+`admin:*` data (`GET /metrics/tables`).

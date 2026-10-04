@@ -676,7 +676,10 @@ async def metrics_prometheus():
         ]
     )
 
-    table_metrics = state.metrics.get_top_tables(20)
+    # Scrapers are unauthenticated; under principal auth table names (every tenant's) are
+    # admin:* data on /metrics/tables, so per-table series are left out.
+    principal_auth = state.config.principal_auth_enabled
+    table_metrics = [] if principal_auth else state.metrics.get_top_tables(20)
     if table_metrics:
         lines.extend(
             [
