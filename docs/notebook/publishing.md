@@ -289,8 +289,10 @@ it on either command; in service mode a publish through the API uses the
 authenticated principal instead. Omit it and there is simply no byline.
 
 **Who computed it** is the *Computed by* row, and it comes from the artifact
-itself, recorded when the cell ran, not when you published. A local run has no
-authenticated identity to record, so that row usually reads "not recorded".
+itself, recorded when the cell ran, not when you published. On a server that
+authenticates its callers (service mode) it is the member who ran the cell. A
+personal server has no authenticated identity to record, so there the row
+usually reads "not recorded".
 `--author` does not change it: crediting yourself for publishing a result is
 not the same as the store attesting who produced it, and the page keeps them
 apart deliberately.

@@ -439,10 +439,16 @@ answers the question a shared cache generates on day one: *"you got a hit and I
 didn't - why?"* The answer is almost always that the identities differ, and
 until they were readable there was no way to see it.
 
-The author column fills in only for steps that came *from* the store - a cell
-you ran yourself has no authenticated identity to attribute, so on a solo
-notebook it stays blank throughout. The platform and environment identity are
-recorded on every run, so what a shared store changes is not that they appear
+On a shared notebook server the author column names the member who ran each
+cell: every artifact the run stores, variables and displays alike, records the
+principal of the request that started it (a WebSocket run, the REST execute
+route, or an MCP tool call), even when another member is watching the same
+notebook. Promoting a result keeps those authors, so the team store says who
+computed each step, not who promoted it. In personal mode there is no
+authenticated identity, so the column fills in only for steps that came *from*
+the store and stays blank throughout on a solo notebook. The platform and
+environment identity are recorded on every run, so what a shared store changes
+is not that they appear
 but that they stop being the same value on every row. A graph where one step
 ran on someone else's machine, in a different environment, is the case these
 columns exist to make visible.
