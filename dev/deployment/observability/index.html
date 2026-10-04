@@ -2274,6 +2274,11 @@ families include:</p>
 <li><strong>Per tenant</strong>: <code>strata_tenant_scans_total</code>,
   <code>strata_tenant_cache_hit_rate</code> and <code>strata_tenant_bytes_total</code>, labelled
   by <code>tenant</code>, once a tenant has made a request</li>
+<li><strong>Per table</strong>: <code>strata_table_scans_total</code>, <code>strata_table_latency_p95_ms</code>
+  and <code>strata_table_cache_hit_rate</code>, labelled by <code>table</code>, for the 20 most
+  scanned tables. Left out under principal auth (<code>trusted_proxy</code> or
+  <code>api_key</code>): the route is unauthenticated for scrapers, and table names,
+  which span tenants, are <code>admin:*</code> data there (<code>GET /metrics/tables</code>)</li>
 <li><strong>AI</strong>: <code>strata_ai_calls_total</code>, <code>strata_ai_input_tokens_total</code> and
   <code>strata_ai_output_tokens_total</code>, labelled by <code>tenant</code>, <code>principal</code> and
   <code>model</code>. Counted from each provider response a prompt cell receives. The

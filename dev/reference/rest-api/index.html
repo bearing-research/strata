@@ -4253,7 +4253,7 @@ limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seco
 </tr>
 <tr>
 <td><code>400</code></td>
-<td>Malformed request (invalid path, bad enum value)</td>
+<td>Malformed request (invalid path, bad enum value, a table URI that names no <code>namespace.table</code>)</td>
 </tr>
 <tr>
 <td><code>401</code></td>
@@ -4265,7 +4265,7 @@ limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seco
 </tr>
 <tr>
 <td><code>404</code></td>
-<td>Notebook session not found, or a hidden 403 (see above)</td>
+<td>Notebook session not found, a table its catalog does not have, or a hidden 403 (see above)</td>
 </tr>
 <tr>
 <td><code>409</code></td>
@@ -4946,6 +4946,9 @@ authenticated caller the only possible answer is every tenant's at once.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-92-1" name="__codelineno-92-1" href="#__codelineno-92-1"></a>GET /metrics
 <a id="__codelineno-92-2" name="__codelineno-92-2" href="#__codelineno-92-2"></a>GET /metrics/prometheus
 </code></pre></div>
+<p>Both are unauthenticated, for scrapers. Under principal auth
+<code>/metrics/prometheus</code> leaves out the per-table series, since table names are
+<code>admin:*</code> data (<code>GET /metrics/tables</code>).</p>
 
 
 

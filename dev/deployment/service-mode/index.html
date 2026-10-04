@@ -2673,7 +2673,10 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
   is listed, read and cancelled (<code>/v1/cache/warm/jobs*</code>) only by its
   own tenant; <code>admin:*</code> sees every tenant's.</li>
 <li><strong>Metric labels</strong>: Prometheus output carries a <code>tenant</code> label so
-  you can dashboard per-tenant usage.</li>
+  you can dashboard per-tenant usage. It names no tables:
+  <code>/metrics/prometheus</code> is unauthenticated for scrapers, so under
+  principal auth the per-table series are left out. Read them from
+  <code>GET /metrics/tables</code> with <code>admin:*</code>.</li>
 </ul>
 <p>A tenant registry tracks active tenants (LRU-bounded; only a tenant with nothing in flight is evicted). <a href="https://github.com/bearing-research/strata/tree/main/src/strata">Implementation details are in the source tree</a> if you need to extend the tenant-scoping behavior.</p>
 <h2 id="acls">ACLs<a class="headerlink" href="#acls" title="Permanent link">&para;</a></h2>
