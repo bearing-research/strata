@@ -27,7 +27,7 @@ Options:
 
 Examples:
   npm run benchmark:notebook -- --base-url http://127.0.0.1:8765
-  npm run benchmark:notebook -- --base-url https://strata-notebook.fly.dev --iterations 3 --json /tmp/notebook-bench.json
+  npm run benchmark:notebook -- --base-url https://strata.example.com --iterations 3 --json /tmp/notebook-bench.json
 `)
 }
 

@@ -17,7 +17,6 @@ between three shapes.
 | **ACLs** | Not evaluated | Not evaluated | Deny-first (`acl_config`) |
 | **Default artifact dir** | `~/.strata/artifacts` | `~/.strata/artifacts` | None; set `STRATA_ARTIFACT_DIR` explicitly (required with a blob backend too) |
 | **Network binding** | Loopback only | Non-loopback with `allow_remote_clients_in_personal=true` | Unrestricted |
-| **Used by Strata's hosted preview** | – | Yes (Fly.io + Cloudflare Access) | – |
 | **Use in production for sharing?** | No: anyone on the network can write | Only behind a real auth proxy, small trusted group | Yes |
 
 The rows that drive the choice are typically **Writes** (does anyone
@@ -36,9 +35,8 @@ shared?). The flags that follow are the consequences.
   isolation (artifact store is shared), but each user gets their
   own list in "Open existing." See [Sharing personal mode with a
   small group](#sharing-personal-mode-with-a-small-group) below.
-  This is what Strata's own hosted preview at
-  [strata-notebook.fly.dev](https://strata-notebook.fly.dev) runs.
-  See [Fly.io deployment](fly.md) for the deployment recipe.
+  See [Fly.io deployment](fly.md) for a recipe that hosts personal
+  mode.
 - **Service**: hosting Strata for users you can't fully trust, or
   with sensitive data, or with multi-tenant isolation requirements.
   Reads are tenant-scoped and ACL-gated; writes are off by default

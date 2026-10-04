@@ -1,20 +1,19 @@
 # Fly.io Deployment
 
-Strata's hosted preview runs on [Fly.io](https://fly.io) at [strata-notebook.fly.dev](https://strata-notebook.fly.dev). This page describes how to replicate that setup for your own single-tenant deployment.
+This page deploys Strata on [Fly.io](https://fly.io) as a single-tenant, personal-mode server, from the template `fly.example.toml` at the repository root.
 
 ## Trust model
 
 !!! warning "Read before deploying to a public URL"
-    The `fly.toml` in this repo deploys Strata in **personal mode** with
+    `fly.example.toml` deploys Strata in **personal mode** with
     `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"`. Personal mode
     has no authentication and enables write endpoints (create / delete
     notebooks, upload artifacts). Anyone who reaches the Fly app's URL
     can use it.
 
     This is fine for: a personal scratch instance behind a URL you
-    don't share, a hosted demo (like Strata's own preview), or a
-    deployment fronted by an authenticating proxy (Cloudflare Access,
-    Pomerium, etc.).
+    don't share, a hosted demo, or a deployment fronted by an
+    authenticating proxy (Cloudflare Access, Pomerium, etc.).
 
     This is **not** appropriate for: shared team deployments without
     an auth proxy, anything with sensitive data, anything you'd be
@@ -27,21 +26,35 @@ Strata's hosted preview runs on [Fly.io](https://fly.io) at [strata-notebook.fly
 
 - [Fly CLI](https://fly.io/docs/flyctl/install/) installed (`brew install flyctl` on macOS).
 - `fly auth login` completed (opens a browser; one-time).
-- A Fly.io account with a payment method on file. The shipped
-  `fly.toml` runs one `shared-cpu-4x` VM with 2 GB of memory. It
-  suspends idle machines but keeps one running, so it does not scale to
-  zero unless you change `min_machines_running`. See
+- A Fly.io account with a payment method on file. The template runs
+  one `shared-cpu-4x` VM with 2 GB of memory. It suspends idle machines
+  but keeps one running, so it does not scale to zero unless you change
+  `min_machines_running`. See
   [Fly pricing](https://fly.io/docs/about/pricing/) for what that costs.
 
 ## Deploy
 
-App names are global on Fly, and the `app` in the shipped `fly.toml`
-is this project's own. Pick a name, set `app = "<your-app-name>"` in
-`fly.toml`, then:
+From the repository root, copy the template to `fly.toml` (gitignored,
+so your values stay out of commits):
+
+```bash
+cp fly.example.toml fly.toml
+```
+
+Replace its placeholders:
+
+- `app`: your app name. App names are global on Fly, so pick one nobody
+  has taken.
+- `primary_region`: the region the machine and its volume live in
+  (`fly platform regions` lists the codes).
+- `STRATA_ALLOWED_HOSTS`: `<your-app-name>.fly.dev`, plus any custom
+  domain.
+
+Then:
 
 ```bash
 # First time
-fly apps create <your-app-name>
+fly apps create <your-app-name>   # add --org <org> for an organization other than your personal one
 fly deploy
 
 # Subsequent deploys
@@ -66,7 +79,7 @@ the most common cause is a cold-start delay on the first request.
 
 ## Configuration
 
-The `fly.toml` at the repo root configures:
+The template configures:
 
 - **VM size**: `shared-cpu-4x` with 2 GB RAM
 - **Auto-scaling**: machines suspend when idle, auto-start on requests
@@ -79,17 +92,10 @@ The `fly.toml` at the repo root configures:
 [env]
   STRATA_DEPLOYMENT_MODE = "personal"
   STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"
-  STRATA_ALLOWED_HOSTS = "strata-notebook.fly.dev"
-  STRATA_PERSONAL_MODE_USER_HEADER = "Cf-Access-Authenticated-User-Email"
+  STRATA_ALLOWED_HOSTS = "<your-app-name>.fly.dev"
   STRATA_NOTEBOOK_PYTHON_VERSIONS = '["3.12","3.13"]'
   UV_PYTHON_DOWNLOADS = "automatic"
 ```
-
-`STRATA_PERSONAL_MODE_USER_HEADER` turns on per-user notebook scoping when
-Cloudflare Access (or another authenticating proxy) injects that header; see
-[Sharing personal mode with a small group](modes.md#sharing-personal-mode-with-a-small-group).
-Without a proxy in front, requests carry no such header and the instance
-behaves as single-user.
 
 `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` is what lets personal-mode
 bind to `0.0.0.0` instead of loopback only - without it, Strata
