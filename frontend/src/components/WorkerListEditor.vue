@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { EditableWorkerSpec, WorkerSpec } from '../types/notebook'
+import { editorWorkerTransport } from '../utils/notebookWorkers'
 
 interface WorkerDraft {
   localId: string
@@ -66,12 +67,7 @@ function toDraft(workers: EditableWorkerSpec[], previous: WorkerDraft[] = []): W
     enabled: worker.enabled !== false,
     runtimeId: worker.runtimeId ?? '',
     executorUrl: typeof worker.config?.url === 'string' ? worker.config.url : '',
-    transport:
-      String(worker.config?.transport || 'direct')
-        .trim()
-        .toLowerCase() === 'signed'
-        ? 'signed'
-        : 'direct',
+    transport: editorWorkerTransport(worker.config?.transport),
     strataUrl: typeof worker.config?.strata_url === 'string' ? worker.config.strata_url : '',
     extraConfig:
       worker.config && typeof worker.config === 'object'
