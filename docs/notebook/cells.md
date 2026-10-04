@@ -476,7 +476,7 @@ Notes:
 
 ### DuckDB over the lake
 
-A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a catalog the server configures (`[tool.strata.catalogs.<name>]`, a REST catalog), and `mounts` names mounts declared for the cell, in `[[mounts]]` or with `# @mount`:
+A DuckDB connection can read the organization's Iceberg catalog and the notebook's mounts. `catalog` names a REST or AWS Glue catalog the server configures (`[tool.strata.catalogs.<name>]`) or, on a personal server, one the notebook defines in [`[catalogs.<name>]`](../reference/notebook-toml.md#notebook-catalogs). `mounts` names mounts declared for the cell, in `[[mounts]]` or with `# @mount`:
 
 ```toml
 [connections.lake]
@@ -493,7 +493,7 @@ FROM lake.taxi.trips t JOIN raw USING (zone)
 GROUP BY t.zone
 ```
 
-Each mount is a view by its name over its Parquet, CSV or JSON files (`file` and `s3` mounts, read with the mount's storage options). Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. The catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends.
+Each mount is a view by its name over its Parquet, CSV or JSON files, read with the mount's storage options. `file`, `s3`, `gs` and `az` mounts work; GCS and Azure ones are read through the same fsspec filesystem (gcsfs, adlfs) a Python cell's mount uses, so a connection's mounts on one of those schemes must share their storage options. Every catalog table the query reads is an input the way an `@table` declaration is: the cell's provenance folds its current snapshot, the query reads that snapshot, and a new snapshot makes the cell idle (out of date) and the cells downstream of it stale. Each mount's fingerprint is folded too, so a new file does the same. The catalog is attached read-only and the mounts are views; a `write` cell on the connection writes only its `path` database. A REST catalog's `s3.*` keys apply only under an `s3://` warehouse; otherwise its tables are read with the credentials the catalog vends. A Glue catalog is attached through Glue's Iceberg REST endpoint in its `glue.region` for the account `glue.id`, both required; its `glue.*` keys (or `client.*`, or `s3.*`) sign the catalog's requests and read its tables' files, and without keys the AWS credential chain (environment, profile, instance role) does.
 
 A read cell runs reads: `SELECT`, set operations, `VALUES`, `TABLE`, `SUMMARIZE`, `PIVOT`, `DESCRIBE`, `SHOW` and plain `EXPLAIN`. Anything else (DDL, DML, `COPY`, `ATTACH`, `USE`, `CALL`, `SET`, `PRAGMA`, and `EXPLAIN ANALYZE`, which runs the statement it describes) is refused before the cell reaches the driver, naming the statement, because the read-only transaction the driver opens is one a `COMMIT` in the body can end. This holds on every driver, not only DuckDB. Use `# @sql connection=<name> write=true` for a cell that changes a database.
 

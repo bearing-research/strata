@@ -200,10 +200,39 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become driver auth, underneath this block's own `auth`. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |
-| `catalog` (DuckDB) | string \| absent | A server-configured REST catalog to attach under its name; the query reads each of its tables at the snapshot the cell's provenance folds. See [DuckDB over the lake](../notebook/cells.md#duckdb-over-the-lake). |
-| `mounts` (DuckDB) | list of strings \| absent | Mounts declared for the cell to expose as views by name over their Parquet, CSV or JSON files. |
+| `catalog` (DuckDB) | string \| absent | A REST or Glue catalog to attach under its name, from the server's catalogs or, in personal mode, this file's [`[catalogs.<name>]`](#notebook-catalogs); the query reads each of its tables at the snapshot the cell's provenance folds. See [DuckDB over the lake](../notebook/cells.md#duckdb-over-the-lake). |
+| `mounts` (DuckDB) | list of strings \| absent | Mounts declared for the cell (`file`, `s3`, `gs` or `az`) to expose as views by name over their Parquet, CSV or JSON files. |
 
 **Malformed connection preservation.** If a `[connections.<name>]` block fails validation (bad name, missing `driver`, etc.), its body is written back verbatim under the same `[connections.<name>]` table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.
+
+## `[catalogs.<name>]` - Notebook-level catalogs { #notebook-catalogs }
+
+On a personal server, a notebook can define the Iceberg catalogs its DuckDB
+connections attach, instead of the server's `STRATA_CATALOGS`:
+
+```toml
+[catalogs.lake]
+type = "glue"
+"glue.id" = "123456789012"
+"glue.region" = "eu-west-1"
+credential = "lake-ro"
+
+[connections.lake]
+driver = "duckdb"
+path = ":memory:"
+catalog = "lake"
+```
+
+Each entry is a set of PyIceberg catalog properties, the same shape as an
+entry in `STRATA_CATALOGS`, and `credential` names a server-defined
+[credential](#named-credentials) so no secret is written here. A notebook entry
+wins over a server catalog of the same name, as a notebook's workers do.
+
+- Only a DuckDB connection's `catalog` reads these. `@table` and the scans a
+  Python cell runs resolve catalog names on the server, so they see the
+  server's catalogs only.
+- A server in service mode ignores them, and a cell whose connection names one
+  fails saying so: on a shared server the operator configures the catalogs.
 
 ## `[[variant_group]]` - Active-variant pointers
 

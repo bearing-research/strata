@@ -160,8 +160,9 @@ class DuckDBAdapter:
             assert catalog_name is not None
             conn.execute("INSTALL iceberg; LOAD iceberg")
             _attach_catalog(conn, catalog_name, catalog)
+        filesystems: dict[str, tuple[str, dict[str, Any]]] = {}
         for mount in mounts:
-            _create_mount_view(conn, mount)
+            _create_mount_view(conn, mount, filesystems)
         for statement in setup:
             conn.execute(statement)
         if confine is not None:
@@ -458,10 +459,13 @@ def _s3_secret(name: str, fields: dict[str, Any], scope: str | None = None) -> s
 
 
 def _attach_catalog(conn: Any, name: str, properties: dict[str, str]) -> None:
-    """Attach an Iceberg REST catalog, from its pyiceberg properties, as *name*."""
+    """Attach an Iceberg REST or AWS Glue catalog, from its pyiceberg properties, as *name*."""
     kind = properties.get("type", "rest")
+    if kind == "glue":
+        _attach_glue(conn, name, properties)
+        return
     if kind != "rest":
-        raise RuntimeError(f"DuckDB attaches REST catalogs; catalog {name!r} is {kind!r}")
+        raise RuntimeError(f"DuckDB attaches REST and Glue catalogs; catalog {name!r} is {kind!r}")
     uri = properties.get("uri")
     if not uri:
         raise RuntimeError(f"catalog {name!r} has no uri")
@@ -501,21 +505,105 @@ def _attach_catalog(conn: Any, name: str, properties: dict[str, str]) -> None:
     )
 
 
-def _create_mount_view(conn: Any, mount: dict[str, Any]) -> None:
-    """``memory.main.<name>``: a view over the mount's Parquet, CSV or JSON files."""
+def _attach_glue(conn: Any, name: str, properties: dict[str, str]) -> None:
+    """Attach an AWS Glue catalog through Glue's Iceberg REST endpoint, signed with SigV4.
+
+    Keys come from pyiceberg's ``glue.*`` properties, then ``client.*``, then
+    ``s3.*``; with none, the AWS credential chain (environment, profile, role) signs.
+    """
+
+    def first(*keys: str) -> str | None:
+        return next((str(properties[key]) for key in keys if properties.get(key)), None)
+
+    account = first("glue.id")
+    if not account:
+        raise RuntimeError(f"Glue catalog {name!r} needs glue.id, the AWS account it belongs to")
+    region = first("glue.region", "client.region", "s3.region")
+    if not region:
+        raise RuntimeError(f"Glue catalog {name!r} needs glue.region")
+    key_id = first("glue.access-key-id", "client.access-key-id", "s3.access-key-id")
+    if key_id:
+        fields = {
+            "KEY_ID": key_id,
+            "SECRET": first(
+                "glue.secret-access-key", "client.secret-access-key", "s3.secret-access-key"
+            ),
+            "SESSION_TOKEN": first(
+                "glue.session-token", "client.session-token", "s3.session-token"
+            ),
+        }
+        options = [f"{key} {_literal(value)}" for key, value in fields.items() if value]
+    else:
+        conn.execute("INSTALL aws; LOAD aws")
+        profile = first("glue.profile-name", "client.profile-name")
+        options = ["PROVIDER credential_chain"]
+        if profile:
+            options.append(f"PROFILE {_literal(profile)}")
+    options.append(f"REGION {_literal(region)}")
+    secret = f"strata_catalog_{name}"
+    # Unscoped: a Glue table's files can be in any bucket, and Glue vends no
+    # credentials for them. A mount's secret is scoped to its root, so wins there.
+    conn.execute(f"CREATE OR REPLACE SECRET {_ident(secret)} (TYPE s3, {', '.join(options)})")
+    conn.execute(
+        f"ATTACH {_literal(account)} AS {_ident(name)} (TYPE iceberg, "
+        f"ENDPOINT {_literal(f'glue.{region}.amazonaws.com/iceberg')}, "
+        f"AUTHORIZATION_TYPE 'sigv4', SECRET {_ident(secret)}, READ_ONLY)"
+    )
+
+
+# GCS and Azure mounts are read through the mount's own fsspec filesystem
+# (gcsfs, adlfs), with a Python cell's storage options; DuckDB names each
+# filesystem by its first protocol.
+_FSSPEC_PREFIXES = {"gs": "gs", "az": "abfs"}
+
+
+def mount_root(uri: str) -> str:
+    """Where DuckDB reads the mount *uri*: a local path, or a URL it has a filesystem for."""
+    from strata.notebook.mounts import parse_mount_uri
+
+    scheme, path = parse_mount_uri(uri)
+    if scheme == "file":
+        return path
+    return f"{_FSSPEC_PREFIXES.get(scheme, scheme)}://{path}"
+
+
+def _create_mount_view(
+    conn: Any,
+    mount: dict[str, Any],
+    filesystems: dict[str, tuple[str, dict[str, Any]]],
+) -> None:
+    """``memory.main.<name>``: a view over the mount's Parquet, CSV or JSON files.
+
+    *filesystems* records the fsspec filesystem registered on *conn* for each of
+    ``gs`` and ``az``, as ``(mount name, storage options)``.
+    """
     from strata.notebook.mounts import parse_mount_uri
 
     name, uri = mount["name"], mount["uri"]
-    scheme, path = parse_mount_uri(uri)
-    if scheme == "file":
-        root = path
-    elif scheme == "s3":
-        root = f"s3://{path}"
-        secret = _s3_secret(f"strata_mount_{name}", mount.get("storage_options") or {}, root)
+    scheme, _ = parse_mount_uri(uri)
+    root = mount_root(uri)
+    storage_options = mount.get("storage_options") or {}
+    if scheme == "s3":
+        secret = _s3_secret(f"strata_mount_{name}", storage_options, root)
         if secret:
             conn.execute(secret)
-    else:
-        raise RuntimeError(f"DuckDB reads file and s3 mounts; mount {name!r} is {scheme}")
+    elif scheme in _FSSPEC_PREFIXES:
+        registered = filesystems.get(scheme)
+        if registered is None:
+            from strata.notebook.mounts import _mount_filesystem, _scheme_to_fsspec_protocol
+
+            conn.register_filesystem(
+                _mount_filesystem(_scheme_to_fsspec_protocol(scheme), storage_options)
+            )
+            filesystems[scheme] = (name, storage_options)
+        elif registered[1] != storage_options:
+            # One filesystem per protocol on a connection, so one identity per scheme.
+            raise RuntimeError(
+                f"mounts {registered[0]!r} and {name!r} read {scheme} with different "
+                "storage options; a DuckDB connection reads each scheme with one"
+            )
+    elif scheme != "file":
+        raise RuntimeError(f"DuckDB reads file, s3, gs and az mounts; mount {name!r} is {scheme}")
     root = root.rstrip("/")
     for extension, reader in _MOUNT_FORMATS:
         if root.endswith(f".{extension}"):

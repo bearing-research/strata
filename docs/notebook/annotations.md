@@ -342,7 +342,10 @@ The warehouse may be local or on S3, GCS (`gs://`) or Azure (`abfs://`,
 name must be a valid Python identifier.
 
 Catalogs are named on the server, not in `notebook.toml`, because the scan the
-cell runs happens in the server and has to resolve the same name.
+cell runs happens in the server and has to resolve the same name. (A DuckDB
+connection, which attaches its catalog itself, can also name one the notebook
+defines on a personal server; see
+[notebook-level catalogs](../reference/notebook-toml.md#notebook-catalogs).)
 
 `snapshot=<id>` pins the table: the cell reads that snapshot forever and never
 goes out of date on new data (the lake-side analog of a mount `pin`). Without a pin,

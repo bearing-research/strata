@@ -492,6 +492,14 @@ class NotebookToml(BaseModel):
         default_factory=dict,
         description="Notebook-level LLM configuration persisted under [ai]",
     )
+    catalogs: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Notebook-level Iceberg catalogs under ``[catalogs.<name>]``, "
+            "PyIceberg properties as in the server's ``catalogs``. Personal "
+            "mode only."
+        ),
+    )
     secret_manager: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -922,6 +930,13 @@ class NotebookState(BaseModel):
             "Connection blocks that failed to parse, preserved so "
             "annotation_validation can surface them and the writer "
             "round-trip doesn't erase them."
+        ),
+    )
+    catalogs: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Parsed ``[catalogs.<name>]`` blocks: catalogs a DuckDB "
+            "connection can name in personal mode, beside the server's."
         ),
     )
     secret_manager_config: dict[str, Any] = Field(

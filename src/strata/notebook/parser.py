@@ -71,6 +71,14 @@ def _parse_connections(
     return valid, malformed
 
 
+def _parse_catalogs(toml_data: dict) -> dict[str, dict]:
+    """``[catalogs.<name>]`` tables; anything else under ``catalogs`` is not a catalog."""
+    raw = toml_data.get("catalogs")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(name): dict(body) for name, body in raw.items() if isinstance(body, dict)}
+
+
 def parse_notebook(directory: Path) -> NotebookState:
     """Parse a notebook directory: notebook.toml plus every cell file.
 
@@ -146,6 +154,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         malformed_connections=_parsed_malformed,
         variant_groups=_parsed_variant_groups,
         ai=toml_data.get("ai", {}),
+        catalogs=_parse_catalogs(toml_data),
         secret_manager=toml_data.get("secret_manager", {}),
         r=toml_data.get("r", {}),
         artifacts=toml_data.get("artifacts", {}),
@@ -249,6 +258,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         mounts=list(notebook_toml.mounts),
         connections=list(notebook_toml.connections),
         malformed_connections=list(notebook_toml.malformed_connections),
+        catalogs=dict(notebook_toml.catalogs),
         secret_manager_config=dict(notebook_toml.secret_manager),
         r=dict(notebook_toml.r),
         cells=cell_states,

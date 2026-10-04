@@ -1,7 +1,8 @@
 """A DuckDB connection over the organization's lake: its catalog and mounts.
 
-A DuckDB connection can name a server-configured catalog
-(``[tool.strata] catalogs``) and the mounts it reads::
+A DuckDB connection can name a catalog (the server's ``[tool.strata] catalogs``
+or, in personal mode, the notebook's ``[catalogs.<name>]``) and the mounts it
+reads::
 
     [connections.lake]
     driver = "duckdb"
@@ -58,6 +59,18 @@ def lake_options(spec: ConnectionSpec) -> tuple[str | None, list[str]]:
     catalog = getattr(spec, "catalog", None)
     mounts = getattr(spec, "mounts", None) or []
     return (str(catalog) if catalog else None), [str(m) for m in mounts]
+
+
+def with_notebook_catalogs(config: Any, notebook_state: NotebookState) -> Any:
+    """*config* with the notebook's ``[catalogs.<name>]`` added, in personal mode only.
+
+    A notebook entry wins over a server one of the same name, as a notebook's
+    worker does. Service mode reads only the catalogs the server configures.
+    """
+    catalogs = getattr(notebook_state, "catalogs", None)
+    if not catalogs or getattr(config, "deployment_mode", "personal") == "service":
+        return config
+    return config.model_copy(update={"catalogs": {**(config.catalogs or {}), **catalogs}})
 
 
 def _table_spec(catalog: str, table: QualifiedTable) -> TableSpec:
@@ -132,10 +145,15 @@ def resolve_lake(
     catalog, mount_names = lake_options(spec)
     lake = Lake(spec=spec)
     update: dict[str, Any] = {}
-    config = session._lake_config()
+    config = with_notebook_catalogs(session._lake_config(), session.notebook_state)
     confined = getattr(config, "deployment_mode", "personal") == "service"
     if catalog:
         properties = (getattr(config, "catalogs", None) or {}).get(catalog)
+        if properties is None and catalog in session.notebook_state.catalogs:
+            raise LakeError(
+                f"catalog {catalog!r} is defined in notebook.toml, and a server in service "
+                "mode reads only the catalogs it configures"
+            )
         if properties is None:
             raise LakeError(f"catalog {catalog!r} is not configured on this server")
         from strata.notebook.credentials import (
@@ -199,10 +217,9 @@ def _table_location(table_spec: TableSpec, config: Any) -> str:
 
 def _mount_location(uri: str) -> str:
     """A mount's root as a location: a directory (``.../``), or its one file."""
-    from strata.notebook.mounts import parse_mount_uri
+    from strata.notebook.sql.drivers.duckdb import mount_root
 
-    scheme, path = parse_mount_uri(uri)
-    root = (path if scheme == "file" else f"{scheme}://{path}").rstrip("/")
+    root = mount_root(uri).rstrip("/")
     if root.endswith((".parquet", ".csv", ".json")):
         return root
     return root + "/"
