@@ -38,7 +38,7 @@ DATA_BUCKET = "s3://my-bucket"
 ANTHROPIC_API_KEY = ""              # blanked: keys matching KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL
 ```
 
-**What gets blanked.** Values for keys whose name contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, or `CREDENTIAL` are written as empty strings to disk. The blanked entry is still committed so users can see which env vars a notebook *expects* without leaking the value into the repo. On open the key comes back empty: fill it in the Runtime panel, or let a [secret manager](#secret_manager-external-secret-manager-wiring) fill it. Until then a cell sees the server's own value for that variable, if it has one: an empty secret-looking value is a placeholder, not an override.
+**What gets blanked.** Values for keys whose name contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, or `CREDENTIAL` are written as empty strings to disk. The blanked entry is still committed so users can see which env vars a notebook *expects* without leaking the value into the repo. A value typed in the Runtime panel stays in the server's memory for the session, and no response or WebSocket frame carries it: clients get `"__strata_masked__"` in its place (see [Update Notebook Default Env](rest-api.md#update-notebook-default-env)). In a new session the key comes back empty: fill it in the Runtime panel, or let a [secret manager](#secret_manager-external-secret-manager-wiring) fill it. Until then a cell sees the server's own value for that variable, if it has one: an empty secret-looking value is a placeholder, not an override.
 
 **Whole-block elision.** If every entry is either empty or a blanked sensitive key, the writer omits the `[env]` block entirely on save. Typing an API key into the Runtime panel doesn't churn the committed file.
 

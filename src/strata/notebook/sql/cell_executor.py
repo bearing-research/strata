@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.provenance import derive_subkey
+from strata.notebook.serializer import _META_SHAPE, _SHAPE_SCALAR, _extract_scalar_from_table
 from strata.notebook.sql.adapter import FreshnessToken
 from strata.notebook.sql.analyzer import (
     analyze_sql_cell,
@@ -897,14 +898,17 @@ def _deserialize_blob(blob: bytes, content_type: str) -> Any:
         except (ValueError, TypeError):
             return None
     if content_type == "arrow/ipc":
-        # Not bindable, but loaded so the bind layer raises the right BindError.
+        # A table is not bindable, but is loaded so the bind layer raises the right BindError.
         try:
             import pyarrow as pa
 
-            reader = pa.ipc.open_stream(blob)
-            return reader.read_all()
+            table = pa.ipc.open_stream(blob).read_all()
         except Exception:  # noqa: BLE001
             return blob
+        # datetime / Decimal / UUID / bytes values are stored as 1-row scalar tables.
+        if (table.schema.metadata or {}).get(_META_SHAPE) == _SHAPE_SCALAR:
+            return _extract_scalar_from_table(table)
+        return table
     if content_type == "pickle/object":
         # Unpickling would run the producing cell's code as the server user.
         return PickledObject()

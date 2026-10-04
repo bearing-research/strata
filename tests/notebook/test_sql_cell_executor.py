@@ -1074,6 +1074,56 @@ async def test_duckdb_cell_read_only_blocks_writes(tmp_path):
         conn.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        ("datetime.datetime(2024, 1, 2, 3, 4, 5)", "2024-01-02 03:04:05"),
+        ("datetime.date(2024, 1, 2)", "2024-01-02"),
+        ("datetime.time(3, 4, 5)", "03:04:05"),
+        ("decimal.Decimal('12.50')", "12.50"),
+        (
+            "uuid.UUID('12345678-1234-5678-1234-567812345678')",
+            "12345678-1234-5678-1234-567812345678",
+        ),
+        ("b'abc'", "abc"),
+        ("numpy.int64(5)", "5"),
+    ],
+)
+async def test_duckdb_cell_binds_a_typed_scalar_from_an_upstream_python_cell(
+    tmp_path, expr, expected
+):
+    """These values are stored as Arrow scalar tables; the bind gets the Python value back."""
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    db_path = tmp_path / "events.duckdb"
+    _seed_duckdb(db_path)
+    nb_dir = create_notebook(tmp_path, "duckdb_binds")
+    add_cell_to_notebook(nb_dir, "py", language="python")
+    write_cell(nb_dir, "py", f"import datetime, decimal, uuid, numpy\nv = {expr}\n")
+    add_cell_to_notebook(nb_dir, "sql", after_cell_id="py", language="sql")
+    write_cell(
+        nb_dir, "sql", "# @sql connection=db\n# @cache forever\nSELECT CAST(:v AS VARCHAR) AS v\n"
+    )
+    toml_path = nb_dir / "notebook.toml"
+    toml_path.write_text(
+        toml_path.read_text() + f'\n[connections.db]\ndriver = "duckdb"\npath = "{db_path}"\n'
+    )
+    session = _make_session(nb_dir)
+    session.refresh_environment_runtime()
+
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    py_result = await CellExecutor(session).execute_cell("py", _read_cell(nb_dir, "py"))
+    assert py_result.success, py_result.error
+
+    result = await execute_sql_cell(session, "sql", _read_cell(nb_dir, "sql"))
+    assert result["success"], result.get("error")
+    table = _load_artifact_as_arrow(session, result["artifact_uri"])
+    assert table.to_pylist() == [{"v": expected}]
+
+
 class TestSafelyClose:
     """A handle whose close fails must not be closed again at collection.
 
