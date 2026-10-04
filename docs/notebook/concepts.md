@@ -244,6 +244,7 @@ The provenance hash determines cache identity. It includes:
 | Mount fingerprints (URI and contents) | Yes | Different mounted data = different result |
 | `@table` snapshot, `@fetch` digest, `@dataset` version | Yes | New data at the source = different result |
 | Cell ID | No | Same code in a different cell = same result |
+| Notebook ID or project name | No | Same cell in another notebook with the same packages = same result |
 | Execution time | No | Same inputs should produce same output |
 
 When you change a cell's source, its provenance hash changes, and all downstream cells become **stale**.

@@ -3,6 +3,7 @@
 import hashlib
 
 from strata.notebook.env import (
+    _runtime_uv_closure_fingerprint,
     collect_referenced_env_keys,
     compute_lockfile_hash,
     narrow_env_for_provenance,
@@ -40,23 +41,6 @@ def test_lockfile_hash_missing_lockfile(tmp_path):
     assert hash_val == expected
 
 
-def test_lockfile_hash_unchanged_for_uv_only_notebook(tmp_path):
-    """A uv-only notebook still hashes to raw sha256(uv.lock).
-
-    Folding ``renv.lock`` into the digest must not change it, or every cached R-free notebook
-    would lose its cache.
-    """
-    lockfile = tmp_path / "uv.lock"
-    lockfile.write_text("[[package]]\nname = 'pandas'\nversion = '2.0'\n")
-
-    actual = compute_lockfile_hash(tmp_path)
-    expected = hashlib.sha256(lockfile.read_bytes()).hexdigest()
-
-    assert actual == expected, (
-        "uv-only notebook hash must match raw sha256(uv.lock) for back-compat with pre-#59 caches."
-    )
-
-
 # --- dev-group exclusion from the provenance hash ---
 
 
@@ -65,8 +49,9 @@ def _uv_lock(
     runtime: dict[str, str],
     dev: dict[str, str] | None = None,
     transitive: dict[str, tuple[str, list[str]]] | None = None,
+    project: str = "probe",
 ) -> str:
-    """Build a minimal but realistic uv.lock.
+    """Build a minimal but realistic uv.lock for a notebook whose project is *project*.
 
     ``runtime`` / ``dev`` map name to version for the root's direct deps; ``transitive`` maps
     name to ``(version, [dep names])``. Each package gets an sdist hash from its name and
@@ -78,7 +63,7 @@ def _uv_lock(
 
     # Root project package.
     lines.append("[[package]]")
-    lines.append('name = "probe"')
+    lines.append(f'name = "{project}"')
     lines.append('version = "0.1.0"')
     lines.append('source = { virtual = "." }')
     lines.append("dependencies = [")
@@ -196,12 +181,32 @@ def test_dev_only_transitive_does_not_change_hash(tmp_path):
     assert base == bumped
 
 
-def test_no_dev_group_uses_raw_bytes(tmp_path):
-    """With no dev group, the hash is raw sha256(uv.lock), not a re-hash."""
-    lock_text = _uv_lock(runtime={"cloudpickle": "3.1.2"})  # no dev=
-    actual = _hash_with(tmp_path, lock_text)
-    expected = hashlib.sha256(lock_text.encode()).hexdigest()
-    assert actual == expected
+def test_notebooks_named_apart_with_the_same_dependencies_get_one_hash(tmp_path):
+    """Two notebooks that differ only in their project name share an env hash, dev group or not."""
+    for dev in (None, {"pytest": "9.1.1"}):
+        nb0 = _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev=dev, project="nb0")
+        nb1 = _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev=dev, project="nb1")
+        assert nb0 != nb1
+        assert _hash_with(tmp_path, nb0) == _hash_with(tmp_path, nb1)
+
+
+def test_a_real_dependency_difference_still_changes_the_hash(tmp_path):
+    """Without a dev group, a runtime version bump or an added dependency changes the hash."""
+    base = _hash_with(tmp_path, _uv_lock(runtime={"cloudpickle": "3.1.2"}, project="nb0"))
+    bumped = _hash_with(tmp_path, _uv_lock(runtime={"cloudpickle": "3.2.0"}, project="nb1"))
+    added = _hash_with(
+        tmp_path, _uv_lock(runtime={"cloudpickle": "3.1.2", "six": "1.17.0"}, project="nb1")
+    )
+    assert len({base, bumped, added}) == 3
+
+
+def test_the_dev_group_path_folds_the_runtime_closure(tmp_path):
+    """With a dev group, the uv part is the runtime-closure fingerprint, as before."""
+    lock_text = _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev={"pytest": "9.1.1"})
+    fingerprint = _runtime_uv_closure_fingerprint(lock_text.encode())
+    assert fingerprint is not None
+    expected = hashlib.sha256(b"\0uv-runtime=" + fingerprint).hexdigest()
+    assert _hash_with(tmp_path, lock_text) == expected
 
 
 def test_unparseable_lock_falls_back_to_raw_bytes(tmp_path):

@@ -366,6 +366,73 @@ async def test_a_result_alice_never_published_by_hand_reaches_bob(
     ) == alice_store.load_artifact_data(alice_artifact_id, alice_artifact.version)
 
 
+def _project_lock(project: str) -> str:
+    """The ``uv.lock`` uv writes for a ``strata new`` notebook: its own project is the root."""
+    return (
+        'version = 1\nrevision = 3\nrequires-python = ">=3.12"\n\n'
+        f'[[package]]\nname = "{project}"\nversion = "0.1.0"\nsource = {{ virtual = "." }}\n'
+        'dependencies = [\n    { name = "pyarrow" },\n]\n\n'
+        '[package.metadata]\nrequires-dist = [{ name = "pyarrow", specifier = ">=18" }]\n\n'
+        '[[package]]\nname = "pyarrow"\nversion = "21.0.0"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+        'sdist = { url = "https://x/pyarrow-21.0.0.tar.gz", hash = "sha256:00" }\n'
+    )
+
+
+async def test_notebooks_named_apart_with_one_lock_share_a_result(
+    tmp_path, team_store_server, monkeypatch
+):
+    """Two notebooks whose ``uv.lock`` differs only in their own project's name get one
+    provenance, so the second is served the first's result.
+    """
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    upstream_source = "value = sum(range(5000))"
+
+    def build(name: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        (notebook_dir / "uv.lock").write_text(_project_lock(name))
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", upstream_source)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", "doubled = value * 2")
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.ensure_venv_synced()
+        return session
+
+    team_config = StrataConfig(
+        cache_dir=tmp_path / "shared-config-cache",
+        notebook_remote_store_url=team_store_server["base_url"],
+        notebook_team_cache_enabled=True,
+    )
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: team_config)
+
+    nb0 = build("nb0")
+    first = await CellExecutor(nb0).execute_cell("up", upstream_source)
+    assert first.success, first.error
+    assert first.cache_hit is False
+
+    nb1 = build("nb1")
+    assert (nb0.path / "uv.lock").read_text() != (nb1.path / "uv.lock").read_text()
+    second = await CellExecutor(nb1).execute_cell("up", upstream_source)
+
+    assert second.success, second.error
+    assert second.cache_hit is True, "the project name kept two identical environments apart"
+    first_store, second_store = (session.get_artifact_manager() for session in (nb0, nb1))
+    first_artifact = first_store.artifact_store.get_latest_version(
+        first_store.cell_artifact_id("up", "value")
+    )
+    second_artifact = second_store.artifact_store.get_latest_version(
+        second_store.cell_artifact_id("up", "value")
+    )
+    assert first_artifact is not None and second_artifact is not None
+    assert first_artifact.provenance_hash == second_artifact.provenance_hash
+
+
 async def test_run_all_both_contributes_to_the_team_and_is_served_by_it(
     tmp_path, team_store_server, monkeypatch
 ):

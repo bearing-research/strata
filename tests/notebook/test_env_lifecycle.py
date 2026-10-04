@@ -639,12 +639,21 @@ class TestLockfileHash:
         expected = hashlib.sha256(b"").hexdigest()
         assert compute_lockfile_hash(tmp_path) == expected
 
+    def test_notebooks_named_apart_get_one_hash(self, tmp_path: Path):
+        """Two new notebooks lock the same dependencies under different project names."""
+        nb0 = create_notebook(tmp_path, "nb0")
+        nb1 = create_notebook(tmp_path, "nb1")
+        assert (nb0 / "uv.lock").read_text() != (nb1 / "uv.lock").read_text()
+        assert compute_lockfile_hash(nb0) == compute_lockfile_hash(nb1)
+
     def test_hash_changes_on_lockfile_modification(self, tmp_path: Path):
         nb_dir = create_notebook(tmp_path, "hash_change")
         h1 = compute_lockfile_hash(nb_dir)
 
         lockfile = nb_dir / "uv.lock"
-        lockfile.write_text(lockfile.read_text() + "\n# extra\n")
+        lockfile.write_text(
+            lockfile.read_text() + '\n[[package]]\nname = "extra"\nversion = "1.0.0"\n'
+        )
 
         h2 = compute_lockfile_hash(nb_dir)
         assert h1 != h2

@@ -2,7 +2,8 @@
 
 The env hash folds ``uv.lock`` (and ``renv.lock``). With a ``[dependency-groups]
 dev`` group, the uv part is a fingerprint of the runtime closure only, so adding
-or removing a dev tool never invalidates a cell's cache; otherwise it is the raw bytes.
+or removing a dev tool never invalidates a cell's cache; otherwise it is
+``uv_lock_key``. Neither depends on the notebook project's own name.
 """
 
 from __future__ import annotations
@@ -99,9 +100,10 @@ def collect_referenced_env_keys(source: str) -> set[str]:
 def compute_lockfile_hash(notebook_dir: Path) -> str:
     """SHA-256 over the notebook's ``uv.lock`` and ``renv.lock``.
 
-    ``renv.lock`` is folded under a ``\\0renv=`` tag so it cannot collide with
-    uv.lock bytes. Missing lockfiles contribute nothing, so with neither present
-    this is the digest of empty input.
+    ``uv.lock`` enters without the notebook project's own name, so notebooks with the
+    same resolved dependencies get one hash. ``renv.lock`` is folded under a
+    ``\\0renv=`` tag so it cannot collide with uv.lock bytes. Missing lockfiles
+    contribute nothing, so with neither present this is the digest of empty input.
     """
     hasher = hashlib.sha256()
     _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
@@ -127,7 +129,8 @@ def uv_lock_key(lock: str) -> str:
     SHA-256 of the lock with the notebook project's own name, version, source and
     declared specifiers left out, so notebooks with the same resolved packages
     share one environment. Its dependency edges (extras, markers, dev group) stay,
-    since they choose what is installed. Not the provenance env hash.
+    since they choose what is installed. Also the provenance env hash's uv part
+    when the lock has no dev group.
     """
     data: dict[str, Any] = tomllib.loads(lock)
     packages = data.get("package", [])
@@ -266,12 +269,21 @@ def _fold_lockfile_into_hash(
         logger.warning("Could not read %s: %s", filename, exc)
         return
     # With a dev group, fold only the runtime dependency closure so dev tools
-    # (pytest/ruff/ty) don't invalidate cell caches. Otherwise fall through to raw bytes.
+    # (pytest/ruff/ty) don't invalidate cell caches. Otherwise fold the lock without
+    # the project's own name, so same-dependency notebooks share cache hits.
     if filename == "uv.lock":
         fingerprint = _runtime_uv_closure_fingerprint(content)
         if fingerprint is not None:
             hasher.update(b"\0uv-runtime=")
             hasher.update(fingerprint)
+            return
+        try:
+            key = uv_lock_key(content.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            key = None
+        if key is not None:
+            hasher.update(b"\0uv-lock=")
+            hasher.update(key.encode("utf-8"))
             return
     if tag is not None:
         hasher.update(tag)

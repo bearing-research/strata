@@ -12,7 +12,7 @@ When you create a notebook, Strata:
 
 Opening a notebook runs the same `uv sync` (and restores `renv.lock`, when the notebook has one) as an environment job, which keeps the server responsive to other requests and tabs while it runs; the open answers once the job finishes, so cells can run straight away. The job appears in the Environment panel's history. Reopening a notebook that is already open skips the job unless its `.venv` is missing or its `renv.lock` changed.
 
-A hash of the lockfiles (`uv.lock`, plus `renv.lock` when the notebook has one) participates in provenance, so changing the environment invalidates all cached cell outputs. When `uv.lock` has a dev group, only the runtime dependency closure is hashed, so adding a dev tool such as `pytest` leaves the cache alone.
+A hash of the lockfiles (`uv.lock`, plus `renv.lock` when the notebook has one) participates in provenance, so changing the environment invalidates all cached cell outputs. When `uv.lock` has a dev group, only the runtime dependency closure is hashed, so adding a dev tool such as `pytest` leaves the cache alone. The notebook's own project entry (its name from `pyproject.toml`) is left out, so two notebooks with the same resolved dependencies get the same hash, and a [team cache](../deployment/service-mode.md#the-team-cache-sharing-results-nobody-named) serves one's results to the other.
 
 A cell sent to a [remote worker](workers.md) runs in this same locked environment when the worker supports it, so the lock describes what the cell ran against there too.
 
