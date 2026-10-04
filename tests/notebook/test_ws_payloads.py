@@ -25,7 +25,7 @@ from strata.notebook.ws_payloads import (
 
 def test_console_payload_roundtrips_to_wire_dict():
     wire = CellConsolePayload(cell_id="c1", stream="stdout", text="hi").model_dump(mode="json")
-    assert wire == {"cell_id": "c1", "stream": "stdout", "text": "hi"}
+    assert wire == {"cell_id": "c1", "stream": "stdout", "text": "hi", "chunk_seq": None}
 
 
 def test_console_rejects_unknown_stream():

@@ -69,11 +69,17 @@ def cell_status_payload(
 
 
 class CellConsolePayload(WsPayload):
-    """``cell_console`` — incremental stdout/stderr from a running cell."""
+    """``cell_console``: incremental stdout/stderr from a running cell.
+
+    ``chunk_seq`` numbers a remote run's streamed chunks per stream from 0, so 0
+    starts that stream's console for the run; None for console sent when the cell
+    finishes.
+    """
 
     cell_id: str
     stream: Literal["stdout", "stderr"]
     text: str
+    chunk_seq: int | None = None
 
 
 class CellOutputDeltaPayload(WsPayload):

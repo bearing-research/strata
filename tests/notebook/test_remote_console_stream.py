@@ -12,14 +12,15 @@ import pytest
 
 from strata.notebook import console_relay
 from strata.transforms.signed_urls import URLSigner
+from tests.conftest import seed_build_targets
 
 
 @pytest.fixture(autouse=True)
 def _clean_relay():
-    console_relay._routes.clear()
+    console_relay._runs.clear()
     console_relay._streamed.clear()
     yield
-    console_relay._routes.clear()
+    console_relay._runs.clear()
     console_relay._streamed.clear()
 
 
@@ -82,7 +83,7 @@ class TestRelayRouting:
         monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
         console_relay.register("b1", "nb1", "cell9")
 
-        assert await console_relay.deliver("b1", "stderr", "loss=0.3\n") is True
+        assert await console_relay.deliver("b1", "stderr", 0, "loss=0.3\n") is True
 
         assert len(sent) == 1
         assert sent[0]["notebook_id"] == "nb1"
@@ -91,6 +92,7 @@ class TestRelayRouting:
             "cell_id": "cell9",
             "stream": "stderr",
             "text": "loss=0.3\n",
+            "chunk_seq": 0,
         }
 
     @pytest.mark.asyncio
@@ -102,7 +104,7 @@ class TestRelayRouting:
             lambda *a, **k: sent.append(a),
         )
 
-        assert await console_relay.deliver("unknown", "stdout", "text") is False
+        assert await console_relay.deliver("unknown", "stdout", 0, "text") is False
         assert sent == []
 
     @pytest.mark.asyncio
@@ -115,7 +117,7 @@ class TestRelayRouting:
         console_relay.register("b1", "nb1", "cell9")
         console_relay.unregister("b1")
 
-        assert await console_relay.deliver("b1", "stdout", "late") is False
+        assert await console_relay.deliver("b1", "stdout", 0, "late") is False
         assert sent == []
 
 
@@ -138,7 +140,7 @@ class TestNoDoubleDelivery:
         monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
 
         console_relay.register("b1", "nb1", "cell9")
-        await console_relay.deliver("b1", "stdout", "epoch 1\n")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
         sent.clear()
 
         result = CellExecutionResult(cell_id="cell9", success=True, stdout="epoch 1\n", stderr="")
@@ -184,7 +186,7 @@ class TestWorkerTeeing:
         posted: list[tuple[str, str]] = []
         first_chunk_seen = asyncio.Event()
 
-        async def _fake_post(client, log_url, stream, text):
+        async def _fake_post(client, log_url, stream, seq, text):
             posted.append((stream, text))
             first_chunk_seen.set()
 
@@ -333,7 +335,7 @@ class TestWhatStreamingDropped:
 
         monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
         console_relay.register("b1", "nb1", "cell9")
-        await console_relay.deliver("b1", "stdout", "epoch 1\n")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
         sent.clear()
 
         # The worker's remaining chunks never made it; the bundle has them all.
@@ -358,8 +360,8 @@ class TestWhatStreamingDropped:
 
         monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
         console_relay.register("b1", "nb1", "cell9")
-        await console_relay.deliver("b1", "stdout", "epoch 1\n")
-        await console_relay.deliver("b1", "stderr", "warn\n")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+        await console_relay.deliver("b1", "stderr", 0, "warn\n")
         sent.clear()
 
         result = CellExecutionResult(
@@ -428,7 +430,7 @@ class TestWhatIsShownStaysAPrefix:
         posted: list[str] = []
         release = _asyncio.Event()
 
-        async def _slow_post(client, log_url, stream, text):
+        async def _slow_post(client, log_url, stream, seq, text):
             await release.wait()
             posted.append(text)
 
@@ -458,3 +460,414 @@ class TestWhatIsShownStaysAPrefix:
 
 async def _drain_via(remote_executor, proc):
     return await remote_executor._drain(proc, "http://server/v1/builds/b1/log")
+
+
+def _capture_broadcasts(monkeypatch, signal: asyncio.Event | None = None) -> list[dict]:
+    sent: list[dict] = []
+
+    async def _capture(notebook_id, message):
+        sent.append({"notebook_id": notebook_id, **message})
+        if signal is not None:
+            signal.set()
+
+    monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
+    return sent
+
+
+def _console_texts(sent: list[dict]) -> list[str]:
+    return [m["payload"]["text"] for m in sent if m["type"] == "cell_console"]
+
+
+class TestChunkOrder:
+    """Each chunk carries a sequence number, and the notebook shows chunks in it, once each."""
+
+    @pytest.mark.asyncio
+    async def test_a_repeated_chunk_is_shown_once(self, monkeypatch):
+        sent = _capture_broadcasts(monkeypatch)
+        console_relay.register("b1", "nb1", "cell9")
+
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+
+        assert _console_texts(sent) == ["epoch 1\n"]
+
+    @pytest.mark.asyncio
+    async def test_an_early_chunk_waits_for_the_one_before_it(self, monkeypatch):
+        sent = _capture_broadcasts(monkeypatch)
+        console_relay.register("b1", "nb1", "cell9")
+
+        await console_relay.deliver("b1", "stdout", 1, "epoch 2\n")
+        assert sent == []
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+
+        assert _console_texts(sent) == ["epoch 1\n", "epoch 2\n"]
+        assert [m["payload"]["chunk_seq"] for m in sent] == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_streams_are_numbered_apart(self, monkeypatch):
+        sent = _capture_broadcasts(monkeypatch)
+        console_relay.register("b1", "nb1", "cell9")
+
+        await console_relay.deliver("b1", "stdout", 0, "out\n")
+        await console_relay.deliver("b1", "stderr", 0, "err\n")
+
+        assert _console_texts(sent) == ["out\n", "err\n"]
+
+    @pytest.mark.asyncio
+    async def test_after_a_lost_chunk_the_shown_console_stays_a_prefix(self, monkeypatch):
+        """A chunk the worker dropped never arrives; what follows it waits for the final report."""
+        from strata.notebook.executor import CellExecutionResult
+        from strata.notebook.ws import _broadcast_execution_result
+
+        sent = _capture_broadcasts(monkeypatch)
+        console_relay.register("b1", "nb1", "cell9")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+        await console_relay.deliver("b1", "stdout", 2, "epoch 3\n")
+        console_relay.unregister("b1")
+
+        result = CellExecutionResult(
+            cell_id="cell9", success=True, stdout="epoch 1\nepoch 2\nepoch 3\n", stderr=""
+        )
+        await _broadcast_execution_result("nb1", "cell9", result)
+
+        assert "".join(_console_texts(sent)) == "epoch 1\nepoch 2\nepoch 3\n"
+
+
+class _FedProc:
+    """Pipes the test feeds by hand, so which chunks queue up is not left to timing."""
+
+    def __init__(self):
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.returncode = None
+
+    async def wait(self):
+        self.returncode = 0
+        return 0
+
+
+class TestWorkerNumbersChunks:
+    @pytest.mark.asyncio
+    async def test_each_stream_is_numbered_from_zero(self, monkeypatch):
+        from strata.notebook import remote_executor
+
+        posted: list[tuple[str, int]] = []
+        arrived = asyncio.Event()
+
+        async def _fake_post(client, log_url, stream, seq, text):
+            posted.append((stream, seq))
+            if len(posted) % 2 == 0:
+                arrived.set()
+
+        monkeypatch.setattr(remote_executor, "_post_log_chunk", _fake_post)
+        proc = _FedProc()
+        drain = asyncio.create_task(remote_executor._drain(proc, "http://server/log"))
+        for text in (b"a", b"b"):
+            arrived.clear()
+            proc.stdout.feed_data(text)
+            proc.stderr.feed_data(text)
+            await asyncio.wait_for(arrived.wait(), timeout=10)
+        proc.stdout.feed_eof()
+        proc.stderr.feed_eof()
+        await drain
+
+        assert [seq for stream, seq in posted if stream == "stdout"] == [0, 1]
+        assert [seq for stream, seq in posted if stream == "stderr"] == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_a_chunk_dropped_for_a_full_queue_leaves_a_gap(self, monkeypatch):
+        """The gap is what tells the server not to show anything after it."""
+        from strata.notebook import remote_executor
+
+        posted: list[int] = []
+        first_posted = asyncio.Event()
+
+        async def _fake_post(client, log_url, stream, seq, text):
+            posted.append(seq)
+            first_posted.set()
+
+        monkeypatch.setattr(remote_executor, "_post_log_chunk", _fake_post)
+        monkeypatch.setattr(remote_executor, "_LOG_QUEUE_CHUNKS", 1)
+        monkeypatch.setattr(remote_executor, "_LOG_READ_CHUNK_BYTES", 1)
+        proc = _FedProc()
+        proc.stderr.feed_eof()
+        # Read in one go before the forwarder posts: chunk 0 queues, 1 and 2 find it full.
+        proc.stdout.feed_data(b"abc")
+        drain = asyncio.create_task(remote_executor._drain(proc, "http://server/log"))
+        await asyncio.wait_for(first_posted.wait(), timeout=10)
+        proc.stdout.feed_data(b"d")
+        proc.stdout.feed_eof()
+        stdout, _ = await drain
+
+        assert stdout == b"abcd"
+        assert posted == [0, 3]
+
+
+class TestLateJoiner:
+    """A viewer who opens the notebook mid-run sees what the running cell printed so far."""
+
+    @pytest.fixture
+    def session(self, tmp_path):
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook
+
+        notebook_dir = create_notebook(tmp_path, "Late Joiner")
+        add_cell_to_notebook(notebook_dir, "cell1", None)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        cell = session.notebook_state.cells[0]
+        cell.console_stdout = "last run's output\n"
+        cell.console_stderr = "last run's warning\n"
+        return session
+
+    @pytest.mark.asyncio
+    async def test_notebook_sync_carries_the_running_cells_console(self, session, monkeypatch):
+        import json
+
+        from strata.notebook.ws import _handle_notebook_sync
+
+        _capture_broadcasts(monkeypatch)
+        console_relay.register("b1", session.id, "cell1")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+        await console_relay.deliver("b1", "stdout", 1, "epoch 2\n")
+
+        class _Socket:
+            def __init__(self):
+                self.sent: list[dict] = []
+
+            async def send_text(self, text):
+                self.sent.append(json.loads(text))
+
+        socket = _Socket()
+        await _handle_notebook_sync(socket, session, session.id)
+
+        (frame,) = socket.sent
+        assert frame["type"] == "notebook_state"
+        (cell,) = frame["payload"]["cells"]
+        assert cell["console_stdout"] == "epoch 1\nepoch 2\n"
+        # Nothing on stderr yet this run: it keeps what every connected viewer still shows.
+        assert cell["console_stderr"] == "last run's warning\n"
+
+    @pytest.mark.asyncio
+    async def test_a_finished_run_serializes_its_own_console_again(self, session, monkeypatch):
+        _capture_broadcasts(monkeypatch)
+        console_relay.register("b1", session.id, "cell1")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+        console_relay.unregister("b1")
+
+        cell = session.notebook_state.cells[0]
+        assert session.serialize_cell(cell)["console_stdout"] == "last run's output\n"
+
+    @pytest.mark.asyncio
+    async def test_the_buffer_keeps_only_the_end(self, monkeypatch):
+        _capture_broadcasts(monkeypatch)
+        monkeypatch.setattr(console_relay, "_TAIL_CHARS", 8)
+        console_relay.register("b1", "nb1", "cell9")
+        await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+        await console_relay.deliver("b1", "stdout", 1, "epoch 2\n")
+
+        assert console_relay.live_console("nb1", "cell9") == {"stdout": "epoch 2\n"}
+
+    def test_a_cell_that_has_printed_nothing_has_no_live_console(self):
+        console_relay.register("b1", "nb1", "cell9")
+
+        assert console_relay.live_console("nb1", "cell9") == {}
+        assert console_relay.live_console("nb1", "other") == {}
+
+
+def _running_build(store, build_id: str = "b1") -> None:
+    store.create_build(build_id=build_id, artifact_id="a", version=1, executor_ref="x@v1")
+    store.start_build(build_id)
+
+
+class TestSharedStore:
+    """Chunks for a build another node dispatched wait in the shared build store."""
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        from strata.transforms.build_store import BuildStore
+
+        seed_build_targets(tmp_path, ["a"], [1])
+        return BuildStore(tmp_path / "artifacts.sqlite")
+
+    def test_chunks_are_taken_once_in_order(self, store):
+        _running_build(store)
+        assert store.append_console_chunk("b1", "stdout", 1, "epoch 2\n")
+        assert store.append_console_chunk("b1", "stdout", 0, "epoch 1\n")
+        assert not store.append_console_chunk("b1", "stdout", 0, "epoch 1\n"), "a retry"
+
+        assert store.take_console_chunks("b1") == [
+            ("stdout", 0, "epoch 1\n"),
+            ("stdout", 1, "epoch 2\n"),
+        ]
+        assert store.take_console_chunks("b1") == []
+
+    def test_a_build_that_is_not_running_stores_nothing(self, store):
+        """A late or stale worker cannot fill the table for a build nobody will read."""
+        _running_build(store)
+        store.complete_build("b1", "a", 1)
+
+        assert not store.append_console_chunk("b1", "stdout", 0, "late\n")
+        assert not store.append_console_chunk("unknown", "stdout", 0, "stray\n")
+        assert store.take_console_chunks("b1") == []
+        assert store.take_console_chunks("unknown") == []
+
+    @pytest.mark.asyncio
+    async def test_the_dispatching_node_relays_and_then_clears_them(self, store, monkeypatch):
+        seen = asyncio.Event()
+        sent = _capture_broadcasts(monkeypatch, signal=seen)
+        _running_build(store)
+        # Received by another node while this one dispatched the build.
+        store.append_console_chunk("b1", "stdout", 0, "epoch 1\n")
+
+        async with console_relay.relaying("b1", "nb1", "cell9", shared_store=store, poll_seconds=0):
+            await asyncio.wait_for(seen.wait(), timeout=10)
+            store.append_console_chunk("b1", "stdout", 5, "arrives as the run ends\n")
+
+        assert _console_texts(sent) == ["epoch 1\n"]
+        assert sent[0]["notebook_id"] == "nb1"
+        assert store.take_console_chunks("b1") == [], "what is left is cleared at the end"
+
+    @pytest.mark.asyncio
+    async def test_a_single_node_does_not_poll(self, store, monkeypatch):
+        taken: list[str] = []
+        monkeypatch.setattr(store, "take_console_chunks", lambda build_id: taken.append(build_id))
+
+        async with console_relay.relaying("b1", "nb1", "cell9", poll_seconds=0):
+            for _ in range(10):
+                await asyncio.sleep(0)
+
+        assert taken == []
+
+
+class TestThroughARealWorker:
+    """A remote cell's print reaches the sockets of the session that ran it, numbered."""
+
+    @pytest.fixture
+    def session(self, tmp_path, notebook_executor_server, notebook_build_server):
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook
+
+        notebook_dir = create_notebook(tmp_path, "Remote Console")
+        add_cell_to_notebook(notebook_dir, "cell1", None)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
+        spec = {
+            "url": notebook_executor_server["execute_url"],
+            "transport": "signed",
+            "strata_url": notebook_build_server["base_url"],
+        }
+        notebook_build_server["config"].transforms_config["notebook_workers"] = [
+            {"name": "remote", "backend": "executor", "runtime_id": "r", "config": spec}
+        ]
+        session.notebook_state.workers = [
+            WorkerSpec(
+                name="remote", backend=WorkerBackendType.EXECUTOR, runtime_id="r", config=spec
+            )
+        ]
+        session.notebook_state.worker = "remote"
+        cell = session.notebook_state.cells[0]
+        cell.worker = "remote"
+        cell.source = "print('from-the-worker')\nx = 1"
+        session.re_analyze_cell("cell1")
+        return session
+
+    @pytest.mark.asyncio
+    async def test_the_chunk_is_broadcast_under_the_session_id(self, session, monkeypatch):
+        """The sockets are registered under the session id, not the notebook.toml id."""
+        from strata.notebook.executor import CellExecutor
+
+        sent = _capture_broadcasts(monkeypatch)
+
+        result = await CellExecutor(session).execute_cell(
+            "cell1", session.notebook_state.cells[0].source
+        )
+
+        assert result.success, result.error
+        console = [m for m in sent if m["type"] == "cell_console"]
+        assert console, "nothing was streamed"
+        assert {m["notebook_id"] for m in console} == {session.id}
+        assert console[0]["payload"]["chunk_seq"] == 0
+        assert "".join(m["payload"]["text"] for m in console) == "from-the-worker\n"
+
+    @pytest.mark.asyncio
+    async def test_a_multi_node_server_follows_the_shared_store(
+        self, session, notebook_build_server, monkeypatch
+    ):
+        from strata.notebook.executor import CellExecutor
+
+        followed: list[object] = []
+        real = console_relay.relaying
+
+        def _recording(build_id, notebook_id, cell_id, shared_store=None, **kwargs):
+            followed.append(shared_store)
+            return real(build_id, notebook_id, cell_id, shared_store=shared_store, **kwargs)
+
+        monkeypatch.setattr(console_relay, "relaying", _recording)
+        monkeypatch.setattr(notebook_build_server["config"], "node_advertised_url", "http://node-a")
+
+        result = await CellExecutor(session).execute_cell(
+            "cell1", session.notebook_state.cells[0].source
+        )
+
+        assert result.success, result.error
+        assert followed == [notebook_build_server["build_store"]]
+
+
+class TestLogRoute:
+    """``POST /v1/builds/{id}/log`` takes the chunk's ``seq`` and, on another node, stores it."""
+
+    @pytest.fixture
+    def route(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.config import StrataConfig
+        from strata.server import app
+        from strata.transforms.build_store import get_build_store, reset_build_store
+
+        signer = URLSigner(b"secret")
+        state = MagicMock()
+        state.config = StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
+        state.url_signer = signer
+        monkeypatch.setattr(server_module, "_state", state)
+        reset_build_store()
+        seed_build_targets(tmp_path, ["a"], [1])
+        store = get_build_store(tmp_path / "artifacts.sqlite")
+        _running_build(store)
+        url = signer.generate_log_url(base_url="http://testserver", build_id="b1")
+        yield {"client": TestClient(app), "url": url, "state": state, "store": store}
+        reset_build_store()
+
+    def test_a_chunk_without_seq_is_refused(self, route):
+        response = route["client"].post(route["url"] + "&stream=stdout", content=b"x")
+
+        assert response.status_code == 422
+
+    def test_a_chunk_reaches_the_dispatching_session_with_its_seq(self, route, monkeypatch):
+        sent = _capture_broadcasts(monkeypatch)
+        console_relay.register("b1", "nb1", "cell9")
+
+        response = route["client"].post(route["url"] + "&stream=stdout&seq=0", content=b"hi\n")
+
+        assert response.status_code == 202
+        assert response.json() == {"delivered": True}
+        assert [m["payload"]["chunk_seq"] for m in sent] == [0]
+
+    def test_on_another_node_the_chunk_waits_in_the_shared_store(self, route, monkeypatch):
+        monkeypatch.setattr(route["state"].config, "node_advertised_url", "http://node-b")
+
+        response = route["client"].post(route["url"] + "&stream=stderr&seq=3", content=b"warn\n")
+
+        assert response.json() == {"delivered": True}
+        assert route["store"].take_console_chunks("b1") == [("stderr", 3, "warn\n")]
+
+    def test_a_single_node_drops_a_chunk_for_a_build_it_is_not_running(self, route):
+        response = route["client"].post(route["url"] + "&stream=stdout&seq=0", content=b"x")
+
+        assert response.json() == {"delivered": False}
+        assert route["store"].take_console_chunks("b1") == []

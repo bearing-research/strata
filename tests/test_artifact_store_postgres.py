@@ -684,6 +684,49 @@ class TestBuildStoreSharesTheBackend:
             dialect_a.close()
             dialect_b.close()
 
+    def test_console_left_by_one_node_is_taken_by_the_other(self, postgres_dsn, tmp_path):
+        """A remote cell's console chunk can land on a node that did not dispatch it."""
+        from strata.transforms.build_store import BuildStore
+
+        dialect_a = PostgresDialect(postgres_dsn)
+        dialect_b = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect_a.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS build_console_chunks, artifact_builds, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, "
+                "registry_audit, registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            version = ArtifactStore(tmp_path / "a", dialect=dialect_a).create_artifact(
+                "art-c", "prov-c", _spec()
+            )
+            node_a = BuildStore(tmp_path / "a.sqlite", dialect=dialect_a)
+            node_b = BuildStore(tmp_path / "b.sqlite", dialect=dialect_b)
+            node_a.create_build(
+                build_id="b-c", artifact_id="art-c", version=version, executor_ref="x"
+            )
+            node_a.start_build("b-c")
+
+            assert node_b.append_console_chunk("b-c", "stdout", 1, "epoch 2\n")
+            assert node_b.append_console_chunk("b-c", "stdout", 0, "epoch 1\n")
+            assert not node_b.append_console_chunk("b-c", "stdout", 0, "epoch 1\n")
+            assert not node_b.append_console_chunk("missing", "stdout", 0, "stray\n")
+
+            assert node_a.take_console_chunks("b-c") == [
+                ("stdout", 0, "epoch 1\n"),
+                ("stdout", 1, "epoch 2\n"),
+            ]
+            assert node_a.take_console_chunks("b-c") == []
+            node_b.append_console_chunk("b-c", "stderr", 0, "late\n")
+            node_a.delete_console_chunks("b-c")
+            assert node_a.take_console_chunks("b-c") == []
+        finally:
+            dialect_a.close()
+            dialect_b.close()
+
     def test_build_columns_survive_postgres_widths(self, postgres_dsn, tmp_path):
         # Same INTEGER/REAL traps as the artifact store: byte counts are
         # INTEGER and timestamps are REAL in the shared schema.

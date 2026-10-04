@@ -23,7 +23,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -2837,11 +2837,18 @@ class CellExecutor:
             headers = {**trace_context}
             if worker_token:
                 headers["Authorization"] = f"Bearer {worker_token}"
-            # Register console-chunk delivery before the worker can send any. Scoped to the
-            # request, so a late chunk for a finished build is dropped.
-            if cell_id:
-                console_relay.register(build_id, self.session.notebook_state.id, cell_id)
-            try:
+            # Before the worker can send a chunk; keyed by the session id, as the sockets are.
+            relay = (
+                console_relay.relaying(
+                    build_id,
+                    self.session.id,
+                    cell_id,
+                    shared_store=build_store if state.config.node_advertised_url else None,
+                )
+                if cell_id
+                else nullcontext()
+            )
+            async with relay:
                 async with httpx.AsyncClient(timeout=max(timeout_seconds + 10.0, 30.0)) as client:
                     response = await client.post(
                         manifest_execute_url, json=manifest, headers=headers
@@ -2858,8 +2865,6 @@ class CellExecutor:
                         worker_spec=worker_spec,
                         cell_id=cell_id,
                     )
-            finally:
-                console_relay.unregister(build_id)
         except RemoteExecutionError as exc:
             _mark_failed(str(exc), exc.remote_error_code or "EXECUTOR_ERROR")
             raise

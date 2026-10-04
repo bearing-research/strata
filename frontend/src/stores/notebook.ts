@@ -52,6 +52,7 @@ import type {
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import type { DatasetReader } from '../utils/datasetReaders'
 import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
+import { applyConsoleChunk } from '../utils/consoleChunk'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
 import { refusalNotice } from '../utils/refusal'
@@ -2079,9 +2080,9 @@ function initializeWebSocket() {
       const cell = cellMap.value.get(cellId)
       if (cell && text) {
         if (stream === 'stderr') {
-          cell.consoleStderr = (cell.consoleStderr ?? '') + text
+          cell.consoleStderr = applyConsoleChunk(cell.consoleStderr, text, p.chunk_seq)
         } else {
-          cell.consoleStdout = (cell.consoleStdout ?? '') + text
+          cell.consoleStdout = applyConsoleChunk(cell.consoleStdout, text, p.chunk_seq)
         }
       }
     })

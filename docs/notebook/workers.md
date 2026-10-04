@@ -663,4 +663,4 @@ You changed `.pip_install(...)` - Modal is rebuilding the image layer. With torc
 
 ## Live status
 
-When a cell dispatches to a remote worker, the UI shows a pulsing **"dispatching → <name>"** badge during execution, and the cell's console output streams back from the worker as it is produced. After completion, the worker name and transport type appear in the cell metadata.
+When a cell dispatches to a remote worker, the UI shows a pulsing **"dispatching → <name>"** badge during execution, and the cell's console output streams back from the worker as it is produced, replacing what the cell's last run printed. Someone who opens the notebook mid-run, or reloads the page, sees the last 64 KiB the cell has printed so far and the rest as it arrives. After completion, the worker name and transport type appear in the cell metadata.
