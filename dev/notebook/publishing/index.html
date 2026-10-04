@@ -2402,6 +2402,12 @@ crate it is a <code>File</code> whose <code>@id</code> is the URL, with that <co
 retrieval time as <code>sdDatePublished</code>. The digest describes what was read, and
 the URL may serve something else now. A step stored before retrieval times were
 recorded shows only when it ran.</p>
+<p>A Snowflake or BigQuery cell with <a href="../annotations/#cache"><code># @cache snapshot</code></a>,
+published or upstream of what is, shows the moment of the warehouse state it
+read ("Warehouse state as of") and how long the warehouse keeps that state
+("Queryable until"). Until then a reader with access to the warehouse can run
+the query against the same state; after it, they cannot. A cell stored before
+the horizon was recorded shows "not recorded".</p>
 <h2 id="embedding-it-elsewhere">Embedding it elsewhere<a class="headerlink" href="#embedding-it-elsewhere" title="Permanent link">&para;</a></h2>
 <p>Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
 unfurls into a card: the figure, what it is, how many steps are behind it, and
