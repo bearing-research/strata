@@ -3156,7 +3156,11 @@ written outside a notebook (a core transform, <code>strata.put</code>) are Arrow
 Anything else, such as an image, arrives as a <code>pathlib.Path</code> to its bytes.</p>
 <p>Each artifact the cell stores records the name and the version it resolved to
 as an input, so lineage, in the dashboard and in <code>strata artifact lineage</code>,
-walks from a downstream result through the cell to the named version.</p>
+walks from a downstream result through the cell to the named version. The copy
+keeps that version's own inputs, and the steps behind it, up to ten deep, are
+copied with it, so the walk goes on past the dataset to whatever made it. A
+step the registry no longer holds ends the walk there, as it does in the
+registry. The Registry tab lists, beside each name, the cells that read it.</p>
 <p>The registry is asked at most once a minute while staleness is being
 recomputed, and always right before the cell runs. A name that does not
 resolve shows the cell as out of date, and running it fails with the reason. A cell

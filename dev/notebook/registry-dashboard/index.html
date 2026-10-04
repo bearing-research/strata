@@ -2288,12 +2288,19 @@ top to bottom:</p>
 <li><strong>Pending-approval banner</strong> - appears only when a protected-alias move is
    queued, with <strong>Approve / Reject</strong> buttons (the human gate, in the UI).</li>
 <li><strong>Names table</strong> - every registry name, each row showing its <strong>alias chips</strong>
-   (<code>★champion=v1</code>, <code>candidate=v2</code>), latest version, <strong>tags</strong>, a
-   <strong><code>[Promote ▾]</code></strong> menu, and a <strong><code>⎘</code></strong> lineage button. This is the same data on the per-cell strip, but for
+   (<code>★champion=v1</code>, <code>candidate=v2</code>), latest version, <strong>tags</strong>, the cells
+   that read it (<strong>Read by</strong>), a <strong><code>[Promote ▾]</code></strong> menu, and a <strong><code>⎘</code></strong>
+   lineage button. This is the same data on the per-cell strip, but for
    <em>all</em> names - not just what the current notebook published.</li>
 <li><strong>Audit timeline</strong> (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.</li>
 </ol>
+<p><strong>Read by</strong> lists the cells that read a name with
+<a href="../annotations/#dataset"><code># @dataset</code></a>, each from a result it stored. Cells of
+the open notebook show by name as soon as they have run. A cell in another
+notebook shows as <code>&lt;notebook id&gt;/&lt;cell id&gt;</code> once one of its results reaches
+the store the tab describes, by promotion or publication; a result that stays
+in its own notebook is not visible from anywhere else.</p>
 <p><img alt="The Registry tab in the bottom drawer: a names table with the champion alias
 chip, an rmse tag and a Promote menu, above an expanded audit timeline of every
 name, alias and tag change." src="../../assets/registry-tab-light.png#only-light" />

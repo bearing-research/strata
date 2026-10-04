@@ -4733,10 +4733,14 @@ to the UI.</p>
 <h3 id="list-a-notebooks-published-artifacts">List a Notebook's Published Artifacts<a class="headerlink" href="#list-a-notebooks-published-artifacts" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-73-1" name="__codelineno-73-1" href="#__codelineno-73-1"></a>GET /v1/notebooks/{session_id}/artifacts
 </code></pre></div>
-<p>Returns <code>{"cells": {&lt;cell_id&gt;: [...]}}</code>: the registry artifacts each cell
-published through the ambient <code>strata</code> client. Answered by the team store when
-<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> is set, since that is where a cell's
-<code>put(name=...)</code> went.</p>
+<p>Returns <code>{"cells": {&lt;cell_id&gt;: [...]}, "readers": {&lt;name&gt;: [...]}}</code>: the
+registry artifacts each cell published through the ambient <code>strata</code> client.
+Answered by the team store when <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> is set,
+since that is where a cell's <code>put(name=...)</code> went. <code>readers</code> is read from the
+notebook's own store: per registry name, the cells whose stored results read
+it with <code># @dataset</code>, as <code>{"notebook_id", "cell_id", "reference"}</code>. The rows of
+<code>GET /v1/registry/summary</code> carry the same <code>readers</code> list for the results in
+the registry's store.</p>
 <h3 id="promote-an-artifact">Promote an Artifact<a class="headerlink" href="#promote-an-artifact" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-74-1" name="__codelineno-74-1" href="#__codelineno-74-1"></a>POST /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/promote
 </code></pre></div>
