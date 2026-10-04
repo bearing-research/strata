@@ -120,10 +120,10 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | Status | Common cause |
 | --- | --- |
 | `200` | Success |
-| `400` | Malformed request (invalid path, bad enum value) |
+| `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
-| `404` | Notebook session not found, or a hidden 403 (see above) |
+| `404` | Notebook session not found, a table its catalog does not have, or a hidden 403 (see above) |
 | `409` | Conflict - concurrent environment job, a cell someone else is editing (`cell_locked`), or a quiesced notebook (`NOTEBOOK_QUIESCED`) |
 | `413` | Request body or scan response exceeded the configured byte cap |
 | `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which. A table the ACL denies is refused first, so its caller gets the `403`/`404` instead |
@@ -1053,3 +1053,7 @@ GET /health
 GET /metrics
 GET /metrics/prometheus
 ```
+
+Both are unauthenticated, for scrapers. Under principal auth
+`/metrics/prometheus` leaves out the per-table series, since table names are
+`admin:*` data (`GET /metrics/tables`).

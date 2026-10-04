@@ -233,7 +233,10 @@ alphanumeric / `_` / `-` characters and hashed into:
   is listed, read and cancelled (`/v1/cache/warm/jobs*`) only by its
   own tenant; `admin:*` sees every tenant's.
 - **Metric labels**: Prometheus output carries a `tenant` label so
-  you can dashboard per-tenant usage.
+  you can dashboard per-tenant usage. It names no tables:
+  `/metrics/prometheus` is unauthenticated for scrapers, so under
+  principal auth the per-table series are left out. Read them from
+  `GET /metrics/tables` with `admin:*`.
 
 A tenant registry tracks active tenants (LRU-bounded; only a tenant with nothing in flight is evicted). [Implementation details are in the source tree](https://github.com/bearing-research/strata/tree/main/src/strata) if you need to extend the tenant-scoping behavior.
 

@@ -124,13 +124,12 @@ def _authorize_warm_tables(table_uris: list[str]) -> None:
     Warming is a read of the table, so it takes the same gate as a scan, on the identity the scan
     path parses (a named catalog's included). Runs before planning: reporting a planning failure for
     a denied table would confirm it exists. The planned identity is checked again after planning.
+    A URI that names no table is a 400.
     """
-    from strata.server import _table_identity_from_uri
+    from strata.server import _table_identity_or_400
 
     for table_uri in table_uris:
-        identity = _table_identity_from_uri(table_uri)
-        if identity is not None:
-            authorize_table_access(table_uri, identity)
+        authorize_table_access(table_uri, _table_identity_or_400(table_uri))
 
 
 def _refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
