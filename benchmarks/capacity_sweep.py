@@ -8,7 +8,11 @@ Usage:
     python benchmarks/capacity_sweep.py
     python benchmarks/capacity_sweep.py --levels 10 --duration 180
     python benchmarks/capacity_sweep.py --min-users 10 --max-users 100
-    python benchmarks/capacity_sweep.py --no-server --base-url http://localhost:8765
+    python benchmarks/capacity_sweep.py --no-server --base-url http://localhost:8765 \
+        --table-uri 'file:///data/warehouse#db.events'
+
+With ``--no-server`` the queries project id, ts, user_id, category and value, and filter
+on category, so each ``--table-uri`` table needs those columns.
 """
 
 from __future__ import annotations
@@ -1260,9 +1264,19 @@ async def main():
     parser.add_argument("--warmup", type=float, default=15, help="Warmup seconds per level")
     parser.add_argument("--no-server", action="store_true", help="Don't start server")
     parser.add_argument("--base-url", type=str, help="Server base URL")
+    parser.add_argument(
+        "--table-uri",
+        action="append",
+        default=[],
+        help="Table to scan with --no-server (repeatable), e.g. file:///wh#db.events",
+    )
     parser.add_argument("--keep-dirs", action="store_true", help="Keep temp directories")
     parser.add_argument("--dry-run", action="store_true", help="Quick validation run")
     args = parser.parse_args()
+    if args.no_server and not args.table_uri:
+        parser.error("--no-server needs at least one --table-uri")
+    if args.table_uri and not args.no_server:
+        parser.error("--table-uri only applies with --no-server")
 
     config = SweepConfig(
         num_levels=args.levels,
@@ -1318,11 +1332,8 @@ async def main():
             )
             server.start()
         else:
-            print("Connecting to external server - using dummy tables info")
-            tables_info = [
-                {"name": f"table_{i}", "uri": f"table_{i}", "rows": 10000}
-                for i in range(config.num_tables)
-            ]
+            print(f"Connecting to external server, scanning {len(args.table_uri)} table(s)")
+            tables_info = [{"name": uri, "uri": uri} for uri in args.table_uri]
 
         print("\nStarting capacity sweep...")
         results = await run_sweep(config, tables_info)

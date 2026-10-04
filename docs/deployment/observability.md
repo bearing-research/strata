@@ -202,12 +202,17 @@ in the container). Then run a few `scan@v1` materializes against
 [Python client](../getting-started/core.md#3-materialize-a-result),
 using `file:///data/warehouse#<namespace>.<table>` as the input.
 
-`benchmarks/capacity_sweep.py --no-server` is not a load source for
-this stack. It has no option for table URIs, so it sends placeholder
-table names, every request fails before any data is read, and the
-scan, cache and QoS panels stay flat. Without `--no-server`
-the sweep starts its own server on a free port and loads that one
-instead.
+For sustained load, point `benchmarks/capacity_sweep.py` at the stack:
+
+```bash
+python benchmarks/capacity_sweep.py --no-server --base-url http://localhost:8765 \
+    --table-uri 'file:///data/warehouse#<namespace>.<table>'
+```
+
+`--table-uri` is repeatable, and each table needs the columns the
+sweep's queries use: `id`, `ts`, `user_id`, `category` and `value`.
+Without `--no-server` the sweep starts its own server on a free port
+and loads that one instead.
 
 After a few scans:
 
