@@ -930,7 +930,7 @@ class TestTransformValidation:
         from unittest.mock import MagicMock
 
         import strata.server as server_module
-        from strata.server import materialize_artifact
+        from strata.api.routers.materialize import materialize_artifact
         from strata.types import MaterializeRequest
 
         reset_artifact_store()
@@ -1297,7 +1297,7 @@ class TestServiceModeReviewFindings:
         def deny(*_args, **_kwargs):
             raise HTTPException(status_code=403, detail="Access denied")
 
-        monkeypatch.setattr("strata.server._resolve_input_version", deny)
+        monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", deny)
 
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
@@ -1318,7 +1318,7 @@ class TestServiceModeReviewFindings:
         def unresolvable(*_args, **_kwargs):
             raise HTTPException(status_code=400, detail="Unknown input URI type")
 
-        monkeypatch.setattr("strata.server._resolve_input_version", unresolvable)
+        monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", unresolvable)
 
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
