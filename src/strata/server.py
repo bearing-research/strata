@@ -40,7 +40,9 @@ from starlette.websockets import WebSocketClose
 
 from strata.api.dependencies import (
     authorize_table_access,
+    refuse_unconfigured_warehouses,
     resolve_input_version,
+    table_identity_or_400,
 )
 from strata.artifact_uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
 from strata.auth import (
@@ -97,7 +99,6 @@ from strata.types import (
     IdentityParams,
     MaterializeRequest,
     MaterializeResponse,
-    TableIdentity,
 )
 from strata.url_safety import host_is_allowlisted
 
@@ -1756,29 +1757,6 @@ def _table_identity_from_uri(table_uri: str):
         return None
 
 
-def _table_identity_or_400(table_uri: str) -> TableIdentity:
-    """Resolve a request's table URI to its identity; a URI that names no table is a 400."""
-    from strata.iceberg import table_identity_for
-
-    try:
-        return table_identity_for(table_uri, get_state().config)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-def _refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
-    """Refuse with a 400 a request naming a warehouse this server has no catalog for."""
-    from strata.iceberg import PyIcebergCatalog, refuse_unconfigured_warehouse
-
-    for table_uri in table_uris:
-        try:
-            refuse_unconfigured_warehouse(
-                PyIcebergCatalog.parse_table_uri(table_uri)[0], get_state().config
-            )
-        except CatalogUriRequired as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 def _authorize_artifact_write() -> None:
     """Gate a write endpoint (put / set_name / set_alias / tags).
 
@@ -1859,7 +1837,7 @@ async def materialize_artifact(request: MaterializeRequest):
             if e.status_code in (401, 403, 404, 422):
                 raise
             # A warehouse with no catalog here is the server's config, not an unresolvable URI.
-            _refuse_unconfigured_warehouses([input_uri])
+            refuse_unconfigured_warehouses([input_uri])
             input_versions[input_uri] = input_uri
 
     from strata.services.materialize import materialize_service
@@ -2143,7 +2121,7 @@ async def _handle_identity_materialize(
     # Authorize before planning: the 400/413 planning errors would tell a denied
     # caller the table exists and its size, and planning costs manifest reads.
     # The identity comes from the URI so a refused request does no manifest work.
-    uri_identity = _table_identity_or_400(table_uri)
+    uri_identity = table_identity_or_400(table_uri)
     if state.config.principal_auth_enabled:
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
