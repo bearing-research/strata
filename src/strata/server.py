@@ -32,6 +32,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
+from pyiceberg.exceptions import NoSuchTableError
 from starlette.datastructures import Headers
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -2171,6 +2172,8 @@ async def _handle_identity_materialize(
         raise HTTPException(status_code=422, detail=str(e)) from e
     except CatalogUriRequired as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except NoSuchTableError as e:
+        raise HTTPException(status_code=404, detail=f"Table not found: {table_uri}") from e
 
     max_tasks = state.config.max_tasks_per_scan
     if len(plan.tasks) > max_tasks:

@@ -1,9 +1,12 @@
 """A request's bad table URI is the caller's 4xx, not a 500.
 
-A URI that names no ``namespace.table`` is a 400 carrying the parse message.
+A URI that names no ``namespace.table`` is a 400 carrying the parse message; a
+table its catalog does not have is a 404 naming it.
 """
 
 from __future__ import annotations
+
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,3 +57,53 @@ class TestMalformedTableUri:
 
         assert response.status_code == 400, response.text
         assert "expected 'namespace.table' format" in response.json()["detail"]
+
+
+@pytest.fixture
+def warehouse(tmp_path):
+    """A warehouse whose catalog has namespace ``ns`` and no tables."""
+    if sys.platform == "win32":
+        pytest.skip("pyiceberg + pyarrow LocalFileSystem path handling broken on Windows")
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    wh = tmp_path / "warehouse"
+    wh.mkdir()
+    SqlCatalog("strata", uri=f"sqlite:///{wh / 'catalog.db'}", warehouse=str(wh)).create_namespace(
+        "ns"
+    )
+    return wh
+
+
+class TestTableMissingFromItsCatalog:
+    @pytest.mark.parametrize("table_id", ["ns.missing", "nons.missing"])
+    def test_scan_is_404_naming_the_table(self, client, warehouse, table_id):
+        uri = f"file://{warehouse}#{table_id}"
+
+        response = client.post("/v1/materialize", json=_scan(uri))
+
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"] == f"Table not found: {uri}"
+
+    def test_a_transform_input_is_404_naming_the_table(self, client, warehouse):
+        from strata.transforms.registry import (
+            TransformDefinition,
+            TransformRegistry,
+            reset_transform_registry,
+            set_transform_registry,
+        )
+
+        set_transform_registry(
+            TransformRegistry(
+                enabled=True,
+                definitions=[TransformDefinition(ref="sql@v1", executor_url="http://executor")],
+            )
+        )
+        uri = f"file://{warehouse}#ns.missing"
+        body = {"inputs": [uri], "transform": {"executor": "sql@v1", "params": {}}}
+        try:
+            response = client.post("/v1/materialize", json=body)
+        finally:
+            reset_transform_registry()
+
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"] == f"Table not found: {uri}"
