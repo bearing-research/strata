@@ -2842,8 +2842,8 @@
 </tr>
 <tr>
 <td><code>cell_console</code></td>
-<td><code>{ "cell_id": "...", "stream": "stdout", "text": "..." }</code></td>
-<td>Incremental output</td>
+<td><code>{ "cell_id": "...", "stream": "stdout", "text": "...", "chunk_seq": 0 }</code></td>
+<td>Incremental output. Append <code>text</code> to the cell's console for <code>stream</code>. A remote cell's output arrives while it runs, numbered per stream by <code>chunk_seq</code> from 0: chunk 0 starts that stream's console for the run, so replace what the last run left. <code>chunk_seq</code> is <code>null</code> on console sent when the cell finishes</td>
 </tr>
 <tr>
 <td><code>cell_error</code></td>
@@ -3071,7 +3071,7 @@
 <li><strong>Client sends <code>notebook_sync</code></strong> as its first message after reconnecting. The server responds with <code>notebook_state</code> containing the full current state (cells, DAG, cell statuses, latest display outputs).</li>
 <li><strong>Client replaces local state</strong> with the synced payload and resumes listening.</li>
 </ol>
-<p>There is <strong>no replay</strong> of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (<code>cell_output</code>, finished cell statuses) is recovered via <code>notebook_sync</code>; transient progress events (<code>cell_console</code> mid-stream, <code>cell_output_delta</code> for a streaming prompt cell, <code>cell_iteration_progress</code> for a <code>@loop</code> cell, <code>cell_variant_progress</code> for a <code># @per_variant</code> fan-out cell, <code>cascade_progress</code>) are not.</p>
+<p>There is <strong>no replay</strong> of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (<code>cell_output</code>, finished cell statuses) is recovered via <code>notebook_sync</code>; transient progress events (<code>cell_console</code> mid-stream, <code>cell_output_delta</code> for a streaming prompt cell, <code>cell_iteration_progress</code> for a <code>@loop</code> cell, <code>cell_variant_progress</code> for a <code># @per_variant</code> fan-out cell, <code>cascade_progress</code>) are not. The one exception is a remote cell's live console: while it runs, its <code>console_stdout</code> / <code>console_stderr</code> in <code>notebook_state</code> hold the last 64 KiB it has streamed of each stream, so a client that joins mid-run shows the run so far and appends the <code>cell_console</code> frames that follow.</p>
 <h3 id="session-lifetime">Session lifetime<a class="headerlink" href="#session-lifetime" title="Permanent link">&para;</a></h3>
 <p>A session ends when:</p>
 <ul>

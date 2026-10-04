@@ -3028,7 +3028,7 @@ Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall 
 <p><strong>Modal redeploy hangs at "Building image".</strong>
 You changed <code>.pip_install(...)</code> - Modal is rebuilding the image layer. With torch + sentence-transformers this takes ~5 minutes the first time on a new image hash. Subsequent deploys with no dep changes hit the layer cache and finish in seconds.</p>
 <h2 id="live-status">Live status<a class="headerlink" href="#live-status" title="Permanent link">&para;</a></h2>
-<p>When a cell dispatches to a remote worker, the UI shows a pulsing <strong>"dispatching → <name>"</strong> badge during execution, and the cell's console output streams back from the worker as it is produced. After completion, the worker name and transport type appear in the cell metadata.</p>
+<p>When a cell dispatches to a remote worker, the UI shows a pulsing <strong>"dispatching → <name>"</strong> badge during execution, and the cell's console output streams back from the worker as it is produced, replacing what the cell's last run printed. Someone who opens the notebook mid-run, or reloads the page, sees the last 64 KiB the cell has printed so far and the rest as it arrives. After completion, the worker name and transport type appear in the cell metadata.</p>
 
 
 

@@ -2585,7 +2585,9 @@ against the preserved execution state.</p>
   <code>cell_iteration_progress</code>, <code>cascade_progress</code>) are dropped. On reconnect, send <code>notebook_sync</code> and
   rebuild from the fresh <code>notebook_state</code>. Persisted state (finished
   <code>cell_status</code>, latest <code>cell_output</code>) survives - it's recovered through
-  the snapshot.</li>
+  the snapshot. So does a running remote cell's console: the snapshot's
+  <code>console_stdout</code> / <code>console_stderr</code> hold the last 64 KiB of what it has
+  streamed so far, and the <code>cell_console</code> frames after it append.</li>
 <li><strong>Sequence numbers continue across reconnects.</strong> Every server-to-client
   message carries a <code>seq</code> from a per-notebook counter. The counter doesn't
   reset on reconnect; if you see a large gap, that's expected - treat it as
