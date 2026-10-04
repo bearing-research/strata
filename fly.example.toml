@@ -1,12 +1,15 @@
-# Fly.io deployment configuration for Strata Notebook
+# Example Fly.io deployment for Strata Notebook (personal mode).
 #
-# Deploy:   fly deploy
-# Open:     fly open
-# Logs:     fly logs
-# Status:   fly status
+# Copy it to fly.toml (gitignored), replace every <placeholder>, then:
+#
+#     fly apps create <your-app-name>
+#     fly deploy
+#
+# See docs/deployment/fly.md before deploying to a public URL.
 
-app = "strata-notebook"
-primary_region = "sjc"
+app = "<your-app-name>"
+# A Fly region code, e.g. "iad" or "fra"; `fly platform regions` lists them.
+primary_region = "<region>"
 
 [build]
   dockerfile = "Dockerfile"
@@ -17,14 +20,8 @@ primary_region = "sjc"
   STRATA_DEPLOYMENT_MODE = "personal"
   STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"
   # The name browsers reach the app on; anything else is refused as a
-  # possible DNS-rebinding page. Change it with the app name, and add any
-  # custom domain (comma-separated).
-  STRATA_ALLOWED_HOSTS = "strata-notebook.fly.dev"
-  # Per-user notebook scoping behind Cloudflare Access (or any authenticating
-  # proxy that injects the user's email). Without a proxy the header is absent
-  # and Strata acts single-user, so this is safe either way. See
-  # docs/deployment/modes.md, "Sharing personal mode with a small group".
-  STRATA_PERSONAL_MODE_USER_HEADER = "Cf-Access-Authenticated-User-Email"
+  # possible DNS-rebinding page. Add any custom domain (comma-separated).
+  STRATA_ALLOWED_HOSTS = "<your-app-name>.fly.dev"
   STRATA_NOTEBOOK_PYTHON_VERSIONS = '["3.12","3.13"]'
   STRATA_CACHE_DIR = "/home/strata/.strata/cache"
   STRATA_METADATA_DB = "/home/strata/.strata/meta.sqlite"

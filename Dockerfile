@@ -60,7 +60,7 @@ COPY packages ./packages
 # installs it, then the wheel with --no-deps, so nothing is re-resolved.
 #
 # Extras:
-#   --extra otel: without it, the OTEL_* env vars fly.toml sets are ignored.
+#   --extra otel: without it, the OTEL_* env vars fly.example.toml sets are ignored.
 #   --extra postgres: lets a deployment point STRATA_ARTIFACT_METADATA_DSN at
 #     Postgres (several servers sharing one store) without rebuilding the
 #     image. SQLite stays the default.

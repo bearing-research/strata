@@ -249,3 +249,6 @@ src/strata/_frontend/
 
 # Claude Code session state
 .claude/
+
+# A Fly deployment's own config, copied from fly.example.toml.
+/fly.toml
