@@ -548,7 +548,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | `STRATA_WORKER_MAX_CONCURRENT`    | unlimited            | Executions the worker runs at once; one more is refused with 503 and `Retry-After`. Same as `--max-concurrent`, which wins. |
 | `STRATA_WORKER_GPU_SLOTS`         | none                 | GPUs to hand out, one per execution: the worker sets `CUDA_VISIBLE_DEVICES` for each cell itself. Same as `--gpu-slots`, which wins. |
 | `STRATA_WORKER_ENV_ROOT`          | `~/.strata/worker-envs` | Where the worker keeps one locked environment per notebook `uv.lock` and interpreter build. See [the `environment` block](executor-protocol.md#the-environment-block). |
-| `STRATA_WORKER_ENV_REGISTRY_URL`  | `None`               | Fetch a missing locked environment from `<url>/<key>` as a `.tar.gz` instead of building it with `uv sync`. |
+| `STRATA_WORKER_ENV_REGISTRY_URL`  | `None`               | Fetch a missing locked environment from `<url>/<key>/<interpreter>/<platform>` as a `.tar.gz` instead of building it with `uv sync`; a `404` is built locally. See [the `environment` block](executor-protocol.md#the-environment-block). |
 
 The worker's input downloads, result uploads and log forwarding connect only to an address that passed the private-address check, and they connect directly: `HTTPS_PROXY` and the other proxy variables are ignored, because through a proxy the proxy would resolve the name and the check would say nothing about where it connects. A worker that can reach its store only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`, under which nothing is checked and the proxy variables apply. See the SSRF defenses in the [executor protocol](executor-protocol.md).
 

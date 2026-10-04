@@ -8,7 +8,8 @@ A server sends the notebook's lock with the cell::
 and the worker runs the cell in that exact environment, built once per lock and
 interpreter build under ``STRATA_WORKER_ENV_ROOT`` and reused for the same key.
 With ``STRATA_WORKER_ENV_REGISTRY_URL`` set, a missing environment is fetched
-from ``<registry>/<key>`` as a ``.tar.gz`` instead of installed. Workers
+from ``<registry>/<key>/<interpreter>/<platform>`` as a ``.tar.gz``, and built
+locally when the registry answers 404. Workers
 advertise support in ``/health`` (``locked_environments``); the server sends
 ``environment`` only to those.
 """
@@ -38,9 +39,10 @@ REGISTRY_VAR = "STRATA_WORKER_ENV_REGISTRY_URL"
 COMPLETE_MARKER = ".strata-env-complete"
 INSTALL_TIMEOUT_SECONDS = 900
 _KEY = re.compile(r"^[0-9a-f]{64}$")
+# The build, ``cpython-3.13.1 linux-x86_64``: the registry path's last two segments.
 _PROBE = (
     "import platform, sys, sysconfig; "
-    "print(sys.implementation.name, platform.python_version(), sys.abiflags, "
+    "print(f'{sys.implementation.name}-{platform.python_version()}{sys.abiflags}', "
     "sysconfig.get_platform())"
 )
 
@@ -141,26 +143,26 @@ def _install(spec: dict[str, str], interpreter: Path, env_dir: Path) -> None:
         ) from exc
 
 
-def _fetch(registry: str, key: str, env_dir: Path) -> None:
-    """Unpack ``<registry>/<key>`` into *env_dir*."""
-    url = f"{registry.rstrip('/')}/{key}"
+def _fetch(url: str, env_dir: Path) -> bool:
+    """Unpack *url* into *env_dir*; False when the registry has no such environment."""
     with tempfile.TemporaryDirectory(dir=env_dir.parent) as scratch:
         archive = Path(scratch) / "environment.tar.gz"
         try:
             with httpx.stream("GET", url, timeout=INSTALL_TIMEOUT_SECONDS) as response:
+                if response.status_code == 404:
+                    return False
                 response.raise_for_status()
                 with open(archive, "wb") as out:
                     for chunk in response.iter_bytes():
                         out.write(chunk)
         except httpx.HTTPError as exc:
-            raise WorkerEnvironmentError(
-                f"could not fetch environment {key} from {url}: {exc}"
-            ) from exc
+            raise WorkerEnvironmentError(f"could not fetch environment from {url}: {exc}") from exc
         unpacked = Path(scratch) / "environment"
         with tarfile.open(archive) as tar:
             tar.extractall(unpacked, filter="data")
         shutil.rmtree(env_dir, ignore_errors=True)
         os.replace(unpacked, env_dir)
+    return True
 
 
 def _prepare(spec: dict[str, str]) -> PreparedEnvironment:
@@ -174,10 +176,9 @@ def _prepare(spec: dict[str, str]) -> PreparedEnvironment:
     with lock:
         installed = False
         if not (env_dir / COMPLETE_MARKER).exists():
-            registry = os.environ.get(REGISTRY_VAR)
-            if registry:
-                _fetch(registry, spec["key"], env_dir)
-            else:
+            registry = os.environ.get(REGISTRY_VAR, "").rstrip("/")
+            url = f"{registry}/{spec['key']}/{build.replace(' ', '/')}"
+            if not registry or not _fetch(url, env_dir):
                 _install(spec, interpreter, env_dir)
             if not python.exists():
                 # If marked complete first, an archive with no interpreter would fail every
