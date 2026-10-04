@@ -96,6 +96,7 @@ from strata.types import (
     IdentityParams,
     MaterializeRequest,
     MaterializeResponse,
+    TableIdentity,
 )
 from strata.url_safety import host_is_allowlisted
 
@@ -1754,6 +1755,16 @@ def _table_identity_from_uri(table_uri: str):
         return None
 
 
+def _table_identity_or_400(table_uri: str) -> TableIdentity:
+    """Resolve a request's table URI to its identity; a URI that names no table is a 400."""
+    from strata.iceberg import table_identity_for
+
+    try:
+        return table_identity_for(table_uri, get_state().config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 def _authorize_artifact_write() -> None:
     """Gate a write endpoint (put / set_name / set_alias / tags).
 
@@ -2116,12 +2127,11 @@ async def _handle_identity_materialize(
     # Authorize before planning: the 400/413 planning errors would tell a denied
     # caller the table exists and its size, and planning costs manifest reads.
     # The identity comes from the URI so a refused request does no manifest work.
+    uri_identity = _table_identity_or_400(table_uri)
     if state.config.principal_auth_enabled:
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
-        early_identity = _table_identity_from_uri(table_uri)
-        if early_identity is not None:
-            _authorize_table_access(table_uri, early_identity)
+        _authorize_table_access(table_uri, uri_identity)
 
     plan_timeout = state.config.plan_timeout_seconds
 

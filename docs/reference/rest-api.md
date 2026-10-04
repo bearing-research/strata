@@ -120,7 +120,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | Status | Common cause |
 | --- | --- |
 | `200` | Success |
-| `400` | Malformed request (invalid path, bad enum value) |
+| `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
 | `404` | Notebook session not found, or a hidden 403 (see above) |

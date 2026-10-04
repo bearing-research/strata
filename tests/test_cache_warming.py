@@ -210,7 +210,7 @@ class TestCacheWarmerIntegration:
 
                 await client.post(
                     "/v1/cache/warm/async",
-                    json={"tables": ["table1"]},
+                    json={"tables": ["ns.table1"]},
                 )
 
                 await asyncio.sleep(0.1)
