@@ -3419,6 +3419,22 @@ no route serves files from outside the frontend.</p>
   <code>/v1/usage</code> and <code>/v1/workers</code> return only the caller's tenant.</li>
 <li>Cells whose <code>[env]</code> held a blanked secret re-run once, since that empty
   value no longer reaches them.</li>
+<li>Shared environments are keyed by what the lock installs, not the raw
+  <code>uv.lock</code> (which carried the project's name): existing shared environments
+  are rebuilt once and the old ones swept. The executor protocol's
+  <code>environment.key</code> changed the same way, so servers and workers (and any
+  registry addressing environments by key) upgrade together.</li>
+<li>A configured SQL catalog whose warehouse is in object storage now needs a
+  <code>uri</code> (<code>STRATA_CATALOG_URI</code>, or the entry's own): the server refuses to start
+  rather than keep the catalog in SQLite on its own disk.</li>
+<li>Notebook sessions with no edits, runs or focus for 4 hours are closed even
+  with a tab open (<code>STRATA_NOTEBOOK_SESSION_TTL_SECONDS</code>); the tab offers to
+  reopen.</li>
+<li><code>.mcp.json</code> and <code>CLAUDE.md</code> are ignored in new notebooks and left out of
+  exports; an existing notebook's <code>.gitignore</code> is not changed.</li>
+<li>strata-pool: the jobs table's state CHECK gains <code>cancelled</code>. A pool database
+  created before this rejects a cancel until that constraint is updated or the
+  database recreated.</li>
 </ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3479,6 +3495,39 @@ no route serves files from outside the frontend.</p>
   its default from files that predate it, and an identity-partition column a
   file omits (a Hive-layout file registered with <code>add_files</code>) reads the
   file's partition value, as pyiceberg reads it.</li>
+<li><strong>Notebook sessions have limits.</strong> Idle sessions close after
+  <code>STRATA_NOTEBOOK_SESSION_TTL_SECONDS</code> (4 hours), at most
+  <code>STRATA_NOTEBOOK_MAX_SESSIONS</code> (50) stay open, and with
+  <code>STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB</code> set the least recently used idle
+  session closes when available memory drops below it. A sweep applies them
+  every minute. Edits, runs, cell focus and MCP calls count as activity; a
+  session running a cell or an environment job is never closed.
+  <code>STRATA_NOTEBOOK_WARM_POOL_SIZE</code> sets the warm pool (0 turns it off). A
+  closed session tells its clients with a <code>session_closed</code> frame, and the
+  browser offers to reopen. <code>POST /v1/notebooks/{id}/close</code> closes a session
+  and keeps the notebook.</li>
+<li><strong>A worker can answer a direct cell with 202.</strong> <code>POST /v1/execute</code> may
+  return a <code>job_url</code>; the server polls it, a machine's boot no longer counts
+  against the cell's timeout, and the finished job's URL returns the bundle.</li>
+<li><strong>strata-pool jobs can be cancelled.</strong> <code>POST /v1/jobs/{id}/cancel</code> stops a
+  queued job before any machine starts, and a running one on its machine,
+  which returns to warm. The job ends <code>cancelled</code>.</li>
+<li><strong>Results record who computed them.</strong> On a server that authenticates its
+  callers, every artifact a notebook run stores records the member who started
+  the run, so promoted and published results name who computed each step.</li>
+<li><strong><code>strata cell pin-fetch</code></strong> writes <code>sha256=</code> pins for a cell's fetches from
+  the local fetch cache. A pin mismatch carries <code>error_code:
+  fetch_pin_mismatch</code>, and publication pages and RO-Crates show when fetched
+  bytes were retrieved.</li>
+<li><strong>Named catalogs take a credential.</strong> A <code>STRATA_CATALOGS</code> entry accepts
+  <code>credential = "&lt;name&gt;"</code>, resolved from <code>STRATA_NOTEBOOK_CREDENTIALS</code>.</li>
+<li><strong>Every cell has a digest.</strong> <code>strata run</code> stores leaf cells' variables too,
+  so <code>--format json</code> reports a digest for the final result, and the ZIP
+  export's <code>provenance.json</code> lists each cell's output digests.</li>
+<li><strong>Archives verify either file.</strong> The RO-Crate lists <code>artifact.parquet</code> when
+  the archive has one, and <code>GET /p/{token}/verify?sha256=</code> names the bundle
+  file a digest matches. Each credit edit is a <code>credit</code> event on
+  <code>/v1/events</code>.</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3536,6 +3585,18 @@ no route serves files from outside the frontend.</p>
   turns <code>javascript:</code> and similar link targets into <code>#</code>.</li>
 <li><strong><code>strata run</code> keeps notebook INFO logs off stderr</strong>; <code>STRATA_LOG_LEVEL</code>
   brings them back.</li>
+<li><strong>Notebooks share an environment whatever their names.</strong> In shared mode,
+  notebooks with the same resolved dependencies link one environment, and the
+  notebook's own project is never installed into it.</li>
+<li><strong>Exports carry the committed set.</strong> Snapshot and ZIP exports include
+  <code>cells/tests/</code> and the notebook's <code>.gitignore</code>, and import restores it.</li>
+<li><strong><code>publish --to</code> streams and remaps.</strong> Uploads go through the staged import
+  route instead of memory, and a chain another tenant already holds lands as
+  remapped copies instead of a 409. <code>promote --to</code> also streams.</li>
+<li><strong>Service mode reuses only your own session.</strong> Opening a path reuses a live
+  session only for the member who opened it.</li>
+<li><code>PATCH /v1/publications/{token}</code> refuses <code>artifact_id</code> and <code>version</code> with a
+  400 instead of ignoring them.</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3794,6 +3855,9 @@ no route serves files from outside the frontend.</p>
   <code>Cache-Control: no-cache</code>, every response carries
   <code>X-Content-Type-Options: nosniff</code>, and strata-client and strata-pool ship
   their LICENSE.</li>
+<li>Opening a notebook while its imported environment was still building in
+  shared mode could hang the whole server; a blocking shared-environment sync
+  now refuses to run on the event loop.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
