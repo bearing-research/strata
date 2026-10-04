@@ -82,6 +82,7 @@ from strata.notebook.workers import (
     worker_supports_notebook_execution,
 )
 from strata.notebook.writer import (
+    _is_sensitive_env_key,
     _renv_sync,
     _uv_sync,
     drop_blanked_secrets,
@@ -535,14 +536,34 @@ class NotebookSession:
         self.set_variant_active(group, new_name)
         return new_name, new_cell_id
 
-    def reload(self) -> None:
-        """Reload notebook state from disk."""
+    def reload(self, *, keep_typed_secrets: bool = True) -> None:
+        """Reload notebook state from disk.
+
+        Secret values typed this session are never written to disk, so they are carried
+        over for keys the disk still leaves blank. ``keep_typed_secrets=False`` is for a
+        caller that sets the whole env itself.
+        """
+        from strata.notebook.secret_manager.session_integration import MANUAL_SOURCE
+
         previous_cells = {cell.id: cell.model_copy(deep=True) for cell in self.notebook_state.cells}
         previous_runtime_identities = {
             cell.id: self._effective_worker_runtime_identity(cell)
             for cell in self.notebook_state.cells
         }
+        previous_env = self.notebook_state.env
+        previous_sources = self.notebook_state.env_sources
         self.notebook_state = parse_notebook(self.path)
+        if keep_typed_secrets:
+            disk_env = self.notebook_state.env
+            # The writer drops an [env] block that holds only blanked secrets.
+            block_dropped = not disk_env
+            for key, value in previous_env.items():
+                if not value or not _is_sensitive_env_key(key):
+                    continue
+                if previous_sources.get(key, MANUAL_SOURCE) != MANUAL_SOURCE:
+                    continue  # provider-fetched; _merge_secrets restores it
+                if disk_env.get(key) == "" or (block_dropped and key not in disk_env):
+                    disk_env[key] = value
         self._analyze_and_build_dag()
         self._run_annotation_validation()
         self._merge_secrets()

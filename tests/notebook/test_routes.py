@@ -1357,6 +1357,76 @@ def test_secret_env_values_never_reach_clients(client, tmp_path):
     assert session.notebook_state.env == {"OPENAI_API_KEY": "sk-new"}
 
 
+@pytest.mark.parametrize(
+    "others",
+    [{}, {"LOG_LEVEL": "info"}],
+    ids=["only-secrets-no-env-block", "secret-blank-in-env-block"],
+)
+def test_a_typed_secret_survives_a_reload(client, tmp_path, others):
+    """A secret is never written to disk, so a reload must not blank it for the session."""
+    import tomllib
+
+    from strata.notebook.secret_manager.session_integration import MASKED_ENV_VALUE
+
+    notebook_dir = create_notebook(tmp_path, "Secret Reload Test")
+    add_cell_to_notebook(notebook_dir, "cell-1")
+    session_id = open_session_id(client, notebook_dir)
+    session = get_session_manager().get_session(session_id)
+    assert session is not None
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env", json={"env": {"OPENAI_API_KEY": "sk-typed", **others}}
+    )
+    assert response.status_code == 200, response.text
+
+    def on_disk() -> dict:
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            return tomllib.load(f).get("env", {})
+
+    # PUT /timeout writes notebook.toml and reloads the session from it.
+    assert client.put(f"/v1/notebooks/{session_id}/timeout", json={"timeout": 9}).status_code == 200
+    assert session.notebook_state.env == {"OPENAI_API_KEY": "sk-typed", **others}
+    assert session.notebook_state.cells[0].env["OPENAI_API_KEY"] == "sk-typed"
+    assert on_disk().get("OPENAI_API_KEY", "") == ""
+    assert "sk-typed" not in (notebook_dir / "notebook.toml").read_text()
+
+    # The masked marker a client got back still means "unchanged" after the reload.
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env",
+        json={"env": {"OPENAI_API_KEY": MASKED_ENV_VALUE, **others}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["env"]["OPENAI_API_KEY"] == MASKED_ENV_VALUE
+    assert session.notebook_state.env["OPENAI_API_KEY"] == "sk-typed"
+
+    # A secret the env editor removes stays removed across the next reload.
+    response = client.put(f"/v1/notebooks/{session_id}/env", json={"env": dict(others)})
+    assert response.status_code == 200, response.text
+    assert client.put(f"/v1/notebooks/{session_id}/timeout", json={"timeout": 8}).status_code == 200
+    assert "OPENAI_API_KEY" not in session.notebook_state.env
+    assert "OPENAI_API_KEY" not in session.notebook_state.cells[0].env
+
+
+def test_a_secret_removed_from_notebook_toml_goes_away_on_reload(client, tmp_path):
+    notebook_dir = create_notebook(tmp_path, "Secret Removed Test")
+    add_cell_to_notebook(notebook_dir, "cell-1")
+    session_id = open_session_id(client, notebook_dir)
+    session = get_session_manager().get_session(session_id)
+    assert session is not None
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env",
+        json={"env": {"OPENAI_API_KEY": "sk-typed", "LOG_LEVEL": "info"}},
+    )
+    assert response.status_code == 200, response.text
+
+    toml_path = notebook_dir / "notebook.toml"
+    text = toml_path.read_text()
+    assert 'OPENAI_API_KEY = ""\n' in text
+    toml_path.write_text(text.replace('OPENAI_API_KEY = ""\n', ""))
+
+    assert client.put(f"/v1/notebooks/{session_id}/timeout", json={"timeout": 9}).status_code == 200
+    assert session.notebook_state.env == {"LOG_LEVEL": "info"}
+
+
 def test_update_cell_source(client, tmp_path):
     """PUT /cells/{cell_id} updates the source in memory and on disk."""
     notebook_dir = create_notebook(tmp_path, "Update Test")
