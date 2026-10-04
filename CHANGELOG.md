@@ -84,6 +84,10 @@ no route serves files from outside the frontend.
 - strata-pool: the jobs table's state CHECK gains `cancelled`. A pool database
   created before this rejects a cancel until that constraint is updated or the
   database recreated.
+- Service mode: a table URI whose warehouse is in object storage needs a
+  catalog `uri` (`STRATA_CATALOG_URI`); without one, scans, cache warming and
+  export to a table answer 400 instead of using a SQLite catalog on the
+  server's disk.
 
 
 ### Added
@@ -513,7 +517,9 @@ no route serves files from outside the frontend.
 - The terminal viewer reconnected into a refusal when the server closed its
   session. It now stops, shows why, and `r` reopens the notebook by path (with
   `--session ID` it says to run `strata watch PATH`).
-
+- A personal server read a `gs://`, `az://` or `abfs://` warehouse with no
+  catalog `uri` through a SQLite file at a malformed local path and failed
+  with a 500; it now uses the `STRATA_METADATA_DB` catalog, as `s3://` does.
 
 ## 0.8.0 - 2026-09-27
 

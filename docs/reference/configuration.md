@@ -135,7 +135,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 
 | Variable             | Default | Description                          |
 | -------------------- | ------- | ------------------------------------ |
-| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite catalog an `s3://` warehouse URI uses when no catalog `uri` is set. It is on this server's disk, so other readers of the bucket do not see it |
+| `STRATA_METADATA_DB` | `~/.strata/meta.sqlite` | SQLite catalog a personal server uses for an object-store warehouse URI (`s3://`, `gs://`, `az://`, `abfs://`) when no catalog `uri` is set. It is on this server's disk, so other readers of the bucket do not see it. A service refuses such a URI instead (see [Catalog](#catalog)) |
 
 ## Catalog
 
@@ -152,6 +152,13 @@ in `catalog_properties`, in a `STRATA_CATALOGS` entry, or in the named
 credential that entry names. Without one its tables
 would be in a SQLite file on this server's disk, so the server refuses to start
 and names the setting.
+
+A warehouse named only in a request's table URI (`s3://bucket/wh#ns.table`)
+is not known at startup. With no catalog `uri` set, a service
+(`STRATA_DEPLOYMENT_MODE=service`) refuses such a URI in any object store with
+a 400 naming `STRATA_CATALOG_URI`, on scans, cache warming and export to a
+table. A personal server keeps the catalog in `STRATA_METADATA_DB`, so it can
+write its own tables there; nothing else reading the bucket sees them.
 
 ## S3 Storage
 
