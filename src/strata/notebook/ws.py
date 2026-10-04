@@ -44,6 +44,7 @@ from strata.notebook.protocol import MessageType
 from strata.notebook.scopes import (
     NOTEBOOK_SCOPE_READ,
     required_scope_for_frame,
+    session_visible_to_caller,
 )
 from strata.notebook.session import CellStateSnapshot, SessionManager
 from strata.notebook.workers import resolve_worker_spec, worker_transport
@@ -805,7 +806,8 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
 
     session_manager = _get_session_manager()
     session = session_manager.get_session(notebook_id)
-    if not session:
+    # Another tenant's session looks missing, as over REST and MCP.
+    if not session or not session_visible_to_caller(session):
         await websocket.close(code=1008, reason="Notebook not found")
         return
 

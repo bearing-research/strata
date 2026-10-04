@@ -43,7 +43,11 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
 )
 from strata.notebook.quiesce import NotebookQuiesced
-from strata.notebook.scopes import NOTEBOOK_SCOPE_READ, required_scope_for_route
+from strata.notebook.scopes import (
+    NOTEBOOK_SCOPE_READ,
+    required_scope_for_route,
+    session_visible_to_caller,
+)
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
@@ -136,12 +140,12 @@ def shutdown_worker_supervisor() -> None:
 def get_notebook_session(notebook_id: str, request: Request) -> NotebookSession:
     """FastAPI dependency: resolve ``notebook_id`` to an open session.
 
-    Raises 404 when the session is unknown or the caller does not own it (404, not
-    403, so probes cannot enumerate owners), matching the WS upgrade gate. Unowned
-    notebooks and single-user deployments pass through.
+    Raises 404 when the session is unknown, belongs to another tenant, or the caller
+    does not own it (404, not 403, so probes cannot enumerate sessions), matching the
+    WS upgrade gate and MCP. Unowned notebooks and single-user deployments pass through.
     """
     session = _session_manager.get_session(notebook_id)
-    if session is None:
+    if session is None or not session_visible_to_caller(session):
         raise HTTPException(status_code=404, detail="Notebook not found")
     _require_owner(session.notebook_state.owner, _caller_identity(request))
     # An edit or a run keeps the session open; a read does not, or a poller would.
@@ -232,18 +236,48 @@ def _sanitize_user_dir_name(identity: str) -> str | None:
     return cleaned or None
 
 
+def _caller_tenant_dir() -> str | None:
+    """The caller's subdir of the storage root on a multi-tenant server, else ``None``.
+
+    The tenant middleware has validated the id, so it is a safe directory name. A
+    tenantless caller gets the default tenant's subdir, never the whole root, which
+    only ``admin:*`` sees.
+    """
+    from strata.auth import get_principal
+    from strata.server import get_state
+    from strata.tenant import DEFAULT_TENANT_ID
+
+    try:
+        config = get_state().config
+    except RuntimeError:
+        return None
+    if not getattr(config, "multi_tenant_enabled", False):
+        return None
+    principal = get_principal()
+    if principal is not None and principal.has_scope("admin:*"):
+        return None
+    return (principal.tenant if principal is not None else None) or DEFAULT_TENANT_ID
+
+
 def _get_user_storage_root(request: Request | None) -> Path | None:
-    """Return the storage root scoped to the calling user.
+    """Return the storage root scoped to the calling user or tenant.
 
     ``None`` without server state. The base root when there is no request, no
-    header configured, or no identity. Otherwise ``<base>/<sanitized_identity>/``,
-    created on first call.
+    header configured, or no identity. Otherwise ``<base>/<sanitized_identity>/``
+    for a personal-mode user header, or ``<base>/<tenant>/`` on a multi-tenant
+    server, created on first call.
     """
     base = _get_notebook_storage_root()
     if base is None:
         return None
     if request is None:
         return base
+
+    tenant_dir = _caller_tenant_dir()
+    if tenant_dir is not None:
+        tenant_root = base / tenant_dir
+        tenant_root.mkdir(parents=True, exist_ok=True)
+        return tenant_root
 
     identity = _caller_identity(request)
     if identity is None:
@@ -2023,7 +2057,7 @@ async def list_sessions(request: Request) -> dict:
     sessions = []
     for sid in _session_manager.list_sessions():
         session = _session_manager.get_session(sid)
-        if session is None:
+        if session is None or not session_visible_to_caller(session):
             continue
         if boundary is not None:
             try:
@@ -2059,7 +2093,7 @@ async def get_session(session_id: str, request: Request) -> JSONResponse:
     _require_personal_mode_session_api()
     with timing.phase("lookup"):
         session = _session_manager.get_session(session_id)
-    if not session:
+    if not session or not session_visible_to_caller(session):
         raise HTTPException(status_code=404, detail="Session not found")
 
     # A leaked session_id must not let another user read this notebook; 404

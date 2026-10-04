@@ -40,8 +40,8 @@ Within a tenant, every open session is visible to any caller holding
 tenant of the caller who opened or created it, and a caller from another tenant
 neither sees it in `list_notebooks` nor reaches it by `session_id`, as with
 tenant-scoped artifacts. `admin:*` sees every tenant's sessions, and a session
-opened without a tenant is visible to all. This covers MCP only; the notebook
-REST routes and the WebSocket do not check a session's tenant.
+opened without a tenant is visible to all. The notebook REST routes and the
+WebSocket apply the same rule.
 
 === "From PyPI"
 

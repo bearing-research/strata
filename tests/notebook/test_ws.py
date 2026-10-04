@@ -2727,6 +2727,51 @@ async def test_ws_personal_mode_unchanged(notebook_session, personal_mode):
     assert fake.frames_of("notebook_state")
 
 
+@pytest.mark.asyncio
+async def test_ws_upgrade_to_another_tenants_session_is_refused(
+    notebook_session, trusted_proxy_mode
+):
+    """Another tenant's session looks missing, so its code and state stay out of reach."""
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    session.opened_by = ("ana", "acme")
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("cell_execute", {"cell_id": "root"})],
+        headers={**_auth_headers("notebook:read notebook:execute"), "x-tenant-id": "globex"},
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    assert fake.accepted is False
+    assert fake.closed == (1008, "Notebook not found")
+    assert fake.sent == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scopes", "tenant"),
+    [("notebook:read", "acme"), ("admin:*", "ops")],
+    ids=["same-tenant", "admin"],
+)
+async def test_ws_upgrade_to_a_visible_tenants_session_is_accepted(
+    notebook_session, trusted_proxy_mode, scopes, tenant
+):
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    session.opened_by = ("ana", "acme")
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")],
+        headers={**_auth_headers(scopes, principal="bea"), "x-tenant-id": tenant},
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    assert fake.accepted is True
+    assert fake.frames_of("notebook_state")
+
+
 def test_unknown_frames_default_to_execute_scope():
     """Fail closed: a newly added frame is privileged until classified."""
     from strata.notebook.ws import required_scope_for_frame

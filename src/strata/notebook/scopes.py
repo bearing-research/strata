@@ -7,7 +7,13 @@ unclassified operation is privileged until someone classifies it.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from strata.auth import get_principal
 from strata.notebook.protocol import MessageType
+
+if TYPE_CHECKING:
+    from strata.notebook.session import NotebookSession
 
 NOTEBOOK_SCOPE_READ = "notebook:read"
 NOTEBOOK_SCOPE_WRITE = "notebook:write"
@@ -193,3 +199,16 @@ def required_scope_for_tool(name: str) -> str:
     if name in _WRITE_TOOLS:
         return NOTEBOOK_SCOPE_WRITE
     return _OTHER_TOOL_SCOPES.get(name, NOTEBOOK_SCOPE_EXECUTE)
+
+
+def session_visible_to_caller(session: NotebookSession) -> bool:
+    """Whether the current caller's tenant may use *session*, as artifacts are scoped.
+
+    A session carries the tenant that opened it; a tenantless one is open to all. No
+    principal (personal mode) or ``admin:*`` sees every session.
+    """
+    principal = get_principal()
+    if principal is None or principal.has_scope("admin:*"):
+        return True
+    tenant = session.opened_by[1] if session.opened_by else None
+    return tenant is None or tenant == principal.tenant
