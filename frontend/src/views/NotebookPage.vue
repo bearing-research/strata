@@ -11,6 +11,7 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 import { useStrata } from '../composables/useStrata'
 import { embedSnippet } from '../utils/embedSnippet'
 import { editorChrome, editorQuery } from '../utils/framed'
+import { BASE_PATH } from '../utils/strataBase'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
@@ -38,7 +39,9 @@ const router = useRouter()
 const { record, remove, findBySessionId } = useRecentNotebooks()
 
 async function copyEmbedSnippet() {
-  await navigator.clipboard.writeText(embedSnippet(window.location.origin, props.sessionId))
+  await navigator.clipboard.writeText(
+    embedSnippet(window.location.origin, BASE_PATH, props.sessionId),
+  )
   pushToast('Embed snippet copied to clipboard')
 }
 

@@ -208,3 +208,27 @@ These apply identically in either mode and can be tuned freely:
 - `artifact_blob_backend`, local / s3 / gcs / azure
 - Tracing, logging, S3 / GCS / Azure credentials
 - Cache size, cache directory, metadata DB path
+- `public_base_url` and `public_base_path`, the address readers reach the server on (below)
+
+## Serving under a path
+
+A reverse proxy can serve Strata at a path such as
+`https://app.example.com/o/acme/lab/` instead of a hostname of its own. Tell
+Strata the path:
+
+```bash
+STRATA_PUBLIC_BASE_PATH=/o/acme/lab
+STRATA_PUBLIC_BASE_URL=https://app.example.com   # origin only; the path comes from above
+```
+
+The proxy may strip the prefix before forwarding or pass it through; both
+reach the same routes. The notebook UI, its WebSocket, the API docs, signed
+build URLs and every link on a [publication](../notebook/publishing.md) page
+carry the prefix. Open the UI with the trailing slash
+(`https://app.example.com/o/acme/lab/`), since its assets load relative to
+the page. The prefix's first segment must not be one of Strata's own
+(`v1`, `p`, `assets`, `docs`, `health`), or a stripped request is read as
+already carrying it.
+
+Clients take the full URL, path included (`https://app.example.com/o/acme/lab`):
+the CLI's `--server`, the TUI and `strata_client` all append their routes to it.

@@ -19,12 +19,18 @@ function heightAfter(snippet: string, event: { origin: string; data: unknown }):
 }
 
 test('the snippet frames the app view of the session', () => {
-  const snippet = embedSnippet('https://strata.example.com', 'abc123')
+  const snippet = embedSnippet('https://strata.example.com', '', 'abc123')
   assert.match(snippet, /src="https:\/\/strata\.example\.com\/#\/app\/abc123\?embed=1"/)
 })
 
+test('under a base path the snippet frames the app view at that path', () => {
+  const snippet = embedSnippet('https://app.example.com', '/o/acme/lab', 'abc123')
+  assert.match(snippet, /src="https:\/\/app\.example\.com\/o\/acme\/lab\/#\/app\/abc123\?embed=1"/)
+  assert.match(snippet, /e\.origin==="https:\/\/app\.example\.com"/)
+})
+
 test('the resize listener takes heights only from the Strata origin', () => {
-  const snippet = embedSnippet('https://strata.example.com', 'abc123')
+  const snippet = embedSnippet('https://strata.example.com', '', 'abc123')
   const resize = { type: 'strata:embed:resize', height: 640 }
 
   assert.equal(

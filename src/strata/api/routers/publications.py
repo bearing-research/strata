@@ -322,6 +322,7 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
             image_src=inline_png,
             oembed_url=f"{base}/oembed?url={page_url}",
             json_ld=json.dumps(crate),
+            base=base,
             # Nobody assembles a linked badge by hand from three route names.
             share=[
                 (
@@ -472,7 +473,7 @@ _EMBED_HEIGHT = 420
 
 
 def _public_base(request: Request) -> str:
-    """The origin a *reader* reaches this server on.
+    """The origin and base path a *reader* reaches this server on.
 
     ``public_base_url`` when set, since behind a reverse proxy ``request.base_url``
     is the internal address and embeds would advertise URLs no consumer can reach.
@@ -483,7 +484,9 @@ def _public_base(request: Request) -> str:
         configured = get_state().config.public_base_url
     except RuntimeError:
         configured = None
-    return (configured or str(request.base_url)).rstrip("/")
+    if configured:
+        return configured.rstrip("/") + request.scope.get("root_path", "")
+    return str(request.base_url).rstrip("/")
 
 
 def _same_host(left: str, right: str) -> bool:
@@ -576,7 +579,10 @@ def _token_from_url(url: str, base: str) -> str | None:
     parsed = urlparse(url)
     if not _same_host(base, url):
         return None
-    parts = [segment for segment in parsed.path.split("/") if segment]
+    base_path = urlparse(base).path
+    if not parsed.path.startswith(f"{base_path}/"):
+        return None
+    parts = [segment for segment in parsed.path[len(base_path) :].split("/") if segment]
     if len(parts) < 2 or parts[0] != "p":
         return None
     return parts[1]

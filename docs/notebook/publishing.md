@@ -215,6 +215,9 @@ use. The URLs in an embed are consumed by someone else's page, and a server
 that only knows its internal origin will advertise an oEmbed endpoint nobody
 can reach and reject the public link a wiki pastes. Unset, the request's own
 origin is used, which is right for a directly-reachable server.
+A proxy that serves Strata under a path also needs `STRATA_PUBLIC_BASE_PATH`
+([Serving under a path](../deployment/modes.md#serving-under-a-path)); every
+link on the page and in the card then carries it.
 
 ## Archiving: the copy that needs no server
 

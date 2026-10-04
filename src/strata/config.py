@@ -163,6 +163,9 @@ class StrataConfig(BaseSettings):
     # reverse proxy ``request.base_url`` is the internal address, which published pages and oEmbed
     # would advertise). Only publication URLs consult this; unset, the request's own origin is used.
     public_base_url: str | None = None
+    # The path a reverse proxy serves this server under (``/o/acme/lab``), with or without the proxy
+    # stripping it. Empty means the root. Every URL the server and the UI build carries it.
+    public_base_path: str = ""
 
     # Cache settings
     cache_dir: Path = Field(default_factory=lambda: Path.home() / ".strata" / "cache")
@@ -615,6 +618,15 @@ class StrataConfig(BaseSettings):
         if isinstance(v, str):
             v = [part.strip() for part in v.split(",") if part.strip()]
         return [str(item).lower() for item in v]
+
+    @field_validator("public_base_path", mode="before")
+    @classmethod
+    def normalize_public_base_path(cls, v: Any) -> str:
+        """Accept ``/a/b``, ``a/b/`` or ``/`` alike; store ``/a/b``, or ``""`` for the root."""
+        path = str(v or "").strip().strip("/")
+        if any(char in path for char in "?#%\\") or any(char.isspace() for char in path):
+            raise ValueError(f"public_base_path must be a plain URL path, got {v!r}")
+        return f"/{path}" if path else ""
 
     @field_validator("embed_frame_ancestors", mode="before")
     @classmethod

@@ -10,6 +10,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -25,6 +26,7 @@ import pyarrow.ipc as ipc
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import (
     FileResponse,
+    HTMLResponse,
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
@@ -298,10 +300,19 @@ def get_state() -> ServerState:
     return _state
 
 
+def _route_path(conn: HTTPConnection) -> str:
+    """The request path below the base path, which is what route-name checks compare."""
+    root = conn.scope.get("root_path", "")
+    path = conn.scope["path"]
+    if root and (path == root or path.startswith(root + "/")):
+        return path[len(root) :] or "/"
+    return path
+
+
 def _is_signed_finalize_request(request: Request) -> bool:
     """Return True when the request is using the signed finalize contract."""
     return bool(
-        re.fullmatch(r"/v1/builds/[^/]+/finalize", request.url.path)
+        re.fullmatch(r"/v1/builds/[^/]+/finalize", _route_path(request))
         and "signature" in request.query_params
         and "expires_at" in request.query_params
     )
@@ -309,7 +320,7 @@ def _is_signed_finalize_request(request: Request) -> bool:
 
 def _is_signed_data_plane_request(request: Request) -> bool:
     """Return True for pull-model data-plane requests that self-authenticate."""
-    return request.url.path in (
+    return _route_path(request) in (
         "/v1/artifacts/download",
         "/v1/artifacts/upload",
     ) or _is_signed_finalize_request(request)
@@ -325,7 +336,7 @@ def _is_public_publication_request(request: Request) -> bool:
     """
     if request.method != "GET":
         return False
-    path = request.url.path
+    path = _route_path(request)
     if path == "/v1/publications":  # the authenticated listing, not one record
         return False
     # Wikis and CMSs call ``/oembed`` to unfurl a link, unauthenticated; it
@@ -1157,7 +1168,7 @@ async def rate_limit_middleware(request: Request, call_next):
     if rate_limiter is None:
         return await call_next(request)
 
-    path = request.url.path
+    path = _route_path(request)
     # Never rate limited: a spike that drains the global bucket would 429 the
     # readiness probe, pull the pod from the load balancer while it is serving,
     # and amplify the overload across the fleet.
@@ -1207,7 +1218,7 @@ async def tenant_context_middleware(request: Request, call_next):
     Missing header falls back to ``_default`` unless required (400); an invalid id is
     400, a disabled tenant 403. Health, metrics and self-authenticating routes skip this.
     """
-    path = request.url.path
+    path = _route_path(request)
     if (
         path
         in (
@@ -1287,7 +1298,7 @@ async def auth_middleware(request: Request, call_next):
     if config.auth_mode == "none":
         return await call_next(request)
 
-    path = request.url.path
+    path = _route_path(request)
     if (
         path
         in (
@@ -1406,6 +1417,32 @@ class HostAllowlistMiddleware:
 
 # Added after every other middleware so it runs first: the origin guard trusts Host.
 app.add_middleware(HostAllowlistMiddleware)
+
+
+class BasePathMiddleware:
+    """Serve under ``public_base_path`` whether or not the reverse proxy strips it.
+
+    ASGI puts the base in both ``root_path`` and ``path``; routing, mounts and ``base_url``
+    rely on that, so a stripped path gets the base put back.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            base = get_state().config.public_base_path
+            if base:
+                path = scope["path"]
+                scope = {**scope, "root_path": base}
+                if path != base and not path.startswith(base + "/"):
+                    scope["path"] = base + path
+                    if scope.get("raw_path") is not None:
+                        scope["raw_path"] = base.encode() + scope["raw_path"]
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(BasePathMiddleware)
 
 # No-op if OTel is not installed.
 instrument_fastapi(app)
@@ -2607,7 +2644,7 @@ def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
 
     # SPA fallback: any non-API GET returns index.html
     @application.get("/{full_path:path}", include_in_schema=False)
-    async def spa_fallback(full_path: str):
+    async def spa_fallback(full_path: str, request: Request):
         if full_path.startswith(("v1/", "health", "docs", "openapi")):
             raise HTTPException(status_code=404)
         # An absolute or dot-segment path would otherwise escape the dist and read any file.
@@ -2616,6 +2653,12 @@ def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
             file_path = index
         # index.html names this build's hashed assets; a cached copy outlives an upgrade.
         headers = {"Cache-Control": "no-cache"} if file_path == index else None
+        root_path = request.scope.get("root_path", "")
+        if file_path == index and root_path:
+            # The UI reads this to put its API and WebSocket calls under the proxy's path.
+            meta = f'<meta name="strata-base-path" content="{escape(root_path, quote=True)}">'
+            page = index.read_text(encoding="utf-8").replace("<head>", f"<head>{meta}", 1)
+            return HTMLResponse(page, headers=headers)
         return FileResponse(str(file_path), headers=headers)
 
 

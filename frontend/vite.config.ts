@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Relative asset URLs, so the bundle loads under whatever path a reverse proxy serves it at.
+  base: './',
   plugins: [vue()],
   build: {
     rollupOptions: {

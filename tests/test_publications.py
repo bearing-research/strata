@@ -93,10 +93,11 @@ class TestAuthExemption:
     """
 
     @staticmethod
-    def _request(method: str, path: str):
-        from types import SimpleNamespace
+    def _request(method: str, path: str, root_path: str = ""):
+        from starlette.requests import Request
 
-        return SimpleNamespace(method=method, url=SimpleNamespace(path=path))
+        scope = {"type": "http", "method": method, "path": root_path + path, "headers": []}
+        return Request({**scope, "root_path": root_path, "query_string": b""})
 
     @pytest.mark.parametrize(
         "path",
@@ -129,6 +130,16 @@ class TestAuthExemption:
         from strata.server import _is_public_publication_request
 
         assert not _is_public_publication_request(self._request(method, path))
+
+    @pytest.mark.parametrize("path", ["/p/sometoken", "/oembed", "/v1/publications/sometoken"])
+    def test_public_reads_are_exempt_under_a_base_path(self, path):
+        """Behind a proxy at a non-root path the request path carries the base."""
+        from strata.server import _is_public_publication_request
+
+        assert _is_public_publication_request(self._request("GET", path, "/o/acme/lab"))
+        assert not _is_public_publication_request(
+            self._request("GET", "/v1/publications", "/o/acme/lab")
+        )
 
 
 class TestPublicationPage:

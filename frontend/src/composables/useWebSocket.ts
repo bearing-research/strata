@@ -2,22 +2,15 @@
 
 import { ref, shallowRef } from 'vue'
 import type { WsMessage, WsClientMessageType, WsServerMessageType } from '../types/notebook'
+import { BASE_PATH, strataHttpBase, strataWsBase } from '../utils/strataBase'
 
-function resolveStrataWsBase(): string {
-  const configured = (import.meta as any).env?.VITE_STRATA_URL
-  const httpBase =
-    configured || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8765')
-
-  if (httpBase.startsWith('https://')) {
-    return `wss://${httpBase.slice('https://'.length)}`
-  }
-  if (httpBase.startsWith('http://')) {
-    return `ws://${httpBase.slice('http://'.length)}`
-  }
-  return httpBase.replace(/^http/, 'ws')
-}
-
-const STRATA_WS_URL = resolveStrataWsBase()
+const STRATA_WS_URL = strataWsBase(
+  strataHttpBase(
+    (import.meta as any).env?.VITE_STRATA_URL,
+    typeof window !== 'undefined' ? window.location.origin : undefined,
+    BASE_PATH,
+  ),
+)
 
 export type WsConnectionState =
   'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
