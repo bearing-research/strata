@@ -785,6 +785,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-the-server-closes-the-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the server closes the session
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#options" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2226,6 +2237,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-the-server-closes-the-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the server closes the session
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#options" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2414,7 +2436,7 @@ in the terminal.</p>
 </tr>
 <tr>
 <td><code>r</code></td>
-<td>Force an immediate resync (the viewer also auto-resyncs in the background)</td>
+<td>Force an immediate resync (the viewer also auto-resyncs in the background); after the server closed the session, reopen it</td>
 </tr>
 <tr>
 <td><code>Ctrl</code>+<code>←</code> / <code>Ctrl</code>+<code>→</code></td>
@@ -2491,6 +2513,18 @@ the two-second load never executes again." src="../../assets/tui-cache-payoff.gi
 <p><code>load</code> sleeps two seconds on purpose in the
 <a href="../../getting-started/notebook/">quickstart</a>; that is what makes the point
 legible. It is the step you would notice re-running, and it does not.</p>
+<h2 id="when-the-server-closes-the-session">When the server closes the session<a class="headerlink" href="#when-the-server-closes-the-session" title="Permanent link">&para;</a></h2>
+<p>The server closes a session nobody has used for a while, when too many are
+open, when memory runs low, or when someone closes or deletes the notebook (see
+<a href="../../reference/notebook-protocol/#session-lifetime-and-session_closed">Session lifetime</a>).
+The viewer then stops reconnecting, shows why in a notification, and keeps
+<code>session closed (&lt;reason&gt;)</code> in its header. Unless the notebook was deleted, its
+results stay on disk.</p>
+<p>If the viewer knows the notebook's path (you passed <code>--notebook</code>, or it
+attached a session from the list or the picker), press <code>r</code> to reopen it as a
+new session and keep watching. Attached with <code>--session ID</code>, it does not know
+the path: run <code>strata watch PATH</code> (or open the notebook in the web UI) to start
+a new session.</p>
 <h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata-notebook-tui<span class="w"> </span><span class="o">[</span>--session<span class="w"> </span>ID<span class="w"> </span><span class="p">|</span><span class="w"> </span>--notebook<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--server<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--user-header<span class="w"> </span>NAME<span class="w"> </span>--user<span class="w"> </span>VALUE<span class="o">]</span>
 </code></pre></div>

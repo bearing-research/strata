@@ -2628,7 +2628,9 @@ or a <a href="../rest-api/">quiesce</a> hold. Before the socket closes (code <co
 <p><code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code> or <code>deleted</code>. Do not
 reconnect to the old <code>session_id</code> (the upgrade closes with <code>1008 Notebook not
 found</code>); reopen the notebook by path with <code>POST /v1/notebooks/open</code>, which
-starts a new session. The browser shows the message with a Reopen button.</p>
+starts a new session. The browser shows the message with a Reopen button;
+the <a href="../../notebook/tui/#when-the-server-closes-the-session">terminal viewer</a>
+shows it in a notification and reopens on <code>r</code>.</p>
 <h2 id="message-types">Message types<a class="headerlink" href="#message-types" title="Permanent link">&para;</a></h2>
 <p>The full list of WS frame types lives on the <a href="../websocket/">WebSocket Protocol</a>
 page. <strong>Every type corresponds to a member of
