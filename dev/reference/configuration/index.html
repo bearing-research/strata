@@ -2993,8 +2993,8 @@ and names the setting.</p>
 <p>A warehouse named only in a request's table URI (<code>s3://bucket/wh#ns.table</code>)
 is not known at startup. With no catalog <code>uri</code> set, a service
 (<code>STRATA_DEPLOYMENT_MODE=service</code>) refuses such a URI in any object store with
-a 400 naming <code>STRATA_CATALOG_URI</code>, on scans, cache warming and export to a
-table. A personal server keeps the catalog in <code>STRATA_METADATA_DB</code>, so it can
+a 400 naming <code>STRATA_CATALOG_URI</code>, on scans, transform inputs, cache warming
+and export to a table. A personal server keeps the catalog in <code>STRATA_METADATA_DB</code>, so it can
 write its own tables there; nothing else reading the bucket sees them.</p>
 <h2 id="s3-storage">S3 Storage<a class="headerlink" href="#s3-storage" title="Permanent link">&para;</a></h2>
 <table>

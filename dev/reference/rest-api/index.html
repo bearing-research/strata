@@ -4253,7 +4253,7 @@ limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seco
 </tr>
 <tr>
 <td><code>400</code></td>
-<td>Malformed request (invalid path, bad enum value, a table URI that names no <code>namespace.table</code>)</td>
+<td>Malformed request (invalid path, bad enum value, a table URI that names no <code>namespace.table</code>, a scan of a column the table does not have)</td>
 </tr>
 <tr>
 <td><code>401</code></td>
@@ -4265,7 +4265,7 @@ limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seco
 </tr>
 <tr>
 <td><code>404</code></td>
-<td>Notebook session not found, a table its catalog does not have, or a hidden 403 (see above)</td>
+<td>Notebook session not found, a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above)</td>
 </tr>
 <tr>
 <td><code>409</code></td>
