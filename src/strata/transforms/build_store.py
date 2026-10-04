@@ -73,6 +73,19 @@ CREATE TABLE IF NOT EXISTS build_attempts (
 );
 """
 
+# Console chunks a worker posted to a node other than the one that dispatched the
+# build; that node polls them out. Rows live only while the build runs.
+_CONSOLE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS build_console_chunks (
+    build_id TEXT NOT NULL,
+    stream TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    chunk TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (build_id, stream, seq)
+);
+"""
+
 
 @dataclass
 class BuildState:
@@ -225,6 +238,10 @@ class BuildStore:
                     self._dialect.begin_write(conn, "__build_schema__")
                     conn.executescript(self._dialect.adapt_ddl(_ATTEMPT_SCHEMA_SQL))
                     conn.commit()
+                if not self._dialect.schema_exists(conn, "build_console_chunks"):
+                    self._dialect.begin_write(conn, "__build_schema__")
+                    conn.executescript(self._dialect.adapt_ddl(_CONSOLE_SCHEMA_SQL))
+                    conn.commit()
                 return
 
             cursor = conn.execute(
@@ -260,6 +277,7 @@ class BuildStore:
                 conn.commit()
 
             conn.executescript(_ATTEMPT_SCHEMA_SQL)
+            conn.executescript(_CONSOLE_SCHEMA_SQL)
             conn.commit()
         finally:
             conn.close()
@@ -650,6 +668,66 @@ class BuildStore:
                 "DELETE FROM build_attempts WHERE build_id = ? AND attempt = ?",
                 (build_id, attempt),
             )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def append_console_chunk(self, build_id: str, stream: str, seq: int, chunk: str) -> bool:
+        """Leave a running build's console chunk for the node that dispatched it.
+
+        Returns False, storing nothing, when the build is not running (a late or
+        stale worker) or the chunk is already stored.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO build_console_chunks (build_id, stream, seq, chunk, created_at)
+                SELECT ?, ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1 FROM artifact_builds
+                    WHERE build_id = ? AND state IN ('pending', 'building')
+                )
+                ON CONFLICT (build_id, stream, seq) DO NOTHING
+                """,
+                (build_id, stream, seq, chunk, self._clock(), build_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def take_console_chunks(self, build_id: str) -> list[tuple[str, int, str]]:
+        """Remove and return a build's stored console chunks as ``(stream, seq, chunk)``."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT stream, seq, chunk FROM build_console_chunks
+                WHERE build_id = ? ORDER BY stream, seq
+                """,
+                (build_id,),
+            ).fetchall()
+            taken = [(r["stream"], r["seq"], r["chunk"]) for r in rows]
+            last: dict[str, int] = {}
+            for stream, seq, _ in taken:
+                last[stream] = seq
+            for stream, seq in last.items():
+                conn.execute(
+                    "DELETE FROM build_console_chunks "
+                    "WHERE build_id = ? AND stream = ? AND seq <= ?",
+                    (build_id, stream, seq),
+                )
+            conn.commit()
+            return taken
+        finally:
+            conn.close()
+
+    def delete_console_chunks(self, build_id: str) -> None:
+        """Drop whatever console a build left in the store."""
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM build_console_chunks WHERE build_id = ?", (build_id,))
             conn.commit()
         finally:
             conn.close()

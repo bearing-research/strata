@@ -130,8 +130,10 @@ def _guarded_transport() -> httpx.AsyncHTTPTransport | None:
 _LOG_QUEUE_CHUNKS = 64
 
 
-async def _post_log_chunk(client: httpx.AsyncClient, log_url: str, stream: str, text: str) -> None:
-    """Forward one console chunk; never let doing so slow or fail the cell.
+async def _post_log_chunk(
+    client: httpx.AsyncClient, log_url: str, stream: str, seq: int, text: str
+) -> None:
+    """Forward console chunk *seq* of *stream*; never let doing so slow or fail the cell.
 
     Console is advisory and the bundle is the record, so this has a short timeout
     and swallows everything.
@@ -139,7 +141,7 @@ async def _post_log_chunk(client: httpx.AsyncClient, log_url: str, stream: str, 
     separator = "&" if "?" in log_url else "?"
     try:
         await client.post(
-            f"{log_url}{separator}stream={stream}",
+            f"{log_url}{separator}stream={stream}&seq={seq}",
             content=text.encode("utf-8"),
         )
     except Exception:
@@ -151,11 +153,11 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
 
     Used instead of ``communicate()``, which returns only at exit. Both pipes are
     read concurrently so a full buffer on one cannot block the process. Chunks per
-    stream are posted in order (the notebook cannot reorder them) from their own
-    task over one connection with a bounded queue, so a cell that prints faster
-    than the link runs at its own speed and the oldest waiting chunks are dropped.
+    stream are numbered and posted in order from their own task over one
+    connection with a bounded queue, so a cell that prints faster than the link
+    runs at its own speed and the newest chunks are dropped.
     """
-    queue: asyncio.Queue[tuple[str, str]] | None = None
+    queue: asyncio.Queue[tuple[str, int, str]] | None = None
     forwarder: asyncio.Task[None] | None = None
 
     async def _forward() -> None:
@@ -164,8 +166,8 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
             while True:
                 item = await queue.get()
                 try:
-                    stream, text = item
-                    await _post_log_chunk(client, log_url, stream, text)
+                    stream, seq, text = item
+                    await _post_log_chunk(client, log_url, stream, seq, text)
                 finally:
                     queue.task_done()
 
@@ -176,12 +178,13 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
             if not chunk:
                 break
             collected.append(chunk)
+            seq = len(collected) - 1
             if queue is not None:
                 if queue.full():
-                    # Drop the new chunk, not the oldest: what was shown stays a prefix, so the
-                    # final report can send exactly the missing part.
+                    # A dropped chunk leaves a gap in seq, so the server shows nothing after it
+                    # and what was shown stays a prefix the final report can complete.
                     continue
-                queue.put_nowait((stream, chunk.decode("utf-8", errors="replace")))
+                queue.put_nowait((stream, seq, chunk.decode("utf-8", errors="replace")))
         return b"".join(collected)
 
     if log_url:

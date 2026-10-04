@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from strata.notebook import console_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.causality import CausalityChain, compute_causality_on_staleness, skip_none
@@ -1267,6 +1268,9 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
+        # A viewer joining mid-run gets what the running cell has printed so far.
+        for stream, text in console_relay.live_console(self.id, cell.id).items():
+            data[f"console_{stream}"] = text
         return data
 
     def persist_display_outputs(

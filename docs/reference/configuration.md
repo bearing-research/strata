@@ -444,6 +444,15 @@ mid-stream still ends that stream; the artifact behind it is durable and its
 build is reclaimable by another node, so the client re-requests and gets a
 cache hit or joins the in-flight build.
 
+`STRATA_NODE_ADVERTISED_URL` also carries a remote cell's live console
+between nodes. A worker posts console chunks to the server's public address,
+so a chunk can land on a node other than the one holding the notebook session
+that dispatched the cell.
+That node leaves the chunk in the shared build store, and the dispatching node
+polls the store every half second while the cell runs and sends the chunks to
+the notebook's sockets in order. Single-node deployments neither write nor
+poll; there the console goes straight from the log route to the sockets.
+
 ## Multi-Tenancy
 
 | Variable                       | Default       | Description                           |

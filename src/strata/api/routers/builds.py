@@ -388,16 +388,19 @@ async def append_build_log(
     expires_at: str,
     signature: str,
     request: Request,
+    seq: int,
     stream: str = "stdout",
 ):
-    """Append console output from a build that is still running.
+    """Append console chunk ``seq`` (from 0 per stream) of a build that is still running.
 
-    Advisory, hence 202: nothing is persisted. A chunk for a build this process is
-    not running is accepted and dropped, since failing the worker's cell over a
-    console chunk would be worse than a missing line.
+    Advisory, hence 202. In a multi-node deployment a chunk for a build another node
+    dispatched is left in the shared build store for that node; otherwise one for a
+    build this process is not running is accepted and dropped, since failing the
+    worker's cell over a console chunk would be worse than a missing line.
     """
     from strata.notebook import console_relay
     from strata.server import get_state
+    from strata.transforms.build_store import get_build_store
 
     try:
         expires_float = float(expires_at)
@@ -412,9 +415,17 @@ async def append_build_log(
         # Keep the tail; a runaway cell must not grow server memory through a display route.
         body = body[-_MAX_LOG_CHUNK_BYTES:]
 
-    delivered = await console_relay.deliver(
-        build_id, stream, body.decode("utf-8", errors="replace")
-    )
+    text = body.decode("utf-8", errors="replace")
+    delivered = await console_relay.deliver(build_id, stream, seq, text)
+    store = get_build_store()
+    if not delivered and get_state().config.node_advertised_url and store is not None:
+        delivered = await asyncio.to_thread(
+            store.append_console_chunk,
+            build_id,
+            "stderr" if stream == "stderr" else "stdout",
+            seq,
+            text,
+        )
     return JSONResponse(status_code=202, content={"delivered": delivered})
 
 

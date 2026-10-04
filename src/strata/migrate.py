@@ -24,7 +24,7 @@ _AUTOINCREMENT_COLUMNS: dict[str, str] = {"registry_audit": "seq"}
 #
 # stream_owners is deliberately absent: it describes live streams on live nodes, and none survive
 # the migration. So is import_staging: an upload waits seconds for its import, and a caller retrying
-# after the move uploads again.
+# after the move uploads again. So is build_console_chunks: live console of running builds.
 #
 # Each entry pairs a table with its primary key, which makes the copy idempotent: a row already in
 # the target is skipped, not rewritten.

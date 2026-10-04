@@ -47,6 +47,7 @@ export interface CellConsolePayload {
   cell_id: string
   stream: 'stdout' | 'stderr'
   text: string
+  chunk_seq?: number | null
 }
 
 export interface CellIterationProgressPayload {
