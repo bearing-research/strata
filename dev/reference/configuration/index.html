@@ -2948,7 +2948,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tr>
 <td><code>STRATA_METADATA_DB</code></td>
 <td><code>~/.strata/meta.sqlite</code></td>
-<td>SQLite catalog a personal server uses for an object-store warehouse URI (<code>s3://</code>, <code>gs://</code>, <code>az://</code>, <code>abfs://</code>) when no catalog <code>uri</code> is set. It is on this server's disk, so other readers of the bucket do not see it. A service refuses such a URI instead (see <a href="#catalog">Catalog</a>)</td>
+<td>SQLite catalog a personal server uses for an object-store warehouse URI (<code>s3://</code>, <code>gs://</code>, <code>abfs://</code>, <code>abfss://</code>) when no catalog <code>uri</code> is set. It is on this server's disk, so other readers of the bucket do not see it. A service refuses such a URI instead (see <a href="#catalog">Catalog</a>)</td>
 </tr>
 </tbody>
 </table>
@@ -3036,6 +3036,13 @@ write its own tables there; nothing else reading the bucket sees them.</p>
 <h2 id="gcs-storage">GCS Storage<a class="headerlink" href="#gcs-storage" title="Permanent link">&para;</a></h2>
 <p>Credentials for the GCS blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=gcs</code>).
 Unset credentials fall back to Application Default Credentials.</p>
+<p>The same settings read lake tables on GCS. A table named by a <code>gs://</code>
+warehouse URI (<code>gs://bucket/wh#ns.table</code>, see <a href="#catalog">Catalog</a>) has its
+metadata read with the bucket location, endpoint and service-account key,
+passed to its catalog as <code>gcs.*</code> properties. PyIceberg has no anonymous GCS access, so
+<code>STRATA_GCS_ANONYMOUS</code> covers data files only; set <code>gcs.oauth2.token</code> in
+<code>STRATA_CATALOG_PROPERTIES</code> if the catalog needs a token. A key set there
+overrides the one Strata derives.</p>
 <table>
 <thead>
 <tr>
@@ -3071,6 +3078,13 @@ Unset credentials fall back to Application Default Credentials.</p>
 <p>Credentials for the Azure blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=azure</code>).
 Supply exactly one of connection string, account key, SAS token, or default
 credential.</p>
+<p>The same settings read lake tables on Azure. A table named by an <code>abfs://</code> or
+<code>abfss://</code> warehouse URI (see <a href="#catalog">Catalog</a>) has its metadata read with the account name, key, SAS token, connection string and
+endpoint that are set, passed to its catalog as <code>adls.*</code> properties; with no
+secret set it uses <code>DefaultAzureCredential</code>. PyIceberg reads that metadata with
+<code>adlfs</code> when it is installed, else with PyArrow, which ignores the connection
+string. A key set in <code>STRATA_CATALOG_PROPERTIES</code> overrides the one Strata
+derives.</p>
 <table>
 <thead>
 <tr>

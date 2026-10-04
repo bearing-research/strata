@@ -3195,7 +3195,7 @@ fully deterministic: it reads exactly the snapshot its provenance recorded.</p>
 <li><code>&lt;namespace&gt;.&lt;table&gt;</code>, a table in the server's default catalog.</li>
 </ul>
 <p>The warehouse may be local or on S3, GCS (<code>gs://</code>) or Azure (<code>abfs://</code>,
-<code>abfss://</code>, <code>az://</code>); files on GCS and Azure are read with the same
+<code>abfss://</code>; pyiceberg has no <code>az://</code> catalog support); files on GCS and Azure are read with the same
 <code>STRATA_GCS_*</code> and <code>STRATA_AZURE_*</code> settings the artifact blob store uses. The
 name must be a valid Python identifier.</p>
 <p>Catalogs are named on the server, not in <code>notebook.toml</code>, because the scan the
