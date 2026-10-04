@@ -3196,8 +3196,11 @@ fully deterministic: it reads exactly the snapshot its provenance recorded.</p>
 </ul>
 <p>The warehouse may be local or on S3, GCS (<code>gs://</code>) or Azure (<code>abfs://</code>,
 <code>abfss://</code>; pyiceberg has no <code>az://</code> catalog support); files on GCS and Azure are read with the same
-<code>STRATA_GCS_*</code> and <code>STRATA_AZURE_*</code> settings the artifact blob store uses. The
-name must be a valid Python identifier.</p>
+<code>STRATA_GCS_*</code> and <code>STRATA_AZURE_*</code> settings the artifact blob store uses. An
+Azure table's metadata is read with <code>adlfs</code>, or with PyArrow only when the table's
+locations have no <code>@&lt;account&gt;</code> host
+(<a href="../../reference/configuration/#azure-storage">Azure Storage</a>). The name must be a
+valid Python identifier.</p>
 <p>Catalogs are named on the server, not in <code>notebook.toml</code>, because the scan the
 cell runs happens in the server and has to resolve the same name. (A DuckDB
 connection, which attaches its catalog itself, can also name one the notebook

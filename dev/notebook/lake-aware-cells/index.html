@@ -2252,7 +2252,8 @@ SQLite at <code>STRATA_METADATA_DB</code> on its own disk, which no other reader
 bucket sees, and a service refuses the table, naming the setting. Either
 catalog reads the table's metadata with the server's own S3, GCS or Azure
 settings (<a href="../../reference/configuration/#gcs-storage">GCS</a>,
-<a href="../../reference/configuration/#azure-storage">Azure</a>). A configured
+<a href="../../reference/configuration/#azure-storage">Azure</a>, which also says when an
+Azure table needs <code>adlfs</code>). A configured
 warehouse (<code>warehouse</code> in <code>catalog_properties</code> or in a named SQL catalog) in
 object storage with no <code>uri</code> stops the server at startup
 (<a href="../../reference/configuration/#catalog">Catalog settings</a>).</p>
