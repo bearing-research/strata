@@ -146,9 +146,12 @@ STRATA_NOTEBOOK_CREDENTIALS='{"lake-db": {"uri": "${LAKE_DSN}", "s3.access-key-i
 ```
 
 Its fields become pyiceberg catalog properties, beneath the catalog's own keys.
-`@table` and scans resolve the references against the server's environment; a
-DuckDB cell attaching the catalog resolves them against the notebook's first, as
-a mount does. A missing name fails the read with a message naming it. The
+Wherever a notebook reads the catalog (an `@table` snapshot, a DuckDB cell's
+attach and the snapshots of the tables it reads, staleness checks), the
+references resolve against the notebook's environment first, as a mount's do.
+A scan through `POST /v1/materialize`, including `client.materialize` from a
+cell, has no notebook, so it resolves them against the server's environment
+only. A missing name fails the read with a message naming it. The
 catalog's credential is not part of provenance: a table read is already keyed
 by its snapshot.
 

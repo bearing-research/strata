@@ -195,6 +195,34 @@ class TestANamedCredential:
         assert seen[0]["s3.access-key-id"] == "from-the-vault"
         assert "credential" not in seen[0]
 
+    def test_a_notebook_s_env_resolves_it_and_never_reaches_another_reader(
+        self, tmp_path, monkeypatch
+    ):
+        from strata.notebook.models import TableSpec
+        from strata.notebook.tables import resolve_table_snapshot
+
+        config, server_uri = self._configured(tmp_path, {"north-db": {"uri": "${NORTH_URI}"}})
+        notebook_uris, snapshots = [], []
+        for name, ids in (("east", [5]), ("west", [6, 7])):
+            warehouse = tmp_path / name
+            warehouse.mkdir()
+            uri = f"sqlite:///{warehouse / 'catalog.db'}"
+            # Named north: a SQL catalog finds only rows written under its own name.
+            catalog = SqlCatalog("north", uri=uri, warehouse=warehouse.as_uri())
+            catalog.create_namespace("taxi")
+            table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
+            table.append(pa.table({"id": ids}))
+            notebook_uris.append(uri)
+            snapshots.append(catalog.load_table("taxi.trips").current_snapshot().snapshot_id)
+        spec = TableSpec(name="trips", uri="north:taxi.trips")
+        monkeypatch.delenv("NORTH_URI", raising=False)
+
+        for uri, snapshot in zip(notebook_uris, snapshots, strict=True):
+            assert resolve_table_snapshot(spec, config, {"NORTH_URI": uri}) == snapshot
+        # A scan (no notebook) still resolves against the server's env.
+        monkeypatch.setenv("NORTH_URI", server_uri)
+        assert _rows(config, "north:taxi.trips") == [1, 2]
+
     def test_a_missing_credential_fails_naming_it(self, tmp_path):
         from strata.notebook.models import TableSpec
         from strata.notebook.tables import resolve_table_snapshot

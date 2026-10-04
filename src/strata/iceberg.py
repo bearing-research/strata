@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -135,9 +136,14 @@ class PyIcebergCatalog:
     planning threads do not build duplicates.
     """
 
-    def __init__(self, config: StrataConfig) -> None:
-        """Initialize the provider from server config (catalog properties, storage credentials)."""
+    def __init__(self, config: StrataConfig, env: Mapping[str, str] | None = None) -> None:
+        """Initialize the provider from server config (catalog properties, storage credentials).
+
+        *env* is a notebook's environment: a named catalog's credential resolves
+        against it before the server's, as the notebook's DuckDB attach does.
+        """
         self.config = config
+        self._env = env
         self._catalogs: dict[str, Catalog] = {}
         self._lock = Lock()
 
@@ -240,7 +246,11 @@ class PyIcebergCatalog:
         )
 
     def _get_named_catalog(self, name: str) -> Catalog:
-        """Return the configured catalog *name*, built on first use and cached."""
+        """Return the configured catalog *name*, built on first use and cached.
+
+        Cached by name alone: an instance resolves against one env, so a catalog
+        built with one notebook's secrets is never handed to another caller.
+        """
         key = f"catalog:{name}"
         catalog = self._catalogs.get(key)
         if catalog is not None:
@@ -254,7 +264,8 @@ class PyIcebergCatalog:
                 )
 
                 properties = resolve_catalog_properties(
-                    self.config.catalogs[name], CredentialResolver.from_config(self.config)
+                    self.config.catalogs[name],
+                    CredentialResolver.from_config(self.config, env=self._env),
                 )
                 catalog = load_catalog(name, **properties)
                 self._catalogs[key] = catalog

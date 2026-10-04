@@ -159,6 +159,7 @@ def resolve_lake(
     update: dict[str, Any] = {}
     config = with_notebook_catalogs(session._lake_config(), session.notebook_state)
     confined = getattr(config, "deployment_mode", "personal") == "service"
+    env = dict(session.notebook_state.env)
     if catalog:
         properties = (getattr(config, "catalogs", None) or {}).get(catalog)
         if properties is None and catalog in session.notebook_state.catalogs:
@@ -177,7 +178,7 @@ def resolve_lake(
         try:
             update["catalog_properties"] = resolve_catalog_properties(
                 properties,
-                CredentialResolver.from_config(config, env=dict(session.notebook_state.env)),
+                CredentialResolver.from_config(config, env=env),
             )
         except CredentialError as exc:
             raise LakeError(f"catalog {catalog!r}: {exc}") from exc
@@ -186,7 +187,7 @@ def resolve_lake(
         pinned = pinned or {}
         specs = {_table_key(spec): spec for spec in _catalog_tables(catalog, tables)}
         _, snapshots = fingerprint_tables(
-            [spec for key, spec in specs.items() if key not in pinned], config
+            [spec for key, spec in specs.items() if key not in pinned], config, env
         )
         for (namespace, name), table_spec in specs.items():
             snapshot = pinned.get((namespace, name), snapshots.get(table_spec.name))
@@ -194,7 +195,7 @@ def resolve_lake(
                 # Unresolved the first time: ask again, so the cell fails with the catalog's
                 # reason or reads what a retry found.
                 try:
-                    snapshot = resolve_table_snapshot(table_spec, config)
+                    snapshot = resolve_table_snapshot(table_spec, config, env)
                 except ValueError as exc:
                     raise LakeError(f"table {table_spec.uri}: {exc}") from exc
             lake.snapshots[(namespace, name)] = snapshot
@@ -202,7 +203,7 @@ def resolve_lake(
             # gives a reproducible hash (fingerprint_tables invents a random one otherwise).
             lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
             if confined:
-                lake.locations.append(_table_location(table_spec, config))
+                lake.locations.append(_table_location(table_spec, config, env))
     if mount_names:
         update["mount_sources"] = _mount_sources(
             session, cell_id, source, mount_names, lake, config if confined else None
@@ -245,7 +246,7 @@ def snapshot_rows(snapshots: dict[tuple[str, str], int]) -> list[list[Any]]:
     return sorted([namespace, name, snapshot] for (namespace, name), snapshot in snapshots.items())
 
 
-def _table_location(table_spec: TableSpec, config: Any) -> str:
+def _table_location(table_spec: TableSpec, config: Any, env: dict[str, str]) -> str:
     """Where a catalog table's metadata and data files live, as a directory.
 
     Files outside it (a ``write.data.path`` elsewhere) are refused to a
@@ -254,7 +255,7 @@ def _table_location(table_spec: TableSpec, config: Any) -> str:
     from strata.iceberg import PyIcebergCatalog
 
     try:
-        location = PyIcebergCatalog(config).load_table(table_spec.uri).location()
+        location = PyIcebergCatalog(config, env).load_table(table_spec.uri).location()
     except Exception as exc:  # the catalog's own error types vary by backend
         raise LakeError(f"table {table_spec.uri}: {exc}") from exc
     return location.rstrip("/") + "/"
