@@ -2210,6 +2210,8 @@ class TestPromptCellExecution:
         assert result.success is False
         assert result.cell_id == "p1"
         assert "not configured" in (result.error or "").lower()
+        # CLI and agent users have no panel; the error names the file they can edit.
+        assert "[env] in notebook.toml" in (result.error or "")
         assert result.execution_method == "llm"
 
     @pytest.mark.asyncio
