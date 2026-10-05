@@ -1825,9 +1825,13 @@ _mount_frontend(app)
 
 def _build_server_arg_parser():
     import argparse
+    import sys
 
+    # argparse's default prints "__main__.py" for the module form (before 3.14).
+    invoked = os.path.basename(sys.argv[0])
+    prog = "python -m strata" if invoked == "__main__.py" else invoked
     parser = argparse.ArgumentParser(
-        prog="strata-notebook",
+        prog=prog,
         description="Run the Strata notebook server.",
     )
     parser.add_argument(

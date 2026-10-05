@@ -23,6 +23,19 @@ def _isolate_storage_env():
         os.environ[_ENV] = saved
 
 
+@pytest.mark.parametrize(
+    ("argv0", "prog"),
+    [
+        ("/venv/lib/python3.14/site-packages/strata/__main__.py", "python -m strata"),
+        ("/venv/bin/strata-notebook", "strata-notebook"),
+    ],
+    ids=["module", "script"],
+)
+def test_usage_names_the_server_as_invoked(monkeypatch, argv0, prog):
+    monkeypatch.setattr("sys.argv", [argv0])
+    assert server._build_server_arg_parser().prog == prog
+
+
 def test_no_flag_does_not_set_env():
     args = server._build_server_arg_parser().parse_args([])
     server._apply_server_cli_overrides(args)
