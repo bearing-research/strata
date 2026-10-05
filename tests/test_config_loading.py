@@ -313,3 +313,18 @@ class TestGCSBucketLocationRename:
         monkeypatch.setenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", "europe-west1")
 
         assert StrataConfig().gcs_default_bucket_location == "europe-west1"
+
+
+class TestListSettingsAcceptCommaSeparatedEnv:
+    """pydantic-settings JSON-decodes a bare ``list[str]`` env value before any validator
+    runs, so a field documented as comma-separated must opt out with ``NoDecode``."""
+
+    def test_notebook_python_versions_comma_separated(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("STRATA_NOTEBOOK_PYTHON_VERSIONS", "3.12,3.13")
+        config = StrataConfig(cache_dir=tmp_path / "c")
+        assert config.notebook_python_versions == ["3.12", "3.13"]
+
+    def test_notebook_python_versions_json_array(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("STRATA_NOTEBOOK_PYTHON_VERSIONS", '["3.12", "3.13"]')
+        config = StrataConfig(cache_dir=tmp_path / "c")
+        assert config.notebook_python_versions == ["3.12", "3.13"]
