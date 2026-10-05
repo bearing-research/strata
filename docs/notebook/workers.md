@@ -122,6 +122,7 @@ strata-worker --port 9000 --max-concurrent 2 --gpu-slots 2
 
 - **`--max-concurrent N`**: the worker refuses execution number N+1 with `503` and a `Retry-After` header, before downloading any inputs. Unset, it is unlimited.
 - **`--gpu-slots N`**: each execution gets a free GPU index from `0..N-1`, set as `CUDA_VISIBLE_DEVICES` for that cell and released when it finishes. The worker's choice overrides any `CUDA_VISIBLE_DEVICES` the cell asked for, so two concurrent cells never share a GPU on a caller's say-so. With every slot taken, the request is refused like any full worker.
+- **`--log-level`**: `debug`, `info` (the default), `warning` or `error`.
 
 Both limits are enforced by the worker, not trusted to whatever dispatches to it, and both are advertised in `/health`. For `uvicorn --factory` deployments that cannot pass flags, set `STRATA_WORKER_MAX_CONCURRENT` and `STRATA_WORKER_GPU_SLOTS`.
 

@@ -91,7 +91,7 @@ A request to a worker that advertises `locked_environments` carries the notebook
 }
 ```
 
-`key` names what the lock installs, not which notebook it belongs to, so notebooks with the same resolved dependencies share one key. It is `strata.notebook.env.uv_lock_key(lockfile)`: the lock parsed as TOML; in the notebook's own `package` entry (the one whose `source` is `{ virtual = "." }` or `{ editable = "." }`), `name`, `version`, `source` and `metadata` dropped; any other `name` field equal to that project's name, and that name in `manifest.members`, replaced by `"<project>"`; `package` sorted by each entry's JSON with sorted keys; and the SHA-256 hex digest of the result as compact JSON with sorted keys (Python's `json.dumps(data, sort_keys=True, separators=(",", ":"))`). An environment registry addressed by `key` should compute it the same way, ideally by calling that function. The worker installs with `--no-install-project`, so the environment holds only the lock's packages.
+`key` names what the lock installs, not which notebook it belongs to, so notebooks with the same resolved dependencies share one key. It is `strata.notebook.env.uv_lock_key(lockfile)`: the lock parsed as TOML; in the notebook's own `package` entry (the one whose `source` is `{ virtual = "." }` or `{ editable = "." }`), `name`, `version`, `source` and `metadata` dropped; any other `name` field equal to that project's name, and that name in `manifest.members`, replaced by `"<project>"`; `package` sorted by each entry's JSON with sorted keys and `manifest.members` sorted; and the SHA-256 hex digest of the result as compact JSON with sorted keys (Python's `json.dumps(data, sort_keys=True, separators=(",", ":"))`). An environment registry addressed by `key` should compute it the same way, ideally by calling that function. The worker installs with `--no-install-project`, so the environment holds only the lock's packages.
 
 The worker runs the cell's harness with the interpreter of that environment:
 
@@ -442,6 +442,9 @@ files/                  - one file per serialized variable
     "log": {"content_type": "json/object", "file": "files/log.json", "...": "..."},
     "_": {"content_type": "image/png", "file": "files/__display__0.png", "...": "..."}
   },
+  "displays": [
+    {"content_type": "image/png", "file": "files/__display__0.png", "...": "..."}
+  ],
   "stdout_file": "stdout.txt",
   "stderr_file": "stderr.txt",
   "mutation_warnings": [],
@@ -454,7 +457,10 @@ files/                  - one file per serialized variable
 
 Each entry in `variables` is the serializer's metadata for that value, with
 `file` pointing inside the bundle. A variable that could not be serialized has
-`{"error", "type"}` and no file.
+`{"error", "type"}` and no file. `displays` lists every display the cell
+emitted, in order, in the same shape (a display that failed to serialize has
+`error` and no file); the last one also travels as the variable `_`. It must
+be a list, possibly empty.
 
 `hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
 

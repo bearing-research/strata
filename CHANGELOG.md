@@ -35,7 +35,9 @@ no route serves files from outside the frontend.
 **Upgrading from 0.8.0:**
 
 - Scan caches are rebuilt: the first scan of each table reads from storage.
-  The artifact store's metadata migrates on first start, one way.
+  The artifact store's metadata migrates on first start, one way. Results
+  stored by 0.8.0 count as used at the upgrade, so none is collected for
+  idleness in the first 30 days; the size cap still applies.
 - New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
   `[mcp]`; textual-image 0.14 and Pillow 12.1 with `[tui]`.
 - Unnamed `materialize` results can now be collected in personal mode; name or
@@ -66,6 +68,8 @@ no route serves files from outside the frontend.
   `admin:*`.
 - strata-pool: `PUT /v1/machine-types` needs the new `admin_token`;
   `/v1/usage` and `/v1/workers` return only the caller's tenant.
+  `GET /v1/machine-types` shows `env` and `provider_options` values as
+  `<redacted>` without it.
 - Cells whose `[env]` held a blanked secret re-run once, since that empty
   value no longer reaches them.
 - Shared environments are keyed by what the lock installs, not the raw
@@ -100,8 +104,7 @@ no route serves files from outside the frontend.
   DEFAULT 0` or a fresh store.
 - `PUT /v1/notebooks/{id}/workers` and `strata worker add` refuse an unknown
   transport; a worker saved as `transport = "http"` should be `"direct"`.
-- Service mode: a table URI whose warehouse is in object storage needs a
-  catalog `uri`; MCP tools reach only sessions of the caller's tenant; the
+- Service mode: MCP tools reach only sessions of the caller's tenant; the
   Prometheus scrape leaves out per-table series under principal auth.
 - Service mode: a notebook session belongs to the tenant that opened, created
   or imported it; with `multi_tenant_enabled`, each tenant's notebooks live
@@ -122,6 +125,8 @@ no route serves files from outside the frontend.
   catalog `uri` (`STRATA_CATALOG_URI`); without one, scans, cache warming and
   export to a table answer 400 instead of using a SQLite catalog on the
   server's disk.
+- Naming, aliasing or tagging an artifact that does not exist answers 404
+  instead of 400, the same as reading it.
 
 
 ### Added
@@ -238,6 +243,8 @@ no route serves files from outside the frontend.
   are shown in order and once each; opening a notebook mid-run shows the last
   64 KiB a remote cell printed; with `STRATA_NODE_ADVERTISED_URL` set, chunks
   that land on another node reach the session through the shared build store.
+  `cell_console` frames carry `chunk_seq`; chunk 0 starts a stream's console
+  for the run.
 - **Dataset lineage.** A `# @dataset` read copies the dataset version with its
   inputs and the steps behind it (up to 10 deep), so lineage walks past the
   dataset, and the Registry tab shows which notebook cells read each name
@@ -664,6 +671,8 @@ no route serves files from outside the frontend.
   one); use `abfs://`.
 - A publication page's data and Verify links pointed at the server root, which
   broke behind a path prefix.
+- The embed snippet's resize listener accepts messages from the Strata origin
+  only; re-copy a snippet pasted before this.
 
 ## 0.8.0 - 2026-09-27
 

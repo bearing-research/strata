@@ -232,4 +232,9 @@ carry an existing SQLite store across. Each mutation is one transaction.
 Everything commits before the API responds; the audit is in-transaction with
 its mutation; server restarts are non-events. The `strata artifact` CLI reads
 the server's configured store directly, server up or down; `--artifact-dir`
-points it at one local SQLite store instead.
+points it at one local SQLite store instead. Every subcommand that reports
+(all but `pull`, `archive` and `unpublish`) takes `--format human|json`;
+`list` filters with `--state` and caps rows with
+`--limit` (default 50), `audit` takes `--limit` too, `lineage` stops at
+`--max-depth` (default 10), and `--tenant` scopes name and alias resolution on
+a store several tenants share.

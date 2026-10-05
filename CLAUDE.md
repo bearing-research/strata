@@ -152,7 +152,8 @@ Two executor protocols:
 HTTP layer: `server.py` (app + lifespan/middleware and the shared artifact
 gates); per-domain routers in `api/routers/` (`materialize`, `streams`,
 `cache`, `debug`, `registry`, `metrics_health`, `admin`, `artifacts`,
-`names`, `builds`); typed mode/auth/tenant gates in `api/dependencies.py`;
+`names`, `builds`, `logs`, `metadata`, `publications`); typed
+mode/auth/tenant gates in `api/dependencies.py`;
 pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
 Data plane: `types.py`, `planner.py`, `cache.py`, `fetcher.py`, `metadata_*.py`,
 `fast_io.py` (+ `rust/src/lib.rs`).
@@ -206,13 +207,15 @@ the cell harness is the **executor**.
 
 ```
 notebook_dir/
-├── notebook.toml          # committed config (id, name, cells, workers, mounts, env, ai)
+├── notebook.toml          # committed config (id, name, cells, workers, mounts, env, ai, [catalogs.<name>])
 ├── pyproject.toml         # uv config
 ├── uv.lock
 ├── cells/{cell_id}.py     # cell source (8-char UUID prefix)
+├── cells/{cell_id}.test.py  # the cell's pytest tests, if any
 └── .strata/               # gitignored runtime state
     ├── runtime.json       # display outputs, provenance hashes, env metadata
     ├── console/           # per-cell stdout/stderr ({cell_id}.json)
+    ├── fetch/             # bytes each @fetch last read
     └── artifacts/         # SQLite + blobs (nb_…@v=N.arrow)
 ```
 

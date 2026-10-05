@@ -287,6 +287,7 @@ strata migrate --to-dsn 'postgresql://...' --dry-run
 strata migrate --to-dsn 'postgresql://...'
 ```
 
+`--artifact-dir` names the source store when it is not `~/.strata/artifacts`.
 The copy is idempotent: rows already in the target are skipped, so an
 interrupted run can be repeated with `--allow-nonempty-target`. It refuses a
 populated target otherwise, because merging two different stores is not
@@ -438,7 +439,10 @@ strata apikey revoke <key_id>
 The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
 shown again, by you or by us, and a database disclosure yields no usable
 credentials. Pass `--dsn` (or set `STRATA_ARTIFACT_METADATA_DSN`) when the
-metadata lives on Postgres, so the CLI writes where the server reads.
+metadata lives on Postgres, so the CLI writes where the server reads;
+`--artifact-dir` reads one local SQLite store instead. `create
+--expires-in-days N` sets an expiry (none by default); `list --principal`
+filters to one principal and `--format json` prints JSON.
 
 **Revocation is immediate**: verification reads the row on each request, so a
 revoked key stops working at once rather than after a cache expiry. A notebook
