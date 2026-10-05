@@ -709,13 +709,12 @@ class BuildStore:
                 (build_id,),
             ).fetchall()
             taken = [(r["stream"], r["seq"], r["chunk"]) for r in rows]
-            last: dict[str, int] = {}
+            # Only the rows read: a chunk another node stores between the read and the
+            # delete must stay for the next take, or it is lost unseen.
             for stream, seq, _ in taken:
-                last[stream] = seq
-            for stream, seq in last.items():
                 conn.execute(
                     "DELETE FROM build_console_chunks "
-                    "WHERE build_id = ? AND stream = ? AND seq <= ?",
+                    "WHERE build_id = ? AND stream = ? AND seq = ?",
                     (build_id, stream, seq),
                 )
             conn.commit()

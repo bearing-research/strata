@@ -750,6 +750,49 @@ class TestSharedStore:
         ]
         assert store.take_console_chunks("b1") == []
 
+    def test_a_chunk_stored_between_the_read_and_the_delete_is_not_lost(self, store, tmp_path):
+        """Another node fills a gap while this one is taking what it read: the next take sees it."""
+        from strata.transforms.build_store import BuildStore
+
+        _running_build(store)
+        store.append_console_chunk("b1", "stdout", 3, "three\n")
+        store.append_console_chunk("b1", "stdout", 5, "five\n")
+        other_node = BuildStore(tmp_path / "artifacts.sqlite")
+        real_connect = store._get_connection
+
+        class _Rows:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        class _Connection:
+            """Lands seq 4 from the other node after the read, before the delete."""
+
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, params=()):
+                cursor = self._conn.execute(sql, params)
+                if sql.lstrip().startswith("SELECT"):
+                    rows = cursor.fetchall()
+                    assert other_node.append_console_chunk("b1", "stdout", 4, "four\n")
+                    return _Rows(rows)
+                return cursor
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        store._get_connection = lambda: _Connection(real_connect())
+        assert store.take_console_chunks("b1") == [
+            ("stdout", 3, "three\n"),
+            ("stdout", 5, "five\n"),
+        ]
+        store._get_connection = real_connect
+
+        assert store.take_console_chunks("b1") == [("stdout", 4, "four\n")]
+
     def test_a_build_that_is_not_running_stores_nothing(self, store):
         """A late or stale worker cannot fill the table for a build nobody will read."""
         _running_build(store)
