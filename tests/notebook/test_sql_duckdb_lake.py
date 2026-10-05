@@ -282,7 +282,9 @@ def test_a_table_never_written_is_read_unpinned_and_never_cached(tmp_path, monke
     config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
     name = _lake_name("lake:taxi.trips")
-    monkeypatch.setattr(tables, "fingerprint_tables", lambda specs, cfg: ([], {name: None}))
+    monkeypatch.setattr(
+        tables, "fingerprint_tables", lambda specs, cfg, env=None: ([], {name: None})
+    )
 
     def resolve():
         return resolve_lake(
