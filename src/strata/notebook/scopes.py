@@ -212,5 +212,7 @@ def session_visible_to_caller(session: NotebookSession) -> bool:
     principal = get_principal()
     if principal is None or principal.has_scope("admin:*"):
         return True
-    tenant = session.opened_by[1] if session.opened_by else None
+    if session.opened_by is None:
+        return True
+    tenant = session.opened_by[1]
     return (tenant or DEFAULT_TENANT_ID) == (principal.tenant or DEFAULT_TENANT_ID)
