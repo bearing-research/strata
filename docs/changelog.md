@@ -105,6 +105,21 @@ no route serves files from outside the frontend.
 - Service mode: a table URI whose warehouse is in object storage needs a
   catalog `uri`; MCP tools reach only sessions of the caller's tenant; the
   Prometheus scrape leaves out per-table series under principal auth.
+- Service mode: a notebook session belongs to the tenant that opened, created
+  or imported it; with `multi_tenant_enabled`, each tenant's notebooks live
+  under `<notebook_storage_dir>/<tenant>/`, so notebooks at the top of the
+  storage root are no longer listed or openable by non-admin callers until
+  they are moved into their tenant's folder.
+- The root `fly.toml` is now `fly.example.toml`; copy it to `fly.toml`
+  (gitignored) and fill in the placeholders to deploy on Fly.
+- `strata-worker --connect` reads its relay token from
+  `STRATA_WORKER_CONNECT_TOKEN`; workers upgrade with the server for the
+  relay protocol.
+- `STRATA_PERSONAL_MODE_USER_HEADER` is gone and ignored if set: a personal
+  server has one user, and every caller reaches every notebook. Before
+  upgrading a server that used it, give each member a personal server or
+  switch to service mode. A notebook's `owner` key is ignored and dropped on
+  the next structural edit. The TUI's `--user-header`/`--user` flags are gone.
 - Service mode: a table URI whose warehouse is in object storage needs a
   catalog `uri` (`STRATA_CATALOG_URI`); without one, scans, cache warming and
   export to a table answer 400 instead of using a SQLite catalog on the
@@ -242,6 +257,20 @@ no route serves files from outside the frontend.
   the same store; `pool.queue` and `pool.boot` spans join the submitter's trace.
 - The generic reference executor reports its hardware on `GET /health`.
 - `benchmarks/capacity_sweep.py --no-server` takes `--table-uri`.
+- **Tenant-aware notebook routes.** In service mode every notebook REST route,
+  `/sessions` and the WebSocket treat another tenant's session as missing
+  (404, or close 1008), as MCP already did; `admin:*` reaches every session.
+  With `multi_tenant_enabled` each tenant gets its own storage folder. This is a
+  convenience for small trusted tenants, not an isolation boundary: cells still
+  share the host.
+- **Serving under a path.** `STRATA_PUBLIC_BASE_PATH` serves Strata behind a
+  reverse proxy at a non-root path, whether or not the proxy strips it; the
+  UI, its WebSocket, the API docs, signed build URLs and publication pages
+  carry the path. The frontend bundle uses relative asset URLs.
+- **A worker behind NAT.** `strata-worker --connect wss://...` binds no port: it
+  dials out to a relay and serves cells over that WebSocket, reconnecting with
+  backoff. The relay protocol is documented in the Worker Relay Protocol
+  reference; Strata does not ship a relay.
 
 
 ### Changed
@@ -330,6 +359,22 @@ no route serves files from outside the frontend.
   only fail).
 - `gs://` and `abfs://` warehouse catalogs read with the server's
   `STRATA_GCS_*` and `STRATA_AZURE_*` settings.
+- A table with no snapshots yet reads as zero rows with its schema (scans,
+  transform inputs, cache warm, `@table` inputs) instead of a 500, and nothing
+  read from it is reused.
+- Under principal auth the AI usage series on `/metrics/prometheus` carry no
+  `principal` label: they are per-tenant, per-model totals.
+- A named catalog's `credential` resolves against the notebook's environment
+  wherever a notebook reads the catalog, not only for the DuckDB attach.
+- The `azure` extra installs `adlfs`, which PyIceberg needs to read Azure lake
+  tables.
+- The materialize and stream handlers moved from `server.py` into routers;
+  their routes now carry the "materialize" and "streams" OpenAPI tags.
+- **Two modes.** The personal-mode multi-user header is retired: personal
+  mode has exactly one user, and a team runs a personal server per member
+  sharing results through a service-mode store, or one service-mode server.
+  `discover` and the notebook state no longer carry `owner`, and `mcp_enabled`
+  is no longer refused in personal mode on its account.
 
 
 ### Security
@@ -619,6 +664,8 @@ no route serves files from outside the frontend.
 - The hardware probe answers on Windows.
 - The docs no longer list `az://` as a warehouse scheme (pyiceberg cannot read
   one); use `abfs://`.
+- A publication page's data and Verify links pointed at the server root, which
+  broke behind a path prefix.
 
 ## 0.8.0 - 2026-09-27
 
