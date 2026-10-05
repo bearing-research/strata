@@ -205,7 +205,36 @@ async def test_a_cancel_never_reaches_a_machine_that_moved_on_to_another_job(mak
         )
     )
 
-    cancelled = await pool.cancel("j", "build-1")
+    pool.store.save_worker(
+        Worker(
+            id="w2",
+            machine_type="cpu",
+            tenant_id="acme",
+            backend="fake",
+            state=WorkerState.BUSY,
+            created_at=1.0,
+            endpoint="http://w2.test",
+            auth_token=new_auth_token(),
+            current_job_id="k",
+        )
+    )
+    pool.store.save_job(
+        Job(
+            id="k",
+            tenant_id="acme",
+            machine_type="cpu",
+            payload=b"y",
+            state=JobState.RUNNING,
+            submitted_at=1.0,
+            started_at=2.0,
+            worker_id="w2",
+        )
+    )
 
+    cancelled = await pool.cancel("j", "build-1")
     assert cancelled.state is JobState.CANCELLED
     assert workers.requests == []
+
+    # The same cancel does reach a machine still on its job.
+    assert (await pool.cancel("k", "build-2")).state is JobState.CANCELLED
+    assert [str(r.url) for r in workers.requests] == ["http://w2.test/v1/executions/build-2/cancel"]

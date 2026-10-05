@@ -424,6 +424,24 @@ def test_a_nested_type_iceberg_cannot_read_is_refused():
     assert _unreadable(struct, struct) is None
 
 
+def test_a_file_storing_a_struct_where_the_table_says_list_is_refused(tmp_path):
+    from strata.planner import UnsupportedTableFormatError
+    from tests.iceberg_fixtures import commit_files, data_file
+
+    catalog, uri = _catalog(tmp_path)
+    table = catalog.create_table(
+        "db.t", schema=pa.schema([("id", pa.int64()), ("s", pa.list_(pa.int64()))])
+    )
+    table.append(pa.table({"id": pa.array([1], pa.int64()), "s": pa.array([[1]])}))
+    # The nested field carries its own id, so the file is matched by id, not name mapping.
+    struct = pa.struct([pa.field("a", pa.int64(), metadata={b"PARQUET:field_id": b"3"})])
+    rows = pa.table({"id": pa.array([2], pa.int64()), "s": pa.array([{"a": 1}], struct)})
+    commit_files(table, data_file(table, rows))
+
+    with pytest.raises(UnsupportedTableFormatError, match="cannot be read as"):
+        ReadPlanner(StrataConfig(cache_dir=tmp_path / "cache")).plan(uri)
+
+
 def test_an_unchanged_table_reads_its_files_as_written(lake):
     """No layout when a file already matches: the common case keeps its old path."""
     _, uri, config = lake

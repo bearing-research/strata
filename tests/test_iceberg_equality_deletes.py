@@ -536,6 +536,7 @@ def test_a_scan_artifact_counts_the_rows_left_and_a_refusal_says_why(people, tmp
         try:
             artifact = client.materialize(inputs=[uri], transform=scan)
             assert _names(client.fetch(artifact.uri)) == ["ann", "cy", "nul"]
+            assert artifact.info()["row_count"] == 3
         finally:
             client.close()
 
