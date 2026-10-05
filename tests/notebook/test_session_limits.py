@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import cast
 
@@ -144,6 +145,8 @@ class TestWarmPoolAndTimeout:
         assert pool is not None
         await asyncio.gather(*pool._background_tasks)
         assert pool._available.qsize() == 1
+        warm = pool._available.get_nowait()
+        pool._available.put_nowait(warm)
 
         clock.now += 899
         await manager.sweep()
@@ -153,7 +156,8 @@ class TestWarmPoolAndTimeout:
         clock.now += 2
         await manager.sweep()
         assert manager.list_sessions() == []
-        await _until(lambda: pool._available.qsize() == 0)
+        # The process, not the queue: the drain dequeues before the kill finishes.
+        await _until(lambda: warm.process.returncode is not None)
 
     def test_a_pool_size_of_zero_starts_no_pool(self, config, manager, tmp_path):
         config.notebook_warm_pool_size = 0
@@ -178,6 +182,8 @@ class TestWarmPoolAndTimeout:
             await asyncio.wait_for(swept.wait(), timeout=30)
         finally:
             task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 class TestIdleByActivity:
@@ -310,12 +316,14 @@ class TestCountAndMemory:
         config.notebook_cell_lock_seconds = 3600
         locked = manager.open_notebook(_notebook(tmp_path, "locked"))
         held = manager.open_notebook(_notebook(tmp_path, "held"))
+        manager.open_notebook(_notebook(tmp_path, "idle"))
         locked.presence.record_edit("root", "alice")
         quiesce.begin(held.path.resolve(), 3600)
         memory.mb = 100
 
         await manager.relieve_memory_pressure()
 
+        # The idle one goes; the lock and the hold keep the other two.
         assert sorted(manager.list_sessions()) == sorted([locked.id, held.id])
 
 
@@ -323,16 +331,23 @@ class TestRunningCell:
     async def test_a_session_running_a_cell_is_never_closed(
         self, config, manager, clock, memory, tmp_path
     ):
-        config.notebook_max_sessions = 1
-        config.notebook_session_min_available_mb = 500
         session = manager.open_notebook(_notebook(tmp_path, "running"))
         running = await _hold_a_run(session)
         try:
+            # Timeout, count and memory each close an idle session and pass it over.
+            manager.open_notebook(_notebook(tmp_path, "idle"))
             clock.now += 10_000
-            memory.mb = 100
             await manager.sweep()
-            # Count, timeout and memory all pass it over.
+            assert manager.list_sessions() == [session.id]
+
+            config.notebook_max_sessions = 1
+            manager.open_notebook(_notebook(tmp_path, "over_the_limit"))
             manager._evict_stale(making_room=True)
+            assert manager.list_sessions() == [session.id]
+
+            config.notebook_session_min_available_mb = 500
+            memory.mb = 100
+            manager.open_notebook(_notebook(tmp_path, "hungry"))
             await manager.relieve_memory_pressure()
             assert manager.list_sessions() == [session.id]
 
@@ -354,6 +369,11 @@ class TestRunningCell:
         await manager.sweep()
         assert manager.list_sessions() == [session.id]
 
+        # The idle clock restarted at the end of the run, so it does expire.
+        clock.now += 900
+        await manager.sweep()
+        assert manager.list_sessions() == []
+
 
 class TestCloseRoute:
     def test_close_keeps_the_notebook_and_ends_the_session(self, config, manager, tmp_path):
@@ -368,11 +388,12 @@ class TestCloseRoute:
         assert (notebook_dir / "notebook.toml").is_file()
 
     def test_close_needs_the_scope_open_needs(self):
-        from strata.notebook.scopes import required_scope_for_route
+        from strata.notebook.scopes import NOTEBOOK_SCOPE_WRITE, required_scope_for_route
 
-        assert required_scope_for_route(
-            "POST", "/v1/notebooks/{notebook_id}/close"
-        ) == required_scope_for_route("POST", "/v1/notebooks/open")
+        close = required_scope_for_route("POST", "/v1/notebooks/{notebook_id}/close")
+
+        assert close == required_scope_for_route("POST", "/v1/notebooks/open")
+        assert close == NOTEBOOK_SCOPE_WRITE
 
 
 class TestServiceModeReuse:
