@@ -257,13 +257,16 @@ class TestTenantStorage:
 
 
 def test_recents_validation_in_personal_mode_keeps_paths_under_the_root(server):
-    inside = create_notebook(server.notebook_storage_dir, "inside_nb")
-    outside = create_notebook(server.notebook_storage_dir.parent / "elsewhere", "outside_nb")
-    gone = server.notebook_storage_dir / "deleted_nb"
+    root = server.notebook_storage_dir
+    inside = create_notebook(root, "inside_nb")
+    outside = create_notebook(root.parent / "elsewhere", "outside_nb")
+    # Shares the root's string prefix but is a sibling directory, not under it.
+    sibling = create_notebook(root.parent / (root.name + "2"), "sibling_nb")
+    gone = root / "deleted_nb"
 
     response = _client().post(
         "/v1/notebooks/recents/validate",
-        json={"paths": [str(inside), str(outside), str(gone), "../escape"]},
+        json={"paths": [str(inside), str(outside), str(sibling), str(gone), "../escape"]},
     )
 
     assert response.status_code == 200, response.text
