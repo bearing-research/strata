@@ -3211,7 +3211,10 @@ retrain on new data, pin a snapshot), see
 <p><strong>Two variables are injected into the cell's namespace</strong>: <code>&lt;name&gt;</code> - the table
 URI string - and <code>&lt;name&gt;_snapshot</code> - the snapshot id resolved when the cell's
 provenance was computed. Passing <code>&lt;name&gt;_snapshot</code> to the scan makes the cell
-fully deterministic: it reads exactly the snapshot its provenance recorded.</p>
+fully deterministic: it reads exactly the snapshot its provenance recorded.
+For a table with no snapshots yet, <code>&lt;name&gt;_snapshot</code> is <code>None</code> (a scan reads
+it as zero rows) and the cell is never served from the cache, so it sees the
+table's first write.</p>
 <p>Format: <code># @table &lt;name&gt; &lt;uri&gt; [snapshot=&lt;id&gt;]</code>. The URI is one of the forms
 <code>client.materialize</code> accepts:</p>
 <ul>

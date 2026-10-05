@@ -4965,6 +4965,9 @@ authenticated caller the only possible answer is every tenant's at once.</p>
 <a id="__codelineno-89-8" name="__codelineno-89-8" href="#__codelineno-89-8"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my_result"</span>
 <a id="__codelineno-89-9" name="__codelineno-89-9" href="#__codelineno-89-9"></a><span class="p">}</span>
 </code></pre></div>
+<p>A table with no snapshots yet streams zero rows with the table's schema
+(projected by <code>columns</code>). Nothing read from it is reused: each request is a
+miss, as is a transform that takes the table as an input.</p>
 <h3 id="get-stream">Get Stream<a class="headerlink" href="#get-stream" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-90-1" name="__codelineno-90-1" href="#__codelineno-90-1"></a>GET /v1/streams/{stream_id}
 </code></pre></div>
@@ -4978,7 +4981,8 @@ authenticated caller the only possible answer is every tenant's at once.</p>
 </code></pre></div>
 <p>Both are unauthenticated, for scrapers. Under principal auth
 <code>/metrics/prometheus</code> leaves out the per-table series, since table names are
-<code>admin:*</code> data (<code>GET /metrics/tables</code>).</p>
+<code>admin:*</code> data (<code>GET /metrics/tables</code>), and the AI usage series carry no
+<code>principal</code> label: they are per-tenant, per-model totals.</p>
 
 
 

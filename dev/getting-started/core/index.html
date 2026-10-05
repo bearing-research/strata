@@ -2190,7 +2190,7 @@
 <li>Explicit lineage</li>
 <li>Safe reuse across runs and processes</li>
 </ul>
-<p>Reading from an Iceberg table is itself a <code>materialize</code> call with the built-in <code>scan@v1</code> transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, and a snapshot never changes, so a scan result never goes stale and there's no invalidation problem. An unnamed result is still a cache entry: the store keeps it while it is used and may collect it later (see <a href="#core-behaviors">Core behaviors</a>).</p>
+<p>Reading from an Iceberg table is itself a <code>materialize</code> call with the built-in <code>scan@v1</code> transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, and a snapshot never changes, so a scan result never goes stale and there's no invalidation problem. A table with no snapshots yet (created, never written) reads as zero rows with its schema, and with no snapshot to key it on that result is never reused, so the first read after the first write sees the data. An unnamed result is still a cache entry: the store keeps it while it is used and may collect it later (see <a href="#core-behaviors">Core behaviors</a>).</p>
 <h2 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>

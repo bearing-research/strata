@@ -2311,7 +2311,10 @@ families include:</p>
   <code>strata_ai_output_tokens_total</code>, labelled by <code>tenant</code>, <code>principal</code> and
   <code>model</code>. Counted from each provider response a prompt cell receives. The
   labels are the caller the request ran as, and are empty in personal mode. The series appear after the first
-  model call.</li>
+  model call. Under principal auth (<code>trusted_proxy</code> or <code>api_key</code>) the
+  <code>principal</code> label is left out and each series is the tenant's total per
+  model: the route is unauthenticated for scrapers, and who called a model
+  is not theirs to see. Per-principal counts are not exported in that mode.</li>
 </ul>
 <h3 id="traces-opentelemetry-otlp">Traces, OpenTelemetry OTLP<a class="headerlink" href="#traces-opentelemetry-otlp" title="Permanent link">&para;</a></h3>
 <p>Tracing is on whenever the <code>otel</code> extra is installed (the published
