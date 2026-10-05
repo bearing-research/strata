@@ -203,8 +203,6 @@ def test_a_schema_change_is_not_served_from_the_cache_of_the_old_schema(lake):
 
 def test_a_scan_artifact_is_not_reused_across_a_schema_change(lake, tmp_path):
     """The artifact dedups on the scan's provenance, which must see the schema."""
-    import time
-
     from strata_client.client import StrataClient
 
     from tests.conftest import run_server_with_context
@@ -216,7 +214,7 @@ def test_a_scan_artifact_is_not_reused_across_a_schema_change(lake, tmp_path):
         try:
             first = client.materialize(inputs=[uri], transform=scan)
             assert _rows(client.fetch(first.uri)) == [{"id": 1, "x": 10}, {"id": 2, "x": 20}]
-            time.sleep(0.5)  # let the artifact finalize, as test_unified_materialize does
+            assert first.info()["state"] == "ready"
             _evolve(catalog, lambda u: u.delete_column("x"))
             _evolve(catalog, lambda u: u.add_column("x", LongType()))
 

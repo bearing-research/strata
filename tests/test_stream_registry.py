@@ -162,7 +162,7 @@ async def test_an_expired_stream_is_handed_to_on_drop():
     reg.register(st)
 
     reg.schedule_cleanup("s1", scan_id="scan-s1")
-    await asyncio.sleep(0.05)
+    await reg._cleanup_tasks["s1"]
 
     assert dropped == [st]
 
