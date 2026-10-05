@@ -1509,6 +1509,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../reference/worker-connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker Relay Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../reference/notebook-toml/" class="md-nav__link">
         
   
@@ -2447,7 +2475,7 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 </tr>
 <tr>
 <td><code>strata-worker --port 9000</code></td>
-<td>Start a remote worker for <code># @worker</code> cells. Run the installed binary (for example <code>.venv/bin/strata-worker</code>), not through <code>uv run</code>, whose process would keep <code>STRATA_WORKER_TOKEN</code> readable to cells. See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
+<td>Start a remote worker for <code># @worker</code> cells. Run the installed binary (for example <code>.venv/bin/strata-worker</code>), not through <code>uv run</code>, whose process would keep <code>STRATA_WORKER_TOKEN</code> readable to cells. With <code>--connect wss://...</code> it binds no port and dials out to a relay instead. See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
 </tr>
 </tbody>
 </table>

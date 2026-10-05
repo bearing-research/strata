@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/deployment/privacy/">
+        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/reference/worker-connect/">
       
       
-        <link rel="prev" href="../lifecycle/">
+        <link rel="prev" href="../executor-protocol/">
       
       
-        <link rel="next" href="../docker/">
+        <link rel="next" href="../notebook-toml/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Privacy & Sharing - Strata</title>
+        <title>Worker Relay Protocol - Strata</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#privacy-sharing-model" class="md-skip">
+        <a href="#worker-relay-protocol" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Privacy & Sharing
+              Worker Relay Protocol
             
           </span>
         </div>
@@ -315,11 +315,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../reference/notebook-protocol/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../notebook-protocol/" class="md-tabs__link">
           
   
   
@@ -335,12 +337,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../../getting-started/installation/" class="md-tabs__link">
           
   
@@ -1340,28 +1340,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
             
   
   
@@ -1379,7 +1382,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1397,7 +1400,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/notebook-protocol/" class="md-nav__link">
+      <a href="../notebook-protocol/" class="md-nav__link">
         
   
   
@@ -1425,7 +1428,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/rest-api/" class="md-nav__link">
+      <a href="../rest-api/" class="md-nav__link">
         
   
   
@@ -1453,7 +1456,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/websocket/" class="md-nav__link">
+      <a href="../websocket/" class="md-nav__link">
         
   
   
@@ -1481,7 +1484,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/executor-protocol/" class="md-nav__link">
+      <a href="../executor-protocol/" class="md-nav__link">
         
   
   
@@ -1506,10 +1509,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../reference/worker-connect/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker Relay Protocol
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1525,6 +1555,131 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-goes-over-the-socket-and-what-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What goes over the socket, and what does not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mapping-urls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mapping URLs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frames" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frames
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Frames">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#relay-to-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relay to worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-to-relay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker to relay
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#concurrency-and-flow-control" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrency and flow control
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authentication-end-to-end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication, end to end
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-this-framing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this framing
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1537,7 +1692,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/notebook-toml/" class="md-nav__link">
+      <a href="../notebook-toml/" class="md-nav__link">
         
   
   
@@ -1569,31 +1724,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1611,7 +1763,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1657,7 +1809,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/configuration/" class="md-nav__link">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -1685,7 +1837,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../modes/" class="md-nav__link">
+      <a href="../../deployment/modes/" class="md-nav__link">
         
   
   
@@ -1713,7 +1865,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../service-mode/" class="md-nav__link">
+      <a href="../../deployment/service-mode/" class="md-nav__link">
         
   
   
@@ -1741,7 +1893,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../lifecycle/" class="md-nav__link">
+      <a href="../../deployment/lifecycle/" class="md-nav__link">
         
   
   
@@ -1766,37 +1918,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Privacy & Sharing
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../deployment/privacy/" class="md-nav__link">
         
   
   
@@ -1812,159 +1937,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#whats-shared-what-isnt" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What's shared, what isn't
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="What&#39;s shared, what isn&#39;t">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#iceberg-scan-cache-shared-by-design" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Iceberg scan cache, shared by design
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#notebook-artifacts-not-actually-shared" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notebook artifacts, not actually shared
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#notebook-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notebook access
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#how-notebook-ownership-gets-stamped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How notebook ownership gets stamped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#trust-boundaries-pick-a-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Trust boundaries, pick a shape
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Trust boundaries, pick a shape">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#single-developer-default" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Single developer (default)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#small-trusted-team-520-people" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Small trusted team (5–20 people)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#multi-tenant-or-hard-isolation-requirements" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Multi-tenant or hard-isolation requirements
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#per-user-isolation-every-user-truly-private" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Per-user isolation (every user truly private)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#future-direction-per-notebook-acls" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Future direction: per-notebook ACLs
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1977,7 +1949,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../docker/" class="md-nav__link">
+      <a href="../../deployment/docker/" class="md-nav__link">
         
   
   
@@ -2005,7 +1977,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fly/" class="md-nav__link">
+      <a href="../../deployment/fly/" class="md-nav__link">
         
   
   
@@ -2033,7 +2005,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../codespaces/" class="md-nav__link">
+      <a href="../../deployment/codespaces/" class="md-nav__link">
         
   
   
@@ -2061,7 +2033,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../observability/" class="md-nav__link">
+      <a href="../../deployment/observability/" class="md-nav__link">
         
   
   
@@ -2116,22 +2088,55 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#whats-shared-what-isnt" class="md-nav__link">
+  <a href="#what-goes-over-the-socket-and-what-does-not" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's shared, what isn't
+        What goes over the socket, and what does not
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="What&#39;s shared, what isn&#39;t">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mapping-urls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mapping URLs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frames" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frames
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Frames">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#iceberg-scan-cache-shared-by-design" class="md-nav__link">
+  <a href="#relay-to-worker" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Iceberg scan cache, shared by design
+        Relay to worker
       
     </span>
   </a>
@@ -2139,21 +2144,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#notebook-artifacts-not-actually-shared" class="md-nav__link">
+  <a href="#worker-to-relay" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Notebook artifacts, not actually shared
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#notebook-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notebook access
+        Worker to relay
       
     </span>
   </a>
@@ -2166,10 +2160,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-notebook-ownership-gets-stamped" class="md-nav__link">
+  <a href="#concurrency-and-flow-control" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How notebook ownership gets stamped
+        Concurrency and flow control
       
     </span>
   </a>
@@ -2177,71 +2171,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#trust-boundaries-pick-a-shape" class="md-nav__link">
+  <a href="#authentication-end-to-end" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Trust boundaries, pick a shape
+        Authentication, end to end
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Trust boundaries, pick a shape">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#single-developer-default" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Single developer (default)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#small-trusted-team-520-people" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Small trusted team (5–20 people)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#multi-tenant-or-hard-isolation-requirements" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Multi-tenant or hard-isolation requirements
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#per-user-isolation-every-user-truly-private" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Per-user isolation (every user truly private)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#future-direction-per-notebook-acls" class="md-nav__link">
+  <a href="#why-this-framing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Future direction: per-notebook ACLs
+        Why this framing
       
     </span>
   </a>
@@ -2268,193 +2212,107 @@
   
 
 
-<h1 id="privacy-sharing-model">Privacy &amp; Sharing Model<a class="headerlink" href="#privacy-sharing-model" title="Permanent link">&para;</a></h1>
-<p>How notebook access works depends on whether personal mode's
-per-user header (<code>STRATA_PERSONAL_MODE_USER_HEADER</code>) is set. With it
-unset, access is <strong>URL-based</strong>, similar to Google Docs: notebook IDs
-are unguessable, and anyone who can reach the server and has the ID
-can open and execute the notebook. With it set, every notebook route
-checks the notebook's owner and answers <code>404</code> to anyone else, so a
-shared link works only for its owner. Service mode gates the routes
-by scope, not by owner. This page lays out the model honestly so you
-can pick the deployment shape that matches your trust boundary.</p>
-<h2 id="whats-shared-what-isnt">What's shared, what isn't<a class="headerlink" href="#whats-shared-what-isnt" title="Permanent link">&para;</a></h2>
-<h3 id="iceberg-scan-cache-shared-by-design">Iceberg scan cache, shared by design<a class="headerlink" href="#iceberg-scan-cache-shared-by-design" title="Permanent link">&para;</a></h3>
-<p>The original Strata value prop: identical scans hit the same cache.
-The key is content-addressed:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>hash(tenant | table_identity | snapshot_id | file_path | row_group_id | projection_fingerprint)
+<h1 id="worker-relay-protocol">Worker Relay Protocol<a class="headerlink" href="#worker-relay-protocol" title="Permanent link">&para;</a></h1>
+<p><code>strata-worker --connect &lt;url&gt;</code> runs a worker that binds no port. It opens one outbound WebSocket to a relay, and the relay presents the worker at an HTTP URL the notebook server dispatches to like any other worker. Each HTTP request the relay receives for that URL travels over the WebSocket as a stream of frames, and the worker's in-process app answers it the same way. A worker behind NAT, or a firewall that allows only outbound connections, can then serve <code># @worker</code> cells.</p>
+<p>Strata ships the worker side. The relay is not part of Strata; this page is what a relay implements. Everything the server and worker say to each other is the <a href="../executor-protocol/">executor protocol</a>, unchanged: this page only says how those HTTP requests ride over one WebSocket.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>notebook server ──HTTP──► relay ◄══WebSocket══ strata-worker --connect
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                 POST https://relay/w/abc/v1/execute      (worker dialled out)
 </code></pre></div>
-<p>If Alice ran a scan an hour ago and Bob runs the same scan now, Bob
-hits Alice's cached result. <strong>This is intentional</strong>: it's the
-performance win that makes Strata interesting. In multi-tenant
-service mode, the <code>tenant</code> term in the hash isolates one tenant
-from another.</p>
-<h3 id="notebook-artifacts-not-actually-shared">Notebook artifacts, not actually shared<a class="headerlink" href="#notebook-artifacts-not-actually-shared" title="Permanent link">&para;</a></h3>
-<p>Per-cell variable outputs are stored in each notebook's own
-<code>.strata/artifacts/</code> store as
-<code>nb_{notebook_id}_cell_{cell_id}_var_{name}</code>. Two users with
-identical notebook code but different notebooks each produce their
-own artifacts under different <code>notebook_id</code>s, they don't dedupe
-across notebooks. So sharing a Strata instance with a teammate
-does <strong>not</strong> mean your cell outputs cross-pollinate. The exception
-is opt-in: the <a href="../service-mode/#the-team-cache-sharing-results-nobody-named">team cache</a>
-(<code>STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</code>) offers results to a shared
-store by provenance, so identical cells in different notebooks hit
-each other there.</p>
-<h3 id="notebook-access">Notebook access<a class="headerlink" href="#notebook-access" title="Permanent link">&para;</a></h3>
-<p>Notebook IDs are full UUIDs (8-char prefix for display, full UUID
-for the actual ID). They're not in any global enumeration and
-they're not in <code>discover</code>'s output unless the caller owns them.
-What happens next depends on whether <code>STRATA_PERSONAL_MODE_USER_HEADER</code>
-is configured.</p>
-<p><strong>With per-user scoping on</strong>, knowing the id is not enough. Every route
-that takes a session id resolves it through one dependency,
-<code>get_notebook_session</code>, which checks the notebook's recorded owner against
-the caller's identity and answers <code>404</code> on a mismatch. The WebSocket upgrade
-does the same and closes with <code>1008</code>. A missing header is denied too, so a
-caller who sends nothing is not treated as everyone.</p>
+<h2 id="what-goes-over-the-socket-and-what-does-not">What goes over the socket, and what does not<a class="headerlink" href="#what-goes-over-the-socket-and-what-does-not" title="Permanent link">&para;</a></h2>
+<p>Only requests <strong>to</strong> the worker go through the relay: the dispatch (<code>/v1/execute</code>, <code>/v1/notebook-execute</code>, <code>/v1/execute-manifest</code>, <code>/execute</code>), the cancel (<code>/v1/executions/{build_id}/cancel</code>) and <code>GET /health</code>.</p>
+<p>Requests the worker <strong>makes</strong> go out directly, as from any worker: a signed worker downloads inputs, uploads its bundle, finalizes and posts console chunks to the <code>log_url</code> over ordinary outbound HTTPS. A <code>direct</code> worker makes none; its console arrives in the bundle when the cell ends. So a <code>signed</code> worker needs outbound reach to the server's signed URLs (or the object store, with presigned URLs), and a <code>direct</code> worker needs nothing but the relay.</p>
+<h2 id="connecting">Connecting<a class="headerlink" href="#connecting" title="Permanent link">&para;</a></h2>
+<p>The worker opens a WebSocket to the <code>--connect</code> URL (<code>ws://</code> or <code>wss://</code>; use <code>wss://</code> anywhere but a test) with:</p>
+<ul>
+<li><code>Authorization: Bearer &lt;token&gt;</code>, where the token is the value of <code>STRATA_WORKER_CONNECT_TOKEN</code> on the worker, if set. It is the relay's credential for this worker and nothing else: the relay checks it to decide which worker this socket is. The worker never puts it on the command line, where the cells it runs could read it, and removes it from its environment at startup like its other secrets.</li>
+<li><code>Sec-WebSocket-Protocol: strata-worker-connect.v1</code>. The relay must select this subprotocol in its handshake response. A relay that selects none, or another one, is refused by the worker as one that does not speak this version.</li>
+</ul>
+<p>The relay refuses a worker by answering the handshake with an HTTP status instead of <code>101</code>. A <code>4xx</code> other than <code>408</code> and <code>429</code> is final: <code>strata-worker</code> logs it and exits with status 1, since the same token would be refused again. A <code>408</code>, <code>429</code>, <code>5xx</code>, a network error, or a connection that closes later, is retried.</p>
+<p><strong>Reconnecting.</strong> After a failure or a close, the worker waits a random time between half and all of the current delay, then reconnects. The delay starts at 1 s, doubles on each consecutive failure up to 60 s, and goes back to 1 s once a handshake succeeds. A request in flight when the connection drops is lost to its caller (the relay should fail it, for example with <code>502</code>); the cell it started keeps running on the worker until it finishes or the server cancels it, as when a plain HTTP client hangs up.</p>
+<p><strong>Keepalive.</strong> The worker sends a WebSocket ping every 20 s and closes the connection if no pong arrives within 20 s. A relay answers pings as any WebSocket implementation does. That traffic also keeps a NAT mapping open.</p>
+<h2 id="mapping-urls">Mapping URLs<a class="headerlink" href="#mapping-urls" title="Permanent link">&para;</a></h2>
+<p>The relay chooses the URL it presents the worker at, typically with a per-worker prefix such as <code>https://relay.example.com/w/&lt;worker-id&gt;</code>. It strips that prefix before forwarding, so the worker sees the paths of the executor protocol. The server is registered with the relay URL, for example <code>config.url = "https://relay.example.com/w/abc/v1/execute"</code>, and derives <code>/health</code>, <code>/v1/execute-manifest</code> and the cancel URL from it keeping the prefix, so all of them reach the relay under the same prefix.</p>
+<h2 id="frames">Frames<a class="headerlink" href="#frames" title="Permanent link">&para;</a></h2>
+<p>Every WebSocket message is one frame. A <strong>text</strong> message is a JSON object, a <strong>control frame</strong>. A <strong>binary</strong> message is a <strong>body chunk</strong>: 4 bytes holding the stream id as an unsigned big-endian integer, then up to 1 MiB (1,048,576 bytes) of body. The worker refuses a message larger than 1 MiB plus 4 bytes by closing the connection (close code 1009), so a relay splits larger bodies. An empty chunk carries nothing and need not be sent.</p>
+<p>Each HTTP request is a <strong>stream</strong>, named by an <code>id</code> the relay picks: an integer from 1 to 2³²−1, unique among the streams in flight on this connection. A relay may reuse an id once its stream has ended. Frames of different streams interleave freely; frames of one stream arrive in the order sent, since one WebSocket preserves order.</p>
+<h3 id="relay-to-worker">Relay to worker<a class="headerlink" href="#relay-to-worker" title="Permanent link">&para;</a></h3>
+<p><strong><code>request</code></strong> opens a stream:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"request"</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/v1/execute"</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">"query"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">"headers"</span><span class="p">:</span><span class="w"> </span><span class="p">[[</span><span class="s2">"authorization"</span><span class="p">,</span><span class="w"> </span><span class="s2">"Bearer &lt;STRATA_WORKER_TOKEN&gt;"</span><span class="p">],</span><span class="w"> </span><span class="p">[</span><span class="s2">"content-type"</span><span class="p">,</span><span class="w"> </span><span class="s2">"multipart/form-data; boundary=..."</span><span class="p">],</span><span class="w"> </span><span class="p">[</span><span class="s2">"content-length"</span><span class="p">,</span><span class="w"> </span><span class="s2">"52133"</span><span class="p">]]</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
+</code></pre></div>
 <table>
 <thead>
 <tr>
-<th>Endpoint</th>
-<th>Owner check?</th>
-<th>How</th>
+<th>Field</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>GET /v1/notebooks/{id}/cells</code></td>
-<td><strong>Yes</strong></td>
-<td><code>get_notebook_session</code>, 404 to non-owners</td>
+<td><code>method</code></td>
+<td>The HTTP method.</td>
 </tr>
 <tr>
-<td><code>POST /v1/notebooks/{id}/cells/{cell_id}/execute</code></td>
-<td><strong>Yes</strong></td>
-<td>Same dependency</td>
+<td><code>path</code></td>
+<td>The request path after the relay's own prefix is stripped, starting with <code>/</code>, percent-encoded as it was on the wire.</td>
 </tr>
 <tr>
-<td><code>GET /v1/notebooks/{id}/dag</code></td>
-<td><strong>Yes</strong></td>
-<td>Same dependency</td>
+<td><code>query</code></td>
+<td>The raw query string without the <code>?</code>, or <code>""</code>.</td>
 </tr>
 <tr>
-<td><code>WS /v1/notebooks/ws/{id}</code></td>
-<td><strong>Yes</strong></td>
-<td>Upgrade closes with 1008</td>
-</tr>
-<tr>
-<td><code>GET /v1/notebooks/discover</code></td>
-<td><strong>Yes</strong></td>
-<td>Filters by owner, and scans only the caller's own storage root</td>
-</tr>
-<tr>
-<td><code>POST /v1/notebooks/open</code></td>
-<td><strong>Yes</strong></td>
-<td>The path must lie inside the caller's own storage root</td>
-</tr>
-<tr>
-<td><code>DELETE /v1/notebooks/{id}</code></td>
-<td><strong>Yes</strong></td>
-<td>404 to non-owners</td>
-</tr>
-<tr>
-<td><code>POST /v1/notebooks/delete-by-path</code></td>
-<td><strong>Yes</strong></td>
-<td>404 to non-owners</td>
-</tr>
-<tr>
-<td><code>PUT /v1/notebooks/{id}/name</code></td>
-<td><strong>Yes</strong></td>
-<td>404 to non-owners</td>
+<td><code>headers</code></td>
+<td><code>[name, value]</code> pairs in order, repeats allowed, as Latin-1 strings. Forward the caller's headers, <code>Authorization</code> included, minus hop-by-hop ones (<code>Connection</code>, <code>Keep-Alive</code>, <code>Transfer-Encoding</code>, <code>Upgrade</code>, <code>TE</code>, <code>Trailer</code>, <code>Proxy-*</code>).</td>
 </tr>
 </tbody>
 </table>
-<p>The generic <code>404</code> is deliberate: a <code>403</code> would confirm that a notebook with
-that id exists.</p>
-<p><strong>With the header unset</strong> there is no identity to check against, every
-notebook is unowned, and anyone who can reach the port can open anything.
-That is the single-user shape, and it is why personal mode binds to loopback
-by default.</p>
-<p>Sharing a link with a teammate therefore does not work under per-user
-scoping, because their path resolution is confined to their own root. Use
-<a href="../../notebook/publishing/">publishing</a> to hand someone a result, or service
-mode for a genuinely shared deployment.</p>
-<h2 id="how-notebook-ownership-gets-stamped">How notebook ownership gets stamped<a class="headerlink" href="#how-notebook-ownership-gets-stamped" title="Permanent link">&para;</a></h2>
-<p>The <code>owner</code> field on <code>notebook.toml</code> is set only in
-personal-mode-with-proxy (<code>STRATA_PERSONAL_MODE_USER_HEADER</code> set):
-<code>POST /create</code>, <code>POST /import</code> and <code>POST /import-snapshot</code> stamp the
-caller's identity from the configured header (typically
-<code>Cf-Access-Authenticated-User-Email</code>, <code>X-Forwarded-Email</code>, etc.).</p>
-<p>Service mode stamps no owner: it refuses <code>personal_mode_user_header</code>,
-and <code>X-Strata-Principal</code> is not used for notebook ownership. There,
-notebook scopes decide what a principal can do.</p>
-<p>When <code>personal_mode_user_header</code> is unset, <code>owner</code> stays <code>None</code>, all
-notebooks are unowned and the single-user pattern applies. This is
-the default for a developer running on localhost.</p>
-<p>Unowned notebooks (<code>owner is None</code>) remain accessible to any
-caller. Migrating an unowned notebook to ownership requires
-manually editing <code>notebook.toml</code>.</p>
-<h2 id="trust-boundaries-pick-a-shape">Trust boundaries, pick a shape<a class="headerlink" href="#trust-boundaries-pick-a-shape" title="Permanent link">&para;</a></h2>
-<h3 id="single-developer-default">Single developer (default)<a class="headerlink" href="#single-developer-default" title="Permanent link">&para;</a></h3>
-<p><code>STRATA_DEPLOYMENT_MODE=personal</code> on localhost, no proxy. The
-caller is you, every notebook is yours, sharing isn't on the table.
-Use this shape unless something else applies.</p>
-<h3 id="small-trusted-team-520-people">Small trusted team (5–20 people)<a class="headerlink" href="#small-trusted-team-520-people" title="Permanent link">&para;</a></h3>
-<p><code>STRATA_DEPLOYMENT_MODE=personal</code> + an authenticating proxy
-(Cloudflare Access, Pomerium, corporate SSO) +
-<code>STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email</code>
-(or whatever your proxy injects).</p>
-<p>Every notebook is stamped with its creator's identity and lives
-under that user's own storage root. <code>discover</code> filters to your
-notebooks, and every notebook route answers <code>404</code> to anyone else, so
-a link to an owned notebook works only for its owner. Unowned
-notebooks stay open to everyone.</p>
-<p><strong>This is the right shape for most teams.</strong> Share results by
-<a href="../../notebook/publishing/">publishing</a> them rather than by sending a
-notebook link.</p>
-<h3 id="multi-tenant-or-hard-isolation-requirements">Multi-tenant or hard-isolation requirements<a class="headerlink" href="#multi-tenant-or-hard-isolation-requirements" title="Permanent link">&para;</a></h3>
-<p><code>STRATA_DEPLOYMENT_MODE=service</code> + multi-tenancy. Each tenant gets
-its own QoS pools, cache namespacing, and metric labels. Notebook routes
-are scope gated (<code>notebook:read</code>, <code>notebook:write</code>, <code>notebook:execute</code>),
-so what a principal can reach depends on the scopes the proxy asserts
-for it.</p>
-<p>Notes:</p>
-<ul>
-<li><strong>Notebooks are not tenant-scoped.</strong> Tenancy isolates the scan
-  cache and the server's artifact store: the tenant is hashed into
-  cache keys, and artifact and name reads are filtered by tenant.
-  Notebook sessions and the notebook storage root are shared by the
-  whole server, and there are no per-notebook ACLs. If Alice's
-  notebook ID leaks to Bob and Bob holds <code>notebook:read</code>, he can open
-  it, whatever tenant either of them is in.</li>
-<li><strong>Notebook deletion is personal-mode only.</strong> Service mode refuses
-  <code>DELETE /v1/notebooks/{id}</code> and <code>delete-by-path</code>.</li>
-</ul>
-<h3 id="per-user-isolation-every-user-truly-private">Per-user isolation (every user truly private)<a class="headerlink" href="#per-user-isolation-every-user-truly-private" title="Permanent link">&para;</a></h3>
-<p><strong>Not supported in a single instance.</strong> If you need every user to
-have a notebook namespace nobody else can ever access, run one
-Strata instance per user. The deployment cost is real (one process,
-one venv, one storage volume per user) but the isolation is total.
-Per-user containers behind a routing proxy is a reasonable
-implementation.</p>
-<p>This is the same answer you'd get from JupyterHub, Marimo Cloud, or
-any other notebook tool: hard-private = separate instances.</p>
-<h2 id="future-direction-per-notebook-acls">Future direction: per-notebook ACLs<a class="headerlink" href="#future-direction-per-notebook-acls" title="Permanent link">&para;</a></h2>
-<p>Real per-notebook permissions (a <code>read_principals</code> / <code>write_principals</code>
-list in <code>notebook.toml</code> checked on every endpoint) would sit between
-the two shapes that exist today. With per-user scoping an owned
-notebook is its owner's alone; without it, or in service mode, anyone
-who can reach the server and has the ID (and, in service mode, the
-scope) can open it. Nothing in between is implemented:</p>
-<ul>
-<li><a href="../../notebook/publishing/">Publishing</a> already hands a result to
-  someone without handing them the notebook.</li>
-<li>The handful of users who need stronger isolation already have
-  the "separate instance" escape hatch.</li>
-</ul>
-<p>If you have a concrete use case that needs per-notebook ACLs,
-file an issue describing the workflow, that's the right way to
-move this off the future-work list.</p>
+<p>Then the request body as body chunks with this <code>id</code>, then:</p>
+<p><strong><code>end</code></strong>, <code>{"type": "end", "id": 7}</code>, when the body is complete. A request without a body (<code>GET /health</code>) is a <code>request</code> frame followed by <code>end</code>. A <code>Content-Length</code> header, if forwarded, must match the bytes sent.</p>
+<p><strong><code>abort</code></strong>, <code>{"type": "abort", "id": 7}</code>, when the relay gives up on the stream, for example because its caller disconnected. The worker drops what is left of the body and tells the app its client has gone; it sends nothing more for the stream. A running cell is not stopped by this, as with a plain HTTP disconnect: the server stops a cell through the cancel route, which arrives as a stream of its own.</p>
+<h3 id="worker-to-relay">Worker to relay<a class="headerlink" href="#worker-to-relay" title="Permanent link">&para;</a></h3>
+<p><strong><code>response</code></strong> starts the answer:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"response"</span><span class="p">,</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span><span class="w"> </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="mi">200</span><span class="p">,</span><span class="w"> </span><span class="nt">"headers"</span><span class="p">:</span><span class="w"> </span><span class="p">[[</span><span class="s2">"content-type"</span><span class="p">,</span><span class="w"> </span><span class="s2">"application/x-tar"</span><span class="p">],</span><span class="w"> </span><span class="p">[</span><span class="s2">"x-strata-executor-protocol"</span><span class="p">,</span><span class="w"> </span><span class="s2">"v1"</span><span class="p">]]}</span>
+</code></pre></div>
+<p>Then the response body as body chunks with this <code>id</code>, then <strong><code>end</code></strong>, <code>{"type": "end", "id": 7}</code>. The worker sends the response only after the app produces it, which for a cell is when the cell finishes; the relay holds its caller's request open meanwhile, so it should allow at least as long as the longest cell timeout. If <code>headers</code> carries <code>Content-Length</code>, the body has exactly that many bytes, and a relay may forward it or re-frame the body (chunked) and drop it.</p>
+<p>If the app fails before it has a response, the worker answers <code>500</code> with a short text body. If it fails after the response has started, the worker sends <strong><code>abort</code></strong>, <code>{"type": "abort", "id": 7}</code>, and the relay ends its caller's response as failed (closing the connection rather than completing it).</p>
+<p>Both sides ignore a frame with an unknown <code>type</code>, and frames for an id that is not open (a stream already finished or aborted).</p>
+<h2 id="concurrency-and-flow-control">Concurrency and flow control<a class="headerlink" href="#concurrency-and-flow-control" title="Permanent link">&para;</a></h2>
+<p>Every stream is served concurrently: the server's cancel for a cell arrives as a second stream while the dispatch stream is still open, and is answered at once. There is no per-stream flow control. The worker holds at most 16 chunks of a request body that the app has not read yet; beyond that it stops reading the WebSocket until the app catches up, which pauses every stream on the connection the way a slow reader pauses a TCP connection. The app reads request bodies as they arrive (a multipart body is spooled to disk), so this only bites on a slow disk. A request the app answers without reading its body, such as a <code>401</code>, has the rest of its body discarded rather than held. In the other direction the worker writes response chunks as the WebSocket accepts them; a relay that stops reading likewise pauses the worker's responses.</p>
+<h2 id="authentication-end-to-end">Authentication, end to end<a class="headerlink" href="#authentication-end-to-end" title="Permanent link">&para;</a></h2>
+<p>Two credentials, for two hops:</p>
+<table>
+<thead>
+<tr>
+<th>Credential</th>
+<th>Presented by</th>
+<th>To</th>
+<th>Checked by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_WORKER_CONNECT_TOKEN</code></td>
+<td>the worker</td>
+<td>the relay, on the WebSocket handshake</td>
+<td>the relay</td>
+</tr>
+<tr>
+<td><code>STRATA_WORKER_TOKEN</code></td>
+<td>the server (<code>config.token</code> / <code>config.token_env</code>)</td>
+<td>the worker, in each request's <code>Authorization</code> header, forwarded by the relay</td>
+<td>the worker, per request, as on a bound worker</td>
+</tr>
+</tbody>
+</table>
+<p>The relay never needs the worker token, and the worker token is not the relay's business beyond forwarding the header. Set <code>STRATA_WORKER_TOKEN</code> on a connected worker as on any reachable one: without it, anyone who can send a request to the relay URL can run code on the worker.</p>
+<h2 id="why-this-framing">Why this framing<a class="headerlink" href="#why-this-framing" title="Permanent link">&para;</a></h2>
+<p>The executor protocol's requests are few, long, and large: one dispatch per cell, a body of inputs, a bundle back, and an occasional cancel alongside. A JSON control frame plus raw binary chunks covers that with nothing a relay author has to pull in beyond a WebSocket library, and it can be implemented and debugged by reading the messages. Multiplexing through yamux or HTTP/2 over the socket would add a dependency on both ends, plus window-based flow control that this traffic does not need, for a relay that is not Strata's to write.</p>
 
 
 

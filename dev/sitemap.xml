@@ -244,4 +244,8 @@
          <loc>https://bearing-research.github.io/strata/dev/reference/websocket/</loc>
          <lastmod>2026-10-05</lastmod>
     </url>
+    <url>
+         <loc>https://bearing-research.github.io/strata/dev/reference/worker-connect/</loc>
+         <lastmod>2026-10-05</lastmod>
+    </url>
 </urlset>

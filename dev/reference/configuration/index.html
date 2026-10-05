@@ -1509,6 +1509,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../worker-connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker Relay Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../notebook-toml/" class="md-nav__link">
         
   
@@ -3822,6 +3850,11 @@ without a URL or a config, to find the server. The server does not read
 <td><code>STRATA_WORKER_TOKEN</code></td>
 <td><code>None</code></td>
 <td>Optional bearer token. When set, the worker's <code>/v1/*</code> execution endpoints require <code>Authorization: Bearer &lt;token&gt;</code>. <code>/health</code> stays open. See <a href="../../notebook/workers/#authentication">Workers § Authentication</a>.</td>
+</tr>
+<tr>
+<td><code>STRATA_WORKER_CONNECT_TOKEN</code></td>
+<td><code>None</code></td>
+<td>The token <code>strata-worker --connect</code> presents to the relay as <code>Authorization: Bearer &lt;token&gt;</code> on its WebSocket handshake. Read once at startup and removed from the environment. Unrelated to <code>STRATA_WORKER_TOKEN</code>, which still guards each request. See <a href="../worker-connect/">Worker Relay Protocol</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_WORKER_MAX_INPUT_BYTES</code></td>

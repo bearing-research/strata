@@ -16,7 +16,7 @@
         <link rel="prev" href="../websocket/">
       
       
-        <link rel="next" href="../notebook-toml/">
+        <link rel="next" href="../worker-connect/">
       
       
         
@@ -1747,6 +1747,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../worker-connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker Relay Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../notebook-toml/" class="md-nav__link">
         
   
@@ -2876,6 +2904,7 @@ change.</p>
 <h2 id="implementing-a-custom-worker">Implementing a custom worker<a class="headerlink" href="#implementing-a-custom-worker" title="Permanent link">&para;</a></h2>
 <p>The minimum surface is <code>POST /v1/execute</code> + <code>GET /health</code>. The reference Python implementation is <code>create_notebook_executor_app()</code> in <code>src/strata/notebook/remote_executor.py</code> and is the canonical specification when in doubt.</p>
 <p>A custom worker doesn't have to run Python - it just has to accept the <code>notebook_cell@v1</code> envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the <code>strata-worker</code> script is the path of least resistance.</p>
+<p>A worker the server cannot reach can dial out instead: <code>strata-worker --connect</code> carries these same requests over one outbound WebSocket to a relay, which presents the worker at an ordinary URL. The <a href="../worker-connect/">Worker Relay Protocol</a> specifies the framing a relay implements.</p>
 <h2 id="core-transform-executors">Core transform executors<a class="headerlink" href="#core-transform-executors" title="Permanent link">&para;</a></h2>
 <p>Everything above is the notebook-cell contract. The Core build runner, which
 executes <code>POST /v1/materialize</code> transforms other than <code>scan@v1</code>, uses a simpler
