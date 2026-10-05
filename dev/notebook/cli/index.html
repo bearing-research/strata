@@ -2556,7 +2556,7 @@ project (see <a href="../scratchpad/">the notebook as an agent's scratchpad</a>)
 it, three read-only commands print structured JSON (default) or a compact human
 view. They open the notebook locally - no server, no env sync:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># every cell: id, name, status, source</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>show<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w">  </span><span class="c1"># one cell: source, status, outputs, console, staleness</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>show<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w">  </span><span class="c1"># one cell: source, status, staleness (outputs and console with --format json)</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>strata<span class="w"> </span>cell<span class="w"> </span>show<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>--var<span class="w"> </span>NAME<span class="w"> </span><span class="c1"># the cell that DEFINES a variable (else the available names)</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>strata<span class="w"> </span>dag<span class="w">       </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># dependency edges + topological order</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>strata<span class="w"> </span>status<span class="w">    </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># per-cell status + staleness summary</span>
@@ -2589,8 +2589,11 @@ directory. Pass <code>--server &lt;url&gt; --session &lt;id&gt;</code> in place 
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>strata<span class="w"> </span>dag<span class="w">       </span>--server<span class="w"> </span>http://localhost:8765<span class="w"> </span>--session<span class="w"> </span><span class="nv">$SID</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>strata<span class="w"> </span>status<span class="w">    </span>--server<span class="w"> </span>http://localhost:8765<span class="w"> </span>--session<span class="w"> </span><span class="nv">$SID</span>
 </code></pre></div>
-<p><code>&lt;id&gt;</code> is the session id (the route <code>{id}</code>, not the <code>notebook.toml</code> id). The
-output is identical to the local backend - both project the same wire shape - so
+<p><code>&lt;id&gt;</code> is the session id (the route <code>{id}</code>, not the <code>notebook.toml</code> id).
+<code>strata agent</code> prints it when it starts; without that, <code>POST
+/v1/notebooks/open</code> with the notebook's path returns it as <code>session_id</code>, and
+<code>GET /v1/notebooks/sessions</code> lists the open ones (see the
+<a href="../../reference/rest-api/#open-notebook">REST API</a>). The output is identical to the local backend - both project the same wire shape - so
 a script written against a local notebook works unchanged against a live session.
 <code>cell run</code> / <code>cell test</code> and the authoring commands accept the same selector
 (see below), so the entire surface works against a live session. Remote

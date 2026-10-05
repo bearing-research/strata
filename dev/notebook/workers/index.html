@@ -2608,6 +2608,7 @@ to, and the cell runs in-process while appearing to be configured.</p>
 <ul>
 <li><strong><code>--max-concurrent N</code></strong>: the worker refuses execution number N+1 with <code>503</code> and a <code>Retry-After</code> header, before downloading any inputs. Unset, it is unlimited.</li>
 <li><strong><code>--gpu-slots N</code></strong>: each execution gets a free GPU index from <code>0..N-1</code>, set as <code>CUDA_VISIBLE_DEVICES</code> for that cell and released when it finishes. The worker's choice overrides any <code>CUDA_VISIBLE_DEVICES</code> the cell asked for, so two concurrent cells never share a GPU on a caller's say-so. With every slot taken, the request is refused like any full worker.</li>
+<li><strong><code>--log-level</code></strong>: <code>debug</code>, <code>info</code> (the default), <code>warning</code> or <code>error</code>.</li>
 </ul>
 <p>Both limits are enforced by the worker, not trusted to whatever dispatches to it, and both are advertised in <code>/health</code>. For <code>uvicorn --factory</code> deployments that cannot pass flags, set <code>STRATA_WORKER_MAX_CONCURRENT</code> and <code>STRATA_WORKER_GPU_SLOTS</code>.</p>
 <p>Once this works locally, the cloud deploys below just change <code>config.url</code> from <code>http://127.0.0.1:9000</code> to the worker's public URL.</p>

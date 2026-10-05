@@ -3414,7 +3414,9 @@ no route serves files from outside the frontend.</p>
 <p><strong>Upgrading from 0.8.0:</strong></p>
 <ul>
 <li>Scan caches are rebuilt: the first scan of each table reads from storage.
-  The artifact store's metadata migrates on first start, one way.</li>
+  The artifact store's metadata migrates on first start, one way. Results
+  stored by 0.8.0 count as used at the upgrade, so none is collected for
+  idleness in the first 30 days; the size cap still applies.</li>
 <li>New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
   <code>[mcp]</code>; textual-image 0.14 and Pillow 12.1 with <code>[tui]</code>.</li>
 <li>Unnamed <code>materialize</code> results can now be collected in personal mode; name or
@@ -3444,7 +3446,9 @@ no route serves files from outside the frontend.</p>
   metadata cleanup, <code>/metrics/tables*</code> and <code>/v1/debug/*</code> need <code>admin:cache</code> or
   <code>admin:*</code>.</li>
 <li>strata-pool: <code>PUT /v1/machine-types</code> needs the new <code>admin_token</code>;
-  <code>/v1/usage</code> and <code>/v1/workers</code> return only the caller's tenant.</li>
+  <code>/v1/usage</code> and <code>/v1/workers</code> return only the caller's tenant.
+  <code>GET /v1/machine-types</code> shows <code>env</code> and <code>provider_options</code> values as
+  <code>&lt;redacted&gt;</code> without it.</li>
 <li>Cells whose <code>[env]</code> held a blanked secret re-run once, since that empty
   value no longer reaches them.</li>
 <li>Shared environments are keyed by what the lock installs, not the raw
@@ -3479,8 +3483,7 @@ no route serves files from outside the frontend.</p>
   DEFAULT 0</code> or a fresh store.</li>
 <li><code>PUT /v1/notebooks/{id}/workers</code> and <code>strata worker add</code> refuse an unknown
   transport; a worker saved as <code>transport = "http"</code> should be <code>"direct"</code>.</li>
-<li>Service mode: a table URI whose warehouse is in object storage needs a
-  catalog <code>uri</code>; MCP tools reach only sessions of the caller's tenant; the
+<li>Service mode: MCP tools reach only sessions of the caller's tenant; the
   Prometheus scrape leaves out per-table series under principal auth.</li>
 <li>Service mode: a notebook session belongs to the tenant that opened, created
   or imported it; with <code>multi_tenant_enabled</code>, each tenant's notebooks live
@@ -3501,6 +3504,8 @@ no route serves files from outside the frontend.</p>
   catalog <code>uri</code> (<code>STRATA_CATALOG_URI</code>); without one, scans, cache warming and
   export to a table answer 400 instead of using a SQLite catalog on the
   server's disk.</li>
+<li>Naming, aliasing or tagging an artifact that does not exist answers 404
+  instead of 400, the same as reading it.</li>
 </ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3615,7 +3620,9 @@ no route serves files from outside the frontend.</p>
 <li><strong>Live remote console across nodes.</strong> Worker console chunks carry a <code>seq</code> and
   are shown in order and once each; opening a notebook mid-run shows the last
   64 KiB a remote cell printed; with <code>STRATA_NODE_ADVERTISED_URL</code> set, chunks
-  that land on another node reach the session through the shared build store.</li>
+  that land on another node reach the session through the shared build store.
+  <code>cell_console</code> frames carry <code>chunk_seq</code>; chunk 0 starts a stream's console
+  for the run.</li>
 <li><strong>Dataset lineage.</strong> A <code># @dataset</code> read copies the dataset version with its
   inputs and the steps behind it (up to 10 deep), so lineage walks past the
   dataset, and the Registry tab shows which notebook cells read each name
@@ -4040,6 +4047,8 @@ no route serves files from outside the frontend.</p>
   one); use <code>abfs://</code>.</li>
 <li>A publication page's data and Verify links pointed at the server root, which
   broke behind a path prefix.</li>
+<li>The embed snippet's resize listener accepts messages from the Strata origin
+  only; re-copy a snippet pasted before this.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three

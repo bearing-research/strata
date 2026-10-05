@@ -2433,7 +2433,8 @@ lockfile instead. They live under <code>STRATA_NOTEBOOK_SHARED_ENV_DIR</code>, b
   job, then only links. The server keeps answering other requests meanwhile.</li>
 <li><strong>Clean-up.</strong> An environment no notebook links to is removed once it has
   gone unused for <code>STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS</code> (default 7), by an
-  hourly sweep in the server or by <code>strata env gc</code>. An environment a notebook
+  hourly sweep in the server or by <code>strata env gc</code> (<code>--dir</code> names the store,
+  <code>--ttl-days</code> overrides the TTL). An environment a notebook
   links to is never removed, opening a notebook counts as using it, and the
   sweep removes only environments it built. A directory of your own under the
   store, or one whose build never finished, is left alone.</li>

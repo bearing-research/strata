@@ -2368,6 +2368,8 @@ the separate binary on <code>PATH</code>:</p>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>strata<span class="w"> </span>watch<span class="w"> </span>--session<span class="w"> </span>&lt;id&gt;<span class="w">    </span><span class="c1"># attach to a specific running session</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>strata<span class="w"> </span>watch<span class="w">                   </span><span class="c1"># auto-attach the only session, or show a picker</span>
 </code></pre></div>
+<p><code>--server URL</code> names the server, as for <code>strata-notebook-tui</code> (default
+<code>$STRATA_TUI_SERVER</code> or <code>http://localhost:8765</code>).</p>
 <p><code>strata watch</code> is watch-only: unlike <a href="../agent/"><code>strata agent</code></a>, it writes no
 <code>.mcp.json</code> / <code>CLAUDE.md</code> and never owns the server lifecycle - it just shows a
 notebook live. Point it at a scratchpad an agent is driving to see the cells land

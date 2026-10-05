@@ -3029,6 +3029,9 @@ the team's store, whether or not they meant to share it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c2_var_model<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/model<span class="w"> </span>--alias<span class="w"> </span>champion
 </code></pre></div>
+<p><code>--tag KEY=VALUE</code> (repeatable) tags the promoted version, <code>--header 'Name:
+value'</code> (repeatable) adds a header for <code>--to</code> beyond the <code>STRATA_STORE_TOKEN</code>
+bearer, and <code>--max-depth</code> (default 10) bounds how far the chain is walked.</p>
 <p>The chain travels with it, and has to. The cache is keyed by provenance, so
 each ancestor that arrives is a hit for the next person whose cell computes the
 same thing - promoting the result alone would share the answer and none of the
@@ -3085,7 +3088,8 @@ store's configured catalog.</p>
   to the table.</li>
 </ul>
 <p>The same write is <code>strata artifact export --table &lt;table&gt; &lt;ref&gt;</code> against a local
-store, and <code>POST /v1/artifacts/{id}/v/{version}/export</code> with
+store (<code>--alias</code> tags the new snapshot, <code>--by</code> is recorded as
+<code>strata.promoted_by</code>), and <code>POST /v1/artifacts/{id}/v/{version}/export</code> with
 <code>{"table": ..., "alias": ...}</code> for a platform that exports once a promotion
 lands. Only Arrow tables can be written; a JSON value, a pickle, an array or a
 scalar is refused.</p>

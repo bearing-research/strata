@@ -2339,6 +2339,9 @@ resolve. Whichever applies, the destination is printed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Published into ~/.strata/artifacts (the store your server serves).
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Copied 4 artifacts across so the link resolves.
 </code></pre></div>
+<p><code>--header 'Name: value'</code> (repeatable) adds a header for <code>--to</code> beyond the
+<code>STRATA_STORE_TOKEN</code> bearer, and <code>--max-depth</code> (default 10) bounds how far the
+chain is listed.</p>
 <p>That line is not conditional. A caller who is never told where a grant lives
 cannot tell a working link from one their own server will never resolve, and
 the silent case used to be exactly the one where it already matched.</p>
@@ -2473,6 +2476,9 @@ paper outlives most servers, so there is a second form:</p>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>├── ro-crate-metadata.json  the chain as RO-Crate
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>└── README.md               what it is and how to check it
 </code></pre></div>
+<p><code>--force</code> writes into a non-empty directory (which may leave a stale payload
+beside the new one); <code>--max-depth</code> (default 10) bounds how far the chain is
+walked.</p>
 <p>A tabular artifact's bytes are Arrow IPC (<code>artifact.arrow</code>), and the bundle
 also carries <code>artifact.parquet</code>, the same rows in a format a data repository
 indexes. The manifest's digest covers the Arrow file; the Parquet file carries

@@ -2363,7 +2363,9 @@ needed) or over HTTP:</p>
 </code></pre></div>
 <p>Each limit you leave out takes the configured one. On the command line and the
 route a limit of <code>0</code> means "everything past the recent-use floor", unlike the
-settings, where <code>0</code> turns the limit off. <code>collect_latest=true</code>
+settings, where <code>0</code> turns the limit off. <code>min_idle_seconds</code>
+(<code>--min-idle-seconds</code>) overrides that floor for one sweep: nothing used more
+recently than it is collected. <code>collect_latest=true</code>
 (<code>--collect-latest</code>) also collects the current value of caller-chosen ids,
 which deletes live notebook state; use it only on a store you are deliberately
 reclaiming. In service mode the route needs a principal holding <code>admin:*</code>, and

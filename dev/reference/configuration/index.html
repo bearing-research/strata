@@ -3296,7 +3296,8 @@ existing SQLite metadata is not carried over automatically. To move one:</p>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># 3. Move it.</span>
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>strata<span class="w"> </span>migrate<span class="w"> </span>--to-dsn<span class="w"> </span><span class="s1">'postgresql://...'</span>
 </code></pre></div>
-<p>The copy is idempotent: rows already in the target are skipped, so an
+<p><code>--artifact-dir</code> names the source store when it is not <code>~/.strata/artifacts</code>.
+The copy is idempotent: rows already in the target are skipped, so an
 interrupted run can be repeated with <code>--allow-nonempty-target</code>. It refuses a
 populated target otherwise, because merging two different stores is not
 recoverable.</p>
@@ -3465,7 +3466,10 @@ makes bootstrapping possible:</p>
 <p>The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
 shown again, by you or by us, and a database disclosure yields no usable
 credentials. Pass <code>--dsn</code> (or set <code>STRATA_ARTIFACT_METADATA_DSN</code>) when the
-metadata lives on Postgres, so the CLI writes where the server reads.</p>
+metadata lives on Postgres, so the CLI writes where the server reads;
+<code>--artifact-dir</code> reads one local SQLite store instead. <code>create
+--expires-in-days N</code> sets an expiry (none by default); <code>list --principal</code>
+filters to one principal and <code>--format json</code> prints JSON.</p>
 <p><strong>Revocation is immediate</strong>: verification reads the row on each request, so a
 revoked key stops working at once rather than after a cache expiry. A notebook
 WebSocket opened with the key re-checks it on every frame that edits or runs
