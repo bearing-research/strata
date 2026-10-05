@@ -2461,7 +2461,7 @@ class NotebookSession:
             # Library matches the lockfile, last sync succeeded and the library dir still
             # exists: skip the ~1-2s Rscript spawn (this fires on every reopen).
             logger.debug(
-                "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
+                "renv sync skipped for %s: lockfile hash unchanged and library present (%s)",
                 self.path,
                 lock_hash[:12],
             )
