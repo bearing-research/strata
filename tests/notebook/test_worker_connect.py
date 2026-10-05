@@ -52,6 +52,7 @@ class _Relay:
         self.socket: WebSocket | None = None
         self.connections = 0
         self.connected = threading.Event()
+        self.reconnected = threading.Event()  # a second worker socket was accepted
         self.forwarded: list[tuple[str, str]] = []
         self._next_id = 0
         self._pending: dict[int, asyncio.Queue[tuple[str, Any]]] = {}
@@ -74,6 +75,8 @@ class _Relay:
         self.socket = websocket
         self.connections += 1
         self.connected.set()
+        if self.connections >= 2:
+            self.reconnected.set()
         try:
             while True:
                 message = await websocket.receive()
@@ -241,11 +244,10 @@ class TestThroughARelay:
     def test_the_worker_comes_back_after_the_relay_drops_it(self, relay, connected_worker):
         relay.drop_worker()
 
-        deadline = 300
-        while relay.connections < 2 and deadline:
-            relay.connected.wait(timeout=0.1)
-            deadline -= 1
-        assert relay.connections == 2, "the worker did not reconnect"
+        # ``connected`` stays set until the relay reads the disconnect, so wait
+        # on the event the second accept sets rather than polling it.
+        assert relay.reconnected.wait(timeout=30), "the worker did not reconnect"
+        assert relay.connections == 2
         assert relay.connected.wait(timeout=30)
         assert httpx.get(f"{relay.http_url}/health", timeout=30).json()["status"] == "healthy"
 
