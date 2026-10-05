@@ -144,7 +144,9 @@ client.garbage_collect(max_idle_days=7)
 
 Each limit you leave out takes the configured one. On the command line and the
 route a limit of `0` means "everything past the recent-use floor", unlike the
-settings, where `0` turns the limit off. `collect_latest=true`
+settings, where `0` turns the limit off. `min_idle_seconds`
+(`--min-idle-seconds`) overrides that floor for one sweep: nothing used more
+recently than it is collected. `collect_latest=true`
 (`--collect-latest`) also collects the current value of caller-chosen ids,
 which deletes live notebook state; use it only on a store you are deliberately
 reclaiming. In service mode the route needs a principal holding `admin:*`, and
