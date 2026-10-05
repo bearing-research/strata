@@ -276,7 +276,8 @@ no route serves files from outside the frontend.
   dials out to a relay and serves cells over that WebSocket, reconnecting with
   backoff. The relay protocol is documented in the Worker Relay Protocol
   reference; Strata does not ship a relay.
-
+- `GET /v1/streams/{id}` carries `X-Strata-Artifact-Uri`, the canonical
+  artifact of the rows it serves.
 
 ### Changed
 
@@ -673,6 +674,56 @@ no route serves files from outside the frontend.
   broke behind a path prefix.
 - The embed snippet's resize listener accepts messages from the Strata origin
   only; re-copy a snippet pasted before this.
+- On a multi-tenant server, a member the proxy sends without a tenant header
+  is the default tenant for its notebook sessions too: other tenants no longer
+  see, edit or run that member's open notebooks over REST, WebSocket or MCP.
+- `POST /v1/notebooks/recents/validate` answers only for paths under the
+  caller's notebook root, so it no longer reveals which other directories on
+  the server hold a notebook.
+- Service mode: a worker's live console chunks are accepted with only the
+  signed log URL, so the console streams under trusted-proxy and API-key auth
+  instead of arriving only when the cell ends.
+- A character split across two reads on a remote worker no longer shows as two
+  replacement characters in the live console, and the closing console no
+  longer starts a character late after a dropped chunk.
+- The TUI console shows only the current run of a remote cell; the previous
+  run's output no longer stays above it.
+- Multi-node: a console chunk relayed through the shared store between one
+  node's read and delete is no longer dropped.
+- A lake table on Azurite or a private blob endpoint configured with
+  `STRATA_AZURE_ACCOUNT_NAME`, `STRATA_AZURE_ACCOUNT_KEY` and
+  `STRATA_AZURE_ENDPOINT_URL` reads its metadata at that endpoint; adlfs takes
+  the endpoint only from a connection string, so Strata derives one for the
+  catalog.
+- A transform over a `gs://`, `abfs://`, schemeless `/wh#ns.t`, named-catalog
+  or bare table URI, every form `scan@v1` reads, runs instead of answering
+  pending and failing in the runner; an input whose plan fails answers the
+  planner's 4xx instead of building a snapshot-less result.
+- Two in-flight misses for one scan both serve, and the second artifact reads
+  `superseded` (its own URI still serves the data) instead of `failed`;
+  `/v1/artifacts/usage` counts no failure for it.
+- A cell whose only output is printed text reads ready after reopening the
+  notebook, and in `strata status` and `cell list`; it was shown idle although
+  its console was restored and the next run was a cache hit.
+- A worker whose `uv sync` or `renv::restore` times out, or whose environment
+  registry serves a broken archive, reports a `locked environment:` error
+  naming the step instead of a generic executor failure.
+- `STRATA_NOTEBOOK_PYTHON_VERSIONS` accepts a comma-separated list, as the
+  reference documents.
+- Importing a Conda `environment.yaml` works on a base install; PyYAML is a
+  core dependency.
+- `STRATA_LOG_FORMAT=text` renders metrics events as text instead of JSON
+  lines.
+- Offline CLI commands that write the notebook log each annotation diagnostic
+  once instead of twice.
+- The prompt-cell "LLM not configured" error names `[env]` in `notebook.toml`
+  and the server's `STRATA_AI_API_KEY`, not only the Runtime panel.
+- `python -m strata --help` prints `usage: python -m strata`; `strata cell
+  --help` lists `output` and `pin-fetch`.
+- `strata-worker --connect` ignores a relay request whose stream id is outside
+  1..2^32-1 instead of failing the request task.
+- A failed persist of planning metadata to SQLite is logged at debug instead
+  of silently dropped.
 
 ## 0.8.0 - 2026-09-27
 
