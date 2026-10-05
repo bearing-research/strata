@@ -354,6 +354,21 @@ class ReadPlanner:
             # Vended credentials go to the table's FileIO; the fetcher needs them too.
             lake_files.register_vended_credentials(table.location(), dict(table.io.properties))
         resolved_snapshot_id = self.catalog.get_snapshot_id(table, snapshot_id)
+        if resolved_snapshot_id is None:
+            # Created, never written: zero rows with the table's schema, as other engines read it.
+            schema = table.schema()
+            table_arrow_schema = snapshot_arrow_schema(schema)
+            _assert_projection_exists(columns, table_arrow_schema, str(table_identity))
+            return ReadPlan(
+                table_uri=table_uri,
+                table_identity=table_identity,
+                snapshot_id=None,
+                columns=columns,
+                filters=filters,
+                schema=_project_schema(table_arrow_schema, columns),
+                schema_id=schema.schema_id,
+                planning_time_ms=elapsed_ms(start_time),
+            )
 
         snapshot = table.snapshot_by_id(resolved_snapshot_id)
         if snapshot is None:

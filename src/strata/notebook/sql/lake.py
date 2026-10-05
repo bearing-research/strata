@@ -182,7 +182,11 @@ def resolve_lake(
             )
         except CredentialError as exc:
             raise LakeError(f"catalog {catalog!r}: {exc}") from exc
-        from strata.notebook.tables import fingerprint_tables, resolve_table_snapshot
+        from strata.notebook.tables import (
+            fingerprint_tables,
+            random_fingerprint,
+            resolve_table_snapshot,
+        )
 
         pinned = pinned or {}
         specs = {_table_key(spec): spec for spec in _catalog_tables(catalog, tables)}
@@ -190,18 +194,26 @@ def resolve_lake(
             [spec for key, spec in specs.items() if key not in pinned], config, env
         )
         for (namespace, name), table_spec in specs.items():
-            snapshot = pinned.get((namespace, name), snapshots.get(table_spec.name))
-            if snapshot is None:
+            if (namespace, name) in pinned:
+                snapshot = pinned[(namespace, name)]
+            elif table_spec.name in snapshots:
+                snapshot = snapshots[table_spec.name]
+            else:
                 # Unresolved the first time: ask again, so the cell fails with the catalog's
                 # reason or reads what a retry found.
                 try:
                     snapshot = resolve_table_snapshot(table_spec, config, env)
                 except ValueError as exc:
                     raise LakeError(f"table {table_spec.uri}: {exc}") from exc
-            lake.snapshots[(namespace, name)] = snapshot
-            # From the snapshot the query reads, so a catalog that answered only on retry still
-            # gives a reproducible hash (fingerprint_tables invents a random one otherwise).
-            lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
+            if snapshot is None:
+                # No snapshots yet: read it unpinned, and never cache what was read.
+                lake.fingerprints.append(f"{table_spec.name}:table:empty:{random_fingerprint()}")
+            else:
+                lake.snapshots[(namespace, name)] = snapshot
+                # From the snapshot the query reads, so a catalog that answered only on retry
+                # still gives a reproducible hash (fingerprint_tables invents a random one
+                # otherwise).
+                lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
             if confined:
                 lake.locations.append(_table_location(table_spec, config, env))
     if mount_names:

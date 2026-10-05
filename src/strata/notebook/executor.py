@@ -286,7 +286,7 @@ class _CellProvenance:
     mount_fingerprints: list[str]
     has_rw_mount: bool
     table_fingerprints: list[str]
-    table_snapshots: dict[str, int]
+    table_snapshots: dict[str, int | None]
     provenance_hash: str
     # ``@fetch`` inputs: what each name resolved to, and why any did not.
     fetch_fingerprints: list[str] = field(default_factory=list)
@@ -3510,7 +3510,7 @@ class CellExecutor:
         self,
         table_specs: list[TableSpec],
         config: Any = None,
-    ) -> tuple[list[str], dict[str, int]]:
+    ) -> tuple[list[str], dict[str, int | None]]:
         """Resolve table snapshots for provenance hashing (see tables.py).
 
         Catalog I/O runs off the event loop. An unreachable catalog yields a
@@ -3698,9 +3698,11 @@ class CellExecutor:
     def _manifest_tables(
         self,
         table_specs: list[TableSpec],
-        table_snapshots: dict[str, int],
+        table_snapshots: dict[str, int | None],
     ) -> dict[str, dict[str, Any]]:
         """Build the manifest ``tables`` block from resolved snapshots.
+
+        A table with no snapshots yet is injected with ``snapshot_id`` None.
 
         Raises:
             RuntimeError: If two ``@table`` declarations share a name, or a
@@ -3723,14 +3725,12 @@ class CellExecutor:
 
         tables: dict[str, dict[str, Any]] = {}
         for spec in table_specs:
-            snapshot_id = table_snapshots.get(spec.name)
-            if snapshot_id is None:
+            if spec.name not in table_snapshots:
                 raise RuntimeError(
                     f"@table {spec.name}: could not resolve a snapshot for "
-                    f"{spec.uri!r} — is the catalog reachable and does the "
-                    "table have at least one snapshot?"
+                    f"{spec.uri!r}; is the catalog reachable?"
                 )
-            tables[spec.name] = {"uri": spec.uri, "snapshot_id": snapshot_id}
+            tables[spec.name] = {"uri": spec.uri, "snapshot_id": table_snapshots[spec.name]}
         return tables
 
     def _write_manifest(

@@ -324,7 +324,7 @@ class ReadPlan:
 
     table_uri: str  # Original user input (for debugging/display only)
     table_identity: TableIdentity  # Canonical identity for cache/metrics/logs
-    snapshot_id: int
+    snapshot_id: int | None  # None: the table has no snapshots, so the plan has no tasks
     tasks: list[Task] = field(default_factory=list)
     columns: list[str] | None = None
     filters: list[Filter] = field(default_factory=list)

@@ -1036,6 +1036,10 @@ POST /v1/materialize
 }
 ```
 
+A table with no snapshots yet streams zero rows with the table's schema
+(projected by `columns`). Nothing read from it is reused: each request is a
+miss, as is a transform that takes the table as an input.
+
 ### Get Stream
 
 ```
@@ -1059,4 +1063,5 @@ GET /metrics/prometheus
 
 Both are unauthenticated, for scrapers. Under principal auth
 `/metrics/prometheus` leaves out the per-table series, since table names are
-`admin:*` data (`GET /metrics/tables`).
+`admin:*` data (`GET /metrics/tables`), and the AI usage series carry no
+`principal` label: they are per-tenant, per-model totals.

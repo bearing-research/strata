@@ -12,6 +12,8 @@ can scan exactly the snapshot its provenance recorded::
     )
 
 ``snapshot=<id>`` pins the table, so the cell never goes stale on new data.
+A table with no snapshots yet injects ``<name>_snapshot = None`` (a scan reads it
+as zero rows) and is never cached, so its first write is seen.
 """
 
 from __future__ import annotations
@@ -32,14 +34,14 @@ logger = logging.getLogger(__name__)
 
 def resolve_table_snapshot(
     spec: TableSpec, config: StrataConfig, env: Mapping[str, str] | None = None
-) -> int:
+) -> int | None:
     """Resolve the snapshot id a cell should read for ``spec``: the pin, else the current one.
 
+    None when the table has no snapshots yet (created, never written).
     A named catalog's credential resolves against *env* (the notebook's) first.
 
     Raises:
-        ValueError: If the table has no snapshots, or the catalog/table
-            cannot be reached.
+        ValueError: If the catalog/table cannot be reached.
     """
     if spec.snapshot_pin is not None:
         return spec.snapshot_pin
@@ -54,24 +56,24 @@ def resolve_table_snapshot(
         raise ValueError(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
 
     snapshot = table.current_snapshot()
-    if snapshot is None:
-        raise ValueError(f"@table {spec.name}: table {spec.uri!r} has no snapshots yet")
-    return snapshot.snapshot_id
+    return None if snapshot is None else snapshot.snapshot_id
 
 
 def fingerprint_tables(
     specs: list[TableSpec], config: StrataConfig, env: Mapping[str, str] | None = None
-) -> tuple[list[str], dict[str, int]]:
+) -> tuple[list[str], dict[str, int | None]]:
     """Resolve every table's snapshot for provenance hashing.
 
     Returns ``(fingerprints, snapshots)``: fingerprints are
     ``"<name>:table:<uri>:<snapshot_id>"``; ``snapshots`` maps table name to
-    snapshot id. Never raises (it runs on notebook open too): an unreachable
-    catalog yields a random fingerprint, so the cell shows stale and the error
-    surfaces when it runs, instead of serving a possibly outdated cache hit.
+    snapshot id, None for a table with no snapshots yet. Never raises (it runs on
+    notebook open too): an unreachable catalog yields a random fingerprint, so the
+    cell shows stale and the error surfaces when it runs, instead of serving a
+    possibly outdated cache hit. An empty table gets one too: with no snapshot
+    to pin, the cell reads whatever is current when it runs.
     """
     fingerprints: list[str] = []
-    snapshots: dict[str, int] = {}
+    snapshots: dict[str, int | None] = {}
     for spec in sorted(specs, key=lambda t: t.name):
         try:
             snapshot_id = resolve_table_snapshot(spec, config, env)
@@ -82,9 +84,16 @@ def fingerprint_tables(
                 spec.uri,
                 e,
             )
-            random_fp = hashlib.sha256(os.urandom(32)).hexdigest()
-            fingerprints.append(f"{spec.name}:table:unresolved:{random_fp}")
+            fingerprints.append(f"{spec.name}:table:unresolved:{random_fingerprint()}")
+            continue
+        snapshots[spec.name] = snapshot_id
+        if snapshot_id is None:
+            fingerprints.append(f"{spec.name}:table:empty:{random_fingerprint()}")
             continue
         fingerprints.append(f"{spec.name}:table:{spec.uri}:{snapshot_id}")
-        snapshots[spec.name] = snapshot_id
     return fingerprints, snapshots
+
+
+def random_fingerprint() -> str:
+    """A fingerprint no other run shares, for a table whose state cannot be keyed."""
+    return hashlib.sha256(os.urandom(32)).hexdigest()

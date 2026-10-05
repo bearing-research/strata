@@ -116,6 +116,31 @@ class TestFingerprintTables:
         assert fp1 != fp2
         assert fp1[0].startswith("gone:table:unresolved:")
 
+    def test_a_table_never_written_has_no_snapshot_and_a_fingerprint_per_call(
+        self, tmp_path, config
+    ):
+        """Nothing read from it can be keyed, so the cell is never served from the cache."""
+        from pyiceberg.catalog.sql import SqlCatalog
+        from pyiceberg.schema import Schema
+        from pyiceberg.types import LongType, NestedField
+
+        warehouse = tmp_path / "empty"
+        warehouse.mkdir()
+        catalog = SqlCatalog(
+            "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
+        )
+        catalog.create_namespace("db")
+        catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
+        spec = TableSpec(name="events", uri=f"file://{warehouse}#db.events")
+
+        fp1, snaps = fingerprint_tables([spec], config)
+        fp2, _ = fingerprint_tables([spec], config)
+
+        assert resolve_table_snapshot(spec, config) is None
+        assert snaps == {"events": None}
+        assert fp1 != fp2
+        assert fp1[0].startswith("events:table:empty:")
+
     def test_sorted_by_name(self, mini_warehouse, config):
         specs = [
             TableSpec(name="zz", uri=mini_warehouse["uri"]),

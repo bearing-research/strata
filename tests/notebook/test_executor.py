@@ -182,6 +182,20 @@ class TestManifestTablesDuplicates:
             executor._manifest_tables(specs, {"trips": 123})
 
 
+class TestManifestTablesEmpty:
+    def test_a_table_never_written_is_injected_with_no_snapshot(self, sample_notebook):
+        from strata.notebook.models import TableSpec
+
+        executor = CellExecutor(sample_notebook)
+        specs = [TableSpec(name="trips", uri="file:///wh#a.trips")]
+
+        tables = executor._manifest_tables(specs, {"trips": None})
+
+        assert tables == {"trips": {"uri": "file:///wh#a.trips", "snapshot_id": None}}
+        with pytest.raises(RuntimeError, match="could not resolve a snapshot"):
+            executor._manifest_tables(specs, {})
+
+
 class TestCellExecutor:
     @pytest.mark.asyncio
     async def test_execute_simple_assignment(self, sample_notebook):
