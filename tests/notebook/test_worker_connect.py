@@ -514,11 +514,13 @@ async def test_requests_run_concurrently():
 
     socket = _ScriptedSocket()
     serving = asyncio.create_task(serve_connection(socket, app))
-    socket.request(1, "GET", "/first")
-    socket.request(2, "GET", "/second")
-    await asyncio.wait_for(_until(lambda: socket.response(1)["end"]), timeout=30)
-    socket.incoming.put_nowait(None)
-    await serving
+    try:
+        socket.request(1, "GET", "/first")
+        socket.request(2, "GET", "/second")
+        await asyncio.wait_for(_until(lambda: socket.response(1)["end"]), timeout=30)
+    finally:
+        socket.incoming.put_nowait(None)
+        await serving
 
     assert socket.response(1)["body"] == b"/first"
     assert socket.response(2)["body"] == b"/second"
@@ -541,12 +543,14 @@ async def test_an_abort_reaches_the_app_as_a_disconnect():
 
     socket = _ScriptedSocket()
     serving = asyncio.create_task(serve_connection(socket, app))
-    socket.request(1, "POST", "/", [b"part"])
-    await _until(lambda: "http.request" in received)
-    socket.incoming.put_nowait(json.dumps({"type": "abort", "id": 1}))
-    await asyncio.wait_for(done.wait(), timeout=30)
-    socket.incoming.put_nowait(None)
-    await serving
+    try:
+        socket.request(1, "POST", "/", [b"part"])
+        await _until(lambda: "http.request" in received)
+        socket.incoming.put_nowait(json.dumps({"type": "abort", "id": 1}))
+        await asyncio.wait_for(done.wait(), timeout=30)
+    finally:
+        socket.incoming.put_nowait(None)
+        await serving
 
     assert received[-1] == "http.disconnect"
     assert socket.response(1)["status"] is None, "an abandoned response must not be sent"
@@ -562,10 +566,12 @@ async def test_a_large_body_is_split_into_bounded_messages():
 
     socket = _ScriptedSocket()
     serving = asyncio.create_task(serve_connection(socket, app))
-    socket.request(1, "GET", "/")
-    await asyncio.wait_for(_until(lambda: socket.response(1)["end"]), timeout=30)
-    socket.incoming.put_nowait(None)
-    await serving
+    try:
+        socket.request(1, "GET", "/")
+        await asyncio.wait_for(_until(lambda: socket.response(1)["end"]), timeout=30)
+    finally:
+        socket.incoming.put_nowait(None)
+        await serving
 
     response = socket.response(1)
     assert response["body"] == body
@@ -582,9 +588,11 @@ async def test_an_app_that_raises_before_answering_gets_a_500():
 
     socket = _ScriptedSocket()
     serving = asyncio.create_task(serve_connection(socket, app))
-    socket.request(1, "GET", "/")
-    await asyncio.wait_for(_until(lambda: socket.response(1)["end"]), timeout=30)
-    socket.incoming.put_nowait(None)
-    await serving
+    try:
+        socket.request(1, "GET", "/")
+        await asyncio.wait_for(_until(lambda: socket.response(1)["end"]), timeout=30)
+    finally:
+        socket.incoming.put_nowait(None)
+        await serving
 
     assert socket.response(1)["status"] == 500
