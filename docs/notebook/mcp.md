@@ -16,10 +16,7 @@ edits them.
 
 The endpoint is **off by default**. On a personal server there is one user and
 nothing to check, so a caller has full control of the session. Keep it behind
-loopback. For the same reason a personal server refuses to start with the flag
-set alongside `STRATA_PERSONAL_MODE_USER_HEADER`: the endpoint has no
-per-request identity to filter sessions by owner, so it would hand every user's
-notebooks to any caller.
+loopback.
 
 On a **service-mode** server it needs principal auth (`auth_mode` of
 `trusted_proxy` or `api_key`). Service mode without principal auth is rejected

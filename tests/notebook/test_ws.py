@@ -1720,7 +1720,7 @@ async def test_variant_add_broadcasts_new_cell():
     assert old["variant_active"] is False
 
 
-# --- notebook_websocket upgrade + owner gate ---
+# --- notebook_websocket upgrade ---
 
 
 @pytest.mark.asyncio
@@ -1767,140 +1767,6 @@ async def test_endpoint_dispatch_unknown_message_type(notebook_session):
     errors = fake.frames_of("error")
     assert errors
     assert "Unknown message type" in errors[-1]["payload"]["error"]
-
-
-class TestWebSocketOwnerGate:
-    """WS-upgrade owner gate, mirroring ``test_routes::TestPersonalModeUserScoping``.
-
-    Refusal closes with 1008 (the WS twin of the REST 404) and never accepts.
-    """
-
-    HEADER = "X-Strata-Test-User"
-
-    def _configure_scoping(self, monkeypatch):
-        """Set server state so ``personal_mode_user_header`` is active."""
-        monkeypatch.setattr(
-            "strata.server._state",
-            SimpleNamespace(
-                config=SimpleNamespace(
-                    personal_mode_user_header=self.HEADER,
-                    transforms_config={},
-                    # These tests exercise the owner gate, not the auth gate;
-                    # personal mode is what per-user scoping implies anyway.
-                    auth_mode="none",
-                )
-            ),
-        )
-
-    @pytest.mark.asyncio
-    async def test_owner_allowed(self, notebook_session, monkeypatch):
-        from strata.notebook.ws import notebook_websocket
-
-        _, session = notebook_session
-        session.notebook_state.owner = "alice@example.com"
-        self._configure_scoping(monkeypatch)
-
-        fake = FakeNotebookWebSocket(headers={self.HEADER: "alice@example.com"})
-        await notebook_websocket(cast(WebSocket, fake), session.id)
-
-        assert fake.accepted is True
-        assert fake.closed is None
-
-    @pytest.mark.asyncio
-    async def test_wrong_header_refused(self, notebook_session, monkeypatch):
-        """A non-owner identity is refused with a generic not-found close."""
-        from strata.notebook.ws import notebook_websocket
-
-        _, session = notebook_session
-        session.notebook_state.owner = "alice@example.com"
-        self._configure_scoping(monkeypatch)
-
-        fake = FakeNotebookWebSocket(headers={self.HEADER: "bob@example.com"})
-        await notebook_websocket(cast(WebSocket, fake), session.id)
-
-        assert fake.accepted is False
-        assert fake.closed == (1008, "Notebook not found")
-
-    @pytest.mark.asyncio
-    async def test_missing_header_refused(self, notebook_session, monkeypatch):
-        """With scoping on, omitting the identity header must not bypass the gate."""
-        from strata.notebook.ws import notebook_websocket
-
-        _, session = notebook_session
-        session.notebook_state.owner = "alice@example.com"
-        self._configure_scoping(monkeypatch)
-
-        fake = FakeNotebookWebSocket()  # no identity header
-        await notebook_websocket(cast(WebSocket, fake), session.id)
-
-        assert fake.accepted is False
-        assert fake.closed == (1008, "Notebook not found")
-
-    @pytest.mark.asyncio
-    async def test_legacy_unowned_notebook_passthrough(self, notebook_session, monkeypatch):
-        """An ``owner = None`` notebook stays open to any caller, even with scoping on."""
-        from strata.notebook.ws import notebook_websocket
-
-        _, session = notebook_session
-        session.notebook_state.owner = None
-        self._configure_scoping(monkeypatch)
-
-        fake = FakeNotebookWebSocket()  # no header at all
-        await notebook_websocket(cast(WebSocket, fake), session.id)
-
-        assert fake.accepted is True
-        assert fake.closed is None
-
-
-class TestWsOwnerAllowedHelper:
-    """Unit coverage for the ``_ws_owner_allowed`` decision helper."""
-
-    def _scoping(self, monkeypatch, *, enabled):
-        if enabled:
-            monkeypatch.setattr(
-                "strata.server._state",
-                SimpleNamespace(
-                    config=SimpleNamespace(personal_mode_user_header="X-User", transforms_config={})
-                ),
-            )
-        else:
-            monkeypatch.setattr(
-                "strata.server._state",
-                SimpleNamespace(
-                    config=SimpleNamespace(personal_mode_user_header=None, transforms_config={})
-                ),
-            )
-
-    def test_unowned_always_allowed(self, monkeypatch):
-        from strata.notebook.ws import _ws_owner_allowed
-
-        self._scoping(monkeypatch, enabled=True)
-        assert _ws_owner_allowed(None, None) is True
-        assert _ws_owner_allowed(None, "anyone") is True
-
-    def test_owned_missing_caller_denied_when_scoping_on(self, monkeypatch):
-        from strata.notebook.ws import _ws_owner_allowed
-
-        self._scoping(monkeypatch, enabled=True)
-        assert _ws_owner_allowed("alice", None) is False
-
-    def test_owned_missing_caller_allowed_when_scoping_off(self, monkeypatch):
-        from strata.notebook.ws import _ws_owner_allowed
-
-        self._scoping(monkeypatch, enabled=False)
-        assert _ws_owner_allowed("alice", None) is True
-
-    def test_owned_mismatch_denied(self, monkeypatch):
-        from strata.notebook.ws import _ws_owner_allowed
-
-        self._scoping(monkeypatch, enabled=True)
-        assert _ws_owner_allowed("alice", "bob") is False
-
-    def test_owned_match_allowed(self, monkeypatch):
-        from strata.notebook.ws import _ws_owner_allowed
-
-        self._scoping(monkeypatch, enabled=True)
-        assert _ws_owner_allowed("alice", "alice") is True
 
 
 class TestRunningPayloadHelper:

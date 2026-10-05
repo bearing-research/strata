@@ -416,11 +416,9 @@ def test_create_notebook_endpoint_defers_initial_environment_sync(client, monkey
         python_version=None,
         *,
         initialize_environment=True,
-        owner=None,
     ):
         captured["initialize_environment"] = initialize_environment
         captured["python_version"] = python_version
-        captured["owner"] = owner
         return Path("/tmp/fake-notebook")
 
     class FakeSession:
@@ -1743,244 +1741,28 @@ class TestCellIterationsEndpoint:
         assert payload["iterations"][0]["iteration"] == 0
 
 
-# Personal mode per-user scoping
+# A notebook.toml stamped with an owner by an older server
 
 
-class TestPersonalModeUserScoping:
-    """Per-user subdir scoping when STRATA_PERSONAL_MODE_USER_HEADER is set.
+def test_legacy_owner_key_neither_gates_nor_surfaces(client, monkeypatch, tmp_path):
+    """Personal mode has one user: a leftover ``owner`` key is ignored on open and discover."""
+    set_server_state(monkeypatch, deployment_mode="personal", notebook_storage_dir=tmp_path)
+    notebook_dir = create_notebook(tmp_path, "Legacy Owned", initialize_environment=False)
+    toml_path = notebook_dir / "notebook.toml"
+    toml_path.write_text(
+        'owner = "alice@example.com"\n' + toml_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
 
-    A proxy-injected header identifies the user; each user gets a private storage
-    subdirectory and cannot see, create or delete anyone else's notebooks.
-    """
+    discovered = client.get("/v1/notebooks/discover").json()["notebooks"]
+    assert [entry["path"] for entry in discovered] == [str(notebook_dir.resolve())]
+    assert "owner" not in discovered[0]
 
-    HEADER = "X-Strata-Test-User"
-
-    @pytest.fixture
-    def configured_state(self, monkeypatch):
-        """Inject server config with ``personal_mode_user_header`` set."""
-
-        def _configure(storage_root: Path) -> None:
-            set_server_state(
-                monkeypatch,
-                deployment_mode="personal",
-                notebook_storage_dir=storage_root,
-                notebook_python_versions=["3.13"],
-                personal_mode_user_header=self.HEADER,
-            )
-
-        return _configure
-
-    def _read_owner(self, notebook_dir: Path) -> str | None:
-        import tomllib
-
-        with open(notebook_dir / "notebook.toml", "rb") as f:
-            return tomllib.load(f).get("owner")
-
-    def _user_subdir(self, storage_root: Path, identity: str) -> Path:
-        """The per-user subdir as the runtime config endpoint would advertise it."""
-        from strata.notebook.routes import _sanitize_user_dir_name
-
-        sanitized = _sanitize_user_dir_name(identity)
-        assert sanitized is not None
-        return storage_root / sanitized
-
-    def test_runtime_config_returns_user_subdir(self, client, configured_state, tmp_path):
-        configured_state(tmp_path)
-
-        response = client.get("/v1/notebooks/config", headers={self.HEADER: "alice@example.com"})
-
-        assert response.status_code == 200
-        expected = self._user_subdir(tmp_path, "alice@example.com").resolve()
-        assert Path(response.json()["default_parent_path"]) == expected
-
-    def test_create_lands_in_user_subdir(self, client, configured_state, tmp_path):
-        configured_state(tmp_path)
-        alice_root = self._user_subdir(tmp_path, "alice@example.com")
-
-        response = client.post(
-            "/v1/notebooks/create",
-            json={"parent_path": str(alice_root), "name": "Alice NB"},
-            headers={self.HEADER: "alice@example.com"},
-        )
-
-        assert response.status_code == 200
-        notebook_dir = alice_root / "alice_nb"
-        assert notebook_dir.exists()
-        assert self._read_owner(notebook_dir) == "alice@example.com"
-
-    def test_create_outside_own_subdir_is_rejected(self, client, configured_state, tmp_path):
-        configured_state(tmp_path)
-        bob_root = self._user_subdir(tmp_path, "bob@example.com")
-        bob_root.mkdir(parents=True)  # rule out "rejected because dir missing"
-
-        response = client.post(
-            "/v1/notebooks/create",
-            json={"parent_path": str(bob_root), "name": "Sneak"},
-            headers={self.HEADER: "alice@example.com"},
-        )
-
-        assert response.status_code == 400
-
-    def test_discover_returns_only_callers_subdir(self, client, configured_state, tmp_path):
-        configured_state(tmp_path)
-
-        client.post(
-            "/v1/notebooks/create",
-            json={
-                "parent_path": str(self._user_subdir(tmp_path, "alice@example.com")),
-                "name": "Alice NB",
-            },
-            headers={self.HEADER: "alice@example.com"},
-        )
-        client.post(
-            "/v1/notebooks/create",
-            json={
-                "parent_path": str(self._user_subdir(tmp_path, "bob@example.com")),
-                "name": "Bob NB",
-            },
-            headers={self.HEADER: "bob@example.com"},
-        )
-
-        response = client.get("/v1/notebooks/discover", headers={self.HEADER: "alice@example.com"})
-
-        assert response.status_code == 200
-        names = {nb["name"] for nb in response.json()["notebooks"]}
-        assert names == {"Alice NB"}
-
-    def test_delete_by_path_rejects_cross_user_path(self, client, configured_state, tmp_path):
-        configured_state(tmp_path)
-        alice_root = self._user_subdir(tmp_path, "alice@example.com")
-
-        client.post(
-            "/v1/notebooks/create",
-            json={"parent_path": str(alice_root), "name": "Alice NB"},
-            headers={self.HEADER: "alice@example.com"},
-        )
-        alice_nb = alice_root / "alice_nb"
-
-        response = client.post(
-            "/v1/notebooks/delete-by-path",
-            json={"path": str(alice_nb)},
-            headers={self.HEADER: "bob@example.com"},
-        )
-
-        # Path validator rejects the cross-subdir reference at the boundary.
-        assert response.status_code == 400
-        assert alice_nb.exists()
-
-    def test_delete_by_path_allows_owner(self, client, configured_state, tmp_path):
-        configured_state(tmp_path)
-        alice_root = self._user_subdir(tmp_path, "alice@example.com")
-
-        client.post(
-            "/v1/notebooks/create",
-            json={"parent_path": str(alice_root), "name": "Alice NB"},
-            headers={self.HEADER: "alice@example.com"},
-        )
-        alice_nb = alice_root / "alice_nb"
-
-        response = client.post(
-            "/v1/notebooks/delete-by-path",
-            json={"path": str(alice_nb)},
-            headers={self.HEADER: "alice@example.com"},
-        )
-
-        assert response.status_code == 200
-        assert not alice_nb.exists()
-
-    def test_sanitize_user_dir_name_collapses_unsafe_chars(self):
-        """Hostile header values can't escape the storage root."""
-        from strata.notebook.routes import _sanitize_user_dir_name
-
-        assert _sanitize_user_dir_name("alice@example.com") == "alice@example.com"
-        assert _sanitize_user_dir_name("../etc/passwd") == "etc_passwd"
-        assert _sanitize_user_dir_name("alice/bob") == "alice_bob"
-        assert _sanitize_user_dir_name("") is None
-        assert _sanitize_user_dir_name("...") is None  # all-trim chars
-
-    def test_session_keyed_routes_owner_gated(self, client, configured_state, tmp_path):
-        """A leaked session_id must not be a bearer capability across users.
-
-        Any SessionDep route owned by Alice returns 404 when Bob holds the id. ``cells`` stands
-        in for the rest: the gate is in the dependency itself.
-        """
-        configured_state(tmp_path)
-        alice_root = self._user_subdir(tmp_path, "alice@example.com")
-
-        create_resp = client.post(
-            "/v1/notebooks/create",
-            json={"parent_path": str(alice_root), "name": "Alice NB"},
-            headers={self.HEADER: "alice@example.com"},
-        )
-        assert create_resp.status_code == 200
-        session_id = create_resp.json()["session_id"]
-
-        # Alice (owner): allowed.
-        ok = client.get(
-            f"/v1/notebooks/{session_id}/cells",
-            headers={self.HEADER: "alice@example.com"},
-        )
-        assert ok.status_code == 200
-
-        # Bob (non-owner) with a valid session_id gets the same 404 as a missing
-        # notebook, so probes can't enumerate owners.
-        denied = client.get(
-            f"/v1/notebooks/{session_id}/cells",
-            headers={self.HEADER: "bob@example.com"},
-        )
-        assert denied.status_code == 404
-        assert denied.json() == {"detail": "Notebook not found"}
-
-        # A missing identity header must not bypass the gate. ``_caller_identity``
-        # returns None both when the header is unconfigured and when this request
-        # omits it; the latter must close on owned notebooks.
-        bypass = client.get(f"/v1/notebooks/{session_id}/cells")
-        assert bypass.status_code == 404
-        assert bypass.json() == {"detail": "Notebook not found"}
-
-    def test_legacy_unowned_notebook_still_accessible_when_scoping_on(
-        self, client, configured_state, tmp_path
-    ):
-        """An ``owner = None`` notebook stays accessible to any caller when scoping is on.
-
-        Notebooks created before per-user scoping have no owner; gating them would lock
-        every one of them out.
-        """
-        configured_state(tmp_path)
-        alice_root = self._user_subdir(tmp_path, "alice@example.com")
-
-        # Notebooks created before scoping have no ``owner``; mimic that by stripping
-        # the field on disk before opening the session.
-        create_resp = client.post(
-            "/v1/notebooks/create",
-            json={"parent_path": str(alice_root), "name": "Legacy NB"},
-            headers={self.HEADER: "alice@example.com"},
-        )
-        assert create_resp.status_code == 200
-        legacy_nb = alice_root / "legacy_nb"
-        toml_path = legacy_nb / "notebook.toml"
-        text = toml_path.read_text(encoding="utf-8")
-        toml_path.write_text(
-            "\n".join(line for line in text.splitlines() if not line.startswith("owner =")),
-            encoding="utf-8",
-        )
-
-        opened = client.post(
-            "/v1/notebooks/open",
-            json={"path": str(legacy_nb)},
-            headers={self.HEADER: "alice@example.com"},
-        )
-        assert opened.status_code == 200
-        session_id = opened.json()["session_id"]
-
-        no_header = client.get(f"/v1/notebooks/{session_id}/cells")
-        assert no_header.status_code == 200
-
-        wrong_header = client.get(
-            f"/v1/notebooks/{session_id}/cells",
-            headers={self.HEADER: "bob@example.com"},
-        )
-        assert wrong_header.status_code == 200
+    opened = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+    assert opened.status_code == 200, opened.text
+    assert "owner" not in opened.json()
+    session_id = opened.json()["session_id"]
+    assert client.get(f"/v1/notebooks/{session_id}/cells").status_code == 200
 
 
 # Connections
@@ -2490,32 +2272,6 @@ def test_import_endpoint_rejects_structurally_invalid_notebook(client, monkeypat
         assert resp.status_code == 400, (bad_payload, resp.text)
 
 
-def test_import_endpoint_stamps_caller_owner(client, monkeypatch, tmp_path):
-    """With per-user scoping on, imports get the caller as owner, as ``create`` does."""
-    import tomllib
-
-    set_server_state(
-        monkeypatch,
-        deployment_mode="personal",
-        notebook_storage_dir=tmp_path,
-        personal_mode_user_header="X-Notebook-User",
-    )
-
-    payload = _ipynb_bytes([_code("x = 1\n")])
-    resp = client.post(
-        "/v1/notebooks/import",
-        files={"file": ("owned.ipynb", payload, "application/x-ipynb+json")},
-        headers={"X-Notebook-User": "alice@example.com"},
-    )
-
-    assert resp.status_code == 200, resp.text
-
-    notebook_dir = Path(resp.json()["path"])
-    with (notebook_dir / "notebook.toml").open("rb") as f:
-        data = tomllib.load(f)
-    assert data.get("owner") == "alice@example.com"
-
-
 def test_import_endpoint_uses_custom_name_form_field(client, monkeypatch, tmp_path):
     """The ``name`` form field overrides the upload's filename stem."""
     storage = _import_storage(monkeypatch, tmp_path)
@@ -2537,7 +2293,7 @@ def test_import_endpoint_uses_custom_name_form_field(client, monkeypatch, tmp_pa
 # POST /v1/notebooks/import-snapshot: snapshot bundle upload
 
 
-def _snapshot_bytes(tmp_path: Path, owner: str | None = None) -> tuple[bytes, str]:
+def _snapshot_bytes(tmp_path: Path) -> tuple[bytes, str]:
     """A snapshot of a one-cell notebook with one stored artifact, built without running
     anything."""
     import io
@@ -2550,15 +2306,6 @@ def _snapshot_bytes(tmp_path: Path, owner: str | None = None) -> tuple[bytes, st
     nb = create_notebook(tmp_path / "snapshot-src", "Snap Source", initialize_environment=False)
     add_cell_to_notebook(nb, "c1", None)
     write_cell(nb, "c1", "x = 1\n")
-    if owner is not None:
-        import tomllib
-
-        from strata.notebook.writer import _write_notebook_toml_atomic
-
-        with open(nb / "notebook.toml", "rb") as f:
-            data = tomllib.load(f)
-        data["owner"] = owner
-        _write_notebook_toml_atomic(nb / "notebook.toml", data)
 
     session = NotebookSession(parse_notebook(nb), nb)
     session.get_artifact_manager().store_cell_output(
@@ -2616,29 +2363,6 @@ def test_import_snapshot_replaces_an_id_already_in_the_storage_root(client, monk
     assert first.json()["id"] == source_id
     assert second.json()["import_report"]["replaced_notebook_id"] == source_id
     assert second.json()["id"] != source_id
-
-
-def test_import_snapshot_stamps_the_caller_not_the_exporter(client, monkeypatch, tmp_path):
-    """The import is owned by the caller, or it would vanish from their per-user discovery list."""
-    import tomllib
-
-    set_server_state(
-        monkeypatch,
-        deployment_mode="personal",
-        notebook_storage_dir=tmp_path / "storage",
-        personal_mode_user_header="X-Notebook-User",
-    )
-    payload, _ = _snapshot_bytes(tmp_path, owner="bob@example.com")
-
-    resp = client.post(
-        "/v1/notebooks/import-snapshot",
-        files={"file": ("owned.zip", payload, "application/zip")},
-        headers={"X-Notebook-User": "alice@example.com"},
-    )
-
-    assert resp.status_code == 200, resp.text
-    with (Path(resp.json()["path"]) / "notebook.toml").open("rb") as f:
-        assert tomllib.load(f).get("owner") == "alice@example.com"
 
 
 def test_import_snapshot_refuses_what_is_not_a_snapshot(client, monkeypatch, tmp_path):

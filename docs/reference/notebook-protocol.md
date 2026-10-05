@@ -38,8 +38,8 @@ The minimum sequence to render a notebook view:
    (page refresh case), `GET /v1/notebooks/sessions/{session_id}` returns
    the same payload shape.
 2. **Connect the WebSocket.** `ws://.../v1/notebooks/ws/{session_id}`. The
-   handler verifies the session exists and (if owned) that the caller is the
-   owner - refuses with close code `1008 Notebook not found` otherwise. A
+   handler verifies the session exists and is visible to the caller's tenant -
+   refuses with close code `1008 Notebook not found` otherwise. A
    browser upgrade whose `Origin` is neither the server's own nor listed in
    `STRATA_CORS_ALLOW_ORIGINS` closes first with `1008 Origin not allowed`;
    clients that send no `Origin` (the TUI, scripts) are unaffected. The
@@ -70,33 +70,12 @@ A non-Vue client that passes the TOML id will get clean 404s from every
 endpoint. The Vue client doesn't have this confusion because it always
 stores the session id from the open response.
 
-## Auth and ownership
+## Auth
 
 ### Personal mode (default)
 
-- **No header configured.** Single-user trust. Every caller can hit every
-  endpoint. This is the local-dev default.
-- **`STRATA_PERSONAL_MODE_USER_HEADER` set.** Personal mode behind an
-  authenticating proxy (Cloudflare Access, Pomerium, …). The proxy injects
-  the configured header (e.g. `X-Authenticated-User`); the backend reads it
-  via `_caller_identity` and uses it for:
-  - **Storage scoping** - each user gets a private subdir under the storage
-    root (`/discover`, `/create`, path-keyed deletes).
-  - **Owner stamping** - `notebook.toml` records `owner = "<header value>"`
-    on create.
-  - **Owner enforcement** - every `WS /{session_id}` upgrade and every
-    REST `/{session_id}/...` route checks the caller's header against the
-    notebook's owner. Mismatch returns close `1008` or HTTP 404 (same
-    generic "Notebook not found" body, so probes can't enumerate owners).
-  - **Unowned notebooks pass through** - legacy notebooks without an
-    `owner` field (and notebooks created by services that don't send the
-    header) accept any caller.
-
-Both surfaces share a single gate: every `SessionDep` route routes through
-`get_notebook_session`, which resolves the session and immediately calls
-`_require_owner`. The WS upgrade applies the same check before
-`accept()`. A leaked `session_id` is *not* a bearer capability - owner
-enforcement is symmetric across REST and WS, with no opt-outs.
+Single-user trust: a personal server has one user, and every caller can hit
+every endpoint. This is the local-dev default.
 
 ### Service mode
 
@@ -144,7 +123,7 @@ further calls are required before showing a useful UI. The shape is
 | `path` | Absolute notebook directory path. |
 | `dag` | Formatted upstream/downstream/staleness map. |
 | Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`. |
-| `id`, `name`, `owner`, `worker`, `timeout`, `env`, `ai` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](rest-api.md#update-notebook-default-env)) |
+| `id`, `name`, `worker`, `timeout`, `env`, `ai` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](rest-api.md#update-notebook-default-env)) |
 | `env_sources`, `env_fetch_error`, `env_fetched_at` | Secret-manager fetch status |
 | `workers`, `mounts`, `connections`, `malformed_connections`, `secret_manager_config`, `variant_groups` | `notebook.toml` |
 | `cells` (full) | Source, status, display outputs, console stdout/stderr, provenance hashes, causality chains, DAG shadow warnings, per-cell overrides. |
@@ -357,4 +336,4 @@ edits exactly as before. `0` turns the lock off.
 - [notebook.toml Schema](notebook-toml.md) - what the on-disk config
   looks like.
 - [Configuration](configuration.md) - the server-side knobs
-  (`personal_mode_user_header`, deployment mode, storage root, …).
+  (deployment mode, auth mode, storage root, …).

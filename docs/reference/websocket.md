@@ -2,7 +2,7 @@
 
 The notebook UI communicates with the backend via a WebSocket connection for real-time updates.
 
-For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, owner gating, cold-start payload, grace window), start at the [Notebook Client Protocol](notebook-protocol.md) page; this page is the message-level reference.
+For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, tenant gating, cold-start payload, grace window), start at the [Notebook Client Protocol](notebook-protocol.md) page; this page is the message-level reference.
 
 Every frame type below corresponds to a member of `strata.notebook.protocol.MessageType` - that enum is the canonical source. If the tables here and the enum diverge, the enum wins.
 
@@ -221,7 +221,7 @@ This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style tr
 | Code | Meaning |
 | --- | --- |
 | `1000` | Normal closure (client or server initiated) |
-| `1008` | Policy violation - session not found, ownership mismatch in per-user personal mode, or an auth failure on the upgrade |
+| `1008` | Policy violation - session not found or another tenant's, or an auth failure on the upgrade |
 | `1011` | Internal error while handling a frame |
 
 If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with `1008`. A session closed while you are connected sends `session_closed` and then closes with `1000`. The client should call `POST /v1/notebooks/open` to start a new session.

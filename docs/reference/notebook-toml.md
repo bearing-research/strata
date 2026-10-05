@@ -11,7 +11,6 @@ The schema is defined in `src/strata/notebook/models.py::NotebookToml` and the r
 ```toml
 notebook_id = "01HZJV4Y9G..."       # required; UUID-like, backend-generated on create
 name = "Iris classifier"            # human-readable display name
-owner = "alice@example.com"         # optional; stamped when STRATA_PERSONAL_MODE_USER_HEADER is set
 created_at = 2026-04-12T10:31:00Z
 updated_at = 2026-05-18T18:04:22Z
 
@@ -23,7 +22,6 @@ timeout = 300                       # notebook-level default in seconds; overrid
 | --- | --- | --- |
 | `notebook_id` | string (required) | Stable opaque ID generated on create. Never edit by hand. |
 | `name` | string | Display name. Default: `"Untitled Notebook"`. |
-| `owner` | string \| absent | Stamped on create when `STRATA_PERSONAL_MODE_USER_HEADER` is set and the request carries that header. Unowned notebooks (no key) are visible/deletable by any caller. |
 | `created_at` | datetime (UTC) | Set on create; never updated. |
 | `updated_at` | datetime (UTC) | Bumped on structural edits only. Runtime writers don't touch it. |
 | `worker` | string \| absent | Notebook-level default worker name. Overridden by cell-level `worker` (below) or `# @worker` annotations. |
@@ -315,7 +313,7 @@ Annotations are the canonical per-cell configuration surface; there's no UI edit
 | Per-cell provenance hashes | Cell-level worker/timeout/env overrides |
 | Per-cell console (stdout/stderr) snapshots | Mounts, workers, connections, variant pointers |
 | `uv sync` timestamps | AI default model, secret-manager routing |
-| Artifact-store SQLite + blobs | Notebook owner, name, created/updated timestamps |
+| Artifact-store SQLite + blobs | Notebook name, created/updated timestamps |
 
 Runtime writers never touch `notebook.toml`; structural-edit writers never touch `.strata/`. The invariant is enforced at the writer layer.
 

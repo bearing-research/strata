@@ -207,7 +207,7 @@ a new session.
 ## Options
 
 ```bash
-strata-notebook-tui [--session ID | --notebook PATH] [--server URL] [--user-header NAME --user VALUE]
+strata-notebook-tui [--session ID | --notebook PATH] [--server URL]
 ```
 
 | Option | Purpose |
@@ -215,16 +215,10 @@ strata-notebook-tui [--session ID | --notebook PATH] [--server URL] [--user-head
 | `--session ID` | Attach to a specific running session id (skips the picker). |
 | `--notebook PATH` | Open / reuse a session for a notebook directory path (the path must exist on the server's filesystem). |
 | `--server URL` | Base URL of the server (default: `$STRATA_TUI_SERVER` or `http://localhost:8765`). |
-| `--user-header NAME` | Identity header name, matching the server's `personal_mode_user_header`. |
-| `--user VALUE` | Identity header value - needed to attach to an owned notebook. |
 
 ## Authentication
 
-Against a plain local server (the default), no auth flags are needed. If the
-server runs behind a proxy with per-user scoping
-(`STRATA_PERSONAL_MODE_USER_HEADER`), pass `--user-header` and `--user` matching
-what the proxy injects; the WebSocket attach is owner-gated, so a notebook
-created under your identity needs the same identity to watch. Point at a
+No auth flags are needed: a personal server has one user. Point at a
 non-default server with `--server` (or the `STRATA_TUI_SERVER` environment
-variable). See [Privacy & Sharing](../deployment/privacy.md) for the per-user
-scoping model.
+variable). See [Privacy & Sharing](../deployment/privacy.md) for who can reach
+a notebook.

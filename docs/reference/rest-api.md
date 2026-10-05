@@ -35,7 +35,6 @@ Authentication depends on `deployment_mode`:
 | Mode | Default auth | Required headers |
 | --- | --- | --- |
 | `personal` | None (single user) | None |
-| `personal` + `STRATA_PERSONAL_MODE_USER_HEADER` | Caller identity from the named header (set by an authenticating proxy) | The header you configured (e.g. `X-Authenticated-User`) |
 | `service` + `auth_mode="trusted_proxy"` | Proxy-injected identity | `X-Strata-Principal`, `X-Strata-Scopes`, `X-Strata-Proxy-Token`; `X-Tenant-ID` if multi-tenant |
 | `service` + `auth_mode="api_key"` | Strata verifies the key itself | `Authorization: Bearer strata_<key_id>_<secret>`; the key carries the principal, tenant and scopes |
 
@@ -50,7 +49,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | `GET /v1/notebooks/sessions` | Lists in-memory session ids and notebook filesystem paths |
 | `GET /v1/notebooks/sessions/{session_id}` | Same, for one session |
 
-`POST /open`, `POST /create` and `GET /discover` are **not** restricted - they work in service mode, and `/discover` is filtered by owner when `STRATA_PERSONAL_MODE_USER_HEADER` is set. With `multi_tenant_enabled`, all three (and the imports) are confined to the caller's tenant subdir of the storage root.
+`POST /open`, `POST /create` and `GET /discover` are **not** restricted - they work in service mode. With `multi_tenant_enabled`, all three (and the imports) are confined to the caller's tenant subdir of the storage root.
 
 **Tenant-scoped sessions.** A session records the tenant of whoever opened, created or imported it, and every `/v1/notebooks/{session_id}/...` route answers `404` to a caller from another tenant, as for an unknown session. `admin:*` reaches every session; a session opened without a tenant is open to all.
 
@@ -232,8 +231,7 @@ refused with `400` before anything is extracted.
 Turns the bundle into a notebook directory and opens a session on it. Cells
 whose artifacts the bundle carried are cache hits before anything runs; cells it
 only described open idle. With a team store configured, running one of those is
-a pull rather than a recompute. The caller is stamped as the notebook's owner,
-replacing whoever exported it.
+a pull rather than a recompute.
 
 A notebook id already in use under the caller's storage root is replaced, and
 every artifact id and lineage edge that embeds it is rewritten to match. Two
@@ -303,12 +301,10 @@ GET /v1/notebooks/discover
 ```
 
 Lists notebook directories under the configured storage root. Returns
-`{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at", "owner" }] }`
+`{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at" }] }`
 sorted newest-first. Used by the "Open existing" UI so users pick from a list
 instead of typing a filesystem path. Available in both modes; requires
-`notebook:read` under principal auth. With `STRATA_PERSONAL_MODE_USER_HEADER`
-set, the list is filtered to the caller's own notebooks - unowned ones stay
-visible to everyone. On a multi-tenant server the scan root is
+`notebook:read` under principal auth. On a multi-tenant server the scan root is
 `<notebook_storage_dir>/<tenant>/` (the whole root for `admin:*`).
 
 ### Validate Recent Notebooks

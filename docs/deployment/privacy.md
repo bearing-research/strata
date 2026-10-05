@@ -1,14 +1,11 @@
 # Privacy & Sharing Model
 
-How notebook access works depends on whether personal mode's
-per-user header (`STRATA_PERSONAL_MODE_USER_HEADER`) is set. With it
-unset, access is **URL-based**, similar to Google Docs: notebook IDs
-are unguessable, and anyone who can reach the server and has the ID
-can open and execute the notebook. With it set, every notebook route
-checks the notebook's owner and answers `404` to anyone else, so a
-shared link works only for its owner. Service mode gates the routes
-by scope, not by owner. This page lays out the model honestly so you
-can pick the deployment shape that matches your trust boundary.
+A personal server has one user, so notebook access there is
+**URL-based**, similar to Google Docs: notebook IDs are unguessable,
+and anyone who can reach the server and has the ID can open and
+execute the notebook. Service mode gates the routes by scope and
+tenant. This page lays out the model honestly so you can pick the
+deployment shape that matches your trust boundary.
 
 ## What's shared, what isn't
 
@@ -44,62 +41,14 @@ each other there.
 ### Notebook access
 
 Notebook IDs are full UUIDs (8-char prefix for display, full UUID
-for the actual ID). They're not in any global enumeration and
-they're not in `discover`'s output unless the caller owns them.
-What happens next depends on whether `STRATA_PERSONAL_MODE_USER_HEADER`
-is configured.
+for the actual ID). They're not in any global enumeration.
 
-**With per-user scoping on**, knowing the id is not enough. Every route
-that takes a session id resolves it through one dependency,
-`get_notebook_session`, which checks the notebook's recorded owner against
-the caller's identity and answers `404` on a mismatch. The WebSocket upgrade
-does the same and closes with `1008`. A missing header is denied too, so a
-caller who sends nothing is not treated as everyone.
-
-| Endpoint | Owner check? | How |
-|---|---|---|
-| `GET /v1/notebooks/{id}/cells` | **Yes** | `get_notebook_session`, 404 to non-owners |
-| `POST /v1/notebooks/{id}/cells/{cell_id}/execute` | **Yes** | Same dependency |
-| `GET /v1/notebooks/{id}/dag` | **Yes** | Same dependency |
-| `WS /v1/notebooks/ws/{id}` | **Yes** | Upgrade closes with 1008 |
-| `GET /v1/notebooks/discover` | **Yes** | Filters by owner, and scans only the caller's own storage root |
-| `POST /v1/notebooks/open` | **Yes** | The path must lie inside the caller's own storage root |
-| `DELETE /v1/notebooks/{id}` | **Yes** | 404 to non-owners |
-| `POST /v1/notebooks/delete-by-path` | **Yes** | 404 to non-owners |
-| `PUT /v1/notebooks/{id}/name` | **Yes** | 404 to non-owners |
-
-The generic `404` is deliberate: a `403` would confirm that a notebook with
-that id exists.
-
-**With the header unset** there is no identity to check against, every
-notebook is unowned, and anyone who can reach the port can open anything.
-That is the single-user shape, and it is why personal mode binds to loopback
-by default.
-
-Sharing a link with a teammate therefore does not work under per-user
-scoping, because their path resolution is confined to their own root. Use
-[publishing](../notebook/publishing.md) to hand someone a result, or service
-mode for a genuinely shared deployment.
-
-## How notebook ownership gets stamped
-
-The `owner` field on `notebook.toml` is set only in
-personal-mode-with-proxy (`STRATA_PERSONAL_MODE_USER_HEADER` set):
-`POST /create`, `POST /import` and `POST /import-snapshot` stamp the
-caller's identity from the configured header (typically
-`Cf-Access-Authenticated-User-Email`, `X-Forwarded-Email`, etc.).
-
-Service mode stamps no owner: it refuses `personal_mode_user_header`,
-and `X-Strata-Principal` is not used for notebook ownership. There,
-notebook scopes decide what a principal can do.
-
-When `personal_mode_user_header` is unset, `owner` stays `None`, all
-notebooks are unowned and the single-user pattern applies. This is
-the default for a developer running on localhost.
-
-Unowned notebooks (`owner is None`) remain accessible to any
-caller. Migrating an unowned notebook to ownership requires
-manually editing `notebook.toml`.
+On a personal server there is no identity to check against: `discover`
+lists every notebook under the storage root, and anyone who can reach
+the port can open anything. That is the single-user shape, and it is why
+personal mode binds to loopback by default. Use
+[publishing](../notebook/publishing.md) to hand someone a result, or
+service mode for a genuinely shared deployment.
 
 ## Trust boundaries, pick a shape
 
@@ -109,22 +58,14 @@ manually editing `notebook.toml`.
 caller is you, every notebook is yours, sharing isn't on the table.
 Use this shape unless something else applies.
 
-### Small trusted team (5–20 people)
+### A team
 
-`STRATA_DEPLOYMENT_MODE=personal` + an authenticating proxy
-(Cloudflare Access, Pomerium, corporate SSO) +
-`STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email`
-(or whatever your proxy injects).
-
-Every notebook is stamped with its creator's identity and lives
-under that user's own storage root. `discover` filters to your
-notebooks, and every notebook route answers `404` to anyone else, so
-a link to an owned notebook works only for its owner. Unowned
-notebooks stay open to everyone.
-
-**This is the right shape for most teams.** Share results by
-[publishing](../notebook/publishing.md) them rather than by sending a
-notebook link.
+Give each member a personal server (their own machine, or one container
+each behind your proxy) and share results through a service-mode store:
+see [Connecting a notebook to the shared store](service-mode.md#connecting-a-notebook-to-the-shared-store).
+Share results by [publishing](../notebook/publishing.md) them rather
+than by sending a notebook link. For one server the whole team uses,
+run service mode (next section).
 
 ### Multi-tenant or hard-isolation requirements
 
@@ -136,13 +77,12 @@ for it.
 
 Notes:
 
-- **Notebooks are not tenant-scoped.** Tenancy isolates the scan
-  cache and the server's artifact store: the tenant is hashed into
-  cache keys, and artifact and name reads are filtered by tenant.
-  Notebook sessions and the notebook storage root are shared by the
-  whole server, and there are no per-notebook ACLs. If Alice's
-  notebook ID leaks to Bob and Bob holds `notebook:read`, he can open
-  it, whatever tenant either of them is in.
+- **Notebooks are tenant-scoped, not per-principal.** A session
+  records the tenant of the caller who opened it and looks missing to
+  other tenants, and a multi-tenant server gives each tenant its own
+  subdirectory of the storage root. Within a tenant there are no
+  per-notebook ACLs: if Alice's notebook ID leaks to Bob in her tenant
+  and Bob holds `notebook:read`, he can open it.
 - **Notebook deletion is personal-mode only.** Service mode refuses
   `DELETE /v1/notebooks/{id}` and `delete-by-path`.
 
@@ -162,10 +102,9 @@ any other notebook tool: hard-private = separate instances.
 
 Real per-notebook permissions (a `read_principals` / `write_principals`
 list in `notebook.toml` checked on every endpoint) would sit between
-the two shapes that exist today. With per-user scoping an owned
-notebook is its owner's alone; without it, or in service mode, anyone
-who can reach the server and has the ID (and, in service mode, the
-scope) can open it. Nothing in between is implemented:
+the two shapes that exist today: a personal server has one user, and
+in service mode anyone in the tenant who has the ID and the scope can
+open a notebook. Nothing in between is implemented:
 
 - [Publishing](../notebook/publishing.md) already hands a result to
   someone without handing them the notebook.

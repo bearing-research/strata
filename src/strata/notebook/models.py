@@ -434,17 +434,6 @@ class NotebookToml(BaseModel):
 
     notebook_id: str = Field(..., description="Unique notebook ID")
     name: str = Field(default="Untitled Notebook", description="Human-readable name")
-    owner: str | None = Field(
-        default=None,
-        description=(
-            "Opaque identity string of the user who created this notebook. "
-            "Stamped on create when STRATA_PERSONAL_MODE_USER_HEADER is set "
-            "and the request carries that header. Unset (None) means "
-            "'unowned' — visible/deletable by any caller. The string is "
-            "intentionally opaque: it can be an email, a GitHub login, a "
-            "service-mode principal, or any other stable identifier."
-        ),
-    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(tz=UTC))
     cells: list[CellMeta] = Field(default_factory=list, description="Cell metadata")
@@ -874,13 +863,6 @@ class NotebookState(BaseModel):
 
     id: str = Field(..., description="Notebook ID")
     name: str = Field(default="Untitled Notebook", description="Notebook name")
-    owner: str | None = Field(
-        default=None,
-        description=(
-            "Opaque identity of the notebook's owner, mirrored from "
-            "notebook.toml. None for unowned notebooks."
-        ),
-    )
     worker: str | None = Field(
         default=None,
         description="Notebook-level default worker name",

@@ -13,10 +13,10 @@ through a network. It's the right mode when:
   publish directly to a shared store with `service_writes_enabled`
   (the [shared research store](#authenticated-write-back-the-shared-research-store)).
 
-For a single developer running on a laptop, use
-[personal mode](modes.md#personal-mode). Personal-mode-behind-a-proxy
-also covers small-team sharing (~5–20 trusted users); see
-[Sharing personal mode with a small group](modes.md#sharing-personal-mode-with-a-small-group).
+For one person, use [personal mode](modes.md#personal-mode). A team can
+also give each member a personal server and share results through a
+service-mode store; see
+[Connecting a notebook to the shared store](#connecting-a-notebook-to-the-shared-store).
 
 ## Switching from the default
 

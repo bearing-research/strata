@@ -232,4 +232,4 @@ The notebook storage root is controlled by `STRATA_NOTEBOOK_STORAGE_DIR`. The de
     volume at `/tmp/strata-notebooks` in Docker - see the Docker page
     for that pattern).
 
-For multi-user deployments, see `STRATA_PERSONAL_MODE_USER_HEADER` in [Configuration](../reference/configuration.md#notebook) - it scopes each user to their own subdirectory under the storage root.
+On a multi-tenant service-mode server, each tenant gets its own subdirectory under the storage root.

@@ -296,14 +296,10 @@ class StrataConfig(BaseSettings):
     allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
     # Mount the MCP server at ``/mcp`` so an external coding agent can drive the live session over
     # streamable HTTP. It exposes the read/run/author surface, so ``validate_mode_coherence``
-    # allows it in personal mode without ``personal_mode_user_header``, or in service mode only
-    # with principal auth, where each tool call is checked against its caller's scopes. Needs the
-    # ``[mcp]`` extra; without it the flag warns and no-ops.
+    # allows it in personal mode, or in service mode only with principal auth, where each tool
+    # call is checked against its caller's scopes. Needs the ``[mcp]`` extra; without it the flag
+    # warns and no-ops.
     mcp_enabled: bool = False
-    # Request header naming the calling user when a personal-mode deployment sits behind an
-    # authenticating proxy (Cloudflare Access, Pomerium, etc.). Notebooks are stamped with the
-    # caller on create, and discover/delete scope to it. Unset means single-user.
-    personal_mode_user_header: str | None = None
     # Origins allowed to embed a notebook's app view in an ``<iframe>``; sets
     # ``Content-Security-Policy: frame-ancestors 'self' <origins>``. Empty (the default) means
     # same-origin only. A JSON array or comma-separated list of origins
@@ -881,14 +877,6 @@ class StrataConfig(BaseSettings):
                     "auth_mode='trusted_proxy')"
                 )
 
-            # personal_mode_user_header is a personal-mode proxy shim; service
-            # mode uses `X-Strata-Principal` via the trusted-proxy pipeline.
-            if self.personal_mode_user_header:
-                conflicts.append(
-                    "personal_mode_user_header (a personal-mode proxy shim; service "
-                    "mode uses auth_mode='trusted_proxy' with X-Strata-Principal)"
-                )
-
             # Key auth has nowhere to keep keys without an artifact directory:
             # the api_keys table lives in the artifact store's database. Every
             # request would then fail closed at the middleware, which is safe
@@ -991,17 +979,6 @@ class StrataConfig(BaseSettings):
         if self.require_tenant_header:
             conflicts.append(
                 "require_tenant_header=True (personal mode has no tenants to require a header for)"
-            )
-        if self.mcp_enabled and self.personal_mode_user_header:
-            # personal_mode_user_header scopes REST notebook routes by owner, but the MCP mount has
-            # no per-request identity or owner filter: `list_notebooks` returns every open session
-            # and any tool call accepts any session id, so one user could run code in another's
-            # notebook.
-            conflicts.append(
-                "mcp_enabled=True with personal_mode_user_header set (the MCP "
-                "endpoint has no per-request identity and does not filter by "
-                "owner, so it would expose every user's sessions; use one or "
-                "the other)"
             )
 
         if conflicts:

@@ -712,16 +712,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("STRATA_TUI_SERVER", "http://localhost:8765"),
         help="Server base URL (default: $STRATA_TUI_SERVER or :8765).",
     )
-    watch_parser.add_argument(
-        "--user-header",
-        default=os.environ.get("STRATA_TUI_USER_HEADER_NAME"),
-        help="Identity header name (matches the server's personal_mode_user_header).",
-    )
-    watch_parser.add_argument(
-        "--user",
-        default=os.environ.get("STRATA_TUI_USER"),
-        help="Identity header value (needed when the notebook is owned).",
-    )
     watch_parser.set_defaults(func=_dispatch_watch)
 
     return parser
@@ -808,8 +798,6 @@ def _dispatch_watch(args: argparse.Namespace) -> int:
         server=args.server,
         session=args.session,
         notebook=args.notebook_dir,
-        user_header=args.user_header,
-        user=args.user,
     )
     return 0
 
