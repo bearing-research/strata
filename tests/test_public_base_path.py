@@ -245,7 +245,17 @@ class TestClientsKeepThePath:
     def test_the_sdk_client(self):
         from strata_client.client import StrataClient
 
-        client = StrataClient(base_url=f"https://app.example.com{BASE}")
+        seen: list[str] = []
 
-        request = client._client.build_request("GET", "/v1/streams/abc")
-        assert str(request.url) == f"https://app.example.com{BASE}/v1/streams/abc"
+        def answer(request: httpx.Request) -> httpx.Response:
+            seen.append(str(request.url))
+            return httpx.Response(200, json={"status": "ok"})
+
+        client = StrataClient(base_url=f"https://app.example.com{BASE}")
+        # The real constructor's URL; only the wire is swapped out.
+        client._client = httpx.Client(
+            transport=httpx.MockTransport(answer), base_url=client._client.base_url
+        )
+
+        assert client.health() == {"status": "ok"}
+        assert seen == [f"https://app.example.com{BASE}/health"]

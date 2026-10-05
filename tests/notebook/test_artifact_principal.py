@@ -65,6 +65,19 @@ def _reset_ws_state():
     _reset()
 
 
+@pytest.fixture(autouse=True)
+def _close_opened_sessions():
+    """The manager is a module global; a session left open counts against later tests."""
+    from strata.notebook.routes import get_session_manager
+
+    manager = get_session_manager()
+    before = set(manager.list_sessions())
+    yield
+    for session_id in manager.list_sessions():
+        if session_id not in before:
+            manager.close_session(session_id)
+
+
 @pytest.fixture
 def session(tmp_path):
     from strata.notebook.routes import get_session_manager

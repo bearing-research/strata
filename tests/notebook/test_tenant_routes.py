@@ -15,6 +15,17 @@ from strata.notebook.routes import get_notebook_session, get_session_manager
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
 
+@pytest.fixture(autouse=True)
+def _close_opened_sessions():
+    """The manager is a module global; a session left open counts against later tests."""
+    manager = get_session_manager()
+    before = set(manager.list_sessions())
+    yield
+    for session_id in manager.list_sessions():
+        if session_id not in before:
+            manager.close_session(session_id)
+
+
 @pytest.fixture
 def server(monkeypatch, tmp_path):
     import strata.server as server_module
