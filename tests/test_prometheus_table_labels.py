@@ -70,6 +70,7 @@ def test_a_single_tenant_service_with_auth_names_no_table(scrape):
 
     assert "acme_payroll" not in body
     assert "strata_table_" not in body
+    assert "strata_scans_total" in body
 
 
 def test_personal_mode_keeps_the_table_series(scrape):
