@@ -2719,7 +2719,7 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_MCP_ENABLED</code></td>
 <td><code>false</code></td>
-<td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. In service mode it requires principal auth (<code>trusted_proxy</code> or <code>api_key</code>); each tool call then runs as its caller and is checked against the notebook scopes. Refused at startup together with <code>STRATA_PERSONAL_MODE_USER_HEADER</code>, since the MCP endpoint does not filter sessions by owner. Requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
+<td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. In service mode it requires principal auth (<code>trusted_proxy</code> or <code>api_key</code>); each tool call then runs as its caller and is checked against the notebook scopes. Requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
 </tr>
 <tr>
 <td><code>STRATA_ARROW_MEMORY_POOL</code></td>
@@ -3699,11 +3699,6 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>How many earlier values of each cell output a notebook's own store keeps beside the current one, so reverting a recent edit is still a cache hit. Older ones are pruned each time the server opens the notebook, an already-open one included. <code>0</code> turns pruning off and keeps every value.</td>
 </tr>
 <tr>
-<td><code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>
-<td><code>None</code></td>
-<td>Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and <code>discover</code>/<code>delete</code> scope to it. Intended for proxy-fronted personal deployments.</td>
-</tr>
-<tr>
 <td><code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code></td>
 <td><code>None</code></td>
 <td>Point the ambient <code>strata</code> client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup, because the registry routes would forward to themselves. See <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</td>
@@ -3801,16 +3796,6 @@ flag, and the flag wins. Environment only.</p>
 <td><code>STRATA_TUI_SERVER</code></td>
 <td><code>http://localhost:8765</code></td>
 <td>Server the TUI connects to</td>
-</tr>
-<tr>
-<td><code>STRATA_TUI_USER</code></td>
-<td><code>None</code></td>
-<td>Caller identity to send, for a personal deployment behind a proxy</td>
-</tr>
-<tr>
-<td><code>STRATA_TUI_USER_HEADER_NAME</code></td>
-<td><code>None</code></td>
-<td>Header carrying that identity (matches <code>STRATA_PERSONAL_MODE_USER_HEADER</code> on the server)</td>
 </tr>
 </tbody>
 </table>

@@ -2554,7 +2554,7 @@ new session and keep watching. Attached with <code>--session ID</code>, it does 
 the path: run <code>strata watch PATH</code> (or open the notebook in the web UI) to start
 a new session.</p>
 <h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata-notebook-tui<span class="w"> </span><span class="o">[</span>--session<span class="w"> </span>ID<span class="w"> </span><span class="p">|</span><span class="w"> </span>--notebook<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--server<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--user-header<span class="w"> </span>NAME<span class="w"> </span>--user<span class="w"> </span>VALUE<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata-notebook-tui<span class="w"> </span><span class="o">[</span>--session<span class="w"> </span>ID<span class="w"> </span><span class="p">|</span><span class="w"> </span>--notebook<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--server<span class="w"> </span>URL<span class="o">]</span>
 </code></pre></div>
 <table>
 <thead>
@@ -2576,25 +2576,13 @@ a new session.</p>
 <td><code>--server URL</code></td>
 <td>Base URL of the server (default: <code>$STRATA_TUI_SERVER</code> or <code>http://localhost:8765</code>).</td>
 </tr>
-<tr>
-<td><code>--user-header NAME</code></td>
-<td>Identity header name, matching the server's <code>personal_mode_user_header</code>.</td>
-</tr>
-<tr>
-<td><code>--user VALUE</code></td>
-<td>Identity header value - needed to attach to an owned notebook.</td>
-</tr>
 </tbody>
 </table>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
-<p>Against a plain local server (the default), no auth flags are needed. If the
-server runs behind a proxy with per-user scoping
-(<code>STRATA_PERSONAL_MODE_USER_HEADER</code>), pass <code>--user-header</code> and <code>--user</code> matching
-what the proxy injects; the WebSocket attach is owner-gated, so a notebook
-created under your identity needs the same identity to watch. Point at a
+<p>No auth flags are needed: a personal server has one user. Point at a
 non-default server with <code>--server</code> (or the <code>STRATA_TUI_SERVER</code> environment
-variable). See <a href="../../deployment/privacy/">Privacy &amp; Sharing</a> for the per-user
-scoping model.</p>
+variable). See <a href="../../deployment/privacy/">Privacy &amp; Sharing</a> for who can reach
+a notebook.</p>
 
 
 

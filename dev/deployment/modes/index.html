@@ -1756,10 +1756,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#choosing-a-shape" class="md-nav__link">
+  <a href="#choosing-a-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Choosing a shape
+        Choosing a mode
       
     </span>
   </a>
@@ -1800,10 +1800,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sharing-personal-mode-with-a-small-group" class="md-nav__link">
+  <a href="#sharing-with-a-team" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sharing personal mode with a small group
+        Sharing with a team
       
     </span>
   </a>
@@ -2093,10 +2093,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#choosing-a-shape" class="md-nav__link">
+  <a href="#choosing-a-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Choosing a shape
+        Choosing a mode
       
     </span>
   </a>
@@ -2137,10 +2137,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sharing-personal-mode-with-a-small-group" class="md-nav__link">
+  <a href="#sharing-with-a-team" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sharing personal mode with a small group
+        Sharing with a team
       
     </span>
   </a>
@@ -2201,73 +2201,62 @@
 
 
 <h1 id="deployment-modes">Deployment Modes<a class="headerlink" href="#deployment-modes" title="Permanent link">&para;</a></h1>
-<p>Strata's <code>deployment_mode</code> is binary - <code>personal</code> or <code>service</code> - but
-<code>personal</code> supports two flavors depending on whether
-<code>STRATA_PERSONAL_MODE_USER_HEADER</code> is set. In practice you're choosing
-between three shapes.</p>
+<p>Strata's <code>deployment_mode</code> is <code>personal</code> or <code>service</code>. A personal server
+has exactly one user; a service-mode server serves many, each with their
+own identity.</p>
 <h2 id="decision-matrix">Decision matrix<a class="headerlink" href="#decision-matrix" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th></th>
 <th><strong>Personal</strong></th>
-<th><strong>Personal + auth proxy</strong></th>
 <th><strong>Service</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>Best for</strong></td>
-<td>One developer, laptop, single notebook open</td>
-<td>5–20 trusted users behind Cloudflare Access / Pomerium / etc.</td>
-<td>Multi-tenant team or customer-facing</td>
+<td>One person: a laptop, or a server of your own</td>
+<td>A team or customer-facing deployment</td>
 </tr>
 <tr>
 <td><strong>Writes</strong></td>
 <td>Enabled</td>
-<td>Enabled (per-user filter on discover/delete)</td>
 <td>Off by default (server-side transforms); opt-in client write-back via <code>service_writes_enabled</code></td>
 </tr>
 <tr>
 <td><strong>Auth</strong></td>
 <td>None</td>
-<td>Identity from <code>STRATA_PERSONAL_MODE_USER_HEADER</code> (proxy injects)</td>
 <td><code>X-Strata-Principal</code> + <code>X-Strata-Proxy-Token</code> from a trusted proxy, or an API key</td>
 </tr>
 <tr>
 <td><strong>Identity scoping</strong></td>
-<td>No scoping (single user)</td>
-<td>Per-user filter on <code>discover</code> / <code>delete</code>; shared artifact store</td>
+<td>None (one user)</td>
 <td>Per-tenant cache keys, cache dirs, QoS pools; artifacts filtered by tenant</td>
 </tr>
 <tr>
 <td><strong>Multi-tenancy</strong></td>
-<td>n/a</td>
 <td>n/a</td>
 <td>Optional (<code>multi_tenant_enabled=true</code>)</td>
 </tr>
 <tr>
 <td><strong>ACLs</strong></td>
 <td>Not evaluated</td>
-<td>Not evaluated</td>
 <td>Deny-first (<code>acl_config</code>)</td>
 </tr>
 <tr>
 <td><strong>Default artifact dir</strong></td>
 <td><code>~/.strata/artifacts</code></td>
-<td><code>~/.strata/artifacts</code></td>
 <td>None; set <code>STRATA_ARTIFACT_DIR</code> explicitly (required with a blob backend too)</td>
 </tr>
 <tr>
 <td><strong>Network binding</strong></td>
-<td>Loopback only</td>
-<td>Non-loopback with <code>allow_remote_clients_in_personal=true</code></td>
+<td>Loopback only, or non-loopback with <code>allow_remote_clients_in_personal=true</code></td>
 <td>Unrestricted</td>
 </tr>
 <tr>
 <td><strong>Use in production for sharing?</strong></td>
-<td>No: anyone on the network can write</td>
-<td>Only behind a real auth proxy, small trusted group</td>
+<td>No: anyone who reaches it can write</td>
 <td>Yes</td>
 </tr>
 </tbody>
@@ -2276,21 +2265,15 @@ between three shapes.</p>
 who reaches the URL get to mutate?), <strong>Auth</strong> (who decides who's
 allowed?), and <strong>Identity scoping</strong> (what's isolated and what's
 shared?). The flags that follow are the consequences.</p>
-<h2 id="choosing-a-shape">Choosing a shape<a class="headerlink" href="#choosing-a-shape" title="Permanent link">&para;</a></h2>
+<h2 id="choosing-a-mode">Choosing a mode<a class="headerlink" href="#choosing-a-mode" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Personal</strong>: running the notebook on your own machine. Fast to
-  start, nothing to configure, writes land in your home directory.
-  This is the default for Docker Compose and the "from source"
-  instructions.</li>
-<li><strong>Personal + auth proxy</strong>: small team sharing one Strata instance
-  with the proxy handling auth. Cheap to operate, no per-user
-  isolation (artifact store is shared), but each user gets their
-  own list in "Open existing." See <a href="#sharing-personal-mode-with-a-small-group">Sharing personal mode with a
-  small group</a> below.
-  See <a href="../fly/">Fly.io deployment</a> for a recipe that hosts personal
-  mode.</li>
-<li><strong>Service</strong>: hosting Strata for users you can't fully trust, or
-  with sensitive data, or with multi-tenant isolation requirements.
+<li><strong>Personal</strong>: running the notebook for yourself. Fast to start,
+  nothing to configure, writes land in your home directory. This is
+  the default for Docker Compose and the "from source" instructions.
+  A personal server you reach over the network is still one person's;
+  see <a href="../fly/">Fly.io deployment</a> for a recipe that hosts one.</li>
+<li><strong>Service</strong>: one server for more than one person, users you can't
+  fully trust, sensitive data, or multi-tenant isolation requirements.
   Reads are tenant-scoped and ACL-gated; writes are off by default
   (routed through server-side transforms), or authenticated clients
   can publish directly to a shared store with <code>service_writes_enabled</code>.
@@ -2357,45 +2340,17 @@ machine callers outside the proxy can use an API key instead
 <li>Multi-tenancy, ACLs, server-side transforms.</li>
 <li>Migration path from personal mode.</li>
 </ul>
-<h2 id="sharing-personal-mode-with-a-small-group">Sharing personal mode with a small group<a class="headerlink" href="#sharing-personal-mode-with-a-small-group" title="Permanent link">&para;</a></h2>
-<p>A common deployment shape is "personal mode behind an authenticating proxy", for example, Cloudflare Access in front of a Fly.io app, sharing the
-notebook UI with a handful of trusted users. This isn't full multi-tenancy
-(no per-user QoS, one shared cache), but each user does get their own
-storage root, <code>&lt;notebook_storage_dir&gt;/&lt;identity&gt;/</code>, and every path-taking
-route is confined to it. A notebook's artifacts live under its own
-directory, so they land inside that root too.</p>
-<p>Set:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>personal
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</span><span class="o">=</span><span class="nb">true</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nv">STRATA_PERSONAL_MODE_USER_HEADER</span><span class="o">=</span>Cf-Access-Authenticated-User-Email
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nv">STRATA_ALLOWED_HOSTS</span><span class="o">=</span>strata.example.com<span class="w">   </span><span class="c1"># the name users browse to</span>
-</code></pre></div>
-<p>The header value is whatever your proxy injects after authenticating the
-caller. Strata treats the value as opaque: email, GitHub login, internal
-ID, anything stable.</p>
-<p>What changes when the header is set:</p>
+<h2 id="sharing-with-a-team">Sharing with a team<a class="headerlink" href="#sharing-with-a-team" title="Permanent link">&para;</a></h2>
+<p>Personal mode has no notion of more than one user, so a team has two
+shapes:</p>
 <ul>
-<li><code>POST /v1/notebooks/create</code> stamps the caller's identity into
-  <code>notebook.toml</code> as <code>owner</code>.</li>
-<li><code>GET /v1/notebooks/discover</code> returns only notebooks where
-  <code>owner == caller</code> or <code>owner is None</code>.</li>
-<li><code>DELETE /v1/notebooks/{id}</code> and <code>POST /v1/notebooks/delete-by-path</code>
-  return 404 if a non-owner tries to delete an owned notebook.</li>
-<li>Sharing a link does not work. <code>POST /open</code> resolves the path inside the
-  caller's own storage root, and every session-targeted route checks the
-  notebook's owner and answers 404 otherwise. To hand someone a result, use
-  <a href="../../notebook/publishing/">publishing</a>.</li>
+<li><strong>A personal server per member.</strong> Each member runs their own (a laptop,
+  or one container each behind your proxy) and shares results through a
+  service-mode store; see
+  <a href="../service-mode/#connecting-a-notebook-to-the-shared-store">Connecting a notebook to the shared store</a>.</li>
+<li><strong>One shared server in service mode</strong>, where every request carries the
+  caller's identity and scopes. See <a href="../service-mode/">Service Mode</a>.</li>
 </ul>
-<p>What does <em>not</em> change:
-- Concurrent edits to the same notebook still race (no per-user sessions).
-- The artifact store is shared; provenance hashes don't include the caller.
-- The AI API key pool (<code>STRATA_AI_*</code>) is shared across all users.
-- Unowned (legacy) notebooks bypass the owner check, but not the storage
-  boundary: one sitting in the base directory rather than a user's own root
-  is invisible to <code>discover</code> and unopenable by every scoped caller. Move it
-  into a user's root to make it reachable again.</p>
-<p>This shape is the right answer for a 5–20 person trusted group. For untrusted
-or paid users, migrate to service mode for proper tenant isolation.</p>
 <h2 id="coherence-enforcement">Coherence enforcement<a class="headerlink" href="#coherence-enforcement" title="Permanent link">&para;</a></h2>
 <p>Strata rejects incoherent mode combinations at startup. These combos
 raise <code>ValueError</code> during config load:</p>
@@ -2422,14 +2377,6 @@ raise <code>ValueError</code> during config load:</p>
 <tr>
 <td><code>deployment_mode=personal</code> + <code>auth_mode=api_key</code></td>
 <td>Personal mode is single-user on loopback; authenticating yourself to your own machine buys nothing</td>
-</tr>
-<tr>
-<td><code>deployment_mode=personal</code> + <code>mcp_enabled</code> + <code>personal_mode_user_header</code></td>
-<td>The MCP endpoint has no per-request identity and does not filter by owner, so it would expose every user's sessions</td>
-</tr>
-<tr>
-<td><code>deployment_mode=service</code> + <code>personal_mode_user_header</code></td>
-<td>Service mode uses <code>X-Strata-Principal</code> via trusted-proxy auth; the personal-mode shim is for proxy-fronted personal deployments only</td>
 </tr>
 <tr>
 <td><code>deployment_mode=service</code> + <code>multi_tenant_enabled</code> or <code>acl_config</code> rules or <code>mcp_enabled</code>, without <code>trusted_proxy</code> / <code>api_key</code> auth</td>
@@ -2471,8 +2418,8 @@ service-mode errors name the setting to add.</p>
 <p>A reverse proxy can serve Strata at a path such as
 <code>https://app.example.com/o/acme/lab/</code> instead of a hostname of its own. Tell
 Strata the path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">STRATA_PUBLIC_BASE_PATH</span><span class="o">=</span>/o/acme/lab
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">STRATA_PUBLIC_BASE_URL</span><span class="o">=</span>https://app.example.com<span class="w">   </span><span class="c1"># origin only; the path comes from above</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_PUBLIC_BASE_PATH</span><span class="o">=</span>/o/acme/lab
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">STRATA_PUBLIC_BASE_URL</span><span class="o">=</span>https://app.example.com<span class="w">   </span><span class="c1"># origin only; the path comes from above</span>
 </code></pre></div>
 <p>The proxy may strip the prefix before forwarding or pass it through; both
 reach the same routes. The notebook UI, its WebSocket, the API docs, signed

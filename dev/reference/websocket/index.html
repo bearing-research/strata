@@ -2634,7 +2634,7 @@
 
 <h1 id="websocket-protocol">WebSocket Protocol<a class="headerlink" href="#websocket-protocol" title="Permanent link">&para;</a></h1>
 <p>The notebook UI communicates with the backend via a WebSocket connection for real-time updates.</p>
-<p>For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, owner gating, cold-start payload, grace window), start at the <a href="../notebook-protocol/">Notebook Client Protocol</a> page; this page is the message-level reference.</p>
+<p>For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, tenant gating, cold-start payload, grace window), start at the <a href="../notebook-protocol/">Notebook Client Protocol</a> page; this page is the message-level reference.</p>
 <p>Every frame type below corresponds to a member of <code>strata.notebook.protocol.MessageType</code> - that enum is the canonical source. If the tables here and the enum diverge, the enum wins.</p>
 <h2 id="connection">Connection<a class="headerlink" href="#connection" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ws://localhost:8765/v1/notebooks/ws/{session_id}
@@ -3136,7 +3136,7 @@ was going to cost; what it no longer costs is the notebook.</p>
 </tr>
 <tr>
 <td><code>1008</code></td>
-<td>Policy violation - session not found, ownership mismatch in per-user personal mode, or an auth failure on the upgrade</td>
+<td>Policy violation - session not found or another tenant's, or an auth failure on the upgrade</td>
 </tr>
 <tr>
 <td><code>1011</code></td>

@@ -4121,11 +4121,6 @@
 <td>None</td>
 </tr>
 <tr>
-<td><code>personal</code> + <code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>
-<td>Caller identity from the named header (set by an authenticating proxy)</td>
-<td>The header you configured (e.g. <code>X-Authenticated-User</code>)</td>
-</tr>
-<tr>
 <td><code>service</code> + <code>auth_mode="trusted_proxy"</code></td>
 <td>Proxy-injected identity</td>
 <td><code>X-Strata-Principal</code>, <code>X-Strata-Scopes</code>, <code>X-Strata-Proxy-Token</code>; <code>X-Tenant-ID</code> if multi-tenant</td>
@@ -4165,7 +4160,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>POST /open</code>, <code>POST /create</code> and <code>GET /discover</code> are <strong>not</strong> restricted - they work in service mode, and <code>/discover</code> is filtered by owner when <code>STRATA_PERSONAL_MODE_USER_HEADER</code> is set. With <code>multi_tenant_enabled</code>, all three (and the imports) are confined to the caller's tenant subdir of the storage root.</p>
+<p><code>POST /open</code>, <code>POST /create</code> and <code>GET /discover</code> are <strong>not</strong> restricted - they work in service mode. With <code>multi_tenant_enabled</code>, all three (and the imports) are confined to the caller's tenant subdir of the storage root.</p>
 <p><strong>Tenant-scoped sessions.</strong> A session records the tenant of whoever opened, created or imported it, and every <code>/v1/notebooks/{session_id}/...</code> route answers <code>404</code> to a caller from another tenant, as for an unknown session. <code>admin:*</code> reaches every session; a session opened without a tenant is open to all.</p>
 <p><strong>Scope-gated endpoints.</strong> Under principal auth, <strong>every</strong> route on the <code>/v1/notebooks</code> and <code>/v1/projects</code> routers requires a notebook scope in <code>X-Strata-Scopes</code>. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns <code>403 Forbidden</code> naming the scope it wanted.</p>
 <table>
@@ -4406,8 +4401,7 @@ refused with <code>400</code> before anything is extracted.</p>
 <p>Turns the bundle into a notebook directory and opens a session on it. Cells
 whose artifacts the bundle carried are cache hits before anything runs; cells it
 only described open idle. With a team store configured, running one of those is
-a pull rather than a recompute. The caller is stamped as the notebook's owner,
-replacing whoever exported it.</p>
+a pull rather than a recompute.</p>
 <p>A notebook id already in use under the caller's storage root is replaced, and
 every artifact id and lineage edge that embeds it is rewritten to match. Two
 copies of one notebook sharing an id would collide as soon as both publish to a
@@ -4457,12 +4451,10 @@ process and do not survive a restart.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>GET /v1/notebooks/discover
 </code></pre></div>
 <p>Lists notebook directories under the configured storage root. Returns
-<code>{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at", "owner" }] }</code>
+<code>{ "root", "notebooks": [{ "path", "name", "notebook_id", "updated_at" }] }</code>
 sorted newest-first. Used by the "Open existing" UI so users pick from a list
 instead of typing a filesystem path. Available in both modes; requires
-<code>notebook:read</code> under principal auth. With <code>STRATA_PERSONAL_MODE_USER_HEADER</code>
-set, the list is filtered to the caller's own notebooks - unowned ones stay
-visible to everyone. On a multi-tenant server the scan root is
+<code>notebook:read</code> under principal auth. On a multi-tenant server the scan root is
 <code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code> (the whole root for <code>admin:*</code>).</p>
 <h3 id="validate-recent-notebooks">Validate Recent Notebooks<a class="headerlink" href="#validate-recent-notebooks" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>POST /v1/notebooks/recents/validate

@@ -1493,15 +1493,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#auth-and-ownership" class="md-nav__link">
+  <a href="#auth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Auth and ownership
+        Auth
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Auth and ownership">
+    <nav class="md-nav" aria-label="Auth">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2199,15 +2199,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#auth-and-ownership" class="md-nav__link">
+  <a href="#auth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Auth and ownership
+        Auth
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Auth and ownership">
+    <nav class="md-nav" aria-label="Auth">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2414,8 +2414,8 @@ client can do - there's no internal API.</p>
    (page refresh case), <code>GET /v1/notebooks/sessions/{session_id}</code> returns
    the same payload shape.
 2. <strong>Connect the WebSocket.</strong> <code>ws://.../v1/notebooks/ws/{session_id}</code>. The
-   handler verifies the session exists and (if owned) that the caller is the
-   owner - refuses with close code <code>1008 Notebook not found</code> otherwise. A
+   handler verifies the session exists and is visible to the caller's tenant -
+   refuses with close code <code>1008 Notebook not found</code> otherwise. A
    browser upgrade whose <code>Origin</code> is neither the server's own nor listed in
    <code>STRATA_CORS_ALLOW_ORIGINS</code> closes first with <code>1008 Origin not allowed</code>;
    clients that send no <code>Origin</code> (the TUI, scripts) are unaffected. The
@@ -2441,32 +2441,10 @@ session id is the runtime handle the server uses to look you up.</p>
 <p>A non-Vue client that passes the TOML id will get clean 404s from every
 endpoint. The Vue client doesn't have this confusion because it always
 stores the session id from the open response.</p>
-<h2 id="auth-and-ownership">Auth and ownership<a class="headerlink" href="#auth-and-ownership" title="Permanent link">&para;</a></h2>
+<h2 id="auth">Auth<a class="headerlink" href="#auth" title="Permanent link">&para;</a></h2>
 <h3 id="personal-mode-default">Personal mode (default)<a class="headerlink" href="#personal-mode-default" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>No header configured.</strong> Single-user trust. Every caller can hit every
-  endpoint. This is the local-dev default.</li>
-<li><strong><code>STRATA_PERSONAL_MODE_USER_HEADER</code> set.</strong> Personal mode behind an
-  authenticating proxy (Cloudflare Access, Pomerium, …). The proxy injects
-  the configured header (e.g. <code>X-Authenticated-User</code>); the backend reads it
-  via <code>_caller_identity</code> and uses it for:</li>
-<li><strong>Storage scoping</strong> - each user gets a private subdir under the storage
-    root (<code>/discover</code>, <code>/create</code>, path-keyed deletes).</li>
-<li><strong>Owner stamping</strong> - <code>notebook.toml</code> records <code>owner = "&lt;header value&gt;"</code>
-    on create.</li>
-<li><strong>Owner enforcement</strong> - every <code>WS /{session_id}</code> upgrade and every
-    REST <code>/{session_id}/...</code> route checks the caller's header against the
-    notebook's owner. Mismatch returns close <code>1008</code> or HTTP 404 (same
-    generic "Notebook not found" body, so probes can't enumerate owners).</li>
-<li><strong>Unowned notebooks pass through</strong> - legacy notebooks without an
-    <code>owner</code> field (and notebooks created by services that don't send the
-    header) accept any caller.</li>
-</ul>
-<p>Both surfaces share a single gate: every <code>SessionDep</code> route routes through
-<code>get_notebook_session</code>, which resolves the session and immediately calls
-<code>_require_owner</code>. The WS upgrade applies the same check before
-<code>accept()</code>. A leaked <code>session_id</code> is <em>not</em> a bearer capability - owner
-enforcement is symmetric across REST and WS, with no opt-outs.</p>
+<p>Single-user trust: a personal server has one user, and every caller can hit
+every endpoint. This is the local-dev default.</p>
 <h3 id="service-mode">Service mode<a class="headerlink" href="#service-mode" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>auth_mode = "trusted_proxy"</code> is the usual deployment shape; <code>api_key</code>
@@ -2530,7 +2508,7 @@ further calls are required before showing a useful UI. The shape is
 <td><code>deployment_mode</code>, <code>default_parent_path</code>, <code>available_python_versions</code>, <code>default_python_version</code>, <code>python_selection_fixed</code>, <code>registry_enabled</code>, <code>team_store_configured</code>.</td>
 </tr>
 <tr>
-<td><code>id</code>, <code>name</code>, <code>owner</code>, <code>worker</code>, <code>timeout</code>, <code>env</code>, <code>ai</code></td>
+<td><code>id</code>, <code>name</code>, <code>worker</code>, <code>timeout</code>, <code>env</code>, <code>ai</code></td>
 <td><code>notebook.toml</code>, plus fetched secrets in <code>env</code>; secret values are masked (see <a href="../rest-api/#update-notebook-default-env">Update Notebook Default Env</a>)</td>
 </tr>
 <tr>
@@ -2805,7 +2783,7 @@ edits exactly as before. <code>0</code> turns the lock off.</p>
 <li><a href="../notebook-toml/">notebook.toml Schema</a> - what the on-disk config
   looks like.</li>
 <li><a href="../configuration/">Configuration</a> - the server-side knobs
-  (<code>personal_mode_user_header</code>, deployment mode, storage root, …).</li>
+  (deployment mode, auth mode, storage root, …).</li>
 </ul>
 
 

@@ -1879,17 +1879,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-notebook-ownership-gets-stamped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How notebook ownership gets stamped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#trust-boundaries-pick-a-shape" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1913,10 +1902,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#small-trusted-team-520-people" class="md-nav__link">
+  <a href="#a-team" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Small trusted team (5–20 people)
+        A team
       
     </span>
   </a>
@@ -2166,17 +2155,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-notebook-ownership-gets-stamped" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How notebook ownership gets stamped
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#trust-boundaries-pick-a-shape" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2200,10 +2178,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#small-trusted-team-520-people" class="md-nav__link">
+  <a href="#a-team" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Small trusted team (5–20 people)
+        A team
       
     </span>
   </a>
@@ -2269,15 +2247,12 @@
 
 
 <h1 id="privacy-sharing-model">Privacy &amp; Sharing Model<a class="headerlink" href="#privacy-sharing-model" title="Permanent link">&para;</a></h1>
-<p>How notebook access works depends on whether personal mode's
-per-user header (<code>STRATA_PERSONAL_MODE_USER_HEADER</code>) is set. With it
-unset, access is <strong>URL-based</strong>, similar to Google Docs: notebook IDs
-are unguessable, and anyone who can reach the server and has the ID
-can open and execute the notebook. With it set, every notebook route
-checks the notebook's owner and answers <code>404</code> to anyone else, so a
-shared link works only for its owner. Service mode gates the routes
-by scope, not by owner. This page lays out the model honestly so you
-can pick the deployment shape that matches your trust boundary.</p>
+<p>A personal server has one user, so notebook access there is
+<strong>URL-based</strong>, similar to Google Docs: notebook IDs are unguessable,
+and anyone who can reach the server and has the ID can open and
+execute the notebook. Service mode gates the routes by scope and
+tenant. This page lays out the model honestly so you can pick the
+deployment shape that matches your trust boundary.</p>
 <h2 id="whats-shared-what-isnt">What's shared, what isn't<a class="headerlink" href="#whats-shared-what-isnt" title="Permanent link">&para;</a></h2>
 <h3 id="iceberg-scan-cache-shared-by-design">Iceberg scan cache, shared by design<a class="headerlink" href="#iceberg-scan-cache-shared-by-design" title="Permanent link">&para;</a></h3>
 <p>The original Strata value prop: identical scans hit the same cache.
@@ -2303,115 +2278,25 @@ store by provenance, so identical cells in different notebooks hit
 each other there.</p>
 <h3 id="notebook-access">Notebook access<a class="headerlink" href="#notebook-access" title="Permanent link">&para;</a></h3>
 <p>Notebook IDs are full UUIDs (8-char prefix for display, full UUID
-for the actual ID). They're not in any global enumeration and
-they're not in <code>discover</code>'s output unless the caller owns them.
-What happens next depends on whether <code>STRATA_PERSONAL_MODE_USER_HEADER</code>
-is configured.</p>
-<p><strong>With per-user scoping on</strong>, knowing the id is not enough. Every route
-that takes a session id resolves it through one dependency,
-<code>get_notebook_session</code>, which checks the notebook's recorded owner against
-the caller's identity and answers <code>404</code> on a mismatch. The WebSocket upgrade
-does the same and closes with <code>1008</code>. A missing header is denied too, so a
-caller who sends nothing is not treated as everyone.</p>
-<table>
-<thead>
-<tr>
-<th>Endpoint</th>
-<th>Owner check?</th>
-<th>How</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>GET /v1/notebooks/{id}/cells</code></td>
-<td><strong>Yes</strong></td>
-<td><code>get_notebook_session</code>, 404 to non-owners</td>
-</tr>
-<tr>
-<td><code>POST /v1/notebooks/{id}/cells/{cell_id}/execute</code></td>
-<td><strong>Yes</strong></td>
-<td>Same dependency</td>
-</tr>
-<tr>
-<td><code>GET /v1/notebooks/{id}/dag</code></td>
-<td><strong>Yes</strong></td>
-<td>Same dependency</td>
-</tr>
-<tr>
-<td><code>WS /v1/notebooks/ws/{id}</code></td>
-<td><strong>Yes</strong></td>
-<td>Upgrade closes with 1008</td>
-</tr>
-<tr>
-<td><code>GET /v1/notebooks/discover</code></td>
-<td><strong>Yes</strong></td>
-<td>Filters by owner, and scans only the caller's own storage root</td>
-</tr>
-<tr>
-<td><code>POST /v1/notebooks/open</code></td>
-<td><strong>Yes</strong></td>
-<td>The path must lie inside the caller's own storage root</td>
-</tr>
-<tr>
-<td><code>DELETE /v1/notebooks/{id}</code></td>
-<td><strong>Yes</strong></td>
-<td>404 to non-owners</td>
-</tr>
-<tr>
-<td><code>POST /v1/notebooks/delete-by-path</code></td>
-<td><strong>Yes</strong></td>
-<td>404 to non-owners</td>
-</tr>
-<tr>
-<td><code>PUT /v1/notebooks/{id}/name</code></td>
-<td><strong>Yes</strong></td>
-<td>404 to non-owners</td>
-</tr>
-</tbody>
-</table>
-<p>The generic <code>404</code> is deliberate: a <code>403</code> would confirm that a notebook with
-that id exists.</p>
-<p><strong>With the header unset</strong> there is no identity to check against, every
-notebook is unowned, and anyone who can reach the port can open anything.
-That is the single-user shape, and it is why personal mode binds to loopback
-by default.</p>
-<p>Sharing a link with a teammate therefore does not work under per-user
-scoping, because their path resolution is confined to their own root. Use
-<a href="../../notebook/publishing/">publishing</a> to hand someone a result, or service
-mode for a genuinely shared deployment.</p>
-<h2 id="how-notebook-ownership-gets-stamped">How notebook ownership gets stamped<a class="headerlink" href="#how-notebook-ownership-gets-stamped" title="Permanent link">&para;</a></h2>
-<p>The <code>owner</code> field on <code>notebook.toml</code> is set only in
-personal-mode-with-proxy (<code>STRATA_PERSONAL_MODE_USER_HEADER</code> set):
-<code>POST /create</code>, <code>POST /import</code> and <code>POST /import-snapshot</code> stamp the
-caller's identity from the configured header (typically
-<code>Cf-Access-Authenticated-User-Email</code>, <code>X-Forwarded-Email</code>, etc.).</p>
-<p>Service mode stamps no owner: it refuses <code>personal_mode_user_header</code>,
-and <code>X-Strata-Principal</code> is not used for notebook ownership. There,
-notebook scopes decide what a principal can do.</p>
-<p>When <code>personal_mode_user_header</code> is unset, <code>owner</code> stays <code>None</code>, all
-notebooks are unowned and the single-user pattern applies. This is
-the default for a developer running on localhost.</p>
-<p>Unowned notebooks (<code>owner is None</code>) remain accessible to any
-caller. Migrating an unowned notebook to ownership requires
-manually editing <code>notebook.toml</code>.</p>
+for the actual ID). They're not in any global enumeration.</p>
+<p>On a personal server there is no identity to check against: <code>discover</code>
+lists every notebook under the storage root, and anyone who can reach
+the port can open anything. That is the single-user shape, and it is why
+personal mode binds to loopback by default. Use
+<a href="../../notebook/publishing/">publishing</a> to hand someone a result, or
+service mode for a genuinely shared deployment.</p>
 <h2 id="trust-boundaries-pick-a-shape">Trust boundaries, pick a shape<a class="headerlink" href="#trust-boundaries-pick-a-shape" title="Permanent link">&para;</a></h2>
 <h3 id="single-developer-default">Single developer (default)<a class="headerlink" href="#single-developer-default" title="Permanent link">&para;</a></h3>
 <p><code>STRATA_DEPLOYMENT_MODE=personal</code> on localhost, no proxy. The
 caller is you, every notebook is yours, sharing isn't on the table.
 Use this shape unless something else applies.</p>
-<h3 id="small-trusted-team-520-people">Small trusted team (5–20 people)<a class="headerlink" href="#small-trusted-team-520-people" title="Permanent link">&para;</a></h3>
-<p><code>STRATA_DEPLOYMENT_MODE=personal</code> + an authenticating proxy
-(Cloudflare Access, Pomerium, corporate SSO) +
-<code>STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email</code>
-(or whatever your proxy injects).</p>
-<p>Every notebook is stamped with its creator's identity and lives
-under that user's own storage root. <code>discover</code> filters to your
-notebooks, and every notebook route answers <code>404</code> to anyone else, so
-a link to an owned notebook works only for its owner. Unowned
-notebooks stay open to everyone.</p>
-<p><strong>This is the right shape for most teams.</strong> Share results by
-<a href="../../notebook/publishing/">publishing</a> them rather than by sending a
-notebook link.</p>
+<h3 id="a-team">A team<a class="headerlink" href="#a-team" title="Permanent link">&para;</a></h3>
+<p>Give each member a personal server (their own machine, or one container
+each behind your proxy) and share results through a service-mode store:
+see <a href="../service-mode/#connecting-a-notebook-to-the-shared-store">Connecting a notebook to the shared store</a>.
+Share results by <a href="../../notebook/publishing/">publishing</a> them rather
+than by sending a notebook link. For one server the whole team uses,
+run service mode (next section).</p>
 <h3 id="multi-tenant-or-hard-isolation-requirements">Multi-tenant or hard-isolation requirements<a class="headerlink" href="#multi-tenant-or-hard-isolation-requirements" title="Permanent link">&para;</a></h3>
 <p><code>STRATA_DEPLOYMENT_MODE=service</code> + multi-tenancy. Each tenant gets
 its own QoS pools, cache namespacing, and metric labels. Notebook routes
@@ -2420,13 +2305,12 @@ so what a principal can reach depends on the scopes the proxy asserts
 for it.</p>
 <p>Notes:</p>
 <ul>
-<li><strong>Notebooks are not tenant-scoped.</strong> Tenancy isolates the scan
-  cache and the server's artifact store: the tenant is hashed into
-  cache keys, and artifact and name reads are filtered by tenant.
-  Notebook sessions and the notebook storage root are shared by the
-  whole server, and there are no per-notebook ACLs. If Alice's
-  notebook ID leaks to Bob and Bob holds <code>notebook:read</code>, he can open
-  it, whatever tenant either of them is in.</li>
+<li><strong>Notebooks are tenant-scoped, not per-principal.</strong> A session
+  records the tenant of the caller who opened it and looks missing to
+  other tenants, and a multi-tenant server gives each tenant its own
+  subdirectory of the storage root. Within a tenant there are no
+  per-notebook ACLs: if Alice's notebook ID leaks to Bob in her tenant
+  and Bob holds <code>notebook:read</code>, he can open it.</li>
 <li><strong>Notebook deletion is personal-mode only.</strong> Service mode refuses
   <code>DELETE /v1/notebooks/{id}</code> and <code>delete-by-path</code>.</li>
 </ul>
@@ -2442,10 +2326,9 @@ any other notebook tool: hard-private = separate instances.</p>
 <h2 id="future-direction-per-notebook-acls">Future direction: per-notebook ACLs<a class="headerlink" href="#future-direction-per-notebook-acls" title="Permanent link">&para;</a></h2>
 <p>Real per-notebook permissions (a <code>read_principals</code> / <code>write_principals</code>
 list in <code>notebook.toml</code> checked on every endpoint) would sit between
-the two shapes that exist today. With per-user scoping an owned
-notebook is its owner's alone; without it, or in service mode, anyone
-who can reach the server and has the ID (and, in service mode, the
-scope) can open it. Nothing in between is implemented:</p>
+the two shapes that exist today: a personal server has one user, and
+in service mode anyone in the tenant who has the ID and the scope can
+open a notebook. Nothing in between is implemented:</p>
 <ul>
 <li><a href="../../notebook/publishing/">Publishing</a> already hands a result to
   someone without handing them the notebook.</li>

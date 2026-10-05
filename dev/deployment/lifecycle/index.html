@@ -2451,7 +2451,7 @@ intentionally want the legacy path (e.g. you're already mounting a
 volume at <code>/tmp/strata-notebooks</code> in Docker - see the Docker page
 for that pattern).</p>
 </div>
-<p>For multi-user deployments, see <code>STRATA_PERSONAL_MODE_USER_HEADER</code> in <a href="../../reference/configuration/#notebook">Configuration</a> - it scopes each user to their own subdirectory under the storage root.</p>
+<p>On a multi-tenant service-mode server, each tenant gets its own subdirectory under the storage root.</p>
 
 
 
