@@ -446,13 +446,17 @@ class TestWhatIsShownStaysAPrefix:
                 stderr=_asyncio.subprocess.PIPE,
             )
             drain = _asyncio.create_task(_drain_via(remote_executor, proc))
-            await _asyncio.sleep(0.2)
+            # Release only once both pipes are read to the end: the queue is then
+            # full and every later chunk was dropped, whatever the machine's speed.
+            while not (proc.stdout.at_eof() and proc.stderr.at_eof()):
+                await _asyncio.sleep(0.01)
             release.set()
             stdout, _ = await drain
         finally:
             monkeypatch.undo()
 
         shown = "".join(posted)
+        assert 0 < len(shown) < len(stdout), "the burst was not larger than the queue"
         assert stdout.decode().startswith(shown), (
             "what the notebook was shown is no longer the beginning of the console"
         )
