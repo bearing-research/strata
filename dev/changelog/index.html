@@ -3482,6 +3482,21 @@ no route serves files from outside the frontend.</p>
 <li>Service mode: a table URI whose warehouse is in object storage needs a
   catalog <code>uri</code>; MCP tools reach only sessions of the caller's tenant; the
   Prometheus scrape leaves out per-table series under principal auth.</li>
+<li>Service mode: a notebook session belongs to the tenant that opened, created
+  or imported it; with <code>multi_tenant_enabled</code>, each tenant's notebooks live
+  under <code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code>, so notebooks at the top of the
+  storage root are no longer listed or openable by non-admin callers until
+  they are moved into their tenant's folder.</li>
+<li>The root <code>fly.toml</code> is now <code>fly.example.toml</code>; copy it to <code>fly.toml</code>
+  (gitignored) and fill in the placeholders to deploy on Fly.</li>
+<li><code>strata-worker --connect</code> reads its relay token from
+  <code>STRATA_WORKER_CONNECT_TOKEN</code>; workers upgrade with the server for the
+  relay protocol.</li>
+<li><code>STRATA_PERSONAL_MODE_USER_HEADER</code> is gone and ignored if set: a personal
+  server has one user, and every caller reaches every notebook. Before
+  upgrading a server that used it, give each member a personal server or
+  switch to service mode. A notebook's <code>owner</code> key is ignored and dropped on
+  the next structural edit. The TUI's <code>--user-header</code>/<code>--user</code> flags are gone.</li>
 <li>Service mode: a table URI whose warehouse is in object storage needs a
   catalog <code>uri</code> (<code>STRATA_CATALOG_URI</code>); without one, scans, cache warming and
   export to a table answer 400 instead of using a SQLite catalog on the
@@ -3618,6 +3633,20 @@ no route serves files from outside the frontend.</p>
   the same store; <code>pool.queue</code> and <code>pool.boot</code> spans join the submitter's trace.</li>
 <li>The generic reference executor reports its hardware on <code>GET /health</code>.</li>
 <li><code>benchmarks/capacity_sweep.py --no-server</code> takes <code>--table-uri</code>.</li>
+<li><strong>Tenant-aware notebook routes.</strong> In service mode every notebook REST route,
+  <code>/sessions</code> and the WebSocket treat another tenant's session as missing
+  (404, or close 1008), as MCP already did; <code>admin:*</code> reaches every session.
+  With <code>multi_tenant_enabled</code> each tenant gets its own storage folder. This is a
+  convenience for small trusted tenants, not an isolation boundary: cells still
+  share the host.</li>
+<li><strong>Serving under a path.</strong> <code>STRATA_PUBLIC_BASE_PATH</code> serves Strata behind a
+  reverse proxy at a non-root path, whether or not the proxy strips it; the
+  UI, its WebSocket, the API docs, signed build URLs and publication pages
+  carry the path. The frontend bundle uses relative asset URLs.</li>
+<li><strong>A worker behind NAT.</strong> <code>strata-worker --connect wss://...</code> binds no port: it
+  dials out to a relay and serves cells over that WebSocket, reconnecting with
+  backoff. The relay protocol is documented in the Worker Relay Protocol
+  reference; Strata does not ship a relay.</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3705,6 +3734,22 @@ no route serves files from outside the frontend.</p>
   only fail).</li>
 <li><code>gs://</code> and <code>abfs://</code> warehouse catalogs read with the server's
   <code>STRATA_GCS_*</code> and <code>STRATA_AZURE_*</code> settings.</li>
+<li>A table with no snapshots yet reads as zero rows with its schema (scans,
+  transform inputs, cache warm, <code>@table</code> inputs) instead of a 500, and nothing
+  read from it is reused.</li>
+<li>Under principal auth the AI usage series on <code>/metrics/prometheus</code> carry no
+  <code>principal</code> label: they are per-tenant, per-model totals.</li>
+<li>A named catalog's <code>credential</code> resolves against the notebook's environment
+  wherever a notebook reads the catalog, not only for the DuckDB attach.</li>
+<li>The <code>azure</code> extra installs <code>adlfs</code>, which PyIceberg needs to read Azure lake
+  tables.</li>
+<li>The materialize and stream handlers moved from <code>server.py</code> into routers;
+  their routes now carry the "materialize" and "streams" OpenAPI tags.</li>
+<li><strong>Two modes.</strong> The personal-mode multi-user header is retired: personal
+  mode has exactly one user, and a team runs a personal server per member
+  sharing results through a service-mode store, or one service-mode server.
+  <code>discover</code> and the notebook state no longer carry <code>owner</code>, and <code>mcp_enabled</code>
+  is no longer refused in personal mode on its account.</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3993,6 +4038,8 @@ no route serves files from outside the frontend.</p>
 <li>The hardware probe answers on Windows.</li>
 <li>The docs no longer list <code>az://</code> as a warehouse scheme (pyiceberg cannot read
   one); use <code>abfs://</code>.</li>
+<li>A publication page's data and Verify links pointed at the server root, which
+  broke behind a path prefix.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
