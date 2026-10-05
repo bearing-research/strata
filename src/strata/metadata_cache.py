@@ -5,6 +5,8 @@ Each is an in-memory LRU over an optional SQLite store that persists across rest
 """
 
 import json
+import logging
+import sqlite3
 from collections import OrderedDict
 from collections.abc import Callable, Hashable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,6 +16,8 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, overload
 
 import pyarrow as pa
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pyarrow.fs
@@ -490,8 +494,9 @@ class ParquetMetadataCache:
             if to_persist:
                 try:
                     self._store.put_parquet_meta_many(to_persist)
-                except Exception:
-                    pass
+                except sqlite3.Error as exc:
+                    # Persistence is best-effort: the in-memory entries serve this process.
+                    logger.debug("Could not persist %d Parquet footers: %s", len(to_persist), exc)
 
         return result
 
@@ -611,8 +616,9 @@ class ParquetMetadataCache:
         try:
             persisted = _persisted_parquet_meta_from_loaded(metadata)
             self._store.put_parquet_meta(file_path, persisted)
-        except Exception:
-            pass  # Persistence is best-effort
+        except sqlite3.Error as exc:
+            # Persistence is best-effort: the in-memory entry serves this process.
+            logger.debug("Could not persist Parquet metadata for %s: %s", file_path, exc)
 
     def _load_metadata(self, file_path: str) -> ParquetMetadata:
         """Load metadata from a Parquet file."""
@@ -734,8 +740,14 @@ class ManifestCache:
                 try:
                     data_files = [asdict(entry) for entry in resolution.data_files]
                     self._store.put_manifest(catalog_name, table_identity, snapshot_id, data_files)
-                except Exception:
-                    pass  # Persistence is best-effort
+                except sqlite3.Error as exc:
+                    # Persistence is best-effort: the in-memory entry serves this process.
+                    logger.debug(
+                        "Could not persist the manifest resolution of %s@%s: %s",
+                        table_identity,
+                        snapshot_id,
+                        exc,
+                    )
 
     def clear(self) -> None:
         """Clear all cached resolutions."""
