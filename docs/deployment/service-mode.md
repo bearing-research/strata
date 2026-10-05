@@ -229,6 +229,16 @@ alphanumeric / `_` / `-` characters and hashed into:
   cache dir. Artifacts are not split by directory; each row records
   its tenant, and reads are filtered by it.
 - **QoS limiters**: interactive + bulk semaphores per tenant.
+- **Notebooks**: each tenant's notebooks live under
+  `<notebook_storage_dir>/<tenant>/`, and `/discover`, `/open`, `/create`
+  and the imports stay inside it. A live session belongs to the tenant
+  that opened it; to any other tenant its REST routes, WebSocket and MCP
+  tools answer as for an unknown session. `admin:*` sees every tenant's
+  notebooks and sessions. This keeps tenants out of each other's
+  notebooks, but cells still run on one host: it is a convenience for
+  small, trusted tenants, not an isolation boundary (see
+  [`STRATA_NOTEBOOK_HARNESS_USER`](#who-a-cell-is-strata_notebook_harness_user)
+  and remote workers for what a cell can reach).
 - **Cache warm jobs**: a background job from `POST /v1/cache/warm/async`
   is listed, read and cancelled (`/v1/cache/warm/jobs*`) only by its
   own tenant; `admin:*` sees every tenant's.

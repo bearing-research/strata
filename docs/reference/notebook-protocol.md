@@ -114,8 +114,16 @@ enforcement is symmetric across REST and WS, with no opt-outs.
   `/sessions` routes, which return `403 Forbidden` elsewhere.
 - `/open` returns the session the same principal already has open on that
   path, and never another principal's: service mode has no per-session owner
-  check, so a session id is what keeps members out of each other's live
-  sessions. Without a principal, every open starts a new session.
+  check, so a session id is what keeps members of one tenant out of each
+  other's live sessions. Without a principal, every open starts a new session.
+- A session records the tenant of whoever opened, created or imported it.
+  Another tenant's session looks missing: every `/{session_id}` REST route
+  answers `404` and the WS upgrade closes with `1008 Notebook not found`, as
+  for an unknown id (MCP applies the same rule). `admin:*` reaches every
+  session, and a session opened without a tenant is open to all. With
+  `multi_tenant_enabled`, `/discover`, `/open`, `/create` and the imports
+  are confined to the tenant's own `<notebook_storage_dir>/<tenant>/`
+  (`admin:*` keeps the whole root).
 - Every route on the `/v1/notebooks` and `/v1/projects` routers is scope
   gated under principal auth, by the same `notebook:read` /
   `notebook:write` / `notebook:execute` table that checks the frames below
