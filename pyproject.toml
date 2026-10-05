@@ -46,6 +46,7 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "tomli_w>=1.0.0",
     "jsonschema>=4.0.0",
+    "pyyaml>=6.0", # Conda environment.yaml import
     "infisicalsdk>=1.0.16",
     "packaging>=24.0",
     "filelock>=3.16.0", # Cross-process renv mutual exclusion

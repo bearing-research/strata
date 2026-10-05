@@ -327,6 +327,15 @@ class TestRequirementsCompatibility:
         with pytest.raises(ValueError, match="Unsupported requirements entry"):
             parse_requirements_text("-r base.txt")
 
+    def test_environment_yaml_import_needs_no_extra(self):
+        """The base install ships PyYAML; a slim `uv tool install` can import environment.yaml."""
+        import tomllib
+
+        root = Path(__file__).resolve().parents[2]
+        with open(root / "pyproject.toml", "rb") as f:
+            dependencies = tomllib.load(f)["project"]["dependencies"]
+        assert any(dep.startswith("pyyaml") for dep in dependencies)
+
     def test_parse_environment_yaml_text_extracts_pip_compatible_requirements(self):
         """environment.yaml import should translate a supported subset with warnings."""
         requirements, warnings = parse_environment_yaml_text(
