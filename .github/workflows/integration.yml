@@ -88,6 +88,7 @@ jobs:
 
       - name: Run emulator-backed mount integration tests
         run: |
+          set -o pipefail
           uv run pytest \
             tests/notebook/test_e2e_mounts_s3.py \
             tests/notebook/test_e2e_mounts_azure.py \
@@ -97,4 +98,8 @@ jobs:
             tests/test_lake_catalogs_integration.py \
             tests/notebook/test_e2e_duckdb_lake.py \
             tests/test_s3_integration.py \
-            -v --tb=short -p no:cacheprovider
+            -v --tb=short -p no:cacheprovider | tee emulator-tests.log
+          # The lake-catalog tests skip as a module without a Docker daemon; a
+          # skip passes pytest, and here it would mean the real writers' deletes
+          # were never checked.
+          grep -q "test_lake_catalogs_integration.py::.* PASSED" emulator-tests.log

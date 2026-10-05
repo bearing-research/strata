@@ -46,7 +46,7 @@ def table(tmp_path):
     table.append(pa.table({"id": pa.array(range(10), pa.int64())}))
     (task,) = table.scan().plan_files()
     catalog.engine.dispose()
-    return {"uri": f"{warehouse.as_uri()}#db.t", "data_file": task.file.file_path}
+    return {"uri": f"{warehouse.as_uri()}#db.t", "data_file": task.file.file_path, "table": table}
 
 
 def _delete_file(path, rows: dict[str, list[int]], file_format=FileFormat.PARQUET) -> DataFile:
@@ -166,6 +166,30 @@ def test_every_delete_file_for_a_data_file_applies(tmp_path, table, attach):
         ),
     )
     assert _scan(_config(tmp_path), table["uri"])[0] == [1, 2, 4, 5, 6, 7, 8]
+
+
+def test_a_committed_positional_delete_applies_to_the_files_before_it(tmp_path, table):
+    """Unpatched: the planner matches the snapshot's delete files to its data files itself."""
+    from tests.iceberg_fixtures import commit_files, positional_delete
+
+    iceberg = table["table"]
+    commit_files(iceberg, positional_delete(iceberg, {table["data_file"]: [1]}))
+
+    assert _scan(_config(tmp_path), table["uri"])[0] == [0, 2, 3, 4, 5, 6, 7, 8, 9]
+
+
+def test_a_positional_delete_leaves_a_file_added_after_it(tmp_path, table):
+    """A delete applies to data files at or below its sequence number, not later ones."""
+    from tests.iceberg_fixtures import commit_files, data_file, positional_delete
+
+    iceberg = table["table"]
+    later = data_file(iceberg, pa.table({"id": pa.array([10, 11], pa.int64())}))
+    commit_files(
+        iceberg, positional_delete(iceberg, {table["data_file"]: [1], later.file_path: [0]})
+    )
+    commit_files(iceberg, later)
+
+    assert _scan(_config(tmp_path), table["uri"])[0] == [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 
 def test_the_persisted_manifest_keeps_the_deletes(tmp_path, table, attach):
