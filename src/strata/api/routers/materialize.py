@@ -100,7 +100,7 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
                 detail={
                     "error": "transform_unknown",
                     "message": f"Transform '{executor_ref}' is not registered on "
-                    "this server — nothing can execute it. "
+                    "this server: nothing can execute it. "
                     f"Available transforms: {available}.",
                     "executor": executor_ref,
                 },
