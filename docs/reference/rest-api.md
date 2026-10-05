@@ -1048,7 +1048,12 @@ the request never becomes a pending build.
 GET /v1/streams/{stream_id}
 ```
 
-Returns Arrow IPC stream.
+Returns Arrow IPC stream. With an artifact store, the response carries
+`X-Arrow-Row-Count` and `X-Strata-Artifact-Uri`, the canonical
+`strata://artifact/{id}@v={n}` of the rows it serves. That URI can differ from the
+materialize response's: when two misses for one scan were in flight together,
+one artifact becomes the ready result and the other reads `superseded` (its own
+URI still serves the same rows). Read the header to keep the canonical one.
 
 ### Health
 

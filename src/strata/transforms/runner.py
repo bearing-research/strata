@@ -469,15 +469,9 @@ class BuildRunner:
                     raise ValueError(
                         f"Failed to finalize build artifact {build.artifact_id}@v={build.version}"
                     )
-                if (
-                    finalized_artifact.id != build.artifact_id
-                    or finalized_artifact.version != build.version
-                ):
-                    # Deduplicated to an artifact that already existed, and the
-                    # build now points at it; nothing reads this attempt.
-                    self.artifact_store.delete_attempt_blob(
-                        build.artifact_id, build.version, attempt
-                    )
+                # Deduplicated to an artifact that already existed: the build points at it, and
+                # this attempt's bytes stay as the superseded version's blob, readable by the URI
+                # the materialize response handed out, until retention collects it.
 
                 # Set here because the materialize endpoint can't: the build is async.
                 if build.name:

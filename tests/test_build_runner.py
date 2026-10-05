@@ -611,9 +611,12 @@ class TestBuildExecution:
         assert completed_build.artifact_id == existing_artifact_id
         assert completed_build.version == existing_version
 
+        # Overtaken, not failed: the URI materialize handed out still serves its rows.
         duplicate_artifact = artifact_store.get_artifact(duplicate_artifact_id, duplicate_version)
         assert duplicate_artifact is not None
-        assert duplicate_artifact.state == "failed"
+        assert duplicate_artifact.state == "superseded"
+        assert duplicate_artifact.row_count == 1
+        assert artifact_store.read_blob(duplicate_artifact_id, duplicate_version) == output_bytes
 
     @pytest.mark.asyncio
     async def test_build_max_output_bytes_exceeded(self, build_runner, artifact_store, build_store):

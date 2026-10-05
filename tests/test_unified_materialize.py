@@ -252,6 +252,44 @@ class TestUnifiedMaterialize:
         assert data2["state"] == "ready"
         assert data2["artifact_uri"] == data1["artifact_uri"]
 
+    def test_two_in_flight_misses_both_serve_and_the_second_is_superseded(
+        self, server_with_personal_mode
+    ):
+        """Two misses for one scan before either streams: both serve every row.
+
+        Finalize keeps one ready row per provenance; the second artifact is overtaken, not
+        failed: it reads ``superseded``, its data stays fetchable by its own URI, usage counts no
+        failure, and its stream names the canonical artifact.
+        """
+        base_url = server_with_personal_mode["base_url"]
+        table_uri = server_with_personal_mode["warehouse"]["table_uri"]
+        body = {"inputs": [table_uri], "transform": {"executor": "scan@v1", "params": {}}}
+
+        first = requests.post(f"{base_url}/v1/materialize", json=body).json()
+        second = requests.post(f"{base_url}/v1/materialize", json=body).json()
+        assert first["state"] == second["state"] == "building"
+        assert first["artifact_uri"] != second["artifact_uri"]
+
+        for response in (first, second):
+            stream = requests.get(f"{base_url}{response['stream_url']}")
+            assert stream.status_code == 200
+            assert ipc.open_stream(stream.content).read_all().num_rows == 100
+            assert stream.headers["X-Strata-Artifact-Uri"] == first["artifact_uri"]
+
+        overtaken = second["artifact_uri"].removeprefix("strata://artifact/")
+        artifact_id, version = overtaken.split("@v=")
+        info = requests.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}")
+        assert info.status_code == 200
+        assert info.json()["state"] == "superseded"
+        assert info.json()["row_count"] == 100
+        data = requests.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data")
+        assert data.status_code == 200
+        assert ipc.open_stream(data.content).read_all().num_rows == 100
+
+        usage = requests.get(f"{base_url}/v1/artifacts/usage").json()
+        assert usage["failed_versions"] == 0
+        assert usage["ready_versions"] == 1
+
     def test_identity_materialize_artifact_mode(self, server_with_personal_mode):
         """scan@v1 in artifact mode."""
         base_url = server_with_personal_mode["base_url"]
