@@ -80,11 +80,12 @@ class MaterializeService:
 
         - ``strata://artifact/{id}@v={n}`` -> ``"{id}@v={n}"``
         - ``strata://name/{name}`` -> the named artifact's ``"{id}@v={version}"``
-        - ``file://`` / ``s3://`` table -> :func:`table_input_version`, plus the
-          plan's ``table_identity`` for the caller's ACL check.
+        - any other URI is a table, in every form the scan path reads ->
+          :func:`table_input_version`, plus the plan's ``table_identity`` for the
+          caller's ACL check.
 
         Raises:
-            InputResolutionError: malformed/unknown URI, unknown name, or a failed
+            InputResolutionError: malformed ``strata://`` URI, unknown name, or a failed
                 table plan; a table its catalog does not have, or a local warehouse that
                 does not exist, is 404, one Strata refuses to read 422 with the planner's
                 message.
@@ -110,27 +111,27 @@ class MaterializeService:
                 raise InputResolutionError(404, f"Name not found: {name}")
             return ResolvedInput(f"{artifact.id}@v={artifact.version}", artifact=artifact)
 
-        if input_uri.startswith("file://") or input_uri.startswith("s3://"):
-            try:
-                plan = planner.plan(
-                    table_uri=input_uri,
-                    snapshot_id=None,  # Current snapshot
-                    columns=None,
-                    filters=None,
-                )
-            except UnsupportedTableFormatError as e:
-                raise InputResolutionError(422, str(e)) from e
-            except NoSuchTableError as e:
-                raise InputResolutionError(404, f"Table not found: {input_uri}") from e
-            except WarehouseNotFound as e:
-                raise InputResolutionError(404, str(e)) from e
-            except Exception as e:
-                raise InputResolutionError(
-                    400, f"Could not resolve table {input_uri}: {str(e)}"
-                ) from e
-            return ResolvedInput(table_input_version(plan), table_identity=plan.table_identity)
+        if input_uri.startswith("strata://"):
+            raise InputResolutionError(400, f"Unknown input URI type: {input_uri}")
 
-        raise InputResolutionError(400, f"Unknown input URI type: {input_uri}")
+        # The planner, not a scheme list, decides what is a table: the scan path reads
+        # object-store, named-catalog and bare forms, and a transform over one must agree.
+        try:
+            plan = planner.plan(
+                table_uri=input_uri,
+                snapshot_id=None,  # Current snapshot
+                columns=None,
+                filters=None,
+            )
+        except UnsupportedTableFormatError as e:
+            raise InputResolutionError(422, str(e)) from e
+        except NoSuchTableError as e:
+            raise InputResolutionError(404, f"Table not found: {input_uri}") from e
+        except WarehouseNotFound as e:
+            raise InputResolutionError(404, str(e)) from e
+        except Exception as e:
+            raise InputResolutionError(400, f"Could not resolve table {input_uri}: {str(e)}") from e
+        return ResolvedInput(table_input_version(plan), table_identity=plan.table_identity)
 
     def compute_provenance(
         self,

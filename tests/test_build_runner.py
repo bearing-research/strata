@@ -906,7 +906,7 @@ class TestInputAcquisition:
     async def test_acquire_invalid_uri(self, build_runner):
         temp_files = []
         with pytest.raises(ValueError, match="Unsupported input URI"):
-            await build_runner._acquire_input("invalid://uri", temp_files)
+            await build_runner._acquire_input("strata://other/uri", temp_files)
 
     @pytest.mark.asyncio
     async def test_acquire_named_input_uses_build_tenant(self, build_runner, artifact_store):

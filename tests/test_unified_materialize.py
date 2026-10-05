@@ -709,6 +709,29 @@ class TestTransformOverATable:
         finally:
             client.close()
 
+    def test_a_table_uri_the_scan_path_reads_runs_to_ready(self, server_with_personal_mode):
+        """Every table URI form scan accepts is a transform input too.
+
+        A schemeless ``/wh#ns.t`` scans fine; as a transform input it must either run or be
+        refused at admission, never answer pending and fail in the runner.
+        """
+        from strata_client.client import StrataClient
+
+        base_url = server_with_personal_mode["base_url"]
+        warehouse = server_with_personal_mode["warehouse"]
+        path_uri = f"{warehouse['warehouse_path']}#test_db.events"
+        sql = {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT * FROM input0"}}
+
+        client = StrataClient(base_url=base_url)
+        try:
+            scanned = client.materialize(inputs=[path_uri], transform={"executor": "scan@v1"})
+            assert client.fetch(scanned.uri).num_rows == 100
+
+            artifact = client.materialize(inputs=[path_uri], transform=sql)
+            assert client.fetch(artifact.uri).num_rows == 100
+        finally:
+            client.close()
+
     def test_a_table_strata_refuses_to_read_is_422(self, server_with_personal_mode):
         """The planner's refusal keeps its status and message, as on the scan path."""
         from pyiceberg.manifest import FileFormat

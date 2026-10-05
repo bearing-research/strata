@@ -263,12 +263,28 @@ class TestResolveInputVersion:
         assert exc.value.status_code == 422
         assert exc.value.detail == "Strata cannot read this table: rewrite it"
 
-    def test_unknown_uri_scheme_is_400(self, service):
+    def test_unknown_strata_uri_is_400(self, service):
+        planner = _FakePlanner()
         with pytest.raises(InputResolutionError) as exc:
             service.resolve_input_version(
-                "ftp://nope", store=_FakeResolveStore(), planner=_FakePlanner()
+                "strata://other/nope", store=_FakeResolveStore(), planner=planner
             )
         assert exc.value.status_code == 400
+        assert planner.calls == []
+
+    @pytest.mark.parametrize(
+        "table_uri",
+        ["gs://lake/wh#ns.t", "abfs://lake/wh#ns.t", "/wh#ns.t", "cat:ns.t", "ns.t"],
+    )
+    def test_every_other_uri_is_planned_as_a_table(self, service, table_uri):
+        """The scan path's URI set is the transform input's: the planner decides, not a scheme."""
+        planner = _FakePlanner(snapshot_id=7, schema_id=1, table_identity="cat.ns.t")
+        resolved = service.resolve_input_version(
+            table_uri, store=_FakeResolveStore(), planner=planner
+        )
+        assert planner.calls == [table_uri]
+        assert resolved.version == "7:1"
+        assert resolved.table_identity == "cat.ns.t"
 
 
 class TestComputeIdentityProvenance:

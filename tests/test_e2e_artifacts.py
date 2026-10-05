@@ -223,16 +223,19 @@ class TestArtifactPipeline:
         client = ArtifactClient(e2e_server["base_url"])
 
         try:
-            result_table = pa.table({"x": [1]})
-
+            # The base persists via PUT, which takes a synthetic table input as its version;
+            # materialize resolves every table input, so the duplicate reads the base instead.
+            base_uri = client.create_artifact(
+                inputs=["table://source"], result_table=pa.table({"x": [1]})
+            )
             uri1 = client.create_artifact(
-                inputs=["table://source"],
-                result_table=result_table,
+                inputs=[base_uri],
+                result_table=pa.table({"x": [1]}),
                 params={"sql": "SELECT 1 as x"},
             )
 
             resp = client.materialize(
-                inputs=["table://source"],
+                inputs=[base_uri],
                 params={"sql": "SELECT 1 as x"},
             )
 

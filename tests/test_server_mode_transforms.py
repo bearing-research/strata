@@ -1311,8 +1311,8 @@ class TestServiceModeReviewFindings:
         )
         assert response.status_code == 403
 
-    def test_materialize_falls_back_on_unresolvable_input(self, server_mode_app, monkeypatch):
-        """A 400 still falls back to the raw URI; only authz and not-found short-circuit."""
+    def test_materialize_refuses_an_unresolvable_input(self, server_mode_app, monkeypatch):
+        """A 400 from input resolution is the answer; the raw URI is never built past."""
         from fastapi import HTTPException
 
         def unresolvable(*_args, **_kwargs):
@@ -1323,15 +1323,42 @@ class TestServiceModeReviewFindings:
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["weird://thing"],
+                "inputs": ["strata://other/thing"],
                 "transform": {
                     "executor": "duckdb_sql@v1",
                     "params": {"sql": "SELECT 1"},
                 },
             },
         )
-        assert response.status_code == 200
-        assert response.json()["build_id"] is not None
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Unknown input URI type"
+        assert get_artifact_store().stats()["total_versions"] == 0
+
+    def test_materialize_surfaces_a_failed_table_plan(self, server_mode_app):
+        """A plan that fails for a table input answers with the planner's 400.
+
+        Building past it would record a snapshot-less version, and a later request whose plan
+        also fails would dedup onto that result after the table advanced.
+        """
+        import strata.server as server_module
+
+        server_module._state.planner.plan.side_effect = RuntimeError(
+            "Failed to read Parquet metadata"
+        )
+
+        response = server_mode_app.post(
+            "/v1/artifacts/materialize",
+            json={
+                "inputs": ["s3://lake/wh#taxi.trips"],
+                "transform": {
+                    "executor": "duckdb_sql@v1",
+                    "params": {"sql": "SELECT 1"},
+                },
+            },
+        )
+        assert response.status_code == 400, response.text
+        assert "Failed to read Parquet metadata" in response.json()["detail"]
+        assert get_artifact_store().stats()["total_versions"] == 0
 
     def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_auth_app):
         """The build carries input_uris and params, so the pull-model manifest is not empty."""

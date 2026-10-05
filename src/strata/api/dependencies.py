@@ -303,9 +303,9 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     store = _get_artifact_store(allow_server_mode=True)
     # Authorize a table input before planning, on the identity its URI names, as the scan path does.
     # Planning first would answer a denied caller with the plan's failure (naming the table and its
-    # delete files) or a 400 that materialize builds past. The check after resolution stays, for a
-    # catalog that resolves the table to another identity.
-    if input_uri.startswith(("file://", "s3://")):
+    # delete files). The check after resolution stays, for a catalog that resolves the table to
+    # another identity.
+    if not input_uri.startswith("strata://"):
         authorize_table_access(input_uri, _table_identity_from_uri(input_uri))
     try:
         resolved = materialize_service.resolve_input_version(

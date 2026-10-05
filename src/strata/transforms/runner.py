@@ -618,11 +618,11 @@ class BuildRunner:
             temp_files.append(temp_file)
             return temp_file
 
-        if input_uri.startswith("file://") or input_uri.startswith("s3://"):
-            temp_file = await self._scan_to_file(input_uri, temp_files)
-            return temp_file
+        if input_uri.startswith("strata://"):
+            raise ValueError(f"Unsupported input URI: {input_uri}")
 
-        raise ValueError(f"Unsupported input URI: {input_uri}")
+        # Any other URI is a table in a form the planner reads, as admission resolved it.
+        return await self._scan_to_file(input_uri, temp_files)
 
     async def _scan_to_file(
         self,
