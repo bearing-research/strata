@@ -203,8 +203,6 @@ def test_a_schema_change_is_not_served_from_the_cache_of_the_old_schema(lake):
 
 def test_a_scan_artifact_is_not_reused_across_a_schema_change(lake, tmp_path):
     """The artifact dedups on the scan's provenance, which must see the schema."""
-    import time
-
     from strata_client.client import StrataClient
 
     from tests.conftest import run_server_with_context
@@ -216,7 +214,7 @@ def test_a_scan_artifact_is_not_reused_across_a_schema_change(lake, tmp_path):
         try:
             first = client.materialize(inputs=[uri], transform=scan)
             assert _rows(client.fetch(first.uri)) == [{"id": 1, "x": 10}, {"id": 2, "x": 20}]
-            time.sleep(0.5)  # let the artifact finalize, as test_unified_materialize does
+            assert first.info()["state"] == "ready"
             _evolve(catalog, lambda u: u.delete_column("x"))
             _evolve(catalog, lambda u: u.add_column("x", LongType()))
 
@@ -424,6 +422,24 @@ def test_a_nested_type_iceberg_cannot_read_is_refused():
     narrowed = StructType(NestedField(4, "a", StringType(), required=False))
     assert _unreadable(struct, narrowed) is not None
     assert _unreadable(struct, struct) is None
+
+
+def test_a_file_storing_a_struct_where_the_table_says_list_is_refused(tmp_path):
+    from strata.planner import UnsupportedTableFormatError
+    from tests.iceberg_fixtures import commit_files, data_file
+
+    catalog, uri = _catalog(tmp_path)
+    table = catalog.create_table(
+        "db.t", schema=pa.schema([("id", pa.int64()), ("s", pa.list_(pa.int64()))])
+    )
+    table.append(pa.table({"id": pa.array([1], pa.int64()), "s": pa.array([[1]])}))
+    # The nested field carries its own id, so the file is matched by id, not name mapping.
+    struct = pa.struct([pa.field("a", pa.int64(), metadata={b"PARQUET:field_id": b"3"})])
+    rows = pa.table({"id": pa.array([2], pa.int64()), "s": pa.array([{"a": 1}], struct)})
+    commit_files(table, data_file(table, rows))
+
+    with pytest.raises(UnsupportedTableFormatError, match="cannot be read as"):
+        ReadPlanner(StrataConfig(cache_dir=tmp_path / "cache")).plan(uri)
 
 
 def test_an_unchanged_table_reads_its_files_as_written(lake):

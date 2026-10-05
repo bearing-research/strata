@@ -1,4 +1,4 @@
-"""Hand-built Iceberg snapshots for what pyiceberg cannot write: equality deletes.
+"""Hand-built Iceberg snapshots for what pyiceberg cannot write: delete files.
 
 pyiceberg writes data manifests only, so ``commit_files`` writes the Parquet
 files, a DATA and a DELETES manifest, a manifest list and the snapshot itself,
@@ -91,6 +91,41 @@ def equality_delete(
     return delete_file
 
 
+def positional_delete(table: Table, rows: dict[str, list[int]]) -> DataFile:
+    """A positional delete file deleting *rows* (data file path -> positions)."""
+    deleted = pa.table(
+        {
+            "file_path": pa.array([p for p, positions in rows.items() for _ in positions]),
+            "pos": pa.array([n for positions in rows.values() for n in positions], pa.int64()),
+        }
+    )
+    deleted = deleted.cast(
+        pa.schema(
+            [
+                pa.field("file_path", pa.string(), metadata={_FIELD_ID: b"2147483546"}),
+                pa.field("pos", pa.int64(), metadata={_FIELD_ID: b"2147483545"}),
+            ]
+        )
+    )
+    path = (
+        Path(table.location().removeprefix("file://"))
+        / "data"
+        / f"pos-delete-{uuid.uuid4()}.parquet"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(deleted, path)
+    delete_file = DataFile.from_args(
+        content=DataFileContent.POSITION_DELETES,
+        file_path=path.as_uri(),
+        file_format=FileFormat.PARQUET,
+        partition=Record(),
+        record_count=deleted.num_rows,
+        file_size_in_bytes=path.stat().st_size,
+    )
+    delete_file.spec_id = table.metadata.default_spec_id
+    return delete_file
+
+
 def data_file(table: Table, rows: pa.Table, *, partition: Record | None = None) -> DataFile:
     """A data file holding *rows*."""
     uri, size = _write(table, rows, "data")
@@ -107,7 +142,7 @@ def data_file(table: Table, rows: pa.Table, *, partition: Record | None = None) 
 
 
 def commit_files(table: Table, *files: DataFile) -> int:
-    """Commit *files* (data and equality deletes) as one new snapshot; its sequence number."""
+    """Commit *files* (data and delete files) as one new snapshot; its sequence number."""
     metadata = table.metadata
     parent = table.current_snapshot()
     assert parent is not None
@@ -117,6 +152,7 @@ def commit_files(table: Table, *files: DataFile) -> int:
     manifests = list(parent.manifests(table.io))
     for writer_class, content in (
         (ManifestWriterV2, DataFileContent.DATA),
+        (_DeleteManifestWriter, DataFileContent.POSITION_DELETES),
         (_DeleteManifestWriter, DataFileContent.EQUALITY_DELETES),
     ):
         batch = [file for file in files if file.content == content]

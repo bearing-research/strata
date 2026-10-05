@@ -20,6 +20,7 @@ def _serve(handler: type[http.server.BaseHTTPRequestHandler]) -> Iterator[str]:
         yield f"http://127.0.0.1:{server.server_address[1]}"
     finally:
         server.shutdown()
+        server.server_close()
 
 
 @contextmanager

@@ -591,13 +591,15 @@ class TestThroughTheServer:
         base_url, store = server
         key = _ready(store)
         _last_used(store, key, 60)
+        idle = _ready(store)
+        _last_used(store, idle, 7200)
 
         dry = httpx.post(
             f"{base_url}/v1/artifacts/gc", params={"dry_run": True, "max_idle_days": 0}
         )
 
         assert dry.status_code == 200, dry.text
-        assert dry.json()["collected"] == []
+        assert [(c["artifact_id"], c["version"]) for c in dry.json()["collected"]] == [idle]
         assert _exists(store, key)
 
 
@@ -1000,6 +1002,7 @@ async def test_the_first_sweep_runs_soon_after_startup(monkeypatch):
 
     import strata.server as server_module
 
+    assert server_module._FIRST_ARTIFACT_GC_DELAY_SECONDS <= 60
     monkeypatch.setattr(server_module, "_FIRST_ARTIFACT_GC_DELAY_SECONDS", 0.0)
     swept = asyncio.Event()
 

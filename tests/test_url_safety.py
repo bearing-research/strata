@@ -162,6 +162,8 @@ class TestPinning:
 
     def test_an_allowlisted_name_is_connected_by_name(self, rebinding_dns, sockets):
         """Trusted by name, so not resolved or checked here."""
+        rebinding_dns.answers["build.internal"] = [["10.0.0.5"]]  # refused, were it checked
+
         response = _get("http://build.internal:8000/finalize", allowed_hosts=("build.internal",))
 
         assert response.status_code == 200
