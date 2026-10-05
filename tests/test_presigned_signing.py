@@ -211,7 +211,6 @@ ACCOUNT_KEY = base64.b64encode(b"k" * 32).decode()
 
 
 def test_an_azure_account_key_signs_a_read_sas_and_a_create_write_sas():
-    pytest.importorskip("azure.storage.blob")
     store = AzureBlobStore(account_name="acct", container_name="c", account_key=ACCOUNT_KEY)
 
     url = store.presign_get("fig", 1, ttl_seconds=60)
@@ -231,7 +230,6 @@ def test_an_azure_account_key_signs_a_read_sas_and_a_create_write_sas():
 
 
 def test_an_azure_sas_token_is_not_handed_to_workers():
-    pytest.importorskip("azure.storage.blob")
     store = AzureBlobStore(account_name="acct", container_name="c", sas_token="sv=2024&sig=abc")
 
     assert store.presign_get("fig", 1, 60) is None
@@ -239,7 +237,6 @@ def test_an_azure_sas_token_is_not_handed_to_workers():
 
 
 def test_an_azure_managed_identity_signs_with_a_reused_user_delegation_key(monkeypatch):
-    pytest.importorskip("azure.identity")
     from azure.storage.blob import BlobServiceClient, UserDelegationKey
 
     requested: list[tuple[float, float]] = []
