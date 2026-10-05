@@ -92,6 +92,36 @@ def test_reload_preserves_ready_leaf_runtime_state(tmp_path: Path):
     assert cell.status == "ready"
 
 
+def test_cold_open_restores_a_leaf_whose_only_product_is_stdout(tmp_path: Path):
+    """A leaf stores its console under a provenance subkey; a cold open must find it."""
+    notebook_dir = create_notebook(tmp_path, "cold_open_leaf")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    add_cell_to_notebook(notebook_dir, "c2", "c1")
+    write_cell(notebook_dir, "c2", "y = x + 1\nprint(y)")
+
+    manager = SessionManager()
+    session = manager.open_notebook(notebook_dir)
+
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.ops import LocalNotebookOps
+
+    async def _prime() -> None:
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("c1", "x = 1")).success
+        assert (await executor.execute_cell("c2", "y = x + 1\nprint(y)")).success
+
+    asyncio.run(_prime())
+    manager.close_session(session.id)
+
+    reopened = SessionManager().open_notebook(notebook_dir)
+    leaf = next(c for c in reopened.notebook_state.cells if c.id == "c2")
+    assert leaf.status == "ready"
+    assert leaf.console_stdout == "2\n"
+    # The offline CLI (status / cell list) resolves through the same path.
+    assert LocalNotebookOps(notebook_dir).get_cell("c2").status == "ready"
+
+
 def test_reload_does_not_restore_ready_state_after_mount_change(tmp_path: Path):
     notebook_dir = create_notebook(tmp_path, "reload_mount_state")
     add_cell_to_notebook(notebook_dir, "c1")

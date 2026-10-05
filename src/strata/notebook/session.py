@@ -1777,18 +1777,17 @@ class NotebookSession:
         notebook whose provenance matches the executor's per-variable hash.
         """
         consumed_vars = self.dag.consumed_variables.get(cell_id, set()) if self.dag else set()
-        if consumed_vars:
-            first_var = sorted(consumed_vars)[0]
-            lookup_hash = derive_subkey(provenance_hash, first_var)
-        else:
-            lookup_hash = provenance_hash
-
-        cached = self.artifact_manager.find_cached(lookup_hash)
-        if cached is None:
+        if not consumed_vars:
+            # A leaf's only product is its console, stored under its own subkey; that is
+            # what the executor replays as a hit, so it is what makes the cell ready.
+            if self._resolve_cached_console(cell_id, provenance_hash) is not None:
+                return {}
             return None
 
-        if not consumed_vars:
-            return {}
+        first_var = sorted(consumed_vars)[0]
+        cached = self.artifact_manager.find_cached(derive_subkey(provenance_hash, first_var))
+        if cached is None:
+            return None
 
         notebook_id = self.notebook_state.id
         cached_outputs: dict[str, tuple[str, int]] = {}
