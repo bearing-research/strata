@@ -61,6 +61,8 @@ otel = [
 azure = [
     "azure-storage-blob>=12.20.0",
     "azure-identity>=1.25.3",
+    # PyIceberg reads Azure lake tables' metadata through adlfs.
+    "adlfs>=2026.0.0",
 ]
 # Presigned build-manifest URLs (STRATA_ARTIFACT_PRESIGNED_URLS) from an S3 role
 # rather than a key pair, and from GCS. Reading and writing blobs needs neither.
