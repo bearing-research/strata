@@ -140,14 +140,12 @@ def shutdown_worker_supervisor() -> None:
 def get_notebook_session(notebook_id: str, request: Request) -> NotebookSession:
     """FastAPI dependency: resolve ``notebook_id`` to an open session.
 
-    Raises 404 when the session is unknown, belongs to another tenant, or the caller
-    does not own it (404, not 403, so probes cannot enumerate sessions), matching the
-    WS upgrade gate and MCP. Unowned notebooks and single-user deployments pass through.
+    Raises 404 when the session is unknown or belongs to another tenant (404, not
+    403, so probes cannot enumerate sessions), matching the WS upgrade gate and MCP.
     """
     session = _session_manager.get_session(notebook_id)
     if session is None or not session_visible_to_caller(session):
         raise HTTPException(status_code=404, detail="Notebook not found")
-    _require_owner(session.notebook_state.owner, _caller_identity(request))
     # An edit or a run keeps the session open; a read does not, or a poller would.
     route = request.scope.get("route")
     path = getattr(route, "path", request.url.path)
@@ -218,24 +216,6 @@ def _get_notebook_storage_root() -> Path | None:
     return Path(configured_path).resolve()
 
 
-# Email-shaped names survive; anything else becomes ``_`` so a hostile header
-# can't escape the storage root with ``../`` or null bytes.
-_USER_DIR_SAFE_RE = re.compile(r"[^A-Za-z0-9._@\-]")
-
-
-def _sanitize_user_dir_name(identity: str) -> str | None:
-    """Map a caller identity (typically email) to a filesystem-safe dir name.
-
-    Deterministic, so a user's notebooks stay under one path. ``None`` when the
-    input is empty or sanitizes to empty (the caller falls back to no scoping).
-    """
-    if not identity:
-        return None
-    cleaned = _USER_DIR_SAFE_RE.sub("_", identity.strip())
-    cleaned = cleaned.strip("._-") or ""
-    return cleaned or None
-
-
 def _caller_tenant_dir() -> str | None:
     """The caller's subdir of the storage root on a multi-tenant server, else ``None``.
 
@@ -259,13 +239,11 @@ def _caller_tenant_dir() -> str | None:
     return (principal.tenant if principal is not None else None) or DEFAULT_TENANT_ID
 
 
-def _get_user_storage_root(request: Request | None) -> Path | None:
-    """Return the storage root scoped to the calling user or tenant.
+def _get_caller_storage_root(request: Request | None) -> Path | None:
+    """Return the storage root scoped to the calling tenant.
 
-    ``None`` without server state. The base root when there is no request, no
-    header configured, or no identity. Otherwise ``<base>/<sanitized_identity>/``
-    for a personal-mode user header, or ``<base>/<tenant>/`` on a multi-tenant
-    server, created on first call.
+    ``None`` without server state. ``<base>/<tenant>/`` on a multi-tenant server,
+    created on first call; otherwise, or without a request, the base root.
     """
     base = _get_notebook_storage_root()
     if base is None:
@@ -278,21 +256,7 @@ def _get_user_storage_root(request: Request | None) -> Path | None:
         tenant_root = base / tenant_dir
         tenant_root.mkdir(parents=True, exist_ok=True)
         return tenant_root
-
-    identity = _caller_identity(request)
-    if identity is None:
-        return base
-
-    safe = _sanitize_user_dir_name(identity)
-    if safe is None:
-        return base
-
-    user_root = (base / safe).resolve()
-    # Defense-in-depth: sanitization should already make escape impossible.
-    if user_root != base and base not in user_root.parents:
-        return base
-    user_root.mkdir(parents=True, exist_ok=True)
-    return user_root
+    return base
 
 
 def _require_personal_mode_notebook_delete() -> None:
@@ -309,65 +273,6 @@ def _require_personal_mode_notebook_delete() -> None:
             status_code=403,
             detail="Notebook deletion is only available in personal mode",
         )
-
-
-def _user_scoping_enabled() -> bool:
-    """Return whether a per-request identity header is configured.
-
-    Separates single-user mode from per-user mode, where a ``None`` from
-    ``_caller_identity`` must deny access to owned notebooks rather than allow it.
-    """
-    try:
-        from strata.server import get_state
-
-        state = get_state()
-    except RuntimeError:
-        return False
-    return bool(getattr(state.config, "personal_mode_user_header", None))
-
-
-def _caller_identity(request: Request) -> str | None:
-    """Resolve the calling user's identity for personal-mode scoping.
-
-    Read from the header named by ``personal_mode_user_header`` (set by an
-    authenticating proxy). ``None`` both when the header is not configured and when
-    the request lacks it; owner checks must also consult ``_user_scoping_enabled``,
-    or omitting the header would bypass them.
-    """
-    try:
-        from strata.server import get_state
-
-        state = get_state()
-    except RuntimeError:
-        return None
-
-    header_name = getattr(state.config, "personal_mode_user_header", None)
-    if not header_name:
-        return None
-
-    value = request.headers.get(header_name)
-    if not value:
-        return None
-    value = value.strip()
-    return value or None
-
-
-def _require_owner(notebook_owner: str | None, caller: str | None) -> None:
-    """Reject the request if a non-owner is touching an owned notebook.
-
-    Unowned notebooks, and every notebook when ``personal_mode_user_header`` is
-    unset, are open to any caller. With the header configured, a request that omits
-    it is denied, so a leaked ``session_id`` cannot drive an owned notebook. Denials
-    are a generic 404 so probes cannot enumerate owners.
-    """
-    if notebook_owner is None:
-        return
-    if caller is None:
-        if _user_scoping_enabled():
-            raise HTTPException(status_code=404, detail="Notebook not found")
-        return
-    if notebook_owner != caller:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
 
 def _timed_json_response(
@@ -408,25 +313,25 @@ def _validate_notebook_path(
 ) -> Path:
     """Validate that a notebook path is safe and confined to the storage root.
 
-    With ``request`` and per-user scoping, the path must lie inside the caller's
-    subdir. This is the security boundary that stops one user passing another
-    user's path in ``parent_path`` / ``notebook_path``.
+    With ``request`` on a multi-tenant server, the path must lie inside the
+    caller's tenant subdir. This is the security boundary that stops one tenant
+    passing another's path in ``parent_path`` / ``notebook_path``.
     """
     path = Path(user_path)
     if ".." in path.parts:
         raise HTTPException(status_code=400, detail=f"Invalid {label}: path traversal not allowed")
 
-    user_root = _get_user_storage_root(request)
+    caller_root = _get_caller_storage_root(request)
     base_root = _get_notebook_storage_root()
-    resolution_root = user_root if user_root is not None else base_root
+    resolution_root = caller_root if caller_root is not None else base_root
     resolved = (
         (resolution_root / path).resolve()
         if resolution_root is not None and not path.is_absolute()
         else path.resolve()
     )
 
-    # Confine to the per-user root, or the base root in single-user mode.
-    boundary = user_root if user_root is not None else base_root
+    # Confine to the tenant root, or the base root on a single-tenant server.
+    boundary = caller_root if caller_root is not None else base_root
     if boundary is not None and resolved != boundary and boundary not in resolved.parents:
         raise HTTPException(
             status_code=400,
@@ -488,8 +393,8 @@ def _serialize_environment_change(session: NotebookSession, staleness_map: dict)
 def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
     """Serialize frontend-relevant notebook runtime defaults.
 
-    With ``request`` and per-user scoping, ``default_parent_path`` is the caller's
-    subdir, so new notebooks land under the right user.
+    With ``request`` on a multi-tenant server, ``default_parent_path`` is the
+    caller's tenant subdir, so new notebooks land under the right tenant.
     """
     deployment_mode = "service"
     default_parent_path = Path.home() / ".strata" / "notebooks"
@@ -502,9 +407,9 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
         state = get_state()
         deployment_mode = getattr(state.config, "deployment_mode", deployment_mode)
         team_store_configured = bool(getattr(state.config, "notebook_remote_store_url", None))
-        user_root = _get_user_storage_root(request)
-        if user_root is not None:
-            default_parent_path = user_root
+        caller_root = _get_caller_storage_root(request)
+        if caller_root is not None:
+            default_parent_path = caller_root
         else:
             configured_path = getattr(state.config, "notebook_storage_dir", None)
             if configured_path is not None:
@@ -874,7 +779,7 @@ class PromoteArtifactRequest(BaseModel):
 async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONResponse:
     """Open a notebook directory and return its state, session ID and DAG.
 
-    With per-user scoping, the path must lie in the caller's storage subdir.
+    On a multi-tenant server, the path must lie in the caller's tenant subdir.
     """
     timing = NotebookTimingRecorder()
 
@@ -951,7 +856,7 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
 async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> JSONResponse:
     """Create a new notebook and return its state.
 
-    With per-user scoping, ``parent_path`` must lie in the caller's storage subdir.
+    On a multi-tenant server, ``parent_path`` must lie in the caller's tenant subdir.
     """
     timing = NotebookTimingRecorder()
     try:
@@ -981,7 +886,6 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
                 req.name,
                 python_version=selected_python_version,
                 initialize_environment=False,
-                owner=_caller_identity(request),
             )
         if req.starter_cell:
             with timing.phase("create_starter_cell"):
@@ -1059,8 +963,8 @@ def _resolve_import_target(
     if parent_path:
         target_parent = _validate_notebook_path(parent_path, "parent path", request)
     else:
-        user_root = _get_user_storage_root(request)
-        target_parent = user_root or _get_notebook_storage_root()
+        caller_root = _get_caller_storage_root(request)
+        target_parent = caller_root or _get_notebook_storage_root()
         if target_parent is None:
             raise HTTPException(
                 status_code=400,
@@ -1120,7 +1024,7 @@ async def import_jupyter_notebook(
         default=None,
         description=(
             "Where the new notebook directory lands. Must be inside the "
-            "configured storage root. Defaults to the user's storage root."
+            "configured storage root. Defaults to the caller's storage root."
         ),
     ),
 ) -> JSONResponse:
@@ -1178,7 +1082,6 @@ async def import_jupyter_notebook(
                 result = import_notebook(
                     tmp_path,
                     out_dir=target_parent / raw_name,
-                    owner=_caller_identity(request),
                 )
             except (ValueError, OSError) as exc:
                 raise HTTPException(status_code=400, detail=f"Import failed: {exc}")
@@ -1254,7 +1157,7 @@ async def import_snapshot_bundle(
         default=None,
         description=(
             "Where the new notebook directory lands. Must be inside the "
-            "configured storage root. Defaults to the user's storage root."
+            "configured storage root. Defaults to the caller's storage root."
         ),
     ),
 ) -> JSONResponse:
@@ -1302,7 +1205,7 @@ async def import_snapshot_bundle(
             # A copy sharing an id with this caller's notebooks collides once both
             # publish to a shared store. Scan the storage root, never the request's
             # parent_path: that is not where this caller's notebooks are listed.
-            scan_root = _get_user_storage_root(request)
+            scan_root = _get_caller_storage_root(request)
             taken = (
                 {
                     entry["notebook_id"]
@@ -1318,7 +1221,6 @@ async def import_snapshot_bundle(
                     bundle_path,
                     candidate_dir,
                     taken_ids=taken,
-                    owner=_caller_identity(request),
                 )
             except zipfile.BadZipFile:
                 raise HTTPException(status_code=400, detail="Upload is not a zip file")
@@ -1586,7 +1488,7 @@ _DISCOVER_SKIP_DIRS = frozenset(
 
 
 def _read_notebook_metadata(notebook_toml_path: Path) -> dict[str, Any] | None:
-    """Cheaply read a notebook.toml's summary fields (name, id, updated_at, owner).
+    """Cheaply read a notebook.toml's summary fields (name, id, updated_at).
 
     Returns None if unreadable. Skips cells so discovery stays fast on large trees.
     """
@@ -1597,12 +1499,10 @@ def _read_notebook_metadata(notebook_toml_path: Path) -> dict[str, Any] | None:
     name = raw.get("name")
     notebook_id = raw.get("notebook_id")
     updated_at = raw.get("updated_at")
-    owner = raw.get("owner")
     return {
         "name": str(name) if isinstance(name, str) and name.strip() else None,
         "notebook_id": str(notebook_id) if isinstance(notebook_id, str) else None,
         "updated_at": str(updated_at) if updated_at is not None else None,
-        "owner": str(owner) if isinstance(owner, str) and owner.strip() else None,
     }
 
 
@@ -1659,18 +1559,14 @@ async def discover_notebooks(request: Request) -> dict:
     """List notebook directories under the caller's storage root, newest first.
 
     Returns ``{"root", "notebooks"}``; each notebook is
-    ``{path, name, notebook_id, updated_at, owner}``. With per-user scoping the scan
-    root is the caller's subdir, and notebooks owned by others are filtered out too.
+    ``{path, name, notebook_id, updated_at}``. On a multi-tenant server the scan
+    root is the caller's tenant subdir.
     """
-    root = _get_user_storage_root(request)
+    root = _get_caller_storage_root(request)
     if root is None:
         return {"root": None, "notebooks": []}
 
-    notebooks = _discover_notebooks(root)
-    caller = _caller_identity(request)
-    if caller is not None:
-        notebooks = [n for n in notebooks if n.get("owner") in (None, caller)]
-    return {"root": str(root), "notebooks": notebooks}
+    return {"root": str(root), "notebooks": _discover_notebooks(root)}
 
 
 class ValidateRecentsRequest(BaseModel):
@@ -1690,8 +1586,8 @@ class ValidateRecentsRequest(BaseModel):
 async def validate_recent_notebooks(req: ValidateRecentsRequest) -> dict:
     """Return the subset of supplied paths that still contain a notebook.
 
-    Existence check only (``<path>/notebook.toml`` is a file). No ownership or root
-    check: the list is per-browser, and any follow-up open or delete runs its own.
+    Existence check only (``<path>/notebook.toml`` is a file). No root check: the
+    list is per-browser, and any follow-up open or delete runs its own.
     """
     valid: list[str] = []
     for raw_path in req.paths:
@@ -1727,10 +1623,6 @@ async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Req
             status_code=404,
             detail=f"No notebook found at {notebook_path}",
         )
-
-    metadata = _read_notebook_metadata(notebook_toml_path)
-    if metadata is not None:
-        _require_owner(metadata.get("owner"), _caller_identity(request))
 
     # Personal mode only, where no session records an opener.
     existing = _session_manager._find_session_by_path(notebook_path, None)
@@ -2042,17 +1934,13 @@ async def preview_environment_yaml(
 
 
 @router.get("/sessions")
-async def list_sessions(request: Request) -> dict:
-    """List active notebook sessions visible to the calling user.
+async def list_sessions() -> dict:
+    """List active notebook sessions under the storage root.
 
-    With per-user scoping, only sessions under the caller's storage subdir are
-    returned. Each entry has session_id, name, path and timestamps.
+    Each entry has session_id, name, path and timestamps.
     """
     _require_personal_mode_session_api()
-    user_root = _get_user_storage_root(request)
-    base_root = _get_notebook_storage_root()
-    # With scoping off, ``user_root`` equals ``base_root`` and this is a no-op.
-    boundary = user_root if user_root is not None else base_root
+    boundary = _get_notebook_storage_root()
 
     sessions = []
     for sid in _session_manager.list_sessions():
@@ -2095,10 +1983,6 @@ async def get_session(session_id: str, request: Request) -> JSONResponse:
         session = _session_manager.get_session(session_id)
     if not session or not session_visible_to_caller(session):
         raise HTTPException(status_code=404, detail="Session not found")
-
-    # A leaked session_id must not let another user read this notebook; 404
-    # hides that the session exists.
-    _require_owner(session.notebook_state.owner, _caller_identity(request))
 
     with timing.phase("serialize"):
         data = session.serialize_notebook_state()

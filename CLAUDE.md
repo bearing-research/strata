@@ -109,11 +109,8 @@ enforced at startup by `validate_mode_coherence` in `config.py`.
 | `artifact_dir` default  | `~/.strata/artifacts` | none (must be explicit)        |
 | Non-loopback bind       | only with `allow_remote_clients_in_personal=True` | unrestricted |
 
-**Personal + per-user scoping**: setting `STRATA_PERSONAL_MODE_USER_HEADER`
-turns on a thin per-user filter for proxy-fronted personal deployments. The
-caller's identity (from that header) is stamped as `notebook.toml` `owner` on
-create; `discover` and `delete` filter by owner. Unowned (legacy) notebooks
-remain global. Not multi-tenancy — for true isolation use service mode.
+Personal mode has exactly one user. A team either runs a personal server per
+member (sharing results through a service-mode store) or one service-mode server.
 
 ### Multi-tenancy & auth
 

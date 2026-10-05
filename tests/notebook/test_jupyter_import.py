@@ -237,17 +237,6 @@ def test_import_rejects_non_list_cells_field(tmp_path: Path) -> None:
             import_notebook(bad)
 
 
-def test_import_stamps_owner_when_provided(tmp_path: Path) -> None:
-    """The REST endpoint passes owner (the CLI does not); it must reach notebook.toml."""
-    import tomllib
-
-    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
-    result = import_notebook(ipynb, owner="alice@example.com")
-    with (result.notebook_dir / "notebook.toml").open("rb") as f:
-        data = tomllib.load(f)
-    assert data["owner"] == "alice@example.com"
-
-
 def test_import_writes_to_explicit_out_dir_when_provided(tmp_path: Path) -> None:
     ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")], name="source.ipynb")
     target = tmp_path / "my-imports" / "custom-name"

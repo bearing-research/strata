@@ -1,44 +1,37 @@
 # Deployment Modes
 
-Strata's `deployment_mode` is binary - `personal` or `service` - but
-`personal` supports two flavors depending on whether
-`STRATA_PERSONAL_MODE_USER_HEADER` is set. In practice you're choosing
-between three shapes.
+Strata's `deployment_mode` is `personal` or `service`. A personal server
+has exactly one user; a service-mode server serves many, each with their
+own identity.
 
 ## Decision matrix
 
-| | **Personal** | **Personal + auth proxy** | **Service** |
-| --- | --- | --- | --- |
-| **Best for** | One developer, laptop, single notebook open | 5–20 trusted users behind Cloudflare Access / Pomerium / etc. | Multi-tenant team or customer-facing |
-| **Writes** | Enabled | Enabled (per-user filter on discover/delete) | Off by default (server-side transforms); opt-in client write-back via `service_writes_enabled` |
-| **Auth** | None | Identity from `STRATA_PERSONAL_MODE_USER_HEADER` (proxy injects) | `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy, or an API key |
-| **Identity scoping** | No scoping (single user) | Per-user filter on `discover` / `delete`; shared artifact store | Per-tenant cache keys, cache dirs, QoS pools; artifacts filtered by tenant |
-| **Multi-tenancy** | n/a | n/a | Optional (`multi_tenant_enabled=true`) |
-| **ACLs** | Not evaluated | Not evaluated | Deny-first (`acl_config`) |
-| **Default artifact dir** | `~/.strata/artifacts` | `~/.strata/artifacts` | None; set `STRATA_ARTIFACT_DIR` explicitly (required with a blob backend too) |
-| **Network binding** | Loopback only | Non-loopback with `allow_remote_clients_in_personal=true` | Unrestricted |
-| **Use in production for sharing?** | No: anyone on the network can write | Only behind a real auth proxy, small trusted group | Yes |
+| | **Personal** | **Service** |
+| --- | --- | --- |
+| **Best for** | One person: a laptop, or a server of your own | A team or customer-facing deployment |
+| **Writes** | Enabled | Off by default (server-side transforms); opt-in client write-back via `service_writes_enabled` |
+| **Auth** | None | `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy, or an API key |
+| **Identity scoping** | None (one user) | Per-tenant cache keys, cache dirs, QoS pools; artifacts filtered by tenant |
+| **Multi-tenancy** | n/a | Optional (`multi_tenant_enabled=true`) |
+| **ACLs** | Not evaluated | Deny-first (`acl_config`) |
+| **Default artifact dir** | `~/.strata/artifacts` | None; set `STRATA_ARTIFACT_DIR` explicitly (required with a blob backend too) |
+| **Network binding** | Loopback only, or non-loopback with `allow_remote_clients_in_personal=true` | Unrestricted |
+| **Use in production for sharing?** | No: anyone who reaches it can write | Yes |
 
 The rows that drive the choice are typically **Writes** (does anyone
 who reaches the URL get to mutate?), **Auth** (who decides who's
 allowed?), and **Identity scoping** (what's isolated and what's
 shared?). The flags that follow are the consequences.
 
-## Choosing a shape
+## Choosing a mode
 
-- **Personal**: running the notebook on your own machine. Fast to
-  start, nothing to configure, writes land in your home directory.
-  This is the default for Docker Compose and the "from source"
-  instructions.
-- **Personal + auth proxy**: small team sharing one Strata instance
-  with the proxy handling auth. Cheap to operate, no per-user
-  isolation (artifact store is shared), but each user gets their
-  own list in "Open existing." See [Sharing personal mode with a
-  small group](#sharing-personal-mode-with-a-small-group) below.
-  See [Fly.io deployment](fly.md) for a recipe that hosts personal
-  mode.
-- **Service**: hosting Strata for users you can't fully trust, or
-  with sensitive data, or with multi-tenant isolation requirements.
+- **Personal**: running the notebook for yourself. Fast to start,
+  nothing to configure, writes land in your home directory. This is
+  the default for Docker Compose and the "from source" instructions.
+  A personal server you reach over the network is still one person's;
+  see [Fly.io deployment](fly.md) for a recipe that hosts one.
+- **Service**: one server for more than one person, users you can't
+  fully trust, sensitive data, or multi-tenant isolation requirements.
   Reads are tenant-scoped and ACL-gated; writes are off by default
   (routed through server-side transforms), or authenticated clients
   can publish directly to a shared store with `service_writes_enabled`.
@@ -128,52 +121,17 @@ See [Service Mode](service-mode.md) for the full story:
 - Multi-tenancy, ACLs, server-side transforms.
 - Migration path from personal mode.
 
-## Sharing personal mode with a small group
+## Sharing with a team
 
-A common deployment shape is "personal mode behind an authenticating proxy", for example, Cloudflare Access in front of a Fly.io app, sharing the
-notebook UI with a handful of trusted users. This isn't full multi-tenancy
-(no per-user QoS, one shared cache), but each user does get their own
-storage root, `<notebook_storage_dir>/<identity>/`, and every path-taking
-route is confined to it. A notebook's artifacts live under its own
-directory, so they land inside that root too.
+Personal mode has no notion of more than one user, so a team has two
+shapes:
 
-Set:
-
-```bash
-STRATA_DEPLOYMENT_MODE=personal
-STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL=true
-STRATA_PERSONAL_MODE_USER_HEADER=Cf-Access-Authenticated-User-Email
-STRATA_ALLOWED_HOSTS=strata.example.com   # the name users browse to
-```
-
-The header value is whatever your proxy injects after authenticating the
-caller. Strata treats the value as opaque: email, GitHub login, internal
-ID, anything stable.
-
-What changes when the header is set:
-
-- `POST /v1/notebooks/create` stamps the caller's identity into
-  `notebook.toml` as `owner`.
-- `GET /v1/notebooks/discover` returns only notebooks where
-  `owner == caller` or `owner is None`.
-- `DELETE /v1/notebooks/{id}` and `POST /v1/notebooks/delete-by-path`
-  return 404 if a non-owner tries to delete an owned notebook.
-- Sharing a link does not work. `POST /open` resolves the path inside the
-  caller's own storage root, and every session-targeted route checks the
-  notebook's owner and answers 404 otherwise. To hand someone a result, use
-  [publishing](../notebook/publishing.md).
-
-What does *not* change:
-- Concurrent edits to the same notebook still race (no per-user sessions).
-- The artifact store is shared; provenance hashes don't include the caller.
-- The AI API key pool (`STRATA_AI_*`) is shared across all users.
-- Unowned (legacy) notebooks bypass the owner check, but not the storage
-  boundary: one sitting in the base directory rather than a user's own root
-  is invisible to `discover` and unopenable by every scoped caller. Move it
-  into a user's root to make it reachable again.
-
-This shape is the right answer for a 5–20 person trusted group. For untrusted
-or paid users, migrate to service mode for proper tenant isolation.
+- **A personal server per member.** Each member runs their own (a laptop,
+  or one container each behind your proxy) and shares results through a
+  service-mode store; see
+  [Connecting a notebook to the shared store](service-mode.md#connecting-a-notebook-to-the-shared-store).
+- **One shared server in service mode**, where every request carries the
+  caller's identity and scopes. See [Service Mode](service-mode.md).
 
 ## Coherence enforcement
 
@@ -186,8 +144,6 @@ raise `ValueError` during config load:
 | `deployment_mode=personal` + `multi_tenant_enabled=True` | Personal mode is single-user; there are no tenants to isolate |
 | `deployment_mode=personal` + `require_tenant_header=True` | Same reason, no tenant dimension in personal mode |
 | `deployment_mode=personal` + `auth_mode=api_key` | Personal mode is single-user on loopback; authenticating yourself to your own machine buys nothing |
-| `deployment_mode=personal` + `mcp_enabled` + `personal_mode_user_header` | The MCP endpoint has no per-request identity and does not filter by owner, so it would expose every user's sessions |
-| `deployment_mode=service` + `personal_mode_user_header` | Service mode uses `X-Strata-Principal` via trusted-proxy auth; the personal-mode shim is for proxy-fronted personal deployments only |
 | `deployment_mode=service` + `multi_tenant_enabled` or `acl_config` rules or `mcp_enabled`, without `trusted_proxy` / `api_key` auth | The tenant header would be spoofable, ACL rules are only evaluated for an authenticated caller, and MCP would have no caller to check |
 | `deployment_mode=service` + `auth_mode=trusted_proxy` without `proxy_token` | Every request would be accepted and the identity headers could be spoofed |
 | `deployment_mode=service` + `service_writes_enabled` without `auth_mode=trusted_proxy` | Writes are stamped with the caller's principal and tenant |

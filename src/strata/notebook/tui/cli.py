@@ -29,16 +29,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("STRATA_TUI_SERVER", "http://localhost:8765"),
         help="Base URL of the strata-notebook server (default: $STRATA_TUI_SERVER or :8765).",
     )
-    parser.add_argument(
-        "--user-header",
-        default=os.environ.get("STRATA_TUI_USER_HEADER_NAME"),
-        help="Identity header name (matches the server's personal_mode_user_header).",
-    )
-    parser.add_argument(
-        "--user",
-        default=os.environ.get("STRATA_TUI_USER"),
-        help="Identity header value (needed when the notebook is owned).",
-    )
     return parser
 
 
@@ -47,8 +37,6 @@ def run_spectator(
     server: str,
     session: str | None = None,
     notebook: str | Path | None = None,
-    user_header: str | None = None,
-    user: str | None = None,
 ) -> None:
     """Launch the read-only Textual spectator against a running server.
 
@@ -59,11 +47,7 @@ def run_spectator(
     from strata.notebook.tui.app import NotebookTUI
     from strata.notebook.tui.client import TuiClient
 
-    headers: dict[str, str] = {}
-    if user_header and user:
-        headers[user_header] = user
-
-    client = TuiClient(server_url=server, auth_headers=headers)
+    client = TuiClient(server_url=server)
     notebook_path = str(Path(notebook).expanduser().resolve()) if notebook else None
 
     NotebookTUI(client=client, session_id=session, notebook_path=notebook_path).run()
@@ -76,6 +60,4 @@ def main(argv: list[str] | None = None) -> None:
         server=args.server,
         session=args.session,
         notebook=args.notebook,
-        user_header=args.user_header,
-        user=args.user,
     )

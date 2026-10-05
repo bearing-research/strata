@@ -18,9 +18,8 @@ class TuiClientError(RuntimeError):
 class TuiClient:
     """Async REST client for the spectator's bootstrap calls."""
 
-    def __init__(self, server_url: str, auth_headers: dict[str, str] | None = None) -> None:
+    def __init__(self, server_url: str) -> None:
         self.server_url = server_url.rstrip("/")
-        self.auth_headers = auth_headers or {}
 
     async def list_sessions(self) -> list[dict[str, Any]]:
         """Return the caller's currently-open sessions (id, name, path, …)."""
@@ -77,9 +76,7 @@ class TuiClient:
         path = f"/v1/notebooks/{notebook_id}/cells/{cell_id}/data/export"
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
-                response = await client.get(
-                    self.server_url + path, params=params, headers=self.auth_headers
-                )
+                response = await client.get(self.server_url + path, params=params)
             except httpx.HTTPError as exc:
                 raise TuiClientError(f"cannot reach {self.server_url}: {exc}") from exc
             if response.is_error:
@@ -89,9 +86,7 @@ class TuiClient:
     async def _get(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                response = await client.get(
-                    self.server_url + path, params=params, headers=self.auth_headers
-                )
+                response = await client.get(self.server_url + path, params=params)
             except httpx.HTTPError as exc:
                 raise TuiClientError(f"cannot reach {self.server_url}: {exc}") from exc
             return _json_or_error(response)
@@ -99,9 +94,7 @@ class TuiClient:
     async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                response = await client.post(
-                    self.server_url + path, json=body, headers=self.auth_headers
-                )
+                response = await client.post(self.server_url + path, json=body)
             except httpx.HTTPError as exc:
                 raise TuiClientError(f"cannot reach {self.server_url}: {exc}") from exc
             return _json_or_error(response)

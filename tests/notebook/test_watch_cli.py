@@ -29,8 +29,6 @@ def test_watch_by_notebook_dir(captured):
             "server": "http://localhost:9000",
             "session": None,
             "notebook": "/tmp/nb",
-            "user_header": None,
-            "user": None,
         }
     ]
 

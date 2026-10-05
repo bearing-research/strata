@@ -374,7 +374,6 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
     toml_data = {
         "notebook_id": toml.notebook_id,
         "name": toml.name,
-        **({"owner": toml.owner} if toml.owner else {}),
         "created_at": toml.created_at,
         "updated_at": toml.updated_at,
         "cells": [
@@ -483,18 +482,16 @@ def create_notebook(
     *,
     initialize_environment: bool = True,
     write_gitignore_file: bool = True,
-    owner: str | None = None,
     project_mount: str | None = None,
 ) -> Path:
     """Create a new notebook directory with notebook.toml and pyproject.toml.
 
     On an existing notebook only missing scaffolding (``cells/``,
-    ``.gitignore``) is added; ``owner`` and ``project_mount`` do not apply.
+    ``.gitignore``) is added; ``project_mount`` does not apply.
 
     Args:
         write_gitignore_file: Write a runtime-state .gitignore; an existing one
             is never replaced.
-        owner: Identity stamped into notebook.toml; None means unowned.
         project_mount: Variable name for a pinned read-only mount of
             *parent_dir*, so cells read project files without absolute paths.
             Pinned, so it never makes cells stale.
@@ -541,7 +538,6 @@ def create_notebook(
     notebook_toml = NotebookToml(
         notebook_id=notebook_id,
         name=name,
-        owner=owner,
         created_at=now,
         updated_at=now,
         cells=[],

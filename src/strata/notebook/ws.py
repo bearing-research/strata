@@ -631,39 +631,6 @@ def _cancel_pending_grace_teardown(notebook_id: str) -> None:
 # --- WebSocket Handler ---
 
 
-def _ws_caller_identity(websocket: WebSocket) -> str | None:
-    """Return the caller identity from ``personal_mode_user_header``, or None.
-
-    The WS counterpart of ``routes._caller_identity``. None when per-user scoping is
-    unconfigured or the header is absent or blank, so the gate passes through.
-    """
-    try:
-        from strata.server import get_state
-
-        header_name = get_state().config.personal_mode_user_header
-    except RuntimeError:
-        return None
-    if not header_name:
-        return None
-    return (websocket.headers.get(header_name) or "").strip() or None
-
-
-def _ws_owner_allowed(owner: str | None, caller: str | None) -> bool:
-    """Return whether *caller* may open a WS for an *owner*-scoped notebook.
-
-    The boolean twin of ``routes._require_owner``: unowned notebooks are allowed; a
-    missing caller identity under per-user scoping is denied (so omitting the header
-    is no bypass); a mismatched owner is denied.
-    """
-    from strata.notebook.routes import _user_scoping_enabled
-
-    if owner is None:
-        return True
-    if caller is None:
-        return not _user_scoping_enabled()
-    return owner == caller
-
-
 # A ``?role=viewer`` (app mode) connection may only drive widgets and request
 # state; every other C->S frame is rejected.
 _VIEWER_ALLOWED_FRAMES = frozenset(
@@ -808,13 +775,6 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     session = session_manager.get_session(notebook_id)
     # Another tenant's session looks missing, as over REST and MCP.
     if not session or not session_visible_to_caller(session):
-        await websocket.close(code=1008, reason="Notebook not found")
-        return
-
-    # Per-user scoping, else a leaked notebook_id exposes live state. As in
-    # ``_require_owner``, a missing identity header is denied when scoping is on.
-    owner = session.notebook_state.owner
-    if not _ws_owner_allowed(owner, _ws_caller_identity(websocket)):
         await websocket.close(code=1008, reason="Notebook not found")
         return
 

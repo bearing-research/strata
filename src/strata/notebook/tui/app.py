@@ -483,11 +483,7 @@ class NotebookTUI(App[None]):
                 # max_size=None: display outputs routinely exceed the 1 MiB
                 # default, and a 1009 close becomes a reconnect storm as the
                 # server resends the same frame. The browser has no cap either.
-                async with websockets.connect(
-                    url,
-                    additional_headers=self._client.auth_headers or None,
-                    max_size=None,
-                ) as ws:
+                async with websockets.connect(url, max_size=None) as ws:
                     self._ws = ws
                     backoff = 1.0
                     self._set_connection("connected")

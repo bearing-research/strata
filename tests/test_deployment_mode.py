@@ -201,30 +201,16 @@ class TestModeCoherence:
             )
         assert "mcp_enabled" in str(exc_info.value)
 
-    def test_personal_mcp_with_per_user_header_rejected(self, tmp_path):
-        """MCP plus the multi-user shim would expose every user's notebooks.
-
-        REST filters notebooks by owner, but the MCP mount has no per-request identity, so one user
-        could list and execute another user's sessions.
-        """
-        with pytest.raises(ValueError) as exc_info:
-            StrataConfig(
-                cache_dir=tmp_path / "cache",
-                deployment_mode="personal",
-                mcp_enabled=True,
-                personal_mode_user_header="X-Auth-User",
-            )
-        assert "mcp_enabled" in str(exc_info.value)
-        assert "personal_mode_user_header" in str(exc_info.value)
-
-    def test_personal_with_per_user_header_alone_allowed(self, tmp_path):
-        """Each feature on its own stays supported."""
+    def test_personal_ignores_a_leftover_user_header_env_var(self, tmp_path, monkeypatch):
+        """The retired multi-user header is an unknown setting now, so MCP is not refused."""
+        monkeypatch.setenv("STRATA_PERSONAL_MODE_USER_HEADER", "X-Auth-User")
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
-            personal_mode_user_header="X-Auth-User",
+            mcp_enabled=True,
         )
-        assert config.personal_mode_user_header == "X-Auth-User"
+        assert config.mcp_enabled is True
+        assert not hasattr(config, "personal_mode_user_header")
 
     def test_personal_with_mcp_enabled_allowed(self, tmp_path):
         """Personal mode with MCP is the supported combination."""
@@ -285,26 +271,6 @@ class TestModeCoherence:
         assert config.auth_mode == "none"
         assert config.multi_tenant_enabled is False
         assert config.require_tenant_header is False
-
-    def test_service_with_personal_user_header_rejected(self, tmp_path):
-        """personal_mode_user_header is a personal-mode shim."""
-        with pytest.raises(ValueError) as exc_info:
-            StrataConfig(
-                cache_dir=tmp_path / "cache",
-                deployment_mode="service",
-                personal_mode_user_header="X-Auth-User",
-            )
-        assert "personal_mode_user_header" in str(exc_info.value)
-
-    def test_personal_with_user_header_allowed(self, tmp_path):
-        """The intended shape for proxy-fronted personal deploys."""
-        config = StrataConfig(
-            cache_dir=tmp_path / "cache",
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            personal_mode_user_header="Cf-Access-Authenticated-User-Email",
-        )
-        assert config.personal_mode_user_header == "Cf-Access-Authenticated-User-Email"
 
     def test_service_acl_without_auth_rejected(self, tmp_path):
         """ACL rules with auth_mode='none' would be silently inert."""
