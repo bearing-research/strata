@@ -194,11 +194,13 @@ def _reuse_open_session_by_path() -> tuple[bool, tuple[str, str | None] | None]:
     if state.config.deployment_mode == "personal":
         return True, None
     from strata.auth import get_principal
+    from strata.tenant import DEFAULT_TENANT_ID
 
     principal = get_principal()
     if principal is None:
         return False, None
-    return True, (principal.id, principal.tenant)
+    # A caller the proxy sent without a tenant is the default tenant, as for storage.
+    return True, (principal.id, principal.tenant or DEFAULT_TENANT_ID)
 
 
 def _get_notebook_storage_root() -> Path | None:
