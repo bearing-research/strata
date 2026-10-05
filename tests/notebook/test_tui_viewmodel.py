@@ -76,6 +76,27 @@ def test_cell_console_accumulates():
     assert vm.cells["a"].console == "line1\nline2\n"
 
 
+def test_a_streamed_rerun_replaces_the_last_runs_console():
+    """Chunk 0 of a remote run's stream starts that stream afresh, per stream."""
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    first_run = [
+        ("stdout", 0, "run 1 out\n"),
+        ("stderr", 0, "run 1 err\n"),
+        ("stdout", 1, "run 1 more\n"),
+    ]
+    second_run = [
+        ("stdout", 0, "run 2 out\n"),
+        ("stderr", 0, "run 2 err\n"),
+    ]
+    for stream, seq, text in first_run + second_run:
+        vm.apply_frame(
+            "cell_console",
+            {"cell_id": "a", "stream": stream, "text": text, "chunk_seq": seq},
+        )
+    assert vm.cells["a"].console == "run 2 out\nrun 2 err\n"
+
+
 def test_cell_output_sets_outputs_and_clears_error():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))

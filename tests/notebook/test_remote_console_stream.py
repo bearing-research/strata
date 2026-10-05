@@ -297,6 +297,35 @@ class TestWorkerTeeing:
         assert result["stdout"] == "from-the-cell\n", "and the result still carries it whole"
 
     @pytest.mark.asyncio
+    async def test_a_character_split_across_two_reads_is_posted_whole(self, monkeypatch):
+        """The posted text is the bundle's decode, chunk by chunk.
+
+        A per-read decode turns the halves of one character into two replacement
+        characters, so the live console is garbled and the server counts one more
+        character as shown than the bundle has, and the final tail starts late.
+        """
+        from strata.notebook import remote_executor
+
+        posted: list[tuple[str, int, str]] = []
+
+        async def _fake_post(client, log_url, stream, seq, text):
+            posted.append((stream, seq, text))
+
+        monkeypatch.setattr(remote_executor, "_post_log_chunk", _fake_post)
+
+        whole = b"a" * 8191 + "étail".encode()
+        proc = _FakeProcess(stdout=[whole[:8192], whole[8192:]], stderr=[])
+
+        stdout, _ = await remote_executor._drain(proc, "http://server/v1/builds/b1/log")
+
+        assert stdout == whole
+        texts = [text for _, _, text in posted]
+        assert "".join(texts) == "a" * 8191 + "étail"
+        assert "�" not in "".join(texts)
+        assert sum(len(text) for text in texts) == len(whole.decode())
+        assert [seq for _, seq, _ in posted] == list(range(len(posted)))
+
+    @pytest.mark.asyncio
     async def test_without_a_log_url_the_output_is_still_collected(self, tmp_path):
         """A worker given no log URL still collects output into the result."""
         from strata.notebook import remote_executor
@@ -460,6 +489,25 @@ class TestWhatIsShownStaysAPrefix:
 
 async def _drain_via(remote_executor, proc):
     return await remote_executor._drain(proc, "http://server/v1/builds/b1/log")
+
+
+class _FakePipe:
+    """A pipe that answers each ``read`` with the next scripted chunk, then EOF."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    async def read(self, n: int) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+class _FakeProcess:
+    def __init__(self, stdout: list[bytes], stderr: list[bytes]) -> None:
+        self.stdout = _FakePipe(stdout)
+        self.stderr = _FakePipe(stderr)
+
+    async def wait(self) -> int:
+        return 0
 
 
 def _capture_broadcasts(monkeypatch, signal: asyncio.Event | None = None) -> list[dict]:
@@ -701,6 +749,49 @@ class TestSharedStore:
             ("stdout", 1, "epoch 2\n"),
         ]
         assert store.take_console_chunks("b1") == []
+
+    def test_a_chunk_stored_between_the_read_and_the_delete_is_not_lost(self, store, tmp_path):
+        """Another node fills a gap while this one is taking what it read: the next take sees it."""
+        from strata.transforms.build_store import BuildStore
+
+        _running_build(store)
+        store.append_console_chunk("b1", "stdout", 3, "three\n")
+        store.append_console_chunk("b1", "stdout", 5, "five\n")
+        other_node = BuildStore(tmp_path / "artifacts.sqlite")
+        real_connect = store._get_connection
+
+        class _Rows:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def fetchall(self):
+                return self._rows
+
+        class _Connection:
+            """Lands seq 4 from the other node after the read, before the delete."""
+
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, params=()):
+                cursor = self._conn.execute(sql, params)
+                if sql.lstrip().startswith("SELECT"):
+                    rows = cursor.fetchall()
+                    assert other_node.append_console_chunk("b1", "stdout", 4, "four\n")
+                    return _Rows(rows)
+                return cursor
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        store._get_connection = lambda: _Connection(real_connect())
+        assert store.take_console_chunks("b1") == [
+            ("stdout", 3, "three\n"),
+            ("stdout", 5, "five\n"),
+        ]
+        store._get_connection = real_connect
+
+        assert store.take_console_chunks("b1") == [("stdout", 4, "four\n")]
 
     def test_a_build_that_is_not_running_stores_nothing(self, store):
         """A late or stale worker cannot fill the table for a build nobody will read."""

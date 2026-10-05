@@ -991,6 +991,38 @@ class TestPullModelEndToEnd:
         assert finalize_response.status_code == 200
         assert finalize_response.json()["status"] == "finalized"
 
+    def test_a_signed_log_url_is_self_sufficient_in_trusted_proxy_mode(
+        self,
+        trusted_proxy_client,
+        build_store,
+        artifact_store,
+    ):
+        """A worker posts console chunks holding only the log capability, no proxy token."""
+        output_version = create_test_artifact(artifact_store, "auth-log-output", finalize=False)
+        build_store.create_build(
+            build_id="auth-log-build-001",
+            artifact_id="auth-log-output",
+            version=output_version,
+            executor_ref="test@v1",
+            tenant_id="team-a",
+            principal_id="user-1",
+        )
+        log_url = _TEST_SIGNER.generate_log_url(
+            base_url="http://testserver", build_id="auth-log-build-001"
+        )
+
+        response = trusted_proxy_client.post(
+            log_url.replace("http://testserver", "") + "&stream=stdout&seq=0",
+            content=b"epoch 1\n",
+        )
+        assert response.status_code == 202
+
+        unsigned = trusted_proxy_client.post(
+            "/v1/builds/auth-log-build-001/log?stream=stdout&seq=0",
+            content=b"epoch 1\n",
+        )
+        assert unsigned.status_code == 401
+
 
 @pytest.fixture
 def unauthenticated_service_client(temp_dir, artifact_store, build_store):

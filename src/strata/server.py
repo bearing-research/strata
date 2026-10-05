@@ -288,10 +288,14 @@ def _route_path(conn: HTTPConnection) -> str:
     return path
 
 
-def _is_signed_finalize_request(request: Request) -> bool:
-    """Return True when the request is using the signed finalize contract."""
+def _is_signed_build_request(request: Request) -> bool:
+    """Return True when the request presents a build's signed finalize or log capability.
+
+    A worker holds only the HMAC capability, no proxy token or API key, and the
+    routes verify the signature themselves.
+    """
     return bool(
-        re.fullmatch(r"/v1/builds/[^/]+/finalize", _route_path(request))
+        re.fullmatch(r"/v1/builds/[^/]+/(finalize|log)", _route_path(request))
         and "signature" in request.query_params
         and "expires_at" in request.query_params
     )
@@ -302,7 +306,7 @@ def _is_signed_data_plane_request(request: Request) -> bool:
     return _route_path(request) in (
         "/v1/artifacts/download",
         "/v1/artifacts/upload",
-    ) or _is_signed_finalize_request(request)
+    ) or _is_signed_build_request(request)
 
 
 def _is_public_publication_request(request: Request) -> bool:

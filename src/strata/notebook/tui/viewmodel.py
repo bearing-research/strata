@@ -28,8 +28,9 @@ class CellView:
     outputs: list[dict[str, Any]] = field(default_factory=list)
     # ``cell_output_delta``
     stream_text: str = ""
-    # ``cell_console``
-    console: str = ""
+    # ``cell_console``, per stream: chunk 0 of a remote run starts that stream afresh.
+    console_stdout: str = ""
+    console_stderr: str = ""
     error: str | None = None
     # e.g. "iter 3/10" (``cell_iteration_progress``)
     iteration: str = ""
@@ -43,6 +44,10 @@ class CellView:
     test_unavailable: bool = False
     # ``cells/{id}.test.py``. Carried in every notebook_state snapshot, so read fresh.
     test_source: str = ""
+
+    @property
+    def console(self) -> str:
+        return self.console_stdout + self.console_stderr
 
 
 class NotebookViewModel:
@@ -93,7 +98,8 @@ class NotebookViewModel:
                 display_outputs=_snapshot_display_outputs(raw),
                 outputs=prior.outputs if prior else [],
                 stream_text=prior.stream_text if prior else "",
-                console=prior.console if prior else "",
+                console_stdout=prior.console_stdout if prior else "",
+                console_stderr=prior.console_stderr if prior else "",
                 error=prior.error if prior else None,
                 duration_ms=prior.duration_ms if prior else None,
                 cache_hit=prior.cache_hit if prior else False,
@@ -145,7 +151,13 @@ class NotebookViewModel:
         if msg_type == "cell_status":
             cell.status = str(payload.get("status") or cell.status)
         elif msg_type == "cell_console":
-            cell.console += str(payload.get("text") or "")
+            text = str(payload.get("text") or "")
+            # Chunk 0 starts the stream for this run, so the last run's text goes.
+            fresh = payload.get("chunk_seq") == 0
+            if payload.get("stream") == "stderr":
+                cell.console_stderr = ("" if fresh else cell.console_stderr) + text
+            else:
+                cell.console_stdout = ("" if fresh else cell.console_stdout) + text
         elif msg_type == "cell_output":
             outputs = payload.get("outputs")
             cell.outputs = outputs if isinstance(outputs, list) else []
