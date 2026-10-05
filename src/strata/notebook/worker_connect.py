@@ -189,7 +189,12 @@ async def serve_connection(ws: ClientConnection, app: ASGIApp) -> None:
             kind = frame.get("type")
             stream_id = frame.get("id")
             if kind == "request":
-                if not isinstance(stream_id, int) or stream_id in streams:
+                # The id must fit the 4-byte chunk header, or framing the response fails.
+                if (
+                    not isinstance(stream_id, int)
+                    or not 0 < stream_id < 2**32
+                    or stream_id in streams
+                ):
                     logger.debug("Ignoring a request frame with a bad or duplicate id")
                     continue
                 stream = _Stream()
