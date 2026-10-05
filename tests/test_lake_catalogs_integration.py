@@ -331,24 +331,26 @@ def _azure_config(tmp_path, azurite, **settings: Any) -> StrataConfig:
 _PYARROW_FILE_IO = {"catalog_properties": {"py-io-impl": "pyiceberg.io.pyarrow.PyArrowFileIO"}}
 
 
-@pytest.mark.parametrize("file_io", ["adlfs", "pyarrow"])
+@pytest.mark.parametrize("file_io", ["adlfs", "adlfs-endpoint", "pyarrow"])
 def test_an_azure_request_warehouse_reads_with_the_azure_settings(tmp_path, azurite, file_io):
     """An ``abfs://`` URI with no catalog uri: its metadata is read with the Azure settings.
 
     pyiceberg reads ``abfs://`` with adlfs (and fails without it) unless ``py-io-impl``
     names pyarrow, which takes no connection string and reads only ``abfs://<container>/``.
+    adlfs takes the emulator endpoint only from a connection string, so the account
+    name, key and endpoint alone must read too.
     """
     warehouse = (
-        f"abfs://lake@{azurite.account_name}.dfs.core.windows.net/wh"
-        if file_io == "adlfs"
-        else "abfs://lake/wh"
+        "abfs://lake/wh"
+        if file_io == "pyarrow"
+        else f"abfs://lake@{azurite.account_name}.dfs.core.windows.net/wh"
     )
     first = _two_snapshots(_azure_writer(tmp_path, azurite, warehouse))
-    settings: dict[str, Any] = (
-        {"azure_connection_string": azurite.get_connection_string()}
-        if file_io == "adlfs"
-        else _PYARROW_FILE_IO
-    )
+    settings: dict[str, Any] = {
+        "adlfs": {"azure_connection_string": azurite.get_connection_string()},
+        "adlfs-endpoint": {},
+        "pyarrow": _PYARROW_FILE_IO,
+    }[file_io]
 
     _reads_request_warehouse(
         _azure_config(tmp_path, azurite, **settings), f"{warehouse}#taxi.trips", first

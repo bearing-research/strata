@@ -123,6 +123,37 @@ class TestStoreSettingsReachTheCatalog:
         }
         assert _store_props(catalog, "gcs.") == {}
 
+    def test_an_azure_endpoint_with_a_key_becomes_a_connection_string(self, tmp_path):
+        """adlfs reads only a connection string for an emulator endpoint, so one is derived."""
+        config = _config(
+            tmp_path,
+            "personal",
+            azure_account_name="devstoreaccount1",
+            azure_account_key="a2V5",
+            azure_endpoint_url="http://127.0.0.1:10000",
+        )
+
+        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@devstoreaccount1/wh")
+
+        assert catalog.properties["adls.connection-string"] == (
+            "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=a2V5;"
+            "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1"
+        )
+        assert catalog.properties["adls.blob-storage-authority"] == "127.0.0.1:10000"
+
+    def test_an_azure_endpoint_without_a_key_derives_no_connection_string(self, tmp_path):
+        config = _config(
+            tmp_path,
+            "personal",
+            azure_account_name="acct",
+            azure_sas_token="sv=2024&sig=x",
+            azure_endpoint_url="http://127.0.0.1:10000",
+        )
+
+        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@acct/wh")
+
+        assert "adls.connection-string" not in catalog.properties
+
     def test_an_azure_warehouse_gets_only_what_is_configured(self, tmp_path):
         config = _config(tmp_path, "personal", azure_account_name="acct")
 

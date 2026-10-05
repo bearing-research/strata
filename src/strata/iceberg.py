@@ -205,18 +205,27 @@ class PyIcebergCatalog:
         With no secret set, both pyiceberg Azure FileIOs fall back to ``DefaultAzureCredential``.
         """
         props: dict[str, str] = {}
-        if self.config.azure_account_name:
-            props["adls.account-name"] = self.config.azure_account_name
-        if self.config.azure_account_key:
-            props["adls.account-key"] = self.config.azure_account_key
+        name = self.config.azure_account_name
+        key = self.config.azure_account_key
+        if name:
+            props["adls.account-name"] = name
+        if key:
+            props["adls.account-key"] = key
         if self.config.azure_sas_token:
             props["adls.sas-token"] = self.config.azure_sas_token
         if self.config.azure_connection_string:
             props["adls.connection-string"] = self.config.azure_connection_string
-        if self.config.azure_endpoint_url:
-            parsed = urlparse(self.config.azure_endpoint_url)
+        if endpoint := self.config.azure_endpoint_url:
+            parsed = urlparse(endpoint)
+            # The authority keys reach only PyArrowFileIO; adlfs (pyiceberg's first
+            # choice for abfs) takes an emulator endpoint from a connection string alone.
             props["adls.blob-storage-authority"] = parsed.netloc
             props["adls.blob-storage-scheme"] = parsed.scheme
+            if name and key and "adls.connection-string" not in props:
+                props["adls.connection-string"] = (
+                    f"DefaultEndpointsProtocol={parsed.scheme};AccountName={name};"
+                    f"AccountKey={key};BlobEndpoint={endpoint.rstrip('/')}/{name}"
+                )
         return props
 
     def _build_catalog(self, warehouse_path: str | None) -> Catalog:
