@@ -192,7 +192,7 @@ view. They open the notebook locally - no server, no env sync:
 
 ```bash
 strata cell list <notebook_dir>            # every cell: id, name, status, source
-strata cell show <notebook_dir> <cell_id>  # one cell: source, status, outputs, console, staleness
+strata cell show <notebook_dir> <cell_id>  # one cell: source, status, staleness (outputs and console with --format json)
 strata cell show <notebook_dir> --var NAME # the cell that DEFINES a variable (else the available names)
 strata dag       <notebook_dir>            # dependency edges + topological order
 strata status    <notebook_dir>            # per-cell status + staleness summary
@@ -238,8 +238,11 @@ strata dag       --server http://localhost:8765 --session $SID
 strata status    --server http://localhost:8765 --session $SID
 ```
 
-`<id>` is the session id (the route `{id}`, not the `notebook.toml` id). The
-output is identical to the local backend - both project the same wire shape - so
+`<id>` is the session id (the route `{id}`, not the `notebook.toml` id).
+`strata agent` prints it when it starts; without that, `POST
+/v1/notebooks/open` with the notebook's path returns it as `session_id`, and
+`GET /v1/notebooks/sessions` lists the open ones (see the
+[REST API](../reference/rest-api.md#open-notebook)). The output is identical to the local backend - both project the same wire shape - so
 a script written against a local notebook works unchanged against a live session.
 `cell run` / `cell test` and the authoring commands accept the same selector
 (see below), so the entire surface works against a live session. Remote
