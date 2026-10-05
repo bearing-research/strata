@@ -40,7 +40,7 @@ Add extras in brackets, for example
 | `tui` | The terminal viewer: `strata watch`, `strata-notebook-tui`, and `strata agent` unless you pass `--no-tui`. |
 | `sql` | SQL cells. Add a driver extra for each database you connect to: `sql-duckdb`, `sql-sqlite`, `sql-postgres`, `sql-snowflake`, `sql-bigquery`. |
 | `postgres` | A Postgres metadata database for the artifact store (`STRATA_ARTIFACT_METADATA_DSN`), for several nodes sharing one store. |
-| `azure` | The Azure Blob Storage artifact backend. |
+| `azure` | The Azure Blob Storage artifact backend, and reading Azure lake tables (`adlfs`). |
 | `s3` | Presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) from an S3 role (instance profile, ECS task role, web identity) rather than an access key pair. |
 | `gcs` | Presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) for the GCS artifact backend. |
 | `otel` | OpenTelemetry tracing. |
