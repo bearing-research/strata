@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from threading import Event, Lock, Thread
 from typing import Any, TextIO
 
+from strata.logging import log_format
+
 # Logs are dropped when the queue is full rather than block.
 DEFAULT_LOG_QUEUE_SIZE = 1000
 
@@ -162,6 +164,14 @@ class ScanMetrics:
         return result
 
 
+def _render(entry: dict) -> str:
+    """One log line for *entry*: JSON, or the layout the text log format uses."""
+    if log_format() != "text":
+        return json.dumps(entry)
+    fields = ", ".join(f"{k}={v}" for k, v in entry.items() if k != "event")
+    return f"{'EVENT':7} strata.metrics: {entry.get('event', '')} | {fields}"
+
+
 @dataclass
 class MetricsCollector:
     """Collects metrics and writes structured log entries.
@@ -223,8 +233,7 @@ class MetricsCollector:
                 # Timeout so the loop can check the shutdown flag.
                 entry = self._log_queue.get(timeout=0.1)
                 try:
-                    json.dump(entry, self.output)
-                    self.output.write("\n")
+                    self.output.write(_render(entry) + "\n")
                     self.output.flush()
                 except (OSError, TypeError, ValueError):
                     # Broken pipe, closed stream or non-serializable entry: drop it; the writer must
@@ -239,8 +248,7 @@ class MetricsCollector:
             try:
                 entry = self._log_queue.get_nowait()
                 try:
-                    json.dump(entry, self.output)
-                    self.output.write("\n")
+                    self.output.write(_render(entry) + "\n")
                     self.output.flush()
                 except (OSError, TypeError, ValueError):
                     pass
