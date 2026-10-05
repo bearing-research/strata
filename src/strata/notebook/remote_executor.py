@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import contextlib
 import ctypes
 import hmac
@@ -173,18 +174,31 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
 
     async def _pump(reader: Any, stream: str) -> bytes:
         collected: list[bytes] = []
+        # One decoder per stream: a multibyte character split across reads is decoded
+        # whole, so the posted text is the bundle's decode and the server's count of
+        # what it showed is exact.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        seq = 0
+
+        def _offer(text: str) -> None:
+            nonlocal seq
+            if not text:
+                return
+            if queue is not None and not queue.full():
+                queue.put_nowait((stream, seq, text))
+            # A dropped chunk leaves a gap in seq, so the server shows nothing after it
+            # and what was shown stays a prefix the final report can complete.
+            seq += 1
+
         while True:
             chunk = await reader.read(_LOG_READ_CHUNK_BYTES)
             if not chunk:
                 break
             collected.append(chunk)
-            seq = len(collected) - 1
             if queue is not None:
-                if queue.full():
-                    # A dropped chunk leaves a gap in seq, so the server shows nothing after it
-                    # and what was shown stays a prefix the final report can complete.
-                    continue
-                queue.put_nowait((stream, seq, chunk.decode("utf-8", errors="replace")))
+                _offer(decoder.decode(chunk))
+        if queue is not None:
+            _offer(decoder.decode(b"", final=True))
         return b"".join(collected)
 
     if log_url:
