@@ -48,7 +48,7 @@ def _select(app: NotebookTUI, cell: CellView) -> None:
 async def test_console_keeps_the_subscript_in_a_traceback(monkeypatch):
     app = await _app(monkeypatch)
     async with app.run_test(size=(100, 40)) as pilot:
-        _select(app, CellView(id="c1", console=SUBSCRIPT))
+        _select(app, CellView(id="c1", console_stdout=SUBSCRIPT))
         await pilot.pause()
         assert "data[key]" in _plain(app.query_one("#console-body", Static))
 
@@ -57,7 +57,7 @@ async def test_console_keeps_the_subscript_in_a_traceback(monkeypatch):
 async def test_console_survives_a_bracketed_path(monkeypatch):
     app = await _app(monkeypatch)
     async with app.run_test(size=(100, 40)) as pilot:
-        _select(app, CellView(id="c1", console=BRACKET_PATH))
+        _select(app, CellView(id="c1", console_stdout=BRACKET_PATH))
         await pilot.pause()
         assert "counts[/tmp/out]" in _plain(app.query_one("#console-body", Static))
 
