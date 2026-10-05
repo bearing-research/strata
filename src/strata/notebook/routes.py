@@ -6,7 +6,6 @@ import asyncio
 import io
 import json
 import logging
-import os
 import re
 import tempfile
 import time
@@ -333,25 +332,15 @@ def _validate_notebook_path(
         else path.resolve()
     )
 
-    # Confine to the tenant root, or the base root on a single-tenant server. The
-    # normpath-then-startswith form is the guard static analysis recognises.
-    resolved_str = os.path.normpath(str(resolved))
+    # Confine to the tenant root, or the base root on a single-tenant server.
     boundary = caller_root if caller_root is not None else base_root
-    if boundary is not None:
-        root = os.path.normpath(str(boundary)).rstrip(os.sep)
-        if not resolved_str.startswith(root):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid {label}: must be inside configured notebook storage",
-            )
-        # A sibling such as <root>2 shares the prefix but lies outside the root.
-        if resolved_str[len(root) : len(root) + 1] not in ("", os.sep):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid {label}: must be inside configured notebook storage",
-            )
+    if boundary is not None and resolved != boundary and boundary not in resolved.parents:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {label}: must be inside configured notebook storage",
+        )
 
-    return Path(resolved_str)
+    return resolved
 
 
 def _safe_filename(name: str) -> str:
