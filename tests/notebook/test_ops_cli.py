@@ -286,6 +286,34 @@ def test_cli_cell_add_then_rm(chain_nb, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out) == {"removed": new["id"]}
 
 
+def test_cli_mutation_logs_each_annotation_diagnostic_once(tmp_path, capsys):
+    """One handle validates on open and again after the write; the log says it once."""
+    import logging
+
+    nb = _build_notebook(
+        tmp_path,
+        cells=[
+            ("q", "# @sql connection=local\nSELECT 1 FROM read_parquet('/tmp/x.parquet')", None)
+        ],
+        language="sql",
+    )
+    with open(nb / "notebook.toml", "a") as f:
+        f.write('\n[connections.local]\ndriver = "duckdb"\npath = ":memory:"\n')
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[method-assign]
+    session_logger = logging.getLogger("strata.notebook.session")
+    session_logger.addHandler(handler)
+    try:
+        assert main(["cell", "add", str(nb), "-c", "z = 1", "--format", "json"]) == 0
+    finally:
+        session_logger.removeHandler(handler)
+    capsys.readouterr()
+
+    diagnostics = [r.getMessage() for r in records if "code=sql_dynamic_table" in r.getMessage()]
+    assert len(diagnostics) == 1, diagnostics
+
+
 def test_cli_cell_show_var_defined(chain_nb, capsys):
     # chain_nb: cell `a` defines x, cell `b` defines y (= x + 1).
     assert main(["cell", "show", str(chain_nb), "--var", "x", "--format", "json"]) == 0
