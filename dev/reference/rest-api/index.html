@@ -4137,7 +4137,8 @@
 </tr>
 </tbody>
 </table>
-<p><code>POST /open</code>, <code>POST /create</code> and <code>GET /discover</code> are <strong>not</strong> restricted - they work in service mode, and <code>/discover</code> is filtered by owner when <code>STRATA_PERSONAL_MODE_USER_HEADER</code> is set.</p>
+<p><code>POST /open</code>, <code>POST /create</code> and <code>GET /discover</code> are <strong>not</strong> restricted - they work in service mode, and <code>/discover</code> is filtered by owner when <code>STRATA_PERSONAL_MODE_USER_HEADER</code> is set. With <code>multi_tenant_enabled</code>, all three (and the imports) are confined to the caller's tenant subdir of the storage root.</p>
+<p><strong>Tenant-scoped sessions.</strong> A session records the tenant of whoever opened, created or imported it, and every <code>/v1/notebooks/{session_id}/...</code> route answers <code>404</code> to a caller from another tenant, as for an unknown session. <code>admin:*</code> reaches every session; a session opened without a tenant is open to all.</p>
 <p><strong>Scope-gated endpoints.</strong> Under principal auth, <strong>every</strong> route on the <code>/v1/notebooks</code> and <code>/v1/projects</code> routers requires a notebook scope in <code>X-Strata-Scopes</code>. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns <code>403 Forbidden</code> naming the scope it wanted.</p>
 <table>
 <thead>
@@ -4265,7 +4266,7 @@ limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seco
 </tr>
 <tr>
 <td><code>404</code></td>
-<td>Notebook session not found, a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above)</td>
+<td>Notebook session not found (or another tenant's), a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above)</td>
 </tr>
 <tr>
 <td><code>409</code></td>
@@ -4433,7 +4434,8 @@ sorted newest-first. Used by the "Open existing" UI so users pick from a list
 instead of typing a filesystem path. Available in both modes; requires
 <code>notebook:read</code> under principal auth. With <code>STRATA_PERSONAL_MODE_USER_HEADER</code>
 set, the list is filtered to the caller's own notebooks - unowned ones stay
-visible to everyone.</p>
+visible to everyone. On a multi-tenant server the scan root is
+<code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code> (the whole root for <code>admin:*</code>).</p>
 <h3 id="validate-recent-notebooks">Validate Recent Notebooks<a class="headerlink" href="#validate-recent-notebooks" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>POST /v1/notebooks/recents/validate
 </code></pre></div>
