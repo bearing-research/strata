@@ -127,6 +127,20 @@ Both limits are enforced by the worker, not trusted to whatever dispatches to it
 
 Once this works locally, the cloud deploys below just change `config.url` from `http://127.0.0.1:9000` to the worker's public URL.
 
+### A worker behind NAT: `--connect`
+
+A machine the server cannot reach (behind NAT, or a firewall that allows only outbound traffic) can still be a worker if it can reach a relay. With `--connect`, the worker binds no port: it opens one outbound WebSocket to the relay, and the relay presents it at a URL the server dispatches to like any other.
+
+```bash
+export STRATA_WORKER_TOKEN=<worker-token>          # checked on every request, as always
+export STRATA_WORKER_CONNECT_TOKEN=<relay-token>   # presented to the relay
+strata-worker --connect wss://relay.example.com/connect
+```
+
+Register the worker at the URL the relay gives it, for example `config.url = "https://relay.example.com/w/abc/v1/execute"`, with `token_env` naming the worker token as usual. The relay token is read only from the environment, never from a flag, because the cells the worker runs could read its command line; it is removed from the environment at startup like the worker token. The worker reconnects with backoff when the connection drops, and exits with status 1 if the relay refuses the token.
+
+Strata does not ship a relay. A relay is a small service that accepts the worker's WebSocket and forwards HTTP requests over it; the [Worker Relay Protocol](../reference/worker-connect.md) specifies it. A `signed` worker still fetches its inputs and posts its console to the server's signed URLs directly, so it needs outbound reach to them; a `direct` worker needs only the relay.
+
 ## Run cells on a machine you can SSH to
 
 If you have a box you reach over SSH (a GPU machine, a bigger instance, one closer to the data), Strata can turn it into a worker for you in one step, without you deploying anything or hand-editing `notebook.toml`. Strata SSHes in, installs `strata-worker` if it's missing, launches it bound to the box's localhost, opens an `ssh -L` tunnel back to the notebook server, and registers it as a `direct`-transport worker. Cells then run on that box, cached by provenance like any other worker.

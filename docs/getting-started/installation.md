@@ -133,7 +133,7 @@ and call `strata-notebook` / `strata` / `strata-worker` directly.
 | `uv run strata env gc` | Remove shared environments no notebook links to. Only relevant with the shared environment backend. See [Environments](../notebook/environment.md). |
 | `uv run strata watch [dir\|--session]` | Attach the read-only terminal viewer to a live notebook session without writing any config (unlike `strata agent`). Needs the `[tui]` extra. See [Terminal Viewer](../notebook/tui.md). |
 | `uv run strata-notebook-tui` | Read-only terminal viewer that attaches to a running notebook session. Needs the `[tui]` extra. See [Terminal Viewer](../notebook/tui.md). |
-| `strata-worker --port 9000` | Start a remote worker for `# @worker` cells. Run the installed binary (for example `.venv/bin/strata-worker`), not through `uv run`, whose process would keep `STRATA_WORKER_TOKEN` readable to cells. See [Distributed Workers](../notebook/workers.md). |
+| `strata-worker --port 9000` | Start a remote worker for `# @worker` cells. Run the installed binary (for example `.venv/bin/strata-worker`), not through `uv run`, whose process would keep `STRATA_WORKER_TOKEN` readable to cells. With `--connect wss://...` it binds no port and dials out to a relay instead. See [Distributed Workers](../notebook/workers.md). |
 
 In a checkout with the venv activated (`source .venv/bin/activate`),
 you can drop the prefix too.
