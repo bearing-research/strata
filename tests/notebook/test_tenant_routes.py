@@ -236,3 +236,35 @@ class TestTenantStorage:
         listed = _client().get("/v1/notebooks/discover", headers=_headers("acme"))
 
         assert [n["path"] for n in listed.json()["notebooks"]] == [str(notebook.resolve())]
+
+    def test_recents_validation_answers_only_for_the_callers_notebooks(self, server, acme_notebook):
+        """Otherwise a tenant could learn which notebooks another tenant has, or which
+        directories anywhere on the server hold one."""
+        elsewhere = create_notebook(server.notebook_storage_dir.parent / "elsewhere", "secret_nb")
+        client = _client()
+        probe = {"paths": [str(acme_notebook), str(elsewhere)]}
+
+        as_globex = client.post(
+            "/v1/notebooks/recents/validate", json=probe, headers=_headers("globex")
+        )
+        as_acme = client.post(
+            "/v1/notebooks/recents/validate", json=probe, headers=_headers("acme")
+        )
+
+        assert as_globex.status_code == 200, as_globex.text
+        assert as_globex.json()["valid"] == []
+        assert as_acme.json()["valid"] == [str(acme_notebook)]
+
+
+def test_recents_validation_in_personal_mode_keeps_paths_under_the_root(server):
+    inside = create_notebook(server.notebook_storage_dir, "inside_nb")
+    outside = create_notebook(server.notebook_storage_dir.parent / "elsewhere", "outside_nb")
+    gone = server.notebook_storage_dir / "deleted_nb"
+
+    response = _client().post(
+        "/v1/notebooks/recents/validate",
+        json={"paths": [str(inside), str(outside), str(gone), "../escape"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] == [str(inside)]
