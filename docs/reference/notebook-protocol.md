@@ -89,7 +89,8 @@ every endpoint. This is the local-dev default.
   `notebook:execute`, and the socket closes with `1008 Unauthorized` once
   the key is revoked or expired.
 - `/open`, `/create` and `/discover` work in service mode. What is
-  personal-mode-only is narrower: the two path-keyed deletes and the two
+  personal-mode-only is narrower: the two delete routes (`DELETE
+  /{session_id}` and the path-keyed `POST /delete-by-path`) and the two
   `/sessions` routes, which return `403 Forbidden` elsewhere.
 - `/open` returns the session the same principal already has open on that
   path, and never another principal's: service mode has no per-session owner
