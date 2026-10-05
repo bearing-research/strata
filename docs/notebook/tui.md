@@ -78,6 +78,9 @@ strata watch --session <id>    # attach to a specific running session
 strata watch                   # auto-attach the only session, or show a picker
 ```
 
+`--server URL` names the server, as for `strata-notebook-tui` (default
+`$STRATA_TUI_SERVER` or `http://localhost:8765`).
+
 `strata watch` is watch-only: unlike [`strata agent`](agent.md), it writes no
 `.mcp.json` / `CLAUDE.md` and never owns the server lifecycle - it just shows a
 notebook live. Point it at a scratchpad an agent is driving to see the cells land

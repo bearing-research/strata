@@ -63,6 +63,10 @@ Published into ~/.strata/artifacts (the store your server serves).
 Copied 4 artifacts across so the link resolves.
 ```
 
+`--header 'Name: value'` (repeatable) adds a header for `--to` beyond the
+`STRATA_STORE_TOKEN` bearer, and `--max-depth` (default 10) bounds how far the
+chain is listed.
+
 That line is not conditional. A caller who is never told where a grant lives
 cannot tell a working link from one their own server will never resolve, and
 the silent case used to be exactly the one where it already matched.
@@ -237,6 +241,10 @@ figure3-bundle/
 ├── ro-crate-metadata.json  the chain as RO-Crate
 └── README.md               what it is and how to check it
 ```
+
+`--force` writes into a non-empty directory (which may leave a stale payload
+beside the new one); `--max-depth` (default 10) bounds how far the chain is
+walked.
 
 A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
 also carries `artifact.parquet`, the same rows in a format a data repository

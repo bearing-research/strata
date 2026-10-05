@@ -157,7 +157,8 @@ my_notebook/
   job, then only links. The server keeps answering other requests meanwhile.
 - **Clean-up.** An environment no notebook links to is removed once it has
   gone unused for `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (default 7), by an
-  hourly sweep in the server or by `strata env gc`. An environment a notebook
+  hourly sweep in the server or by `strata env gc` (`--dir` names the store,
+  `--ttl-days` overrides the TTL). An environment a notebook
   links to is never removed, opening a notebook counts as using it, and the
   sweep removes only environments it built. A directory of your own under the
   store, or one whose build never finished, is left alone.

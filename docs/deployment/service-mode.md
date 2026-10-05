@@ -540,6 +540,10 @@ strata artifact promote nb_taxi_cell_c2_var_model \
   --to https://store.example --name taxi/model --alias champion
 ```
 
+`--tag KEY=VALUE` (repeatable) tags the promoted version, `--header 'Name:
+value'` (repeatable) adds a header for `--to` beyond the `STRATA_STORE_TOKEN`
+bearer, and `--max-depth` (default 10) bounds how far the chain is walked.
+
 The chain travels with it, and has to. The cache is keyed by provenance, so
 each ancestor that arrives is a hit for the next person whose cell computes the
 same thing - promoting the result alone would share the answer and none of the
@@ -606,7 +610,8 @@ store's configured catalog.
   to the table.
 
 The same write is `strata artifact export --table <table> <ref>` against a local
-store, and `POST /v1/artifacts/{id}/v/{version}/export` with
+store (`--alias` tags the new snapshot, `--by` is recorded as
+`strata.promoted_by`), and `POST /v1/artifacts/{id}/v/{version}/export` with
 `{"table": ..., "alias": ...}` for a platform that exports once a promotion
 lands. Only Arrow tables can be written; a JSON value, a pickle, an array or a
 scalar is refused.
