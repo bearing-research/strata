@@ -3117,9 +3117,8 @@ endpoint that are set, passed to its catalog as <code>adls.*</code> properties; 
 secret set it uses <code>DefaultAzureCredential</code>. A key set in
 <code>STRATA_CATALOG_PROPERTIES</code> overrides the one Strata derives.</p>
 <p>PyIceberg reads and writes that metadata with <code>adlfs</code>, which the <code>azure</code> extra
-does not install: without it the read fails with <code>No module named 'adlfs'</code>,
-unless <code>STRATA_CATALOG_PROPERTIES</code> sets <code>py-io-impl</code> to
-<code>pyiceberg.io.pyarrow.PyArrowFileIO</code>. PyArrow ignores the connection string and
+installs. <code>STRATA_CATALOG_PROPERTIES</code> can set <code>py-io-impl</code> to
+<code>pyiceberg.io.pyarrow.PyArrowFileIO</code> instead; PyArrow ignores the connection string and
 handles only locations of the form <code>abfs[s]://&lt;container&gt;/&lt;path&gt;</code>, with the
 account from <code>STRATA_AZURE_ACCOUNT_NAME</code>. In a location of the form
 <code>abfs[s]://&lt;container&gt;@&lt;account&gt;.dfs.core.windows.net/&lt;path&gt;</code> it takes
