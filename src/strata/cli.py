@@ -637,7 +637,10 @@ def _build_parser() -> argparse.ArgumentParser:
     # Agent inspect commands.
     cell_parser = subparsers.add_parser(
         "cell",
-        help="Per-cell operations: list, show, run, test, add, edit, rm, mv, annotate",
+        help=(
+            "Per-cell operations: list, show, run, test, add, edit, rm, mv, annotate, "
+            "output, pin-fetch"
+        ),
         description="Inspect and (later) drive individual notebook cells.",
     )
     add_cell_arguments(cell_parser)
