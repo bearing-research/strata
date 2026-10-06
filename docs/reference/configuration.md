@@ -161,6 +161,13 @@ a 400 naming `STRATA_CATALOG_URI`, on scans, transform inputs, cache warming
 and export to a table. A personal server keeps the catalog in `STRATA_METADATA_DB`, so it can
 write its own tables there; nothing else reading the bucket sees them.
 
+Such a warehouse's catalog takes `uri` and the storage keys from
+`STRATA_CATALOG_PROPERTIES`, but not its `warehouse`: a table an export creates
+is written under the warehouse the request names. When the configured catalog
+is a REST or Hive one (a `type` other than `sql`, or a `uri` starting with
+`http` or `thrift`), a table URI cannot name a warehouse at all; the request is
+a 400, and the table is addressed as `<namespace>.<table>` in that catalog.
+
 ## S3 Storage
 
 | Variable                 | Default | Description                                      |

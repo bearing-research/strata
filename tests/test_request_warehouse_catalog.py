@@ -231,3 +231,67 @@ class TestServiceModeRefusalOverHttp:
 
         assert response.status_code == 400, response.text
         assert "STRATA_CATALOG_URI" in response.json()["detail"]
+
+
+class TestTheRequestsWarehouseIsTheOneWritten:
+    def test_a_configured_warehouse_does_not_take_a_new_tables_files(self, tmp_path):
+        """``uri`` comes from the configuration, the warehouse from the request."""
+        import pyarrow as pa
+
+        from strata.iceberg import IcebergWriter
+
+        configured, requested = tmp_path / "configured", tmp_path / "requested"
+        configured.mkdir()
+        requested.mkdir()
+        catalogs = PyIcebergCatalog(
+            _config(
+                tmp_path,
+                "personal",
+                catalog_properties={
+                    "uri": f"sqlite:///{tmp_path / 'catalog.db'}",
+                    "warehouse": configured.as_uri(),
+                },
+            )
+        )
+        table_uri = f"{requested.as_uri()}#ns.t"
+
+        IcebergWriter(catalogs).write(
+            table_uri,
+            pa.table({"id": [1, 2]}),
+            artifact_id="a",
+            version=1,
+            provenance_hash="p",
+            promoted_by=None,
+        )
+
+        assert [p for p in requested.rglob("*") if p.is_file()]
+        assert not [p for p in configured.rglob("*") if p.is_file()]
+
+
+@pytest.mark.parametrize(
+    "catalog_properties",
+    [{"type": "rest", "uri": "http://127.0.0.1:9/"}, {"uri": "thrift://127.0.0.1:9"}],
+)
+class TestARestOrHiveCatalogRefusesARequestWarehouse:
+    @pytest.mark.parametrize("warehouse", ["s3://lake/wh", "file:///nowhere"])
+    def test_a_scan_is_a_400_naming_the_table_form(
+        self, tmp_path, monkeypatch, catalog_properties, warehouse
+    ):
+        import strata.server as server_module
+        from strata.server import ServerState, app
+
+        config = _config(tmp_path, "personal", catalog_properties=catalog_properties)
+        monkeypatch.setattr(server_module, "_state", ServerState(config))
+
+        response = TestClient(app).post("/v1/materialize", json=_scan(f"{warehouse}#ns.t"))
+
+        assert response.status_code == 400, response.text
+        assert "<namespace>.<table>" in response.json()["detail"]
+
+    def test_the_catalog_is_refused_before_it_is_built(self, tmp_path, catalog_properties):
+        catalogs = PyIcebergCatalog(
+            _config(tmp_path, "personal", catalog_properties=catalog_properties)
+        )
+
+        with pytest.raises(CatalogUriRequired, match="not a SQL catalog"):
+            catalogs._build_catalog("s3://lake/wh")
