@@ -3932,6 +3932,9 @@ class ArtifactStore:
             ).fetchall()
             for pointer in held_pointers:
                 self._reclaim_blob(pointer["id"], pointer["version"])
+            # Before the first write, so the lock is never awaited while holding a name row.
+            self._serialize_audit(conn)
+            for pointer in held_pointers:
                 conn.execute(
                     "UPDATE artifact_versions SET superseded_by = NULL "
                     "WHERE id = ? AND version = ? AND superseded_by = ?",

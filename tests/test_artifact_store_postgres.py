@@ -1070,6 +1070,65 @@ class TestWriterSerialization:
         later = store.read_events(since=cursor)
         assert sorted(e["action"] for e in seen + later) == ["name_set", "tag_set"]
 
+    def test_deleting_an_artifact_while_its_name_is_deleted_does_not_deadlock(self, store):
+        """Delete took the audit lock after deleting the name rows; ``delete_name`` the reverse.
+
+        Each then waited on the lock the other held, and Postgres aborted one of them.
+        """
+        version = store.create_artifact("d1", "prov-d1", _spec())
+        store.finalize_artifact("d1", version, "{}", row_count=0, byte_size=0)
+        store.set_name("current", "d1", version)
+        store.set_alias("current", "prod", "d1", version)
+
+        locked, release = threading.Event(), threading.Event()
+        errors: list[BaseException] = []
+
+        def name_deleter() -> None:
+            # delete_name's order: the audit lock, then the name row.
+            conn = store._get_connection()
+            try:
+                store._serialize_audit(conn)
+                locked.set()
+                release.wait()
+                conn.execute("DELETE FROM artifact_names WHERE name = ?", ("current",))
+                store._audit_in_connection(conn, action="name_delete", name="current")
+                conn.commit()
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                conn.close()
+
+        def artifact_deleter() -> None:
+            try:
+                store.delete_artifact("d1", version)
+            except BaseException as exc:
+                errors.append(exc)
+
+        names = threading.Thread(target=name_deleter)
+        names.start()
+        locked.wait()
+        deleting = threading.Thread(target=artifact_deleter)
+        deleting.start()
+        probe = store._get_connection()
+        try:
+            # Until the artifact delete waits on the audit lock the name deleter holds.
+            while deleting.is_alive():
+                row = probe.execute(
+                    "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                ).fetchone()
+                probe.commit()
+                if row["n"]:
+                    break
+                deleting.join(timeout=0.05)
+        finally:
+            probe.close()
+        release.set()
+        names.join()
+        deleting.join()
+
+        assert errors == []
+        assert store.get_artifact("d1", version) is None
+
     def test_duplicate_provenance_finalize_is_idempotent(self, store):
         # Exercises the dialect's integrity_error: the partial unique index on
         # (tenant, provenance_hash) rejects the second ready row, and the store
