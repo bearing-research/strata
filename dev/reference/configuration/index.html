@@ -3029,6 +3029,12 @@ is not known at startup. With no catalog <code>uri</code> set, a service
 a 400 naming <code>STRATA_CATALOG_URI</code>, on scans, transform inputs, cache warming
 and export to a table. A personal server keeps the catalog in <code>STRATA_METADATA_DB</code>, so it can
 write its own tables there; nothing else reading the bucket sees them.</p>
+<p>Such a warehouse's catalog takes <code>uri</code> and the storage keys from
+<code>STRATA_CATALOG_PROPERTIES</code>, but not its <code>warehouse</code>: a table an export creates
+is written under the warehouse the request names. When the configured catalog
+is a REST or Hive one (a <code>type</code> other than <code>sql</code>, or a <code>uri</code> starting with
+<code>http</code> or <code>thrift</code>), a table URI cannot name a warehouse at all; the request is
+a 400, and the table is addressed as <code>&lt;namespace&gt;.&lt;table&gt;</code> in that catalog.</p>
 <h2 id="s3-storage">S3 Storage<a class="headerlink" href="#s3-storage" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3119,8 +3125,9 @@ secret set it uses <code>DefaultAzureCredential</code>. A key set in
 <code>STRATA_CATALOG_PROPERTIES</code> overrides the one Strata derives.</p>
 <p><code>STRATA_AZURE_ENDPOINT_URL</code> names the blob host (<code>http://127.0.0.1:10000</code> for
 Azurite), with the account as the first path segment. The artifact blob store
-addresses the account the same way, as <code>&lt;url&gt;/&lt;name&gt;</code>; without an account name
-it uses the URL as given. <code>adlfs</code> takes such an
+addresses the account the same way, as <code>&lt;url&gt;/&lt;name&gt;</code> (a URL that already ends
+in <code>/&lt;name&gt;</code> is used as given); without an account name it uses the URL as
+given. <code>adlfs</code> takes such an
 endpoint only from a connection string, so with an account name and key set and
 no connection string, Strata derives one for the catalog
 (<code>DefaultEndpointsProtocol=&lt;scheme&gt;;AccountName=&lt;name&gt;;AccountKey=&lt;key&gt;;BlobEndpoint=&lt;url&gt;/&lt;name&gt;</code>).
@@ -3324,12 +3331,11 @@ same as starting the server against it.</p>
 or its metadata will resolve to bytes it cannot read. Live stream-ownership
 rows are also skipped, since they describe streams that do not survive the
 move.</p>
-<p>One behavioral difference worth knowing: <code>artifact_builds</code> carries a foreign
-key to <code>artifact_versions</code>, and <strong>Postgres enforces it while SQLite does not</strong>
-(Strata never enables <code>PRAGMA foreign_keys</code>). A build row for an artifact
-version that does not exist is rejected on Postgres and silently accepted on
-SQLite. Strata's own flow creates the artifact version first, so this only
-affects callers writing build rows directly.</p>
+<p><code>artifact_builds</code> carries a foreign key to <code>artifact_versions</code>, and both
+backends enforce it (Strata's SQLite connections enable <code>PRAGMA foreign_keys</code>):
+a build row for an artifact version that does not exist is rejected. Strata's
+own flow creates the artifact version first, so this only affects callers
+writing build rows directly.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

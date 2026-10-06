@@ -4933,7 +4933,11 @@ Powers the web UI <strong>Logs</strong> page.</p>
 <code>limit</code>, <code>offset</code>, <code>state</code>, <code>name_prefix</code>, <code>since</code> (epoch seconds), <code>sort</code>
 (<code>created_at</code>, <code>byte_size</code> or <code>row_count</code>) and <code>order</code> query parameters; <code>GET /v1/artifacts/stats</code> returns summary
 counts and byte totals, and <code>GET /v1/artifacts/usage</code> adds unique-artifact,
-name and unreferenced counts. Powers the web UI <strong>Artifacts</strong> page.</p>
+name and unreferenced counts. Both count <code>total_versions</code> and its split by
+state: <code>ready_versions</code>, <code>building_versions</code>, <code>superseded_versions</code> (a version
+a refresh or a duplicate build overtook) and <code>failed_versions</code>. Powers the web UI <strong>Artifacts</strong> page. Their
+<code>total_bytes</code> counts every version that still holds bytes, superseded ones
+included until a sweep collects them: the measure the byte cap uses.</p>
 <p>In personal mode, stats and usage cover the whole store. In service mode they
 cover <strong>one tenant's holdings</strong>: the caller's own, from the trusted-proxy
 identity, which is what a platform reads to meter storage per tenant. The
@@ -4975,8 +4979,10 @@ materialize response's: when two misses for one scan were in flight together,
 one artifact becomes the ready result and the other reads <code>superseded</code>. The
 superseded one keeps no bytes of its own: its <code>GET /v1/artifacts/{id}/v/{n}/data</code>
 serves the canonical artifact's blob, the store counts those bytes once, and
-retention collects the superseded row like any other. Read the header to keep
-the canonical one.</p>
+retention collects the two together (or neither, while the superseded one is
+held). Deleting the canonical artifact first gives a published or pinned
+superseded one its own copy of the bytes. Read the header to keep the canonical
+one.</p>
 <h3 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-91-1" name="__codelineno-91-1" href="#__codelineno-91-1"></a>GET /health
 </code></pre></div>

@@ -2478,7 +2478,8 @@ paper outlives most servers, so there is a second form:</p>
 </code></pre></div>
 <p><code>--force</code> writes into a non-empty directory (which may leave a stale payload
 beside the new one); <code>--max-depth</code> (default 10) bounds how far the chain is
-walked.</p>
+walked. With <code>--token</code> it defaults to 25, the depth the hosted page and its
+archive walk.</p>
 <p>A tabular artifact's bytes are Arrow IPC (<code>artifact.arrow</code>), and the bundle
 also carries <code>artifact.parquet</code>, the same rows in a format a data repository
 indexes. The manifest's digest covers the Arrow file; the Parquet file carries
@@ -2688,6 +2689,11 @@ Publishing the same chain again writes nothing.</p>
 </tr>
 </tbody>
 </table>
+<p>For a withdrawn token the page, the badge and <code>GET /v1/publications/{token}</code>
+still answer and say so; the record then carries only the token, title and
+the publish and withdraw times, no chain or source. Every route that serves
+content (<code>/data</code>, <code>/archive.zip</code>, <code>/verify</code>, <code>/embed</code>, <code>/ro-crate</code> and
+<code>/oembed</code>) answers <code>410 Gone</code>.</p>
 <p>The unauthenticated routes are exempt from the auth and tenant middleware by
 path, and only for <code>GET</code>. The token is the credential: it exists only because
 someone with authority over that artifact minted it for one version. Minting,
