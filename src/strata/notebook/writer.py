@@ -124,8 +124,10 @@ def _write_text_atomic(path: Path, text: str) -> None:
 def _write_notebook_toml_atomic(notebook_toml_path: Path, toml_data: dict[str, Any]) -> None:
     """Serialize *toml_data* and atomically replace ``notebook.toml``.
 
-    A truncated file would lose the cell list and orphan artifacts.
+    A truncated file would lose the cell list and orphan artifacts. A leftover
+    ``owner`` key (no longer read) is dropped.
     """
+    toml_data.pop("owner", None)
     _replace_file_atomically(notebook_toml_path, lambda f: _dump_notebook_toml(toml_data, f))
 
 

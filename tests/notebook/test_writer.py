@@ -1083,6 +1083,28 @@ def test_a_rewrite_keeps_a_mode_the_user_narrowed(tmp_path):
     assert toml_path.stat().st_mode & 0o777 == 0o600
 
 
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda nb: add_cell_to_notebook(nb, "c2"),
+        lambda nb: rename_notebook(nb, "Renamed"),
+        lambda nb: update_notebook_timeout(nb, 30.0),
+        lambda nb: remove_cell_from_notebook(nb, "c1"),
+    ],
+)
+def test_a_structural_edit_drops_a_leftover_owner_key(tmp_path, edit):
+    """0.8.0 notebooks may carry ``owner``; nothing reads it any more."""
+    nb = create_notebook(tmp_path, "Owned", initialize_environment=False)
+    add_cell_to_notebook(nb, "c1")
+    toml_path = nb / "notebook.toml"
+    toml_path.write_text('owner = "alice@example.com"\n' + toml_path.read_text())
+    assert "owner" in tomllib.loads(toml_path.read_text())
+
+    edit(nb)
+
+    assert "owner" not in tomllib.loads(toml_path.read_text())
+
+
 def test_a_none_inside_a_display_value_stays_null_in_runtime_json(tmp_path):
     """runtime.json is JSON; turning None into "" shows the wrong value in exports."""
     import json
