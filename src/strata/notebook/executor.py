@@ -2753,6 +2753,18 @@ class CellExecutor:
         environment = await self._locked_environment(worker_spec, language)
         if environment is not None:
             build_params["environment"] = environment
+        # The env holds secrets and the artifact and build rows are readable by the tenant,
+        # so what is stored names the keys and digests the values; only the manifest the
+        # worker receives carries them.
+        recorded_params = {
+            **build_params,
+            "env": {
+                "names": sorted(runtime_env),
+                "sha256": hashlib.sha256(
+                    json.dumps(runtime_env, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+            },
+        }
         transport_provenance = hashlib.sha256(
             json.dumps(
                 {
@@ -2766,14 +2778,14 @@ class CellExecutor:
                         }
                         for name, spec in sorted(input_specs.items())
                     ],
-                    "params": build_params,
+                    "params": recorded_params,
                 },
                 sort_keys=True,
             ).encode("utf-8")
         ).hexdigest()
         transform_spec = ArtifactTransformSpec(
             executor=NOTEBOOK_EXECUTOR_TRANSFORM_REF,
-            params=build_params,
+            params=recorded_params,
             inputs=input_uris,
         )
 
@@ -2795,7 +2807,7 @@ class CellExecutor:
                 tenant_id=tenant_id,
                 principal_id=principal_id,
                 input_uris=input_uris,
-                params=build_params,
+                params=recorded_params,
             )
             build_store.start_build(build_id)
 
