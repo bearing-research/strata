@@ -939,6 +939,8 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
     cell_file = cells_dir / cell_meta["file"]
     if cell_file.exists():
         cell_file.unlink()
+    # Otherwise it stays in the committed tree and in every export.
+    (cells_dir / os.path.basename(f"{cell_id}.test.py")).unlink(missing_ok=True)
 
     cells_data.pop(cell_idx)
     toml_data["cells"] = cells_data

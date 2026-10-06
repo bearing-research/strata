@@ -1868,7 +1868,7 @@ function parseBackendTestResult(raw: any): CellTestResult {
           message: t.message ?? '',
         }))
       : [],
-    // Persisted results carry no `stale`; trust them until the next edit.
+    // The server computes `stale` for a persisted result; a local edit sets it too.
     stale: raw.stale === true,
     pytestUnavailable: raw.pytest_unavailable === true,
     ranAt: raw.ran_at ?? 0,

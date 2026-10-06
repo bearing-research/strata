@@ -22,6 +22,7 @@ from strata.notebook.writer import (
     add_cell_to_notebook,
     create_notebook,
     write_cell,
+    write_cell_tests,
 )
 from tests.notebook.e2e_fixtures import FakeNotebookWebSocket
 from tests.notebook.e2e_fixtures import _reset_ws_globals as _reset_e2e_ws_globals
@@ -109,6 +110,90 @@ async def test_run_cell_tests_injects_upstream_inputs():
     assert result.passed == 1
     assert result.failed == 0
     assert result.input_fingerprint  # an upstream input was fingerprinted
+
+
+@pytest.mark.asyncio
+async def test_run_cell_tests_gets_fetch_mount_and_env_inputs(monkeypatch, tmp_path):
+    """A test sees what a run of the cell sees: fetched files, mounts and notebook env."""
+    from types import SimpleNamespace
+
+    from tests.notebook.test_fetch import _Origin
+
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(
+                deployment_mode="personal", notebook_fetch_allowed_hosts=["127.0.0.1"]
+            )
+        ),
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "rows.txt").write_text("a\nb\n")
+    origin = _Origin()
+    try:
+        source = (
+            f"# @fetch zones {origin.url()}\n"
+            f"# @mount data {data_dir.as_uri()} ro\n"
+            "# @env MODE=prod\n"
+            "import os\n"
+            "def summary():\n"
+            "    rows = len(zones.read_text().splitlines())\n"
+            "    text = (data / 'rows.txt').read_text()\n"
+            "    return (rows, text, os.environ['MODE'], os.environ['TOKEN'])\n"
+        )
+        session = _session_with([("cell1", source, None)])
+        session.notebook_state.get_cell("cell1").env = {"TOKEN": "t0"}
+        expected = (len(origin.body.splitlines()), "a\nb\n", "prod", "t0")
+
+        result = await CellExecutor(session).run_cell_tests(
+            "cell1",
+            f"def test_inputs(cell):\n    assert cell.summary() == {expected!r}\n",
+        )
+    finally:
+        origin.close()
+
+    assert (result.passed, result.failed, result.errored) == (1, 0, 0), result.tests
+
+
+@pytest.mark.asyncio
+async def test_the_stale_flag_is_computed_on_reopen():
+    """Editing the cell, its tests or an upstream outside the editor shows stale after reopen."""
+    session = _session_with(
+        [
+            ("cell_a", "factor = 10\n", None),
+            ("cell_b", "def scale(x):\n    return x * factor\n", "cell_a"),
+        ]
+    )
+    test_source = "def test_scale(cell):\n    assert cell.scale(3) == 30\n"
+    write_cell_tests(session.path, "cell_b", test_source)
+    await CellExecutor(session).run_cell_tests("cell_b", test_source)
+
+    def reopened() -> NotebookSession:
+        fresh = NotebookSession(parse_notebook(session.path), session.path)
+        fresh.venv_python = Path(sys.executable)
+        fresh.compute_staleness()  # as opening does
+        return fresh
+
+    def stale(s: NotebookSession) -> bool:
+        return s.serialize_cell(s.notebook_state.get_cell("cell_b"))["test_result"]["stale"]
+
+    assert stale(reopened()) is False
+
+    write_cell(session.path, "cell_b", "def scale(x):\n    return x * factor * 1\n")
+    assert stale(reopened()) is True
+    write_cell(session.path, "cell_b", "def scale(x):\n    return x * factor\n")
+    assert stale(reopened()) is False
+
+    write_cell_tests(session.path, "cell_b", test_source + "# more\n")
+    assert stale(reopened()) is True
+    write_cell_tests(session.path, "cell_b", test_source)
+
+    write_cell(session.path, "cell_a", "factor = 11\n")
+    upstream_moved = reopened()
+    result = await CellExecutor(upstream_moved).execute_cell("cell_a", "factor = 11\n")
+    assert result.success, result.error
+    assert stale(upstream_moved) is True
 
 
 @pytest.mark.asyncio

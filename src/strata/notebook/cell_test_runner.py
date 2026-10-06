@@ -52,6 +52,7 @@ def run_cell_tests_in_dir(
     test_source: str,
     inputs: dict[str, Any],
     input_dir: Path,
+    mounts: dict[str, str] | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     env: dict[str, str] | None = None,
     run_as: HarnessUser | None = None,
@@ -60,6 +61,7 @@ def run_cell_tests_in_dir(
 
     ``inputs`` maps each upstream variable to its ``{content_type, file}`` spec, the
     file in *input_dir*. The test process deserializes them: the server never does.
+    ``mounts`` maps each mount and ``@fetch`` name to the local path bound to it.
 
     The dict has totals (``passed``/``failed``/``errored``/``skipped``) plus a
     ``tests`` list of ``{name, nodeid, outcome, message}``. ``env`` and ``run_as``
@@ -74,7 +76,12 @@ def run_cell_tests_in_dir(
     rundir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(_CONFTEST_TEMPLATE, rundir / "conftest.py")
     (rundir / "cell_source.py").write_text(cell_source, encoding="utf-8")
-    manifest = {"serializer": str(_SERIALIZER), "input_dir": str(input_dir), "inputs": inputs}
+    manifest = {
+        "serializer": str(_SERIALIZER),
+        "input_dir": str(input_dir),
+        "inputs": inputs,
+        "mounts": mounts or {},
+    }
     (rundir / "inputs.json").write_text(json.dumps(manifest), encoding="utf-8")
     test_file = rundir / "test_cell.py"
     test_file.write_text(test_source, encoding="utf-8")
