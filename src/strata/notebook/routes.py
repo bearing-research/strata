@@ -2620,8 +2620,14 @@ async def update_notebook_env_endpoint(
         to_write = {key: value for key, value in env.items() if key not in fetched}
         to_write.update({key: "" for key in fetched if key in declared})
         update_notebook_env(session.path, to_write)
-        # The request is the whole env: a secret it leaves out is removed.
-        session.reload(keep_typed_secrets=False)
+        # The request is the whole env: a secret it leaves out is removed. Set it before
+        # the reload, which carries typed secrets over from it, so the staleness the reload
+        # computes sees the values cells run with rather than the blanks on disk.
+        state.env = dict(env)
+        state.env_sources = {
+            key: previous_sources[key] if key in fetched else MANUAL_SOURCE for key in env
+        }
+        session.reload()
         # The disk writer blanks sensitive values to keep them out of git; restore
         # them in memory for the LLM config and Runtime panel. Edits are manual
         # overrides (for the UI badge).
