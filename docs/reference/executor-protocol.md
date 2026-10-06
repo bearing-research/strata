@@ -525,6 +525,12 @@ in-process `duckdb_sql@v1`. With one, it holds only the listed entries, and
 only when `enabled = true`. A ref no entry matches is refused at
 `POST /v1/materialize` (`403` in service mode, `400` in personal mode).
 
+The in-process `duckdb_sql@v1` runs in the server process, so its DuckDB reads
+only the inputs registered as `input0`, `input1`, ...: file access (`read_csv`,
+`COPY ... TO`, `ATTACH`), extension loading and network reads are off, and the
+query cannot turn them back on or change any other setting. A query that needs
+those runs on an HTTP executor instead.
+
 ### `POST {executor_url}/v1/execute`
 
 `multipart/form-data` with the header `X-Strata-Executor-Protocol: v1`. Strata
