@@ -354,7 +354,10 @@ behind, and a retry works.
 
 A bundle is a file somebody sent you, so its member names, cell ids, cell
 files and artifact ids are checked before anything is written. One that names a
-path outside the notebook is refused rather than unpacked. The same rule holds
+path outside the notebook is refused rather than unpacked. So is an artifact
+record of the wrong shape (a state other than `ready` or `superseded`, a size
+that is not a whole number, a lineage field that is not JSON), which the store
+would otherwise keep and trip over later. The same rule holds
 for any notebook you open: a `notebook.toml` whose cell `file` points outside
 `cells/` (an absolute path, or one climbing out with `..`) is refused with an
 error naming the cell, so a cloned notebook can't read or rewrite other files.

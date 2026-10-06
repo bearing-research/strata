@@ -242,9 +242,52 @@ def _check_manifest(manifest: dict[str, Any], names: set[str]) -> None:
         for entries in index.values()
     ):
         raise NotASnapshotError("not a snapshot: artifacts.json's artifacts is malformed")
-    for ref in manifest.get("records", {}):
+    for ref, record in manifest.get("records", {}).items():
         if f"artifacts/{ref}" not in names:
             raise NotASnapshotError(f"not a complete snapshot: no bytes for the record {ref!r}")
+        problem = _record_problem(record)
+        if problem is not None:
+            raise NotASnapshotError(f"the bundle's record {ref!r} {problem}")
+
+
+def _record_problem(data: dict[str, Any]) -> str | None:
+    """Why a bundle record cannot be stored as it is, or ``None``.
+
+    The checks ``POST /v1/artifacts/import`` makes: rows are stored as read,
+    and a ``building`` row or a string ``byte_size`` breaks later sweeps.
+    """
+    missing = [key for key in RECORD_FIELDS if key not in data]
+    if missing:
+        return f"is missing {', '.join(missing)}"
+    if data["state"] not in ("ready", "superseded"):
+        return "has a state other than 'ready' or 'superseded'"
+    if type(data["version"]) is not int or data["version"] < 1:
+        return "has a version that is not an integer of 1 or more"
+    if not isinstance(data["provenance_hash"], str) or not data["provenance_hash"]:
+        return "has no provenance_hash"
+    if type(data["created_at"]) not in (int, float):
+        return "has a created_at that is not epoch seconds"
+    for key in ("row_count", "byte_size"):
+        value = data[key]
+        if value is not None and (type(value) is not int or value < 0):
+            return f"has a {key} that is not a non-negative integer"
+    for key in ("schema_json", "principal"):
+        if not isinstance(data[key], str | None):
+            return f"has a {key} that is not a string"
+    for key in ("transform_spec", "input_versions"):
+        if data[key] is not None and not _is_json_object(data[key]):
+            return f"has a {key} that is not a JSON object encoded as a string"
+    return None
+
+
+def _is_json_object(value: object) -> bool:
+    """Whether *value* is a string holding a JSON object, as ``transform_spec`` and edges are."""
+    if not isinstance(value, str):
+        return False
+    try:
+        return isinstance(json.loads(value), dict)
+    except json.JSONDecodeError:
+        return False
 
 
 def _by_reference_cells(manifest: dict[str, Any]) -> list[str]:

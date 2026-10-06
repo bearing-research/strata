@@ -590,6 +590,46 @@ class TestAMalformedBundle:
         with pytest.raises(NotASnapshotError, match="no bytes for the record"):
             import_snapshot(broken, tmp_path / "dst")
 
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("state", "building", "state"),
+            ("state", "failed", "state"),
+            ("version", "1", "version"),
+            ("version", 0, "version"),
+            ("created_at", "yesterday", "created_at"),
+            ("byte_size", "100", "byte_size"),
+            ("row_count", -1, "row_count"),
+            ("schema_json", {"fields": []}, "schema_json"),
+            ("principal", 7, "principal"),
+            ("transform_spec", "{not json", "transform_spec"),
+            ("input_versions", "[]", "input_versions"),
+        ],
+    )
+    def test_a_record_of_the_wrong_shape_is_refused_and_leaves_nothing(
+        self, ran, tmp_path, field, value, message
+    ):
+        """Rows are stored as read, so a field the store would trip over later is refused."""
+        good = _export(ran, tmp_path / "snap.zip")
+        bad = tmp_path / "bad.zip"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(bad, "w") as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "artifacts.json":
+                    manifest = json.loads(data)
+                    records = manifest["records"]
+                    assert records, "the fixture exports at least one record"
+                    for record in records.values():
+                        record[field] = value
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, data)
+
+        with pytest.raises(NotASnapshotError, match=message):
+            import_snapshot(bad, tmp_path / "out" / "dst")
+
+        out = tmp_path / "out"
+        assert not out.exists() or not any(out.iterdir())
+
 
 class TestAMemberReadWholeIsCapped:
     """A small zip can declare a huge member; one the import reads whole must not be read."""
