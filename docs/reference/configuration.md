@@ -161,6 +161,13 @@ a 400 naming `STRATA_CATALOG_URI`, on scans, transform inputs, cache warming
 and export to a table. A personal server keeps the catalog in `STRATA_METADATA_DB`, so it can
 write its own tables there; nothing else reading the bucket sees them.
 
+Such a warehouse's catalog takes `uri` and the storage keys from
+`STRATA_CATALOG_PROPERTIES`, but not its `warehouse`: a table an export creates
+is written under the warehouse the request names. When the configured catalog
+is a REST or Hive one (a `type` other than `sql`, or a `uri` starting with
+`http` or `thrift`), a table URI cannot name a warehouse at all; the request is
+a 400, and the table is addressed as `<namespace>.<table>` in that catalog.
+
 ## S3 Storage
 
 | Variable                 | Default | Description                                      |
@@ -206,8 +213,9 @@ secret set it uses `DefaultAzureCredential`. A key set in
 
 `STRATA_AZURE_ENDPOINT_URL` names the blob host (`http://127.0.0.1:10000` for
 Azurite), with the account as the first path segment. The artifact blob store
-addresses the account the same way, as `<url>/<name>`; without an account name
-it uses the URL as given. `adlfs` takes such an
+addresses the account the same way, as `<url>/<name>` (a URL that already ends
+in `/<name>` is used as given); without an account name it uses the URL as
+given. `adlfs` takes such an
 endpoint only from a connection string, so with an account name and key set and
 no connection string, Strata derives one for the catalog
 (`DefaultEndpointsProtocol=<scheme>;AccountName=<name>;AccountKey=<key>;BlobEndpoint=<url>/<name>`).
@@ -320,12 +328,11 @@ or its metadata will resolve to bytes it cannot read. Live stream-ownership
 rows are also skipped, since they describe streams that do not survive the
 move.
 
-One behavioral difference worth knowing: `artifact_builds` carries a foreign
-key to `artifact_versions`, and **Postgres enforces it while SQLite does not**
-(Strata never enables `PRAGMA foreign_keys`). A build row for an artifact
-version that does not exist is rejected on Postgres and silently accepted on
-SQLite. Strata's own flow creates the artifact version first, so this only
-affects callers writing build rows directly.
+`artifact_builds` carries a foreign key to `artifact_versions`, and both
+backends enforce it (Strata's SQLite connections enable `PRAGMA foreign_keys`):
+a build row for an artifact version that does not exist is rejected. Strata's
+own flow creates the artifact version first, so this only affects callers
+writing build rows directly.
 
 ## Authentication
 

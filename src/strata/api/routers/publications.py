@@ -31,6 +31,7 @@ from strata.api.dependencies import (
 )
 from strata.api.provenance_ld import build_crate
 from strata.api.publication_bundle import (
+    PUBLICATION_MAX_DEPTH,
     cached_bundle_zip,
     companion_digests,
     drop_cached_bundles,
@@ -264,15 +265,28 @@ def _load_published(store, token: str, *, require_active: bool):
 
 @router.get("/v1/publications/{token}", response_model=None)
 async def read_publication_record(token: str, store: ReadStore):
-    """The machine-readable record behind the page. Unauthenticated."""
+    """The machine-readable record behind the page. Unauthenticated.
+
+    A withdrawn publication answers with only what its page shows: that it was withdrawn, and when.
+    """
     publication, artifact = _load_published(store, token, require_active=False)
+    if not publication.is_active:
+        return {
+            "publication": {
+                "token": publication.token,
+                "url": f"/p/{publication.token}",
+                "title": publication.title,
+                "published_at": publication.published_at,
+                "revoked_at": publication.revoked_at,
+            }
+        }
     lineage = ArtifactService().build_lineage(
         store,
         artifact=artifact,
         artifact_id=publication.artifact_id,
         version=publication.version,
         tenant_filter=None,
-        max_depth=25,
+        max_depth=PUBLICATION_MAX_DEPTH,
     )
     record = build_record(
         publication=publication,
@@ -295,7 +309,7 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
         artifact_id=publication.artifact_id,
         version=publication.version,
         tenant_filter=None,
-        max_depth=25,
+        max_depth=PUBLICATION_MAX_DEPTH,
     )
     content_type = content_type_of(artifact)
 
@@ -516,7 +530,7 @@ async def publication_embed(token: str, store: ReadStore, http_request: Request)
         artifact_id=publication.artifact_id,
         version=publication.version,
         tenant_filter=None,
-        max_depth=25,
+        max_depth=PUBLICATION_MAX_DEPTH,
     )
     content_type = content_type_of(artifact)
     image_src = _inline_png(store, publication) if content_type == "image/png" else None
@@ -601,7 +615,7 @@ async def publication_ro_crate(token: str, store: ReadStore, http_request: Reque
         artifact_id=publication.artifact_id,
         version=publication.version,
         tenant_filter=None,
-        max_depth=25,
+        max_depth=PUBLICATION_MAX_DEPTH,
     )
     base = _public_base(http_request)
     return JSONResponse(
@@ -634,7 +648,7 @@ async def publication_badge(token: str, store: ReadStore):
         artifact_id=publication.artifact_id,
         version=publication.version,
         tenant_filter=None,
-        max_depth=25,
+        max_depth=PUBLICATION_MAX_DEPTH,
     )
     root = next((node for node in lineage.nodes if node.artifact_id == artifact.id), None)
     steps = sum(1 for node in lineage.nodes if node is not root)

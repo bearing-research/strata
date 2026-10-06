@@ -306,6 +306,32 @@ class TestParquetMetadataCache:
         assert any("Could not persist 1 Parquet footers" in m for m in messages)
         assert all("database is locked" in m for m in messages if "Could not persist" in m)
 
+    def test_a_footer_that_cannot_be_converted_is_served_unpersisted(
+        self, sample_parquet_file, tmp_path, monkeypatch, caplog
+    ):
+        """A statistics value pyarrow cannot box skips persistence, not the load."""
+        import logging
+
+        import strata.metadata_cache as metadata_cache
+        import strata.metadata_store as metadata_store
+
+        def unboxable(metadata):
+            raise pa.ArrowNotImplementedError("unsupported logical type")
+
+        monkeypatch.setattr(metadata_cache, "_persisted_parquet_meta_from_loaded", unboxable)
+        store = metadata_store.MetadataStore(tmp_path / "metadata.sqlite")
+        cache = ParquetMetadataCache(max_size=10, store=store)
+        with caplog.at_level(logging.DEBUG, logger="strata.metadata_cache"):
+            loaded = cache.get_or_load(sample_parquet_file)
+            cache.clear()
+            many = cache.get_or_load_many([sample_parquet_file])
+
+        assert loaded.num_row_groups == 3
+        assert many[sample_parquet_file].num_row_groups == 3
+        assert store.get_parquet_meta(sample_parquet_file) is None
+        converted = [r for r in caplog.records if "Could not convert" in r.getMessage()]
+        assert len(converted) == 2
+
 
 class TestManifestCache:
     """Manifest resolution caching."""

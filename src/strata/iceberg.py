@@ -19,7 +19,7 @@ from pyiceberg.schema import Schema
 from pyiceberg.table import Table
 from pyiceberg.table.snapshots import Operation, Snapshot
 
-from strata.blob_store import _resolve_gcs_credentials
+from strata.blob_store import _resolve_gcs_credentials, azure_account_url
 from strata.config import StrataConfig
 from strata.lake_files import _AZURE_SCHEMES
 from strata.types import ACL_STORE_NAMES, TableIdentity
@@ -95,6 +95,10 @@ class CatalogUriRequired(ValueError):
     """A request names an object-store warehouse on a service with no catalog ``uri``."""
 
 
+class WarehouseNeedsSqlCatalog(CatalogUriRequired):
+    """A request names a warehouse, but the configured catalog is not a SQL one it can share."""
+
+
 class WarehouseNotFound(ValueError):
     """A table URI names a local warehouse directory that does not exist."""
 
@@ -107,8 +111,20 @@ def refuse_unconfigured_warehouse(warehouse_path: str | None, config: StrataConf
     """Raise :class:`CatalogUriRequired` for a service-mode object-store warehouse with no ``uri``.
 
     Its catalog would be SQLite on this server's disk, invisible to every other
-    reader of the bucket. A personal server keeps its own tables there.
+    reader of the bucket. A personal server keeps its own tables there. Any request
+    warehouse is refused when the configured ``uri`` is a REST or Hive catalog's, which
+    a per-warehouse SQL catalog cannot open.
     """
+    if (
+        warehouse_path
+        and "uri" in config.catalog_properties
+        and not _default_catalog_is_sql(config)
+    ):
+        raise WarehouseNeedsSqlCatalog(
+            "This server's catalog is not a SQL catalog, so a table URI cannot name a "
+            f"warehouse ({warehouse_path}). Address the table as <namespace>.<table> in "
+            "the configured catalog."
+        )
     if (
         config.deployment_mode == "service"
         and warehouse_path
@@ -121,6 +137,14 @@ def refuse_unconfigured_warehouse(warehouse_path: str | None, config: StrataConf
             "reader of the bucket. Set STRATA_CATALOG_URI on the server, e.g. "
             "postgresql://user:pass@host/iceberg_catalog."
         )
+
+
+def _default_catalog_is_sql(config: StrataConfig) -> bool:
+    """Whether ``catalog_properties`` is a SQL catalog, its type inferred as pyiceberg does."""
+    props = config.catalog_properties
+    if "type" in props:
+        return str(props["type"]).lower() == "sql"
+    return not str(props.get("uri", "")).startswith(("http", "thrift"))
 
 
 def _is_connection_io_error(exc: BaseException) -> bool:
@@ -157,11 +181,11 @@ class PyIcebergCatalog:
         an object-store warehouse uses SQLite at ``metadata_db`` (refused in service
         mode), a local one SQLite in the warehouse, and ``None`` in-memory.
         """
+        refuse_unconfigured_warehouse(warehouse_path, self.config)
         # A configured URI may name PostgreSQL, MySQL, etc.
         if "uri" in self.config.catalog_properties:
             return self.config.catalog_properties["uri"]
 
-        refuse_unconfigured_warehouse(warehouse_path, self.config)
         if warehouse_path and "://" in warehouse_path:
             return f"sqlite:///{self.config.metadata_db}"
         elif warehouse_path:
@@ -224,7 +248,7 @@ class PyIcebergCatalog:
             if name and key and "adls.connection-string" not in props:
                 props["adls.connection-string"] = (
                     f"DefaultEndpointsProtocol={parsed.scheme};AccountName={name};"
-                    f"AccountKey={key};BlobEndpoint={endpoint.rstrip('/')}/{name}"
+                    f"AccountKey={key};BlobEndpoint={azure_account_url(endpoint, name)}"
                 )
         return props
 
@@ -247,6 +271,9 @@ class PyIcebergCatalog:
             elif warehouse_path.startswith(_AZURE_SCHEMES):
                 props.update(self._adls_catalog_props())
             props.update(self.config.catalog_properties)
+            # The configured warehouse is the default catalog's; a table this request creates
+            # belongs in the warehouse it names.
+            props["warehouse"] = warehouse_path
             return SqlCatalog("strata", **props)
 
         if self.config.catalog_properties:

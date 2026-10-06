@@ -405,3 +405,146 @@ class TestSemaphoreInvariants:
                 assert active <= max_allowed, (
                     f"active_scans ({active}) exceeds max_concurrent_scans ({max_allowed})"
                 )
+
+
+@pytest.fixture
+def in_process(tmp_path):
+    """An in-process personal server over its own state, with stream cleanup torn down after."""
+    from fastapi.testclient import TestClient
+
+    import strata.server as server_module
+    from strata.artifact_store import reset_artifact_store
+    from strata.server import ServerState, app
+    from strata.tenant_registry import reset_tenant_registry
+
+    config = StrataConfig(
+        host="127.0.0.1",
+        deployment_mode="personal",
+        cache_dir=tmp_path / "cache",
+        artifact_dir=tmp_path / "artifacts",
+        metadata_db=tmp_path / "meta.sqlite",
+    )
+    reset_artifact_store()
+    reset_tenant_registry()
+    original = server_module._state
+    state = ServerState(config)
+    server_module._state = state
+    try:
+        yield TestClient(app, raise_server_exceptions=False), state
+    finally:
+        state.streams.shutdown_cleanups()
+        server_module._state = original
+        reset_artifact_store()
+        reset_tenant_registry()
+
+
+def _store_is_locked(self, artifact_id, version):
+    import sqlite3
+
+    raise sqlite3.OperationalError("database is locked")
+
+
+class TestAStreamFetchThatFailsReleasesEverything:
+    """A refused, cancelled or failed stream fetch frees its slots and keeps the stream expiring.
+
+    Otherwise the stream, its plan and its ``building`` artifact stay until restart, and each
+    stranded admission slot brings the server closer to answering every fetch with a 429.
+    """
+
+    def test_a_refused_fetch_rearms_the_stream_cleanup(self, in_process, temp_warehouse):
+        from strata.streaming import QoSRejected
+
+        client, state = in_process
+        body = client.post(
+            "/v1/materialize", json=build_materialize_request(temp_warehouse["table_uri"])
+        ).json()
+
+        async def refuse(plan, request, scan_id):
+            raise QoSRejected("too_many_requests", "bulk", 1)
+
+        state.qos.admit = refuse
+        response = client.get(body["stream_url"])
+
+        assert response.status_code == 429
+        assert body["stream_id"] in state.streams._cleanup_tasks
+
+    async def test_a_fetch_cancelled_while_queued_rearms_the_stream_cleanup(
+        self, in_process, temp_warehouse
+    ):
+        from strata.api.routers.streams import get_stream
+
+        client, state = in_process
+        body = client.post(
+            "/v1/materialize", json=build_materialize_request(temp_warehouse["table_uri"])
+        ).json()
+
+        async def cancelled_in_queue(plan, request, scan_id):
+            raise asyncio.CancelledError
+
+        state.qos.admit = cancelled_in_queue
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await get_stream(body["stream_id"], request=None)
+            assert body["stream_id"] in state.streams._cleanup_tasks
+        finally:
+            state.streams.shutdown_cleanups()
+
+    def test_a_store_error_after_the_build_frees_the_admission_slot(
+        self, in_process, temp_warehouse, monkeypatch
+    ):
+        from strata.artifact_store import ArtifactStore
+        from strata.tenant_registry import get_tenant_registry
+
+        client, state = in_process
+        body = client.post(
+            "/v1/materialize", json=build_materialize_request(temp_warehouse["table_uri"])
+        ).json()
+
+        monkeypatch.setattr(ArtifactStore, "get_artifact", _store_is_locked)
+        response = client.get(body["stream_url"])
+
+        assert response.status_code == 500
+        interactive_in_use, _, bulk_in_use, _ = get_tenant_registry().aggregate_limiter_usage()
+        assert (interactive_in_use, bulk_in_use) == (0, 0)
+        assert state.qos.active_scans == 0
+        assert body["stream_id"] in state.streams._cleanup_tasks
+
+    async def test_a_store_error_after_a_build_frees_its_build_slot(
+        self, in_process, temp_warehouse, monkeypatch
+    ):
+        import sqlite3
+
+        from strata.artifact_store import ArtifactStore, get_artifact_store
+        from strata.streaming import StreamState
+
+        _, state = in_process
+        plan = state.planner.plan(temp_warehouse["table_uri"])
+        store = get_artifact_store(state.config.artifact_dir)
+        version = store.create_artifact(artifact_id="built", provenance_hash="built")
+
+        class Slot:
+            released = False
+
+            async def release(self):
+                self.released = True
+
+        slot = Slot()
+        stream_state = StreamState(
+            stream_id="built",
+            plan=plan,
+            artifact_id="built",
+            artifact_version=version,
+            created_at=time.time(),
+            mode="artifact",
+            build_slot=slot,
+        )
+        state.streams.register(stream_state)
+
+        monkeypatch.setattr(ArtifactStore, "get_artifact", _store_is_locked)
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                await state.scan_builds.build_identity_artifact(state, stream_state)
+            assert slot.released
+            assert "built" in state.streams._cleanup_tasks
+        finally:
+            state.streams.shutdown_cleanups()

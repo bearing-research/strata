@@ -58,7 +58,7 @@ async def explain_materialize(
     resolved_versions: dict[str, str] = {}
     for input_uri in request.inputs:
         try:
-            resolved_versions[input_uri] = resolve_input_version(input_uri, tenant=tenant_id)
+            resolved_versions[input_uri] = await resolve_input_version(input_uri, tenant=tenant_id)
         except HTTPException as e:
             resolved_versions[input_uri] = f"<error: {e.detail}>"
 
@@ -199,7 +199,7 @@ async def materialize_artifact(request: MaterializeRequest):
     # (denied, missing, unreadable, or a plan that failed) refuses the request: building past
     # it would record a snapshot-less version and dedup later runs onto the result.
     input_versions: dict[str, str] = {
-        input_uri: resolve_input_version(input_uri, tenant=tenant_id)
+        input_uri: await resolve_input_version(input_uri, tenant=tenant_id)
         for input_uri in request.inputs
     }
 

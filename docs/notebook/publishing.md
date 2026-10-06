@@ -244,7 +244,8 @@ figure3-bundle/
 
 `--force` writes into a non-empty directory (which may leave a stale payload
 beside the new one); `--max-depth` (default 10) bounds how far the chain is
-walked.
+walked. With `--token` it defaults to 25, the depth the hosted page and its
+archive walk.
 
 A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
 also carries `artifact.parquet`, the same rows in a format a data repository
@@ -424,6 +425,12 @@ Publishing the same chain again writes nothing.
 | `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |
 | `GET /p/{token}/badge.svg` | **no** | A README pill reporting the chain size. |
 | `GET /v1/publications/{token}` | **no** | The same record as JSON. |
+
+For a withdrawn token the page, the badge and `GET /v1/publications/{token}`
+still answer and say so; the record then carries only the token, title and
+the publish and withdraw times, no chain or source. Every route that serves
+content (`/data`, `/archive.zip`, `/verify`, `/embed`, `/ro-crate` and
+`/oembed`) answers `410 Gone`.
 
 The unauthenticated routes are exempt from the auth and tenant middleware by
 path, and only for `GET`. The token is the credential: it exists only because

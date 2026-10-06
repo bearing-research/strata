@@ -290,25 +290,28 @@ class ScanBuildManager:
             )
             self.mark_stream_artifact_failed(state, stream_state)
         finally:
-            artifact_ready = False
-            store = get_artifact_store(state.config.artifact_dir)
-            if store is not None:
-                artifact = store.get_artifact(
-                    stream_state.artifact_id, stream_state.artifact_version
-                )
-                artifact_ready = artifact is not None and artifact.state == "ready"
+            # The store read can raise; the slot and the cleanup must not depend on it.
+            try:
+                artifact_ready = False
+                store = get_artifact_store(state.config.artifact_dir)
+                if store is not None:
+                    artifact = store.get_artifact(
+                        stream_state.artifact_id, stream_state.artifact_version
+                    )
+                    artifact_ready = artifact is not None and artifact.state == "ready"
 
-            if stream_state.completed and stream_state.error_message is None and artifact_ready:
-                await record_build_output_bytes(
-                    stream_state.qos_tenant_id,
-                    stream_state.bytes_streamed,
-                )
-            if stream_state.build_slot is not None:
-                await stream_state.build_slot.release()
-            stream_state.completed_at = time.time()
-            # Pass the scan_id: schedule_cleanup() replaces the pending cleanup, and only a
-            # scan-aware one runs ``expire_scan``; without it the ReadPlan leaks for good.
-            state.streams.schedule_cleanup(stream_state.stream_id, stream_state.plan.scan_id)
+                if stream_state.completed and stream_state.error_message is None and artifact_ready:
+                    await record_build_output_bytes(
+                        stream_state.qos_tenant_id,
+                        stream_state.bytes_streamed,
+                    )
+            finally:
+                if stream_state.build_slot is not None:
+                    await stream_state.build_slot.release()
+                stream_state.completed_at = time.time()
+                # Pass the scan_id: schedule_cleanup() replaces the pending cleanup, and only a
+                # scan-aware one runs ``expire_scan``; without it the ReadPlan leaks for good.
+                state.streams.schedule_cleanup(stream_state.stream_id, stream_state.plan.scan_id)
 
     async def finalize_written_blob(
         self,

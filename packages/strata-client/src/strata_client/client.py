@@ -51,6 +51,17 @@ def _parse_artifact_uri(uri: str) -> tuple[str, int]:
     return match.group(1), int(match.group(2))
 
 
+#: Names the artifact a stream served; differs from the materialize response's URI when a
+#: duplicate build finished first and this one was superseded.
+ARTIFACT_URI_HEADER = "X-Strata-Artifact-Uri"
+
+
+def _streamed_artifact(response: httpx.Response, artifact_id: str, version: int) -> tuple[str, int]:
+    """The ``(artifact_id, version)`` a stream response served, defaulting to the one asked for."""
+    uri = response.headers.get(ARTIFACT_URI_HEADER)
+    return _parse_artifact_uri(uri) if uri else (artifact_id, version)
+
+
 #: Set by the by-provenance route on a genuine "nobody has computed this".
 PROVENANCE_MISS_HEADER = "X-Strata-Provenance-Miss"
 
@@ -265,11 +276,10 @@ class Artifact:
 
         return pl.from_arrow(self.to_table())
 
-    def lineage(self, direction: str = "upstream", max_depth: int = 10) -> dict:
-        """Get artifact lineage (dependency graph).
+    def lineage(self, max_depth: int = 10) -> dict:
+        """Get artifact lineage: what this artifact was computed from (see ``dependents``).
 
         Args:
-            direction: "upstream" (inputs) or "downstream" (dependents).
             max_depth: Maximum traversal depth.
 
         Returns:
@@ -277,23 +287,23 @@ class Artifact:
         """
         response = self._client._client.get(
             f"/v1/artifacts/{self.artifact_id}/v/{self.version}/lineage",
-            params={"direction": direction, "max_depth": max_depth},
+            params={"max_depth": max_depth},
         )
         response.raise_for_status()
         return response.json()
 
-    def dependents(self, max_depth: int = 10) -> dict:
-        """Get artifacts that depend on this artifact.
+    def dependents(self, limit: int = 100) -> dict:
+        """Get the ready artifacts that read this one as a direct input.
 
         Args:
-            max_depth: Maximum traversal depth.
+            limit: Maximum number of dependents returned.
 
         Returns:
             Dict with a 'dependents' list.
         """
         response = self._client._client.get(
             f"/v1/artifacts/{self.artifact_id}/v/{self.version}/dependents",
-            params={"max_depth": max_depth},
+            params={"limit": limit},
         )
         response.raise_for_status()
         return response.json()
@@ -432,15 +442,15 @@ class StrataClient:
                 # Unknown state: assume ready.
                 return self._fetch_artifact_data(artifact_id, version)
 
-    def _fetch_stream_with_retry(self, stream_url: str) -> bytes:
-        """Fetch stream data with retry on 429 responses."""
+    def _fetch_stream_with_retry(self, stream_url: str) -> httpx.Response:
+        """Fetch a stream, retrying on 429 responses."""
         last_response = None
         for attempt in range(self.retry_config.max_retries + 1):
             response = self._client.get(stream_url)
 
             if response.status_code != 429:
                 response.raise_for_status()
-                return response.content
+                return response
 
             last_response = response
 
@@ -567,7 +577,9 @@ class StrataClient:
         if hit or state == "ready":
             stream_data = None
             if stream_url and mode == "stream":
-                stream_data = self._fetch_stream_with_retry(stream_url)
+                streamed = self._fetch_stream_with_retry(stream_url)
+                stream_data = streamed.content
+                artifact_id, version = _streamed_artifact(streamed, artifact_id, version)
 
             return Artifact(
                 _client=self,
@@ -580,7 +592,8 @@ class StrataClient:
             )
 
         if mode == "stream" and stream_url:
-            content = self._fetch_stream_with_retry(stream_url)
+            streamed = self._fetch_stream_with_retry(stream_url)
+            artifact_id, version = _streamed_artifact(streamed, artifact_id, version)
             return Artifact(
                 _client=self,
                 artifact_id=artifact_id,
@@ -588,7 +601,7 @@ class StrataClient:
                 cache_hit=False,
                 execution="stream",
                 name=name,
-                _stream_data=content,
+                _stream_data=streamed.content,
             )
 
         if not wait:
@@ -1001,7 +1014,7 @@ class StrataClient:
         Args:
             limit: Maximum number of artifacts to return.
             offset: Number of artifacts to skip, for pagination.
-            state: Only this state ("ready", "building", "failed").
+            state: Only this state ("ready", "building", "failed", "superseded").
             name_prefix: Only artifacts with a name starting with this prefix.
 
         Returns:
@@ -1295,15 +1308,15 @@ class AsyncStrataClient:
         reader = ipc.open_stream(pa.BufferReader(response.content))
         return reader.read_all()
 
-    async def _fetch_stream_with_retry(self, stream_url: str) -> bytes:
-        """Fetch stream data with retry on 429 responses."""
+    async def _fetch_stream_with_retry(self, stream_url: str) -> httpx.Response:
+        """Fetch a stream, retrying on 429 responses."""
         last_response = None
         for attempt in range(self.retry_config.max_retries + 1):
             response = await self._client.get(stream_url)
 
             if response.status_code != 429:
                 response.raise_for_status()
-                return response.content
+                return response
 
             last_response = response
 
@@ -1392,7 +1405,9 @@ class AsyncStrataClient:
         if hit or state == "ready":
             stream_data = None
             if stream_url and mode == "stream":
-                stream_data = await self._fetch_stream_with_retry(stream_url)
+                streamed = await self._fetch_stream_with_retry(stream_url)
+                stream_data = streamed.content
+                artifact_id, version = _streamed_artifact(streamed, artifact_id, version)
 
             return AsyncArtifact(
                 _client=self,
@@ -1405,7 +1420,8 @@ class AsyncStrataClient:
             )
 
         if mode == "stream" and stream_url:
-            content = await self._fetch_stream_with_retry(stream_url)
+            streamed = await self._fetch_stream_with_retry(stream_url)
+            artifact_id, version = _streamed_artifact(streamed, artifact_id, version)
             return AsyncArtifact(
                 _client=self,
                 artifact_id=artifact_id,
@@ -1413,7 +1429,7 @@ class AsyncStrataClient:
                 cache_hit=False,
                 execution="stream",
                 name=name,
-                _stream_data=content,
+                _stream_data=streamed.content,
             )
 
         if build_id and wait:
@@ -1657,20 +1673,20 @@ class AsyncArtifact:
         table = await self.to_table()
         return pl.from_arrow(table)
 
-    async def lineage(self, direction: str = "upstream", max_depth: int = 10) -> dict:
-        """Get artifact lineage (dependency graph)."""
+    async def lineage(self, max_depth: int = 10) -> dict:
+        """Get artifact lineage: what this artifact was computed from."""
         response = await self._client._client.get(
             f"/v1/artifacts/{self.artifact_id}/v/{self.version}/lineage",
-            params={"direction": direction, "max_depth": max_depth},
+            params={"max_depth": max_depth},
         )
         response.raise_for_status()
         return response.json()
 
-    async def dependents(self, max_depth: int = 10) -> dict:
-        """Get artifacts that depend on this artifact."""
+    async def dependents(self, limit: int = 100) -> dict:
+        """Get the ready artifacts that read this one as a direct input."""
         response = await self._client._client.get(
             f"/v1/artifacts/{self.artifact_id}/v/{self.version}/dependents",
-            params={"max_depth": max_depth},
+            params={"limit": limit},
         )
         response.raise_for_status()
         return response.json()
