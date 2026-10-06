@@ -776,12 +776,14 @@ class LocalNotebookOps:
         )
 
     def _reload(self) -> None:
-        """Re-parse the notebook after a file mutation so reads see fresh state."""
-        from strata.notebook.parser import parse_notebook
-        from strata.notebook.session import NotebookSession
+        """Re-read the notebook after a file mutation so reads see fresh state.
 
-        state = parse_notebook(self.notebook_dir)
-        self._session = NotebookSession(state, self.notebook_dir)
+        In place rather than a fresh session: a fresh one logs every annotation
+        diagnostic a second time. The reload computes staleness, so it counts as
+        this handle's one computation.
+        """
+        self._session.reload()
+        self._staleness_computed = True
         self._executor = None
 
 

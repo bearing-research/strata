@@ -115,6 +115,10 @@ def _interpreter(python: str) -> tuple[Path, str]:
         raise WorkerEnvironmentError(
             f"no Python {python or ''} on this worker: {(exc.stderr or exc.stdout).strip()}"
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WorkerEnvironmentError(
+            f"finding Python {python or ''} on this worker timed out after {exc.timeout:g}s"
+        ) from exc
     return interpreter, build
 
 
@@ -148,6 +152,10 @@ def _install(spec: dict[str, str], interpreter: Path, env_dir: Path) -> None:
         raise WorkerEnvironmentError(
             f"uv sync failed on this worker: {exc.stderr.strip()}"
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WorkerEnvironmentError(
+            f"uv sync on this worker timed out after {exc.timeout:g}s"
+        ) from exc
 
 
 def _fetch(url: str, env_dir: Path) -> bool:
@@ -165,10 +173,13 @@ def _fetch(url: str, env_dir: Path) -> bool:
         except httpx.HTTPError as exc:
             raise WorkerEnvironmentError(f"could not fetch environment from {url}: {exc}") from exc
         unpacked = Path(scratch) / "environment"
-        with tarfile.open(archive) as tar:
-            tar.extractall(unpacked, filter="data")
-        shutil.rmtree(env_dir, ignore_errors=True)
-        os.replace(unpacked, env_dir)
+        try:
+            with tarfile.open(archive) as tar:
+                tar.extractall(unpacked, filter="data")
+            shutil.rmtree(env_dir, ignore_errors=True)
+            os.replace(unpacked, env_dir)
+        except (tarfile.TarError, OSError) as exc:
+            raise WorkerEnvironmentError(f"could not unpack environment from {url}: {exc}") from exc
     return True
 
 
@@ -289,6 +300,10 @@ def _r_build(rscript: str) -> str:
         raise WorkerEnvironmentError(
             f"could not ask this worker's R its version: {(exc.stderr or exc.stdout).strip()}"
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WorkerEnvironmentError(
+            f"asking this worker's R its version timed out after {exc.timeout:g}s"
+        ) from exc
 
 
 def _restore_r(rscript: str, lockfile: str, library: Path) -> None:
@@ -314,6 +329,10 @@ def _restore_r(rscript: str, lockfile: str, library: Path) -> None:
     except subprocess.CalledProcessError as exc:
         raise WorkerEnvironmentError(
             f"renv::restore failed on this worker: {(exc.stderr or exc.stdout).strip()}"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WorkerEnvironmentError(
+            f"renv::restore on this worker timed out after {exc.timeout:g}s"
         ) from exc
 
 

@@ -395,6 +395,63 @@ class TestTheWorkerSide:
 
         assert len(served) == 1
 
+    async def test_a_registry_serving_a_broken_archive_is_an_environment_error(
+        self, tmp_path, monkeypatch
+    ):
+        """The route answers only WorkerEnvironmentError with the locked-environment body."""
+        body = b"\x1f\x8b not a gzip member"
+
+        class Registry(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                return None
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Registry)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        monkeypatch.setenv(worker_env.ENV_ROOT_VAR, str(tmp_path / "envs"))
+        monkeypatch.setenv(
+            worker_env.REGISTRY_VAR, f"http://127.0.0.1:{server.server_address[1]}/envs"
+        )
+        monkeypatch.setattr(
+            worker_env, "_interpreter", lambda python: (Path(sys.executable), "cpython-3 posix")
+        )
+        monkeypatch.setattr(worker_env, "_install", lambda *a: pytest.fail("installed"))
+        try:
+            with pytest.raises(worker_env.WorkerEnvironmentError, match="could not unpack"):
+                await worker_env.ensure_environment(self._spec())
+        finally:
+            server.shutdown()
+
+    @pytest.mark.parametrize(
+        ("step", "message"),
+        [
+            (lambda tmp: worker_env._interpreter("3.13"), "finding Python 3.13"),
+            (
+                lambda tmp: worker_env._install(
+                    {"pyproject": "", "lockfile": ""}, Path(sys.executable), tmp / "env"
+                ),
+                "uv sync",
+            ),
+            (lambda tmp: worker_env._r_build("Rscript"), "R its version"),
+            (lambda tmp: worker_env._restore_r("Rscript", "{}", tmp / "lib"), "renv::restore"),
+        ],
+        ids=["interpreter", "install", "r_build", "restore_r"],
+    )
+    def test_a_subprocess_timeout_names_its_step(self, tmp_path, monkeypatch, step, message):
+        def _timeout(args, **kwargs):
+            raise subprocess.TimeoutExpired(args, kwargs.get("timeout", 0))
+
+        monkeypatch.setattr(worker_env.shutil, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(worker_env.subprocess, "run", _timeout)
+
+        with pytest.raises(worker_env.WorkerEnvironmentError, match=f"{message}.*timed out"):
+            step(tmp_path)
+
 
 class TestAnEnvironmentIsCompleteWhenItRuns:
     """The marker lets a worker reuse a directory without installing, so an archive with no

@@ -425,6 +425,11 @@ def configure_logging(
     _configured = True
 
 
+def log_format() -> str:
+    """The configured log format, ``json`` or ``text``."""
+    return _log_format
+
+
 def get_logger(name: str) -> StructuredLogger:
     """Get a structured logger, configuring logging on first use."""
     if not _configured:

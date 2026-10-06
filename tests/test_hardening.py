@@ -1248,6 +1248,28 @@ class TestNonBlockingLogging:
         finally:
             collector.shutdown()
 
+    def test_text_log_format_renders_events_as_text(self, monkeypatch):
+        """STRATA_LOG_FORMAT=text covers metrics events too, not only the logger."""
+        import io
+        import json
+
+        from strata.metrics import MetricsCollector
+
+        monkeypatch.setattr("strata.logging._log_format", "text")
+        output = io.StringIO()
+        collector = MetricsCollector(output=output, enabled=True)
+        try:
+            collector.log_event("server_started", host="127.0.0.1", port=8765)
+            collector._log_queue.join()
+        finally:
+            collector.shutdown()
+
+        line = output.getvalue().strip()
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(line)
+        assert "server_started" in line
+        assert "host=127.0.0.1" in line and "port=8765" in line
+
     def test_logging_drops_when_queue_full(self):
         """Logs are dropped, not blocked, when the queue is full."""
         import io

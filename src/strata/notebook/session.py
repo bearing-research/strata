@@ -42,6 +42,7 @@ from strata.notebook.env import (
     narrow_env_for_provenance,
 )
 from strata.notebook.models import (
+    AnnotationDiagnostic,
     CellOutput,
     CellStaleness,
     CellState,
@@ -388,12 +389,23 @@ class NotebookSession:
         if [cell.env for cell in self.notebook_state.cells] != envs_before:
             await self.compute_staleness_async()
 
-    def _run_annotation_validation(self) -> None:
-        """Validate annotations across all cells (on open/reload only)."""
+    def _run_annotation_validation(
+        self, previous: dict[str, list[AnnotationDiagnostic]] | None = None
+    ) -> None:
+        """Validate annotations across all cells (on open/reload only).
+
+        A diagnostic is logged once: not again while the cell keeps carrying it, nor
+        when ``previous`` (the cells a reload replaced) already held it.
+        """
         for cell in self.notebook_state.cells:
+            seen = (
+                previous.get(cell.id, []) if previous is not None else cell.annotation_diagnostics
+            )
             diagnostics = validate_cell_annotations(cell, self.notebook_state)
             cell.annotation_diagnostics = diagnostics
             for d in diagnostics:
+                if d in seen:
+                    continue
                 logger.warning(
                     "annotation diagnostic notebook=%s cell=%s code=%s: %s",
                     self.notebook_state.id,
@@ -566,7 +578,9 @@ class NotebookSession:
                 if disk_env.get(key) == "" or (block_dropped and key not in disk_env):
                     disk_env[key] = value
         self._analyze_and_build_dag()
-        self._run_annotation_validation()
+        self._run_annotation_validation(
+            {cell_id: cell.annotation_diagnostics for cell_id, cell in previous_cells.items()}
+        )
         self._merge_secrets()
         # Restore ``last_provenance_hash`` *before* computing staleness, or every cell
         # falls back to IDLE and none can be marked STALE.
@@ -1777,18 +1791,17 @@ class NotebookSession:
         notebook whose provenance matches the executor's per-variable hash.
         """
         consumed_vars = self.dag.consumed_variables.get(cell_id, set()) if self.dag else set()
-        if consumed_vars:
-            first_var = sorted(consumed_vars)[0]
-            lookup_hash = derive_subkey(provenance_hash, first_var)
-        else:
-            lookup_hash = provenance_hash
-
-        cached = self.artifact_manager.find_cached(lookup_hash)
-        if cached is None:
+        if not consumed_vars:
+            # A leaf's only product is its console, stored under its own subkey; that is
+            # what the executor replays as a hit, so it is what makes the cell ready.
+            if self._resolve_cached_console(cell_id, provenance_hash) is not None:
+                return {}
             return None
 
-        if not consumed_vars:
-            return {}
+        first_var = sorted(consumed_vars)[0]
+        cached = self.artifact_manager.find_cached(derive_subkey(provenance_hash, first_var))
+        if cached is None:
+            return None
 
         notebook_id = self.notebook_state.id
         cached_outputs: dict[str, tuple[str, int]] = {}
@@ -2462,7 +2475,7 @@ class NotebookSession:
             # Library matches the lockfile, last sync succeeded and the library dir still
             # exists: skip the ~1-2s Rscript spawn (this fires on every reopen).
             logger.debug(
-                "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
+                "renv sync skipped for %s: lockfile hash unchanged and library present (%s)",
                 self.path,
                 lock_hash[:12],
             )
