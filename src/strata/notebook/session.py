@@ -608,6 +608,23 @@ class NotebookSession:
             ):
                 references = references + [annotations.loop.carry]
 
+            loop = annotations.loop
+            seed_from = (
+                (loop.start_from_cell, loop.carry)
+                if loop is not None and loop.carry and loop.start_from_cell is not None
+                else None
+            )
+            if loop is not None and loop.until_expr:
+                # The predicate runs in the cell's namespace: a name the body doesn't bind
+                # (a tolerance set upstream) is an input like any other.
+                from strata.notebook.analyzer import analyze_cell
+
+                references = references + [
+                    name
+                    for name in analyze_cell(loop.until_expr).references
+                    if name not in defines and name not in references
+                ]
+
             variant_group = annotations.variant.group if annotations.variant is not None else None
             variant_name = annotations.variant.name if annotations.variant is not None else None
             builtin_references = list(analyzed.builtin_references)
@@ -622,6 +639,7 @@ class NotebookSession:
                     variant_name=variant_name,
                     per_variant=annotations.per_variant,
                     per_variant_group=annotations.per_variant_group,
+                    seed_from=seed_from,
                 )
             )
             cell.defines = defines
@@ -1280,10 +1298,36 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
-        # A viewer joining mid-run gets what the running cell has printed so far.
-        for stream, text in console_relay.live_console(self.id, cell.id).items():
-            data[f"console_{stream}"] = text
+        # A viewer joining mid-run gets what the running cell has printed so far;
+        # clients cleared the last run's console when this run started.
+        live = console_relay.live_console(self.id, cell.id)
+        for stream in ("stdout", "stderr"):
+            if stream in live:
+                data[f"console_{stream}"] = live[stream]
+            elif cell.status == CellStatus.RUNNING:
+                data[f"console_{stream}"] = ""
+        if cell.test_result is not None and data.get("test_result") is not None:
+            result = cell.test_result
+            ran_against = (
+                result.cell_source_hash,
+                result.test_source_hash,
+                result.input_fingerprint,
+            )
+            data["test_result"]["stale"] = ran_against != self.cell_test_fingerprint(
+                cell.id, cell.source, cell.test_source
+            )
         return data
+
+    def cell_test_fingerprint(
+        self, cell_id: str, source: str, test_source: str
+    ) -> tuple[str, str, str]:
+        """``(cell source, test source, inputs)`` hashes a cell-test result is keyed by."""
+        input_hashes = self._collect_input_hashes(cell_id)
+        return (
+            compute_source_hash(source),
+            hashlib.sha256(test_source.encode("utf-8")).hexdigest(),
+            hashlib.sha256("|".join(sorted(input_hashes)).encode("utf-8")).hexdigest(),
+        )
 
     def persist_display_outputs(
         self, cell_id: str, display_outputs: list[dict[str, Any]] | None
@@ -1354,18 +1398,25 @@ class NotebookSession:
         Keyed by ``derive_subkey(provenance_hash, "__console__")``, so it replays only
         on an identical provenance.
         """
+        artifact = self._cached_console_record(cell_id, provenance_hash)
+        if artifact is None:
+            return None
+        try:
+            blob = self.artifact_manager.load_artifact_data(artifact.id, artifact.version)
+            payload = json.loads(blob)
+        except (ValueError, OSError, KeyError):
+            return None
+        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
+
+    def _cached_console_record(self, cell_id: str, provenance_hash: str) -> ArtifactVersion | None:
+        """The leaf's console artifact for this exact provenance, without reading its blob."""
         notebook_id = self.notebook_state.id
         artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___console__"
         expected_hash = hashlib.sha256(f"{provenance_hash}:__console__".encode()).hexdigest()
         artifact = self.artifact_manager.artifact_store.get_latest_version(artifact_id)
         if artifact is None or artifact.provenance_hash != expected_hash:
             return None
-        try:
-            blob = self.artifact_manager.load_artifact_data(artifact_id, artifact.version)
-            payload = json.loads(blob)
-        except (ValueError, OSError, KeyError):
-            return None
-        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
+        return artifact
 
     def _hydrate_display_output(self, output: CellOutput | dict[str, Any]) -> dict[str, Any] | None:
         """Return a serialized display payload with any transient inline data added."""
@@ -1792,7 +1843,7 @@ class NotebookSession:
         if not consumed_vars:
             # A leaf's only product is its console, stored under its own subkey; that is
             # what the executor replays as a hit, so it is what makes the cell ready.
-            if self._resolve_cached_console(cell_id, provenance_hash) is not None:
+            if self._cached_console_record(cell_id, provenance_hash) is not None:
                 return {}
             return None
 
@@ -1814,6 +1865,22 @@ class NotebookSession:
             cached_outputs[var_name] = (canonical.id, canonical.version)
 
         return cached_outputs
+
+    def wired_variables(self, cell_id: str, upstream_id: str) -> set[str]:
+        """The variables ``cell_id`` reads from ``upstream_id``, as the DAG wired them."""
+        return self.dag.wired_variables(cell_id, upstream_id) if self.dag is not None else set()
+
+    def _shadowed_reads(self, cell: Any) -> set[str]:
+        """Names ``cell`` reads that some upstream defines but is not wired to feed it."""
+        reads = set(cell.references) | set(cell.builtin_references)
+        shadowed: set[str] = set()
+        for upstream_id in cell.upstream_ids:
+            upstream_cell = self.notebook_state.get_cell(upstream_id)
+            if upstream_cell is not None:
+                shadowed |= (reads & set(upstream_cell.defines)) - self.wired_variables(
+                    cell.id, upstream_id
+                )
+        return shadowed
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
         """Provenance hashes from upstream artifacts, with sweep refs grouped.
@@ -1857,12 +1924,16 @@ class NotebookSession:
         # producers keep every variable: their hashes move together, and narrowing
         # would rekey every existing downstream cell.
         reads = set(cell.references) | set(cell.builtin_references)
+        # A shadowed name loads from its wired producer only; recording which one rekeys
+        # a cell that cached the shadowed value, and leaves every other key as it was.
+        shadowed = self._shadowed_reads(cell)
 
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
             by_content = _value_outlives_provenance(upstream_cell)
+            wired = self.wired_variables(cell_id, upstream_id) if shadowed else set()
 
             uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
             if not uri_items and upstream_cell.artifact_uri:
@@ -1913,6 +1984,8 @@ class NotebookSession:
                         )
                         continue
                 hashes.append(provenance_hash)
+                if var_name in shadowed and var_name in wired:
+                    hashes.append(f"wired:{var_name}={provenance_hash}")
 
         for var_name, pairs in sweep_buckets.items():
             joined = ";".join(f"{name}={h}" for name, h in sorted(pairs))
@@ -1953,15 +2026,20 @@ class NotebookSession:
         # A fan-out instance over the same group binds only its own variant as a
         # scalar, so recording the whole set would name variants it never read.
         own_group = self._fanout_group_of(cell_id) if variant is not None else None
+        shadowed = self._shadowed_reads(cell)
 
         refs: dict[str, str] = {}
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
+            # The cell never read a shadowed name from a producer the DAG did not wire.
+            unread = shadowed - self.wired_variables(cell_id, upstream_id)
 
             uris: list[str] = []
             for var_name, uri in upstream_cell.artifact_uris.items():
+                if var_name in unread:
+                    continue
                 producer = self.dag.variable_producer.get(var_name) if self.dag else None
                 if isinstance(producer, SweepProducer) and producer.fanout_cell == upstream_id:
                     # A fan-out keeps one URI per variable (last variant stored), while a collapse
@@ -2077,6 +2155,7 @@ class NotebookSession:
             return []
         from strata.notebook import datasets
 
+        tenant = self.opened_by[1] if self.opened_by else None
         fingerprints: list[str] = []
         for spec in sorted(annotations.datasets, key=lambda s: s.name):
             checked = self._dataset_checks.get((spec.name, spec.reference))
@@ -2087,7 +2166,8 @@ class NotebookSession:
                 fingerprints.append(checked[1])
                 continue
             try:
-                fingerprint = datasets.registry_for(self._lake_config()).resolve(spec).fingerprint
+                registry = datasets.registry_for(self._lake_config(), tenant)
+                fingerprint = registry.resolve(spec).fingerprint
             except datasets.DatasetError:
                 fingerprint = datasets.unresolved_fingerprint(spec)
             self.remember_dataset_fingerprint(spec, fingerprint)
@@ -2120,7 +2200,7 @@ class NotebookSession:
         resolved = drop_blanked_secrets(cell.env)
         resolved.update(annotations.env)
         declared = set(annotations.env) | set(getattr(cell, "env_overrides", {}) or {})
-        return narrow_env_for_provenance(cell.source, resolved, declared)
+        return narrow_env_for_provenance(cell.source, resolved, declared, language=cell.language)
 
     def _effective_worker_name(self, cell: Any) -> str | None:
         """Return the effective worker name with annotation precedence."""

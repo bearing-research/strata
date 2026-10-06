@@ -104,16 +104,22 @@ collect_reads <- function(expr) {
   acc
 }
 
-# Collect the bare name(s) defined by an LHS subtree. Top-level LHS
-# patterns we support: a bare name. Other patterns (subscript-assign,
-# list assignment) are rare enough at the top level that we treat them
-# as "no new define" for Phase 1 — the value still gets its reads
-# collected via the assignment expression's normal RHS walk.
+# Collect the bare name defined by an LHS subtree. A replacement call
+# (``df$b <- v``, ``df[i] <- v``, ``names(df) <- v``) defines its root
+# name: R rewrites it to ``df <- `$<-`(df, "b", v)``.
 collect_lhs_defines <- function(expr) {
+  while (is.call(expr) && length(expr) >= 2) {
+    expr <- expr[[2]]
+  }
   if (is.name(expr)) {
     return(as.character(expr))
   }
   character(0)
+}
+
+# Reads of an LHS: a replacement call reads its root and index args.
+collect_lhs_reads <- function(expr) {
+  if (is.call(expr)) collect_reads(expr) else character(0)
 }
 
 # Process one top-level expression. Returns a list with $defs and
@@ -125,11 +131,13 @@ process_statement <- function(expr) {
     if (op_name %in% ASSIGN_LEFT) {
       defs <- if (length(expr) >= 2) collect_lhs_defines(expr[[2]]) else character(0)
       reads <- if (length(expr) >= 3) collect_reads(expr[[3]]) else character(0)
+      if (length(expr) >= 2) reads <- c(reads, collect_lhs_reads(expr[[2]]))
       return(list(defs = defs, reads = reads))
     }
     if (op_name %in% ASSIGN_RIGHT) {
       reads <- if (length(expr) >= 2) collect_reads(expr[[2]]) else character(0)
       defs <- if (length(expr) >= 3) collect_lhs_defines(expr[[3]]) else character(0)
+      if (length(expr) >= 3) reads <- c(reads, collect_lhs_reads(expr[[3]]))
       return(list(defs = defs, reads = reads))
     }
   }

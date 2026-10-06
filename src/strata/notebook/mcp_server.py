@@ -373,13 +373,12 @@ def _live_session(session_manager: SessionManager, session_id: str):
 
 
 async def _sync_and_broadcast(session_id: str, session: Any) -> None:
-    """Reload the live session from disk after a file mutation, then broadcast.
+    """Broadcast the live session after a file mutation.
 
-    ``LocalNotebookOps`` authoring verbs write files and reload a detached copy,
-    never the server's live session, so this ``reload()``s it in place (as the REST
-    CRUD routes do) before broadcasting.
+    The mutation already reloaded it: ``LocalNotebookOps.from_session`` verbs and the
+    session's variant setters ``reload()`` the server's live session in place, and a
+    second reload would recompute staleness again on the event loop.
     """
-    session.reload()
     await _broadcast_notebook(session_id, session)
 
 
@@ -610,10 +609,13 @@ def _cell_output(session_manager: SessionManager, session_id: str, cell_id: str,
     for name, artifact in manager.list_cell_artifacts(cell_id):
         if name == variable:
             return manager.artifact_store, artifact
-    stored = sorted(name for name, _ in manager.list_cell_artifacts(cell_id))
+    # ``__console__`` / ``__display__N`` are the cell's records, not variables it defined.
+    stored = sorted(
+        name for name, _ in manager.list_cell_artifacts(cell_id) if not name.startswith("__")
+    )
     raise ValueError(
         f"Cell {cell_id} has no stored output named {variable!r}. "
-        f"Stored: {', '.join(stored) or 'none'} — only variables a downstream "
+        f"Stored: {', '.join(stored) or 'none'}. Only variables a downstream "
         f"cell reads are kept as artifacts."
     )
 

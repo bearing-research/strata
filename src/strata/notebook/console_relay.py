@@ -81,7 +81,7 @@ def live_console(notebook_id: str, cell_id: str) -> dict[str, str]:
     """The last part of each stream a running cell has shown, by stream name.
 
     Empty when the cell is not streaming. A stream that has shown nothing yet is
-    absent, so its last run's text stays as every connected viewer still sees it.
+    absent.
     """
     for run in _runs.values():
         if run.notebook_id == notebook_id and run.cell_id == cell_id:

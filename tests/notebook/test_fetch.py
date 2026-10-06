@@ -193,6 +193,58 @@ class TestTheCache:
         assert len(origin.requests) == 2
         assert "If-None-Match" not in origin.requests[-1][1]
 
+    @pytest.mark.parametrize("url", ["http://localhost:80a/x.csv", "http://[::1/x.csv"])
+    def test_a_malformed_url_is_a_fetch_error(self, tmp_path, url):
+        cache = FetchCache(tmp_path, allow_local=True)
+        spec = FetchSpec(name="zones", url=url)
+
+        with pytest.raises(FetchError, match="could not download"):
+            cache.resolve(spec)
+        assert cache.fingerprint(spec).startswith("zones:fetch:unresolved:")
+
+    def test_a_corrupt_index_is_treated_as_empty(self, tmp_path, origin):
+        index_path = tmp_path / ".strata" / "fetch" / "index.json"
+        index_path.parent.mkdir(parents=True)
+        index_path.write_text('{"a": 1}\n}')
+        cache = _cache(tmp_path)
+        spec = FetchSpec(name="zones", url=origin.url())
+
+        assert cache.recorded(origin.url()) is None
+        fetched = cache.resolve(spec)
+
+        assert fetched.path.read_bytes() == origin.body
+        assert cache.recorded(origin.url()) == fetched
+
+    def test_concurrent_records_all_land(self, tmp_path):
+        """The staleness thread and the executor record into one index at once."""
+        import json
+
+        response = SimpleNamespace(headers={})
+        digest = "ab" * 32
+        threads_n, writes_n = 8, 25
+        errors: list[BaseException] = []
+        start = threading.Barrier(threads_n)
+
+        def writer(t: int) -> None:
+            cache = FetchCache(tmp_path)
+            start.wait()
+            try:
+                for i in range(writes_n):
+                    cache._record(f"https://x.org/{t}/{i}", digest, response, None, filename="f")
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer, args=(t,)) for t in range(threads_n)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert errors == []
+        index = json.loads((tmp_path / ".strata" / "fetch" / "index.json").read_text())
+        assert len(index) == threads_n * writes_n
+        assert list((tmp_path / ".strata" / "fetch").glob("*.tmp")) == []
+
 
 class TestPins:
     def test_a_pin_that_matches_needs_no_network(self, tmp_path, origin):
@@ -446,6 +498,20 @@ class TestInACell:
         moved = await CellExecutor(session).execute_cell("c1", source)
         assert moved.success, moved.error
         assert moved.cache_hit is False
+
+    @pytest.mark.parametrize("dirname", ["My Notebooks", "café"])
+    async def test_a_notebook_path_with_a_space_or_non_ascii_reads_the_bytes(
+        self, tmp_path, origin, monkeypatch, dirname
+    ):
+        from strata.notebook.executor import CellExecutor
+
+        parent = tmp_path / dirname
+        parent.mkdir()
+        source = f"# @fetch zones {origin.url()}\nrows = len(zones.read_text().splitlines())"
+        session = self._session(parent, source, monkeypatch)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+        assert result.success, result.error
 
     async def test_a_pin_the_url_no_longer_matches_fails_the_cell_with_both_digests(
         self, tmp_path, origin, monkeypatch

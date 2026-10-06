@@ -201,6 +201,16 @@ def test_single_table_none_when_not_a_single_table():
     assert _single_table(CellView(id="a", outputs=[_table_output()], error="x")) is None
 
 
+def test_a_displayed_table_that_is_also_a_stored_variable_is_one_table():
+    """``df`` as the last expression and read downstream arrives both ways."""
+    cell = CellView(
+        id="a",
+        display_outputs=[_table_output()],
+        outputs=[{"name": "df", **_table_output()}],
+    )
+    assert _single_table(cell) is not None
+
+
 def test_single_table_uri_returns_backing_artifact():
     out = _table_output()
     out["artifact_uri"] = "strata://artifact/nb_x_cell_a_var___display__0@v=1"

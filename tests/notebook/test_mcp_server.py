@@ -342,6 +342,30 @@ async def test_authoring_add_edit_move_remove_and_broadcast(sm_with_session, mon
 
 
 @pytest.mark.asyncio
+async def test_an_authoring_tool_reloads_the_live_session_once(sm_with_session, monkeypatch):
+    """Each reload recomputes staleness on the event loop; one per edit is enough."""
+    sm, session_id, _ = sm_with_session
+    session = sm.get_session(session_id)
+    reloads = []
+    real_reload = session.reload
+
+    def counting_reload(*args, **kwargs):
+        reloads.append(1)
+        return real_reload(*args, **kwargs)
+
+    async def fake_sync(notebook_id, session):
+        del notebook_id, session
+
+    monkeypatch.setattr(session, "reload", counting_reload)
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+
+    added = await _add_cell(sm, session_id, "z = 9", after="a", language="python")
+
+    assert len(reloads) == 1
+    assert _get_cell(sm, session_id, added["id"])["source"] == "z = 9"
+
+
+@pytest.mark.asyncio
 async def test_an_agent_edit_honours_the_soft_lock(sm_with_session, monkeypatch):
     """MCP edits honour the same soft lock as REST and the WebSocket.
 
@@ -625,6 +649,28 @@ class TestResolvingAnOutput:
 
         with pytest.raises(ValueError, match="Stored: x"):
             _cell_output(sm, session_id, "a", "not_a_variable")
+
+    def test_the_console_record_is_not_listed_as_an_output(self, sm_with_session):
+        """A leaf's ``__console__`` record is not a variable: the error and the run report's
+        digests leave it out.
+        """
+        from strata.notebook.mcp_server import _cell_output
+
+        sm, session_id, _ = sm_with_session
+        manager = sm._sessions[session_id].get_artifact_manager()
+        manager.store_cell_output(
+            cell_id="a",
+            variable_name="__console__",
+            blob_data=b'{"stdout": "", "stderr": ""}',
+            content_type="json/object",
+            provenance_hash="c1" * 32,
+            input_versions={},
+            source="x = 1",
+        )
+
+        with pytest.raises(ValueError, match="Stored: none"):
+            _cell_output(sm, session_id, "a", "not_a_variable")
+        assert manager.cell_output_digests("a") == []
 
 
 class TestLineage:

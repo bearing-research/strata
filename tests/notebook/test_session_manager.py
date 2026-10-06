@@ -122,6 +122,31 @@ def test_cold_open_restores_a_leaf_whose_only_product_is_stdout(tmp_path: Path):
     assert LocalNotebookOps(notebook_dir).get_cell("c2").status == "ready"
 
 
+def test_cold_open_restores_a_leaf_only_ever_rerun(tmp_path: Path):
+    """A rerun (also what ``strata run --force`` does) records the leaf's console, so a leaf
+    that never had a plain run still reads ready on a cold open.
+    """
+    notebook_dir = create_notebook(tmp_path, "cold_open_rerun_leaf")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "print('hi')")
+
+    manager = SessionManager()
+    session = manager.open_notebook(notebook_dir)
+
+    from strata.notebook.executor import CellExecutor
+
+    async def _prime() -> None:
+        assert (await CellExecutor(session).execute_cell_rerun("c1", "print('hi')")).success
+
+    asyncio.run(_prime())
+    manager.close_session(session.id)
+
+    reopened = SessionManager().open_notebook(notebook_dir)
+    leaf = reopened.notebook_state.cells[0]
+    assert leaf.status == "ready"
+    assert leaf.console_stdout == "hi\n"
+
+
 def test_cold_open_restores_a_silent_leaf(tmp_path: Path):
     """A leaf that stores no variable and prints nothing still ran; its empty console is the
     record of that run, and a cold open must find it.
@@ -151,6 +176,37 @@ def test_cold_open_restores_a_silent_leaf(tmp_path: Path):
     assert leaf.status == "ready"
     assert leaf.console_stdout == ""
     assert LocalNotebookOps(notebook_dir).get_cell("c2").status == "ready"
+
+
+def test_cold_open_restores_a_leaf_loop(tmp_path: Path):
+    """A leaf loop stores its console like any leaf, so a cold open reads it ready."""
+    notebook_dir = create_notebook(tmp_path, "cold_open_leaf_loop")
+    add_cell_to_notebook(notebook_dir, "seed")
+    write_cell(notebook_dir, "seed", "state = 0")
+    add_cell_to_notebook(notebook_dir, "loop", "seed")
+    loop_src = "# @loop max_iter=2 carry=state\nstate = state + 1\nprint(state)\n"
+    write_cell(notebook_dir, "loop", loop_src)
+
+    manager = SessionManager()
+    session = manager.open_notebook(notebook_dir)
+
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.ops import LocalNotebookOps
+
+    async def _prime() -> None:
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("seed", "state = 0")).success
+        result = await executor.execute_cell("loop", loop_src)
+        assert result.success, result.error
+        assert result.execution_method == "loop"
+
+    asyncio.run(_prime())
+    manager.close_session(session.id)
+
+    reopened = SessionManager().open_notebook(notebook_dir)
+    loop = next(c for c in reopened.notebook_state.cells if c.id == "loop")
+    assert loop.status == "ready"
+    assert LocalNotebookOps(notebook_dir).get_cell("loop").status == "ready"
 
 
 def test_cold_open_restores_a_silent_leaf_run_in_a_batch(tmp_path: Path):

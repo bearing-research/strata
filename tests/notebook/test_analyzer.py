@@ -1,5 +1,7 @@
 """Tests for AST-based variable analysis."""
 
+import pytest
+
 from strata.notebook.analyzer import analyze_cell
 
 
@@ -752,3 +754,110 @@ class TestLambdaDefaults:
     def test_lambda_params_still_local(self):
         result = analyze_cell("f = lambda x=1: x + y")
         assert result.references == ["y"]
+
+
+class TestDottedImports:
+    """``import os.path`` binds ``os`` at module scope, so a later reader of ``os`` needs it."""
+
+    def test_dotted_import_defines_root(self):
+        result = analyze_cell("import os.path")
+        assert result.defines == ["os"]
+
+    def test_dotted_import_alias_defines_alias(self):
+        result = analyze_cell("import os.path as osp")
+        assert result.defines == ["osp"]
+
+    def test_dotted_import_is_an_imported_name(self):
+        from strata.notebook.analyzer import imported_names
+
+        assert imported_names("import os.path\n") == {"os"}
+
+
+class TestReadBeforeSameCellDefine:
+    """A read that runs before the cell binds the name reads the upstream value."""
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "print(x)\nx = 5",
+            "y = x + 1\nx = 5",
+            "x: int = x + 1",
+            "(x := x + 1)",
+            "for x in x:\n    pass",
+            "with x as x:\n    pass",
+            "x += 1",
+        ],
+    )
+    def test_read_before_define_is_a_reference(self, source):
+        result = analyze_cell(source)
+        assert "x" in result.defines
+        assert "x" in result.references
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "x = 5\nprint(x)",
+            "import x\nx.run()",
+            "def x():\n    pass\nx()",
+            "for x in range(3):\n    print(x)",
+            "with open('f') as x:\n    x.read()",
+            "x: int = 5\nprint(x)",
+        ],
+    )
+    def test_read_after_define_is_local(self, source):
+        result = analyze_cell(source)
+        assert "x" in result.defines
+        assert "x" not in result.references
+
+
+class TestPep695:
+    """Type-parameter and type-alias scopes (PEP 695)."""
+
+    def test_generic_function_body_reference(self):
+        result = analyze_cell("def f[T](a: T) -> T:\n    return a + up\n")
+        assert result.defines == ["f"]
+        assert result.references == ["up"]
+
+    def test_generic_class_body_reference(self):
+        result = analyze_cell("class C[T](Base[T]):\n    def m(self):\n        return up\n")
+        assert result.defines == ["C"]
+        assert result.references == ["Base", "up"]
+
+    def test_type_alias_defines_and_references(self):
+        result = analyze_cell("type Rows = list[Row]")
+        assert result.defines == ["Rows"]
+        assert result.references == ["Row"]
+
+    def test_recursive_type_alias_is_not_a_reference(self):
+        result = analyze_cell("type Tree = list[Tree] | int")
+        assert result.defines == ["Tree"]
+        assert result.references == []
+
+    def test_type_param_bound_is_a_reference(self):
+        result = analyze_cell("def f[T: Bound](a: T):\n    return a\n")
+        assert result.references == ["Bound"]
+
+
+class TestMatchCaptures:
+    """``match`` capture patterns bind names in the cell."""
+
+    def test_sequence_captures_define(self):
+        result = analyze_cell("match items:\n    case [first, *rest]:\n        head = first\n")
+        assert set(result.defines) == {"first", "rest", "head"}
+        assert result.references == ["items"]
+
+    def test_capture_read_in_body_is_not_a_reference(self):
+        result = analyze_cell("match point:\n    case [a]:\n        print(a)\n")
+        assert result.defines == ["a"]
+        assert result.references == ["point"]
+
+    def test_mapping_rest_and_as_capture(self):
+        result = analyze_cell(
+            "match cfg:\n    case {'k': Point() as p, **extra}:\n        out = (p, extra)\n"
+        )
+        assert set(result.defines) == {"p", "extra", "out"}
+        assert sorted(result.references) == ["Point", "cfg"]
+
+    def test_value_pattern_is_a_reference(self):
+        result = analyze_cell("match c:\n    case Color.RED:\n        hit = 1\n")
+        assert sorted(result.references) == ["Color", "c"]

@@ -25,6 +25,7 @@ from strata.notebook.llm import (
 )
 from strata.notebook.prompt_analyzer import analyze_prompt_cell
 from strata.notebook.provenance import derive_subkey
+from strata.notebook.serializer import _META_SHAPE, _SHAPE_SCALAR, _extract_scalar_from_table
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -345,7 +346,8 @@ async def execute_prompt_cell(
                     output_schema=output_schema,
                 )
         except Exception as e:
-            return _error_result(f"LLM call failed: {e}", start_time)
+            # ``str()`` of an httpx timeout is empty; its type still says what happened.
+            return _error_result(f"LLM call failed: {str(e) or type(e).__name__}", start_time)
 
         total_input_tokens += result.input_tokens
         total_output_tokens += result.output_tokens
@@ -618,7 +620,8 @@ def _load_upstream_variables(
         if upstream_cell is None:
             continue
 
-        referenced_vars = [v for v in cell.references if v in upstream_cell.defines]
+        wired = session.wired_variables(cell_id, upstream_id)
+        referenced_vars = [v for v in cell.references if v in wired]
 
         for var_name in referenced_vars:
             canonical_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"
@@ -666,6 +669,9 @@ def _parse_output(blob: bytes, content_type: str) -> Any:
 
             reader = pa.ipc.open_stream(blob)
             table = reader.read_all().combine_chunks()
+            # datetime / Decimal / numpy scalars are stored as one-row tables.
+            if (table.schema.metadata or {}).get(_META_SHAPE) == _SHAPE_SCALAR:
+                return _extract_scalar_from_table(table)
             try:
                 return table.to_pandas()
             except Exception:

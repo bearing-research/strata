@@ -62,7 +62,8 @@ rewriting).
 
 Before the run, any stale upstream cell is materialized, exactly as a normal
 run of the cell would (an unchanged upstream is a cache hit), so `cell.sales`
-is current.
+is current. The cell's `@fetch` files, `@mount` paths and notebook and `@env`
+variables are bound as they are in a run.
 
 ![A Python cell with its results table above an open Tests panel: the test
 source, a green "2 passed" summary, and a tick beside each test name. The flask

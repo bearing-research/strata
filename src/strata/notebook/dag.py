@@ -74,6 +74,9 @@ class CellAnalysisWithId:
     # ``per_variant_group`` (or the single sweep group it reads when None).
     per_variant: bool = False
     per_variant_group: str | None = None
+    # ``# @loop start_from=<cell>@iter=k``: ``(cell, carry)``. The seed is that cell's
+    # iteration, so the loop depends on it whichever cell last defined the carry.
+    seed_from: tuple[str, str] | None = None
 
 
 class VariantNameCollisionError(ValueError):
@@ -104,6 +107,16 @@ class NotebookDag:
     shadow_warnings: dict[str, list[str]] = field(default_factory=dict)
     variant_groups: list[VariantGroupResolution] = field(default_factory=list)
     inactive_cells: set[str] = field(default_factory=set)
+    # consumer -> producer -> the variables wired along that edge.
+    wired_inputs: dict[str, dict[str, set[str]]] = field(default_factory=dict)
+
+    def wired_variables(self, consumer_id: str, producer_id: str) -> set[str]:
+        """The variables ``consumer_id`` reads from ``producer_id``.
+
+        A name several upstreams define is wired only from its last definer before the
+        consumer, so every input loader filters on this, never on the upstream's defines.
+        """
+        return self.wired_inputs.get(consumer_id, {}).get(producer_id, set())
 
     @classmethod
     def from_cells(
@@ -205,6 +218,18 @@ class NotebookDag:
                         _wire_variable_edge(dag, member_id, cell.id, var)
                 else:
                     _wire_variable_edge(dag, producer, cell.id, var)
+
+            if cell.seed_from is not None:
+                seed_id, carry = cell.seed_from
+                seed_cell = cell_by_id.get(seed_id)
+                if (
+                    seed_cell is not None
+                    and seed_id != cell.id
+                    and seed_id not in inactive
+                    and carry in seed_cell.defines
+                    and carry not in dag.wired_variables(cell.id, seed_id)
+                ):
+                    _wire_variable_edge(dag, seed_id, cell.id, carry)
 
             # ``# @after <cell-id>``: ordering-only edge (e.g. a setup cell seeding a SQLite
             # file). It affects wiring and topological order but not consumed_variables, so
@@ -386,6 +411,7 @@ def _wire_variable_edge(dag: NotebookDag, from_id: str, to_id: str, var: str) ->
     if to_id not in dag.cell_downstream[from_id]:
         dag.cell_downstream[from_id].append(to_id)
     dag.consumed_variables[from_id].add(var)
+    dag.wired_inputs.setdefault(to_id, {}).setdefault(from_id, set()).add(var)
 
 
 def _resolve_variant_groups(

@@ -8,6 +8,7 @@ under version control.
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -48,6 +49,15 @@ class CellRuntime:
     # Recent ``{duration_ms, cache_hit}`` timings, oldest first, capped at
     # ``MAX_EXECUTION_SAMPLES``; persisted so cache savings survive a restart.
     execution_samples: list[dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Older builds persisted NaN/inf control values, which the open payload
+        # cannot carry; such a control falls back to its default.
+        self.widget_values = {
+            name: value
+            for name, value in self.widget_values.items()
+            if not (isinstance(value, float) and not math.isfinite(value))
+        }
 
     def is_empty(self) -> bool:
         """Whether this entry carries no state; empty entries are stripped on save."""

@@ -7,6 +7,8 @@ participation as a producer.
 
 from __future__ import annotations
 
+import pytest
+
 from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 from strata.notebook.languages.analyzer import (
     analyze_cell_by_language,
@@ -168,3 +170,10 @@ class TestCoerceWidgetValues:
         d = self._descriptors()
         assert coerce_widget_values(d, {"nope": 1}) == {}
         assert coerce_widget_values(d, {"a": "not-a-number"}) == {}
+
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf", float("nan"), float("inf")])
+    def test_non_finite_values_dropped(self, value):
+        """NaN/inf have no JSON form; persisted, the notebook would not open."""
+        d = self._descriptors()
+        assert coerce_widget_values(d, {"a": value}) == {}
+        assert coerce_widget_values(d, {"n": value}) == {}

@@ -416,6 +416,32 @@ async def test_leaf_cells_cache_hit_in_a_batch_on_their_console(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_run_all_after_rerun_all_replays_the_reruns_console(tmp_path: Path):
+    """Rerun All records a leaf's console too, so the next Run All replays what it printed,
+    not what an earlier Run All printed under the same provenance.
+    """
+    data = tmp_path / "data.txt"
+    data.write_text("v1")
+    leaf = f"import pathlib\nprint(pathlib.Path({str(data)!r}).read_text())\n"
+    cells = [("c1", "x = 1\n"), ("c2", leaf)]
+    session = _make_session_with_cells(tmp_path / "nb", cells)
+    specs = _populate_consumed_vars([_cell_spec(cid, src) for cid, src in cells], session)
+    executor = CellExecutor(session)
+
+    assert (await executor.execute_batch(specs)).completed
+    data.write_text("v2")
+    rerun = await executor.execute_batch(specs, use_cache=False)
+    by_id = {r.cell_id: r for r in rerun.cell_results}
+    assert by_id["c2"].status == "ok"
+    assert by_id["c2"].stdout == "v2\n"
+
+    again = await executor.execute_batch(specs)
+    by_id = {r.cell_id: r for r in again.cell_results}
+    assert by_id["c2"].status == "cache_hit"
+    assert by_id["c2"].stdout == "v2\n"
+
+
+@pytest.mark.asyncio
 async def test_batch_warns_on_inplace_input_mutation_end_to_end(tmp_path: Path):
     """An in-place mutation of an upstream DataFrame warns on the BatchCellResult.
 

@@ -921,16 +921,17 @@ def _is_pandas_value(value: Any) -> bool:
     return isinstance(value, (pd.DataFrame, pd.Series))
 
 
-def to_serialization_safe(value: Any) -> Any:
+def to_serialization_safe(value: Any, *, keep_none: bool = False) -> Any:
     """Return a JSON- and TOML-compatible form of *value*.
 
     The single sanitization boundary for manifest.json, notebook.toml and REST/WS
     payloads: the output holds only ``bool``, ``int``, ``float``, ``str``, ``list``
-    and ``dict[str, ...]``. ``None`` becomes ``""`` (TOML has no null), sequences
-    and dicts recurse (keys stringified), and anything else becomes ``str(value)``.
+    and ``dict[str, ...]``. ``None`` becomes ``""`` (TOML has no null) unless
+    *keep_none*, for a JSON-only target; sequences and dicts recurse (keys
+    stringified), and anything else becomes ``str(value)``.
     """
     if value is None:
-        return ""
+        return None if keep_none else ""
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -950,9 +951,9 @@ def to_serialization_safe(value: Any) -> Any:
     except ImportError:
         pass
     if isinstance(value, (list, tuple)):
-        return [to_serialization_safe(item) for item in value]
+        return [to_serialization_safe(item, keep_none=keep_none) for item in value]
     if isinstance(value, dict):
-        return {str(k): to_serialization_safe(v) for k, v in value.items()}
+        return {str(k): to_serialization_safe(v, keep_none=keep_none) for k, v in value.items()}
     return str(value)
 
 

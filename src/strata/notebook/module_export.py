@@ -34,7 +34,9 @@ class ModuleExportEntry(TypedDict):
     kind: str
 
 
-_BUILTIN_NAMES: frozenset[str] = frozenset(dir(_python_builtins))
+# Python 3.14 symtable reports the compiler-generated ``__conditional_annotations__``
+# as a referenced global in any scope with annotated assignments; it always resolves.
+_BUILTIN_NAMES: frozenset[str] = frozenset(dir(_python_builtins)) | {"__conditional_annotations__"}
 
 
 @dataclass(frozen=True)

@@ -71,6 +71,22 @@ def test_annotated_literal_assignment_is_exportable() -> None:
     assert plan.exported_symbols["STEP_SIZE"].kind == "constant"
 
 
+def test_annotated_assignment_beside_def_is_exportable() -> None:
+    # Python 3.14 symtable adds ``__conditional_annotations__`` to these scopes.
+    plan = build_module_export_plan("def f():\n    return 1\n\nCACHE: dict | None = None\n")
+    assert plan.unsupported_reasons == []
+    assert plan.is_exportable is True
+    assert set(plan.exported_symbols) == {"f", "CACHE"}
+
+
+def test_class_with_conditional_annotation_is_exportable() -> None:
+    plan = build_module_export_plan(
+        "class C:\n    if True:\n        x: int = 1\n    def m(self):\n        return 1\n"
+    )
+    assert plan.unsupported_reasons == []
+    assert plan.is_exportable is True
+
+
 def test_tuple_unpacking_of_literals_is_exportable() -> None:
     plan = build_module_export_plan("MIN, MAX = 0, 100")
     assert plan.is_exportable is True

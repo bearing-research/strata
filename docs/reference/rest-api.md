@@ -170,6 +170,10 @@ POST /v1/notebooks/open
 }
 ```
 
+`path` must be inside `STRATA_NOTEBOOK_STORAGE_DIR` (default
+`~/.strata/notebooks`; with multi-tenancy, the tenant's own subdirectory of it),
+and a relative `path` is taken from there. Any other path is a `400`.
+
 Returns notebook state with `session_id` and `dag`. A session already open on
 the path is returned rather than a second one: in personal mode any open
 session, in service mode only one the same principal opened. Before opening, when
