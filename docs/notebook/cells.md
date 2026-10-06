@@ -595,7 +595,7 @@ SQL cells are **read-only by default**, but the enforcement mechanism depends on
 
 For SQLite, DuckDB and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into `write=true`,” and the statement check above refuses anything but a read before the driver sees it.
 
-In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: its database file must be in the notebook's directory or outside the server's state (a SQLite `uri` is refused), a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. See [Service mode](../deployment/service-mode.md).
+In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: its database file must be in the notebook's directory or outside the server's state (a SQLite `uri` is refused), a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. A BigQuery connection there must name a `credentials_path` key file in the notebook's directory, so it never runs as the server's own Google credentials. See [Service mode](../deployment/service-mode.md).
 
 ### Write cells
 

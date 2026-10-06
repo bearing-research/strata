@@ -846,8 +846,8 @@ def database_problem(spec: ConnectionSpec, notebook_dir: Any, config: Any) -> st
 
     The file is opened by the server process, so it must be one the notebook
     may read: see ``local_database_problem``. A SQLite ``uri`` is refused, since
-    its parameters can name any file. A BigQuery key file must be in the
-    notebook's directory.
+    its parameters can name any file. A BigQuery connection must name a key
+    file, in the notebook's directory.
     """
     from pathlib import Path
 
@@ -874,6 +874,13 @@ def _key_file_problem(spec: ConnectionSpec, notebook_dir: Any) -> str | None:
 
     own = Path(os.path.realpath(str(notebook_dir)))
     extras = spec.model_extra or {}
+    # Without a key file the driver falls back to the server's own Google credentials.
+    if not extras.get("credentials_path", getattr(spec, "credentials_path", None)):
+        return (
+            "a BigQuery connection on this server needs `credentials_path`, a "
+            "service-account key file in this notebook's directory; without one it "
+            "would use the server's own Google credentials"
+        )
     for key in ("credentials_path", "write_credentials_path"):
         value = extras.get(key, getattr(spec, key, None))
         if not isinstance(value, str) or not value:

@@ -588,6 +588,47 @@ async def test_a_service_mode_bigquery_key_file_is_the_notebooks_own(
         assert "`credentials_path`" in (result.error or "")
 
 
+@pytest.mark.parametrize("mode", ["personal", "service"])
+@pytest.mark.parametrize("write", [False, True], ids=["read", "write"])
+@pytest.mark.asyncio
+async def test_a_service_mode_bigquery_connection_without_a_key_file_is_refused(
+    tmp_path, monkeypatch, mode, write
+):
+    """With no key file the driver would use the server's own Google credentials."""
+    from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
+
+    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode)
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    dialed: list[dict] = []
+
+    def record(self, kwargs):
+        dialed.append(kwargs)
+        raise RuntimeError("not dialing")
+
+    monkeypatch.setattr(BigQueryAdapter, "_invoke_connect", record)
+    nb_dir = create_notebook(tmp_path, "bq_ambient")
+    (nb_dir / "rw.json").write_text("{}")
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    source = f"# @sql connection=db{' write=true' if write else ''}\nSELECT 1\n"
+    write_cell(nb_dir, "c1", source)
+    toml = nb_dir / "notebook.toml"
+    # A write key alone still leaves read cells on ambient credentials.
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "bigquery"\nproject_id = "p"\n'
+        'write_credentials_path = "rw.json"\n'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    result = await CellExecutor(session).execute_cell("c1", source)
+
+    assert not result.success
+    if mode == "personal":
+        assert dialed, result.error
+        return
+    assert dialed == []
+    assert "server's own Google credentials" in (result.error or "")
+
+
 def test_adapter_internal_keys_are_not_read_from_a_connection_block(tmp_path):
     """``confine_to``, ``mount_sources`` and ``catalog_properties`` are set by the
     executor; from notebook.toml or a request they would steer what the server opens."""
