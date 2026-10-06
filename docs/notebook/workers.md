@@ -490,7 +490,7 @@ strata worker rm ./my-notebook fly-cpu
 
 ### Signed workers and private hosts
 
-A `signed` (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback or link-local address. A Strata server on your own network trips this. Name its host in `STRATA_WORKER_ALLOWED_HOSTS` on the worker, or set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to turn the check off (local dev). Those connections also ignore `HTTPS_PROXY`, so a worker that reaches the server only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`. See [Worker configuration](../reference/configuration.md#worker).
+A `signed` (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback, link-local or other non-public address (`100.64.0.0/10` included). A Strata server on your own network or tailnet trips this. Name its host in `STRATA_WORKER_ALLOWED_HOSTS` on the worker, or set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to turn the check off (local dev). Those connections also ignore `HTTPS_PROXY`, so a worker that reaches the server only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`. See [Worker configuration](../reference/configuration.md#worker).
 
 ### Server-managed workers (service mode)
 
