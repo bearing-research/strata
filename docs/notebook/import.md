@@ -21,11 +21,16 @@ Read this before you decide to import a particular notebook.
 - **`%pip install`, `!pip install`, `%conda install`** - packages
   captured into the new notebook's `pyproject.toml`.
 - **`%env`, `%set_env`** - translated to `# @env KEY=VAL` cell
-  annotations.
+  annotations, moved to the top of the cell so they apply.
 - **`%run script.py`** - translated to `exec(Path(...).read_text())`.
 - **`%%writefile`** - translated to `Path(...).write_text(...)`.
-- **`%timeit`, `%time` (line form)** - the magic prefix is dropped;
-  the body keeps running.
+- **`%timeit`, `%time` (line form)** - the magic prefix and its
+  options are dropped; the body keeps running.
+
+Only a line that starts a statement is read as a magic or shell
+escape: a `%` or `!` inside a string, a bracketed expression or a
+backslash continuation stays Python. A magic that was the only
+statement of an indented block leaves a `pass` behind.
 
 **What you lose:**
 
@@ -156,9 +161,9 @@ extends support; rows can be:
 | `%load_ext`, `%reload_ext`, `%autoreload`, `%config`, `%colors`, `%rerun` | Dropped. |
 | `%capture`, `%xmode`, `%pdb`, `%debug`, `%tb` | Dropped. |
 | `%who`, `%who_ls`, `%whos`, `%lsmagic`, `%magic`, `%history`, `%alias`, `%alias_magic` | Dropped (interactive REPL inspection has no Strata equivalent). |
-| `%timeit`, `%time` (line form) | Magic stripped, body kept. |
+| `%timeit`, `%time` (line form) | Magic and its options stripped, body kept. |
 | `%pip install <pkgs>`, `!pip install <pkgs>`, `%conda install <pkgs>` | Packages captured into `pyproject.toml`. |
-| `%env KEY=VAL`, `%set_env KEY=VAL` | Translated to a `# @env KEY=VAL` cell annotation. |
+| `%env KEY=VAL`, `%set_env KEY=VAL` | Translated to a `# @env KEY=VAL` annotation at the top of the cell. |
 | `%run script.py` | Translated to an `exec(Path("script.py").read_text())` (with a self-contained `Path` import). |
 | `%%bash`, `%%sh`, `%%script` | Dropped; the body is kept as comments under a marker, so re-enabling it is a deliberate edit. |
 | `%%writefile <path>`, `%%file <path>` | Translated to `Path(<path>).write_text(<body>)`. |
@@ -189,7 +194,9 @@ Four sources, in priority order, earlier sources shadow later ones,
 so a version-pinned spec from `requirements.txt` wins over a bare
 inferred-from-imports entry:
 
-1. Sibling `requirements.txt` next to the `.ipynb`.
+1. Sibling `requirements.txt` next to the `.ipynb`, read as pip
+   does: backslash continuations joined, inline `# comments` and
+   options such as `--hash=...` dropped.
 2. Sibling `pyproject.toml` next to the `.ipynb`.
 3. `%pip install` / `!pip install` lines extracted from cells.
 4. **Bare imports in cell source.** AST-walk each cell, collect
@@ -198,15 +205,17 @@ inferred-from-imports entry:
    `*/__init__.py` next to the notebook). Map import names to PyPI
    names via a small hand-maintained dict for common mismatches:
    `cv2 → opencv-python`, `sklearn → scikit-learn`, `PIL → Pillow`,
-   `bs4 → beautifulsoup4`, `yaml → PyYAML`, etc. Anything not in the
+   `bs4 → beautifulsoup4`, `yaml → PyYAML`, `mpl_toolkits → matplotlib`,
+   `pkg_resources → setuptools`, etc. Anything not in the
    dict is assumed to use the same name on PyPI (right ~95% of the
    time).
 
 The combined set is deduped with PEP 503-normalized package names
 (so `scikit-learn` and `scikit_learn` collapse to one entry) and
-filtered to **PEP 508 specifiers only**: `pyproject.toml`'s
-`dependencies` won't accept editable installs (`-e .`), bare URLs
-(`git+https://…`), or local paths. Skipped specs land in the import
+filtered to **PEP 508 specifiers only** (each is parsed as one):
+`pyproject.toml`'s `dependencies` won't accept editable installs
+(`-e .`), bare URLs (`git+https://…`), local paths, or a malformed
+line. Skipped specs land in the import
 report so you can address them by hand.
 
 The deps are written to the new notebook's `pyproject.toml`. First
