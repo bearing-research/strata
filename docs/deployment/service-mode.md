@@ -64,6 +64,13 @@ the network-level isolation is. If an attacker can reach Strata's
 IP directly, they can read the token from any leaked config and
 forge headers. Treat the token as defense-in-depth.
 
+The proxy must pass the browser's `Host` header through unchanged,
+port included (nginx: `proxy_set_header Host $http_host;`, not
+`$host`, which drops the port). Strata accepts a browser write or a
+notebook WebSocket only when its `Origin` matches that `Host`; a proxy
+that rewrites `Host` has to list the public origin in
+`STRATA_CORS_ALLOW_ORIGINS` instead.
+
 ## Running the demo stack
 
 The repo ships a complete service-mode demo: Strata + a notebook
