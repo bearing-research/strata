@@ -470,7 +470,7 @@ password = "${PGPASS}"
 Notes:
 
 - **Driver-specific extras** (e.g. `options.search_path`, `options.warehouse` for Snowflake, future driver-specific keys) round-trip through the editor unchanged. The form editorializes the keys it knows; everything else is preserved.
-- **Auth values use `${VAR}` indirection.** Literal credentials get blanked when `notebook.toml` is saved, so committing the file never leaks secrets. The form shows a warning border on a literal value so you know to switch it to a variable reference.
+- **Auth values use `${VAR}` indirection.** Literal credentials get blanked when `notebook.toml` is saved, so committing the file never leaks secrets. The form shows a warning border on a literal value so you know to switch it to a variable reference. A personal server reads the variable from its own environment; a server in [service mode](../deployment/service-mode.md) reads it from the notebook's env.
 - **Relative `path` values are notebook-local.** `path = "analytics.db"` resolves against the notebook directory at execution time. The on-disk value stays relative so a notebook moves cleanly between machines.
 - **Currently shipped drivers**: DuckDB, SQLite, PostgreSQL, Snowflake, and BigQuery. DuckDB uses the native DuckDB DBAPI; the other four are ADBC-backed (`adbc-driver-sqlite`, `adbc-driver-postgresql`, `adbc-driver-snowflake`, `adbc-driver-bigquery`). For Snowflake, read cells use `role`; `write=true` cells switch to `write_role` when configured, otherwise they reuse `role`. For BigQuery, read cells use `credentials_path`; `write=true` cells switch to `write_credentials_path` when configured, otherwise they reuse `credentials_path`. Snowflake and BigQuery do not have a session-level read-only flag like PostgreSQL's `SET default_transaction_read_only = on`, so the safety boundary is the grants on the configured role or service account.
 
@@ -528,7 +528,7 @@ The DAG links the SQL cell to the Python cell automatically, with the same edge 
 
 A SQL cell's **provenance hash** folds together:
 
-- The query text (sqlglot-normalized so whitespace and comment edits don't churn the cache).
+- The query's own tokens (so whitespace, comment and keyword-case edits don't churn the cache, and any other edit runs the query again).
 - The bind parameters (type-tagged: `True` ≠ `1`).
 - The connection's identity (host / DB / user / role / search_path, never the password).
 - The hashes of every upstream artifact referenced via `:name`.
@@ -593,7 +593,7 @@ SQL cells are **read-only by default**, but the enforcement mechanism depends on
 
 For SQLite, DuckDB and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into `write=true`,” and the statement check above refuses anything but a read before the driver sees it.
 
-In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. See [Service mode](../deployment/service-mode.md).
+In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: its database file must be in the notebook's directory or outside the server's state (a SQLite `uri` is refused), a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. See [Service mode](../deployment/service-mode.md).
 
 ### Write cells
 

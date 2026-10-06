@@ -18,7 +18,7 @@ from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
 from strata.notebook.sql.drivers.snowflake import SnowflakeAdapter
 
 T0 = datetime(2026, 9, 15, 10, 0, tzinfo=UTC)
-_AT = re.compile(r"AT \(TIMESTAMP => CAST\('([^']+)' AS TIMESTAMPTZ\)\)")
+_AT = re.compile(r"AT \(TIMESTAMP => '([^']+)'::TIMESTAMP_TZ\)")
 
 
 class Warehouse:
@@ -136,7 +136,7 @@ async def test_a_snapshot_cell_hits_on_rerun_and_keeps_its_state_after_new_rows(
         f"State as of {pinned}; queryable until {(warehouse.now + timedelta(days=1)).isoformat()}"
         in first["stdout"]
     )
-    assert f"AT (TIMESTAMP => CAST('{pinned}'" in warehouse.queries[-1]
+    assert f"AT (TIMESTAMP => '{pinned}'::TIMESTAMP_TZ)" in warehouse.queries[-1]
 
     warehouse.now = T0 + timedelta(hours=1)
     warehouse.insert(3)
@@ -209,7 +209,7 @@ class TestTheAdapters:
             "2026-09-15T10:00:00+00:00",
         )
 
-        assert pinned.count("AT (TIMESTAMP => CAST('2026-09-15T10:00:00+00:00'") == 2
+        assert pinned.count("AT (TIMESTAMP => '2026-09-15T10:00:00+00:00'::TIMESTAMP_TZ)") == 2
         assert "FROM recent AT" not in pinned
         assert pinned.endswith("> ?")
 
@@ -238,7 +238,7 @@ class TestTheAdapters:
             "SELECT id FROM `p.d.t` WHERE x > ?", "2026-09-15T10:00:00+00:00"
         )
 
-        assert "FOR SYSTEM_TIME AS OF CAST('2026-09-15T10:00:00+00:00' AS TIMESTAMP)" in pinned
+        assert "FOR SYSTEM_TIME AS OF TIMESTAMP '2026-09-15T10:00:00+00:00'" in pinned
         assert adapter.retention_until(None, [], "2026-09-15T10:00:00+00:00") == (
             "2026-09-17T10:00:00+00:00"
         )
@@ -249,7 +249,7 @@ class TestWhichTablesAPinCovers:
     table the author pinned may be moved to another.
     """
 
-    _AT = "SELECT * FROM t AT (TIMESTAMP => CAST('2020-01-01T00:00:00+00:00' AS TIMESTAMPTZ))"
+    _AT = "AT (TIMESTAMP => '2020-01-01T00:00:00+00:00'::TIMESTAMP_TZ)"
 
     def test_a_base_table_sharing_a_name_with_an_inner_cte_is_pinned(self):
         from strata.notebook.sql.time_travel import pin_tables
@@ -259,6 +259,7 @@ class TestWhichTablesAPinCovers:
             "snowflake",
             self._AT,
             "when",
+            after_alias=False,
         )
 
         assert pinned.startswith("SELECT * FROM orders AT (TIMESTAMP =>"), pinned
@@ -271,6 +272,7 @@ class TestWhichTablesAPinCovers:
             "snowflake",
             self._AT,
             "when",
+            after_alias=False,
         )
 
         assert "base AT (TIMESTAMP =>" in pinned
@@ -279,6 +281,25 @@ class TestWhichTablesAPinCovers:
     def test_the_moment_the_author_asked_for_is_kept(self):
         from strata.notebook.sql.time_travel import pin_tables
 
-        pinned = pin_tables("SELECT * FROM a AT (OFFSET => -300)", "snowflake", self._AT, "when")
+        pinned = pin_tables(
+            "SELECT * FROM a AT (OFFSET => -300)", "snowflake", self._AT, "when", after_alias=False
+        )
 
         assert pinned == "SELECT * FROM a AT (OFFSET => -300)"
+
+    def test_the_rest_of_the_query_runs_as_written(self):
+        """sqlglot's regeneration would drop ``NUMERIC(10,2)``'s precision."""
+        at = "2026-09-15T10:00:00+00:00"
+
+        bigquery = BigQueryAdapter().pin_query(
+            "SELECT CAST(x AS NUMERIC(10,2)) AS v FROM `p.d.t` AS t WHERE x > ?", at
+        )
+        snowflake = SnowflakeAdapter().pin_query("SELECT x::NUMBER(10,2) FROM s.t AS a", at)
+
+        assert bigquery == (
+            "SELECT CAST(x AS NUMERIC(10,2)) AS v FROM `p.d.t` AS t "
+            f"FOR SYSTEM_TIME AS OF TIMESTAMP '{at}' WHERE x > ?"
+        )
+        assert snowflake == (
+            f"SELECT x::NUMBER(10,2) FROM s.t AT (TIMESTAMP => '{at}'::TIMESTAMP_TZ) AS a"
+        )

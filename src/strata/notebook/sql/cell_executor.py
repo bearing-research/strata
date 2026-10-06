@@ -34,6 +34,7 @@ from strata.notebook.sql.lake import (
     Lake,
     LakeError,
     lake_options,
+    local_database_problem,
     pin_snapshots,
     resolve_lake,
     snapshot_problem,
@@ -99,6 +100,9 @@ async def execute_sql_cell(
         adapter = get_adapter(spec.driver)
     except KeyError as exc:
         return _error_result(str(exc), start_time)
+    problem = database_problem(spec, session.path, session._lake_config())
+    if problem is not None:
+        return _error_result(f"connection {spec.name!r}: {problem}", start_time)
 
     # Write cells: no freshness probe (the key is source-derived) and no
     # read-only enforcement.
@@ -121,7 +125,10 @@ async def execute_sql_cell(
     if not analysis.sql_body:
         return _error_result("SQL cell body is empty.", start_time)
     # A body can end the driver's read-only transaction, so check before sending.
-    violation = read_only_violation(analysis.sql_body, adapter.sqlglot_dialect)
+    violation = read_only_violation(
+        rewrite_named_to_positional(analysis.sql_body, adapter.sqlglot_dialect),
+        adapter.sqlglot_dialect,
+    )
     if violation is not None:
         return _error_result(violation, start_time)
 
@@ -159,7 +166,9 @@ async def execute_sql_cell(
     # The on-disk spec keeps relative paths so notebook.toml round-trips;
     # resolve them only for the adapter.
     try:
-        runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
+        runtime_spec = _resolve_runtime_spec(
+            spec, session.path, _credentials(session), _auth_env(session)
+        )
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
 
@@ -416,12 +425,17 @@ async def _execute_write_cell(
     # No probe slots. Runtime spec for relative credential paths;
     # ``read_only=False`` puts the write principal in the identity.
     try:
-        runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
+        runtime_spec = _resolve_runtime_spec(
+            spec, session.path, _credentials(session), _auth_env(session)
+        )
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     runtime_spec = _confined(session, runtime_spec, None)
     if spec.driver == "sqlite" and getattr(runtime_spec, "confine_to", None) is not None:
-        violation = confined_write_violation(analysis.sql_body, adapter.sqlglot_dialect)
+        violation = confined_write_violation(
+            rewrite_named_to_positional(analysis.sql_body, adapter.sqlglot_dialect),
+            adapter.sqlglot_dialect,
+        )
         if violation is not None:
             return _error_result(f"connection {spec.name!r}: {violation}", start_time)
     query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
@@ -582,7 +596,10 @@ def _execute_write_statements(
     # ``WITH ... INSERT`` as "WITH", not DML).
     parsed = [
         statement
-        for statement in sqlglot.parse(body, dialect=adapter.sqlglot_dialect)
+        for statement in sqlglot.parse(
+            rewrite_named_to_positional(body, adapter.sqlglot_dialect),
+            dialect=adapter.sqlglot_dialect,
+        )
         if statement is not None and not isinstance(statement, sqlglot.exp.Semicolon)
     ]
     texts = _split_statements(body, adapter.sqlglot_dialect)
@@ -770,7 +787,7 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     try:
         # No credentials: resolving may hit a secret manager, and the identity
         # carries only the credential's name.
-        runtime_spec = _resolve_runtime_spec(spec, session.path)
+        runtime_spec = _resolve_runtime_spec(spec, session.path, auth_env=_auth_env(session))
         connection_id = _with_credential(
             adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
         )
@@ -793,6 +810,30 @@ def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
     return spec.model_copy(update={"confine_to": list(lake.locations) if lake else []})
 
 
+def database_problem(spec: ConnectionSpec, notebook_dir: Any, config: Any) -> str | None:
+    """Why a service-mode SQL cell may not open *spec*'s database file, or None.
+
+    The file is opened by the server process, so it must be one the notebook
+    may read: see ``local_database_problem``. A SQLite ``uri`` is refused, since
+    its parameters can name any file.
+    """
+    from pathlib import Path
+
+    if spec.driver not in ("duckdb", "sqlite"):
+        return None
+    if getattr(config, "deployment_mode", "personal") != "service":
+        return None
+    if spec.driver == "sqlite" and getattr(spec, "uri", None):
+        return "a SQLite `uri` is not allowed on this server; name the database file with `path`"
+    path = getattr(spec, "path", None)
+    if not isinstance(path, str) or not path or path == ":memory:":
+        return None
+    problem = local_database_problem(str(Path(str(notebook_dir)) / path), notebook_dir, config)
+    if problem is None:
+        return None
+    return f"the database {path} is outside this notebook's directory and {problem}"
+
+
 def _with_credential(connection_id: str, spec: ConnectionSpec) -> str:
     """Fold the credential's name into the connection's identity.
 
@@ -809,6 +850,7 @@ def _resolve_runtime_spec(
     spec: ConnectionSpec,
     notebook_dir: Any,
     credentials: CredentialResolver | None = None,
+    auth_env: dict[str, str] | None = None,
 ) -> ConnectionSpec:
     """Return a spec copy with relative file paths and the credential resolved.
 
@@ -816,7 +858,9 @@ def _resolve_runtime_spec(
     so adapters never see names; ``CredentialError`` names it on failure.
     Relative paths (and BigQuery's ``credentials_path`` /
     ``write_credentials_path``) are rebased on the notebook directory, since the
-    server's CWD is unrelated. ``uri`` passes through as-is.
+    server's CWD is unrelated. ``uri`` passes through as-is. With *auth_env*
+    (see ``_auth_env``), ``${VAR}`` in ``auth`` is resolved from it here, so the
+    driver never reads the server's environment.
     """
     from pathlib import Path
 
@@ -845,13 +889,35 @@ def _resolve_runtime_spec(
         if new_value != raw_value:
             update[key] = new_value
 
+    auth = dict(spec.auth)
+    if auth_env is not None:
+        for key, value in auth.items():
+            if value.startswith("${") and value.endswith("}"):
+                if value[2:-1] not in auth_env:
+                    raise CredentialError(
+                        f"auth.{key} references {value}, which this notebook's env does not set"
+                    )
+                auth[key] = auth_env[value[2:-1]]
+        if auth != spec.auth:
+            update["auth"] = auth
     if spec.credential:
         resolved = (credentials or CredentialResolver()).resolve(spec.credential)
-        update["auth"] = {**resolved, **spec.auth}
+        update["auth"] = {**resolved, **auth}
 
     if not update:
         return spec
     return spec.model_copy(update=update)
+
+
+def _auth_env(session: Any) -> dict[str, str] | None:
+    """What ``${VAR}`` in connection auth reads in service mode: the notebook's env.
+
+    ``None`` (personal mode) leaves it to the driver, which reads the server's
+    environment; on a shared server that would send it to a member-chosen host.
+    """
+    if getattr(session._lake_config(), "deployment_mode", "personal") != "service":
+        return None
+    return dict(session.notebook_state.env)
 
 
 def _load_upstream_variables(

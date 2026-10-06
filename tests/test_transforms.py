@@ -1,5 +1,6 @@
 """The transform system: the base class, built-ins, registration, params and local runs."""
 
+import duckdb
 import pyarrow as pa
 import pytest
 from pydantic import ValidationError
@@ -197,6 +198,30 @@ class TestDuckDBSQLTransform:
         result = transform.run([table], {"sql": "SELECT x * 2 AS doubled FROM input0"})
 
         assert result.column("doubled").to_pylist() == [2, 4, 6]
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT content FROM read_text('{secret}')",
+            "SELECT * FROM glob('{secret_dir}/*')",
+            "COPY input0 TO '{leak}'",
+            "ATTACH '{leak}' AS other",
+            "SET enable_external_access = true",
+            "SET lock_configuration = false",
+            "LOAD httpfs",
+        ],
+    )
+    def test_duckdb_sql_reaches_only_its_inputs(self, tmp_path, sql):
+        """It runs in the server process: no server files, no writes, no extensions."""
+        secret = tmp_path / "server" / "secret.txt"
+        secret.parent.mkdir()
+        secret.write_text("server secret")
+        leak = tmp_path / "leak.csv"
+        query = sql.format(secret=secret, secret_dir=secret.parent, leak=leak)
+
+        with pytest.raises(duckdb.Error):
+            DuckDBSQLTransform().execute([pa.table({"x": [1]})], DuckDBSQLParams(sql=query))
+        assert not leak.exists()
 
     def test_build_duckdb_sql_transform(self):
         spec = build_duckdb_sql_transform("SELECT * FROM input0")

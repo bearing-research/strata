@@ -675,7 +675,18 @@ can. A notebook that needs more isolation than that wants a worker on another
 machine.
 
 SQL cells are different: their queries run inside the server process, not as
-the harness user. A DuckDB SQL cell is confined instead. Once its connection is
+the harness user, so the server checks which database file a SQLite or DuckDB
+connection opens. After resolving `../` and following links, its `path` must be
+inside the notebook's own directory, or else pass the mount-root rule below and
+not be inside the server's state (the artifact directory, the cache directory,
+the metadata database's directory, the notebook storage directory or the
+server's home). A SQLite connection may not use `uri`, whose parameters can name
+any file. Saving such a connection fails with a 400, and one already in
+`notebook.toml` fails the cell and the connection's schema listing, naming it.
+The keys the server sets on a connection it opens (`confine_to`,
+`mount_sources`, `catalog_properties`) are dropped from a connection block.
+
+A DuckDB SQL cell is also confined. Once its connection is
 set up, it can reach only its own database, the roots of the mounts it reads,
 and the locations of the catalog tables it reads; file access outside those is
 refused, and the cell cannot turn it back on. So `read_text` of a server file,
@@ -693,6 +704,9 @@ harness user, whose own file permissions decide what a root exposes. A SQLite ce
 runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
+A `${VAR}` in a connection's `auth` reads the notebook's env, never the server's
+environment, which would otherwise go to whatever host the notebook names; a
+secret the server holds reaches a connection only as a named `credential`.
 
 Prompt cells call their model from the server process too, and show the author
 what came back. A `base_url` from the notebook's `[ai]` section is checked like

@@ -164,14 +164,26 @@ def test_only_the_catalog_tables_a_query_reads_are_pinned():
     )
     pinned = pin_snapshots(sql, "lake", {("taxi", "trips"): 11, ("taxi", "zones"): 22})
 
-    assert "lake.taxi.trips AS t AT (VERSION => 11)" in pinned
-    assert "lake.taxi.zones AS z AT (VERSION => 22)" in pinned
-    assert "warehouse.taxi.trips AS w" in pinned
+    assert "lake.taxi.trips t AT (VERSION => 11)" in pinned
+    assert "lake.taxi.zones z AT (VERSION => 22)" in pinned
+    assert "warehouse.taxi.trips w USING" in pinned
     assert "JOIN trips USING" in pinned
     assert pinned.endswith("> ?")
     # DuckDB's parser is the judge: an alias after AT (what sqlglot before
     # 30.13 wrote) is a syntax error, and a pin must bind to its own table.
     assert _pinned_versions(pinned) == {("trips", "t"): 11, ("zones", "z"): 22}
+
+
+def test_a_pinned_query_is_the_cells_own_text():
+    """sqlglot's regeneration would read ``MAP {a: b}`` as ``MAP {'a': b}``."""
+    sql = "SELECT MAP {a: b} AS m FROM lake.ns.t AS x(a, b) WHERE a > ?"
+
+    pinned = pin_snapshots(sql, "lake", {("ns", "t"): 5})
+
+    assert (
+        pinned == "SELECT MAP {a: b} AS m FROM lake.ns.t AS x(a, b) AT (VERSION => 5) WHERE a > ?"
+    )
+    assert _pinned_versions(pinned) == {("t", "x"): 5}
 
 
 def _pinned_versions(sql: str) -> dict[tuple[str, str], int]:
