@@ -67,7 +67,7 @@ def _agent_id(name: str) -> str:
     return f"#agent-{_fragment(name)}"
 
 
-def _orcid_url(orcid: str) -> str:
+def orcid_url(orcid: str) -> str:
     """An ORCID as its canonical URL, whether it was given bare or as a link."""
     bare = orcid.strip()
     for prefix in ("https://orcid.org/", "http://orcid.org/", "orcid.org/"):
@@ -82,7 +82,7 @@ def _credited(publication) -> list[dict]:
 
 def _author_id(author: dict) -> str:
     # An ORCID ``@id`` lets two crates say they name the same researcher.
-    return _orcid_url(author["orcid"]) if author.get("orcid") else _agent_id(author["name"])
+    return orcid_url(author["orcid"]) if author.get("orcid") else _agent_id(author["name"])
 
 
 def build_crate(

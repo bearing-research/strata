@@ -136,6 +136,12 @@ class TestThePage:
         assert "by <a" in html
         assert "F. Li" in html and "B. Second" in html
 
+    def test_an_orcid_given_as_a_link_is_not_prefixed_twice(self, store):
+        html = self._page(store, authors=[{"name": "A", "orcid": f"https://orcid.org/{ORCID}"}])
+
+        assert f"href='https://orcid.org/{ORCID}'" in html
+        assert "orcid.org/https" not in html
+
     def test_the_byline_falls_back_to_who_published(self, store):
         html = self._page(store, published_by="alice")
 
