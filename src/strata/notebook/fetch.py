@@ -161,14 +161,18 @@ class FetchCache:
 
         A pin is its own fingerprint. Anything unresolvable gets a unique one, as an
         unreachable ``@table`` does: the cell shows stale and runs, and the run reports
-        why.
+        why. A URL nothing has read yet counts as unresolvable: only a run makes the
+        first request, so opening or editing a notebook sends none to the URLs it names.
         """
         if spec.sha256:
             return f"{spec.name}:fetch:{spec.url}:{spec.sha256}"
+        unresolved = f"{spec.name}:fetch:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
+        if self.recorded(spec.url) is None:
+            return unresolved
         try:
             return self.resolve(spec, max_age=max_age).fingerprint(spec)
         except FetchError:
-            return f"{spec.name}:fetch:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
+            return unresolved
 
     # --- internals ---
 
