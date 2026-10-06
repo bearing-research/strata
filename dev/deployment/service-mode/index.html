@@ -2701,7 +2701,10 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
   <code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code>, and <code>/discover</code>, <code>/open</code>, <code>/create</code>
   and the imports stay inside it. A live session belongs to the tenant
   that opened it; to any other tenant its REST routes, WebSocket and MCP
-  tools answer as for an unknown session. <code>admin:*</code> sees every tenant's
+  tools answer as for an unknown session. A caller the proxy sends
+  without a tenant header is the default tenant (<code>_default</code>) for both:
+  its notebooks live under <code>&lt;notebook_storage_dir&gt;/_default/</code> and its
+  sessions are visible to that tenant only. <code>admin:*</code> sees every tenant's
   notebooks and sessions. This keeps tenants out of each other's
   notebooks, but cells still run on one host: it is a convenience for
   small, trusted tenants, not an isolation boundary (see
