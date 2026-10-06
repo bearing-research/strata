@@ -19,7 +19,7 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 const strata = useStrata()
 
 const PAGE_SIZE = 100
-const STATES = ['', 'ready', 'building', 'failed'] as const
+const STATES = ['', 'ready', 'building', 'superseded', 'failed'] as const
 type SortKey = NonNullable<ArtifactQuery['sort']>
 
 const stats = ref<ArtifactStats | null>(null)
@@ -171,6 +171,10 @@ onMounted(() => {
       <div class="stat-card">
         <span class="stat-value building">{{ stats.building_versions.toLocaleString() }}</span>
         <span class="stat-label">building</span>
+      </div>
+      <div v-if="stats.superseded_versions != null" class="stat-card">
+        <span class="stat-value">{{ stats.superseded_versions.toLocaleString() }}</span>
+        <span class="stat-label">superseded</span>
       </div>
       <div class="stat-card">
         <span class="stat-value failed">{{ stats.failed_versions.toLocaleString() }}</span>
@@ -529,6 +533,12 @@ onMounted(() => {
 .state-failed {
   background: var(--tint-danger);
   color: var(--accent-danger);
+}
+
+/* A duplicate build that reads another version's bytes: usable, not notable. */
+.state-superseded {
+  background: var(--bg-input);
+  color: var(--text-muted);
 }
 
 .pager {

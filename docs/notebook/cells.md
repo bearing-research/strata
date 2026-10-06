@@ -771,8 +771,8 @@ copy a ready-to-paste snippet, or build it yourself:
   addEventListener('message', (e) => {
     if (e.origin === 'http://localhost:8765' &&
         e.data && e.data.type === 'strata:embed:resize')
-      document.querySelector('iframe[title="Strata notebook"]').style.height =
-        e.data.height + 'px'
+      for (const f of document.querySelectorAll('iframe[title="Strata notebook"]'))
+        if (f.contentWindow === e.source) f.style.height = e.data.height + 'px'
   })
 </script>
 ```
@@ -782,7 +782,8 @@ view blends into the host page, and the embedded app posts its content height to
 the parent frame (`{ type: 'strata:embed:resize', height }`) so the optional
 listener above sizes the iframe with no inner scrollbar. The listener accepts
 heights only from the Strata server's origin, so another frame on the page
-cannot resize it. Widgets stay live inside
+cannot resize it, and sizes only the iframe that sent the height, so several
+embeds on one page each get their own. Widgets stay live inside
 the frame, so with **⚡ Live** on it's a fully interactive embedded panel.
 
 **Cross-origin embedding is opt-in.** By default a notebook is framable only from

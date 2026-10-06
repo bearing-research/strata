@@ -318,6 +318,9 @@ class CellAnalysisModel(WsPayload):
     # Carried on the edit frame, else the browser shows the previous author until reload.
     created_by: str | None = None
     updated_by: str | None = None
+    # The edited cell's new text, sent only to the session's other connections: a
+    # second tab follows the edit, and the sender is never echoed text it has typed past.
+    source: str | None = None
 
 
 class DagUpdatePayload(WsPayload):
@@ -395,7 +398,12 @@ def session_closed_payload(reason: SessionClosedReason) -> dict[str, Any]:
 
 # Typed so a mistyped code at an emit site is a type error, not a silent frontend miss.
 ErrorCode = Literal[
-    "ENVIRONMENT_BUSY", "cell_busy", "cell_locked", "read_only", "insufficient_scope"
+    "ENVIRONMENT_BUSY",
+    "notebook_busy",
+    "cell_busy",
+    "cell_locked",
+    "read_only",
+    "insufficient_scope",
 ]
 
 
@@ -404,6 +412,7 @@ class ErrorPayload(WsPayload):
 
     ``code`` is part of the contract: the frontend branches on ``ENVIRONMENT_BUSY``.
     Known codes: ``ENVIRONMENT_BUSY`` (an environment job holds the notebook),
+    ``notebook_busy`` (run refused while another run holds the notebook),
     ``cell_busy`` (edit refused while the cell runs), ``cell_locked`` (someone else
     just changed the cell), ``read_only`` (not allowed in app view),
     ``insufficient_scope`` (auth).
@@ -411,7 +420,8 @@ class ErrorPayload(WsPayload):
 
     error: str
     code: ErrorCode | None = None
-    # On ``cell_busy`` and ``cell_locked``, the cell that refused the edit.
+    # On ``cell_busy`` and ``cell_locked``, the cell that refused the edit; on
+    # ``notebook_busy``, the cell whose run was refused (absent for run-all).
     cell_id: str | None = None
     # Only on ``cell_locked``: who changed the cell.
     held_by: str | None = None

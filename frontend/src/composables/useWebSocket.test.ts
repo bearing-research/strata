@@ -1,0 +1,120 @@
+import assert from 'node:assert/strict'
+import test, { mock } from 'node:test'
+
+import { useWebSocket } from './useWebSocket.ts'
+
+// Stands in for the browser WebSocket; the test drives each instance's events.
+class FakeSocket {
+  static all: FakeSocket[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((e: unknown) => void) | null = null
+  onerror: ((e: unknown) => void) | null = null
+  onclose: (() => void) | null = null
+  sent: string[] = []
+
+  constructor() {
+    FakeSocket.all.push(this)
+  }
+
+  send(data: string) {
+    this.sent.push(data)
+  }
+
+  close() {
+    this.onclose?.()
+  }
+
+  // A refused or unreachable handshake: the browser fires error, then close.
+  fail() {
+    this.onerror?.({})
+    this.onclose?.()
+  }
+
+  sentTypes(): string[] {
+    return this.sent.map((raw) => JSON.parse(raw).type)
+  }
+}
+
+;(globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket
+
+test.beforeEach(() => {
+  FakeSocket.all = []
+  mock.timers.enable({ apis: ['setTimeout'] })
+  for (const level of ['log', 'warn', 'error'] as const) mock.method(console, level, () => {})
+})
+
+test.afterEach(() => {
+  mock.timers.reset()
+  mock.restoreAll()
+})
+
+test('a dropped socket keeps retrying with backoff until one connects', () => {
+  const ws = useWebSocket('nb')
+  ws.connect()
+  FakeSocket.all[0]!.onopen?.()
+  assert.equal(ws.state.value, 'connected')
+
+  FakeSocket.all[0]!.close()
+  assert.equal(ws.state.value, 'reconnecting')
+
+  // Each failed attempt schedules the next one, with a longer wait.
+  for (const [i, delay] of [1000, 2000, 4000, 8000].entries()) {
+    mock.timers.tick(delay - 1)
+    assert.equal(FakeSocket.all.length, i + 1, 'not before the backoff elapses')
+    mock.timers.tick(1)
+    assert.equal(FakeSocket.all.length, i + 2)
+    FakeSocket.all[i + 1]!.fail()
+    assert.equal(ws.state.value, 'reconnecting')
+  }
+
+  mock.timers.tick(16000)
+  const last = FakeSocket.all.at(-1)!
+  last.onopen?.()
+  assert.equal(ws.state.value, 'connected')
+  assert.deepEqual(last.sentTypes(), ['notebook_sync'])
+})
+
+test('the backoff stops growing at 30 seconds and never gives up', () => {
+  const ws = useWebSocket('nb')
+  ws.connect()
+  for (let i = 0; i < 15; i++) {
+    FakeSocket.all.at(-1)!.fail()
+    mock.timers.tick(30000)
+  }
+  assert.equal(FakeSocket.all.length, 16)
+  assert.equal(ws.state.value, 'connecting')
+})
+
+test('disconnect stops reconnecting, even with a retry already scheduled', () => {
+  const ws = useWebSocket('nb')
+  ws.connect()
+  FakeSocket.all[0]!.onopen?.()
+  FakeSocket.all[0]!.close()
+  ws.disconnect()
+
+  mock.timers.tick(120000)
+  assert.equal(FakeSocket.all.length, 1)
+  assert.equal(ws.state.value, 'disconnected')
+})
+
+test('send reports whether the frame went out', () => {
+  const ws = useWebSocket('nb')
+  assert.equal(ws.updateCellSource('c1', 'x = 1'), false)
+  ws.connect()
+  FakeSocket.all[0]!.onopen?.()
+  assert.equal(ws.updateCellSource('c1', 'x = 1'), true)
+})
+
+test('open handlers run on every connect, before the sync request', () => {
+  const ws = useWebSocket('nb')
+  ws.onOpen(() => ws.updateCellSource('c1', 'x = 1'))
+  ws.connect()
+  FakeSocket.all[0]!.onopen?.()
+  FakeSocket.all[0]!.close()
+  mock.timers.tick(1000)
+  FakeSocket.all[1]!.onopen?.()
+
+  for (const socket of FakeSocket.all) {
+    assert.deepEqual(socket.sentTypes(), ['cell_source_update', 'notebook_sync'])
+  }
+})
