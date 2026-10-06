@@ -9,37 +9,62 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
-The artifact store looks after its own size, Iceberg tables that other engines
-delete from or evolve are read correctly instead of refused, and service mode
+Strata becomes something a platform can host for many people. Notebook routes
+know their tenant, the server runs under a path behind a proxy, workers reach it
+from behind NAT, and lake reads cover more catalogs and more of what other
+engines write. The artifact store looks after its own size, and service mode
 closes several ways a notebook could reach past its own data.
+
+**A platform can host it.** In service mode every notebook route, the WebSocket
+and MCP treat another tenant's session as missing, and with
+`multi_tenant_enabled` each tenant keeps its notebooks in its own folder.
+`STRATA_PUBLIC_BASE_PATH` serves the UI, API and publication pages under a path,
+the editor can be framed without its own chrome, idle sessions close, and a
+result can be promoted to a team store without a name. There are two deployment
+modes and nothing between them: a personal server has one user, and a team runs
+one per member or a service-mode server.
+
+**Workers go where the hardware is.** `strata-worker --connect` dials out to a
+relay, so a machine behind NAT serves cells with no open port. Workers restore a
+notebook's `renv.lock` as they do its `uv.lock`, fetch prebuilt environments
+keyed by what the lock installs, and a remote cell's console streams live,
+across nodes and under authentication.
+
+**More of the lake reads correctly.** Scans apply merge-on-read deletes
+(positional deletes, deletion vectors and equality deletes) and follow schema
+changes by field id, so tables Spark, Flink and DuckDB write are read as Iceberg
+defines them. DuckDB cells attach AWS Glue catalogs and read `gs://` and `az://`
+mounts, and a `# @dataset` read carries the dataset's lineage, so the registry
+shows which cells read each name.
 
 **The store stays bounded.** A personal server now collects results nobody has
 used for a while, least recently used first, and never anything named, pinned,
 published or still needed by something kept. A notebook keeps each cell's
 current value and its last few versions.
 
-**More tables read correctly.** Scans apply merge-on-read deletes (positional
-deletes, deletion vectors and equality deletes) and follow schema changes by
-field id, so tables Spark, Flink and DuckDB write are read as Iceberg defines
-them.
-
-**Service mode is tighter.** SQL cells are confined to their own database and
-lake, package installs are wheels only, outbound requests connect only to the
-address the guard checked, R restores run as the harness user, the server's
-Infisical credentials go only to the operator's host, and the log buffer and a
-worker's token are out of other tenants' and cells' reach. Nothing the server
-stores is unpickled or served as a page in its process or on its origin.
-
-**Personal servers are harder to reach from a web page.** A request under a
-hostname the server does not know is refused, which closes DNS rebinding, and
-no route serves files from outside the frontend.
+**Service mode is tighter, and personal servers are harder to reach from a web
+page.** SQL cells are confined to their own database and lake, package installs
+are wheels only, outbound requests connect only to the address the guard
+checked, R restores run as the harness user, the server's Infisical credentials
+go only to the operator's host, and the log buffer and a worker's token are out
+of other tenants' and cells' reach. Nothing the server stores is unpickled or
+served as a page in its process or on its origin. A personal server refuses a
+hostname it does not know, which closes DNS rebinding, and no route serves files
+from outside the frontend.
 
 **Upgrading from 0.8.0:**
 
-- Scan caches are rebuilt: the first scan of each table reads from storage.
-  The artifact store's metadata migrates on first start, one way. Results
+- Scan caches are rebuilt: the first scan of each table reads from storage,
+  and a transform that reads a table directly recomputes once, since a table
+  input's version now carries the schema id as well as the snapshot. Until it
+  does, a name over such a result reports stale (`is_stale`, the name status
+  route). The artifact store's metadata migrates on first start, one way, and
+  a notebook's own store migrates the first time a command opens it. Results
   stored by 0.8.0 count as used at the upgrade, so none is collected for
   idleness in the first 30 days; the size cap still applies.
+- Do not start 0.8.0 on a store this release has migrated: it runs without a
+  warning, and the latest version of each result it writes is never collected.
+  Restore a backup to go back.
 - New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
   `[mcp]`; textual-image 0.14 and Pillow 12.1 with `[tui]`.
 - Unnamed `materialize` results can now be collected in personal mode; name or
@@ -76,7 +101,9 @@ no route serves files from outside the frontend.
   value no longer reaches them.
 - Shared environments are keyed by what the lock installs, not the raw
   `uv.lock` (which carried the project's name): existing shared environments
-  are rebuilt once and the old ones swept. The executor protocol's
+  are rebuilt once, and an old one stays on disk until it has been unused for
+  `STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS` (7 days; `strata env gc --ttl-days 0`
+  removes it sooner). The executor protocol's
   `environment.key` changed the same way, so servers and workers (and any
   registry addressing environments by key) upgrade together.
 - A configured SQL catalog whose warehouse is in object storage now needs a
@@ -129,6 +156,13 @@ no route serves files from outside the frontend.
   server's disk.
 - Naming, aliasing or tagging an artifact that does not exist answers 404
   instead of 400, the same as reading it.
+- Leaf cells, ones nothing else reads, are now cache hits on an unchanged run,
+  in Run All too. A leaf kept only for its side effect (writing a file, sending
+  a message) runs once until its source or inputs change; mark it `# @nocache`
+  to run it every time.
+- `STRATA_AZURE_ENDPOINT_URL` for the artifact blob store is the blob host,
+  with the account appended as the first path segment, as for lake tables; a
+  value that already ends in the account name must drop it.
 
 
 ### Added
@@ -199,8 +233,9 @@ no route serves files from outside the frontend.
   session running a cell or an environment job is never closed.
   `STRATA_NOTEBOOK_WARM_POOL_SIZE` sets the warm pool (0 turns it off). A
   closed session tells its clients with a `session_closed` frame, and the
-  browser offers to reopen. `POST /v1/notebooks/{id}/close` closes a session
-  and keeps the notebook.
+  browser offers to reopen; the terminal viewer stops, shows why, and `r`
+  reopens the notebook by path. `POST /v1/notebooks/{id}/close` closes a
+  session and keeps the notebook.
 - **A worker can answer a direct cell with 202.** `POST /v1/execute` may
   return a `job_url`; the server polls it, a machine's boot no longer counts
   against the cell's timeout, and the finished job's URL returns the bundle.
@@ -264,10 +299,12 @@ no route serves files from outside the frontend.
   the same store; `pool.queue` and `pool.boot` spans join the submitter's trace.
 - The generic reference executor reports its hardware on `GET /health`.
 - `benchmarks/capacity_sweep.py --no-server` takes `--table-uri`.
-- **Tenant-aware notebook routes.** In service mode every notebook REST route,
-  `/sessions` and the WebSocket treat another tenant's session as missing
-  (404, or close 1008), as MCP already did; `admin:*` reaches every session.
-  With `multi_tenant_enabled` each tenant gets its own storage folder. This is a
+- **Tenant-aware notebook routes.** In service mode every notebook REST route
+  and the WebSocket treat another tenant's session as missing (a 404, or a
+  refused upgrade), as MCP already did; `admin:*` reaches every session. A
+  member the proxy sends without a tenant header is the default tenant there
+  too. With
+  `multi_tenant_enabled` each tenant gets its own storage folder. This is a
   convenience for small trusted tenants, not an isolation boundary: cells still
   share the host.
 - **Serving under a path.** `STRATA_PUBLIC_BASE_PATH` serves Strata behind a
@@ -341,7 +378,8 @@ no route serves files from outside the frontend.
   notebooks with the same resolved dependencies link one environment, and the
   notebook's own project is never installed into it.
 - **Exports carry the committed set.** Snapshot and ZIP exports include
-  `cells/tests/` and the notebook's `.gitignore`, and import restores it.
+  everything under `cells/`, subdirectories too, and the notebook's
+  `.gitignore`, and import restores it.
 - **`publish --to` streams and remaps.** Uploads go through the staged import
   route instead of memory, and a chain another tenant already holds lands as
   remapped copies instead of a 409. `promote --to` also streams.
@@ -366,7 +404,8 @@ no route serves files from outside the frontend.
   warming, export and transform inputs (which used to start a build that could
   only fail).
 - `gs://` and `abfs://` warehouse catalogs read with the server's
-  `STRATA_GCS_*` and `STRATA_AZURE_*` settings.
+  `STRATA_GCS_*` and `STRATA_AZURE_*` settings, including an Azurite or private
+  blob endpoint (Strata derives the connection string adlfs needs).
 - A table with no snapshots yet reads as zero rows with its schema (scans,
   transform inputs, cache warm, `@table` inputs) instead of a 500, and nothing
   read from it is reused.
@@ -452,9 +491,8 @@ no route serves files from outside the frontend.
   worker took `STRATA_WORKER_TOKEN` and the credential variables out of
   `os.environ`, but `/proc/<pid>/environ` still showed the environment it
   started with, and on the worker image cells run as the worker's user. The
-  values are now zeroed there too. An app built directly with
-  `create_notebook_executor_app()`, as in the Modal example, does not do this
-  yet.
+  values are now zeroed there too, also in an app built with
+  `create_notebook_executor_app()` (Modal, any ASGI host).
 - **The server's log buffer needs `admin:*`.** `GET /v1/logs` and
   `/v1/logs/stream` hold every tenant's records and were open to any
   authenticated principal. Under principal auth they now need `admin:*`;
@@ -645,9 +683,6 @@ no route serves files from outside the frontend.
 - Opening a notebook while its imported environment was still building in
   shared mode could hang the whole server; a blocking shared-environment sync
   now refuses to run on the event loop.
-- The terminal viewer reconnected into a refusal when the server closed its
-  session. It now stops, shows why, and `r` reopens the notebook by path (with
-  `--session ID` it says to run `strata watch PATH`).
 - A personal server read a `gs://`, `az://` or `abfs://` warehouse with no
   catalog `uri` through a SQLite file at a malformed local path and failed
   with a 500; it now uses the `STRATA_METADATA_DB` catalog, as `s3://` does.
@@ -657,8 +692,6 @@ no route serves files from outside the frontend.
   numpy scalars) from an upstream Python cell.
 - A secret typed this session survives a session reload (changing the timeout,
   workers, mounts, adding or renaming a cell, reopening).
-- A worker app hosted outside `strata-worker` (Modal, any ASGI host) takes its
-  token and credentials out of its environment.
 - `strata worker add --transport`, MCP `add_worker` and the REST worker PUT
   refuse an unknown transport; the worker editor keeps `manifest`/`build`
   workers signed instead of saving them as `direct`.
@@ -672,13 +705,8 @@ no route serves files from outside the frontend.
 - The hardware probe answers on Windows.
 - The docs no longer list `az://` as a warehouse scheme (pyiceberg cannot read
   one); use `abfs://`.
-- A publication page's data and Verify links pointed at the server root, which
-  broke behind a path prefix.
 - The embed snippet's resize listener accepts messages from the Strata origin
   only; re-copy a snippet pasted before this.
-- On a multi-tenant server, a member the proxy sends without a tenant header
-  is the default tenant for its notebook sessions too: other tenants no longer
-  see, edit or run that member's open notebooks over REST, WebSocket or MCP.
 - `POST /v1/notebooks/recents/validate` answers only for paths under the
   caller's notebook root, so it no longer reveals which other directories on
   the server hold a notebook.
@@ -690,13 +718,6 @@ no route serves files from outside the frontend.
   longer starts a character late after a dropped chunk.
 - The TUI console shows only the current run of a remote cell; the previous
   run's output no longer stays above it.
-- Multi-node: a console chunk relayed through the shared store between one
-  node's read and delete is no longer dropped.
-- A lake table on Azurite or a private blob endpoint configured with
-  `STRATA_AZURE_ACCOUNT_NAME`, `STRATA_AZURE_ACCOUNT_KEY` and
-  `STRATA_AZURE_ENDPOINT_URL` reads its metadata at that endpoint; adlfs takes
-  the endpoint only from a connection string, so Strata derives one for the
-  catalog.
 - A transform over a `gs://`, `abfs://`, schemeless `/wh#ns.t`, named-catalog
   or bare table URI, every form `scan@v1` reads, runs instead of answering
   pending and failing in the runner; an input whose plan fails answers the
@@ -723,9 +744,7 @@ no route serves files from outside the frontend.
 - The prompt-cell "LLM not configured" error names `[env]` in `notebook.toml`
   and the server's `STRATA_AI_API_KEY`, not only the Runtime panel.
 - `python -m strata --help` prints `usage: python -m strata`; `strata cell
-  --help` lists `output` and `pin-fetch`.
-- `strata-worker --connect` ignores a relay request whose stream id is outside
-  1..2^32-1 instead of failing the request task.
+  --help` lists `output`.
 - A failed persist of planning metadata to SQLite is logged at debug instead
   of silently dropped.
 - The Azure artifact blob store reads `STRATA_AZURE_ENDPOINT_URL` as the blob
