@@ -206,11 +206,27 @@ def test_normalize_handles_multi_statement():
     assert ";" in out
 
 
-def test_normalize_returns_stripped_input_on_parse_failure():
-    """Parse failures still need a stable string for unit tests
-    that lift the hash without a real adapter."""
-    out = normalize_query("SELECT * FROM", dialect="postgres")
-    assert out == "SELECT * FROM"
+def test_normalize_returns_stripped_input_on_tokenizer_failure():
+    out = normalize_query("SELECT 'unterminated ", dialect="postgres")
+    assert out == "SELECT 'unterminated"
+
+
+@pytest.mark.parametrize(
+    ("dialect", "before", "after"),
+    [
+        ("sqlite", "SELECT CAST('12' AS REAL)", "SELECT CAST('12' AS NUMERIC)"),
+        ("bigquery", "SELECT CAST(x AS NUMERIC(10,2))", "SELECT CAST(x AS NUMERIC)"),
+        ("bigquery", "SELECT CAST(x AS STRING(3))", "SELECT CAST(x AS STRING)"),
+        ("postgres", "SELECT CURRENT_TIMESTAMP(0)", "SELECT CURRENT_TIMESTAMP(3)"),
+        ("postgres", 'SELECT "Total" FROM t', "SELECT Total FROM t"),
+        ("postgres", "SELECT 'a' FROM t", "SELECT 'A' FROM t"),
+        ("duckdb", "SELECT MAP {a: b} FROM t", "SELECT MAP {'a': b} FROM t"),
+    ],
+)
+def test_normalize_keeps_edits_that_change_the_result_apart(dialect, before, after):
+    """Keyed on the query's own tokens, not sqlglot's regeneration, which maps
+    each of these pairs to the same SQL."""
+    assert normalize_query(before, dialect=dialect) != normalize_query(after, dialect=dialect)
 
 
 def test_normalize_empty_input_returns_empty():

@@ -89,6 +89,25 @@ async def test_a_declared_cache_policy_still_reuses_a_run_time_table(tmp_path, m
     assert second["cache_hit"] is True
 
 
+@pytest.mark.asyncio
+async def test_an_edit_sqlglot_cannot_tell_apart_still_runs_the_new_query(tmp_path):
+    """The cache key is the cell's own text: ``REAL`` and ``NUMERIC`` regenerate alike."""
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    real = "# @sql connection=db\n# @cache forever\nSELECT CAST('12' AS REAL) AS v\n"
+    nb_dir = _build_notebook_with_sql_cell(tmp_path, db_path=db_path, cell_source=real)
+    session = _make_session(nb_dir)
+
+    from strata.notebook.sql.cell_executor import execute_sql_cell
+
+    first = await execute_sql_cell(session, "c1", real)
+    edited = await execute_sql_cell(session, "c1", real.replace("REAL", "NUMERIC"))
+
+    assert first["success"] and edited["success"], edited["error"]
+    assert edited["cache_hit"] is False
+    assert first["outputs"]["result"]["preview"] != edited["outputs"]["result"]["preview"]
+
+
 def _build_notebook_with_sql_cell(
     tmp_path: Path,
     *,

@@ -528,7 +528,7 @@ The DAG links the SQL cell to the Python cell automatically, with the same edge 
 
 A SQL cell's **provenance hash** folds together:
 
-- The query text (sqlglot-normalized so whitespace and comment edits don't churn the cache).
+- The query's own tokens (so whitespace, comment and keyword-case edits don't churn the cache, and any other edit runs the query again).
 - The bind parameters (type-tagged: `True` ≠ `1`).
 - The connection's identity (host / DB / user / role / search_path, never the password).
 - The hashes of every upstream artifact referenced via `:name`.
