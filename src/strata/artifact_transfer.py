@@ -15,7 +15,7 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from strata.artifact_store import (
     ArtifactStore,
@@ -24,6 +24,9 @@ from strata.artifact_store import (
     Publication,
 )
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+
+if TYPE_CHECKING:
+    from strata.types import ArtifactLineageResponse, LineageNode
 
 # What another store needs to rebuild an artifact version: everything but the tenant, which the
 # destination takes from the authenticated caller. One list shared by the HTTP transfer and the
@@ -337,7 +340,7 @@ def copy_chain(
     remap: dict[str, str] = {}
     published_ref = f"{artifact.id}@v={artifact.version}"
     landed_ref = published_ref
-    for node in reversed(lineage.nodes):
+    for node in _ancestors_first(lineage):
         # Table nodes are leaves naming an external source, not artifacts this
         # store holds; there is nothing to copy and nothing to serve.
         if node.type != "artifact" or node.artifact_id is None or node.version is None:
@@ -369,6 +372,30 @@ def copy_chain(
             if source_ref == published_ref:
                 landed_ref = imported.ref
     return written, landed_ref
+
+
+def _ancestors_first(lineage: ArtifactLineageResponse) -> list[LineageNode]:
+    """The lineage's nodes, each after every node its edges name as an input.
+
+    BFS order is not enough: a direct input can also be an ancestor of another input, and a
+    descendant copied before it keeps an edge naming where the ancestor was, not where it landed.
+    """
+    parents: dict[str, list[str]] = {node.uri: [] for node in lineage.nodes}
+    for edge in lineage.edges:
+        if edge.to_uri in parents and edge.from_uri in parents:
+            parents[edge.to_uri].append(edge.from_uri)
+
+    ordered: list[LineageNode] = []
+    placed: set[str] = set()
+    pending = list(reversed(lineage.nodes))
+    while pending:
+        ready = [node for node in pending if all(p in placed for p in parents[node.uri])]
+        # A cycle only comes from hand-edited rows; copy the rest in the old order.
+        for node in ready or pending[:1]:
+            ordered.append(node)
+            placed.add(node.uri)
+        pending = [node for node in pending if node.uri not in placed]
+    return ordered
 
 
 # The ``nb_`` prefix keeps it out of the tag lists the registry shows: it is a

@@ -370,6 +370,20 @@ class TestCleanup:
         assert store.get_artifact("test-id", version) is None
         assert store.blob_exists("test-id", version) is False
 
+    def test_cleanup_failed_takes_a_failed_build_row_with_it(self, store):
+        """A server build that failed leaves a build row, whose foreign key refused the delete."""
+        from strata.transforms.build_store import BuildStore
+
+        builds = BuildStore(store.db_path, dialect=store.dialect)
+        version = store.create_artifact("built", "hash-built")
+        builds.create_build("build-1", "built", version, "exec@v1")
+        builds.fail_build("build-1", "boom")
+        store.fail_artifact("built", version)
+
+        assert store.cleanup_failed(max_age_seconds=-10) == 1
+        assert store.get_artifact("built", version) is None
+        assert builds.get_build("build-1") is None
+
     def test_cleanup_preserves_ready(self, store):
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)
@@ -410,6 +424,42 @@ class TestStats:
         assert stats["total_bytes"] == 1000
         assert stats["total_rows"] == 100
         assert stats["name_count"] == 1
+
+    def test_byte_totals_count_what_versions_still_hold_as_the_sweep_does(self, store):
+        """An older version a refresh superseded keeps its bytes until a sweep takes them."""
+        for size in (1000, 300):
+            version = store.create_artifact("id-1", "hash1")
+            store.finalize_artifact("id-1", version, "{}", 1, size)
+        store.create_artifact("id-2", "hash1")
+        store.finalize_artifact("id-2", 1, "{}", 1, 300)  # reads id-1@v=2's bytes
+
+        swept = store.garbage_collect(dry_run=True)["store_bytes"]
+        assert store.stats()["total_bytes"] == swept == 1300
+        assert store.get_usage()["total_bytes"] == 1300
+
+    def test_superseded_versions_are_counted_so_the_states_add_up(self, store):
+        """A refresh and a dedup each leave a superseded version, which no other count holds."""
+        for _ in range(2):
+            version = store.create_artifact("id-1", "hash1")
+            store.finalize_artifact("id-1", version, "{}", 1, 10)
+        store.create_artifact("id-2", "hash1")
+        store.finalize_artifact("id-2", 1, "{}", 1, 10)
+        store.create_artifact("id-3", "hash3")
+
+        for counts in (store.stats(), store.get_usage()):
+            assert counts["superseded_versions"] == 2
+            assert counts["total_versions"] == sum(
+                counts[f"{state}_versions"]
+                for state in ("ready", "building", "superseded", "failed")
+            )
+
+    def test_name_prefix_treats_an_underscore_literally(self, store):
+        for name, artifact_id in (("taxi_model", "a"), ("taxi/model", "b")):
+            version = store.create_artifact(artifact_id, f"hash-{artifact_id}")
+            store.finalize_artifact(artifact_id, version, "{}", 1, 1)
+            store.set_name(name, artifact_id, version)
+
+        assert [a.id for a in store.list_artifacts(name_prefix="taxi_")] == ["a"]
 
 
 def _ipc_bytes(num_rows: int) -> bytes:
@@ -620,6 +670,34 @@ class TestVersionPromotion:
         assert promoted.id == "art-1"
         assert store.get_latest_version("art-1").provenance_hash == "prov-a"
 
+    def test_promotion_keeps_its_own_bytes_when_another_id_holds_the_provenance(self, store):
+        """A non-deterministic cell's twin holds other bytes; the reverted cell gets its own."""
+        from strata.artifact_store import StagedVersion
+
+        self._ready(store, "art-1", "prov-a", b"mine-bytes")
+        self._ready(store, "art-1", "prov-b", b"second")
+        twin = store.create_artifact("art-twin", "prov-a")
+        store.write_blob("art-twin", twin, b"twin-bytes-differ")
+        store.finalize_canonical_together([StagedVersion("art-twin", twin, "{}", 1, 17, "digest")])
+
+        promoted = store.promote_version("art-1", 1)
+
+        assert promoted is not None
+        assert (promoted.id, promoted.state) == ("art-1", "ready")
+        assert store.read_blob("art-1", promoted.version) == b"mine-bytes"
+        assert promoted.byte_size == len(b"mine-bytes")
+        assert store.read_blob("art-twin", twin) == b"twin-bytes-differ"
+
+    def test_reclaiming_bytes_whose_canonical_blob_is_gone_raises(self, store):
+        """Promoted with no blob at all, the version would read ready and serve nothing."""
+        self._ready(store, "art-1", "prov-a", b"bytes")
+        self._ready(store, "art-2", "prov-a", b"bytes")
+        store.blob_store.delete_blob("art-1", 1)
+
+        with pytest.raises(ValueError, match="whose blob is gone"):
+            store.force_finalize_canonical("art-2", 1, "{}", 1, 5)
+        assert store.get_artifact("art-2", 1).state == "superseded"
+
 
 class TestRefreshSupersede:
     """Refresh rebuilds become new versions of the same artifact."""
@@ -700,6 +778,26 @@ class TestRefreshSupersede:
         [finding] = store.verify_artifacts()
         assert (finding["artifact_id"], finding["problem"]) == ("art-2", "missing_blob")
         assert "art-1@v=1" in finding["detail"]
+
+    @pytest.mark.parametrize("hold", ["publish", "pin"])
+    def test_deleting_a_canonical_hands_its_bytes_to_a_held_version_reading_them(self, store, hold):
+        """A published or pinned version is a link somebody holds; the delete must not empty it."""
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-2", 1, "{}", 10, 100)
+        if hold == "publish":
+            store.publish_artifact("art-2", 1)
+        else:
+            store.pin_artifact("art-2", 1, "review")
+
+        assert store.delete_artifact("art-1", 1)
+
+        assert store.read_blob("art-2", 1) == _ipc_bytes(10)
+        assert store.blob_store.blob_exists("art-2", 1)
+        assert store.verify_artifacts() == []
 
     def test_finalize_and_set_name_supersedes(self, store):
         """The atomic finalize+name path supersedes the same way."""
@@ -1357,6 +1455,7 @@ class TestTenantNormalization:
         import sqlite3
 
         store.create_artifact("equiv", "race-prov", tenant="team-a")
+        store.write_blob("equiv", 1, b"x" * 10)
         store.finalize_artifact("equiv", 1, "{}", 1, 10)
         store.create_artifact("canonical", "race-prov", tenant="team-a")
         store.finalize_artifact("canonical", 1, "{}", 1, 10)
@@ -1395,6 +1494,7 @@ class TestTenantNormalization:
         import sqlite3
 
         store.create_artifact("equiv", "race-prov", tenant="team-a")
+        store.write_blob("equiv", 1, b"x" * 10)
         store.finalize_artifact("equiv", 1, "{}", 1, 10)
         store.create_artifact("canonical", "race-prov", tenant="team-a")
         store.finalize_artifact("canonical", 1, "{}", 1, 10)
@@ -1423,6 +1523,7 @@ class TestTenantNormalization:
         ready row per (tenant, provenance), for tenant-scoped rows too.
         """
         store.create_artifact("equiv", "canon-prov", tenant="team-a")
+        store.write_blob("equiv", 1, b"x" * 10)
         store.finalize_artifact("equiv", 1, "{}", 1, 10)
         # Canonical row dedups to 'equiv' and is marked failed.
         store.create_artifact("canonical", "canon-prov", tenant="team-a")

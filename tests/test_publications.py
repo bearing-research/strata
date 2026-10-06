@@ -453,6 +453,15 @@ class TestPublicRoutesEndToEnd:
         assert page.status_code == 200
         assert "withdrawn" in page.text.lower()
 
+        # The JSON record says the same as the page, and no more: no chain, no source.
+        record = httpx.get(f"{base_url}/v1/publications/{token}", timeout=10)
+        assert record.status_code == 200
+        body = record.json()
+        assert set(body) == {"publication"}
+        assert body["publication"]["token"] == token
+        assert body["publication"]["title"] == "Figure 3"
+        assert body["publication"]["revoked_at"] is not None
+
     def test_an_unknown_token_is_not_found(self, published_server):
         import httpx
 
@@ -615,6 +624,48 @@ class TestPublishDestination:
         # …and not in the store it was read from.
         assert ArtifactStore(tmp_path / "source").list_publications() == []
 
+    def test_the_withdraw_hint_names_the_store_it_was_published_into(self, tmp_path, capsys):
+        """``unpublish`` reads the configured store, so a hint without ``--artifact-dir`` answered
+        "No active publication" for a ``--into`` publish.
+        """
+        import argparse
+        import shlex
+
+        from strata.artifact_cli import cmd_unpublish
+        from strata.artifact_store import ArtifactStore
+
+        elsewhere = tmp_path / "else where"
+        out, _ = self._publish(tmp_path, capsys, into=str(elsewhere))
+        hint = next(line for line in out.splitlines() if line.startswith("Withdraw it with: "))
+        words = shlex.split(hint.removeprefix("Withdraw it with: "))
+
+        assert words[:5] == ["strata", "artifact", "unpublish", "--artifact-dir", str(elsewhere)]
+        args = argparse.Namespace(token=words[5], artifact_dir=words[4], tenant=None)
+        assert cmd_unpublish(args) == 0
+        assert ArtifactStore(elsewhere).list_publications() == []
+
+    def test_unpublish_drops_the_cached_archive(self, tmp_path, capsys):
+        """The route answers 410 for a withdrawn token, so its built zip is just disk in use."""
+        import argparse
+
+        from strata.api.publication_bundle import ARCHIVE_CACHE_DIRNAME, cached_bundle_zip
+        from strata.artifact_cli import cmd_unpublish
+        from strata.artifact_store import ArtifactStore
+
+        self._publish(tmp_path, capsys, here=True)
+        store = ArtifactStore(tmp_path / "source")
+        publication = store.list_publications()[0]
+        artifact = store.get_artifact(publication.artifact_id, publication.version)
+        cached, _ = cached_bundle_zip(store, artifact, publication=publication)
+        assert cached.exists()
+
+        args = argparse.Namespace(
+            token=publication.token, artifact_dir=str(tmp_path / "source"), tenant=None
+        )
+        assert cmd_unpublish(args) == 0
+
+        assert not (tmp_path / "source" / ARCHIVE_CACHE_DIRNAME / publication.token).exists()
+
     def test_here_keeps_it_in_the_source_store(self, tmp_path, capsys):
         from strata.artifact_store import ArtifactStore
 
@@ -764,6 +815,55 @@ class TestImportAcrossStores:
         assert first.written is True
         assert second.written is False
         assert second.ref == first.ref, "the second import must resolve to the row already here"
+
+    def test_an_input_that_is_also_an_ancestor_is_copied_before_its_descendants(self, tmp_path):
+        """``load -> features(load) -> train(load, features)``, with ``load`` already on the target.
+
+        BFS reaches ``load`` at depth 1 and ``features`` too, so reversed BFS copied ``features``
+        first, with an edge naming ``load``'s source id that never landed on the target.
+        """
+        import json
+
+        from strata.artifact_store import TransformSpec
+        from strata.artifact_transfer import copy_chain
+        from strata.services.artifact import ArtifactService
+
+        def ready(store, artifact_id, provenance, inputs=None):
+            version = store.create_artifact(
+                artifact_id,
+                provenance,
+                TransformSpec("notebook/cell@v1", {"source": artifact_id}, []),
+                input_versions=inputs,
+            )
+            store.write_blob(artifact_id, version, b"x")
+            store.finalize_artifact(artifact_id, version, "", 1, 1)
+            return f"{artifact_id}@v={version}"
+
+        def edge(ref):
+            return {f"strata://artifact/{ref}": ref}
+
+        source = ArtifactStore(tmp_path / "source")
+        target = ArtifactStore(tmp_path / "target")
+        load = ready(source, "nb_A_cell_load_var_df", "prov-load")
+        features = ready(source, "nb_A_cell_feat_var_x", "prov-feat", edge(load))
+        ready(source, "nb_A_cell_train_var_m", "prov-train", {**edge(load), **edge(features)})
+        # A colleague's notebook already put the same load step on the target.
+        theirs = ready(target, "nb_B_cell_load_var_df", "prov-load")
+
+        train = source.get_artifact("nb_A_cell_train_var_m", 1)
+        copy_chain(source, target, train, 10)
+
+        landed = target.get_artifact("nb_A_cell_feat_var_x", 1)
+        assert json.loads(landed.input_versions) == edge(theirs)
+        chain = ArtifactService().build_lineage(
+            target,
+            artifact=target.get_artifact("nb_A_cell_train_var_m", 1),
+            artifact_id="nb_A_cell_train_var_m",
+            version=1,
+            tenant_filter=None,
+            max_depth=25,
+        )
+        assert "nb_A_cell_load_var_df" not in {n.artifact_id for n in chain.nodes}
 
     def test_import_does_not_deduplicate_across_tenants(self, tmp_path):
         """Dedup is per tenant: another tenant's row would hand out a ref the caller cannot read."""

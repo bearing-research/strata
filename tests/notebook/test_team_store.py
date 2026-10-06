@@ -1247,3 +1247,27 @@ async def test_each_callers_offered_results_carry_that_callers_principal(tmp_pat
 
     assert forwarded == ["ana", "ben"]
     assert fixed == ["server:7"]
+
+
+async def test_an_output_overtaken_by_a_duplicate_offers_its_canonical_bytes(local_manager):
+    """A version dedup overtook holds no bytes of its own; the offer reads them through it."""
+    from strata.notebook.team_store import publish_cell_outputs
+
+    store = local_manager.artifact_store
+    spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
+    for artifact_id in ("canonical", local_manager.cell_artifact_id(CELL_ID, "x")):
+        version = store.create_artifact(artifact_id, provenance_hash="p", transform_spec=spec)
+        store.write_blob(artifact_id, version, b"bytes")
+        store.finalize_artifact(artifact_id, version, "", 0, 5)
+    offered: list[bytes] = []
+
+    class Recording:
+        async def publish(self, provenance_hash, blob, **_):
+            offered.append(blob)
+            return True
+
+    published = await publish_cell_outputs(
+        Recording(), local_manager, cell_id=CELL_ID, consumed_vars={"x"}
+    )
+    assert published == 1
+    assert offered == [b"bytes"]

@@ -136,26 +136,26 @@ class TestArtifactInputTenantGate:
         version = store.create_artifact(artifact_id="secret", provenance_hash="p1", tenant=tenant)
         return f"strata://artifact/secret@v={version}"
 
-    def test_cross_tenant_artifact_input_is_refused(self, tmp_path):
+    async def test_cross_tenant_artifact_input_is_refused(self, tmp_path):
         from strata.api.dependencies import resolve_input_version
 
         uri = self._seed(tmp_path, tenant="tenant-b")
         with pytest.raises(HTTPException) as exc:
-            resolve_input_version(uri, tenant="tenant-a")
+            await resolve_input_version(uri, tenant="tenant-a")
         assert exc.value.status_code in (403, 404)
 
-    def test_same_tenant_artifact_input_resolves(self, tmp_path):
+    async def test_same_tenant_artifact_input_resolves(self, tmp_path):
         from strata.api.dependencies import resolve_input_version
 
         uri = self._seed(tmp_path, tenant="tenant-b")
-        assert resolve_input_version(uri, tenant="tenant-b") == "secret@v=1"
+        assert await resolve_input_version(uri, tenant="tenant-b") == "secret@v=1"
 
-    def test_unknown_artifact_input_is_404(self, tmp_path):
+    async def test_unknown_artifact_input_is_404(self, tmp_path):
         from strata.api.dependencies import resolve_input_version
 
         self._seed(tmp_path, tenant="tenant-b")
         with pytest.raises(HTTPException) as exc:
-            resolve_input_version("strata://artifact/ghost@v=1", tenant="tenant-b")
+            await resolve_input_version("strata://artifact/ghost@v=1", tenant="tenant-b")
         assert exc.value.status_code == 404
 
 
@@ -175,3 +175,33 @@ class TestArtifactListPaginationIsBounded:
         assert client.get("/v1/artifacts", params={"offset": -5}).status_code == 422
         # A sane request still works.
         assert client.get("/v1/artifacts", params={"limit": 10}).status_code == 200
+
+    def test_superseded_is_a_state_the_listing_filters_by(self, tmp_path):
+        """Callers are handed superseded versions, so they can list them."""
+        from fastapi.testclient import TestClient
+
+        from strata.server import app
+
+        _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
+        client = TestClient(app)
+
+        assert client.get("/v1/artifacts", params={"state": "superseded"}).status_code == 200
+        assert client.get("/v1/artifacts", params={"state": "bogus"}).status_code == 400
+
+    def test_stats_and_usage_count_superseded_versions(self, tmp_path):
+        """The Artifacts page shows the superseded count beside the other states."""
+        from fastapi.testclient import TestClient
+
+        from strata.artifact_store import ArtifactStore
+        from strata.server import app
+
+        _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
+        store = ArtifactStore(tmp_path / "artifacts")
+        for _ in range(2):
+            version = store.create_artifact("refreshed", "same-prov")
+            store.finalize_artifact("refreshed", version, "{}", 1, 10)
+        client = TestClient(app)
+
+        for route in ("/v1/artifacts/stats", "/v1/artifacts/usage"):
+            body = client.get(route).json()
+            assert (body["ready_versions"], body["superseded_versions"]) == (1, 1)

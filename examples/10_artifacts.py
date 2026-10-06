@@ -116,7 +116,7 @@ def view_lineage():
         artifact = client.get_artifact_by_name("category_stats")
 
         # Get upstream lineage (what inputs led to this artifact)
-        lineage = artifact.lineage(direction="upstream", max_depth=5)
+        lineage = artifact.lineage(max_depth=5)
 
         print("\nUpstream Lineage:")
         for node in lineage.get("nodes", []):
@@ -125,7 +125,7 @@ def view_lineage():
                 print(f"    <- {input_ref}")
 
         # Get downstream dependents (what uses this artifact)
-        dependents = artifact.dependents(max_depth=3)
+        dependents = artifact.dependents(limit=3)
         print(f"\nDependents: {len(dependents.get('dependents', []))} artifacts")
 
 

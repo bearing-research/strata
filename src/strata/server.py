@@ -1669,6 +1669,9 @@ def _authorize_spec_tables(spec_json: str | None) -> None:
         return  # unparseable spec → no table inputs to gate
 
     for input_uri in spec.inputs:
+        # An artifact or name input is not a table, even when a dot makes it parse as one.
+        if input_uri.startswith("strata://"):
+            continue
         identity = _table_identity_from_uri(input_uri)
         if identity is not None:
             _authorize_table_access(input_uri, identity)

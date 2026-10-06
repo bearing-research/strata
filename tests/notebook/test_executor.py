@@ -2775,6 +2775,24 @@ class TestLoopCellExecution:
         again = await executor.execute_cell("loop", loop)
         assert again.cache_hit is True
 
+    def test_a_start_from_seed_overtaken_by_a_duplicate_reads_its_canonical(self, loop_notebook):
+        """A seed version dedup overtook has no bytes of its own; the seed reads through it."""
+        from strata.artifact_store import TransformSpec
+        from strata.notebook.annotations import LoopAnnotation
+
+        _, session = loop_notebook
+        artifact_mgr = session.get_artifact_manager()
+        store = artifact_mgr.artifact_store
+        spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
+        for artifact_id in ("canonical", artifact_mgr.cell_artifact_id("donor", "state", 1)):
+            version = store.create_artifact(artifact_id, provenance_hash="p", transform_spec=spec)
+            store.write_blob(artifact_id, version, b"seed-bytes")
+            store.finalize_artifact(artifact_id, version, "", 0, 10)
+
+        loop = LoopAnnotation(max_iter=2, carry="state", start_from_cell="donor", start_from_iter=1)
+        blob, _ = CellExecutor(session)._resolve_loop_seed("loop", loop)
+        assert blob == b"seed-bytes"
+
     @pytest.mark.asyncio
     async def test_loop_iteration_progress_callback_fires_per_iter(self, loop_notebook):
         """``on_iteration_complete`` fires once per completed iteration with that iteration's

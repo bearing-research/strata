@@ -7,6 +7,7 @@ is stateless, and handlers map its ``ValueError`` (unresolvable input) to 400.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING
 
@@ -20,11 +21,13 @@ def _resolve_to_artifact_version(
     input_uri: str,
     store: ArtifactStore,
     tenant: str | None = None,
+    admitted_version: str | None = None,
 ) -> tuple[str, int] | None:
     """Resolve an input URI to ``(artifact_id, version)``, or ``None``.
 
     Handles ``strata://artifact/{id}@v={n}`` directly and ``strata://name/{name}``
-    via the store; any other shape or an unknown name returns ``None``.
+    at ``admitted_version`` (the ``{id}@v={n}`` admission recorded), or via the store
+    when nothing was recorded; any other shape or an unknown name returns ``None``.
     """
     if input_uri.startswith("strata://artifact/"):
         match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
@@ -33,6 +36,9 @@ def _resolve_to_artifact_version(
         return None
 
     if input_uri.startswith("strata://name/"):
+        pinned = re.match(r"^(.+)@v=(\d+)$", admitted_version) if admitted_version else None
+        if pinned:
+            return (pinned.group(1), int(pinned.group(2)))
         name = input_uri.replace("strata://name/", "")
         artifact = store.resolve_name(name, tenant=tenant)
         if artifact is None:
@@ -87,9 +93,17 @@ class BuildService:
         Raises:
             ValueError: If an input URI cannot be resolved to an artifact version.
         """
+        # A name that moved since admission would hand the executor other bytes than the
+        # provenance hashed; the runner reads the recorded versions the same way.
+        artifact = store.get_artifact(build.artifact_id, build.version)
+        admitted = (
+            json.loads(artifact.input_versions) if artifact and artifact.input_versions else {}
+        )
         input_artifacts: list[tuple[str, int]] = []
         for input_uri in build.input_uris or []:
-            result = _resolve_to_artifact_version(input_uri, store, tenant=build.tenant_id)
+            result = _resolve_to_artifact_version(
+                input_uri, store, tenant=build.tenant_id, admitted_version=admitted.get(input_uri)
+            )
             if result is None:
                 raise ValueError(f"Cannot resolve input artifact: {input_uri}")
             input_artifacts.append(result)

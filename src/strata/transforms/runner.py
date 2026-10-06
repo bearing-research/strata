@@ -44,6 +44,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _admitted_table_version(version: str | None) -> tuple[int | None, int | None]:
+    """The ``(snapshot, schema)`` in a table input's recorded ``{snapshot}:{schema}``.
+
+    ``empty:...`` (the table had no snapshot at admission) and no record read the current table.
+    """
+    if version is None or version.startswith("empty:"):
+        return None, None
+    snapshot, _, schema = version.partition(":")
+    return int(snapshot), int(schema) if schema else None
+
+
 def _is_runner_managed_build(build: BuildState) -> bool:
     """Return whether the generic build runner should execute this build."""
     params = build.params or {}
@@ -358,6 +369,9 @@ class BuildRunner:
 
                 transform_data = json.loads(artifact.transform_spec)
                 input_uris = transform_data.get("inputs", [])
+                # Read each input at the version admission hashed: a table or name that
+                # moved on since would put other bytes under this provenance.
+                admitted = json.loads(artifact.input_versions) if artifact.input_versions else {}
 
                 input_files: list[tuple[str, Path]] = []
                 for i, input_uri in enumerate(input_uris):
@@ -366,6 +380,7 @@ class BuildRunner:
                         input_uri,
                         temp_files,
                         tenant_id=build.tenant_id,
+                        admitted_version=admitted.get(input_uri),
                     )
                     input_files.append((input_name, input_path))
 
@@ -568,11 +583,15 @@ class BuildRunner:
         input_uri: str,
         temp_files: list[Path],
         tenant_id: str | None = None,
+        admitted_version: str | None = None,
     ) -> Path:
         """Write an input to a temp file as an Arrow IPC stream and return its path.
 
-        Accepts ``strata://artifact/{id}@v={version}``, ``strata://name/{name}``, and ``file://``
-        or ``s3://`` table URIs (scanned). Anything else raises ``ValueError``.
+        Accepts ``strata://artifact/{id}@v={version}`` and ``strata://name/{name}``; any other
+        ``strata://`` URI raises ``ValueError``, and any other URI is a table, as admission
+        resolved it. ``admitted_version`` is what admission recorded for the input
+        (``{id}@v={n}`` for a name, ``{snapshot}:{schema}`` for a table); the input is read at it
+        when given.
         """
         if input_uri.startswith("strata://artifact/"):
             import re
@@ -596,12 +615,19 @@ class BuildRunner:
             return temp_file
 
         if input_uri.startswith("strata://name/"):
-            name = input_uri.split("/", 3)[-1]
-            artifact = self.artifact_store.resolve_name(name, tenant=tenant_id)
-            if artifact is None:
-                raise ValueError(f"Name not found: {name}")
+            import re
 
-            blob = self.artifact_store.read_blob(artifact.id, artifact.version)
+            name = input_uri.split("/", 3)[-1]
+            pinned = re.match(r"^(.+)@v=(\d+)$", admitted_version) if admitted_version else None
+            if pinned:
+                target_id, target_version = pinned.group(1), int(pinned.group(2))
+            else:
+                artifact = self.artifact_store.resolve_name(name, tenant=tenant_id)
+                if artifact is None:
+                    raise ValueError(f"Name not found: {name}")
+                target_id, target_version = artifact.id, artifact.version
+
+            blob = self.artifact_store.read_blob(target_id, target_version)
             if blob is None:
                 raise ValueError(f"Artifact blob not found for name: {name}")
 
@@ -616,14 +642,17 @@ class BuildRunner:
             raise ValueError(f"Unsupported input URI: {input_uri}")
 
         # Any other URI is a table in a form the planner reads, as admission resolved it.
-        return await self._scan_to_file(input_uri, temp_files)
+        snapshot_id, schema_id = _admitted_table_version(admitted_version)
+        return await self._scan_to_file(input_uri, temp_files, snapshot_id, schema_id)
 
     async def _scan_to_file(
         self,
         table_uri: str,
         temp_files: list[Path],
+        snapshot_id: int | None = None,
+        schema_id: int | None = None,
     ) -> Path:
-        """Run an Iceberg scan through the internal scan pipeline into a temp Arrow IPC file."""
+        """Scan a table at ``snapshot_id`` and ``schema_id`` (None: current) into a temp file."""
 
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
         os.close(_fd)  # Windows: handle must be closed before rename
@@ -636,11 +665,19 @@ class BuildRunner:
             self._scan_to_file_sync,
             table_uri,
             temp_file,
+            snapshot_id,
+            schema_id,
         )
 
         return temp_file
 
-    def _scan_to_file_sync(self, table_uri: str, output_path: Path) -> None:
+    def _scan_to_file_sync(
+        self,
+        table_uri: str,
+        output_path: Path,
+        snapshot_id: int | None = None,
+        schema_id: int | None = None,
+    ) -> None:
         """Synchronous helper to scan a table and write to file."""
         from strata.cache import CachedFetcher
         from strata.config import StrataConfig
@@ -656,9 +693,10 @@ class BuildRunner:
 
         plan = planner.plan(
             table_uri=table_uri,
-            snapshot_id=None,  # Current snapshot
+            snapshot_id=snapshot_id,
             columns=None,  # All columns
             filters=None,
+            schema_id=schema_id,
         )
 
         import pyarrow as pa

@@ -2,13 +2,16 @@
 
 Reads are tenant-scoped; personal mode (no principal) and ``admin:*`` see the whole
 store, except the approval queue, which stays in the caller's tenant because approval
-does. With ``notebook_remote_store_url`` set, every route answers from that store,
-where the notebook's names actually live.
+does, and the by-tag lookup, which finds the caller's own stamps. With
+``notebook_remote_store_url`` set, every route answers from that store, where the
+notebook's names actually live.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from strata.api.dependencies import CurrentPrincipal, ReadStore, RegistryDecisionContext
@@ -24,7 +27,7 @@ async def registry_audit(
     principal: CurrentPrincipal,
     name: str | None = None,
     artifact_id: str | None = None,
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ):
     """Read the append-only registry audit, newest first, scoped to the caller's tenant."""
     target = remote_registry()
@@ -77,8 +80,9 @@ async def registry_summary(store: ReadStore, principal: CurrentPrincipal):
     if target is not None:
         return await forward(target, "GET", "/v1/registry/summary")
 
-    tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
-    return {"names": registry_service.summary(store, tenant=tenant)}
+    if principal is None or principal.has_scope("admin:*"):
+        return {"names": registry_service.summary(store, tenant=None, all_tenants=True)}
+    return {"names": registry_service.summary(store, tenant=principal.tenant)}
 
 
 @router.get("/v1/registry/artifacts")
@@ -100,7 +104,7 @@ async def registry_artifacts_by_tag(
             params["tag_value"] = tag_value
         return await forward(target, "GET", "/v1/registry/artifacts", params=params)
 
-    tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
+    tenant = principal.tenant if principal is not None else None
     return {
         "artifacts": registry_service.artifacts_by_tag(store, tag_key, tag_value, tenant=tenant)
     }

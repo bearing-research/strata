@@ -947,6 +947,95 @@ class TestInputAcquisition:
 
         assert result_path.read_bytes() == bytes_a
 
+    @pytest.mark.asyncio
+    async def test_a_name_input_is_read_at_the_admitted_version(self, build_runner, artifact_store):
+        """A name moved after admission still reads the version the provenance hashed."""
+        for artifact_id, value in (("first", "admitted"), ("second", "later")):
+            data = create_arrow_ipc_bytes({"v": [value]})
+            v = artifact_store.create_artifact(artifact_id=artifact_id, provenance_hash=artifact_id)
+            artifact_store.write_blob(artifact_id, v, data)
+            artifact_store.finalize_artifact(artifact_id, v, "{}", 1, len(data))
+            artifact_store.set_name("features", artifact_id, v)
+
+        temp_files = []
+        result_path = await build_runner._acquire_input(
+            "strata://name/features", temp_files, admitted_version="first@v=1"
+        )
+
+        assert result_path.read_bytes() == create_arrow_ipc_bytes({"v": ["admitted"]})
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("before", "after", "name_column"),
+        [
+            (None, "append", "name"),
+            (None, "rename", "name"),
+            # A rename makes no snapshot: the snapshot's own schema is not the admitted one.
+            ("rename", None, "label"),
+        ],
+    )
+    async def test_a_table_input_is_read_at_the_admitted_version(
+        self,
+        build_runner,
+        artifact_store,
+        build_store,
+        temp_warehouse,
+        tmp_path,
+        before,
+        after,
+        name_column,
+    ):
+        """A table that changed between admission and the build still yields what was admitted."""
+        from strata.config import StrataConfig
+        from strata.planner import ReadPlanner
+        from strata.services.materialize import table_input_version
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        build_runner.runtime_config = StrataConfig(cache_dir=cache_dir)
+        table_uri = temp_warehouse["table_uri"]
+        table = temp_warehouse["table"]
+
+        def change(kind):
+            if kind == "append":
+                table.append(table.scan().to_arrow().slice(0, 50))
+            elif kind == "rename":
+                with table.update_schema() as update:
+                    update.rename_column("name", "label")
+
+        change(before)
+        # Admission: the version it records for the table input.
+        admitted = table_input_version(ReadPlanner(build_runner.runtime_config).plan(table_uri))
+        artifact_id = str(uuid.uuid4())
+        version = artifact_store.create_artifact(
+            artifact_id=artifact_id,
+            provenance_hash=f"hash-{artifact_id}",
+            transform_spec=TransformSpec(executor="test_sql@v1", params={}, inputs=[table_uri]),
+            input_versions={table_uri: admitted},
+        )
+        build_id = str(uuid.uuid4())
+        build_store.create_build(
+            build_id=build_id,
+            artifact_id=artifact_id,
+            version=version,
+            executor_ref="test_sql@v1",
+            executor_url="http://test-executor:8080",
+        )
+        # The table moves on before the runner picks the build up.
+        change(after)
+
+        async def identity_executor(*, input_files, **_kwargs):
+            return input_files[0][1], None
+
+        build_runner._call_executor = identity_executor
+        await build_runner._execute_build(build_store.get_build(build_id))
+
+        artifact = artifact_store.get_artifact(artifact_id, version)
+        assert artifact.state == "ready"
+        assert artifact.row_count == 500
+        built = ipc.open_stream(artifact_store.read_blob(artifact_id, version)).read_all()
+        assert built.column_names == ["id", "value", name_column, "timestamp"]
+
     def test_scan_to_file_sync_uses_fetch_pipeline_on_cold_cache(self, build_runner, artifact_dir):
         """Table inputs fetch through the planner/fetcher path, not raw cache files."""
         batch = pa.record_batch([pa.array([1, 2, 3])], names=["id"])

@@ -8,12 +8,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from strata.artifact_store import ArtifactStore, ArtifactVersion
 from strata.artifact_transfer import (
@@ -22,6 +23,9 @@ from strata.artifact_transfer import (
     copy_chain,
     promote_artifact,
 )
+
+if TYPE_CHECKING:
+    from strata.config import StrataConfig
 
 
 def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
@@ -47,14 +51,20 @@ def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
         print(f"invalid configuration: {exc}", file=sys.stderr)
         return None
     artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
-    dialect = config.create_metadata_dialect()
     # Loading the config creates a personal-mode artifact_dir, so an empty
     # directory proves nothing: a store on SQLite is its database file.
-    if dialect is None and not (artifact_dir / "artifacts.sqlite").exists():
+    if not config.artifact_metadata_dsn and not (artifact_dir / "artifacts.sqlite").exists():
         print(f"no artifact store in {artifact_dir}", file=sys.stderr)
         return None
+    return _configured_store(config, artifact_dir)
+
+
+def _configured_store(config: StrataConfig, artifact_dir: Path) -> ArtifactStore:
+    """The store *config* describes under *artifact_dir*: its metadata DSN and blob backend."""
     blob_store = config.create_blob_store() if config.artifact_blob_backend != "local" else None
-    return ArtifactStore(artifact_dir, blob_store=blob_store, dialect=dialect)
+    return ArtifactStore(
+        artifact_dir, blob_store=blob_store, dialect=config.create_metadata_dialect()
+    )
 
 
 class AmbiguousRefError(ValueError):
@@ -359,11 +369,14 @@ def cmd_lineage(args: argparse.Namespace) -> int:
 
 
 def _server_store() -> ArtifactStore | None:
-    """The store the running server serves from, or ``None`` if unresolvable."""
+    """The store the running server serves from, or ``None`` if unresolvable.
+
+    Built as the server builds it, so a link minted here resolves there.
+    """
     from strata.config import StrataConfig
 
-    artifact_dir = StrataConfig.load().artifact_dir
-    return ArtifactStore(artifact_dir) if artifact_dir else None
+    config = StrataConfig.load()
+    return _configured_store(config, config.artifact_dir) if config.artifact_dir else None
 
 
 def _publication_target(
@@ -598,8 +611,17 @@ def cmd_publish(args: argparse.Namespace) -> int:
     print("and it is worth knowing before sending the link:")
     for step in _published_steps(store, artifact, getattr(args, "max_depth", 10)):
         print(f"  - {step}")
-    print()
-    print(f"Withdraw it with: strata artifact unpublish {publication.token}")
+    if not getattr(args, "to_url", None):
+        # Only a local store can be withdrawn from here, and unpublish reads the configured
+        # store unless told which.
+        local = getattr(args, "into", None) or (args.artifact_dir if target is store else None)
+        command = ["strata", "artifact", "unpublish"]
+        if local:
+            command += ["--artifact-dir", str(local)]
+        if getattr(args, "tenant", None):
+            command += ["--tenant", args.tenant]
+        print()
+        print(f"Withdraw it with: {shlex.join([*command, publication.token])}")
     return 0
 
 
@@ -631,6 +653,8 @@ def _published_steps(store: ArtifactStore, artifact: ArtifactVersion, max_depth:
 
 
 def cmd_unpublish(args: argparse.Namespace) -> int:
+    from strata.api.publication_bundle import drop_cached_bundles
+
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
@@ -638,6 +662,8 @@ def cmd_unpublish(args: argparse.Namespace) -> int:
     if not store.revoke_publication(args.token, tenant=getattr(args, "tenant", None)):
         print("No active publication with that token")
         return 1
+    # The route never serves a withdrawn archive, so the cached copy is only disk.
+    drop_cached_bundles(store, args.token)
 
     print("Withdrawn. The link now reports that it was withdrawn rather than")
     print("resolving to anything — it is never reissued for other content.")
@@ -654,7 +680,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     :func:`write_bundle` (shared with the HTTP route); this adds the CLI parts: which store to
     open, and whether writing into an occupied directory is a mistake.
     """
-    from strata.api.publication_bundle import bundle_zip, write_bundle
+    from strata.api.publication_bundle import PUBLICATION_MAX_DEPTH, bundle_zip, write_bundle
     from strata.artifact_store import Publication
 
     token = getattr(args, "token", None)
@@ -700,6 +726,11 @@ def cmd_archive(args: argparse.Namespace) -> int:
             content_sha256=store.content_digest(artifact.id, artifact.version),
         )
 
+    max_depth = args.max_depth
+    if max_depth is None:
+        # By token, the depth the route builds its zip with, so the two stay the same bytes.
+        max_depth = PUBLICATION_MAX_DEPTH if token is not None else 10
+
     dest = Path(args.to)
     if dest.suffix == ".zip":
         if dest.exists() and not getattr(args, "force", False):
@@ -713,7 +744,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
                 artifact,
                 partial,
                 publication=publication,
-                max_depth=args.max_depth,
+                max_depth=max_depth,
                 tenant=getattr(args, "tenant", None),
             )
         except ValueError as exc:
@@ -737,7 +768,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
             artifact,
             dest,
             publication=publication,
-            max_depth=args.max_depth,
+            max_depth=max_depth,
             tenant=getattr(args, "tenant", None),
         )
     except ValueError as exc:

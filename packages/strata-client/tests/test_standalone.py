@@ -79,6 +79,63 @@ def test_fetch_over_mock_transport() -> None:
     client.close()
 
 
+def _overtaken_stream_handler(request: httpx.Request) -> httpx.Response:
+    """A miss whose own build was superseded by a duplicate: the stream names the canonical."""
+    if request.url.path == "/v1/materialize":
+        return httpx.Response(
+            200,
+            json={
+                "artifact_uri": "strata://artifact/mine@v=1",
+                "state": "building",
+                "stream_url": "/v1/streams/s1",
+            },
+        )
+    return httpx.Response(
+        200,
+        content=b"",
+        headers={"X-Strata-Artifact-Uri": "strata://artifact/theirs@v=3"},
+    )
+
+
+@pytest.mark.parametrize("hit", [False, True])
+def test_a_streamed_artifact_names_the_one_the_stream_served(hit: bool) -> None:
+    """The superseded URI reads through the pointer, but naming it is a 400 (not ready)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = _overtaken_stream_handler(request)
+        if hit and request.url.path == "/v1/materialize":
+            return httpx.Response(200, json={**response.json(), "hit": True, "state": "ready"})
+        return response
+
+    client = StrataClient.from_transport(httpx.MockTransport(handler))
+    artifact = client.materialize(["file:///w#db.t"], {"executor": "scan@v1", "params": {}})
+    client.close()
+
+    assert (artifact.artifact_id, artifact.version) == ("theirs", 3)
+
+
+def test_an_async_streamed_artifact_names_the_one_the_stream_served() -> None:
+    import asyncio
+
+    from strata_client.client import AsyncStrataClient
+
+    async def run():
+        client = AsyncStrataClient(base_url="http://strata.test")
+        await client._client.aclose()
+        client._client = httpx.AsyncClient(
+            base_url="http://strata.test", transport=httpx.MockTransport(_overtaken_stream_handler)
+        )
+        try:
+            return await client.materialize(
+                ["file:///w#db.t"], {"executor": "scan@v1", "params": {}}
+            )
+        finally:
+            await client.close()
+
+    artifact = asyncio.run(run())
+    assert (artifact.artifact_id, artifact.version) == ("theirs", 3)
+
+
 def test_async_materialize_polls_a_build_at_the_requested_interval(monkeypatch) -> None:
     import asyncio
 

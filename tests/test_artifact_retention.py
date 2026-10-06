@@ -923,6 +923,42 @@ class TestWhatAKeptResultNeeds:
         assert _exists(store, canonical)
         assert _exists(store, overtaken)
 
+    def test_the_cap_collects_an_overtaken_version_with_its_canonical(self, store):
+        """It holds no bytes of its own, so left behind it would read nothing."""
+        canonical, overtaken = self._overtaken(store)
+
+        result = store.garbage_collect(max_bytes=50)
+
+        assert result["deleted_count"] == 2
+        assert not _exists(store, canonical)
+        assert not _exists(store, overtaken)
+        assert store.verify_artifacts() == []
+
+    def test_an_overtaken_version_held_mid_sweep_keeps_its_canonical(self, store, monkeypatch):
+        canonical, overtaken = self._overtaken(store)
+        choose = ArtifactStore._with_their_pointers
+
+        def pinned_after_choosing(self, conn, chosen, candidates):
+            chosen = choose(self, conn, chosen, candidates)
+            store.pin_artifact(*overtaken, "review")
+            return chosen
+
+        monkeypatch.setattr(ArtifactStore, "_with_their_pointers", pinned_after_choosing)
+
+        assert store.garbage_collect(max_bytes=50)["deleted_count"] == 0
+        assert store.read_blob(*overtaken) == b"x" * 100
+
+    def test_an_overtaken_version_too_recent_to_collect_keeps_its_canonical(self, store):
+        canonical, overtaken = self._overtaken(store)
+        _last_used(store, overtaken, 60)
+
+        dry = store.garbage_collect(max_idle_days=30, min_idle_seconds=3600, dry_run=True)
+        store.garbage_collect(max_idle_days=30, min_idle_seconds=3600)
+
+        assert dry["collected"] == []
+        assert _exists(store, canonical)
+        assert store.read_blob(*overtaken) == b"x" * 100
+
     def test_an_alias_awaiting_approval_keeps_its_target(self, store):
         """The approver is asked to point the alias at it."""
         champion = _ready(store)

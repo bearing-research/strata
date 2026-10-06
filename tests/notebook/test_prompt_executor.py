@@ -282,6 +282,40 @@ async def test_the_response_is_stored_under_the_member_who_ran_it(tmp_path):
     assert stored.principal == "alice"
 
 
+@pytest.mark.asyncio
+async def test_a_duplicated_prompt_cell_reads_its_own_answer_on_the_next_run(tmp_path):
+    """Two cells asking the same thing share a provenance; each still reads by its own id."""
+    import json
+
+    from strata.notebook.llm import LlmConfig
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.prompt_executor import execute_prompt_cell
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = "Tell me something."
+    nb_dir = create_notebook(tmp_path, "duplicated_prompt")
+    for cell_id in ("p1", "p2"):
+        add_cell_to_notebook(nb_dir, cell_id, language="prompt")
+        write_cell(nb_dir, cell_id, source)
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    fake, calls = _fake_llm_returning("one", "two")
+    cfg = LlmConfig(base_url="https://api.openai.com/v1", api_key="sk", model="m")
+
+    with mock.patch("strata.notebook.prompt_executor.chat_completion", fake):
+        await execute_prompt_cell(session, "p1", source, cfg)
+        await execute_prompt_cell(session, "p2", source, cfg)
+        again = await execute_prompt_cell(session, "p2", source, cfg)
+
+    assert again["success"] is True
+    assert again["cache_hit"] is True
+    assert len(calls) == 2
+    store = session.get_artifact_manager().artifact_store
+    own = store.get_latest_version(f"nb_{session.notebook_state.id}_cell_p2_var_result")
+    assert own is not None and own.state == "ready"
+    assert json.loads(store.blob_store.read_blob(own.id, own.version)) == "two"
+
+
 # Streaming: deltas via on_delta, retry frames, fallbacks
 
 

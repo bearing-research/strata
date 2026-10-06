@@ -397,7 +397,7 @@ async def publish_cell_outputs(
         stored = artifact_mgr.artifact_store.get_latest_version(artifact_id)
         if stored is None or stored.state not in ("ready", "superseded"):
             continue
-        blob = artifact_mgr.artifact_store.blob_store.read_blob(artifact_id, stored.version)
+        blob = artifact_mgr.artifact_store.read_blob(artifact_id, stored.version)
         if blob is None:
             continue
         if await store.publish(

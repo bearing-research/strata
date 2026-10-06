@@ -384,16 +384,24 @@ def render_publication(
 
 
 def content_type_of(artifact) -> str:
-    """Return the stored ``content_type`` param, or '' when the spec says nothing."""
+    """Return the stored ``content_type`` param, else ``arrow/ipc`` for a version with a schema.
+
+    Only notebook cells declare a type. Core results (scan, transforms, client puts) are always
+    Arrow IPC and record its schema. '' when neither says anything.
+    """
     import json
 
-    if not artifact.transform_spec:
-        return ""
-    try:
-        params = json.loads(artifact.transform_spec).get("params", {})
-    except (json.JSONDecodeError, ValueError):
-        return ""
-    return str(params.get("content_type") or "") if isinstance(params, dict) else ""
+    declared = ""
+    if artifact.transform_spec:
+        try:
+            params = json.loads(artifact.transform_spec).get("params", {})
+        except (json.JSONDecodeError, ValueError):
+            params = {}
+        if isinstance(params, dict):
+            declared = str(params.get("content_type") or "")
+    if not declared and artifact.schema_json:
+        return "arrow/ipc"
+    return declared
 
 
 CLAIMS = {

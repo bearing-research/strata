@@ -1,7 +1,7 @@
-"""Unit tests for ``BuildService.assemble_manifest``: pure, no server or DB.
+"""Unit tests for ``BuildService.assemble_manifest``: no server.
 
-Signing is stubbed; these cover resolving input URIs to ``(artifact_id, version)``, raising on an
-unresolvable input, and the executor metadata.
+Signing is stubbed; these cover resolving input URIs to ``(artifact_id, version)`` (a name at the
+version admission recorded), raising on an unresolvable input, and the executor metadata.
 """
 
 from types import SimpleNamespace
@@ -18,6 +18,9 @@ class _FakeStore:
     def resolve_name(self, name, *, tenant=None):
         hit = self._names.get(name)
         return SimpleNamespace(id=hit[0], version=hit[1]) if hit else None
+
+    def get_artifact(self, artifact_id, version):
+        return None
 
 
 def _build(**kw):
@@ -80,6 +83,34 @@ def test_assemble_manifest_resolves_inputs_and_builds_metadata(captured_manifest
         "params": {"sql": "select 1"},
     }
     assert captured_manifest.calls["base_url"] == "http://host"
+
+
+def test_assemble_manifest_reads_a_name_at_the_version_admission_recorded(
+    captured_manifest, tmp_path
+):
+    """A name moved after admission: the executor still gets the bytes the provenance hashed."""
+    from strata.artifact_store import ArtifactStore
+
+    store = ArtifactStore(tmp_path / "artifacts")
+    for version in (1, 2):
+        store.create_artifact("A", f"prov-a{version}")
+        store.finalize_artifact("A", version, "{}", 1, 1)
+    store.set_name("champ", "A", 1)
+    # The build's output, OUT@v=2 (see _build), admitted while champ named A@v=1.
+    store.create_artifact("OUT", "prov-earlier")
+    store.create_artifact("OUT", "prov-out", input_versions={"strata://name/champ": "A@v=1"})
+    store.set_name("champ", "A", 2)
+
+    build_service.assemble_manifest(
+        store,
+        signer=captured_manifest.signer,
+        build=_build(input_uris=["strata://name/champ"]),
+        base_url="http://host",
+        max_output_bytes=1,
+        url_expiry_seconds=1.0,
+    )
+
+    assert captured_manifest.calls["input_artifacts"] == [("A", 1)]
 
 
 def test_assemble_manifest_raises_valueerror_on_unresolvable_input(captured_manifest):

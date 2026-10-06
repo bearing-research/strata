@@ -369,6 +369,23 @@ class TestArtifactStoreLineageMethods:
         assert dep_artifact.id == "dep-exact"
         assert input_ver == "base-1@v=1"
 
+    def test_find_dependents_treats_an_underscore_in_the_id_literally(self, tmp_path):
+        """``_`` is a LIKE wildcard; ``nb_a`` must not find what read ``nbXa``."""
+        from strata.artifact_store import ArtifactStore, TransformSpec
+
+        store = ArtifactStore(tmp_path)
+        spec = TransformSpec(executor="dep_executor", params={}, inputs=[])
+        version = store.create_artifact(
+            artifact_id="dep",
+            provenance_hash="dep-hash",
+            transform_spec=spec,
+            input_versions={"strata://artifact/nbXa@v=1": "nbXa@v=1"},
+        )
+        store.finalize_artifact("dep", version, "", 1, 1)
+
+        assert store.find_dependents("nb_a", 1) == []
+        assert [a.id for a, _ in store.find_dependents("nbXa", 1)] == ["dep"]
+
     def test_list_name_reads_lists_ready_reads_in_the_tenant(self, tmp_path):
         from strata.artifact_store import ArtifactStore, TransformSpec
 

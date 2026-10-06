@@ -13,6 +13,7 @@ import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
+from strata.artifact_cli import _server_store as _configured_server_store
 from strata.artifact_store import ArtifactStore, TransformSpec
 from strata.sql_backend import PostgresDialect, advisory_lock_id
 
@@ -301,6 +302,7 @@ class TestCanonicalPromotion:
         # landed under a different id, so returning that foreign id back would
         # leave the canonical row 'superseded' and the caller unaware.
         first = store.create_artifact("a1", "shared-prov", _spec())
+        store.write_blob("a1", first, b"")
         store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
 
         second = store.create_artifact("a2", "shared-prov", _spec())
@@ -422,6 +424,88 @@ class TestGarbageCollection:
 
         assert result["deleted_count"] == 0
         assert store.get_artifact(artifact, 1) is not None
+
+    def test_an_overtaken_version_goes_with_its_canonical(self, store):
+        canonical = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e04"
+        overtaken = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e05"
+        for artifact_id in (canonical, overtaken):
+            version = store.create_artifact(artifact_id, "prov-dup", _spec(), minted=True)
+            store.write_blob(artifact_id, version, b"x" * 100)
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=100)
+        # The canonical the older, as finalize leaves it: the cap stops right after it.
+        self._last_used(store, canonical, 7200)
+        self._last_used(store, overtaken, 3600)
+
+        result = store.garbage_collect(max_bytes=50)
+
+        assert result["deleted_count"] == 2
+        assert store.get_artifact(canonical, 1) is None
+        assert store.get_artifact(overtaken, 1) is None
+
+    def test_deleting_a_canonical_hands_its_bytes_to_a_pinned_reader(self, store):
+        for artifact_id in ("a1", "a2"):
+            version = store.create_artifact(artifact_id, "prov-dup", _spec())
+            store.write_blob(artifact_id, version, b"bytes")
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=5)
+        store.pin_artifact("a2", 1, "review")
+
+        assert store.delete_artifact("a1", 1)
+
+        assert store.read_blob("a2", 1) == b"bytes"
+        assert store.blob_store.blob_exists("a2", 1)
+
+    @pytest.mark.parametrize("raced", [1, 2])
+    def test_a_name_landing_mid_sweep_skips_only_that_version(self, store, raced):
+        """A failed DELETE aborts a Postgres transaction; without a savepoint the closing commit
+        rolled back every row while their blobs were still deleted.
+        """
+        ids = [f"0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e1{i}" for i in range(3)]
+        for i, artifact_id in enumerate(ids):
+            version = store.create_artifact(artifact_id, f"prov-race-{i}", _spec(), minted=True)
+            store.write_blob(artifact_id, version, b"x" * 100)
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=100)
+            self._last_used(store, artifact_id, 7200 - i)
+        children = store._delete_version_children
+
+        def name_lands(conn, artifact_id, version):
+            # Its own thread, so its own pooled connection; the claim does not block a name.
+            if artifact_id == ids[raced]:
+                setter = threading.Thread(target=store.set_name, args=("raced", artifact_id, 1))
+                setter.start()
+                setter.join()
+            children(conn, artifact_id, version)
+
+        store._delete_version_children = name_lands
+        try:
+            result = store.garbage_collect(max_idle_days=0)
+        finally:
+            store._delete_version_children = children
+
+        assert result["deleted_count"] == 2
+        for i, artifact_id in enumerate(ids):
+            assert (store.get_artifact(artifact_id, 1) is not None) == (i == raced)
+            assert store.blob_store.blob_exists(artifact_id, 1) == (i == raced)
+
+    def test_cleanup_failed_takes_a_failed_build_row_with_it(self, store, tmp_path):
+        """The build row's foreign key refused deleting the failed version it references."""
+        from strata.transforms.build_store import BuildStore
+
+        # The fixture's CASCADE drop leaves a prior test's build table without its foreign key.
+        conn = store._get_connection()
+        try:
+            conn.executescript("DROP TABLE IF EXISTS artifact_builds;")
+            conn.commit()
+        finally:
+            conn.close()
+        builds = BuildStore(tmp_path / "builds.sqlite", dialect=store.dialect)
+        version = store.create_artifact("built", "prov-built", _spec())
+        builds.create_build("build-1", "built", version, "exec@v1")
+        builds.fail_build("build-1", "boom")
+        store.fail_artifact("built", version)
+
+        assert store.cleanup_failed(max_age_seconds=-10) == 1
+        assert store.get_artifact("built", version) is None
+        assert builds.get_build("build-1") is None
 
 
 class TestConnectionPool:
@@ -871,6 +955,43 @@ class TestTheCliOnAPostgresStore:
         finally:
             dialect.close()
 
+    def test_publish_mints_the_grant_in_the_store_the_server_serves(
+        self, store, tmp_path, monkeypatch, postgres_dsn
+    ):
+        """The publish target is built like the server's store, not from ``artifact_dir`` alone.
+
+        Built from the directory, it was an empty SQLite file: "not found", and a stray database.
+        """
+        import argparse
+
+        from strata.artifact_cli import cmd_publish
+
+        version = store.create_artifact("fig", "prov-fig", _spec())
+        with store.open_blob_writer("fig", version) as writer:
+            writer.write(b"figure bytes")
+        store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
+
+        monkeypatch.setenv("STRATA_ARTIFACT_METADATA_DSN", postgres_dsn)
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+        # The suite stubs this out so no test publishes into a developer's own store.
+        monkeypatch.setattr("strata.artifact_cli._server_store", _configured_server_store)
+        args = argparse.Namespace(
+            ref=f"fig@v={version}",
+            artifact_dir=None,
+            format="json",
+            title="Figure",
+            author=None,
+            tenant=None,
+            here=False,
+            into=None,
+            to_url=None,
+            max_depth=10,
+        )
+        assert cmd_publish(args) == 0
+
+        assert [p.artifact_id for p in store.list_publications()] == ["fig"]
+        assert not (tmp_path / "artifacts" / "artifacts.sqlite").exists()
+
 
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
@@ -919,6 +1040,115 @@ class TestWriterSerialization:
 
         assert errors == []
         assert sorted(versions) == list(range(1, 9))
+
+    def test_an_events_follower_never_skips_an_event_that_commits_late(self, store):
+        """``seq`` is drawn at insert: a writer that inserts first and commits last was skipped.
+
+        The follower saw the later writer's event, advanced its cursor past the earlier ``seq``,
+        and never got the earlier event once it committed.
+        """
+        version = store.create_artifact("m1", "prov-m1", _spec())
+        store.finalize_artifact("m1", version, "{}", row_count=0, byte_size=0)
+
+        inserted, release = threading.Event(), threading.Event()
+
+        def slow_writer() -> None:
+            # Its own thread: connections are shared per thread, so a commit elsewhere on this
+            # thread would commit this insert too.
+            conn = store._get_connection()
+            try:
+                store._audit_in_connection(conn, action="name_set", name="slow")
+                inserted.set()
+                release.wait()
+                conn.commit()
+            finally:
+                conn.close()
+
+        slow = threading.Thread(target=slow_writer)
+        slow.start()
+        inserted.wait()
+        tagging = threading.Thread(target=store.set_tag, args=("m1", version, "k", "v"))
+        tagging.start()
+        probe = store._get_connection()
+        try:
+            # Until the tag writer waits behind the slow one (or, unserialized, has committed).
+            while tagging.is_alive():
+                row = probe.execute(
+                    "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                ).fetchone()
+                probe.commit()
+                if row["n"]:
+                    break
+                tagging.join(timeout=0.05)
+        finally:
+            probe.close()
+        seen = store.read_events()
+        cursor = seen[-1]["seq"] if seen else 0
+        release.set()
+        slow.join()
+        tagging.join()
+
+        later = store.read_events(since=cursor)
+        assert sorted(e["action"] for e in seen + later) == ["name_set", "tag_set"]
+
+    def test_deleting_an_artifact_while_its_name_is_deleted_does_not_deadlock(self, store):
+        """Delete took the audit lock after deleting the name rows; ``delete_name`` the reverse.
+
+        Each then waited on the lock the other held, and Postgres aborted one of them.
+        """
+        version = store.create_artifact("d1", "prov-d1", _spec())
+        store.finalize_artifact("d1", version, "{}", row_count=0, byte_size=0)
+        store.set_name("current", "d1", version)
+        store.set_alias("current", "prod", "d1", version)
+
+        locked, release = threading.Event(), threading.Event()
+        errors: list[BaseException] = []
+
+        def name_deleter() -> None:
+            # delete_name's order: the audit lock, then the name row.
+            conn = store._get_connection()
+            try:
+                store._serialize_audit(conn)
+                locked.set()
+                release.wait()
+                conn.execute("DELETE FROM artifact_names WHERE name = ?", ("current",))
+                store._audit_in_connection(conn, action="name_delete", name="current")
+                conn.commit()
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                conn.close()
+
+        def artifact_deleter() -> None:
+            try:
+                store.delete_artifact("d1", version)
+            except BaseException as exc:
+                errors.append(exc)
+
+        names = threading.Thread(target=name_deleter)
+        names.start()
+        locked.wait()
+        deleting = threading.Thread(target=artifact_deleter)
+        deleting.start()
+        probe = store._get_connection()
+        try:
+            # Until the artifact delete waits on the audit lock the name deleter holds.
+            while deleting.is_alive():
+                row = probe.execute(
+                    "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                ).fetchone()
+                probe.commit()
+                if row["n"]:
+                    break
+                deleting.join(timeout=0.05)
+        finally:
+            probe.close()
+        release.set()
+        names.join()
+        deleting.join()
+
+        assert errors == []
+        assert store.get_artifact("d1", version) is None
 
     def test_duplicate_provenance_finalize_is_idempotent(self, store):
         # Exercises the dialect's integrity_error: the partial unique index on

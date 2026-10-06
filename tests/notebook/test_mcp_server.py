@@ -777,16 +777,36 @@ class TestPromoteReaches:
 
 class TestPublish:
     def test_it_copies_the_chain_into_the_store_the_link_resolves_from(
-        self, sm_with_a_stored_output, tmp_path, monkeypatch
+        self, sm_with_a_stored_output, tmp_path
     ):
         """Promote mints into the server's artifact_dir, not the notebook's .strata/artifacts.
 
         The page route reads only the server's store, so a link minted elsewhere is dead.
         """
+        from strata.artifact_store import get_artifact_store
+        from strata.notebook.mcp_server import _publish
+
+        sm, session_id, _ = sm_with_a_stored_output
+        served = get_artifact_store(tmp_path / "served")
+
+        result = _publish(sm, session_id, "a", "x", title="Figure 1")
+
+        assert result["token"]
+        assert result["copied"] == 1
+        assert [p.token for p in served.list_publications()] == [result["token"]]
+
+    def test_the_bytes_land_in_the_servers_configured_blob_backend(
+        self, sm_with_a_stored_output, tmp_path, monkeypatch
+    ):
+        """A store rebuilt from ``artifact_dir`` alone writes the bytes where the page never reads.
+
+        The server's store here keeps its blobs elsewhere, as an S3/GCS/Azure backend would.
+        """
         from types import SimpleNamespace
 
         import strata.server as server_module
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact_store import get_artifact_store
+        from strata.blob_store import LocalBlobStore
         from strata.notebook.mcp_server import _publish
 
         sm, session_id, _ = sm_with_a_stored_output
@@ -796,41 +816,32 @@ class TestPublish:
             "_state",
             SimpleNamespace(config=SimpleNamespace(artifact_dir=served_dir)),
         )
+        served = get_artifact_store(
+            served_dir, blob_store=LocalBlobStore(tmp_path / "remote-blobs")
+        )
 
         result = _publish(sm, session_id, "a", "x", title="Figure 1")
 
-        served = ArtifactStore(served_dir)
-        assert result["token"]
-        assert result["copied"] == 1
-        assert [p.token for p in served.list_publications()] == [result["token"]]
+        publication = served.get_publication(result["token"])
+        assert publication is not None
+        assert served.read_blob(publication.artifact_id, publication.version) == b"1"
 
 
 @pytest.mark.asyncio
-async def test_publish_records_who_published_it_and_whose_it_is(
-    sm_with_a_stored_output, tmp_path, monkeypatch
-):
+async def test_publish_records_who_published_it_and_whose_it_is(sm_with_a_stored_output, tmp_path):
     """Without the caller stamped, the audit row names nobody (REST and CLI stamp it too)."""
-    from types import SimpleNamespace
-
-    import strata.server as server_module
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact_store import get_artifact_store
     from strata.auth import principal_context
     from strata.notebook.mcp_server import _publish
     from strata.types import Principal
 
     sm, session_id, _ = sm_with_a_stored_output
-    served_dir = tmp_path / "served"
-    monkeypatch.setattr(
-        server_module,
-        "_state",
-        SimpleNamespace(config=SimpleNamespace(artifact_dir=served_dir)),
-    )
+    served = get_artifact_store(tmp_path / "served")
 
     caller = Principal(id="scientist", tenant="acme", scopes=frozenset({"artifacts:publish"}))
     with principal_context(caller):
         result = _publish(sm, session_id, "a", "x", title="Figure 1")
 
-    served = ArtifactStore(served_dir)
     published = served.list_publications()
     assert [p.token for p in published] == [result["token"]]
     assert published[0].published_by == "scientist"

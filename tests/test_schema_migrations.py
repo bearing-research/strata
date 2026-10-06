@@ -111,6 +111,20 @@ class TestExistingDatabase:
         assert artifact is not None
         assert artifact.state == "ready"
 
+    def test_a_store_a_newer_strata_migrated_is_refused(self, tmp_path):
+        """An older Strata on a migrated store would write rows the newer one does not expect."""
+        db_path = ArtifactStore(tmp_path / "s").db_path
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, 0)",
+            (_LATEST_SCHEMA_VERSION + 1,),
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(RuntimeError, match="newer than this Strata supports"):
+            ArtifactStore(tmp_path / "s")
+
 
 class TestConstantsAndMigrationsAgree:
     def test_a_migrated_database_matches_a_fresh_one(self, tmp_path):

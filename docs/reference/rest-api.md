@@ -1004,7 +1004,11 @@ GET /v1/artifacts/usage
 `limit`, `offset`, `state`, `name_prefix`, `since` (epoch seconds), `sort`
 (`created_at`, `byte_size` or `row_count`) and `order` query parameters; `GET /v1/artifacts/stats` returns summary
 counts and byte totals, and `GET /v1/artifacts/usage` adds unique-artifact,
-name and unreferenced counts. Powers the web UI **Artifacts** page.
+name and unreferenced counts. Both count `total_versions` and its split by
+state: `ready_versions`, `building_versions`, `superseded_versions` (a version
+a refresh or a duplicate build overtook) and `failed_versions`. Powers the web UI **Artifacts** page. Their
+`total_bytes` counts every version that still holds bytes, superseded ones
+included until a sweep collects them: the measure the byte cap uses.
 
 In personal mode, stats and usage cover the whole store. In service mode they
 cover **one tenant's holdings**: the caller's own, from the trusted-proxy
@@ -1059,8 +1063,10 @@ materialize response's: when two misses for one scan were in flight together,
 one artifact becomes the ready result and the other reads `superseded`. The
 superseded one keeps no bytes of its own: its `GET /v1/artifacts/{id}/v/{n}/data`
 serves the canonical artifact's blob, the store counts those bytes once, and
-retention collects the superseded row like any other. Read the header to keep
-the canonical one.
+retention collects the two together (or neither, while the superseded one is
+held). Deleting the canonical artifact first gives a published or pinned
+superseded one its own copy of the bytes. Read the header to keep the canonical
+one.
 
 ### Health
 

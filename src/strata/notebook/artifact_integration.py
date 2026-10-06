@@ -122,7 +122,7 @@ class NotebookArtifactManager:
         latest = self.artifact_store.get_latest_version(artifact_id)
         if latest is None or latest.state not in ("ready", "superseded"):
             return None
-        return self.artifact_store.blob_store.read_blob(artifact_id, latest.version)
+        return self.artifact_store.read_blob(artifact_id, latest.version)
 
     def get_iteration_artifact(
         self,
@@ -303,7 +303,7 @@ class NotebookArtifactManager:
         if artifact is None or artifact.state not in ("ready", "superseded"):
             raise ValueError(f"Artifact {artifact_id}@v={version} not found or not ready")
 
-        blob_data = self.artifact_store.blob_store.read_blob(artifact_id, version)
+        blob_data = self.artifact_store.read_blob(artifact_id, version)
         if blob_data is None:
             raise ValueError(f"Blob data not found for {artifact_id}@v={version}")
         return blob_data
