@@ -188,6 +188,42 @@ class TestIntegrity:
 
         assert _post(client, metadata).status_code == 400
 
+    @pytest.mark.parametrize(
+        "field",
+        [
+            {"byte_size": "big"},
+            {"byte_size": -1},
+            {"row_count": 1.5},
+            {"row_count": True},
+            {"input_versions": {"strata://artifact/a@v=1": "a@v=1"}},
+            {"input_versions": "[1, 2]"},
+            {"transform_spec": "not json"},
+            {"schema_json": 3},
+            {"principal": ["ana"]},
+            {"state": "building"},
+        ],
+    )
+    def test_a_field_of_the_wrong_shape_is_refused(self, client, served_dir, field):
+        """Stored unchecked, a string ``byte_size`` broke every later sweep with a TypeError."""
+        from strata.artifact_store import ArtifactStore
+
+        response = _post(client, _metadata("fig", 1, "k" * 64, **field))
+
+        assert response.status_code == 400
+        assert ArtifactStore(served_dir).get_artifact("fig", 1) is None
+
+    def test_well_formed_fields_are_kept(self, client, served_dir):
+        from strata.artifact_store import ArtifactStore
+
+        edges = json.dumps({"strata://artifact/a@v=1": "a@v=1"})
+        metadata = _metadata(
+            "fig", 1, "l" * 64, byte_size=1, row_count=0, input_versions=edges, state="superseded"
+        )
+
+        assert _post(client, metadata).status_code == 200
+        stored = ArtifactStore(served_dir).get_artifact("fig", 1)
+        assert (stored.byte_size, stored.input_versions, stored.state) == (1, edges, "superseded")
+
     @pytest.mark.parametrize("artifact_id", ["../../../../victim/pwned", "/etc/pwned", "a/b", ".."])
     def test_an_id_that_names_a_path_is_refused(self, client, served_dir, artifact_id):
         """The id from the request becomes a blob key, so a path-like id must not write anywhere."""
