@@ -2122,7 +2122,7 @@ class NotebookSession:
         resolved = drop_blanked_secrets(cell.env)
         resolved.update(annotations.env)
         declared = set(annotations.env) | set(getattr(cell, "env_overrides", {}) or {})
-        return narrow_env_for_provenance(cell.source, resolved, declared)
+        return narrow_env_for_provenance(cell.source, resolved, declared, language=cell.language)
 
     def _effective_worker_name(self, cell: Any) -> str | None:
         """Return the effective worker name with annotation precedence."""

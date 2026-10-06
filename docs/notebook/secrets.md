@@ -93,7 +93,7 @@ Each env row in the Runtime panel shows a green source badge (`INFISICAL`) next 
 
 ## Rotation
 
-Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run after the refresh see the new value immediately (the executor reads the cell's `env` each run). A cell whose source reads the variable by name (`os.environ["KEY"]`, `os.environ.get("KEY")`, `os.getenv("KEY")`) or declares it with `# @env` has its value folded into its provenance, so it goes stale after a rotation and re-runs. A cell that reaches the secret indirectly (a client library reading it for you) does not, and its cached artifacts stay cached; rerun it (`↻`) to execute with the new value.
+Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run after the refresh see the new value immediately (the executor reads the cell's `env` each run). A cell whose source reads the variable by name (`os.environ["KEY"]`, `os.environ.get("KEY")`, `os.getenv("KEY")`, or `Sys.getenv("KEY")` in an R cell) or declares it with `# @env` has its value folded into its provenance, so it goes stale after a rotation and re-runs. A cell that reaches the secret indirectly (a client library reading it for you) does not, and its cached artifacts stay cached; rerun it (`↻`) to execute with the new value.
 
 ## Fetch errors
 

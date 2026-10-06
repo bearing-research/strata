@@ -218,6 +218,21 @@ class TestIntegrationRealRscript:
         result = _RAnalyzer().analyze(cell, session=None)
         assert "df" in result.defines
         assert "df" in result.references
+
+    @pytest.mark.parametrize(
+        "source",
+        ["df$b <- 2", "df[i] <- 0", "df[['b']] <- 2", "names(df) <- cols", "2 -> df$b"],
+    )
+    def test_replacement_assign_reads_and_defines_root(self, source):
+        """``df$b <- v`` is ``df <- `$<-`(df, "b", v)``: the root is read and defined."""
+        result = _RAnalyzer().analyze(_make_cell(source), session=None)
+        assert result.defines == ["df"]
+        assert "df" in result.references
+
+    def test_replacement_assign_after_local_define_is_local(self):
+        result = _RAnalyzer().analyze(_make_cell("df <- data.frame(a = 1)\ndf$b <- 2"), None)
+        assert result.defines == ["df"]
+        assert "df" not in result.references
         assert "complete.cases" not in result.references
         # ``[`` is a function call internally and must not leak.
         assert "[" not in result.references

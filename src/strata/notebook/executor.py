@@ -977,7 +977,12 @@ class CellExecutor:
         declared_env_keys = set(annotations.env) | set(
             getattr(cell_state, "env_overrides", {}) or {}
         )
-        provenance_env = narrow_env_for_provenance(source, runtime_env, declared_env_keys)
+        provenance_env = narrow_env_for_provenance(
+            source,
+            runtime_env,
+            declared_env_keys,
+            language=getattr(cell_state, "language", "python"),
+        )
         env_hash = compute_execution_env_hash(
             self.session.path,
             provenance_env,
