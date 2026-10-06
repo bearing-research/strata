@@ -16,7 +16,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.models import MountMode, MountSpec
@@ -64,7 +64,7 @@ def parse_mount_uri(uri: str) -> tuple[str, str]:
         scheme = "az"
 
     if scheme == "file":
-        return "file", parsed.path
+        return "file", unquote(parsed.path)
     else:
         path = parsed.netloc
         if parsed.path and parsed.path != "/":
