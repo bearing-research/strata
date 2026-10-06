@@ -51,14 +51,14 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 
 `POST /open`, `POST /create` and `GET /discover` are **not** restricted - they work in service mode. With `multi_tenant_enabled`, all three (and the imports) are confined to the caller's tenant subdir of the storage root.
 
-**Tenant-scoped sessions.** A session records the tenant of whoever opened, created or imported it, and every `/v1/notebooks/{session_id}/...` route answers `404` to a caller from another tenant, as for an unknown session. `admin:*` reaches every session; a session opened without a tenant is open to all.
+**Tenant-scoped sessions.** A session records the tenant of whoever opened, created or imported it, and every `/v1/notebooks/{session_id}/...` route answers `404` to a caller from another tenant, as for an unknown session. `admin:*` reaches every session; a session opened by a caller with no tenant belongs to the default tenant (`_default`) and is reached only by tenantless callers and `admin:*`.
 
 **Scope-gated endpoints.** Under principal auth, **every** route on the `/v1/notebooks` and `/v1/projects` routers requires a notebook scope in `X-Strata-Scopes`. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns `403 Forbidden` naming the scope it wanted.
 
 | Endpoint | Required scope |
 | --- | --- |
 | Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
-| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
 | Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
@@ -77,7 +77,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 
 Without principal auth (personal mode, or `auth_mode="none"`), the scope gate returns immediately and none of this applies.
 
-Personal mode with no header configured is effectively trust-on-first-call - anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
+Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
 
 ### Error shape
 
@@ -97,10 +97,12 @@ and a `message`.
 {"detail": {"code": "cell_locked", "cell_id": "a1b2c3d4", "held_by": "alice", "message": "..."}}
 ```
 
-Three middleware responses are plain text, not JSON: the tenant check's `400`
-(missing or invalid tenant header) and `403` (tenant not enabled), and the rate
-limiter's `429`, which also sets `Retry-After` (whole seconds) and
-`X-RateLimit-Limit-Type`.
+Four middleware responses are plain text, not JSON: the host check's `400` (a
+`Host` the server does not answer to, see `STRATA_ALLOWED_HOSTS`), the tenant
+check's `400` (missing or invalid tenant header) and `403` (tenant not
+enabled), and the rate limiter's `429`, which also sets `Retry-After` (whole
+seconds) and `X-RateLimit-Limit-Type`. A stream refused by QoS admission is a
+JSON `429` (`{"error", "tier"}`) with `Retry-After`.
 
 Validation errors (`422`) come from Pydantic and contain structured field info:
 
@@ -121,6 +123,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | Status | Common cause |
 | --- | --- |
 | `200` | Success |
+| `307` | `GET /v1/streams/{id}` on a node that does not hold the stream, redirecting to the one that does (`STRATA_NODE_ADVERTISED_URL`) |
 | `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
@@ -130,6 +133,8 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which. A table the ACL denies is refused first, so its caller gets the `403`/`404` instead |
 | `429` | Rate limit exceeded - global, per-client, or per-tenant |
 | `500` | Server bug - captured to logs with the request ID |
+| `503` | The server is draining for shutdown and takes no new materialize requests |
+| `504` | Planning a scan exceeded its timeout |
 
 ### Request IDs
 
@@ -324,7 +329,9 @@ POST /v1/notebooks/recents/validate
 ```
 
 Returns `{"valid": [...]}`, the subset of the (at most 100) paths that still
-hold a `notebook.toml`. The UI uses it to prune its recent-notebooks list.
+hold a `notebook.toml` and lie inside the caller's notebook root (the tenant's
+folder on a multi-tenant server); any other path is left out like a missing
+one. The UI uses it to prune its recent-notebooks list. Needs `notebook:write`.
 
 ### Delete Notebook By Path
 
@@ -793,9 +800,10 @@ GET /v1/notebooks/{session_id}/connections/{name}/schema
 ```
 
 Enumerates the tables and columns visible through the named connection. Used by
-the schema sidebar. Opens the connection on the read path and returns backend
-errors directly as `4xx` so auth / driver / connectivity failures are visible
-to the UI.
+the schema sidebar. Opens the connection read-only; an unknown connection is a
+`404`, an unknown driver a `400`, and a driver that fails to connect or
+enumerate a `502` carrying its message, so auth / driver / connectivity
+failures are visible to the UI.
 
 ## Artifacts
 
@@ -1087,3 +1095,64 @@ Both are unauthenticated, for scrapers. Under principal auth
 `/metrics/prometheus` leaves out the per-table series, since table names are
 `admin:*` data (`GET /metrics/tables`), and the AI usage series carry no
 `principal` label: they are per-tenant, per-model totals.
+
+### Artifacts, names, cache and diagnostics
+
+The routes the client SDK and the web UI call that no feature page covers.
+The gate column uses these terms:
+
+- **read**: open in both modes; under principal auth scoped to the caller's
+  tenant (`admin:*` sees every tenant).
+- **write**: personal mode, or service mode with
+  `STRATA_SERVICE_WRITES_ENABLED` and the `artifacts:write` scope.
+- **personal**: personal mode only; `403` in service mode.
+- **build**: personal mode, or service mode with transforms enabled.
+- **open**: no gate beyond the server's authentication.
+
+Name, alias, tag and registry reads on a server with
+`STRATA_NOTEBOOK_REMOTE_STORE_URL` set answer from that team store.
+
+| Method | Path | Gate | What it does |
+| --- | --- | --- | --- |
+| `GET` | `/v1/artifacts/{id}/v/{n}` | read | An artifact version's metadata, including `input_versions` |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}` | personal | Delete a version, its blob and its name pointers |
+| `GET` | `/v1/artifacts/{id}/v/{n}/lineage` | read | The transitive input graph (artifacts and tables), up to `max_depth` |
+| `GET` | `/v1/artifacts/{id}/v/{n}/dependents` | read | Ready artifacts that take this one as a direct input |
+| `GET` | `/v1/artifacts/{id}/v/{n}/tags` | read | The version's tags |
+| `PUT` | `/v1/artifacts/{id}/v/{n}/tags` | write | Set one key/value tag |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}/tags/{key}` | write | Delete one tag |
+| `GET` | `/v1/artifacts/by-provenance/{hash}` | read | A ready artifact by provenance hash (the team-cache lookup) |
+| `PUT` | `/v1/artifacts/by-provenance/{hash}` | write | Store a result under a provenance key the caller computed |
+| `POST` | `/v1/artifacts/upload/{id}/v/{n}` | personal | Upload a version's Arrow IPC bytes |
+| `POST` | `/v1/artifacts/finalize` | personal | Mark an uploaded version ready, optionally naming it |
+| `POST` | `/v1/artifacts/explain-materialize` | read | Dry-run materialize: hit or miss, and why a rebuild would be needed |
+| `POST` | `/v1/artifacts/materialize` | build | The cached artifact on a provenance hit, else a `building` artifact and its build spec |
+| `GET` | `/v1/artifacts/builds/{build_id}` | build | Poll an asynchronous build started by materialize (the caller's own builds) |
+| `GET` | `/v1/artifacts/names/{name}/status` | read | A named artifact's state and whether any input has a newer version |
+| `GET` | `/v1/names` | read | Every name pointer and its artifact |
+| `POST` | `/v1/names` | write | Set or move a name pointer |
+| `GET` | `/v1/names/{name}` | read | Resolve a name to its artifact URI |
+| `DELETE` | `/v1/names/{name}` | personal | Delete a name pointer |
+| `GET` | `/v1/names/{name}/aliases` | read | The aliases a name holds |
+| `GET` | `/v1/names/{name}/aliases/{alias}` | read | Resolve `name @ alias` to its version |
+| `PUT` | `/v1/names/{name}/aliases/{alias}` | write | Point an alias at a version; a protected alias answers `202` and queues |
+| `DELETE` | `/v1/names/{name}/aliases/{alias}` | personal | Delete an alias; a protected alias answers `202` and queues |
+| `GET` | `/v1/registry/artifacts` | read | Ready artifacts carrying one tag (`tag_key`, optional `tag_value`) |
+| `GET` | `/v1/registry/pending` | read | Protected-alias changes awaiting approval |
+| `GET` | `/v1/cache/stats` | open | Disk cache statistics |
+| `GET` | `/v1/cache/evictions` | open | Eviction rate and pressure level; `include_events=true` adds recent events |
+| `POST` | `/v1/cache/warm` | table ACL | Warm the cache for some tables and wait until every row group is fetched |
+| `GET` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | A warming job's progress |
+| `DELETE` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | Cancel a warming job; what it cached stays |
+| `GET` | `/v1/metadata/stats` | open | Hit/miss counters and entry counts for the metadata store and its caches |
+| `GET` | `/v1/config/timeouts` | open | Every timeout setting, grouped by planning, scanning, QoS queue, fetching and S3 |
+| `GET` | `/v1/debug/latency` | `admin:*` | Latency histograms per stage (plan, first byte, fetch, total) |
+| `GET` | `/v1/debug/gc/pauses` | `admin:*` | Recent Python GC pauses and their totals |
+| `GET` | `/v1/debug/pools` | `admin:*` | Planning and fetch thread pool use and queue depth |
+| `GET` | `/v1/debug/connections` | `admin:*` | HTTP connection metrics: in flight, totals, peak, rate, keep-alive share |
+| `GET` | `/v1/debug/memory` | `admin:*` | Arrow pool, Python GC and process memory |
+| `GET` | `/v1/debug/rate-limits` | `admin:*` | Rate limiter allowed and rejected counts |
+| `GET` | `/v1/debug/cache/inspect` | `admin:cache` | Disk cache entries: key hash, file path, size and stored metadata |
+
+The `admin:*` and `admin:cache` gates apply under principal auth; without it
+those routes are open.

@@ -2,10 +2,11 @@
 
 Two kinds of examples live here:
 
-- **Notebooks** — directories containing a `notebook.toml` + Python/SQL/prompt
-  cells. Open these with the Strata Notebook UI (`strata notebook` server)
-  or run them headlessly with `strata run`.
-- **SDK scripts** — standalone `*.py` files that talk to a running Strata
+- **Notebooks:** directories holding a `notebook.toml` plus Python, SQL,
+  R or prompt cells. Open them in the notebook UI
+  (`strata-notebook --notebook-dir ./examples`) or run them headlessly
+  with `strata run`.
+- **SDK scripts:** standalone `*.py` files that talk to a running Strata
   server through `StrataClient`. Start the server first, then run them
   with `uv run` or `python`.
 
@@ -20,8 +21,7 @@ from their own Python programs.
 Open with the Notebook UI:
 
 ```bash
-uv run python -m strata               # starts the server at http://127.0.0.1:8765
-# then in the UI: File → Open → pick a directory below
+strata-notebook --notebook-dir ./examples   # every example appears on the home page at http://127.0.0.1:8765
 ```
 
 Or run headlessly:
@@ -34,30 +34,33 @@ strata run examples/iris_classification
 
 | Notebook | What it shows |
 |---|---|
-| [`pandas_basics/`](pandas_basics/) | Linear Pandas pipeline — load, select, group, summarize. Smallest end-to-end notebook. |
+| [`pandas_basics/`](pandas_basics/) | Linear Pandas pipeline: load, select, group, summarize. Smallest end-to-end notebook. |
 | [`iris_classification/`](iris_classification/) | sklearn classifier on the Iris dataset. Shows how artifacts flow between cells. |
-| [`titanic_ml/`](titanic_ml/) | Survival prediction end-to-end: load → feature-engineer → train → score. |
+| [`titanic_ml/`](titanic_ml/) | Survival prediction end-to-end: load, feature-engineer, train, score. |
 
 ### Feature showcases
 
 | Notebook | What it shows |
 |---|---|
 | [`markdown_showcase/`](markdown_showcase/) | Markdown cells, prose-and-code interleaving. |
-| [`data_viewer/`](data_viewer/) | Interactive DataFrame viewer — paging + click-to-sort over a 2,000-row frame. |
-| [`widget_playground/`](widget_playground/) | `# widget` cell — a slider/number/dropdown control panel driving a DataFrame. |
+| [`data_viewer/`](data_viewer/) | Interactive DataFrame viewer: paging and click-to-sort over a 2,000-row frame. |
+| [`widget_playground/`](widget_playground/) | `# widget` cell: a slider/number/dropdown control panel driving a DataFrame. |
 | [`library_cells/`](library_cells/) | A cell exports `def`s/`class`es as a shared library across the notebook. |
-| [`model_variants/`](model_variants/) | `# @variant` annotation — A/B comparison of two model configurations. |
-| [`loop_hill_climb/`](loop_hill_climb/) | `# @loop` annotation — iterative refinement with carried state. |
-| [`s3_mount/`](s3_mount/) | `# @mount` annotation — read data from an S3 bucket as a local `Path`. |
-| [`sql_orders_report/`](sql_orders_report/) | SQL cells with DuckDB; SQL and Python interleave through the same DAG. |
-| [`review_triage/`](review_triage/) | Prompt cell with `@output_schema` — structured LLM output validated against JSON Schema. |
-| [`r_lm_vs_sklearn/`](r_lm_vs_sklearn/) | R cells next to Python — fit `lm()` in R, the same model in sklearn, compare side-by-side over Arrow. |
+| [`model_variants/`](model_variants/) | `# @variant` annotation: three classifiers sharing one DAG slot. |
+| [`model_variants_sweep/`](model_variants_sweep/) | Sweep mode: every variant runs and one downstream cell compares them, plus a `# @per_variant` fan-out. |
+| [`loop_hill_climb/`](loop_hill_climb/) | `# @loop` annotation: iterative refinement with carried state. |
+| [`s3_mount/`](s3_mount/) | `# @mount` annotation: read data from an S3 bucket as a local `Path`. |
+| [`sql_orders_report/`](sql_orders_report/) | SQL cells over a local SQLite file; SQL and Python interleave through the same DAG. Needs the `sql` and `sql-sqlite` extras. |
+| [`review_triage/`](review_triage/) | Prompt cell with `@output_schema`: structured LLM output validated against JSON Schema. |
+| [`r_lm_vs_sklearn/`](r_lm_vs_sklearn/) | R cells next to Python: fit `lm()` in R, the same model in sklearn, compare side-by-side over Arrow. |
+| [`r_mtcars_analysis/`](r_mtcars_analysis/) | A pure-R notebook: `lm()`, `aggregate()` and inline ggplot2 and base-graphics plots. |
+| [`agent_demo/`](agent_demo/) | The notebook a coding agent builds live in the `strata agent` demo: the training cell stays cached while only the evaluation re-runs. |
 
 ### Larger applied examples
 
 | Notebook | What it shows |
 |---|---|
-| [`news_alpha_trader/`](news_alpha_trader/) | Multi-cell finance pipeline — news → sentiment → signals → trades. |
+| [`news_alpha_trader/`](news_alpha_trader/) | Multi-cell finance pipeline: news, sentiment, signals, trades. |
 | [`arxiv_classifier/`](arxiv_classifier/) | Distributed embedding + clustering over arXiv abstracts. Larger DAG. |
 
 ---
@@ -109,43 +112,48 @@ uv run python examples/01_basic_usage.py
 | File | Description |
 |---|---|
 | [setup_demo.py](setup_demo.py) | Create a demo Iceberg table for testing |
-| [hello_world.py](hello_world.py) | Benchmark cold/warm/restart performance |
+| [hello_world.py](hello_world.py) | Time a cold scan against two artifact-cache hits |
 
 ---
 
 ## SDK quick start
 
 ```python
-from strata_client import StrataClient, gt
+from strata_client import StrataClient
 
-client = StrataClient(base_url="http://127.0.0.1:8765")
-
-batches = list(client.scan(
-    "file:///warehouse#db.events",
-    columns=["id", "value", "timestamp"],
-    filters=[gt("timestamp", 1704067200000000)]
-))
-
-import pyarrow as pa
-df = pa.Table.from_batches(batches).to_pandas()
-print(df.head())
-
-client.close()
+with StrataClient(base_url="http://127.0.0.1:8765") as client:
+    artifact = client.materialize(
+        inputs=["file:///warehouse#db.events"],
+        transform={
+            "executor": "scan@v1",
+            "params": {
+                "columns": ["id", "value", "timestamp"],
+                "filters": [{"column": "timestamp", "op": ">", "value": 1704067200000000}],
+            },
+        },
+    )
+    print(client.fetch(artifact.uri).to_pandas().head())
 ```
 
 ### Async
 
 ```python
 import asyncio
-from strata_client import AsyncStrataClient, gt
+from strata_client import AsyncStrataClient
 
 async def main():
     async with AsyncStrataClient() as client:
-        table = await client.scan_to_table(
-            "file:///warehouse#db.events",
-            columns=["id", "value"],
-            filters=[gt("value", 100.0)],
+        artifact = await client.materialize(
+            inputs=["file:///warehouse#db.events"],
+            transform={
+                "executor": "scan@v1",
+                "params": {
+                    "columns": ["id", "value"],
+                    "filters": [{"column": "value", "op": ">", "value": 100.0}],
+                },
+            },
         )
+        table = await client.fetch(artifact.uri)
         print(f"Got {table.num_rows} rows")
 
 asyncio.run(main())

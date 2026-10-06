@@ -103,7 +103,8 @@ every endpoint. This is the local-dev default.
   Another tenant's session looks missing: every `/{session_id}` REST route
   answers `404` and the WS upgrade is refused with HTTP `403`, as
   for an unknown id (MCP applies the same rule). `admin:*` reaches every
-  session, and a session opened without a tenant is open to all. With
+  session, and a session opened by a caller with no tenant belongs to
+  the default tenant (`_default`). With
   `multi_tenant_enabled`, `/discover`, `/open`, `/create` and the imports
   are confined to the tenant's own `<notebook_storage_dir>/<tenant>/`
   (`admin:*` keeps the whole root).

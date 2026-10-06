@@ -193,6 +193,11 @@ entry pointing at `<strata-host>:8765/metrics/prometheus`. There's
 no push-gateway integration; if you need to push (e.g. for jobs in
 ephemeral containers), wrap the scrape in your own sidecar.
 
+A personal-mode server answers only to loopback names, IP literals, its
+own `STRATA_HOST` and the names in `STRATA_ALLOWED_HOSTS`, so list the
+name your scraper uses there (the compose stack lists `strata`); service
+mode checks the Host only when that setting is set.
+
 To use the bundled dashboard with your own Grafana, import
 `observability/grafana/provisioning/dashboards/strata.json` (Dashboards
 → New → Import) and pick your Prometheus from the dashboard's
