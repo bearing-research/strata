@@ -700,8 +700,10 @@ no route serves files from outside the frontend.
   pending and failing in the runner; an input whose plan fails answers the
   planner's 4xx instead of building a snapshot-less result.
 - Two in-flight misses for one scan both serve, and the second artifact reads
-  `superseded` (its own URI still serves the data) instead of `failed`;
-  `/v1/artifacts/usage` counts no failure for it.
+  `superseded` instead of `failed`; `/v1/artifacts/usage` counts no failure
+  for it. Its own blob is dropped as soon as it finalizes and its URI serves
+  the canonical artifact's bytes, so the store holds them once instead of
+  until the retention sweep.
 - A cell whose only output is printed text reads ready after reopening the
   notebook, and in `strata status` and `cell list`; it was shown idle although
   its console was restored and the next run was a cache hit.
@@ -724,6 +726,18 @@ no route serves files from outside the frontend.
   1..2^32-1 instead of failing the request task.
 - A failed persist of planning metadata to SQLite is logged at debug instead
   of silently dropped.
+- The Azure artifact blob store reads `STRATA_AZURE_ENDPOINT_URL` as the blob
+  host with the account as the first path segment, the way the lake path and
+  the docs do; the documented Azurite form with an account name and key now
+  works for artifacts and presigned URLs.
+- A leaf cell that stores no variable and prints nothing (`import os`, or an
+  assignment nothing reads) reads `ready` after a reopen, in the web UI and in
+  `strata status` and `cell list`, and an unchanged re-run is a cache hit
+  instead of another subprocess; its empty console is kept under the cell's
+  provenance like a printing leaf's.
+- Run All keeps a leaf cell's console record too: a leaf run in a batch reads
+  `ready` on reopen and hits the cache on the next Run All with its stdout
+  replayed; before, every leaf re-ran on every Run All.
 
 ## 0.8.0 - 2026-09-27
 
