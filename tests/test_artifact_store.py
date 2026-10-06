@@ -411,6 +411,26 @@ class TestStats:
         assert stats["total_rows"] == 100
         assert stats["name_count"] == 1
 
+    def test_byte_totals_count_what_versions_still_hold_as_the_sweep_does(self, store):
+        """An older version a refresh superseded keeps its bytes until a sweep takes them."""
+        for size in (1000, 300):
+            version = store.create_artifact("id-1", "hash1")
+            store.finalize_artifact("id-1", version, "{}", 1, size)
+        store.create_artifact("id-2", "hash1")
+        store.finalize_artifact("id-2", 1, "{}", 1, 300)  # reads id-1@v=2's bytes
+
+        swept = store.garbage_collect(dry_run=True)["store_bytes"]
+        assert store.stats()["total_bytes"] == swept == 1300
+        assert store.get_usage()["total_bytes"] == 1300
+
+    def test_name_prefix_treats_an_underscore_literally(self, store):
+        for name, artifact_id in (("taxi_model", "a"), ("taxi/model", "b")):
+            version = store.create_artifact(artifact_id, f"hash-{artifact_id}")
+            store.finalize_artifact(artifact_id, version, "{}", 1, 1)
+            store.set_name(name, artifact_id, version)
+
+        assert [a.id for a in store.list_artifacts(name_prefix="taxi_")] == ["a"]
+
 
 def _ipc_bytes(num_rows: int) -> bytes:
     """A single valid Arrow IPC stream with ``num_rows`` rows."""

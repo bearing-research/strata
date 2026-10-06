@@ -1000,7 +1000,9 @@ GET /v1/artifacts/usage
 `limit`, `offset`, `state`, `name_prefix`, `since` (epoch seconds), `sort`
 (`created_at`, `byte_size` or `row_count`) and `order` query parameters; `GET /v1/artifacts/stats` returns summary
 counts and byte totals, and `GET /v1/artifacts/usage` adds unique-artifact,
-name and unreferenced counts. Powers the web UI **Artifacts** page.
+name and unreferenced counts. Powers the web UI **Artifacts** page. Their
+`total_bytes` counts every version that still holds bytes, superseded ones
+included until a sweep collects them: the measure the byte cap uses.
 
 In personal mode, stats and usage cover the whole store. In service mode they
 cover **one tenant's holdings**: the caller's own, from the trusted-proxy

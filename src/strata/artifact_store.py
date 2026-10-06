@@ -121,6 +121,11 @@ def _split_ref(ref: str) -> tuple[str, int]:
     return artifact_id, int(version)
 
 
+def _like_literal(text: str) -> str:
+    """``text`` escaped for ``LIKE ... ESCAPE '\\'``: its ``_`` and ``%`` match only themselves."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @dataclass(frozen=True)
 class ArtifactVersion:
     """Immutable artifact version metadata.
@@ -3636,8 +3641,8 @@ class ArtifactStore:
         Returns ``(ArtifactVersion, input_version_string)`` pairs.
         """
         # Inputs are recorded as "artifact_id@v=N" or as the full URI.
-        search_pattern = f'"{artifact_id}@v={version}"'
-        uri_pattern = f'"strata://artifact/{artifact_id}@v={version}"'
+        search_pattern = _like_literal(f'"{artifact_id}@v={version}"')
+        uri_pattern = _like_literal(f'"strata://artifact/{artifact_id}@v={version}"')
 
         conn = self._get_connection()
         try:
@@ -3650,7 +3655,7 @@ class ArtifactStore:
                     FROM artifact_versions
                     WHERE state = 'ready'
                       AND tenant = ?
-                      AND (input_versions LIKE ? OR input_versions LIKE ?)
+                      AND (input_versions LIKE ? ESCAPE '\\' OR input_versions LIKE ? ESCAPE '\\')
                     ORDER BY created_at DESC
                     """,
                     (tenant, f"%{search_pattern}%", f"%{uri_pattern}%"),
@@ -3663,7 +3668,7 @@ class ArtifactStore:
                            input_versions, tenant, principal, content_sha256
                     FROM artifact_versions
                     WHERE state = 'ready'
-                      AND (input_versions LIKE ? OR input_versions LIKE ?)
+                      AND (input_versions LIKE ? ESCAPE '\\' OR input_versions LIKE ? ESCAPE '\\')
                     ORDER BY created_at DESC
                     """,
                     (f"%{search_pattern}%", f"%{uri_pattern}%"),
@@ -3791,9 +3796,9 @@ class ArtifactStore:
                     FROM artifact_versions av
                     INNER JOIN artifact_names an
                         ON av.id = an.artifact_id AND av.version = an.version
-                    WHERE an.name LIKE ?
+                    WHERE an.name LIKE ? ESCAPE '\\'
                 """
-                params: list = [name_prefix + "%"]
+                params: list = [_like_literal(name_prefix) + "%"]
 
                 if tenant is not None:
                     query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
@@ -4493,6 +4498,8 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
+            # total_bytes is what versions still own, as a sweep measures the store: older
+            # superseded versions count, a pointer reading another's bytes (superseded_by) never.
             usage_query = """
                 SELECT
                     COUNT(DISTINCT id) as unique_artifacts,
@@ -4500,7 +4507,9 @@ class ArtifactStore:
                     COUNT(CASE WHEN state = 'ready' THEN 1 END) as ready_versions,
                     COUNT(CASE WHEN state = 'building' THEN 1 END) as building_versions,
                     COUNT(CASE WHEN state = 'failed' THEN 1 END) as failed_versions,
-                    COALESCE(SUM(CASE WHEN state = 'ready' THEN byte_size END), 0) as total_bytes,
+                    COALESCE(SUM(CASE WHEN state IN ('ready', 'superseded')
+                                       AND superseded_by IS NULL
+                                      THEN byte_size END), 0) as total_bytes,
                     COALESCE(SUM(CASE WHEN state = 'ready' THEN row_count END), 0) as total_rows,
                     MIN(created_at) as oldest_artifact,
                     MAX(created_at) as newest_artifact
@@ -4735,7 +4744,9 @@ class ArtifactStore:
                     COUNT(CASE WHEN state = 'ready' THEN 1 END) as ready_versions,
                     COUNT(CASE WHEN state = 'building' THEN 1 END) as building_versions,
                     COUNT(CASE WHEN state = 'failed' THEN 1 END) as failed_versions,
-                    COALESCE(SUM(CASE WHEN state = 'ready' THEN byte_size END), 0) as total_bytes,
+                    COALESCE(SUM(CASE WHEN state IN ('ready', 'superseded')
+                                       AND superseded_by IS NULL
+                                      THEN byte_size END), 0) as total_bytes,
                     COALESCE(SUM(CASE WHEN state = 'ready' THEN row_count END), 0) as total_rows
                 FROM artifact_versions
             """
