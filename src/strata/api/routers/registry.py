@@ -9,6 +9,8 @@ notebook's names actually live.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -25,7 +27,7 @@ async def registry_audit(
     principal: CurrentPrincipal,
     name: str | None = None,
     artifact_id: str | None = None,
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ):
     """Read the append-only registry audit, newest first, scoped to the caller's tenant."""
     target = remote_registry()
