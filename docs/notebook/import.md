@@ -318,7 +318,9 @@ Over REST the same bundle is a multipart upload to
 `POST /v1/notebooks/import-snapshot`, with the `file`, `name` and
 `parent_path` fields of the Jupyter route and a 2 GiB cap. Either way, a
 bundle whose files would expand to more than 16 GiB is refused before anything
-is extracted.
+is extracted, as is one where a file the import reads whole (`artifacts.json`,
+`notebook.toml`, a cell, a lockfile, a console log) is over 16 MiB. Artifact and
+fetched bytes are streamed, so they have no such limit.
 
 What you get:
 

@@ -515,6 +515,40 @@ class TestACellFileOutsideCells:
         assert parse_notebook(imported.notebook_dir).cells[0].source == "x = 1\n"
 
 
+class TestAMemberReadWholeIsCapped:
+    """A small zip can declare a huge member; one the import reads whole must not be read."""
+
+    @pytest.fixture(autouse=True)
+    def _small_cap(self, monkeypatch):
+        monkeypatch.setattr("strata.notebook.snapshot_import._MAX_MEMBER_BYTES", 1024 * 1024)
+
+    @pytest.mark.parametrize(
+        "member", ["cells/aaaaaaaa.py", "uv.lock", "outputs/aaaaaaaa/console.json"]
+    )
+    def test_an_oversized_member_is_refused_before_it_is_read(self, tmp_path, monkeypatch, member):
+        bomb = tmp_path / "bomb.zip"
+        members = {"cells/aaaaaaaa.py": b"x = 1\n", member: b"#" * (2 * 1024 * 1024)}
+        _minimal_bundle(bomb, file="aaaaaaaa.py", members=members)
+        assert bomb.stat().st_size < 1024 * 1024
+
+        with pytest.raises(NotASnapshotError, match="MiB cap"):
+            import_snapshot(bomb, tmp_path / "dst")
+
+        assert not (tmp_path / "dst").exists()
+
+    def test_a_large_member_the_import_never_reads_whole_is_fine(self, tmp_path):
+        bundle = tmp_path / "big-figure.zip"
+        members = {
+            "cells/aaaaaaaa.py": b"x = 1\n",
+            "outputs/aaaaaaaa/0.png": b"\0" * (2 * 1024 * 1024),
+        }
+        _minimal_bundle(bundle, file="aaaaaaaa.py", members=members)
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert (imported.notebook_dir / "cells" / "aaaaaaaa.py").read_bytes() == b"x = 1\n"
+
+
 class TestWidgetSelections:
     """Widget values travel with the snapshot.
 

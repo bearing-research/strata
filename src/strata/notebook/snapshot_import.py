@@ -30,7 +30,11 @@ _ARTIFACT_URI_PREFIX = "strata://artifact/"
 # Bounds what an archive may expand to on disk; zipfile stops each member at its declared
 # size, so summing the declared sizes bounds the real output.
 _MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024 * 1024
+# Bounds memory: the manifest, notebook.toml, console and committed files are parsed
+# whole (cells again on every open). Artifact and fetched bytes stream, under their own caps.
+_MAX_MEMBER_BYTES = 16 * 1024 * 1024
 _COPY_CHUNK_BYTES = 1024 * 1024
+_COMMITTED_ROOT_FILES = ("pyproject.toml", "uv.lock", "renv.lock", ".gitignore")
 
 
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -150,6 +154,12 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
             f"the bundle expands to {expanded} bytes, over the "
             f"{_MAX_UNCOMPRESSED_BYTES // (1024**3)} GiB import cap"
         )
+    for info in archive.infolist():
+        if _read_whole(info.filename) and info.file_size > _MAX_MEMBER_BYTES:
+            raise NotASnapshotError(
+                f"the bundle's {info.filename!r} is {info.file_size} bytes, over the "
+                f"{_MAX_MEMBER_BYTES // (1024**2)} MiB cap for a file the import reads whole"
+            )
     names = set(archive.namelist())
     if "artifacts.json" not in names:
         raise NotASnapshotError(
@@ -193,6 +203,15 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
             f"does not contain ({', '.join(missing)})"
         )
     return manifest, notebook_toml
+
+
+def _read_whole(name: str) -> bool:
+    """Whether the import (or a later open) holds this member in memory at once."""
+    return (
+        name in ("artifacts.json", "notebook.toml", "fetch/index.json", *_COMMITTED_ROOT_FILES)
+        or name.startswith("cells/")
+        or (name.startswith("outputs/") and name.endswith("/console.json"))
+    )
 
 
 # --- Identity ---
@@ -408,9 +427,9 @@ def _write_committed_files(
         if name.startswith("cells/") and not name.endswith("/"):
             target = _member_target(dest, name)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(archive.read(name))
-        elif name in ("pyproject.toml", "uv.lock", "renv.lock", ".gitignore"):
-            (dest / name).write_bytes(archive.read(name))
+            _copy_member(archive, name, target)
+        elif name in _COMMITTED_ROOT_FILES:
+            _copy_member(archive, name, dest / name)
 
     if new_id != old_id:
         notebook_toml["notebook_id"] = new_id
@@ -421,6 +440,11 @@ def _write_committed_files(
 
     # Keep the imported .strata/ out of git, as `strata new` does, if the bundle had none.
     write_gitignore(dest)
+
+
+def _copy_member(archive: zipfile.ZipFile, name: str, target: Path) -> None:
+    with archive.open(name) as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst, _COPY_CHUNK_BYTES)
 
 
 def _write_runtime_state(

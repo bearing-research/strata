@@ -225,8 +225,10 @@ Content-Type: multipart/form-data
 Form fields as for the Jupyter import (`file`, `name`, `parent_path`), where
 `file` is a bundle from `GET …/export?fmt=snapshot`. The upload is streamed to
 disk and capped at 2 GiB, since an `include=all` snapshot is as large as the
-notebook's store. A bundle whose files would expand to more than 16 GiB is
-refused with `400` before anything is extracted.
+notebook's store. A bundle whose files would expand to more than 16 GiB, or
+holding a file the import reads whole (manifest, `notebook.toml`, a cell, a
+lockfile, a console log) over 16 MiB, is refused with `400` before anything is
+extracted.
 
 Turns the bundle into a notebook directory and opens a session on it. Cells
 whose artifacts the bundle carried are cache hits before anything runs; cells it
