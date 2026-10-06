@@ -1139,10 +1139,10 @@ class CellExecutor:
             if fanout_variant is not None:
                 provenance_hash = derive_subkey(provenance_hash, f"variant={fanout_variant}")
 
-            # RW mounts have side effects: not cacheable.
-            if prov.has_rw_mount:
-                use_cache = False
-            if prov.annotations.nocache:
+            # RW mounts have side effects: not cacheable. A rerun bypasses the cache but still
+            # records a cacheable leaf's console, or the next plain run replays an older one.
+            cacheable = not prov.has_rw_mount and not prov.annotations.nocache
+            if not cacheable:
                 use_cache = False
 
             worker_spec = resolve_worker_spec(
@@ -1391,7 +1391,9 @@ class CellExecutor:
                 cell_id,
                 consumed_vars,
                 use_cache,
-                cached_artifact is not None or bool(cached_display_outputs),
+                cached_artifact is not None
+                or bool(cached_display_outputs)
+                or cached_console is not None,
             )
 
             if cached_artifact is not None or (
@@ -1597,7 +1599,7 @@ class CellExecutor:
                             exec_result.display_outputs[-1] if exec_result.display_outputs else None
                         )
                         # Cache a leaf cell's console by provenance so a re-run replays it.
-                        if use_cache and not consumed_vars:
+                        if cacheable and not consumed_vars:
                             self._store_console_outputs(
                                 cell_id,
                                 provenance_hash,
@@ -5886,7 +5888,6 @@ class CellExecutor:
                         payload,
                         batch_tmpdir,
                         executed_sources=executed_sources,
-                        use_cache=use_cache,
                     )
                 )
                 cell_id_pl = payload["cell_id"]
@@ -6213,7 +6214,6 @@ class CellExecutor:
         batch_tmpdir: Path,
         *,
         executed_sources: dict[str, str],
-        use_cache: bool,
     ) -> dict[str, Any]:
         """Service a ``persist`` request from the batch harness.
 
@@ -6291,14 +6291,14 @@ class CellExecutor:
         if not stored_ok:
             return {"ok": False, "error": "store_outputs returned False"}
 
-        # A leaf's console is its record, as in single-cell: rerun-all and ``# @nocache``
-        # store none, so the next Run All and the next open run the cell again.
+        # A leaf's console is its record, as in single-cell. Rerun All stores it too, or the
+        # next Run All replays an older run's; only ``# @nocache`` stores none.
         consumed_vars = (
             self.session.dag.consumed_variables.get(cell_id, set())
             if self.session.dag is not None
             else set()
         )
-        if use_cache and not prov.annotations.nocache and not consumed_vars:
+        if not prov.annotations.nocache and not consumed_vars:
             self._store_console_outputs(
                 cell_id,
                 provenance_hash,

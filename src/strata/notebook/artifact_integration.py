@@ -357,7 +357,7 @@ class NotebookArtifactManager:
         """Each of a cell's outputs with the digest of its bytes, sorted by name.
 
         A row stored before digests existed is filled from its blob here; ``None``
-        only when it has no blob.
+        only when it has no blob. A leaf's ``__console__`` record is not an output.
         """
         return [
             {
@@ -367,6 +367,7 @@ class NotebookArtifactManager:
                 "content_sha256": self.artifact_store.content_digest(artifact.id, artifact.version),
             }
             for name, artifact in sorted(self.list_cell_artifacts(cell_id))
+            if name != "__console__"
         ]
 
     def get_artifact_info(self, artifact_id: str, version: int) -> ArtifactInfo | None:

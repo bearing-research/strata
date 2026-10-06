@@ -271,6 +271,45 @@ class TestCellExecutor:
         assert second.stderr == ""
 
     @pytest.mark.asyncio
+    async def test_plain_run_after_a_rerun_replays_the_reruns_console(
+        self, sample_notebook, tmp_path
+    ):
+        """A rerun bypasses the cache but still records the leaf's console, so the next plain
+        run replays what the rerun printed, not an older run's output.
+        """
+        data = tmp_path / "data.txt"
+        data.write_text("v1")
+        source = f"import pathlib\nprint(pathlib.Path({str(data)!r}).read_text())\n"
+        executor = CellExecutor(sample_notebook)
+
+        first = await executor.execute_cell("cell1", source)
+        assert first.stdout == "v1\n"
+        data.write_text("v2")
+        rerun = await executor.execute_cell_rerun("cell1", source)
+        assert rerun.cache_hit is False
+        assert rerun.stdout == "v2\n"
+
+        plain = await executor.execute_cell("cell1", source)
+        assert plain.cache_hit is True
+        assert plain.stdout == "v2\n"
+        cell = sample_notebook.notebook_state.get_cell("cell1")
+        assert cell.console_stdout == "v2\n"
+
+    @pytest.mark.asyncio
+    async def test_nocache_leaf_stores_no_console_on_rerun(self, sample_notebook):
+        """``# @nocache`` keeps a leaf out of the cache on every run mode."""
+        source = "# @nocache\nprint('hi')\n"
+        executor = CellExecutor(sample_notebook)
+
+        assert (await executor.execute_cell("cell1", source)).success
+        assert (await executor.execute_cell_rerun("cell1", source)).success
+
+        manager = sample_notebook.get_artifact_manager()
+        assert [name for name, _ in manager.list_cell_artifacts("cell1")] == []
+        again = await executor.execute_cell("cell1", source)
+        assert again.cache_hit is False
+
+    @pytest.mark.asyncio
     async def test_execute_with_error(self, sample_notebook):
         executor = CellExecutor(sample_notebook)
 

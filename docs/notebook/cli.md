@@ -60,8 +60,8 @@ on two machines can be diffed digest by digest with no server involved.
 `strata run` stores the variables of leaf cells too (cells nothing downstream
 reads, which the notebook otherwise keeps no artifact for), so the notebook's
 final results have digests to compare; a value that cannot be serialized is
-skipped. Display outputs and a leaf's cached console appear as `__display__N`
-and `__console__`. An output stored before digests were recorded gets its
+skipped. Display outputs appear as `__display__N`; a leaf's cached console is
+not listed. An output stored before digests were recorded gets its
 digest computed from its bytes when the report is written. The ZIP export's
 `provenance.json` lists the same `outputs` per cell.
 

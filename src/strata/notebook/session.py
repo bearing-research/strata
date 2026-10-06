@@ -1356,18 +1356,25 @@ class NotebookSession:
         Keyed by ``derive_subkey(provenance_hash, "__console__")``, so it replays only
         on an identical provenance.
         """
+        artifact = self._cached_console_record(cell_id, provenance_hash)
+        if artifact is None:
+            return None
+        try:
+            blob = self.artifact_manager.load_artifact_data(artifact.id, artifact.version)
+            payload = json.loads(blob)
+        except (ValueError, OSError, KeyError):
+            return None
+        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
+
+    def _cached_console_record(self, cell_id: str, provenance_hash: str) -> ArtifactVersion | None:
+        """The leaf's console artifact for this exact provenance, without reading its blob."""
         notebook_id = self.notebook_state.id
         artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___console__"
         expected_hash = hashlib.sha256(f"{provenance_hash}:__console__".encode()).hexdigest()
         artifact = self.artifact_manager.artifact_store.get_latest_version(artifact_id)
         if artifact is None or artifact.provenance_hash != expected_hash:
             return None
-        try:
-            blob = self.artifact_manager.load_artifact_data(artifact_id, artifact.version)
-            payload = json.loads(blob)
-        except (ValueError, OSError, KeyError):
-            return None
-        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
+        return artifact
 
     def _hydrate_display_output(self, output: CellOutput | dict[str, Any]) -> dict[str, Any] | None:
         """Return a serialized display payload with any transient inline data added."""
@@ -1794,7 +1801,7 @@ class NotebookSession:
         if not consumed_vars:
             # A leaf's only product is its console, stored under its own subkey; that is
             # what the executor replays as a hit, so it is what makes the cell ready.
-            if self._resolve_cached_console(cell_id, provenance_hash) is not None:
+            if self._cached_console_record(cell_id, provenance_hash) is not None:
                 return {}
             return None
 
