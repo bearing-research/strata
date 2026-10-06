@@ -2,8 +2,9 @@
 
 Named ``cell_test_conftest`` so the project's own pytest run does not load it;
 the cell-test runner copies it to ``<rundir>/conftest.py``. The run dir also
-holds ``inputs.json`` (the serializer's path, the input dir and a
-``{var_name: {content_type, file}}`` map), ``cell_source.py``, the
+holds ``inputs.json`` (the serializer's path, the input dir, a
+``{var_name: {content_type, file}}`` map and a ``{name: local_path}`` map of
+mounts and fetches), ``cell_source.py``, the
 user's tests staged as ``test_<cell>.py`` (so pytest rewrites their asserts),
 and the ``results.json`` this plugin writes on session finish.
 """
@@ -39,6 +40,9 @@ def _load_inputs() -> dict[str, object]:
             )
         except Exception as exc:  # noqa: BLE001 - e.g. R-only; a test reading it fails on the name
             print(f"Input {name} was not loaded: {type(exc).__name__}: {exc}", file=sys.stderr)
+    # Mounts and fetches are bound as ``Path`` objects, as in a run.
+    for name, local_path in manifest.get("mounts", {}).items():
+        inputs[name] = Path(local_path)
     return inputs
 
 

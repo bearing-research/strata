@@ -19,6 +19,7 @@ from strata.notebook.runtime_state import (
 from strata.notebook.writer import (
     add_cell_to_notebook,
     create_notebook,
+    remove_cell_from_notebook,
     write_cell,
     write_cell_tests,
 )
@@ -56,6 +57,16 @@ def test_empty_test_source_removes_file(notebook_dir):
     state = parse_notebook(notebook_dir)
     cell = next(c for c in state.cells if c.id == "cell1")
     assert cell.test_source == ""
+
+
+def test_removing_the_cell_removes_its_test_file(notebook_dir):
+    write_cell_tests(notebook_dir, "cell1", "def test_x(cell): assert True\n")
+    test_file = notebook_dir / "cells" / "cell1.test.py"
+
+    remove_cell_from_notebook(notebook_dir, "cell1")
+
+    assert not test_file.exists()
+    assert list((notebook_dir / "cells").iterdir()) == []
 
 
 def test_write_tests_unknown_cell_raises(notebook_dir):

@@ -280,6 +280,49 @@ def test_collect_referenced_env_keys_syntax_error_returns_empty():
     assert collect_referenced_env_keys("def broken(:") == set()
 
 
+def test_collect_referenced_env_keys_r_sys_getenv():
+    source = (
+        't <- Sys.getenv("THRESHOLD")\n'
+        "u <- Sys.getenv( x = 'MODE', unset = \"dev\")\n"
+        'v <- Sys.getenv(c("A", "B"))\n'
+        "w <- Sys.getenv(key_var)\n"
+    )
+    assert collect_referenced_env_keys(source, "r") == {"THRESHOLD", "MODE", "A", "B"}
+    # ``t <- Sys.getenv(...)`` parses as Python, so the language decides the scan.
+    assert collect_referenced_env_keys(source) == set()
+
+
+def test_narrow_env_for_provenance_r_cell_keeps_sys_getenv_key():
+    source = 't <- as.numeric(Sys.getenv("THRESHOLD"))'
+    resolved = {"THRESHOLD": "0.5", "UNUSED": "x"}
+    assert narrow_env_for_provenance(source, resolved, language="r") == {"THRESHOLD": "0.5"}
+
+
+async def test_r_cell_sys_getenv_enters_executor_and_staleness_env_hash(tmp_path):
+    """The executor and staleness both fold an R cell's ``Sys.getenv`` key (no Rscript needed)."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path / "nb", "nb")
+    add_cell_to_notebook(notebook_dir, "r1", None, language="r")
+    write_cell(notebook_dir, "r1", 't <- Sys.getenv("THRESHOLD")')
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    cell = session.notebook_state.get_cell("r1")
+    executor = CellExecutor(session)
+
+    hashes = []
+    for value in ("0.5", "0.9"):
+        cell.env = {"THRESHOLD": value}
+        prov = await executor._compute_cell_provenance("r1", cell.source)
+        staleness_env = session._collect_runtime_env(cell)
+        assert prov.runtime_env == {"THRESHOLD": value}
+        assert staleness_env == {"THRESHOLD": value}
+        hashes.append(prov.env_hash)
+    assert hashes[0] != hashes[1]
+
+
 def test_narrow_env_for_provenance_drops_unreferenced_keys():
     """Notebook-level env vars that a cell does not reference are dropped."""
     source = "import os\nx = os.environ['USED']"

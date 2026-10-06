@@ -42,7 +42,7 @@ def imported_names(source: str) -> set[str]:
             for alias in node.names:
                 if alias.name == "*":
                     continue
-                names.add(alias.asname or alias.name)
+                names.add(alias.asname or alias.name.split(".")[0])
     return names
 
 
@@ -59,6 +59,11 @@ def _collect_name_targets(target: ast.expr, out: set[str]) -> None:
             _collect_name_targets(elt, out)
     elif isinstance(target, ast.Starred):
         _collect_name_targets(target.value, out)
+
+
+def _type_param_names(params: list[ast.type_param]) -> set[str]:
+    """Names bound by PEP 695 type parameters (``[T, *Ts, **P]``)."""
+    return {p.name for p in params if isinstance(p, (ast.TypeVar, ast.TypeVarTuple, ast.ParamSpec))}
 
 
 def _has_inplace_true(keywords: list[ast.keyword]) -> bool:
@@ -82,10 +87,11 @@ class VariableAnalyzer(ast.NodeVisitor):
         # Subscript/attribute mutations. Unlike pure rebinds these stay in
         # references: the cell depends on an upstream producer.
         self.mutation_defines: set[str] = set()
-        # ``df = df.dropna()`` style: the RHS read is a genuine upstream
-        # reference and survives the pure-define filter.
-        self.rebind_with_self_read: set[str] = set()
-        # Pure defines so far in source order: tells ``x = 0\nx += 1``
+        # Names read before the cell binds them (``df = df.dropna()``,
+        # ``print(x); x = 5``): genuine upstream references that survive the
+        # pure-define filter.
+        self.read_before_define: set[str] = set()
+        # Names bound so far in source order: tells ``x = 0\nx += 1``
         # (local) from a bare ``x += 1`` (upstream read).
         self._defined_so_far: set[str] = set()
         self._in_nested_scope = False
@@ -107,23 +113,10 @@ class VariableAnalyzer(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """Handle: x = ... or x, y = ..."""
-        # Needed before visiting the RHS to catch read-before-write, including
-        # swaps like ``a, b = b, a``.
-        pure_target_names: set[str] = set()
-        for target in node.targets:
-            _collect_name_targets(target, pure_target_names)
         all_underscore = all(self._is_pure_underscore(target) for target in node.targets)
         if not all_underscore:
-            # A target read on its own RHS is an upstream reference unless
-            # the cell pure-defined it earlier (``x = 0; x = x + 1``).
-            for child in ast.walk(node.value):
-                if (
-                    isinstance(child, ast.Name)
-                    and isinstance(child.ctx, ast.Load)
-                    and child.id in pure_target_names
-                    and child.id not in self._defined_so_far
-                ):
-                    self.rebind_with_self_read.add(child.id)
+            # The RHS runs before the targets bind, so ``x = x + 1`` and swaps
+            # like ``a, b = b, a`` read the upstream value.
             self.visit(node.value)
         for target in node.targets:
             self._add_assign_target(target)
@@ -146,7 +139,7 @@ class VariableAnalyzer(ast.NodeVisitor):
         if isinstance(node.target, ast.Name):
             if node.target.id not in self._defined_so_far:
                 self.references.add(node.target.id)
-                self.rebind_with_self_read.add(node.target.id)
+                self.read_before_define.add(node.target.id)
         self._add_assign_target(node.target)
         self.visit(node.value)
         if isinstance(node.target, ast.Name):
@@ -160,6 +153,8 @@ class VariableAnalyzer(ast.NodeVisitor):
             self.visit(node.annotation)
         if node.value:
             self.visit(node.value)
+            if isinstance(node.target, ast.Name):
+                self._defined_so_far.add(node.target.id)
 
     def visit_Call(self, node: ast.Call) -> None:
         """Treat ``X.method(..., inplace=True)`` as a mutation of ``X``.
@@ -183,12 +178,14 @@ class VariableAnalyzer(ast.NodeVisitor):
         """
         self.defines.add(node.name)
         self._visit_function_signature(node)
+        self._defined_so_far.add(node.name)
         # Don't recurse into function body (it's a nested scope)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Handle: async def f(): ..."""
         self.defines.add(node.name)
         self._visit_function_signature(node)
+        self._defined_so_far.add(node.name)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Handle: class C: the name is defined, the body is a nested scope.
@@ -199,10 +196,14 @@ class VariableAnalyzer(ast.NodeVisitor):
         self.defines.add(node.name)
         for decorator in node.decorator_list:
             self.visit(decorator)
+        old_local_vars = self._local_vars
+        self._local_vars = self._local_vars | _type_param_names(node.type_params)
         for base in node.bases:
             self.visit(base)
         for kw in node.keywords:
             self.visit(kw.value)
+        self._local_vars = old_local_vars
+        self._defined_so_far.add(node.name)
         # Don't recurse into class body
 
     def _visit_function_signature(
@@ -218,6 +219,9 @@ class VariableAnalyzer(ast.NodeVisitor):
             if default is not None:
                 self.visit(default)
         if not self._future_annotations:
+            # PEP 695 type parameters are local to the signature's annotations.
+            old_local_vars = self._local_vars
+            self._local_vars = self._local_vars | _type_param_names(node.type_params)
             if node.returns is not None:
                 self.visit(node.returns)
             for arg_list in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs):
@@ -228,12 +232,14 @@ class VariableAnalyzer(ast.NodeVisitor):
                 self.visit(node.args.vararg.annotation)
             if node.args.kwarg is not None and node.args.kwarg.annotation is not None:
                 self.visit(node.args.kwarg.annotation)
+            self._local_vars = old_local_vars
 
     def visit_Import(self, node: ast.Import) -> None:
-        """Handle: import foo or import foo as bar."""
+        """Handle: import foo, import foo as bar, or import foo.bar (binds ``foo``)."""
         for alias in node.names:
-            name = alias.asname if alias.asname else alias.name
+            name = alias.asname if alias.asname else alias.name.split(".")[0]
             self.defines.add(name)
+            self._defined_so_far.add(name)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Handle: from foo import bar or from foo import *."""
@@ -244,11 +250,13 @@ class VariableAnalyzer(ast.NodeVisitor):
             else:
                 name = alias.asname if alias.asname else alias.name
                 self.defines.add(name)
+                self._defined_so_far.add(name)
 
     def visit_For(self, node: ast.For) -> None:
         """Handle: for x in ... — x is defined at top level."""
         self._add_assign_target(node.target)
         self.visit(node.iter)
+        _collect_name_targets(node.target, self._defined_so_far)
         for stmt in node.body:
             self.visit(stmt)
         for stmt in node.orelse:
@@ -260,6 +268,8 @@ class VariableAnalyzer(ast.NodeVisitor):
             if item.optional_vars:
                 self._add_assign_target(item.optional_vars)
             self.visit(item.context_expr)
+            if item.optional_vars:
+                _collect_name_targets(item.optional_vars, self._defined_so_far)
         for stmt in node.body:
             self.visit(stmt)
 
@@ -269,6 +279,8 @@ class VariableAnalyzer(ast.NodeVisitor):
             if item.optional_vars:
                 self._add_assign_target(item.optional_vars)
             self.visit(item.context_expr)
+            if item.optional_vars:
+                _collect_name_targets(item.optional_vars, self._defined_so_far)
         for stmt in node.body:
             self.visit(stmt)
 
@@ -278,6 +290,8 @@ class VariableAnalyzer(ast.NodeVisitor):
             self.defines.add(node.name)
         if node.type:
             self.visit(node.type)
+        if node.name:
+            self._defined_so_far.add(node.name)
         for stmt in node.body:
             self.visit(stmt)
 
@@ -286,6 +300,39 @@ class VariableAnalyzer(ast.NodeVisitor):
         if isinstance(node.target, ast.Name):
             self.defines.add(node.target.id)
         self.visit(node.value)
+        if isinstance(node.target, ast.Name):
+            self._defined_so_far.add(node.target.id)
+
+    def visit_TypeAlias(self, node: ast.TypeAlias) -> None:
+        """Handle: type A = ... (PEP 695); the lazy value's names come from symtable."""
+        self._add_assign_target(node.name)
+        _collect_name_targets(node.name, self._defined_so_far)
+
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:
+        """Handle: case [x] / case P() as x: the capture binds x."""
+        if node.pattern is not None:
+            self.visit(node.pattern)
+        if node.name is not None:
+            self._bind_capture(node.name)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:
+        """Handle: case [first, *rest]."""
+        if node.name is not None:
+            self._bind_capture(node.name)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+        """Handle: case {"k": v, **rest}."""
+        for key in node.keys:
+            self.visit(key)
+        for pattern in node.patterns:
+            self.visit(pattern)
+        if node.rest is not None:
+            self._bind_capture(node.rest)
+
+    def _bind_capture(self, name: str) -> None:
+        self.defines.add(name)
+        self.pure_defines.add(name)
+        self._defined_so_far.add(name)
 
     def visit_Delete(self, node: ast.Delete) -> None:
         """Handle: del x — x is referenced but not defined."""
@@ -311,6 +358,8 @@ class VariableAnalyzer(ast.NodeVisitor):
             # Skip names local to the current scope (e.g. lambda params)
             if node.id not in self._local_vars:
                 self.references.add(node.id)
+                if node.id not in self._defined_so_far:
+                    self.read_before_define.add(node.id)
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         """``[elt for x in iter if cond]``: loop targets are local; the first iter is outer."""
@@ -465,8 +514,7 @@ def _collect_body_refs(source: str) -> set[str]:
 
     refs: set[str] = set()
     for child in root.get_children():
-        if child.get_type() in ("function", "class"):
-            _walk_body(child, refs)
+        _walk_body(child, refs)
     return refs
 
 
@@ -486,8 +534,7 @@ def _walk_body(scope: symtable.SymbolTable, refs: set[str]) -> None:
         ):
             refs.add(sym.get_name())
     for inner in scope.get_children():
-        if inner.get_type() in ("function", "class"):
-            _walk_body(inner, refs)
+        _walk_body(inner, refs)
 
 
 def _collect_global_writes(source: str) -> tuple[set[str], set[str]]:
@@ -507,8 +554,7 @@ def _collect_global_writes(source: str) -> tuple[set[str], set[str]]:
     writes: set[str] = set()
     read_writes: set[str] = set()
     for child in root.get_children():
-        if child.get_type() in ("function", "class"):
-            _walk_global_writes(child, writes, read_writes)
+        _walk_global_writes(child, writes, read_writes)
     return writes, read_writes
 
 
@@ -523,8 +569,7 @@ def _walk_global_writes(
             if sym.is_referenced():
                 read_writes.add(sym.get_name())
     for inner in scope.get_children():
-        if inner.get_type() in ("function", "class"):
-            _walk_global_writes(inner, writes, read_writes)
+        _walk_global_writes(inner, writes, read_writes)
 
 
 def analyze_cell(source: str) -> CellAnalysis:
@@ -560,8 +605,8 @@ def analyze_cell(source: str) -> CellAnalysis:
         if not v.startswith("_") and v in set(defines) and v not in analyzer.pure_defines
     }
     # Pure defines are filtered from references (intra-cell rebinds);
-    # mutation-defines and ``df = df.dropna()`` self-reads are kept.
-    pure_defined_names = set(defines) - effective_mutation_defines - analyzer.rebind_with_self_read
+    # mutation-defines and reads before the cell's own binding are kept.
+    pure_defined_names = set(defines) - effective_mutation_defines - analyzer.read_before_define
     combined_refs = set(analyzer.references) | nested_refs
     references = [
         v

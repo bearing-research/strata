@@ -22,6 +22,26 @@ def _analyzed_cell(cell_id: str, source: str) -> CellAnalysisWithId:
     )
 
 
+class TestAnalyzerEdges:
+    """Analyzer bindings that decide whether a downstream cell gets its edge."""
+
+    def test_dotted_import_wires_the_root_module(self):
+        cells = [
+            _analyzed_cell("imp", "import os.path"),
+            _analyzed_cell("use", "name = os.path.basename('/a/b')"),
+        ]
+        dag = NotebookDag.from_cells(cells)
+        assert dag.cell_upstream["use"] == ["imp"]
+
+    def test_read_before_redefinition_wires_the_upstream(self):
+        cells = [
+            _analyzed_cell("up", "x = 1"),
+            _analyzed_cell("use", "print(x)\nx = 5"),
+        ]
+        dag = NotebookDag.from_cells(cells)
+        assert dag.cell_upstream["use"] == ["up"]
+
+
 class TestInplaceMutationRouting:
     """An ``inplace=True`` method call makes the mutating cell a (re)producer of the receiver.
 

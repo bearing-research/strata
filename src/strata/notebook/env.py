@@ -12,6 +12,7 @@ import ast
 import hashlib
 import json
 import logging
+import re
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -19,15 +20,27 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ``Sys.getenv("KEY")``, ``Sys.getenv(x = 'KEY')``, ``Sys.getenv(c("A", "B"))``.
+_R_GETENV = re.compile(r"""Sys\.getenv\(\s*(?:x\s*=\s*)?(c\([^)]*\)|"[^"]*"|'[^']*')""")
+_R_STRING = re.compile(r""""([^"]*)"|'([^']*)'""")
 
-def collect_referenced_env_keys(source: str) -> set[str]:
+
+def collect_referenced_env_keys(source: str, language: str = "python") -> set[str]:
     """Return the env var keys the cell source references statically.
 
-    Detects ``os.environ["KEY"]``, ``os.environ.get("KEY")`` and
+    Python: ``os.environ["KEY"]``, ``os.environ.get("KEY")`` and
     ``os.getenv("KEY")``, including aliased ``os``/``environ``/``getenv``.
-    Dynamic lookups are ignored: the result is a lower bound for narrowing
-    provenance, not a full dependency analysis.
+    R: ``Sys.getenv`` with literal keys. Dynamic lookups are ignored: the
+    result is a lower bound for narrowing provenance, not a full dependency
+    analysis.
     """
+    if language == "r":
+        return {
+            a or b
+            for match in _R_GETENV.finditer(source)
+            for a, b in _R_STRING.findall(match.group(1))
+            if a or b
+        }
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -303,14 +316,16 @@ def narrow_env_for_provenance(
     source: str,
     resolved_env: Mapping[str, str],
     declared_keys: set[str] | None = None,
+    language: str = "python",
 ) -> dict[str, str]:
     """Return the subset of ``resolved_env`` that participates in provenance.
 
-    That is keys the source references (``os.environ``/``os.getenv``) plus
-    ``declared_keys`` (``# @env`` annotations, per-cell env overrides). Ambient
-    notebook env vars a cell neither reads nor declares do not affect its hash.
+    That is keys the source references (``os.environ``/``os.getenv``, R
+    ``Sys.getenv``) plus ``declared_keys`` (``# @env`` annotations, per-cell env
+    overrides). Ambient notebook env vars a cell neither reads nor declares do
+    not affect its hash.
     """
-    referenced = collect_referenced_env_keys(source)
+    referenced = collect_referenced_env_keys(source, language)
     relevant = referenced | (declared_keys or set())
     return {k: v for k, v in resolved_env.items() if k in relevant}
 

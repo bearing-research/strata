@@ -193,6 +193,9 @@ def _coerce_one(descriptor: WidgetDescriptor, value: Any) -> Any:
             num = float(value)
         except (TypeError, ValueError):
             return None
+        # NaN/inf have no JSON form: persisted, they make the notebook unopenable.
+        if not math.isfinite(num):
+            return None
         low, high = descriptor.params.get("min"), descriptor.params.get("max")
         if isinstance(low, int | float) and num < low:
             num = float(low)

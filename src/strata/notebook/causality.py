@@ -93,7 +93,9 @@ def compute_causality_on_staleness(
         runtime_env = drop_blanked_secrets(cell.env)
         runtime_env.update(annotations.env)
         declared_env_keys = set(annotations.env) | set(cell.env_overrides or {})
-        provenance_env = narrow_env_for_provenance(cell.source, runtime_env, declared_env_keys)
+        provenance_env = narrow_env_for_provenance(
+            cell.source, runtime_env, declared_env_keys, language=cell.language
+        )
         effective_worker = annotations.worker or cell.worker or session.notebook_state.worker
         env_hash = compute_execution_env_hash(
             session.path,

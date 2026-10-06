@@ -213,6 +213,20 @@ async def test_remote_ro_mount_retries_after_partial_materialization_failure(
     assert (resolved["raw_data"].local_path / "nested" / "b.txt").read_bytes() == b"b"
 
 
+@pytest.mark.parametrize("dirname", ["My Notebooks", "café"])
+async def test_local_file_uri_mount_with_percent_encoded_path(tmp_path: Path, dirname) -> None:
+    """``Path.as_uri()`` percent-encodes spaces and non-ASCII; the mount must decode it."""
+    data = tmp_path / dirname / "zones.csv"
+    data.parent.mkdir()
+    data.write_text("zone\n1\n")
+    mount = MountSpec(name="zones", uri=data.as_uri(), mode=MountMode.READ_ONLY)
+
+    resolved = await MountResolver(cache_dir=tmp_path / "cache").prepare_mounts([mount])
+
+    assert resolved["zones"].local_path == data
+    assert resolved["zones"].local_path.read_text() == "zone\n1\n"
+
+
 def test_resolver_credentials_default_to_empty_dict(tmp_path: Path) -> None:
     resolver = MountResolver(cache_dir=tmp_path / "cache")
     assert resolver.credentials == {}

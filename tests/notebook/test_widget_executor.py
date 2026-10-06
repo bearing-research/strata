@@ -107,6 +107,20 @@ def test_persist_cell_widget_values_merges(tmp_path):
     assert load_runtime_state(tmp_path).cells["c1"].widget_values == {"alpha": 0.25, "mode": "a"}
 
 
+def test_a_persisted_non_finite_value_reads_back_as_unset(tmp_path):
+    """Older builds wrote NaN into runtime.json; the open payload cannot carry it."""
+    path = tmp_path / ".strata" / "runtime.json"
+    path.parent.mkdir()
+    path.write_text(
+        '{"cells": {"c1": {"widget_values": {"alpha": NaN, "beta": Infinity, "m": "a"}}}}'
+    )
+
+    values = load_runtime_state(tmp_path).cells["c1"].widget_values
+
+    assert values == {"m": "a"}
+    json.dumps(values, allow_nan=False)
+
+
 def test_serialize_cell_emits_widget_block(widget_session):
     """serialize_cell attaches descriptors and current values for widget cells."""
     controls = widget_session.notebook_state.get_cell("controls")

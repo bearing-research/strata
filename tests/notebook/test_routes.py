@@ -139,6 +139,25 @@ def test_open_notebook(client, tmp_path):
     assert "session_open" in response.headers["Server-Timing"]
 
 
+@pytest.mark.parametrize("case", ["port_typo", "corrupt_index"])
+def test_open_notebook_with_a_bad_fetch_still_opens(client, tmp_path, case):
+    """A typo'd ``@fetch`` URL or a damaged fetch index is the cell's problem, not the open's."""
+    notebook_dir = create_notebook(tmp_path, "Fetch open")
+    add_cell_to_notebook(notebook_dir, "c1")
+    url = "http://localhost:80a/x.csv" if case == "port_typo" else "https://example.invalid/x"
+    write_cell(notebook_dir, "c1", f"# @fetch zones {url}\nrows = 1")
+    if case == "corrupt_index":
+        fetch_dir = notebook_dir / ".strata" / "fetch"
+        fetch_dir.mkdir(parents=True, exist_ok=True)
+        (fetch_dir / "index.json").write_text('{"a": 1}\n}')
+
+    response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+
+    assert response.status_code == 200, response.text
+    (cell,) = response.json()["cells"]
+    assert cell["status"] != "ready"
+
+
 def test_open_syncs_the_environment_in_a_job_off_the_event_loop(client, monkeypatch, tmp_path):
     """``uv sync`` and the renv restore run as an environment job, not inline in the route."""
     from strata.notebook.session import NotebookSession
@@ -656,6 +675,19 @@ def test_validate_recent_notebooks_filters_to_real_notebook_dirs(client, tmp_pat
     response = client.post(
         "/v1/notebooks/recents/validate",
         json={"paths": [str(real), str(missing), str(bare_dir), "", "   "]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"valid": [str(real)]}
+
+
+def test_validate_recent_notebooks_skips_a_path_with_a_nul_byte(client, tmp_path):
+    """One bad localStorage entry must not hide every valid recent."""
+    real = create_notebook(tmp_path, "Real Notebook")
+
+    response = client.post(
+        "/v1/notebooks/recents/validate",
+        json={"paths": [str(tmp_path / "a\u0000b"), str(real)]},
     )
 
     assert response.status_code == 200

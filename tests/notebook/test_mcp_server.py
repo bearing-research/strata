@@ -342,6 +342,30 @@ async def test_authoring_add_edit_move_remove_and_broadcast(sm_with_session, mon
 
 
 @pytest.mark.asyncio
+async def test_an_authoring_tool_reloads_the_live_session_once(sm_with_session, monkeypatch):
+    """Each reload recomputes staleness on the event loop; one per edit is enough."""
+    sm, session_id, _ = sm_with_session
+    session = sm.get_session(session_id)
+    reloads = []
+    real_reload = session.reload
+
+    def counting_reload(*args, **kwargs):
+        reloads.append(1)
+        return real_reload(*args, **kwargs)
+
+    async def fake_sync(notebook_id, session):
+        del notebook_id, session
+
+    monkeypatch.setattr(session, "reload", counting_reload)
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+
+    added = await _add_cell(sm, session_id, "z = 9", after="a", language="python")
+
+    assert len(reloads) == 1
+    assert _get_cell(sm, session_id, added["id"])["source"] == "z = 9"
+
+
+@pytest.mark.asyncio
 async def test_an_agent_edit_honours_the_soft_lock(sm_with_session, monkeypatch):
     """MCP edits honour the same soft lock as REST and the WebSocket.
 

@@ -594,12 +594,22 @@ class CellExecutor:
         source = cell.source
         await self._materialize_upstreams(cell_id)
 
-        source_hash = compute_source_hash(source)
-        test_source_hash = hashlib.sha256(test_source.encode("utf-8")).hexdigest()
-        input_hashes = self._collect_input_hashes(cell_id)
-        input_fingerprint = hashlib.sha256(
-            "|".join(sorted(input_hashes)).encode("utf-8")
-        ).hexdigest()
+        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
+            cell_id, source, test_source
+        )
+        # The same fetch, mount and env inputs a run of the cell gets.
+        annotations = parse_annotations(source)
+        mount_specs = self._resolve_cell_mount_specs(cell_id, source)
+        _, fetched, _, _, _, _ = await self._resolve_fetches(annotations.fetches)
+        mount_specs = [
+            *mount_specs,
+            *(
+                MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
+                for name, path in fetched.items()
+            ),
+        ]
+        resolved_mounts = await self._prepare_mounts(mount_specs)
+        runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
 
         # Tests run the cell's source, so they are refused or dropped to the harness user
         # like any harness.
@@ -637,7 +647,8 @@ class CellExecutor:
                     test_source=test_source,
                     inputs=input_specs,
                     input_dir=blob_dir,
-                    env=identity_env(self._harness_env(), harness_user),
+                    mounts={name: str(rm.local_path) for name, rm in resolved_mounts.items()},
+                    env=identity_env(self._harness_env(runtime_env), harness_user),
                     run_as=harness_user,
                 )
 
@@ -977,7 +988,12 @@ class CellExecutor:
         declared_env_keys = set(annotations.env) | set(
             getattr(cell_state, "env_overrides", {}) or {}
         )
-        provenance_env = narrow_env_for_provenance(source, runtime_env, declared_env_keys)
+        provenance_env = narrow_env_for_provenance(
+            source,
+            runtime_env,
+            declared_env_keys,
+            language=getattr(cell_state, "language", "python"),
+        )
         env_hash = compute_execution_env_hash(
             self.session.path,
             provenance_env,
@@ -3456,12 +3472,13 @@ class CellExecutor:
         )
 
         store = self.session.get_artifact_manager().artifact_store
+        tenant = self.session.opened_by[1] if self.session.opened_by else None
         fingerprints: list[str] = []
         datasets: dict[str, DatasetInput] = {}
         error: str | None = None
         for spec in sorted(dataset_specs, key=lambda item: item.name):
             try:
-                registry = registry_for(self._lake_config())
+                registry = registry_for(self._lake_config(), tenant)
                 resolved = await asyncio.to_thread(registry.resolve, spec)
                 dataset = await asyncio.to_thread(copy_into, registry, resolved, store)
             except DatasetError as exc:

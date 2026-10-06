@@ -124,8 +124,10 @@ def _write_text_atomic(path: Path, text: str) -> None:
 def _write_notebook_toml_atomic(notebook_toml_path: Path, toml_data: dict[str, Any]) -> None:
     """Serialize *toml_data* and atomically replace ``notebook.toml``.
 
-    A truncated file would lose the cell list and orphan artifacts.
+    A truncated file would lose the cell list and orphan artifacts. A leftover
+    ``owner`` key (no longer read) is dropped.
     """
+    toml_data.pop("owner", None)
     _replace_file_atomically(notebook_toml_path, lambda f: _dump_notebook_toml(toml_data, f))
 
 
@@ -250,7 +252,8 @@ def _sanitize_display_output_for_toml(
 ) -> dict[str, object] | None:
     """Strip transient fields before persisting cell display metadata.
 
-    ``to_serialization_safe`` is the single TOML/JSON compatibility boundary.
+    ``to_serialization_safe`` is the single TOML/JSON compatibility boundary. The
+    target is runtime.json, so a ``None`` inside a value stays null.
     """
     from strata.notebook.serializer import to_serialization_safe
 
@@ -262,7 +265,7 @@ def _sanitize_display_output_for_toml(
     persisted.pop("file", None)
     persisted.pop("markdown_text", None)
     cleaned = {key: value for key, value in persisted.items() if value is not None}
-    return to_serialization_safe(cleaned)
+    return to_serialization_safe(cleaned, keep_none=True)
 
 
 def _sanitize_display_outputs_for_toml(
@@ -939,6 +942,8 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
     cell_file = cells_dir / cell_meta["file"]
     if cell_file.exists():
         cell_file.unlink()
+    # Otherwise it stays in the committed tree and in every export.
+    (cells_dir / os.path.basename(f"{cell_id}.test.py")).unlink(missing_ok=True)
 
     cells_data.pop(cell_idx)
     toml_data["cells"] = cells_data

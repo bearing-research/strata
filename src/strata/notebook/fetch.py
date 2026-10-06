@@ -25,6 +25,8 @@ import hashlib
 import json
 import os
 import re
+import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +47,7 @@ RefetchPolicy = Literal["never", "stale", "always"]
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+_INDEX_LOCK = threading.Lock()
 
 
 def guard_settings(config: Any) -> tuple[tuple[str, ...], bool]:
@@ -227,7 +230,8 @@ class FetchCache:
             raise FetchError(
                 f"@fetch {spec.name}: {spec.url} redirected more than {MAX_REDIRECTS} times"
             )
-        except httpx.HTTPError as exc:
+        # A malformed URL (``:80a``, ``[::1``) raises InvalidURL / ValueError, not HTTPError.
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
             raise FetchError(f"@fetch {spec.name}: could not download {spec.url}: {exc}") from exc
         finally:
             partial.unlink(missing_ok=True)
@@ -286,7 +290,11 @@ class FetchCache:
         path = self._index_path()
         if not path.exists():
             return {}
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # A damaged index only costs a re-download; it must not block opening.
+            return {}
 
     def _record(
         self,
@@ -298,7 +306,6 @@ class FetchCache:
         filename: str | None = None,
     ) -> dict:
         """Record what *url* served; return the entry written."""
-        index = self._index()
         now = self._clock()
         entry = dict(previous or {})
         entry.update(
@@ -313,9 +320,17 @@ class FetchCache:
         )
         if filename is not None:
             entry["fetched_at"] = now
-        index[url] = entry
         self.root.mkdir(parents=True, exist_ok=True)
-        tmp = self._index_path().with_suffix(".tmp")
-        tmp.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
-        os.replace(tmp, self._index_path())
+        # The staleness thread and the executor both record: serialize the
+        # read-modify-write, and give each write its own temp file.
+        with _INDEX_LOCK:
+            index = self._index()
+            index[url] = entry
+            fd, tmp = tempfile.mkstemp(dir=self.root, prefix=".index-", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as out:
+                    out.write(json.dumps(index, indent=2, sort_keys=True))
+                os.replace(tmp, self._index_path())
+            finally:
+                Path(tmp).unlink(missing_ok=True)
         return entry

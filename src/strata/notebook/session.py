@@ -1303,7 +1303,28 @@ class NotebookSession:
         # A viewer joining mid-run gets what the running cell has printed so far.
         for stream, text in console_relay.live_console(self.id, cell.id).items():
             data[f"console_{stream}"] = text
+        if cell.test_result is not None and data.get("test_result") is not None:
+            result = cell.test_result
+            ran_against = (
+                result.cell_source_hash,
+                result.test_source_hash,
+                result.input_fingerprint,
+            )
+            data["test_result"]["stale"] = ran_against != self.cell_test_fingerprint(
+                cell.id, cell.source, cell.test_source
+            )
         return data
+
+    def cell_test_fingerprint(
+        self, cell_id: str, source: str, test_source: str
+    ) -> tuple[str, str, str]:
+        """``(cell source, test source, inputs)`` hashes a cell-test result is keyed by."""
+        input_hashes = self._collect_input_hashes(cell_id)
+        return (
+            compute_source_hash(source),
+            hashlib.sha256(test_source.encode("utf-8")).hexdigest(),
+            hashlib.sha256("|".join(sorted(input_hashes)).encode("utf-8")).hexdigest(),
+        )
 
     def persist_display_outputs(
         self, cell_id: str, display_outputs: list[dict[str, Any]] | None
@@ -2108,6 +2129,7 @@ class NotebookSession:
             return []
         from strata.notebook import datasets
 
+        tenant = self.opened_by[1] if self.opened_by else None
         fingerprints: list[str] = []
         for spec in sorted(annotations.datasets, key=lambda s: s.name):
             checked = self._dataset_checks.get((spec.name, spec.reference))
@@ -2118,7 +2140,8 @@ class NotebookSession:
                 fingerprints.append(checked[1])
                 continue
             try:
-                fingerprint = datasets.registry_for(self._lake_config()).resolve(spec).fingerprint
+                registry = datasets.registry_for(self._lake_config(), tenant)
+                fingerprint = registry.resolve(spec).fingerprint
             except datasets.DatasetError:
                 fingerprint = datasets.unresolved_fingerprint(spec)
             self.remember_dataset_fingerprint(spec, fingerprint)
@@ -2151,7 +2174,7 @@ class NotebookSession:
         resolved = drop_blanked_secrets(cell.env)
         resolved.update(annotations.env)
         declared = set(annotations.env) | set(getattr(cell, "env_overrides", {}) or {})
-        return narrow_env_for_provenance(cell.source, resolved, declared)
+        return narrow_env_for_provenance(cell.source, resolved, declared, language=cell.language)
 
     def _effective_worker_name(self, cell: Any) -> str | None:
         """Return the effective worker name with annotation precedence."""
