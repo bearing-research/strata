@@ -1081,3 +1081,20 @@ def test_a_rewrite_keeps_a_mode_the_user_narrowed(tmp_path):
     update_notebook_timeout(nb, 12.0)
 
     assert toml_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_none_inside_a_display_value_stays_null_in_runtime_json(tmp_path):
+    """runtime.json is JSON; turning None into "" shows the wrong value in exports."""
+    import json
+
+    from strata.notebook.writer import update_cell_display_outputs
+
+    nb = create_notebook(tmp_path, "Nulls", initialize_environment=False)
+    add_cell_to_notebook(nb, "c1")
+    preview = {"mean": 2.5, "greeting": None, "rows": [1, None]}
+
+    update_cell_display_outputs(nb, "c1", [{"content_type": "json/object", "preview": preview}])
+
+    saved = json.loads((nb / ".strata" / "runtime.json").read_text())["cells"]["c1"]
+    assert saved["display_outputs"][0]["preview"] == preview
+    assert saved["display"]["preview"] == preview

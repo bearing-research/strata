@@ -250,7 +250,8 @@ def _sanitize_display_output_for_toml(
 ) -> dict[str, object] | None:
     """Strip transient fields before persisting cell display metadata.
 
-    ``to_serialization_safe`` is the single TOML/JSON compatibility boundary.
+    ``to_serialization_safe`` is the single TOML/JSON compatibility boundary. The
+    target is runtime.json, so a ``None`` inside a value stays null.
     """
     from strata.notebook.serializer import to_serialization_safe
 
@@ -262,7 +263,7 @@ def _sanitize_display_output_for_toml(
     persisted.pop("file", None)
     persisted.pop("markdown_text", None)
     cleaned = {key: value for key, value in persisted.items() if value is not None}
-    return to_serialization_safe(cleaned)
+    return to_serialization_safe(cleaned, keep_none=True)
 
 
 def _sanitize_display_outputs_for_toml(
