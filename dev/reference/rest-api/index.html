@@ -4972,8 +4972,11 @@ the request never becomes a pending build.</p>
 <code>X-Arrow-Row-Count</code> and <code>X-Strata-Artifact-Uri</code>, the canonical
 <code>strata://artifact/{id}@v={n}</code> of the rows it serves. That URI can differ from the
 materialize response's: when two misses for one scan were in flight together,
-one artifact becomes the ready result and the other reads <code>superseded</code> (its own
-URI still serves the same rows). Read the header to keep the canonical one.</p>
+one artifact becomes the ready result and the other reads <code>superseded</code>. The
+superseded one keeps no bytes of its own: its <code>GET /v1/artifacts/{id}/v/{n}/data</code>
+serves the canonical artifact's blob, the store counts those bytes once, and
+retention collects the superseded row like any other. Read the header to keep
+the canonical one.</p>
 <h3 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-91-1" name="__codelineno-91-1" href="#__codelineno-91-1"></a>GET /health
 </code></pre></div>
