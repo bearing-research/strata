@@ -881,7 +881,12 @@ class AzureBlobStore(BlobStore):
         self.account_name = account_name
         self.container_name = container_name
         self.prefix = prefix.strip("/")
-        self._account_url = endpoint_url or f"https://{account_name}.blob.core.windows.net"
+        # ``endpoint_url`` is the blob host with the account as the first path segment
+        # (Azurite's form); the lake path derives its connection string the same way.
+        if endpoint_url and account_name:
+            self._account_url = f"{endpoint_url.rstrip('/')}/{account_name}"
+        else:
+            self._account_url = endpoint_url or f"https://{account_name}.blob.core.windows.net"
         self._delegation_key: Any = None
         self._delegation_key_expiry = 0.0
 
@@ -894,24 +899,21 @@ class AzureBlobStore(BlobStore):
             from azure.identity import DefaultAzureCredential
 
             credential = DefaultAzureCredential()
-            account_url = endpoint_url or f"https://{account_name}.blob.core.windows.net"
             self._client = ContainerClient(
-                account_url=account_url,
+                account_url=self._account_url,
                 container_name=container_name,
                 credential=credential,
             )
         elif sas_token:
-            account_url = endpoint_url or f"https://{account_name}.blob.core.windows.net"
             # SAS token can be passed as credential
             self._client = ContainerClient(
-                account_url=account_url,
+                account_url=self._account_url,
                 container_name=container_name,
                 credential=sas_token,
             )
         elif account_key:
-            account_url = endpoint_url or f"https://{account_name}.blob.core.windows.net"
             self._client = ContainerClient(
-                account_url=account_url,
+                account_url=self._account_url,
                 container_name=container_name,
                 credential=account_key,
             )
