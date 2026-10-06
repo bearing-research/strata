@@ -59,6 +59,37 @@ def _fetch(base_url: str, token: str) -> httpx.Response:
     return httpx.get(f"{base_url}/p/{token}/archive.zip", timeout=30)
 
 
+class TestACoreResult:
+    def test_a_transform_result_is_archived_as_arrow(self, tmp_path):
+        """Only notebook cells declare a content type; a ``duckdb_sql`` result was ``.bin``."""
+        from strata.api.publication_bundle import write_bundle
+        from strata.api.publication_page import content_type_of
+
+        store = ArtifactStore(tmp_path / "artifacts")
+        payload = _arrow_bytes()
+        version = store.create_artifact(
+            "features",
+            hashlib.sha256(payload).hexdigest(),
+            transform_spec=TransformSpec(
+                executor="duckdb_sql@v1", params={"sql": "SELECT 1"}, inputs=[]
+            ),
+        )
+        store.write_blob("features", version, payload)
+        store.finalize_artifact(
+            "features", version, TABLE.schema.to_string(), TABLE.num_rows, len(payload)
+        )
+        artifact = store.get_artifact("features", version)
+        publication = store.publish_artifact("features", version)
+        dest = tmp_path / "bundle"
+        dest.mkdir()
+
+        written = write_bundle(store, artifact, dest, publication=publication)
+
+        assert content_type_of(artifact) == "arrow/ipc"
+        assert "artifact.arrow" in written
+        assert "artifact.parquet" in written
+
+
 class TestTheBundle:
     def test_it_is_the_same_files_the_cli_writes(self, served, tmp_path):
         """Two implementations of mutually describing files would drift silently, so both must
