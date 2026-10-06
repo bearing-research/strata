@@ -161,6 +161,23 @@ async def test_another_tenants_session_is_neither_listed_nor_usable(served):
     assert session.id in _text(own_list)
 
 
+async def test_a_tenantless_openers_session_is_the_default_tenants(served):
+    """The proxy may omit the tenant header; that member is the default tenant, not
+    everyone's, so its session is listed for it and hidden from other tenants."""
+    url, session = served
+    session.opened_by = ("ana", None)
+    outsider = {**_headers("gus", "notebook:read"), "X-Tenant-ID": "globex"}
+    tenantless = _headers("bea", "notebook:read")
+
+    listed = await _call(url, outsider, "list_notebooks", {})
+    read = await _call(url, outsider, "get_notebook", {"session_id": session.id})
+    own_list = await _call(url, tenantless, "list_notebooks", {})
+
+    assert session.id not in _text(listed)
+    assert read.is_error
+    assert session.id in _text(own_list)
+
+
 async def test_an_admin_sees_every_tenants_session(served):
     url, session = served
     session.opened_by = ("ana", "acme")

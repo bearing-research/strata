@@ -194,11 +194,13 @@ def _reuse_open_session_by_path() -> tuple[bool, tuple[str, str | None] | None]:
     if state.config.deployment_mode == "personal":
         return True, None
     from strata.auth import get_principal
+    from strata.tenant import DEFAULT_TENANT_ID
 
     principal = get_principal()
     if principal is None:
         return False, None
-    return True, (principal.id, principal.tenant)
+    # A caller the proxy sent without a tenant is the default tenant, as for storage.
+    return True, (principal.id, principal.tenant or DEFAULT_TENANT_ID)
 
 
 def _get_notebook_storage_root() -> Path | None:
@@ -1583,18 +1585,22 @@ class ValidateRecentsRequest(BaseModel):
 
 
 @router.post("/recents/validate")
-async def validate_recent_notebooks(req: ValidateRecentsRequest) -> dict:
+async def validate_recent_notebooks(req: ValidateRecentsRequest, request: Request) -> dict:
     """Return the subset of supplied paths that still contain a notebook.
 
-    Existence check only (``<path>/notebook.toml`` is a file). No root check: the
-    list is per-browser, and any follow-up open or delete runs its own.
+    A path outside the caller's root is left out like a missing one, or the route
+    would tell any member which directories on the server hold a notebook.
     """
     valid: list[str] = []
     for raw_path in req.paths:
         if not isinstance(raw_path, str) or not raw_path.strip():
             continue
         try:
-            if (Path(raw_path) / "notebook.toml").is_file():
+            path = _validate_notebook_path(raw_path, request=request)
+        except HTTPException:
+            continue
+        try:
+            if (path / "notebook.toml").is_file():
                 valid.append(raw_path)
         except OSError:
             # Permission errors, broken symlinks, etc.: treat as invalid.

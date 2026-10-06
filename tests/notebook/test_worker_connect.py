@@ -582,6 +582,29 @@ async def test_a_large_body_is_split_into_bounded_messages():
 
 
 @pytest.mark.asyncio
+async def test_a_request_with_an_id_outside_the_protocol_range_is_ignored():
+    """Ids are 1..2^32-1; a wider int would only fail once the response is framed."""
+    served: list[str] = []
+
+    async def app(scope, receive, send):
+        served.append(scope["path"])
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    socket = _ScriptedSocket()
+    serving = asyncio.create_task(serve_connection(socket, app))
+    for bad_id in (0, -1, 2**32):
+        socket.request(bad_id, "GET", f"/{bad_id}")
+    socket.request(1, "GET", "/ok")
+    await asyncio.wait_for(_until(lambda: socket.response(1)["end"]), timeout=30)
+    socket.incoming.put_nowait(None)
+    await serving
+
+    assert served == ["/ok"]
+    assert {json.loads(m)["id"] for m in socket.sent if isinstance(m, str)} == {1}
+
+
+@pytest.mark.asyncio
 async def test_an_app_that_raises_before_answering_gets_a_500():
     async def app(scope, receive, send):
         raise RuntimeError("boom")

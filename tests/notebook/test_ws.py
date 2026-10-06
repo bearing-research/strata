@@ -2638,6 +2638,34 @@ async def test_ws_upgrade_to_a_visible_tenants_session_is_accepted(
     assert fake.frames_of("notebook_state")
 
 
+@pytest.mark.asyncio
+async def test_ws_upgrade_to_a_tenantless_openers_session_is_the_default_tenants(
+    notebook_session, trusted_proxy_mode
+):
+    """A member the proxy sends without a tenant is the default tenant, as for its
+    notebooks; its session is not open to every other tenant."""
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    session.opened_by = ("ana", None)
+    outsider = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")],
+        headers={**_auth_headers("notebook:read"), "x-tenant-id": "globex"},
+    )
+    tenantless = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")],
+        headers=_auth_headers("notebook:read", principal="bea"),
+    )
+
+    await notebook_websocket(cast(WebSocket, outsider), session.id)
+    await notebook_websocket(cast(WebSocket, tenantless), session.id)
+
+    assert outsider.accepted is False
+    assert outsider.closed == (1008, "Notebook not found")
+    assert tenantless.accepted is True
+    assert tenantless.frames_of("notebook_state")
+
+
 def test_unknown_frames_default_to_execute_scope():
     """Fail closed: a newly added frame is privileged until classified."""
     from strata.notebook.ws import required_scope_for_frame

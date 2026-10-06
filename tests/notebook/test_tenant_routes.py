@@ -111,6 +111,27 @@ class TestSessionRoutes:
 
         assert response.status_code == 200, response.text
 
+    def test_a_tenantless_openers_session_belongs_to_the_default_tenant(
+        self, trusted_proxy, server
+    ):
+        """The proxy may omit the tenant header; that member is the default tenant
+        everywhere else on the server, so its session is not open to every tenant."""
+        trusted_proxy.multi_tenant_enabled = True
+        notebook_dir = create_notebook(server.notebook_storage_dir, "tenantless_nb")
+        session = get_session_manager().open_notebook(notebook_dir, opened_by=("ana", None))
+        client = _client()
+        url = f"/v1/notebooks/{session.id}/cells"
+        tenantless = {k: v for k, v in _headers("nobody").items() if k != "x-tenant-id"}
+
+        globex = client.get(url, headers=_headers("globex"))
+        same = client.get(url, headers=tenantless)
+        claimed = client.get(url, headers=_headers("_default"))
+
+        assert globex.status_code == 404
+        assert same.status_code == 200, same.text
+        # The default tenant's name fails id validation, so it is only ever the fallback.
+        assert claimed.status_code == 400
+
     def test_the_session_table_leaves_out_another_tenants_session(self, server, acme_session):
         """The /sessions routes run only in personal mode, which has no tenants; they
         filter anyway, so the rule does not depend on that gate."""
@@ -203,6 +224,21 @@ class TestTenantStorage:
 
         assert [n["path"] for n in listed.json()["notebooks"]] == [str(acme_notebook.resolve())]
 
+    def test_a_tenantless_caller_opens_as_the_default_tenant(self, server):
+        """Its notebooks already live under the default tenant's dir; the session it
+        opens is recorded the same way, so another tenant cannot reach it."""
+        notebook = create_notebook(server.notebook_storage_dir / "_default", "nb")
+        client = _client()
+        tenantless = {k: v for k, v in _headers("x").items() if k != "x-tenant-id"}
+
+        opened = client.post("/v1/notebooks/open", json={"path": str(notebook)}, headers=tenantless)
+        sid = opened.json()["session_id"]
+        outsider = client.get(f"/v1/notebooks/{sid}/cells", headers=_headers("globex"))
+
+        assert opened.status_code == 200, opened.text
+        assert get_session_manager().get_session(sid).opened_by == ("someone-at-x", "_default")
+        assert outsider.status_code == 404
+
     def test_one_tenant_server_keeps_the_shared_root(self, trusted_proxy, server):
         """Without multi_tenant_enabled a tenant header does not move anyone's notebooks."""
         trusted_proxy.multi_tenant_enabled = False
@@ -211,3 +247,35 @@ class TestTenantStorage:
         listed = _client().get("/v1/notebooks/discover", headers=_headers("acme"))
 
         assert [n["path"] for n in listed.json()["notebooks"]] == [str(notebook.resolve())]
+
+    def test_recents_validation_answers_only_for_the_callers_notebooks(self, server, acme_notebook):
+        """Otherwise a tenant could learn which notebooks another tenant has, or which
+        directories anywhere on the server hold one."""
+        elsewhere = create_notebook(server.notebook_storage_dir.parent / "elsewhere", "secret_nb")
+        client = _client()
+        probe = {"paths": [str(acme_notebook), str(elsewhere)]}
+
+        as_globex = client.post(
+            "/v1/notebooks/recents/validate", json=probe, headers=_headers("globex")
+        )
+        as_acme = client.post(
+            "/v1/notebooks/recents/validate", json=probe, headers=_headers("acme")
+        )
+
+        assert as_globex.status_code == 200, as_globex.text
+        assert as_globex.json()["valid"] == []
+        assert as_acme.json()["valid"] == [str(acme_notebook)]
+
+
+def test_recents_validation_in_personal_mode_keeps_paths_under_the_root(server):
+    inside = create_notebook(server.notebook_storage_dir, "inside_nb")
+    outside = create_notebook(server.notebook_storage_dir.parent / "elsewhere", "outside_nb")
+    gone = server.notebook_storage_dir / "deleted_nb"
+
+    response = _client().post(
+        "/v1/notebooks/recents/validate",
+        json={"paths": [str(inside), str(outside), str(gone), "../escape"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] == [str(inside)]
