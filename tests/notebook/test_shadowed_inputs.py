@@ -180,3 +180,82 @@ async def test_provenance_follows_the_middle_cell(tmp_path: Path):
     # Staleness recomputes the hash the run recorded.
     session.compute_staleness()
     assert session.notebook_state.get_cell("c2").status == "ready"
+
+
+def _var_hash(session: NotebookSession, cell_id: str, var: str) -> str:
+    manager = session.get_artifact_manager()
+    artifact = manager.artifact_store.get_latest_version(manager.cell_artifact_id(cell_id, var))
+    assert artifact is not None
+    return artifact.provenance_hash
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other", _OTHER)
+async def test_a_shadowed_read_keys_on_its_wired_producer(tmp_path: Path, other: str):
+    """A cell that once cached the shadowed value gets a new key, so it runs once more."""
+    session = _session(tmp_path, other, "python", f"out = state * 100 + {other}\n")
+    await _run_upstreams(session, other)
+
+    hashes = session._collect_input_hashes("c2")
+    assert [h for h in hashes if h.startswith("wired:")] == [
+        f"wired:state={_var_hash(session, 'c1', 'state')}"
+    ]
+    # c1 reads state from its only definer: no record, the key it always had.
+    assert sorted(session._collect_input_hashes("c1")) == sorted(
+        [_var_hash(session, "c0", "state"), _var_hash(session, "c0", other)]
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
+    """No shadowed name: the key is still sha256(input artifact hashes, source, env)."""
+    from strata.notebook.env import compute_execution_env_hash
+    from strata.notebook.provenance import compute_provenance_hash, compute_source_hash
+
+    notebook_dir = create_notebook(tmp_path, "Plain")
+    add_cell_to_notebook(notebook_dir, "c0")
+    write_cell(notebook_dir, "c0", "x = 1\n")
+    add_cell_to_notebook(notebook_dir, "c1", after_cell_id="c0")
+    write_cell(notebook_dir, "c1", "y = x + 1\n")
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.refresh_environment_runtime()
+    executor = CellExecutor(session)
+    for cell_id, source in (("c0", "x = 1\n"), ("c1", "y = x + 1\n")):
+        assert (await executor.execute_cell(cell_id, source)).success
+
+    x_hash = _var_hash(session, "c0", "x")
+    assert session._collect_input_hashes("c1") == [x_hash]
+    cell = session.notebook_state.get_cell("c1")
+    env_hash = compute_execution_env_hash(
+        session.path,
+        session._collect_runtime_env(cell),
+        runtime_identity=session._effective_worker_runtime_identity(cell),
+    )
+    assert cell.last_provenance_hash == compute_provenance_hash(
+        [x_hash], compute_source_hash("y = x + 1\n"), env_hash
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other", _OTHER)
+async def test_staleness_agrees_with_the_run_for_a_shadowed_read(tmp_path: Path, other: str):
+    """Ready after the run, stale once the middle cell changes, ready again after a rerun."""
+    reader = f"out = state * 100 + {other}\n"
+    session = _session(tmp_path, other, "python", reader)
+    executor = CellExecutor(session)
+    await _run_upstreams(session, other)
+    assert (await executor.execute_cell("c2", reader)).success
+    session.compute_staleness()
+    assert session.notebook_state.get_cell("c2").status == "ready"
+
+    session.notebook_state.get_cell("c1").source = "state = state + 5\n"
+    for cell in session.notebook_state.cells:
+        session.re_analyze_cell(cell.id)
+    session.compute_staleness()
+    assert session.notebook_state.get_cell("c2").status == "stale"
+
+    rerun = await executor.execute_cell("c2", reader)
+    assert rerun.success and rerun.cache_hit is False
+    session.compute_staleness()
+    assert session.notebook_state.get_cell("c2").status == "ready"
+

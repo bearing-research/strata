@@ -1872,6 +1872,18 @@ class NotebookSession:
         """The variables ``cell_id`` reads from ``upstream_id``, as the DAG wired them."""
         return self.dag.wired_variables(cell_id, upstream_id) if self.dag is not None else set()
 
+    def _shadowed_reads(self, cell: Any) -> set[str]:
+        """Names ``cell`` reads that some upstream defines but is not wired to feed it."""
+        reads = set(cell.references) | set(cell.builtin_references)
+        shadowed: set[str] = set()
+        for upstream_id in cell.upstream_ids:
+            upstream_cell = self.notebook_state.get_cell(upstream_id)
+            if upstream_cell is not None:
+                shadowed |= (reads & set(upstream_cell.defines)) - self.wired_variables(
+                    cell.id, upstream_id
+                )
+        return shadowed
+
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
         """Provenance hashes from upstream artifacts, with sweep refs grouped.
 
@@ -1914,12 +1926,16 @@ class NotebookSession:
         # producers keep every variable: their hashes move together, and narrowing
         # would rekey every existing downstream cell.
         reads = set(cell.references) | set(cell.builtin_references)
+        # A shadowed name loads from its wired producer only; recording which one rekeys
+        # a cell that cached the shadowed value, and leaves every other key as it was.
+        shadowed = self._shadowed_reads(cell)
 
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
             by_content = _value_outlives_provenance(upstream_cell)
+            wired = self.wired_variables(cell_id, upstream_id) if shadowed else set()
 
             uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
             if not uri_items and upstream_cell.artifact_uri:
@@ -1970,6 +1986,8 @@ class NotebookSession:
                         )
                         continue
                 hashes.append(provenance_hash)
+                if var_name in shadowed and var_name in wired:
+                    hashes.append(f"wired:{var_name}={provenance_hash}")
 
         for var_name, pairs in sweep_buckets.items():
             joined = ";".join(f"{name}={h}" for name, h in sorted(pairs))
