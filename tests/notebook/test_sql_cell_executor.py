@@ -108,6 +108,48 @@ async def test_an_edit_sqlglot_cannot_tell_apart_still_runs_the_new_query(tmp_pa
     assert first["outputs"]["result"]["preview"] != edited["outputs"]["result"]["preview"]
 
 
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("SELECT :x AS v", [{"v": 41}]),
+        ("SELECT :x + 1 AS v", [{"v": 42}]),
+        ("WITH p AS (SELECT :x AS v) SELECT v FROM p", [{"v": 41}]),
+        ("CREATE TABLE t AS SELECT :x AS v; INSERT INTO t SELECT :x + 1", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_duckdb_bind_in_the_select_list_runs(tmp_path, monkeypatch, body, expected):
+    """sqlglot reads DuckDB ``SELECT :x`` as an alias; the cell is checked as it runs."""
+    from strata.notebook.sql import cell_executor
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    monkeypatch.setattr(
+        cell_executor,
+        "_load_upstream_variables",
+        lambda session, cell_id, references: ({"x": 41}, {"x": "upstream"}, {}),
+    )
+    nb_dir = create_notebook(tmp_path, "duckdb_bind")
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    source = f"# @sql connection=db{'' if expected else ' write=true'}\n{body}\n"
+    write_cell(nb_dir, "c1", source)
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "duckdb"\npath = "nb.duckdb"\n'
+    )
+
+    session = _make_session(nb_dir)
+    result = await cell_executor.execute_sql_cell(session, "c1", source)
+
+    assert result["success"], result["error"]
+    if expected is None:
+        import duckdb
+
+        rows = duckdb.connect(str(nb_dir / "nb.duckdb")).execute("SELECT v FROM t").fetchall()
+        assert rows == [(41,), (42,)]
+    else:
+        assert _load_arrow_from_uri(session, result["artifact_uri"]).to_pylist() == expected
+
+
 def _build_notebook_with_sql_cell(
     tmp_path: Path,
     *,

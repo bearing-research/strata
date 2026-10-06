@@ -125,7 +125,10 @@ async def execute_sql_cell(
     if not analysis.sql_body:
         return _error_result("SQL cell body is empty.", start_time)
     # A body can end the driver's read-only transaction, so check before sending.
-    violation = read_only_violation(analysis.sql_body, adapter.sqlglot_dialect)
+    violation = read_only_violation(
+        rewrite_named_to_positional(analysis.sql_body, adapter.sqlglot_dialect),
+        adapter.sqlglot_dialect,
+    )
     if violation is not None:
         return _error_result(violation, start_time)
 
@@ -429,7 +432,10 @@ async def _execute_write_cell(
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     runtime_spec = _confined(session, runtime_spec, None)
     if spec.driver == "sqlite" and getattr(runtime_spec, "confine_to", None) is not None:
-        violation = confined_write_violation(analysis.sql_body, adapter.sqlglot_dialect)
+        violation = confined_write_violation(
+            rewrite_named_to_positional(analysis.sql_body, adapter.sqlglot_dialect),
+            adapter.sqlglot_dialect,
+        )
         if violation is not None:
             return _error_result(f"connection {spec.name!r}: {violation}", start_time)
     query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
@@ -590,7 +596,10 @@ def _execute_write_statements(
     # ``WITH ... INSERT`` as "WITH", not DML).
     parsed = [
         statement
-        for statement in sqlglot.parse(body, dialect=adapter.sqlglot_dialect)
+        for statement in sqlglot.parse(
+            rewrite_named_to_positional(body, adapter.sqlglot_dialect),
+            dialect=adapter.sqlglot_dialect,
+        )
         if statement is not None and not isinstance(statement, sqlglot.exp.Semicolon)
     ]
     texts = _split_statements(body, adapter.sqlglot_dialect)

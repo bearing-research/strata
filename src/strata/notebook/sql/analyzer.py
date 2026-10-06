@@ -70,7 +70,14 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
     parse_error: str | None = None
     if dialect is not None and sql_body:
         try:
-            tables, unresolved_tables = _extract_tables(sql_body, dialect)
+            try:
+                tables, unresolved_tables = _extract_tables(sql_body, dialect)
+            except _SqlglotError:
+                # sqlglot reads DuckDB ``SELECT :x`` as an alias; the text that runs
+                # has positional binds instead.
+                tables, unresolved_tables = _extract_tables(
+                    rewrite_named_to_positional(sql_body, dialect), dialect
+                )
         except _SqlglotError as exc:
             # User SQL errors only; anything else is an analyzer bug and
             # must propagate.
