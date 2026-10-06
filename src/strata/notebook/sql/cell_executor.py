@@ -163,7 +163,9 @@ async def execute_sql_cell(
     # The on-disk spec keeps relative paths so notebook.toml round-trips;
     # resolve them only for the adapter.
     try:
-        runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
+        runtime_spec = _resolve_runtime_spec(
+            spec, session.path, _credentials(session), _auth_env(session)
+        )
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
 
@@ -420,7 +422,9 @@ async def _execute_write_cell(
     # No probe slots. Runtime spec for relative credential paths;
     # ``read_only=False`` puts the write principal in the identity.
     try:
-        runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
+        runtime_spec = _resolve_runtime_spec(
+            spec, session.path, _credentials(session), _auth_env(session)
+        )
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     runtime_spec = _confined(session, runtime_spec, None)
@@ -774,7 +778,7 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     try:
         # No credentials: resolving may hit a secret manager, and the identity
         # carries only the credential's name.
-        runtime_spec = _resolve_runtime_spec(spec, session.path)
+        runtime_spec = _resolve_runtime_spec(spec, session.path, auth_env=_auth_env(session))
         connection_id = _with_credential(
             adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
         )
@@ -837,6 +841,7 @@ def _resolve_runtime_spec(
     spec: ConnectionSpec,
     notebook_dir: Any,
     credentials: CredentialResolver | None = None,
+    auth_env: dict[str, str] | None = None,
 ) -> ConnectionSpec:
     """Return a spec copy with relative file paths and the credential resolved.
 
@@ -844,7 +849,9 @@ def _resolve_runtime_spec(
     so adapters never see names; ``CredentialError`` names it on failure.
     Relative paths (and BigQuery's ``credentials_path`` /
     ``write_credentials_path``) are rebased on the notebook directory, since the
-    server's CWD is unrelated. ``uri`` passes through as-is.
+    server's CWD is unrelated. ``uri`` passes through as-is. With *auth_env*
+    (see ``_auth_env``), ``${VAR}`` in ``auth`` is resolved from it here, so the
+    driver never reads the server's environment.
     """
     from pathlib import Path
 
@@ -873,13 +880,35 @@ def _resolve_runtime_spec(
         if new_value != raw_value:
             update[key] = new_value
 
+    auth = dict(spec.auth)
+    if auth_env is not None:
+        for key, value in auth.items():
+            if value.startswith("${") and value.endswith("}"):
+                if value[2:-1] not in auth_env:
+                    raise CredentialError(
+                        f"auth.{key} references {value}, which this notebook's env does not set"
+                    )
+                auth[key] = auth_env[value[2:-1]]
+        if auth != spec.auth:
+            update["auth"] = auth
     if spec.credential:
         resolved = (credentials or CredentialResolver()).resolve(spec.credential)
-        update["auth"] = {**resolved, **spec.auth}
+        update["auth"] = {**resolved, **auth}
 
     if not update:
         return spec
     return spec.model_copy(update=update)
+
+
+def _auth_env(session: Any) -> dict[str, str] | None:
+    """What ``${VAR}`` in connection auth reads in service mode: the notebook's env.
+
+    ``None`` (personal mode) leaves it to the driver, which reads the server's
+    environment; on a shared server that would send it to a member-chosen host.
+    """
+    if getattr(session._lake_config(), "deployment_mode", "personal") != "service":
+        return None
+    return dict(session.notebook_state.env)
 
 
 def _load_upstream_variables(

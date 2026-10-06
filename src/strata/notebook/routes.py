@@ -2216,7 +2216,9 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
 
     Open and enumeration failures return 502 with the driver's message.
     """
+    from strata.notebook.credentials import CredentialError
     from strata.notebook.sql.cell_executor import (
+        _auth_env,
         _confined,
         _resolve_runtime_spec,
         _safely_close,
@@ -2242,7 +2244,11 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
         raise HTTPException(status_code=400, detail=f"connection {name!r}: {problem}")
 
     # Confined as a cell's connection is: the server opens it.
-    runtime_spec = _confined(session, _resolve_runtime_spec(spec, session.path), None)
+    try:
+        runtime_spec = _resolve_runtime_spec(spec, session.path, auth_env=_auth_env(session))
+    except CredentialError as exc:
+        raise HTTPException(status_code=400, detail=f"connection {name!r}: {exc}") from exc
+    runtime_spec = _confined(session, runtime_spec, None)
     try:
         conn = adapter.open(runtime_spec, read_only=True)
     except Exception as exc:  # noqa: BLE001

