@@ -320,12 +320,11 @@ or its metadata will resolve to bytes it cannot read. Live stream-ownership
 rows are also skipped, since they describe streams that do not survive the
 move.
 
-One behavioral difference worth knowing: `artifact_builds` carries a foreign
-key to `artifact_versions`, and **Postgres enforces it while SQLite does not**
-(Strata never enables `PRAGMA foreign_keys`). A build row for an artifact
-version that does not exist is rejected on Postgres and silently accepted on
-SQLite. Strata's own flow creates the artifact version first, so this only
-affects callers writing build rows directly.
+`artifact_builds` carries a foreign key to `artifact_versions`, and both
+backends enforce it (Strata's SQLite connections enable `PRAGMA foreign_keys`):
+a build row for an artifact version that does not exist is rejected. Strata's
+own flow creates the artifact version first, so this only affects callers
+writing build rows directly.
 
 ## Authentication
 
