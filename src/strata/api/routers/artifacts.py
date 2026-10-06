@@ -814,10 +814,13 @@ async def list_artifacts(
 
     ``since`` is an epoch timestamp; ``sort`` is ``created_at``, ``byte_size`` or ``row_count``.
     """
-    if state is not None and state not in ("ready", "building", "failed"):
+    if state is not None and state not in ("ready", "building", "failed", "superseded"):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid state filter: {state}. Must be 'ready', 'building', or 'failed'",
+            detail=(
+                f"Invalid state filter: {state}. "
+                "Must be 'ready', 'building', 'failed', or 'superseded'"
+            ),
         )
     if sort not in ("created_at", "byte_size", "row_count"):
         raise HTTPException(

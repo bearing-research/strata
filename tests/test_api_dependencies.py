@@ -175,3 +175,15 @@ class TestArtifactListPaginationIsBounded:
         assert client.get("/v1/artifacts", params={"offset": -5}).status_code == 422
         # A sane request still works.
         assert client.get("/v1/artifacts", params={"limit": 10}).status_code == 200
+
+    def test_superseded_is_a_state_the_listing_filters_by(self, tmp_path):
+        """Callers are handed superseded versions, so they can list them."""
+        from fastapi.testclient import TestClient
+
+        from strata.server import app
+
+        _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
+        client = TestClient(app)
+
+        assert client.get("/v1/artifacts", params={"state": "superseded"}).status_code == 200
+        assert client.get("/v1/artifacts", params={"state": "bogus"}).status_code == 400

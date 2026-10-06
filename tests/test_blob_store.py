@@ -896,6 +896,20 @@ class TestAzureBlobStore:
         assert store._client.url == "http://127.0.0.1:10000/devstoreaccount1/test-container"
         assert store._client.account_name == "devstoreaccount1"
 
+    def test_endpoint_url_already_naming_the_account_is_not_doubled(self):
+        pytest.importorskip("azure.storage.blob")
+        from strata.blob_store import AzureBlobStore
+
+        store = AzureBlobStore(
+            account_name="devstoreaccount1",
+            container_name="test-container",
+            account_key="dGVzdGtleQ==",
+            endpoint_url="http://127.0.0.1:10000/devstoreaccount1/",
+        )
+
+        assert store._account_url == "http://127.0.0.1:10000/devstoreaccount1"
+        assert store._client.account_name == "devstoreaccount1"
+
     def test_endpoint_url_without_an_account_name_is_used_as_given(self):
         pytest.importorskip("azure.storage.blob")
         from strata.blob_store import AzureBlobStore

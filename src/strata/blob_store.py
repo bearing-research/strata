@@ -559,6 +559,17 @@ class S3BlobStore(BlobStore):
         )
 
 
+def azure_account_url(endpoint_url: str, account_name: str) -> str:
+    """The account's blob URL: the endpoint host with the account as its first path segment.
+
+    An endpoint that already ends in ``/<account>`` is taken as that URL, not doubled.
+    """
+    endpoint = endpoint_url.rstrip("/")
+    if endpoint.endswith(f"/{account_name}"):
+        return endpoint
+    return f"{endpoint}/{account_name}"
+
+
 def _resolve_gcs_credentials(credentials: str) -> str:
     """Return a filesystem path for *credentials*, writing inline JSON key material to a file.
 
@@ -884,7 +895,7 @@ class AzureBlobStore(BlobStore):
         # ``endpoint_url`` is the blob host with the account as the first path segment
         # (Azurite's form); the lake path derives its connection string the same way.
         if endpoint_url and account_name:
-            self._account_url = f"{endpoint_url.rstrip('/')}/{account_name}"
+            self._account_url = azure_account_url(endpoint_url, account_name)
         else:
             self._account_url = endpoint_url or f"https://{account_name}.blob.core.windows.net"
         self._delegation_key: Any = None

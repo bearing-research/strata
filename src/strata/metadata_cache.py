@@ -301,6 +301,10 @@ def _json_safe_stat_value(value: object) -> object:
         return str(value)
 
 
+# What converting a footer's statistics can raise (a value pyarrow cannot box, a date out of range).
+_UNPERSISTABLE = (pa.ArrowException, ValueError, OverflowError)
+
+
 def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "PersistedParquetMeta":
     """Convert loaded Parquet metadata to the persisted representation."""
     from strata.metadata_store import (
@@ -487,9 +491,10 @@ class ParquetMetadataCache:
             for fp, metadata in loaded.items():
                 try:
                     persisted = _persisted_parquet_meta_from_loaded(metadata)
-                    to_persist.append((fp, persisted))
-                except Exception:
-                    pass
+                except _UNPERSISTABLE as exc:
+                    logger.debug("Could not convert Parquet metadata for %s: %s", fp, exc)
+                    continue
+                to_persist.append((fp, persisted))
 
             if to_persist:
                 try:
@@ -615,6 +620,11 @@ class ParquetMetadataCache:
             return
         try:
             persisted = _persisted_parquet_meta_from_loaded(metadata)
+        except _UNPERSISTABLE as exc:
+            # Best-effort like the write: the in-memory entry serves this process.
+            logger.debug("Could not convert Parquet metadata for %s: %s", file_path, exc)
+            return
+        try:
             self._store.put_parquet_meta(file_path, persisted)
         except sqlite3.Error as exc:
             # Persistence is best-effort: the in-memory entry serves this process.

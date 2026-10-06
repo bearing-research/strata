@@ -1001,7 +1001,7 @@ class StrataClient:
         Args:
             limit: Maximum number of artifacts to return.
             offset: Number of artifacts to skip, for pagination.
-            state: Only this state ("ready", "building", "failed").
+            state: Only this state ("ready", "building", "failed", "superseded").
             name_prefix: Only artifacts with a name starting with this prefix.
 
         Returns:

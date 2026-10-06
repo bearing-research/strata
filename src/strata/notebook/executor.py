@@ -5473,7 +5473,7 @@ class CellExecutor:
                     f"start_from={loop.start_from_cell}@iter={loop.start_from_iter}. "
                     f"Run that cell through iteration {loop.start_from_iter} first."
                 )
-            blob = artifact_mgr.artifact_store.blob_store.read_blob(artifact_id, artifact.version)
+            blob = artifact_mgr.artifact_store.read_blob(artifact_id, artifact.version)
             if blob is None:
                 raise ValueError(f"Loop seed blob missing for {artifact_id}@v={artifact.version}.")
             return blob, _artifact_content_type(artifact)

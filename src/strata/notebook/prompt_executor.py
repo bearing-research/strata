@@ -418,7 +418,7 @@ async def execute_prompt_cell(
     blob = json.dumps(content, indent=2, default=str).encode()
 
     try:
-        from strata.artifact_store import TransformSpec
+        from strata.artifact_store import StagedVersion, TransformSpec
         from strata.notebook.artifact_integration import caller_principal_id
 
         version = artifact_mgr.artifact_store.create_artifact(
@@ -442,13 +442,18 @@ async def execute_prompt_cell(
             principal=caller_principal_id(),
         )
         artifact_mgr.artifact_store.write_blob(canonical_id, version, blob)
-        artifact_mgr.artifact_store.finalize_artifact(
-            canonical_id,
-            version,
-            schema_json="{}",
-            row_count=1,
-            byte_size=len(blob),
-            content_sha256=hashlib.sha256(blob).hexdigest(),
+        # Canonical, like every other cell output: a duplicated cell reads by its own id.
+        artifact_mgr.finalize_cell_outputs(
+            [
+                StagedVersion(
+                    artifact_id=canonical_id,
+                    version=version,
+                    schema_json="{}",
+                    row_count=1,
+                    byte_size=len(blob),
+                    content_sha256=hashlib.sha256(blob).hexdigest(),
+                )
+            ]
         )
         artifact_uri = f"strata://artifact/{canonical_id}@v={version}"
     except Exception as e:

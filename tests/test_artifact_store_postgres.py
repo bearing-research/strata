@@ -301,6 +301,7 @@ class TestCanonicalPromotion:
         # landed under a different id, so returning that foreign id back would
         # leave the canonical row 'superseded' and the caller unaware.
         first = store.create_artifact("a1", "shared-prov", _spec())
+        store.write_blob("a1", first, b"")
         store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
 
         second = store.create_artifact("a2", "shared-prov", _spec())
@@ -422,6 +423,67 @@ class TestGarbageCollection:
 
         assert result["deleted_count"] == 0
         assert store.get_artifact(artifact, 1) is not None
+
+    def test_an_overtaken_version_goes_with_its_canonical(self, store):
+        canonical = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e04"
+        overtaken = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e05"
+        for artifact_id in (canonical, overtaken):
+            version = store.create_artifact(artifact_id, "prov-dup", _spec(), minted=True)
+            store.write_blob(artifact_id, version, b"x" * 100)
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=100)
+        # The canonical the older, as finalize leaves it: the cap stops right after it.
+        self._last_used(store, canonical, 7200)
+        self._last_used(store, overtaken, 3600)
+
+        result = store.garbage_collect(max_bytes=50)
+
+        assert result["deleted_count"] == 2
+        assert store.get_artifact(canonical, 1) is None
+        assert store.get_artifact(overtaken, 1) is None
+
+    def test_deleting_a_canonical_hands_its_bytes_to_a_pinned_reader(self, store):
+        for artifact_id in ("a1", "a2"):
+            version = store.create_artifact(artifact_id, "prov-dup", _spec())
+            store.write_blob(artifact_id, version, b"bytes")
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=5)
+        store.pin_artifact("a2", 1, "review")
+
+        assert store.delete_artifact("a1", 1)
+
+        assert store.read_blob("a2", 1) == b"bytes"
+        assert store.blob_store.blob_exists("a2", 1)
+
+    @pytest.mark.parametrize("raced", [1, 2])
+    def test_a_name_landing_mid_sweep_skips_only_that_version(self, store, raced):
+        """A failed DELETE aborts a Postgres transaction; without a savepoint the closing commit
+        rolled back every row while their blobs were still deleted.
+        """
+        ids = [f"0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e1{i}" for i in range(3)]
+        for i, artifact_id in enumerate(ids):
+            version = store.create_artifact(artifact_id, f"prov-race-{i}", _spec(), minted=True)
+            store.write_blob(artifact_id, version, b"x" * 100)
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=100)
+            self._last_used(store, artifact_id, 7200 - i)
+        children = store._delete_version_children
+
+        def name_lands(conn, artifact_id, version):
+            # Its own thread, so its own pooled connection; the claim does not block a name.
+            if artifact_id == ids[raced]:
+                setter = threading.Thread(target=store.set_name, args=("raced", artifact_id, 1))
+                setter.start()
+                setter.join()
+            children(conn, artifact_id, version)
+
+        store._delete_version_children = name_lands
+        try:
+            result = store.garbage_collect(max_idle_days=0)
+        finally:
+            store._delete_version_children = children
+
+        assert result["deleted_count"] == 2
+        for i, artifact_id in enumerate(ids):
+            assert (store.get_artifact(artifact_id, 1) is not None) == (i == raced)
+            assert store.blob_store.blob_exists(artifact_id, 1) == (i == raced)
 
 
 class TestConnectionPool:

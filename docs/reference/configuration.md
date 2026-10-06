@@ -206,8 +206,9 @@ secret set it uses `DefaultAzureCredential`. A key set in
 
 `STRATA_AZURE_ENDPOINT_URL` names the blob host (`http://127.0.0.1:10000` for
 Azurite), with the account as the first path segment. The artifact blob store
-addresses the account the same way, as `<url>/<name>`; without an account name
-it uses the URL as given. `adlfs` takes such an
+addresses the account the same way, as `<url>/<name>` (a URL that already ends
+in `/<name>` is used as given); without an account name it uses the URL as
+given. `adlfs` takes such an
 endpoint only from a connection string, so with an account name and key set and
 no connection string, Strata derives one for the catalog
 (`DefaultEndpointsProtocol=<scheme>;AccountName=<name>;AccountKey=<key>;BlobEndpoint=<url>/<name>`).
