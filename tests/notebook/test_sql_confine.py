@@ -227,10 +227,10 @@ class TestLocalMountRoots:
         )
 
     @staticmethod
-    def _problem(uri: str, config) -> str | None:
+    def _problem(uri: str, config, notebook_dir=None) -> str | None:
         from strata.notebook.sql.lake import local_mount_root_problem
 
-        return local_mount_root_problem(uri, config)
+        return local_mount_root_problem(uri, config, notebook_dir)
 
     @pytest.mark.parametrize("uri", ["file:///", "/", "file:///data", "/usr"])
     def test_the_filesystem_root_and_top_level_directories(self, uri, config):
@@ -258,10 +258,66 @@ class TestLocalMountRoots:
     def test_the_process_filesystem(self, config):
         assert self._problem("file:///proc/self", config) is not None
 
+    @pytest.mark.parametrize(
+        "subpath",
+        ["state/artifacts/blobs", "state/cache/t1", "notebooks/other", "notebooks/other/data"],
+    )
+    def test_a_root_inside_server_state(self, tmp_path, config, subpath):
+        problem = self._problem(
+            (tmp_path / subpath).as_uri(), config, tmp_path / "notebooks" / "nb"
+        )
+
+        assert problem is not None and "is inside the server's" in problem
+
     def test_a_notebooks_own_data_and_other_directories_are_fine(self, tmp_path, config):
-        assert self._problem((tmp_path / "notebooks" / "nb" / "data").as_uri(), config) is None
-        assert self._problem((tmp_path / "lake" / "raw").as_uri(), config) is None
-        assert self._problem("s3://bucket/", config) is None
+        own = tmp_path / "notebooks" / "nb"
+
+        assert self._problem(own.as_uri(), config, own) is None
+        assert self._problem((own / "data").as_uri(), config, own) is None
+        assert self._problem((tmp_path / "lake" / "raw").as_uri(), config, own) is None
+        assert self._problem("s3://bucket/", config, own) is None
+
+
+@pytest.mark.parametrize("where", ["artifact-store", "own"])
+@pytest.mark.asyncio
+async def test_a_service_mount_inside_server_state_is_refused(tmp_path, monkeypatch, where):
+    """A root under the artifact store reads its blobs; the notebook's own directory,
+    though inside notebook storage, is the notebook's to read."""
+    from strata.notebook.models import MountSpec
+    from strata.notebook.writer import update_notebook_mounts
+
+    config = StrataConfig(
+        cache_dir=tmp_path / "state" / "cache",
+        artifact_dir=tmp_path / "state" / "artifacts",
+        notebook_storage_dir=tmp_path / "notebooks",
+        deployment_mode="service",
+    )
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    nb_dir = create_notebook(tmp_path / "notebooks", "inside")
+    root = (
+        tmp_path / "state" / "artifacts" / "blobs" if where == "artifact-store" else nb_dir / "data"
+    )
+    root.mkdir(parents=True)
+    (root / "data.csv").write_text("a\n1\n")
+    source = f"# @sql connection=db\nSELECT a FROM read_csv('{root / 'data.csv'}')\n"
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    write_cell(nb_dir, "c1", source)
+    update_notebook_mounts(nb_dir, [MountSpec(name="srv", uri=root.as_uri())])
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "duckdb"\npath = ":memory:"\n'
+        'mounts = ["srv"]\n'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    result = await CellExecutor(session).execute_cell("c1", source)
+
+    if where == "own":
+        assert result.success, result.error
+        return
+    assert not result.success
+    assert "mount 'srv'" in (result.error or "")
+    assert "inside the server's artifact store" in (result.error or "")
 
 
 # --- A service-mode cell opens only a database file its notebook may read ---

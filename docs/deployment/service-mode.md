@@ -696,9 +696,10 @@ files live outside its own location cannot be read this way.
 A mount's root is therefore as much of the disk as the cell may read, as the
 server, so a SQL cell refuses a local (`file://`) mount root, after following
 links, that is `/` or has fewer than two path components (`/data`); that holds
-the server's state (the artifact directory, the cache directory, the metadata
-database's directory, the notebook storage directory or the server's home); or
-that is inside the server's home, `/proc`, `/sys` or `/dev`. The cell fails
+or is inside the server's state (the artifact directory, the cache directory,
+the metadata database's directory, the notebook storage directory or the
+server's home), other than the notebook's own directory; or that is inside the
+server's home, `/proc`, `/sys` or `/dev`. The cell fails
 naming the mount. Python cells mount the same roots unchecked: they run as the
 harness user, whose own file permissions decide what a root exposes. A SQLite cell also
 runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are

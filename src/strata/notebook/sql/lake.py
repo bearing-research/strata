@@ -289,14 +289,15 @@ def _mount_location(uri: str) -> str:
 _SYSTEM_TREES = (Path("/proc"), Path("/sys"), Path("/dev"))
 
 
-def local_mount_root_problem(uri: str, config: Any) -> str | None:
+def local_mount_root_problem(uri: str, config: Any, notebook_dir: Any = None) -> str | None:
     """Why a confined SQL cell may not mount the local root *uri*, or ``None``.
 
     A confined handle reads everything under the root as the server, so after
     following links this refuses a root with fewer than two path components,
-    one holding server state (artifact store, cache, metadata DB, notebook
-    storage, the server's home), or one under the home, ``/proc``, ``/sys`` or
-    ``/dev``. Remote mounts are not checked.
+    one holding or inside server state (artifact store, cache, metadata DB,
+    notebook storage, the server's home) other than *notebook_dir*'s own tree,
+    or one under the home, ``/proc``, ``/sys`` or ``/dev``. Remote mounts are
+    not checked.
     """
     from strata.notebook.mounts import parse_mount_uri
 
@@ -307,9 +308,13 @@ def local_mount_root_problem(uri: str, config: Any) -> str | None:
     if len(root.parts) < 3:
         return f"its root {root} is too near the top of the filesystem"
     home = Path(os.path.realpath(Path.home()))
+    own = Path(os.path.realpath(notebook_dir)) if notebook_dir is not None else None
+    in_own = own is not None and (root == own or own in root.parents)
     for label, resolved in _server_state(config).items():
         if root == resolved or root in resolved.parents:
             return f"its root {root} holds the server's {label} ({resolved})"
+        if resolved in root.parents and not in_own:
+            return f"its root {root} is inside the server's {label} ({resolved})"
     for tree in (home, *_SYSTEM_TREES):
         if tree in root.parents:
             return f"its root {root} is inside {tree}"
@@ -381,7 +386,7 @@ def _mount_sources(
         if confined_config is not None:
             # Before anything under the root is read: fingerprinting ``/``
             # would walk the whole disk.
-            problem = local_mount_root_problem(mount.uri, confined_config)
+            problem = local_mount_root_problem(mount.uri, confined_config, session.path)
             if problem is not None:
                 raise LakeError(
                     f"mount {name!r}: {problem}, and a SQL cell on this server reads "
