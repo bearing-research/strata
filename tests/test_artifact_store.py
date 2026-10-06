@@ -423,6 +423,22 @@ class TestStats:
         assert store.stats()["total_bytes"] == swept == 1300
         assert store.get_usage()["total_bytes"] == 1300
 
+    def test_superseded_versions_are_counted_so_the_states_add_up(self, store):
+        """A refresh and a dedup each leave a superseded version, which no other count holds."""
+        for _ in range(2):
+            version = store.create_artifact("id-1", "hash1")
+            store.finalize_artifact("id-1", version, "{}", 1, 10)
+        store.create_artifact("id-2", "hash1")
+        store.finalize_artifact("id-2", 1, "{}", 1, 10)
+        store.create_artifact("id-3", "hash3")
+
+        for counts in (store.stats(), store.get_usage()):
+            assert counts["superseded_versions"] == 2
+            assert counts["total_versions"] == sum(
+                counts[f"{state}_versions"]
+                for state in ("ready", "building", "superseded", "failed")
+            )
+
     def test_name_prefix_treats_an_underscore_literally(self, store):
         for name, artifact_id in (("taxi_model", "a"), ("taxi/model", "b")):
             version = store.create_artifact(artifact_id, f"hash-{artifact_id}")

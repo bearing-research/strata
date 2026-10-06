@@ -4526,6 +4526,7 @@ class ArtifactStore:
                     COUNT(*) as total_versions,
                     COUNT(CASE WHEN state = 'ready' THEN 1 END) as ready_versions,
                     COUNT(CASE WHEN state = 'building' THEN 1 END) as building_versions,
+                    COUNT(CASE WHEN state = 'superseded' THEN 1 END) as superseded_versions,
                     COUNT(CASE WHEN state = 'failed' THEN 1 END) as failed_versions,
                     COALESCE(SUM(CASE WHEN state IN ('ready', 'superseded')
                                        AND superseded_by IS NULL
@@ -4579,6 +4580,7 @@ class ArtifactStore:
                 "total_versions": row["total_versions"],
                 "ready_versions": row["ready_versions"],
                 "building_versions": row["building_versions"],
+                "superseded_versions": row["superseded_versions"],
                 "failed_versions": row["failed_versions"],
                 # int(): SUM over a BIGINT column is numeric in Postgres and
                 # arrives as Decimal, which breaks arithmetic like
@@ -4763,6 +4765,7 @@ class ArtifactStore:
                     COUNT(*) as total_versions,
                     COUNT(CASE WHEN state = 'ready' THEN 1 END) as ready_versions,
                     COUNT(CASE WHEN state = 'building' THEN 1 END) as building_versions,
+                    COUNT(CASE WHEN state = 'superseded' THEN 1 END) as superseded_versions,
                     COUNT(CASE WHEN state = 'failed' THEN 1 END) as failed_versions,
                     COALESCE(SUM(CASE WHEN state IN ('ready', 'superseded')
                                        AND superseded_by IS NULL
@@ -4796,6 +4799,7 @@ class ArtifactStore:
                 "total_versions": row["total_versions"],
                 "ready_versions": row["ready_versions"],
                 "building_versions": row["building_versions"],
+                "superseded_versions": row["superseded_versions"],
                 "failed_versions": row["failed_versions"],
                 # int(): SUM over a BIGINT column is numeric in Postgres and
                 # arrives as Decimal, which breaks arithmetic like

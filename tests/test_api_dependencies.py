@@ -187,3 +187,21 @@ class TestArtifactListPaginationIsBounded:
 
         assert client.get("/v1/artifacts", params={"state": "superseded"}).status_code == 200
         assert client.get("/v1/artifacts", params={"state": "bogus"}).status_code == 400
+
+    def test_stats_and_usage_count_superseded_versions(self, tmp_path):
+        """The Artifacts page shows the superseded count beside the other states."""
+        from fastapi.testclient import TestClient
+
+        from strata.artifact_store import ArtifactStore
+        from strata.server import app
+
+        _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
+        store = ArtifactStore(tmp_path / "artifacts")
+        for _ in range(2):
+            version = store.create_artifact("refreshed", "same-prov")
+            store.finalize_artifact("refreshed", version, "{}", 1, 10)
+        client = TestClient(app)
+
+        for route in ("/v1/artifacts/stats", "/v1/artifacts/usage"):
+            body = client.get(route).json()
+            assert (body["ready_versions"], body["superseded_versions"]) == (1, 1)
