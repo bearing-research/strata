@@ -3118,7 +3118,9 @@ endpoint that are set, passed to its catalog as <code>adls.*</code> properties; 
 secret set it uses <code>DefaultAzureCredential</code>. A key set in
 <code>STRATA_CATALOG_PROPERTIES</code> overrides the one Strata derives.</p>
 <p><code>STRATA_AZURE_ENDPOINT_URL</code> names the blob host (<code>http://127.0.0.1:10000</code> for
-Azurite), with the account as the first path segment. <code>adlfs</code> takes such an
+Azurite), with the account as the first path segment. The artifact blob store
+addresses the account the same way, as <code>&lt;url&gt;/&lt;name&gt;</code>; without an account name
+it uses the URL as given. <code>adlfs</code> takes such an
 endpoint only from a connection string, so with an account name and key set and
 no connection string, Strata derives one for the catalog
 (<code>DefaultEndpointsProtocol=&lt;scheme&gt;;AccountName=&lt;name&gt;;AccountKey=&lt;key&gt;;BlobEndpoint=&lt;url&gt;/&lt;name&gt;</code>).
