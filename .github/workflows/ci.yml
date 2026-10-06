@@ -81,7 +81,7 @@ jobs:
           import importlib.util
           for mod in ("strata", "pyiceberg", "fastapi", "uvicorn", "duckdb", "pydantic"):
               assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
-          print("server stack absent — client install is slim")
+          print("server stack absent: client install is slim")
           PY
 
       - name: Run client tests
@@ -129,7 +129,7 @@ jobs:
           import importlib.util
           for mod in ("strata", "pyiceberg", "fastapi", "uvicorn", "duckdb", "pyarrow"):
               assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
-          print("base install is httpx and stdlib — importing the pool drags in no framework")
+          print("base install is httpx and stdlib: importing the pool drags in no framework")
           PY
 
       - name: Add the server extra and the test runner
@@ -142,7 +142,7 @@ jobs:
           import importlib.util
           for mod in ("strata", "pyiceberg", "duckdb", "pyarrow"):
               assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
-          print("server stack absent — the pool stands alone")
+          print("server stack absent: the pool stands alone")
           PY
 
       - name: Run pool tests
@@ -278,7 +278,7 @@ jobs:
           # A skip passes pytest; here it would mean nothing was checked.
           grep -q " 1 passed" harness-e2e.log
 
-      - name: Run unit tests (Windows — notebook subsystem skipped)
+      - name: Run unit tests (Windows, notebook subsystem skipped)
         if: runner.os == 'Windows'
         shell: bash
         run: |

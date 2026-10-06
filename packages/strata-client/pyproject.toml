@@ -1,7 +1,7 @@
 [project]
 name = "strata-client"
 version = "0.8.0"
-description = "Lightweight Python client for Strata — materialize, persist, and query artifacts over HTTP."
+description = "Lightweight Python client for Strata: materialize, persist, and query artifacts over HTTP."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"

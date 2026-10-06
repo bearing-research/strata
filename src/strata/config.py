@@ -334,7 +334,9 @@ class StrataConfig(BaseSettings):
     notebook_storage_dir: Path = Field(
         default_factory=lambda: Path.home() / ".strata" / "notebooks"
     )
-    notebook_python_versions: list[str] = Field(default_factory=discover_installed_python_minors)
+    notebook_python_versions: Annotated[list[str], NoDecode] = Field(
+        default_factory=discover_installed_python_minors
+    )
     # How a notebook's Python environment is kept: "uv" gives each notebook its
     # own .venv; "shared" links notebooks with the same lockfile and
     # interpreter to one environment under notebook_shared_env_dir (default:

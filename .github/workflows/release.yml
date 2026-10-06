@@ -428,7 +428,7 @@ jobs:
           # wheel without it would still pass /health.
           curl -fsS "http://127.0.0.1:${STRATA_PORT}/" -o /tmp/frontend.html
           if ! grep -qi '<!doctype html' /tmp/frontend.html; then
-            echo "::error::GET / did not return the SPA index.html — frontend bundle missing from wheel"
+            echo "::error::GET / did not return the SPA index.html: frontend bundle missing from wheel"
             echo "--- response body (first 200 bytes) ---"
             head -c 200 /tmp/frontend.html
             kill "${SERVER_PID}" 2>/dev/null || true
@@ -526,7 +526,7 @@ jobs:
           text = open("CHANGELOG.md").read()
           # The version's heading (and any suffix, such as a date) up to the
           # next "## " heading or EOF. preflight already checked it exists.
-          pattern = rf"^##\s+{re.escape(version)}(?:[\s—-][^\n]*)?\n(.*?)(?=^##\s|\Z)"
+          pattern = rf"^##\s+{re.escape(version)}(?:[\s-][^\n]*)?\n(.*?)(?=^##\s|\Z)"
           match = re.search(pattern, text, flags=re.DOTALL | re.MULTILINE)
           body = match.group(1).strip() if match else ""
           print("body<<NOTES_EOF")

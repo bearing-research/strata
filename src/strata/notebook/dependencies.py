@@ -21,6 +21,7 @@ from pathlib import Path
 
 import filelock
 import tomli_w
+import yaml
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
@@ -1498,11 +1499,6 @@ def parse_requirements_text(requirements_text: str) -> list[str]:
 
 def parse_environment_yaml_text(environment_yaml_text: str) -> tuple[list[str], list[str]]:
     """Translate a subset of Conda ``environment.yaml`` into pip requirements."""
-    try:
-        import yaml
-    except ModuleNotFoundError as exc:
-        raise ValueError("PyYAML is required to import environment.yaml") from exc
-
     try:
         data = yaml.safe_load(environment_yaml_text) or {}
     except Exception as exc:
