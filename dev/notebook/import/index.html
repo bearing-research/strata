@@ -2458,12 +2458,16 @@ can open in the UI, run headlessly, edit, or export.</p>
 <li><strong><code>%pip install</code>, <code>!pip install</code>, <code>%conda install</code></strong> - packages
   captured into the new notebook's <code>pyproject.toml</code>.</li>
 <li><strong><code>%env</code>, <code>%set_env</code></strong> - translated to <code># @env KEY=VAL</code> cell
-  annotations.</li>
+  annotations, moved to the top of the cell so they apply.</li>
 <li><strong><code>%run script.py</code></strong> - translated to <code>exec(Path(...).read_text())</code>.</li>
 <li><strong><code>%%writefile</code></strong> - translated to <code>Path(...).write_text(...)</code>.</li>
-<li><strong><code>%timeit</code>, <code>%time</code> (line form)</strong> - the magic prefix is dropped;
-  the body keeps running.</li>
+<li><strong><code>%timeit</code>, <code>%time</code> (line form)</strong> - the magic prefix and its
+  options are dropped; the body keeps running.</li>
 </ul>
+<p>Only a line that starts a statement is read as a magic or shell
+escape: a <code>%</code> or <code>!</code> inside a string, a bracketed expression or a
+backslash continuation stays Python. A magic that was the only
+statement of an indented block leaves a <code>pass</code> behind.</p>
 <p><strong>What you lose:</strong></p>
 <ul>
 <li><strong>All cell outputs.</strong> Imported cells start blank; first run
@@ -2642,7 +2646,7 @@ extends support; rows can be:</p>
 </tr>
 <tr>
 <td><code>%timeit</code>, <code>%time</code> (line form)</td>
-<td>Magic stripped, body kept.</td>
+<td>Magic and its options stripped, body kept.</td>
 </tr>
 <tr>
 <td><code>%pip install &lt;pkgs&gt;</code>, <code>!pip install &lt;pkgs&gt;</code>, <code>%conda install &lt;pkgs&gt;</code></td>
@@ -2650,7 +2654,7 @@ extends support; rows can be:</p>
 </tr>
 <tr>
 <td><code>%env KEY=VAL</code>, <code>%set_env KEY=VAL</code></td>
-<td>Translated to a <code># @env KEY=VAL</code> cell annotation.</td>
+<td>Translated to a <code># @env KEY=VAL</code> annotation at the top of the cell.</td>
 </tr>
 <tr>
 <td><code>%run script.py</code></td>
@@ -2702,7 +2706,9 @@ the converter is conservative:</p>
 so a version-pinned spec from <code>requirements.txt</code> wins over a bare
 inferred-from-imports entry:</p>
 <ol>
-<li>Sibling <code>requirements.txt</code> next to the <code>.ipynb</code>.</li>
+<li>Sibling <code>requirements.txt</code> next to the <code>.ipynb</code>, read as pip
+   does: backslash continuations joined, inline <code># comments</code> and
+   options such as <code>--hash=...</code> dropped.</li>
 <li>Sibling <code>pyproject.toml</code> next to the <code>.ipynb</code>.</li>
 <li><code>%pip install</code> / <code>!pip install</code> lines extracted from cells.</li>
 <li><strong>Bare imports in cell source.</strong> AST-walk each cell, collect
@@ -2711,15 +2717,20 @@ inferred-from-imports entry:</p>
    <code>*/__init__.py</code> next to the notebook). Map import names to PyPI
    names via a small hand-maintained dict for common mismatches:
    <code>cv2 → opencv-python</code>, <code>sklearn → scikit-learn</code>, <code>PIL → Pillow</code>,
-   <code>bs4 → beautifulsoup4</code>, <code>yaml → PyYAML</code>, etc. Anything not in the
+   <code>bs4 → beautifulsoup4</code>, <code>yaml → PyYAML</code>, <code>mpl_toolkits → matplotlib</code>,
+   <code>pkg_resources → setuptools</code>, etc. A <code>google.cloud.&lt;x&gt;</code> import maps
+   to its own <code>google-cloud-&lt;x&gt;</code> package (<code>from google.cloud import
+   bigquery → google-cloud-bigquery</code>, <code>pubsub_v1 → google-cloud-pubsub</code>).
+   Anything not in the
    dict is assumed to use the same name on PyPI (right ~95% of the
    time).</li>
 </ol>
 <p>The combined set is deduped with PEP 503-normalized package names
 (so <code>scikit-learn</code> and <code>scikit_learn</code> collapse to one entry) and
-filtered to <strong>PEP 508 specifiers only</strong>: <code>pyproject.toml</code>'s
-<code>dependencies</code> won't accept editable installs (<code>-e .</code>), bare URLs
-(<code>git+https://…</code>), or local paths. Skipped specs land in the import
+filtered to <strong>PEP 508 specifiers only</strong> (each is parsed as one):
+<code>pyproject.toml</code>'s <code>dependencies</code> won't accept editable installs
+(<code>-e .</code>), bare URLs (<code>git+https://…</code>), local paths, or a malformed
+line. Skipped specs land in the import
 report so you can address them by hand.</p>
 <p>The deps are written to the new notebook's <code>pyproject.toml</code>. First
 <code>uv sync</code> (which runs automatically when you open the notebook in
@@ -2810,7 +2821,9 @@ same verb reads it back, told apart by the file:</p>
 <code>POST /v1/notebooks/import-snapshot</code>, with the <code>file</code>, <code>name</code> and
 <code>parent_path</code> fields of the Jupyter route and a 2 GiB cap. Either way, a
 bundle whose files would expand to more than 16 GiB is refused before anything
-is extracted.</p>
+is extracted, as is one where a file the import reads whole (<code>artifacts.json</code>,
+<code>notebook.toml</code>, a cell, a lockfile, a console log) is over 16 MiB. Artifact and
+fetched bytes are streamed, so they have no such limit.</p>
 <p>What you get:</p>
 <ul>
 <li><strong>Carried cells are cache hits</strong> before anything runs, with their outputs
@@ -2831,9 +2844,15 @@ is extracted.</p>
 <p>The destination must be absent or empty. The import is built beside it and
 moved into place only once it's complete. A failure partway leaves nothing
 behind, and a retry works.</p>
-<p>A bundle is a file somebody sent you, so its member names, cell ids and
-artifact ids are checked before anything is written. One that names a path
-outside the notebook is refused rather than unpacked.</p>
+<p>A bundle is a file somebody sent you, so its member names, cell ids, cell
+files and artifact ids are checked before anything is written. One that names a
+path outside the notebook is refused rather than unpacked. So is an artifact
+record of the wrong shape (a state other than <code>ready</code> or <code>superseded</code>, a size
+that is not a whole number, a lineage field that is not JSON), which the store
+would otherwise keep and trip over later. The same rule holds
+for any notebook you open: a <code>notebook.toml</code> whose cell <code>file</code> points outside
+<code>cells/</code> (an absolute path, or one climbing out with <code>..</code>) is refused with an
+error naming the cell, so a cloned notebook can't read or rewrite other files.</p>
 
 
 

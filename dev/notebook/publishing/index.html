@@ -2425,7 +2425,12 @@ output: the shape PROV-O and RO-Crate both expect for "this code, on these
 inputs, made this".</p>
 <p>Upstream steps are <code>CreativeWork</code> entities, <strong>not</strong> files, and they are not
 listed under <code>hasPart</code>. Their bytes are deliberately not in the crate, and
-declaring files that are not there is a claim no validator would catch.</p>
+declaring files that are not there is a claim no validator would catch.
+An input past the depth limit is still named, as a stub saying the recorded
+chain stops there, so no reference dangles.</p>
+<p>People appear once each. A step run by someone listed as an author points at
+that author's node (the ORCID when one is given, as a bare id or a link), and an
+author listed twice is credited once.</p>
 <p>A step that read a URL through <a href="../annotations/#fetch"><code>@fetch</code></a> names it as
 an input. On the page it appears under "External inputs" with the digest of the
 bytes read, when they were retrieved, and when the reading step ran. In the

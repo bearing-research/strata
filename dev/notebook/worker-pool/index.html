@@ -2463,9 +2463,14 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 </tbody>
 </table>
 <p>Both job submit routes take their options as query parameters: <code>machine_type</code>
-(required), <code>priority</code> (default 0, higher runs first), <code>session_id</code> and
-<code>timeout_seconds</code> (both optional). <code>POST /v1/jobs/sync</code> also takes
-<code>wait_seconds</code> (default 300), which bounds the wait and not the job.</p>
+(required), <code>priority</code> (default 0, higher runs first; a 64-bit integer), <code>session_id</code> and
+<code>timeout_seconds</code> (both optional). <code>timeout_seconds</code> can shorten the machine type's
+<code>job_timeout_seconds</code> but not extend it. <code>POST /v1/jobs/sync</code> also takes
+<code>wait_seconds</code> (default 300), which bounds the wait and not the job, and is cut to
+the type's <code>boot_timeout_seconds</code> plus <code>job_timeout_seconds</code>. Both times must be
+positive and finite; anything else is a 422 and no job is queued.</p>
+<p><code>PUT /v1/machine-types</code> checks each field's type before storing anything: a
+number sent as a string, an unknown key or a non-finite number is a 400.</p>
 <p>Replacing the catalogue needs the <strong>admin token</strong>. A catalogue entry decides
 which image receives a tenant's jobs, and with them the signed URLs for that
 tenant's data, so the API token every caller holds cannot rewrite it. A pool

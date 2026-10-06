@@ -2474,7 +2474,10 @@ alongside Markdown and HTML.</p>
 <p>Markdown (markdown cells, markdown outputs, and the README intro) exports
 the way the UI shows it: raw HTML is escaped to visible text, and
 <code>javascript:</code>, <code>vbscript:</code> and non-image <code>data:</code> link targets become <code>#</code>.
-Code spans and fenced code keep their text unchanged.</p>
+Code spans and fenced code keep their text unchanged. The markdown export
+treats the rest of the page the same way: cell and notebook names, widget
+values, notes, table headers and table values are escaped too, and an image is
+written only when its source is an inline <code>data:image/</code> URL.</p>
 <h2 id="cell-kind-specifics">Cell-kind specifics<a class="headerlink" href="#cell-kind-specifics" title="Permanent link">&para;</a></h2>
 <h3 id="prompt-cells-response-excluded-by-design">Prompt cells, response excluded by design<a class="headerlink" href="#prompt-cells-response-excluded-by-design" title="Permanent link">&para;</a></h3>
 <p>Prompt cells render the <strong>template only</strong>. Cached LLM responses are
@@ -2555,6 +2558,8 @@ import &lt;file&gt;.zip</code> unpacks one back into a notebook directory (see
 </tr>
 </tbody>
 </table>
+<p>A carried loop cell brings every stored iteration (<code>@iter=k</code>) with it, so a
+cell that forks from one with <code>start_from</code> still runs after an import.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># The whole thing, to carry to another machine</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>strata<span class="w"> </span><span class="nb">export</span><span class="w"> </span>./my_analysis<span class="w"> </span>--to<span class="w"> </span>snapshot<span class="w"> </span>--include<span class="w"> </span>all<span class="w"> </span>--out<span class="w"> </span>my_analysis.zip
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>

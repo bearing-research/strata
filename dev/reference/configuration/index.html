@@ -3580,7 +3580,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_SIGNED_URL_EXPIRY_SECONDS</code></td>
 <td><code>600</code></td>
-<td>Validity window for pull-model signed build URLs.</td>
+<td>Validity window for pull-model signed build URLs. For a notebook cell on a <code>signed</code> worker it is a floor: the URLs last at least the cell's timeout plus <code>STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS</code> plus 5 minutes, so a long cell can still upload its result.</td>
 </tr>
 <tr>
 <td><code>STRATA_ARTIFACT_PRESIGNED_URLS</code></td>
@@ -4057,7 +4057,9 @@ also sets its provider's <code>base_url</code> and <code>model</code>, so it rep
 link-local address is refused unless its host is in
 <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. <code>STRATA_AI_BASE_URL</code> is the operator's
 and is not checked, nor is a notebook naming that same URL or a provider's
-default.</p>
+default. In every mode the server's <code>STRATA_AI_API_KEY</code> goes only to those
+trusted URLs: a notebook whose <code>[ai] base_url</code> names another host needs its own
+key (the Runtime panel, or <code>[ai] api_key</code>).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[ai]</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://localhost:11434/v1"</span>

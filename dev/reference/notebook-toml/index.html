@@ -2457,7 +2457,7 @@
 </code></pre></div>
 <p>Routing-only config for an external secret manager. Infisical is the only supported <code>provider</code>. The authentication token for the manager itself lives in the strata-notebook's process environment, <strong>not</strong> here. See <a href="../../notebook/secrets/">Secret Manager</a>.</p>
 <p>Allowed keys: <code>provider</code>, <code>project_id</code>, <code>environment</code>, <code>path</code>, <code>base_url</code>. Unknown keys are dropped on save.</p>
-<p>On a server in service mode, <code>base_url</code> must be the operator's <code>INFISICAL_HOST</code> (or the public default when unset); any other host is refused, since the server would log in there with its own credentials.</p>
+<p>In every mode, <code>base_url</code> must be the server's <code>INFISICAL_HOST</code> (or the public default when unset); any other host is refused, since the server would log in there with its own credentials.</p>
 <h2 id="mounts-filesystem-mounts"><code>[[mounts]]</code> - Filesystem mounts<a class="headerlink" href="#mounts-filesystem-mounts" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[[mounts]]</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"taxi_zones"</span>
@@ -2632,7 +2632,7 @@ by its snapshot.</p>
 <tr>
 <td><code>auth</code></td>
 <td>table</td>
-<td><code>${VAR}</code> indirections only. Resolved from the process environment at execute time; never hashed into provenance.</td>
+<td><code>${VAR}</code> indirections only, resolved at execute time and never hashed into provenance. A personal server reads them from its own process environment. A server in service mode reads them from the notebook's env (<code>[env]</code> and its secret manager) and never from its own, so a variable the notebook does not set fails the connection; give a connection a server-held secret with <code>credential</code>.</td>
 </tr>
 <tr>
 <td><code>credential</code></td>

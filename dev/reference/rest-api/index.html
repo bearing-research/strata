@@ -4396,8 +4396,10 @@ translation table and limitations.</p>
 <p>Form fields as for the Jupyter import (<code>file</code>, <code>name</code>, <code>parent_path</code>), where
 <code>file</code> is a bundle from <code>GET …/export?fmt=snapshot</code>. The upload is streamed to
 disk and capped at 2 GiB, since an <code>include=all</code> snapshot is as large as the
-notebook's store. A bundle whose files would expand to more than 16 GiB is
-refused with <code>400</code> before anything is extracted.</p>
+notebook's store. A bundle whose files would expand to more than 16 GiB, or
+holding a file the import reads whole (manifest, <code>notebook.toml</code>, a cell, a
+lockfile, a console log) over 16 MiB, is refused with <code>400</code> before anything is
+extracted.</p>
 <p>Turns the bundle into a notebook directory and opens a session on it. Cells
 whose artifacts the bundle carried are cache hits before anything runs; cells it
 only described open idle. With a team store configured, running one of those is
