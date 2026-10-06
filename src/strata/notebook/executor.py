@@ -3823,7 +3823,8 @@ class CellExecutor:
                 error=(
                     "LLM not configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or "
                     "STRATA_AI_API_KEY in the notebook's environment (the Runtime panel, "
-                    "or [env] in notebook.toml), or STRATA_AI_API_KEY where the server starts."
+                    "or [env] in notebook.toml), or STRATA_AI_API_KEY where the server starts. "
+                    "The server's key is not sent to an [ai] base_url of the notebook's own."
                 ),
                 cache_hit=False,
                 duration_ms=int((time.time() - start_time) * 1000),

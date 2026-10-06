@@ -660,7 +660,9 @@ also sets its provider's `base_url` and `model`, so it replaces the server's
 link-local address is refused unless its host is in
 `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. `STRATA_AI_BASE_URL` is the operator's
 and is not checked, nor is a notebook naming that same URL or a provider's
-default.
+default. In every mode the server's `STRATA_AI_API_KEY` goes only to those
+trusted URLs: a notebook whose `[ai] base_url` names another host needs its own
+key (the Runtime panel, or `[ai] api_key`).
 
 ```toml
 [ai]
