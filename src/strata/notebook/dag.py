@@ -104,6 +104,16 @@ class NotebookDag:
     shadow_warnings: dict[str, list[str]] = field(default_factory=dict)
     variant_groups: list[VariantGroupResolution] = field(default_factory=list)
     inactive_cells: set[str] = field(default_factory=set)
+    # consumer -> producer -> the variables wired along that edge.
+    wired_inputs: dict[str, dict[str, set[str]]] = field(default_factory=dict)
+
+    def wired_variables(self, consumer_id: str, producer_id: str) -> set[str]:
+        """The variables ``consumer_id`` reads from ``producer_id``.
+
+        A name several upstreams define is wired only from its last definer before the
+        consumer, so every input loader filters on this, never on the upstream's defines.
+        """
+        return self.wired_inputs.get(consumer_id, {}).get(producer_id, set())
 
     @classmethod
     def from_cells(
@@ -386,6 +396,7 @@ def _wire_variable_edge(dag: NotebookDag, from_id: str, to_id: str, var: str) ->
     if to_id not in dag.cell_downstream[from_id]:
         dag.cell_downstream[from_id].append(to_id)
     dag.consumed_variables[from_id].add(var)
+    dag.wired_inputs.setdefault(to_id, {}).setdefault(from_id, set()).add(var)
 
 
 def _resolve_variant_groups(

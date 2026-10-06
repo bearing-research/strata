@@ -613,7 +613,8 @@ def _load_upstream_variables(
         if upstream_cell is None:
             continue
 
-        referenced_vars = [v for v in cell.references if v in upstream_cell.defines]
+        wired = session.wired_variables(cell_id, upstream_id)
+        referenced_vars = [v for v in cell.references if v in wired]
 
         for var_name in referenced_vars:
             canonical_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"

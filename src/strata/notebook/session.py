@@ -1824,6 +1824,10 @@ class NotebookSession:
 
         return cached_outputs
 
+    def wired_variables(self, cell_id: str, upstream_id: str) -> set[str]:
+        """The variables ``cell_id`` reads from ``upstream_id``, as the DAG wired them."""
+        return self.dag.wired_variables(cell_id, upstream_id) if self.dag is not None else set()
+
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
         """Provenance hashes from upstream artifacts, with sweep refs grouped.
 

@@ -4214,11 +4214,11 @@ class CellExecutor:
                 continue
 
             # builtin_references holds builtin-shadowing names (``input``) the display-facing
-            # list filters out; the upstream-defines intersect gates them too.
+            # list filters out. Only names wired from this upstream load, so a shadowed earlier
+            # definer never overwrites the real producer's value.
+            wired = self.session.wired_variables(cell_id, upstream_id)
             referenced_vars = [
-                v
-                for v in (*cell.references, *cell.builtin_references)
-                if v in upstream_cell.defines
+                v for v in (*cell.references, *cell.builtin_references) if v in wired
             ]
 
             for var_name in referenced_vars:
@@ -5487,7 +5487,9 @@ class CellExecutor:
         notebook_id = self.session.notebook_state.id
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
-            if upstream_cell is None or loop.carry not in upstream_cell.defines:
+            if upstream_cell is None or loop.carry not in self.session.wired_variables(
+                cell_id, upstream_id
+            ):
                 continue
             upstream_artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{loop.carry}"
             artifact = artifact_mgr.artifact_store.get_latest_version(upstream_artifact_id)
@@ -5993,8 +5995,9 @@ class CellExecutor:
                 upstream_cell = self.session.notebook_state.get_cell(upstream_id)
                 if upstream_cell is None:
                     continue
+                wired = self.session.wired_variables(cell_id, upstream_id)
                 for var_name, uri in upstream_cell.artifact_uris.items():
-                    if var_name in inputs:
+                    if var_name in inputs or var_name not in wired:
                         continue
                     spec_dict = self._materialize_artifact_to_dir(uri, upstream_dir, var_name)
                     if spec_dict is not None:
@@ -6043,14 +6046,14 @@ class CellExecutor:
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
             return {}
-        references = set(cell.references or [])
         inputs: dict[str, dict[str, str]] = {}
         for upstream_id in cell.upstream_ids:
             upstream = self.session.notebook_state.get_cell(upstream_id)
             if upstream is None:
                 continue
+            wired = self.session.wired_variables(cell_id, upstream_id)
             for var_name, uri in upstream.artifact_uris.items():
-                if var_name in references:
+                if var_name in wired:
                     inputs.setdefault(var_name, {"uri": uri})
         return inputs
 
