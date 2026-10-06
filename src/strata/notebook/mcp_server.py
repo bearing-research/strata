@@ -775,11 +775,13 @@ def _server_config():
 
 
 def _served_store():
-    """The store a published link resolves from, or ``None`` if none is set."""
-    from strata.artifact_store import ArtifactStore
+    """The store a published link resolves from, or ``None`` if none is set.
 
-    artifact_dir = getattr(_server_config(), "artifact_dir", None)
-    return ArtifactStore(artifact_dir) if artifact_dir else None
+    The server's own instance, with its configured metadata DSN and blob backend.
+    """
+    from strata.artifact_store import get_artifact_store
+
+    return get_artifact_store()
 
 
 def _caller(context: Any) -> Principal | None:

@@ -13,6 +13,7 @@ import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
+from strata.artifact_cli import _server_store as _configured_server_store
 from strata.artifact_store import ArtifactStore, TransformSpec
 from strata.sql_backend import PostgresDialect, advisory_lock_id
 
@@ -870,6 +871,43 @@ class TestTheCliOnAPostgresStore:
             assert out.read_bytes() == (tmp_path / "direct.zip").read_bytes()
         finally:
             dialect.close()
+
+    def test_publish_mints_the_grant_in_the_store_the_server_serves(
+        self, store, tmp_path, monkeypatch, postgres_dsn
+    ):
+        """The publish target is built like the server's store, not from ``artifact_dir`` alone.
+
+        Built from the directory, it was an empty SQLite file: "not found", and a stray database.
+        """
+        import argparse
+
+        from strata.artifact_cli import cmd_publish
+
+        version = store.create_artifact("fig", "prov-fig", _spec())
+        with store.open_blob_writer("fig", version) as writer:
+            writer.write(b"figure bytes")
+        store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
+
+        monkeypatch.setenv("STRATA_ARTIFACT_METADATA_DSN", postgres_dsn)
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+        # The suite stubs this out so no test publishes into a developer's own store.
+        monkeypatch.setattr("strata.artifact_cli._server_store", _configured_server_store)
+        args = argparse.Namespace(
+            ref=f"fig@v={version}",
+            artifact_dir=None,
+            format="json",
+            title="Figure",
+            author=None,
+            tenant=None,
+            here=False,
+            into=None,
+            to_url=None,
+            max_depth=10,
+        )
+        assert cmd_publish(args) == 0
+
+        assert [p.artifact_id for p in store.list_publications()] == ["fig"]
+        assert not (tmp_path / "artifacts" / "artifacts.sqlite").exists()
 
 
 class TestTimestampPrecision:

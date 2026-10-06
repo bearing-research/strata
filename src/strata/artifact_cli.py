@@ -13,7 +13,7 @@ import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from strata.artifact_store import ArtifactStore, ArtifactVersion
 from strata.artifact_transfer import (
@@ -22,6 +22,9 @@ from strata.artifact_transfer import (
     copy_chain,
     promote_artifact,
 )
+
+if TYPE_CHECKING:
+    from strata.config import StrataConfig
 
 
 def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
@@ -47,14 +50,20 @@ def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
         print(f"invalid configuration: {exc}", file=sys.stderr)
         return None
     artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
-    dialect = config.create_metadata_dialect()
     # Loading the config creates a personal-mode artifact_dir, so an empty
     # directory proves nothing: a store on SQLite is its database file.
-    if dialect is None and not (artifact_dir / "artifacts.sqlite").exists():
+    if not config.artifact_metadata_dsn and not (artifact_dir / "artifacts.sqlite").exists():
         print(f"no artifact store in {artifact_dir}", file=sys.stderr)
         return None
+    return _configured_store(config, artifact_dir)
+
+
+def _configured_store(config: StrataConfig, artifact_dir: Path) -> ArtifactStore:
+    """The store *config* describes under *artifact_dir*: its metadata DSN and blob backend."""
     blob_store = config.create_blob_store() if config.artifact_blob_backend != "local" else None
-    return ArtifactStore(artifact_dir, blob_store=blob_store, dialect=dialect)
+    return ArtifactStore(
+        artifact_dir, blob_store=blob_store, dialect=config.create_metadata_dialect()
+    )
 
 
 class AmbiguousRefError(ValueError):
@@ -359,11 +368,14 @@ def cmd_lineage(args: argparse.Namespace) -> int:
 
 
 def _server_store() -> ArtifactStore | None:
-    """The store the running server serves from, or ``None`` if unresolvable."""
+    """The store the running server serves from, or ``None`` if unresolvable.
+
+    Built as the server builds it, so a link minted here resolves there.
+    """
     from strata.config import StrataConfig
 
-    artifact_dir = StrataConfig.load().artifact_dir
-    return ArtifactStore(artifact_dir) if artifact_dir else None
+    config = StrataConfig.load()
+    return _configured_store(config, config.artifact_dir) if config.artifact_dir else None
 
 
 def _publication_target(
