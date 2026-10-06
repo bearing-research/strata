@@ -206,7 +206,10 @@ inferred-from-imports entry:
    names via a small hand-maintained dict for common mismatches:
    `cv2 → opencv-python`, `sklearn → scikit-learn`, `PIL → Pillow`,
    `bs4 → beautifulsoup4`, `yaml → PyYAML`, `mpl_toolkits → matplotlib`,
-   `pkg_resources → setuptools`, etc. Anything not in the
+   `pkg_resources → setuptools`, etc. A `google.cloud.<x>` import maps
+   to its own `google-cloud-<x>` package (`from google.cloud import
+   bigquery → google-cloud-bigquery`, `pubsub_v1 → google-cloud-pubsub`).
+   Anything not in the
    dict is assumed to use the same name on PyPI (right ~95% of the
    time).
 

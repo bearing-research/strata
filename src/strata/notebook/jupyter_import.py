@@ -968,12 +968,27 @@ def _scan_imports(source: str) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                names.add(alias.name.split(".", 1)[0])
+                names.add(_distribution_key(alias.name))
         elif isinstance(node, ast.ImportFrom):
             # level > 0 is a relative import, never a third-party dependency.
             if node.module and node.level == 0:
-                names.add(node.module.split(".", 1)[0])
+                if node.module == "google.cloud":
+                    names.update(f"google.cloud.{alias.name}" for alias in node.names)
+                else:
+                    names.add(_distribution_key(node.module))
     return names - sys.stdlib_module_names
+
+
+def _distribution_key(module: str) -> str:
+    """The part of a dotted import that names its distribution.
+
+    The top-level package, except under the ``google.cloud`` namespace, where
+    each ``google.cloud.<x>`` is its own ``google-cloud-<x>`` distribution.
+    """
+    parts = module.split(".")
+    if parts[:2] == ["google", "cloud"] and len(parts) > 2:
+        return ".".join(parts[:3])
+    return parts[0]
 
 
 def _local_module_names(parent_dir: Path) -> set[str]:
@@ -1003,7 +1018,12 @@ def _imports_to_deps(imports: set[str], local_modules: set[str]) -> list[str]:
     for name in sorted(imports):
         if name in local_modules:
             continue
-        deps.append(_IMPORT_TO_PIP.get(name, name))
+        if name.startswith("google.cloud."):
+            # ``pubsub_v1`` and ``speech_v1p1beta1`` are API versions inside one distribution.
+            package = re.sub(r"_v\d[a-z0-9]*$", "", name.removeprefix("google.cloud."))
+            deps.append("google-cloud-" + package.replace("_", "-"))
+        else:
+            deps.append(_IMPORT_TO_PIP.get(name, name))
     return deps
 
 

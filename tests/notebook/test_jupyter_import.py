@@ -816,6 +816,30 @@ def test_import_name_pip_overrides_extended(tmp_path: Path) -> None:
     assert not leaked, f"raw import names leaked into deps: {leaked}"
 
 
+def test_a_google_cloud_import_names_its_own_distribution(tmp_path: Path) -> None:
+    """Each ``google.cloud.<x>`` is the ``google-cloud-<x>`` distribution, not the
+    Discovery API client the bare ``google`` namespace maps to."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("import google.cloud.bigquery\n"),
+            _code_cell("from google.cloud import storage, bigquery_storage\n"),
+            _code_cell("from google.cloud.pubsub_v1 import PublisherClient\n"),
+            _code_cell("from google.cloud import speech_v1p1beta1\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    assert {
+        "google-cloud-bigquery",
+        "google-cloud-storage",
+        "google-cloud-bigquery-storage",
+        "google-cloud-pubsub",
+        "google-cloud-speech",
+    } <= deps
+    assert "google-api-python-client" not in deps
+
+
 def test_stdlib_imports_not_captured(tmp_path: Path) -> None:
     """Standard-library imports are never PyPI deps; ``sys.stdlib_module_names`` covers them."""
     ipynb = _make_ipynb(
