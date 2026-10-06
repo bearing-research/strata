@@ -1127,7 +1127,11 @@ def preview_requirements_text(
 ) -> RequirementsPreviewResult:
     """Preview replacing direct notebook dependencies from requirements text."""
     normalized_requirements = parse_requirements_text(requirements_text)
-    preview_dependencies = _dependency_info_from_requirement_strings(normalized_requirements)
+    preview_dependencies = _dependency_info_from_requirement_strings(
+        _keep_runtime_packages(
+            normalized_requirements, _read_project_dependency_strings(notebook_dir)
+        )
+    )
     additions, removals, unchanged = _diff_dependency_sets(
         list_dependencies(notebook_dir),
         preview_dependencies,
@@ -1135,7 +1139,7 @@ def preview_requirements_text(
     return RequirementsPreviewResult(
         dependencies=preview_dependencies,
         normalized_requirements=normalized_requirements,
-        imported_count=len(preview_dependencies),
+        imported_count=len(normalized_requirements),
         additions=additions,
         removals=removals,
         unchanged=unchanged,
@@ -1179,7 +1183,9 @@ def import_requirements_text(
                 success=False,
                 error="pyproject.toml project section is invalid",
             )
-        project["dependencies"] = normalized_requirements
+        project["dependencies"] = _keep_runtime_packages(
+            normalized_requirements, [str(dep) for dep in project.get("dependencies", [])]
+        )
 
         try:
             with open(pyproject_path, "wb") as f:
@@ -1256,7 +1262,9 @@ async def import_requirements_text_streaming(
                 success=False,
                 error="pyproject.toml project section is invalid",
             )
-        project["dependencies"] = normalized_requirements
+        project["dependencies"] = _keep_runtime_packages(
+            normalized_requirements, [str(dep) for dep in project.get("dependencies", [])]
+        )
 
         try:
             with open(pyproject_path, "wb") as f:
@@ -1341,7 +1349,11 @@ def preview_environment_yaml_text(
 ) -> RequirementsPreviewResult:
     """Preview best-effort import of Conda-style ``environment.yaml`` text."""
     normalized_requirements, warnings = parse_environment_yaml_text(environment_yaml_text)
-    preview_dependencies = _dependency_info_from_requirement_strings(normalized_requirements)
+    preview_dependencies = _dependency_info_from_requirement_strings(
+        _keep_runtime_packages(
+            normalized_requirements, _read_project_dependency_strings(notebook_dir)
+        )
+    )
     additions, removals, unchanged = _diff_dependency_sets(
         list_dependencies(notebook_dir),
         preview_dependencies,
@@ -1349,7 +1361,7 @@ def preview_environment_yaml_text(
     return RequirementsPreviewResult(
         dependencies=preview_dependencies,
         normalized_requirements=normalized_requirements,
-        imported_count=len(preview_dependencies),
+        imported_count=len(normalized_requirements),
         warnings=warnings,
         additions=additions,
         removals=removals,
@@ -1558,6 +1570,24 @@ def parse_environment_yaml_text(environment_yaml_text: str) -> tuple[list[str], 
         warnings.append("Ignored unsupported dependency entry in environment.yaml.")
 
     return requirements, warnings
+
+
+def _keep_runtime_packages(imported: list[str], current: list[str]) -> list[str]:
+    """*imported* plus each notebook runtime package in *current* that it does not name.
+
+    The harness imports these in the notebook venv; a requirements file rarely
+    lists them, and replacing the list wholesale would fail every cell.
+    """
+    # writer imports this module at load time.
+    from strata.notebook.writer import _NOTEBOOK_RUNTIME_PACKAGES
+
+    named = {_split_requirement(req)[0] for req in imported}
+    kept = [
+        dep
+        for dep in current
+        if (name := _split_requirement(dep)[0]) in _NOTEBOOK_RUNTIME_PACKAGES and name not in named
+    ]
+    return [*imported, *kept]
 
 
 def _read_project_dependency_strings(notebook_dir: Path) -> list[str]:

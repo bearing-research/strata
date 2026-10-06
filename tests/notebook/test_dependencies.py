@@ -515,14 +515,38 @@ dependencies:
         # Current notebook baseline (pyarrow, orjson, cloudpickle) +
         # requests. YAML pins pyarrow at a different version and adds
         # six. Version differences produce matching remove+add entries.
+        # orjson and cloudpickle are runtime packages the YAML does not
+        # name, so they stay.
         assert [dep.name for dep in preview.additions] == ["pyarrow", "six"]
-        assert sorted(dep.name for dep in preview.removals) == [
-            "cloudpickle",
-            "orjson",
-            "pyarrow",
-            "requests",
-        ]
-        assert preview.unchanged == []
+        assert sorted(dep.name for dep in preview.removals) == ["pyarrow", "requests"]
+        assert sorted(dep.name for dep in preview.unchanged) == ["cloudpickle", "orjson"]
+
+    def test_an_import_that_omits_the_runtime_packages_keeps_them(self, tmp_path: Path):
+        """The harness imports pyarrow/orjson/cloudpickle; a requirements file rarely lists them."""
+        nb_dir = create_notebook(tmp_path, "requirements_keep_runtime")
+        before = {dep.name: dep.specifier for dep in list_dependencies(nb_dir)}
+
+        preview = preview_requirements_text(nb_dir, "pandas>=2.0\nnumpy>=2.0\n")
+
+        assert [dep.name for dep in preview.removals] == []
+        assert sorted(dep.name for dep in preview.unchanged) == ["cloudpickle", "orjson", "pyarrow"]
+        assert preview.imported_count == 2
+
+        with patch(
+            "strata.notebook.dependencies.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=["uv", "sync"], returncode=0, stdout="", stderr=""
+            ),
+        ):
+            result = import_requirements_text(nb_dir, "pandas>=2.0\npyarrow>=19\n")
+
+        assert result.success is True
+        assert result.imported_count == 2
+        after = {dep.name: dep.specifier for dep in list_dependencies(nb_dir)}
+        assert set(after) == {"pandas", "pyarrow", "orjson", "cloudpickle"}
+        assert str(after["pyarrow"]) == ">=19", "a named runtime package takes the imported pin"
+        assert after["orjson"] == before["orjson"]
+        assert after["cloudpickle"] == before["cloudpickle"]
 
 
 # REST API tests
@@ -770,13 +794,8 @@ dependencies:
             assert data["imported_count"] == 2
             assert any("channels" in warning for warning in data["warnings"])
             assert [dep["name"] for dep in data["additions"]] == ["pyarrow", "six"]
-            assert sorted(dep["name"] for dep in data["removals"]) == [
-                "cloudpickle",
-                "orjson",
-                "pyarrow",
-                "requests",
-            ]
-            assert data["unchanged"] == []
+            assert sorted(dep["name"] for dep in data["removals"]) == ["pyarrow", "requests"]
+            assert sorted(dep["name"] for dep in data["unchanged"]) == ["cloudpickle", "orjson"]
 
     def test_add_bad_package_rest(self, setup):
         """POST /dependencies with invalid package returns 400."""

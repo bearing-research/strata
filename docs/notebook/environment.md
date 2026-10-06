@@ -53,7 +53,9 @@ matplotlib>=3.9
 seaborn>=0.13
 ```
 
-Strata previews the changes (additions, removals, unchanged) before applying.
+Strata previews the changes (additions, removals, unchanged) before applying. The
+import replaces the notebook's direct dependencies, except that `pyarrow`, `orjson`
+and `cloudpickle` (which every Python cell needs) stay unless the file pins them itself.
 
 ### Import from environment.yaml
 
