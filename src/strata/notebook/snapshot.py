@@ -137,6 +137,32 @@ def _artifacts_to_carry(
     return {(entry["artifact_id"], entry["version"]) for cell in wanted for entry in index[cell]}
 
 
+def _loop_iterations_to_carry(
+    session: NotebookSession, include: IncludeMode, selected: list[str] | None
+) -> set[tuple[str, int]]:
+    """A carried loop cell's ``@iter=k`` steps, which ``start_from`` seeds from.
+
+    The index lists canonical artifacts only, so without these an imported fork of
+    a loop fails "Loop seed artifact not found".
+    """
+    from strata.notebook.annotations import parse_annotations
+
+    if include == "none":
+        return set()
+    wanted = None if include == "all" else set(selected or [])
+    manager = session.get_artifact_manager()
+    found: set[tuple[str, int]] = set()
+    for cell in session.notebook_state.cells:
+        if wanted is not None and cell.id not in wanted:
+            continue
+        loop = parse_annotations(cell.source).loop
+        if loop is None:
+            continue
+        for _, artifact in manager.list_iterations(cell.id, loop.carry):
+            found.add((artifact.id, artifact.version))
+    return found
+
+
 def unknown_selection(session: NotebookSession, selected: list[str] | None) -> list[str]:
     """Cell ids in ``selected`` that this notebook does not have.
 
@@ -165,6 +191,7 @@ def write_snapshot(
     runtime = load_runtime_state(nb_dir)
     index = build_artifact_index(session)
     carry = _artifacts_to_carry(index, include, selected_cells)
+    carry |= _loop_iterations_to_carry(session, include, selected_cells)
 
     per_cell: dict[str, Any] = {}
     for cell in session.notebook_state.cells:
@@ -192,6 +219,8 @@ def write_snapshot(
             "provenance_hash": cell_runtime.last_provenance_hash if cell_runtime else None,
             "source_hash": cell_runtime.last_source_hash if cell_runtime else None,
             "env_hash": cell_runtime.last_env_hash if cell_runtime else None,
+            # A SQL or prompt cell's own cache identity: without it a carried one opens idle.
+            "reopen_identity": cell_runtime.last_reopen_identity if cell_runtime else None,
             "execution_samples": list(cell_runtime.execution_samples) if cell_runtime else [],
             # Without these an imported red cell opens idle, console but no error.
             "error": cell_runtime.last_error if cell_runtime else None,
@@ -224,7 +253,8 @@ def write_snapshot(
         # Streamed, not read whole: ``include=all`` moves projects between
         # servers, where artifacts are large.
         member = f"artifacts/{artifact_id}@v={version}"
-        with reader_cm as reader, archive.open(member, "w") as out:
+        # The size is unknown when the member opens; without zip64 one over 2 GiB fails mid-write.
+        with reader_cm as reader, archive.open(member, "w", force_zip64=True) as out:
             while chunk := reader.read(_BLOB_CHUNK_BYTES):
                 out.write(chunk)
         written.append(f"{artifact_id}@v={version}")

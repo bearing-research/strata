@@ -67,6 +67,24 @@ def _agent_id(name: str) -> str:
     return f"#agent-{_fragment(name)}"
 
 
+def _orcid_url(orcid: str) -> str:
+    """An ORCID as its canonical URL, whether it was given bare or as a link."""
+    bare = orcid.strip()
+    for prefix in ("https://orcid.org/", "http://orcid.org/", "orcid.org/"):
+        bare = bare.removeprefix(prefix)
+    return f"https://orcid.org/{bare}"
+
+
+def _credited(publication) -> list[dict]:
+    """Declared authors a node can name: those with a name or an ORCID."""
+    return [a for a in publication.authors if a.get("name", "").strip() or a.get("orcid")]
+
+
+def _author_id(author: dict) -> str:
+    # An ORCID ``@id`` lets two crates say they name the same researcher.
+    return _orcid_url(author["orcid"]) if author.get("orcid") else _agent_id(author["name"])
+
+
 def build_crate(
     *,
     publication,
@@ -206,11 +224,19 @@ def build_crate(
                 )
             )
 
+    # Keyed by node id: a step's principal named like a declared author is that author,
+    # so the graph holds one Person per id.
+    by_name = {a["name"]: _author_id(a) for a in _credited(publication) if a.get("name")}
     agents: dict[str, dict] = {}
+    referenced: set[str] = set()
     for node in steps:
         step_id = f"{node.artifact_id}@v={node.version}"
         produced = payload_id if node.artifact_id == artifact.id else step_id
         inputs = _inputs_for(node, lineage, artifact, payload_id)
+        referenced.update(inputs)
+        agent_id = (
+            by_name.get(node.principal, _agent_id(node.principal)) if node.principal else None
+        )
 
         if node.source:
             graph.append(
@@ -223,14 +249,9 @@ def build_crate(
                 }
             )
 
-        if node.principal:
+        if agent_id is not None:
             agents.setdefault(
-                node.principal,
-                {
-                    "@id": _agent_id(node.principal),
-                    "@type": "Person",
-                    "name": node.principal,
-                },
+                agent_id, {"@id": agent_id, "@type": "Person", "name": node.principal}
             )
 
         graph.append(
@@ -243,7 +264,7 @@ def build_crate(
                     "instrument": ({"@id": _source_id(node)} if node.source else None),
                     "object": [{"@id": ref} for ref in inputs],
                     "result": {"@id": produced},
-                    "agent": ({"@id": _agent_id(node.principal)} if node.principal else None),
+                    "agent": ({"@id": agent_id} if agent_id else None),
                     # Where these bytes were made, not a claim they'd be made
                     # again there.
                     "description": (f"Ran under {node.build_env}" if node.build_env else None),
@@ -251,34 +272,37 @@ def build_crate(
             )
         )
 
-    for author in publication.authors:
-        # An ORCID ``@id`` lets two crates say they name the same researcher.
-        node_id = (
-            f"https://orcid.org/{author['orcid']}"
-            if author.get("orcid")
-            else _agent_id(author["name"])
-        )
-        agents.setdefault(
-            node_id,
-            _prune(
-                {
-                    "@id": node_id,
-                    "@type": "Person",
-                    "name": author["name"],
-                    "affiliation": author.get("affiliation"),
-                }
-            ),
-        )
-    if publication.published_by and not publication.authors:
-        agents.setdefault(
-            publication.published_by,
+    for author in _credited(publication):
+        node_id = _author_id(author)
+        # Over a step's entry for the same person: the author carries the affiliation.
+        agents[node_id] = _prune(
             {
-                "@id": _agent_id(publication.published_by),
+                **agents.get(node_id, {}),
+                "@id": node_id,
                 "@type": "Person",
-                "name": publication.published_by,
-            },
+                "name": author.get("name"),
+                "affiliation": author.get("affiliation"),
+            }
+        )
+    if publication.published_by and not _credited(publication):
+        node_id = _agent_id(publication.published_by)
+        agents.setdefault(
+            node_id, {"@id": node_id, "@type": "Person", "name": publication.published_by}
         )
     graph.extend(agents.values())
+
+    # The deepest step's inputs lie past the lineage depth limit, so nothing above
+    # describes them; a stub keeps the reference from dangling.
+    described = {entity["@id"] for entity in graph}
+    for ref in sorted(referenced - described):
+        graph.append(
+            {
+                "@id": ref,
+                "@type": "CreativeWork",
+                "name": ref,
+                "description": "An earlier input; the recorded chain stops before it.",
+            }
+        )
 
     return {"@context": _CONTEXT, "@graph": graph}
 
@@ -307,17 +331,10 @@ def _identifier_of(publication) -> str | None:
 
 def _authors_of(publication):
     """Root-dataset authors: the declared ones, else whoever made the grant."""
-    if publication.authors:
-        return [
-            {
-                "@id": (
-                    f"https://orcid.org/{author['orcid']}"
-                    if author.get("orcid")
-                    else _agent_id(author["name"])
-                )
-            }
-            for author in publication.authors
-        ]
+    credited = _credited(publication)
+    if credited:
+        # dict.fromkeys: one entry per person, in the declared order.
+        return [{"@id": node_id} for node_id in dict.fromkeys(map(_author_id, credited))]
     if publication.published_by:
         return {"@id": _agent_id(publication.published_by)}
     return None
@@ -331,6 +348,10 @@ def _inputs_for(node, lineage, artifact, payload_id: str) -> list[str]:
     ids: list[str] = []
     for uri in consumed:
         source = by_uri.get(uri)
+        if source is None and uri.startswith("strata://artifact/"):
+            # An ancestor past the depth limit: named as the steps that are described.
+            ids.append(uri.removeprefix("strata://artifact/"))
+            continue
         if source is None or source.artifact_id is None:
             # A table or unresolved input: its URI is the only handle, and the
             # input must not drop out of the record.

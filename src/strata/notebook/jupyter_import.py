@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import tomli_w
+from packaging.requirements import InvalidRequirement, Requirement
 
 from strata.notebook.models import CellLanguage
 from strata.notebook.writer import (
@@ -41,6 +42,8 @@ _SHELL_RE = re.compile(r"^(\s*)!(.*)$")
 # ``files = !ls /data``: IPython binds the lhs to stdout lines. Unhandled,
 # the line breaks Python's parser.
 _SHELL_ASSIGN_RE = re.compile(r"^(\s*)([A-Za-z_]\w*)(\s*=\s*)!(.+)$")
+# %timeit's options: -n<N> -r<R> -p<P> take a number; -t -c -q -o are flags.
+_TIMEIT_OPTIONS_RE = re.compile(r"\A(?:-[nrp]\s*\d+\s+|-[tcqo]\s+)+")
 _PIP_INSTALL_RE = re.compile(
     r"^\s*(?:pip|pip3|python\s+-m\s+pip|uv\s+pip)\s+install\s+(.+)$",
 )
@@ -59,6 +62,8 @@ class _CellConversion:
     translated_magics: list[str] = field(default_factory=list)
     dropped_magics: list[str] = field(default_factory=list)
     dropped_shells: list[str] = field(default_factory=list)
+    # ``# @env`` lines, hoisted: an annotation below the first code line is ignored.
+    env_annotations: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -189,7 +194,7 @@ def import_notebook(
         sample = ", ".join(repr(d) for d in rejected_deps[:3])
         more = "" if len(rejected_deps) <= 3 else f" (+{len(rejected_deps) - 3} more)"
         result.warnings.append(
-            f"{len(rejected_deps)} pip-only dep spec(s) skipped — pyproject.toml "
+            f"{len(rejected_deps)} pip-only dep spec(s) skipped: pyproject.toml "
             f"requires PEP 508 specifiers: {sample}{more}"
         )
 
@@ -451,45 +456,97 @@ def _convert_code_source(source: str) -> _CellConversion:
 
     out_lines: list[str] = []
     conv = _CellConversion(source="")
-    for raw_line in source.splitlines(keepends=True):
+    lines = source.splitlines(keepends=True)
+    for raw_line, at_statement in zip(lines, _statement_starts(lines), strict=True):
         line_no_eol = raw_line.rstrip("\n")
-        line_magic = _LINE_MAGIC_RE.match(line_no_eol)
-        if line_magic:
-            indent, magic_name, magic_args = line_magic.groups()
-            replacement = _translate_line_magic(
-                magic_name,
-                magic_args.lstrip(),
-                indent,
-                conv,
-            )
-            out_lines.extend(replacement)
+        # A ``%`` or ``!`` inside a string or a bracketed expression is Python, not a magic.
+        replacement = _translate_escape_line(line_no_eol, conv) if at_statement else None
+        if replacement is None:
+            out_lines.append(raw_line)
             continue
-        shell_assign = _SHELL_ASSIGN_RE.match(line_no_eol)
-        if shell_assign:
-            indent, target, eq, cmd = shell_assign.groups()
-            replacement = _translate_shell_assignment(
-                target,
-                eq,
-                cmd.strip(),
-                indent,
-                conv,
-            )
-            out_lines.extend(replacement)
-            continue
-        shell = _SHELL_RE.match(line_no_eol)
-        if shell:
-            indent, cmd = shell.groups()
-            replacement = _translate_shell(cmd.strip(), indent, conv)
-            out_lines.extend(replacement)
-            continue
-        out_lines.append(raw_line)
+        indent = line_no_eol[: len(line_no_eol) - len(line_no_eol.lstrip())]
+        if indent and not any(_is_code_line(line) for line in replacement):
+            # The magic may have been its block's only statement.
+            replacement = [*replacement, f"{indent}pass\n"]
+        out_lines.extend(replacement)
 
-    result_source = "".join(out_lines)
+    result_source = "".join(conv.env_annotations) + "".join(out_lines)
     if _ends_with_display_suppression(result_source):
         result_source = _suppress_last_expression(result_source)
         conv.suppressed = True
     conv.source = _ensure_final_newline(result_source)
     return conv
+
+
+def _translate_escape_line(line: str, conv: _CellConversion) -> list[str] | None:
+    """Replacement lines for a ``%magic`` or ``!shell`` line, or ``None`` for plain Python."""
+    line_magic = _LINE_MAGIC_RE.match(line)
+    if line_magic:
+        indent, magic_name, magic_args = line_magic.groups()
+        return _translate_line_magic(magic_name, magic_args.lstrip(), indent, conv)
+    shell_assign = _SHELL_ASSIGN_RE.match(line)
+    if shell_assign:
+        indent, target, eq, cmd = shell_assign.groups()
+        return _translate_shell_assignment(target, eq, cmd.strip(), indent, conv)
+    shell = _SHELL_RE.match(line)
+    if shell:
+        indent, cmd = shell.groups()
+        return _translate_shell(cmd.strip(), indent, conv)
+    return None
+
+
+def _is_code_line(line: str) -> bool:
+    stripped = line.strip()
+    return bool(stripped) and not stripped.startswith("#")
+
+
+def _statement_starts(lines: list[str]) -> list[bool]:
+    """For each line, whether it begins a statement.
+
+    False inside a triple-quoted string, an open bracket or after a backslash
+    continuation. A magic or shell line is not scanned, so a quote in its argument
+    cannot open a string. Source with magics does not tokenize, hence the hand scan.
+    """
+    starts: list[bool] = []
+    quote: str | None = None
+    depth = 0
+    continued = False
+    for raw in lines:
+        line = raw.rstrip("\n")
+        at_start = quote is None and depth == 0 and not continued
+        starts.append(at_start)
+        if at_start and (
+            _LINE_MAGIC_RE.match(line) or _SHELL_ASSIGN_RE.match(line) or _SHELL_RE.match(line)
+        ):
+            continued = False
+            continue
+        i = 0
+        while i < len(line):
+            if quote is not None:
+                if line[i] == "\\":
+                    i += 2
+                elif line.startswith(quote, i):
+                    i += len(quote)
+                    quote = None
+                else:
+                    i += 1
+                continue
+            char = line[i]
+            if char == "#":
+                break
+            if char in "\"'":
+                quote = line[i : i + 3] if line[i : i + 3] in ('"""', "'''") else char
+                i += len(quote)
+                continue
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                depth = max(0, depth - 1)
+            i += 1
+        continued = line.endswith("\\")
+        if quote in ('"', "'") and not continued:
+            quote = None  # an unterminated one-line string ends with its line
+    return starts
 
 
 def _ends_with_display_suppression(source: str) -> bool:
@@ -555,8 +612,9 @@ def _lm_drop(name: str, args: str, indent: str, conv: _CellConversion) -> list[s
 
 
 def _lm_strip(name: str, args: str, indent: str, conv: _CellConversion) -> list[str]:
-    """``%timeit body`` → ``body`` (drop the timing wrapper, keep the work)."""
+    """``%timeit -n 10 body`` -> ``body`` (drop the timing wrapper and its options)."""
     conv.translated_magics.append(f"%{name}")
+    args = _TIMEIT_OPTIONS_RE.sub("", args)
     if args:
         return [f"{indent}{args}\n"]
     return []
@@ -579,12 +637,13 @@ def _lm_pip(name: str, args: str, indent: str, conv: _CellConversion) -> list[st
 
 
 def _lm_env(name: str, args: str, indent: str, conv: _CellConversion) -> list[str]:
-    """``%env KEY=VAL`` → ``# @env KEY=VAL`` cell annotation."""
+    """``%env KEY=VAL`` -> a ``# @env KEY=VAL`` annotation at the top of the cell."""
     if "=" not in args:
         conv.dropped_magics.append(f"%{name} (no KEY=VALUE)")
         return [f"{indent}# strata: %env requires KEY=VALUE; dropped\n"]
     conv.translated_magics.append(f"%{name}")
-    return [f"{indent}# @env {args.strip()}\n"]
+    conv.env_annotations.append(f"# @env {args.strip()}\n")
+    return []
 
 
 def _lm_run(name: str, args: str, indent: str, conv: _CellConversion) -> list[str]:
@@ -598,7 +657,7 @@ def _lm_run(name: str, args: str, indent: str, conv: _CellConversion) -> list[st
         return [f"{indent}# strata: %run with no target dropped\n"]
     conv.translated_magics.append(f"%{name} {target}")
     return [
-        f"{indent}# strata: %run translated — verify the path resolves at runtime\n",
+        f"{indent}# strata: %run translated; verify the path resolves at runtime\n",
         f"{indent}from pathlib import Path as _strata_path\n",
         f"{indent}exec(_strata_path({target!r}).read_text())\n",
     ]
@@ -822,13 +881,15 @@ def _capture_sibling_deps(parent: Path) -> list[str]:
     req = parent / "requirements.txt"
     if req.is_file():
         try:
-            for raw in req.read_text(encoding="utf-8").splitlines():
-                line = raw.strip()
-                if not line or line.startswith("#") or line.startswith("-"):
-                    continue
-                deps.append(line)
+            text = req.read_text(encoding="utf-8")
         except OSError:
-            pass
+            text = ""
+        # pip joins backslash continuations, then drops `  # comment` and `--hash=...`.
+        for raw in text.replace("\\\n", " ").splitlines():
+            line = _REQUIREMENT_TAIL_RE.split(raw, maxsplit=1)[0].strip()
+            if not line or line.startswith("#") or line.startswith("-"):
+                continue
+            deps.append(line)
 
     pyproject = parent / "pyproject.toml"
     if pyproject.is_file():
@@ -841,6 +902,9 @@ def _capture_sibling_deps(parent: Path) -> list[str]:
             pass
 
     return deps
+
+
+_REQUIREMENT_TAIL_RE = re.compile(r"\s+(?:#|--?[A-Za-z])")
 
 
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -883,6 +947,8 @@ _IMPORT_TO_PIP: dict[str, str] = {
     "Bio": "biopython",
     # Common namespace-package collisions
     "google": "google-api-python-client",  # ``import google.auth`` etc.
+    "mpl_toolkits": "matplotlib",
+    "pkg_resources": "setuptools",
     # Deprecated aliases that users still write
     "gym": "gymnasium",  # gym is unmaintained; gymnasium is the maintained fork
 }
@@ -972,15 +1038,11 @@ def _is_valid_pep508_dep(spec: str) -> bool:
     Rejects pip-only forms (editable installs, bare URLs, local paths), which would
     produce invalid TOML or fail in uv.
     """
-    spec = spec.strip()
-    if not spec or spec.startswith("-"):
+    try:
+        Requirement(spec.strip())
+    except InvalidRequirement:
         return False
-    if spec.startswith(
-        ("git+", "hg+", "svn+", "bzr+", "file:", "http://", "https://", "/", "./", "../")
-    ):
-        return False
-    # PEP 508 names start with a letter or digit.
-    return re.match(r"^[A-Za-z0-9]", spec) is not None
+    return True
 
 
 def _merge_pyproject_deps(notebook_dir: Path, new_deps: list[str]) -> list[str]:

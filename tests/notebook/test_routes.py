@@ -327,6 +327,22 @@ def test_open_notebook_not_found(client):
     assert response.status_code == 404
 
 
+def test_open_refuses_a_notebook_whose_cell_file_leaves_cells(client, tmp_path):
+    """A cloned notebook.toml naming ``../../x`` must not show that file or let edits rewrite it."""
+    notebook_dir = create_notebook(tmp_path / "nbs", "Cloned")
+    add_cell_to_notebook(notebook_dir, "c1")
+    (tmp_path / "outside.txt").write_text("SECRET\n")
+    toml_path = notebook_dir / "notebook.toml"
+    toml_path.write_text(
+        toml_path.read_text().replace('file = "c1.py"', 'file = "../../outside.txt"')
+    )
+
+    response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+
+    assert response.status_code == 400
+    assert "'c1' names a source file outside cells/" in response.json()["detail"]
+
+
 def test_open_notebook_rejects_path_outside_configured_storage_root(client, monkeypatch, tmp_path):
     storage_root = tmp_path / "allowed"
     storage_root.mkdir()
@@ -2031,6 +2047,33 @@ def test_export_endpoint_html_format(client, tmp_path):
     assert "text/html" in resp.headers["content-type"]
     assert resp.text.startswith("<!doctype html>")
     assert ".html" in resp.headers["content-disposition"]
+
+
+@pytest.mark.parametrize(
+    ("path", "suffix"),
+    [
+        ("export", ".zip"),
+        ("export?fmt=snapshot&include=none", ".snapshot.zip"),
+        ("export?fmt=markdown", ".md"),
+        ("environment/requirements.txt", "-requirements.txt"),
+    ],
+)
+def test_a_non_latin_1_notebook_name_downloads_under_an_ascii_name(client, tmp_path, path, suffix):
+    """Headers go out as latin-1, so the raw name 500s; the original rides in ``filename*``."""
+    from urllib.parse import unquote
+
+    notebook_dir = create_notebook(tmp_path, "分析 notebook", initialize_environment=False)
+    nb_id = open_session_id(client, notebook_dir)
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/{path}")
+
+    assert resp.status_code == 200, resp.text
+    disposition = resp.headers["content-disposition"]
+    ascii_name, _, encoded = disposition.partition("; filename*=UTF-8''")
+    assert ascii_name.startswith('attachment; filename="')
+    assert ascii_name.endswith(f'{suffix}"')
+    assert ascii_name.isascii()
+    assert unquote(encoded).startswith("分析") and unquote(encoded).endswith(suffix)
 
 
 def test_export_endpoint_rejects_unknown_format(client, tmp_path):

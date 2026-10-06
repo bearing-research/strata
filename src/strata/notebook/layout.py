@@ -6,6 +6,7 @@ module is the single statement of that split, which the docs page renders.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # All reproducible from the committed set, and none of it portable between
@@ -59,6 +60,22 @@ def committed_paths(notebook_dir: Path) -> list[Path]:
             found.append(path.relative_to(notebook_dir))
 
     return sorted(found)
+
+
+def cell_source_path(notebook_dir: Path, cell_id: str, file: str) -> Path:
+    """Where a cell's source lives: ``cells/<file>``, refused if that leaves ``cells/``.
+
+    ``file`` comes from ``notebook.toml``, which a cloned or imported notebook writes;
+    an absolute path or ``..`` would otherwise read, overwrite or delete any file.
+
+    Raises:
+        ValueError: The resolved path is not inside ``cells/``.
+    """
+    cells_dir = Path(notebook_dir) / "cells"
+    target = os.path.realpath(os.path.join(cells_dir, file))
+    if not target.startswith(os.path.realpath(cells_dir) + os.sep):
+        raise ValueError(f"cell {cell_id!r} names a source file outside cells/: {file!r}")
+    return cells_dir / file
 
 
 def write_gitignore(notebook_dir: Path) -> bool:

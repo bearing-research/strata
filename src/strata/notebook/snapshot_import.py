@@ -17,6 +17,7 @@ import shutil
 import tomllib
 import uuid
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -30,10 +31,16 @@ _ARTIFACT_URI_PREFIX = "strata://artifact/"
 # Bounds what an archive may expand to on disk; zipfile stops each member at its declared
 # size, so summing the declared sizes bounds the real output.
 _MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024 * 1024
+# Bounds memory: the manifest, notebook.toml, console and committed files are parsed
+# whole (cells again on every open). Artifact and fetched bytes stream, under their own caps.
+_MAX_MEMBER_BYTES = 16 * 1024 * 1024
 _COPY_CHUNK_BYTES = 1024 * 1024
+_COMMITTED_ROOT_FILES = ("pyproject.toml", "uv.lock", "renv.lock", ".gitignore")
 
 
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+# Looser than a cell id: committed files are the user's own names ("notes copy.md").
+_SAFE_MEMBER_SEGMENT = re.compile(r"[^\x00-\x1f\x7f/\\]+")
 
 
 def _member_target(dest: Path, name: str) -> Path:
@@ -43,11 +50,11 @@ def _member_target(dest: Path, name: str) -> Path:
     segment is checked rather than the joined path, so a name that resolves outside
     only through symlinks still cannot be written.
     """
-    parts = PurePosixPath(name).parts
-    if not parts or PurePosixPath(name).is_absolute():
-        raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}")
+    # Split by hand: PurePosixPath collapses ``//`` and ``.``, so ``cells//etc/x`` would
+    # pass as ``cells/etc/x`` while notebook.toml names ``/etc/x``.
+    parts = name.split("/")
     for part in parts:
-        if not _SAFE_SEGMENT.match(part) or part == "..":
+        if not _SAFE_MEMBER_SEGMENT.fullmatch(part) or part in (".", ".."):
             raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}")
     return dest.joinpath(*parts)
 
@@ -89,8 +96,10 @@ def import_snapshot(
 
     with zipfile.ZipFile(bundle) as archive:
         manifest, notebook_toml = _validate(archive)
+        # Before anything is written, so a bundle that cannot answer it leaves nothing behind.
+        by_reference = _by_reference_cells(manifest)
 
-        old_id = str(manifest["notebook_id"])
+        old_id = manifest["notebook_id"]
         new_id = str(uuid.uuid4()) if old_id in taken_ids else old_id
         rename = _renamer(old_id, new_id)
 
@@ -123,13 +132,6 @@ def import_snapshot(
             shutil.rmtree(staging, ignore_errors=True)
             raise
 
-    carried_cells = {
-        cell_id
-        for cell_id, entries in manifest.get("artifacts", {}).items()
-        if all(f"{e['artifact_id']}@v={e['version']}" in manifest["carried"] for e in entries)
-    }
-    by_reference = sorted(set(manifest.get("artifacts", {})) - carried_cells)
-
     return ImportedSnapshot(
         notebook_dir=dest,
         notebook_id=new_id,
@@ -150,6 +152,12 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
             f"the bundle expands to {expanded} bytes, over the "
             f"{_MAX_UNCOMPRESSED_BYTES // (1024**3)} GiB import cap"
         )
+    for info in archive.infolist():
+        if _read_whole(info.filename) and info.file_size > _MAX_MEMBER_BYTES:
+            raise NotASnapshotError(
+                f"the bundle's {info.filename!r} is {info.file_size} bytes, over the "
+                f"{_MAX_MEMBER_BYTES // (1024**2)} MiB cap for a file the import reads whole"
+            )
     names = set(archive.namelist())
     if "artifacts.json" not in names:
         raise NotASnapshotError(
@@ -159,8 +167,15 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
     if "notebook.toml" not in names:
         raise NotASnapshotError("not a snapshot: no notebook.toml")
 
-    manifest = json.loads(archive.read("artifacts.json"))
-    version = int(manifest.get("format_version", 1))
+    manifest = _parse_member(archive, "artifacts.json", json.loads)
+    if not isinstance(manifest, dict):
+        raise NotASnapshotError("not a snapshot: artifacts.json is not an object")
+    try:
+        version = int(manifest.get("format_version", 1))
+    except (TypeError, ValueError) as exc:
+        raise NotASnapshotError(
+            "not a snapshot: artifacts.json has no usable format_version"
+        ) from exc
     if version < SNAPSHOT_FORMAT_VERSION:
         # A version-1 bundle has bytes but no content types or lineage, so its
         # artifacts would load wrong.
@@ -174,7 +189,21 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
             f"({SNAPSHOT_FORMAT_VERSION}); upgrade to import it"
         )
 
-    notebook_toml = tomllib.loads(archive.read("notebook.toml").decode("utf-8"))
+    _check_manifest(manifest, names)
+
+    notebook_toml = _parse_member(
+        archive, "notebook.toml", lambda data: tomllib.loads(data.decode("utf-8"))
+    )
+    cells = notebook_toml.get("cells", [])
+    if not isinstance(cells, list) or not all(isinstance(cell, dict) for cell in cells):
+        raise NotASnapshotError("not a snapshot: notebook.toml's cells are not a list of tables")
+    for cell in cells:
+        file = cell.get("file", "")
+        # The parser joins this onto cells/, so it must stay a relative path inside it.
+        if any(part in ("", ".", "..") for part in str(file).split("/")):
+            raise NotASnapshotError(
+                f"the bundle names a cell file outside cells/: {cell.get('id')!r} -> {file!r}"
+            )
     missing = [
         cell["file"]
         for cell in notebook_toml.get("cells", [])
@@ -186,6 +215,55 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
             f"does not contain ({', '.join(missing)})"
         )
     return manifest, notebook_toml
+
+
+def _parse_member(archive: zipfile.ZipFile, name: str, parse: Callable[[bytes], Any]) -> Any:
+    try:
+        return parse(archive.read(name))
+    except ValueError as exc:  # JSON, TOML and UTF-8 decode errors are all ValueErrors
+        raise NotASnapshotError(f"the bundle's {name} cannot be read: {exc}") from exc
+
+
+def _check_manifest(manifest: dict[str, Any], names: set[str]) -> None:
+    """Refuse a manifest whose shape the import would otherwise trip over halfway."""
+    if not isinstance(manifest.get("notebook_id"), str) or not manifest["notebook_id"]:
+        raise NotASnapshotError("not a snapshot: artifacts.json names no notebook_id")
+    carried = manifest.get("carried")
+    if not isinstance(carried, list) or not all(isinstance(ref, str) for ref in carried):
+        raise NotASnapshotError("not a snapshot: artifacts.json has no list of carried artifacts")
+    for key in ("records", "cells"):
+        value = manifest.get(key, {})
+        if not isinstance(value, dict) or not all(isinstance(v, dict) for v in value.values()):
+            raise NotASnapshotError(f"not a snapshot: artifacts.json's {key} is malformed")
+    index = manifest.get("artifacts", {})
+    if not isinstance(index, dict) or not all(
+        isinstance(entries, list)
+        and all(isinstance(e, dict) and "artifact_id" in e and "version" in e for e in entries)
+        for entries in index.values()
+    ):
+        raise NotASnapshotError("not a snapshot: artifacts.json's artifacts is malformed")
+    for ref in manifest.get("records", {}):
+        if f"artifacts/{ref}" not in names:
+            raise NotASnapshotError(f"not a complete snapshot: no bytes for the record {ref!r}")
+
+
+def _by_reference_cells(manifest: dict[str, Any]) -> list[str]:
+    """Cells whose artifacts the bundle described but did not carry."""
+    carried = set(manifest["carried"])
+    return sorted(
+        cell_id
+        for cell_id, entries in manifest.get("artifacts", {}).items()
+        if not all(f"{e['artifact_id']}@v={e['version']}" in carried for e in entries)
+    )
+
+
+def _read_whole(name: str) -> bool:
+    """Whether the import (or a later open) holds this member in memory at once."""
+    return (
+        name in ("artifacts.json", "notebook.toml", "fetch/index.json", *_COMMITTED_ROOT_FILES)
+        or name.startswith("cells/")
+        or (name.startswith("outputs/") and name.endswith("/console.json"))
+    )
 
 
 # --- Identity ---
@@ -358,7 +436,7 @@ def _write_fetched_bytes(archive: zipfile.ZipFile, dest: Path) -> None:
 
     if "fetch/index.json" not in archive.namelist():
         return
-    index = json.loads(archive.read("fetch/index.json"))
+    index = _parse_member(archive, "fetch/index.json", json.loads)
     if not isinstance(index, dict):
         raise NotASnapshotError("the bundle's fetch index is not an object")
     kept: dict[str, dict[str, Any]] = {}
@@ -401,9 +479,9 @@ def _write_committed_files(
         if name.startswith("cells/") and not name.endswith("/"):
             target = _member_target(dest, name)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(archive.read(name))
-        elif name in ("pyproject.toml", "uv.lock", "renv.lock", ".gitignore"):
-            (dest / name).write_bytes(archive.read(name))
+            _copy_member(archive, name, target)
+        elif name in _COMMITTED_ROOT_FILES:
+            _copy_member(archive, name, dest / name)
 
     if new_id != old_id:
         notebook_toml["notebook_id"] = new_id
@@ -414,6 +492,11 @@ def _write_committed_files(
 
     # Keep the imported .strata/ out of git, as `strata new` does, if the bundle had none.
     write_gitignore(dest)
+
+
+def _copy_member(archive: zipfile.ZipFile, name: str, target: Path) -> None:
+    with archive.open(name) as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst, _COPY_CHUNK_BYTES)
 
 
 def _write_runtime_state(
@@ -443,6 +526,8 @@ def _write_runtime_state(
         entry.last_provenance_hash = cell.get("provenance_hash")
         entry.last_source_hash = cell.get("source_hash")
         entry.last_env_hash = cell.get("env_hash")
+        identity = cell.get("reopen_identity")
+        entry.last_reopen_identity = identity if isinstance(identity, str) else None
         entry.execution_samples = list(cell.get("execution_samples") or [])
         # Older snapshots omit the error pair.
         entry.last_error = cell.get("error") or None
@@ -459,7 +544,9 @@ def _write_runtime_state(
             raise NotASnapshotError(f"the bundle names a cell it cannot write: {cell_id!r}")
         console_member = f"outputs/{cell_id}/console.json"
         if console_member in names:
-            console = json.loads(archive.read(console_member))
+            console = _parse_member(archive, console_member, json.loads)
+            if not isinstance(console, dict):
+                raise NotASnapshotError(f"the bundle's {console_member} is not an object")
             update_cell_console_output(
                 dest, cell_id, console.get("stdout", ""), console.get("stderr", "")
             )
