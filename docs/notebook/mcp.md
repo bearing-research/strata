@@ -36,9 +36,10 @@ Within a tenant, every open session is visible to any caller holding
 `notebook:read`: the check is scopes, not ownership. A session records the
 tenant of the caller who opened or created it, and a caller from another tenant
 neither sees it in `list_notebooks` nor reaches it by `session_id`, as with
-tenant-scoped artifacts. `admin:*` sees every tenant's sessions, and a session
-opened without a tenant is visible to all. The notebook REST routes and the
-WebSocket apply the same rule.
+tenant-scoped artifacts. `admin:*` sees every tenant's sessions, and a caller
+the proxy sends without a tenant is the default tenant (`_default`), so its
+sessions are visible only to other tenantless callers and to `admin:*`. The
+notebook REST routes and the WebSocket apply the same rule.
 
 === "From PyPI"
 

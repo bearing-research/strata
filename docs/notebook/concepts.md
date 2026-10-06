@@ -371,7 +371,7 @@ idle ──→ running ──→ ready ──→ stale
               └───→ error
 ```
 
-- **idle**: no current result: never executed, or its own source, environment or a declared outside input changed since it ran
+- **idle**: no current result: never executed, its own source, environment or a declared outside input changed since it ran, or, after a reopen, a leaf cell that keeps no record of its run (`# @nocache`, or a read-write mount)
 - **running**: currently executing. If an upstream cell is edited while it runs, it stays running and finishes **stale**, since it read the old value.
 - **ready**: last execution succeeded (or was a cache hit), artifact is current
 - **stale**: it has a result, but something upstream has moved, or Run All skipped it because a cell it reads from failed

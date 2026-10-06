@@ -51,7 +51,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 
 `POST /open`, `POST /create` and `GET /discover` are **not** restricted - they work in service mode. With `multi_tenant_enabled`, all three (and the imports) are confined to the caller's tenant subdir of the storage root.
 
-**Tenant-scoped sessions.** A session records the tenant of whoever opened, created or imported it, and every `/v1/notebooks/{session_id}/...` route answers `404` to a caller from another tenant, as for an unknown session. `admin:*` reaches every session; a session opened without a tenant is open to all.
+**Tenant-scoped sessions.** A session records the tenant of whoever opened, created or imported it, and every `/v1/notebooks/{session_id}/...` route answers `404` to a caller from another tenant, as for an unknown session. `admin:*` reaches every session; a session opened by a caller with no tenant belongs to the default tenant (`_default`) and is reached only by tenantless callers and `admin:*`.
 
 **Scope-gated endpoints.** Under principal auth, **every** route on the `/v1/notebooks` and `/v1/projects` routers requires a notebook scope in `X-Strata-Scopes`. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns `403 Forbidden` naming the scope it wanted.
 
