@@ -2402,8 +2402,9 @@ client can do - there's no internal API.</p>
 <p>The minimum sequence to render a notebook view:</p>
 <ol>
 <li><strong>Open the notebook.</strong> <code>POST /v1/notebooks/open</code> with the notebook
-   directory path. The response carries everything you need to render the UI
-   cold - see <a href="#cold-start-payload">Cold-start payload</a> below. The
+   directory path, which must be inside <code>STRATA_NOTEBOOK_STORAGE_DIR</code> (a
+   relative path is taken from there; any other path is a <code>400</code>). The
+   response carries everything you need to render the UI cold - see <a href="#cold-start-payload">Cold-start payload</a> below. The
    <code>session_id</code> in the response is the route parameter for every subsequent
    call. The environment sync (<code>uv sync</code>, <code>renv</code> restore) runs as an
    environment job that the open waits for, so cells can run once it
@@ -2414,11 +2415,13 @@ client can do - there's no internal API.</p>
    (page refresh case), <code>GET /v1/notebooks/sessions/{session_id}</code> returns
    the same payload shape.
 2. <strong>Connect the WebSocket.</strong> <code>ws://.../v1/notebooks/ws/{session_id}</code>. The
-   handler verifies the session exists and is visible to the caller's tenant -
-   refuses with close code <code>1008 Notebook not found</code> otherwise. A
-   browser upgrade whose <code>Origin</code> is neither the server's own nor listed in
-   <code>STRATA_CORS_ALLOW_ORIGINS</code> closes first with <code>1008 Origin not allowed</code>;
-   clients that send no <code>Origin</code> (the TUI, scripts) are unaffected. The
+   handler verifies the session exists and is visible to the caller's tenant,
+   and refuses the upgrade otherwise. A browser upgrade whose <code>Origin</code> is
+   neither the server's own nor listed in <code>STRATA_CORS_ALLOW_ORIGINS</code> is
+   refused too; clients that send no <code>Origin</code> (the TUI, scripts) are
+   unaffected. A refused upgrade is an HTTP <code>403</code> handshake response, before
+   any WebSocket exists: there is no close code or reason, so a client cannot
+   tell an unknown session from a bad <code>Origin</code> or failed auth. The
    only frame sent on accept is <code>presence</code> (see
    <a href="#presence-and-soft-locks">Presence and soft locks</a>).
 3. <strong>Send <code>notebook_sync</code></strong> as the first client → server message. The server
@@ -2452,10 +2455,10 @@ every endpoint. This is the local-dev default.</p>
 <li>Under <code>trusted_proxy</code>, every <code>/v1/*</code> request needs <code>X-Strata-Principal</code>,
   <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> (if multi-tenant); under
   <code>api_key</code>, <code>Authorization: Bearer &lt;key&gt;</code>. The WS upgrade carries the same
-  credentials; a missing or invalid one closes with <code>1008</code>. Under <code>api_key</code>
-  the key is checked again on every frame that needs <code>notebook:write</code> or
-  <code>notebook:execute</code>, and the socket closes with <code>1008 Unauthorized</code> once
-  the key is revoked or expired.</li>
+  credentials; a missing or invalid one refuses the upgrade with HTTP
+  <code>403</code>. Under <code>api_key</code> the key is checked again on every frame that needs
+  <code>notebook:write</code> or <code>notebook:execute</code>, and the open socket closes with
+  <code>1008 Unauthorized</code> once the key is revoked or expired.</li>
 <li><code>/open</code>, <code>/create</code> and <code>/discover</code> work in service mode. What is
   personal-mode-only is narrower: the two delete routes (<code>DELETE
   /{session_id}</code> and the path-keyed <code>POST /delete-by-path</code>) and the two
@@ -2466,7 +2469,7 @@ every endpoint. This is the local-dev default.</p>
   other's live sessions. Without a principal, every open starts a new session.</li>
 <li>A session records the tenant of whoever opened, created or imported it.
   Another tenant's session looks missing: every <code>/{session_id}</code> REST route
-  answers <code>404</code> and the WS upgrade closes with <code>1008 Notebook not found</code>, as
+  answers <code>404</code> and the WS upgrade is refused with HTTP <code>403</code>, as
   for an unknown id (MCP applies the same rule). <code>admin:*</code> reaches every
   session, and a session opened without a tenant is open to all. With
   <code>multi_tenant_enabled</code>, <code>/discover</code>, <code>/open</code>, <code>/create</code> and the imports
@@ -2602,7 +2605,9 @@ against the preserved execution state.</p>
   <code>cell_status</code>, latest <code>cell_output</code>) survives - it's recovered through
   the snapshot. So does a running remote cell's console: the snapshot's
   <code>console_stdout</code> / <code>console_stderr</code> hold the last 64 KiB of what it has
-  streamed so far, and the <code>cell_console</code> frames after it append.</li>
+  streamed so far, and the <code>cell_console</code> frames after it append. A running
+  local cell's console is empty there; it arrives with the result. The full
+  console rules are in <a href="../websocket/#console">WebSocket Protocol</a>.</li>
 <li><strong>Sequence numbers continue across reconnects.</strong> Every server-to-client
   message carries a <code>seq</code> from a per-notebook counter. The counter doesn't
   reset on reconnect; if you see a large gap, that's expected - treat it as
@@ -2643,8 +2648,8 @@ or a <a href="../rest-api/">quiesce</a> hold. Before the socket closes (code <co
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">}}</span>
 </code></pre></div>
 <p><code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code> or <code>deleted</code>. Do not
-reconnect to the old <code>session_id</code> (the upgrade closes with <code>1008 Notebook not
-found</code>); reopen the notebook by path with <code>POST /v1/notebooks/open</code>, which
+reconnect to the old <code>session_id</code> (the upgrade is refused with HTTP <code>403</code>);
+reopen the notebook by path with <code>POST /v1/notebooks/open</code>, which
 starts a new session. The browser shows the message with a Reopen button;
 the <a href="../../notebook/tui/#when-the-server-closes-the-session">terminal viewer</a>
 shows it in a notification and reopens on <code>r</code>.</p>

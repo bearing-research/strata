@@ -2319,7 +2319,9 @@
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>matplotlib&gt;=3.9
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>seaborn&gt;=0.13
 </code></pre></div>
-<p>Strata previews the changes (additions, removals, unchanged) before applying.</p>
+<p>Strata previews the changes (additions, removals, unchanged) before applying. The
+import replaces the notebook's direct dependencies, except that <code>pyarrow</code>, <code>orjson</code>
+and <code>cloudpickle</code> (which every Python cell needs) stay unless the file pins them itself.</p>
 <h3 id="import-from-environmentyaml">Import from environment.yaml<a class="headerlink" href="#import-from-environmentyaml" title="Permanent link">&para;</a></h3>
 <p>Conda-style <code>environment.yaml</code> files are supported on a best-effort basis. Strata translates each conda spec to a pip requirement (<code>numpy=2.1</code> becomes <code>numpy==2.1</code>, a <code>conda-forge::</code> prefix is dropped) and adds the entries of the <code>pip:</code> list as they are. It ignores <code>channels</code>, the <code>python</code> pin and the <code>pip</code> entry itself, and the preview lists what it ignored.</p>
 <h3 id="export">Export<a class="headerlink" href="#export" title="Permanent link">&para;</a></h3>

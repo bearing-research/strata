@@ -3338,7 +3338,8 @@ iteration and the <code>carry</code> variable threads state between them.</p>
 <a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">state</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
 </code></pre></div>
 <p>Iteration 0 reads <code>state</code> from the upstream cell that defines it (or from
-<code>start_from=</code>, below); the body must rebind it every iteration.</p>
+<code>start_from=</code>, below); the body must rebind it, or update it in place, every
+iteration.</p>
 <p>Key/value parameters:</p>
 <ul>
 <li><code>max_iter=&lt;N&gt;</code>, hard upper bound on iterations.</li>
@@ -3346,14 +3347,17 @@ iteration and the <code>carry</code> variable threads state between them.</p>
 <li><code>start_from=&lt;cell-id&gt;@iter=&lt;k&gt;</code>, (optional) resume from another loop cell's
   stored iteration <code>k</code>. Useful for forking a converged run to explore a
   variant. <code>&lt;cell-id&gt;</code> is the upstream loop cell's <code>id</code> in
-  <code>notebook.toml</code> (not its <code>@name</code>) - see <a href="#cell-ids">Cell IDs</a>.</li>
+  <code>notebook.toml</code> (not its <code>@name</code>) - see <a href="#cell-ids">Cell IDs</a>. The fork
+  depends on that cell: when its result changes, the fork runs again.</li>
 <li><code>until=&lt;expr&gt;</code>, (optional) the same early exit as <code>@loop_until</code>, inline.
   Parameters are split on whitespace, so the expression cannot contain a
   space (<code>until=acc["loss"]&lt;0.05</code>); use <code>@loop_until</code> for anything longer.</li>
 </ul>
 <h3 id="loop_until"><code>@loop_until</code><a class="headerlink" href="#loop_until" title="Permanent link">&para;</a></h3>
 <p>Python expression evaluated after each iteration in the cell's namespace. When
-it returns truthy, the loop exits early.</p>
+it returns truthy, the loop exits early. A name it reads that the body does not
+bind (a tolerance set upstream) is an input of the cell, like any other
+reference. An expression that raises fails the cell at that iteration.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># @loop max_iter=100 carry=acc</span>
 <a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="c1"># @loop_until acc["loss"] &lt; 0.05</span>
 </code></pre></div>

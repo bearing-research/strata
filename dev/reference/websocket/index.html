@@ -1655,6 +1655,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cascade" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2437,6 +2448,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#cascade" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2640,7 +2662,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ws://localhost:8765/v1/notebooks/ws/{session_id}
 </code></pre></div>
 <p>The <code>{session_id}</code> is the one returned by <code>POST /v1/notebooks/open</code> or <code>/create</code>. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode each open creates its own session.</p>
-<p>Under principal auth, the upgrade carries the same credentials as a REST call: <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> if multi-tenant under <code>trusted_proxy</code>, or <code>Authorization: Bearer &lt;key&gt;</code> under <code>api_key</code>. A missing or invalid credential closes the connection with <code>1008 Policy Violation</code>. Each client → server frame is then checked against the notebook scope it needs (<code>notebook:read</code>, <code>notebook:write</code> or <code>notebook:execute</code>); a frame the principal's scopes do not cover is answered with an <code>error</code> frame, <code>code: "insufficient_scope"</code>.</p>
+<p>Under principal auth, the upgrade carries the same credentials as a REST call: <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> if multi-tenant under <code>trusted_proxy</code>, or <code>Authorization: Bearer &lt;key&gt;</code> under <code>api_key</code>. A missing or invalid credential refuses the upgrade with HTTP <code>403</code> (see <a href="#close-codes">Close codes</a>). Each client → server frame is then checked against the notebook scope it needs (<code>notebook:read</code>, <code>notebook:write</code> or <code>notebook:execute</code>); a frame the principal's scopes do not cover is answered with an <code>error</code> frame, <code>code: "insufficient_scope"</code>.</p>
 <p>A read-only app view connects with <code>?role=viewer</code>. Such a connection may send only <code>widget_update</code> and <code>notebook_sync</code>; anything else is answered with <code>code: "read_only"</code>.</p>
 <h2 id="envelope">Envelope<a class="headerlink" href="#envelope" title="Permanent link">&para;</a></h2>
 <p>All messages are JSON with this shape:</p>
@@ -2856,12 +2878,12 @@
 <tr>
 <td><code>cell_status</code></td>
 <td><code>{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }</code></td>
-<td>Status changed. Only <code>cell_id</code> and <code>status</code> are always present: the <code>remote_*</code> fields come with <code>running</code> for a remote cell (<code>remote_build_state</code> is <code>starting</code> while a worker provisions the job), <code>staleness_reasons</code> and <code>causality</code> with a staleness update</td>
+<td>Status changed. Only <code>cell_id</code> and <code>status</code> are always present: the <code>remote_*</code> fields come with <code>running</code> for a remote cell (<code>remote_build_state</code> is <code>starting</code> while a worker provisions the job), <code>staleness_reasons</code> and <code>causality</code> with a staleness update. <code>running</code> starts a run: clear the cell's console (see <a href="#console">Console</a>)</td>
 </tr>
 <tr>
 <td><code>cell_output</code></td>
 <td><code>{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false, "duration_ms": 128, "artifact_uri": "...", "artifact_uris": {...}, "stdout": "...", "stderr": "...", "execution_method": "...", "mutation_warnings": [...] }</code></td>
-<td>Execution result, including rich visible outputs. <code>artifact_uris</code> maps each stored variable to its artifact. A remote run adds <code>remote_worker</code>, <code>remote_transport</code>, <code>remote_build_id</code> and <code>remote_build_state</code></td>
+<td>Execution result, including rich visible outputs. <code>outputs</code> maps each stored variable to its preview; <code>_</code> is the last displayed value. <code>artifact_uris</code> maps each stored variable to its artifact. <code>stdout</code> / <code>stderr</code> are the run's whole console and replace what <code>cell_console</code> built (see <a href="#console">Console</a>). A remote run adds <code>remote_worker</code>, <code>remote_transport</code>, <code>remote_build_id</code> and <code>remote_build_state</code></td>
 </tr>
 <tr>
 <td><code>cell_output_delta</code></td>
@@ -2871,12 +2893,12 @@
 <tr>
 <td><code>cell_console</code></td>
 <td><code>{ "cell_id": "...", "stream": "stdout", "text": "...", "chunk_seq": 0 }</code></td>
-<td>Incremental output. Append <code>text</code> to the cell's console for <code>stream</code>. A remote cell's output arrives while it runs, numbered per stream by <code>chunk_seq</code> from 0: chunk 0 starts that stream's console for the run, so replace what the last run left. <code>chunk_seq</code> is <code>null</code> on console sent when the cell finishes</td>
+<td>Console output. Append <code>text</code> to the cell's console for <code>stream</code>. A remote cell's output arrives while it runs, numbered per stream by <code>chunk_seq</code> from 0: chunk 0 starts that stream's console for the run, so replace what the last run left. <code>chunk_seq</code> is <code>null</code> on console sent when the cell finishes: for a cell that streamed nothing (every local cell), that frame is the stream's whole console for the run (see <a href="#console">Console</a>)</td>
 </tr>
 <tr>
 <td><code>cell_error</code></td>
-<td><code>{ "cell_id": "...", "error": "...", "suggest_install": "...", "suggest_install_language": "python" }</code></td>
-<td>Execution error. <code>error_code</code>, when present, is a stable name to branch on (<code>fetch_pin_mismatch</code>: a <code># @fetch ... sha256=</code> pin no longer matches the URL's bytes). <code>suggest_install</code> names a missing package to offer installing, with <code>python</code> or <code>r</code> for which installer. A remote run adds the <code>remote_*</code> fields of <code>cell_output</code> plus <code>remote_error_code</code></td>
+<td><code>{ "cell_id": "...", "error": "...", "stdout": "...", "stderr": "...", "suggest_install": "...", "suggest_install_language": "python" }</code></td>
+<td>Execution error. <code>stdout</code> / <code>stderr</code>, when present, are the failed run's whole console and replace it, as on <code>cell_output</code>; a failure before the cell ran carries neither. <code>error_code</code>, when present, is a stable name to branch on (<code>fetch_pin_mismatch</code>: a <code># @fetch ... sha256=</code> pin no longer matches the URL's bytes). <code>suggest_install</code> names a missing package to offer installing, with <code>python</code> or <code>r</code> for which installer. A remote run adds the <code>remote_*</code> fields of <code>cell_output</code> plus <code>remote_error_code</code></td>
 </tr>
 <tr>
 <td><code>cell_iteration_progress</code></td>
@@ -2900,6 +2922,14 @@
 </tr>
 </tbody>
 </table>
+<h3 id="console">Console<a class="headerlink" href="#console" title="Permanent link">&para;</a></h3>
+<p>A cell's console follows three rules, in this order of frames:</p>
+<ol>
+<li><code>cell_status</code> with <code>status: "running"</code> starts a run: clear the cell's stdout and stderr.</li>
+<li><code>cell_console</code> appends <code>text</code> to its <code>stream</code>; a frame with <code>chunk_seq: 0</code> first clears that stream.</li>
+<li><code>cell_output</code> and <code>cell_error</code> that carry <code>stdout</code> / <code>stderr</code> strings replace the console with them. The <code>cell_output</code> of a cache hit that replays no console carries the cell's last console, as <code>notebook_state</code> does.</li>
+</ol>
+<p>A cell run as an upstream inside another cell's run may get its console and result without a <code>running</code> frame; rule 3 still leaves the right console. In <code>notebook_state</code>, a running cell's <code>console_stdout</code> / <code>console_stderr</code> hold what this run has shown so far (empty until it prints); any other cell's hold its last run's console.</p>
 <h3 id="cascade">Cascade<a class="headerlink" href="#cascade" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -3099,7 +3129,7 @@
 <li><strong>Client sends <code>notebook_sync</code></strong> as its first message after reconnecting. The server responds with <code>notebook_state</code> containing the full current state (cells, DAG, cell statuses, latest display outputs).</li>
 <li><strong>Client replaces local state</strong> with the synced payload and resumes listening.</li>
 </ol>
-<p>There is <strong>no replay</strong> of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (<code>cell_output</code>, finished cell statuses) is recovered via <code>notebook_sync</code>; transient progress events (<code>cell_console</code> mid-stream, <code>cell_output_delta</code> for a streaming prompt cell, <code>cell_iteration_progress</code> for a <code>@loop</code> cell, <code>cell_variant_progress</code> for a <code># @per_variant</code> fan-out cell, <code>cascade_progress</code>) are not. The one exception is a remote cell's live console: while it runs, its <code>console_stdout</code> / <code>console_stderr</code> in <code>notebook_state</code> hold the last 64 KiB it has streamed of each stream, so a client that joins mid-run shows the run so far and appends the <code>cell_console</code> frames that follow.</p>
+<p>There is <strong>no replay</strong> of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (<code>cell_output</code>, finished cell statuses) is recovered via <code>notebook_sync</code>; transient progress events (<code>cell_console</code> mid-stream, <code>cell_output_delta</code> for a streaming prompt cell, <code>cell_iteration_progress</code> for a <code>@loop</code> cell, <code>cell_variant_progress</code> for a <code># @per_variant</code> fan-out cell, <code>cascade_progress</code>) are not. The one exception is a remote cell's live console: while it runs, its <code>console_stdout</code> / <code>console_stderr</code> in <code>notebook_state</code> hold the last 64 KiB it has streamed of each stream, so a client that joins mid-run shows the run so far and appends the <code>cell_console</code> frames that follow. A running local cell's console there is empty: it arrives with the result.</p>
 <h3 id="session-lifetime">Session lifetime<a class="headerlink" href="#session-lifetime" title="Permanent link">&para;</a></h3>
 <p>A session ends when:</p>
 <ul>
@@ -3110,7 +3140,7 @@
 <li><code>STRATA_NOTEBOOK_SESSION_MIN_AVAILABLE_MB</code> is set and the host's available memory is below it: the least recently used are closed until it is above,</li>
 <li>or the server restarts.</li>
 </ul>
-<p><code>notebook_sync</code>, previews, profiling requests, unknown frames and pings are not activity; a running cell is. The checks run every minute and when a notebook is opened, and never close a session with a running cell, an environment job, a held soft lock or a quiesce hold. Connected clients get <code>session_closed</code> with the reason before the socket closes. A reconnect to a closed session is refused with <code>1008</code>; call <code>POST /v1/notebooks/open</code> again for a new session ID. See <a href="../notebook-protocol/#session-lifetime-and-session_closed">Session lifetime and <code>session_closed</code></a>.</p>
+<p><code>notebook_sync</code>, previews, profiling requests, unknown frames and pings are not activity; a running cell is. The checks run every minute and when a notebook is opened, and never close a session with a running cell, an environment job, a held soft lock or a quiesce hold. Connected clients get <code>session_closed</code> with the reason before the socket closes. A reconnect to a closed session is refused with HTTP <code>403</code>; call <code>POST /v1/notebooks/open</code> again for a new session ID. See <a href="../notebook-protocol/#session-lifetime-and-session_closed">Session lifetime and <code>session_closed</code></a>.</p>
 <h3 id="cancelling-a-sql-cell">Cancelling a SQL cell<a class="headerlink" href="#cancelling-a-sql-cell" title="Permanent link">&para;</a></h3>
 <p>A cancel stops the notebook waiting for the cell: the run is abandoned, no
 result is published, the cell leaves <code>running</code>, and the next cell can start.
@@ -3136,7 +3166,7 @@ was going to cost; what it no longer costs is the notebook.</p>
 </tr>
 <tr>
 <td><code>1008</code></td>
-<td>Policy violation - session not found or another tenant's, or an auth failure on the upgrade</td>
+<td>Policy violation: under <code>api_key</code>, the key was revoked or expired while connected</td>
 </tr>
 <tr>
 <td><code>1011</code></td>
@@ -3144,7 +3174,7 @@ was going to cost; what it no longer costs is the notebook.</p>
 </tr>
 </tbody>
 </table>
-<p>If the session has been closed server-side (notebook deleted, evicted, server restart), the WebSocket upgrade is refused with <code>1008</code>. A session closed while you are connected sends <code>session_closed</code> and then closes with <code>1000</code>. The client should call <code>POST /v1/notebooks/open</code> to start a new session.</p>
+<p>A refused upgrade never gets a close code: the server answers the handshake with HTTP <code>403</code> before any WebSocket exists, for an unknown or closed session (notebook deleted, evicted, server restart), another tenant's session, an <code>Origin</code> not allowed, or a missing or invalid credential. The response carries no reason, so a client cannot tell these apart; reopen by path and, if that fails, report the REST error. A session closed while you are connected sends <code>session_closed</code> and then closes with <code>1000</code>. The client should call <code>POST /v1/notebooks/open</code> to start a new session.</p>
 <p>The server does not send protocol-level pings; the WebSocket library's default frame keepalive is what holds idle connections open. If your client sees no traffic for an extended period and you can't tell whether the connection is live, the safest probe is to send <code>notebook_sync</code> and watch for the response.</p>
 
 

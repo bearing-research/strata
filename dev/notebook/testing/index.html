@@ -2249,7 +2249,8 @@ of the cell source, the upstream inputs, and your test file staged under a
 rewriting).</p>
 <p>Before the run, any stale upstream cell is materialized, exactly as a normal
 run of the cell would (an unchanged upstream is a cache hit), so <code>cell.sales</code>
-is current.</p>
+is current. The cell's <code>@fetch</code> files, <code>@mount</code> paths and notebook and <code>@env</code>
+variables are bound as they are in a run.</p>
 <p><img alt="A Python cell with its results table above an open Tests panel: the test
 source, a green &quot;2 passed&quot; summary, and a tick beside each test name. The flask
 toggle on the cell's left rail carries a green 2/2

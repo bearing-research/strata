@@ -4307,7 +4307,7 @@ same <code>embed_frame_ancestors</code> rule decides which hosts may frame it.</
 </tr>
 <tr>
 <td><code># @loop carry=VAR</code></td>
-<td>The variable threaded between iterations. Required. Must be re-bound by the cell body each iteration, and seeded by an upstream cell on iteration 0.</td>
+<td>The variable threaded between iterations. Required. Must be re-bound (or updated in place) by the cell body each iteration, and seeded by an upstream cell on iteration 0.</td>
 </tr>
 </tbody>
 </table>
@@ -4363,7 +4363,9 @@ happens if you push harder from that exact state with a different step size.</p>
    iterations as its own artifact chain. The original run stays untouched.</li>
 </ol>
 <p>You now have two parallel forks materialized in the artifact store. Either
-one can be forked further, and the inspect panel shows both chains.</p>
+one can be forked further, and the inspect panel shows both chains. The fork
+is downstream of the cell it starts from: when that cell's result changes, the
+fork and everything reading it run again.</p>
 <p>This is the escape hatch for "that intermediate state looked promising, let
 me explore from there": the thing that's hard to do in a plain for-loop
 once you've thrown away the intermediates.</p>
