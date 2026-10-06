@@ -165,8 +165,7 @@ class NotebookViewModel:
         elif msg_type == "cell_console":
             _append_console(cell, payload)
         elif msg_type == "cell_output":
-            outputs = payload.get("outputs")
-            cell.outputs = outputs if isinstance(outputs, list) else []
+            cell.outputs = _live_outputs(payload.get("outputs"))
             cell.error = None
             _replace_console(cell, payload.get("stdout"), payload.get("stderr"))
             duration = payload.get("duration_ms")
@@ -231,6 +230,20 @@ def _replace_console(cell: CellView, stdout: Any, stderr: Any) -> None:
     err = stderr if isinstance(stderr, str) else cell.console_stderr
     if (out, err) != (cell.console_stdout, cell.console_stderr):
         cell.console_parts = [(s, t) for s, t in (("stdout", out), ("stderr", err)) if t]
+
+
+def _live_outputs(outputs: Any) -> list[dict[str, Any]]:
+    """A ``cell_output`` frame's variables (a dict by name) as a list with ``name``.
+
+    ``_`` is the cell's display value, which ``display_outputs`` already holds.
+    """
+    if not isinstance(outputs, dict):
+        return []
+    return [
+        {"name": name, **meta}
+        for name, meta in outputs.items()
+        if name != "_" and isinstance(meta, dict)
+    ]
 
 
 def _test_badge(payload: dict[str, Any]) -> str:

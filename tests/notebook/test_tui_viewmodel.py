@@ -94,6 +94,16 @@ async def test_a_streamed_run_keeps_the_order_its_streams_arrived_in(server_fram
     assert vm.cells["a"].console == "epoch 1\nwarn 1\nepoch 2\ndone\n"
 
 
+@pytest.mark.asyncio
+async def test_live_outputs_arrive_as_the_server_sends_them(server_frames):
+    """``outputs`` is a dict by variable; ``_`` is the display, kept out of the list."""
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    preview = {"content_type": "json/object", "preview": 1}
+    await _run(vm, server_frames, "a", success=True, outputs={"x": preview, "_": preview})
+    assert vm.cells["a"].outputs == [{"name": "x", "content_type": "json/object", "preview": 1}]
+
+
 def test_a_resync_takes_the_snapshots_console_unless_the_cell_is_running():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a", "console_stdout": "old\n"}))
@@ -199,7 +209,7 @@ def test_cell_output_sets_outputs_and_clears_error():
     assert vm.cells["a"].error == "boom"
     vm.apply_frame(
         "cell_output",
-        {"cell_id": "a", "outputs": [{"name": "x", "preview": 1}], "duration_ms": 250},
+        {"cell_id": "a", "outputs": {"x": {"preview": 1}}, "duration_ms": 250},
     )
     assert vm.cells["a"].outputs == [{"name": "x", "preview": 1}]
     assert vm.cells["a"].error is None
@@ -232,7 +242,7 @@ def test_resync_preserves_live_console_and_outputs():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a", "status": "idle"}))
     vm.apply_frame("cell_console", {"cell_id": "a", "text": "kept\n"})
-    vm.apply_frame("cell_output", {"cell_id": "a", "outputs": [{"name": "x"}]})
+    vm.apply_frame("cell_output", {"cell_id": "a", "outputs": {"x": {}}})
     # A fresh snapshot (e.g. manual resync) must not wipe what we already saw.
     vm.apply_notebook_state(_state({"id": "a", "status": "ready"}))
     assert vm.cells["a"].status == "ready"  # snapshot wins for status
