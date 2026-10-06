@@ -23,6 +23,7 @@ export type _CodeIsAUnion = Expect<
   Equal<
     ErrorPayload['code'],
     | 'ENVIRONMENT_BUSY'
+    | 'notebook_busy'
     | 'cell_busy'
     | 'cell_locked'
     | 'read_only'

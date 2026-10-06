@@ -291,6 +291,31 @@ async def _send_error_message(
     )
 
 
+async def _send_busy_refusal(
+    websocket: WebSocket,
+    seq: int,
+    busy_cell: str | None,
+    refused_cell: str | None,
+) -> None:
+    """Refuse a run because another one holds the notebook.
+
+    Names the refused cell so a client already showing it as running can roll it back.
+    """
+    await websocket.send_text(
+        _json_encode(
+            _make_message(
+                MessageType.ERROR,
+                seq,
+                error_payload(
+                    str(NotebookBusyError(busy_cell)),
+                    code="notebook_busy",
+                    cell_id=refused_cell,
+                ),
+            )
+        )
+    )
+
+
 async def _set_cell_idle(
     session: NotebookSession,
     notebook_id: str,
@@ -482,14 +507,8 @@ async def _schedule_execution(
                 raise
 
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
+        await _send_busy_refusal(
+            websocket, next_notebook_sequence(notebook_id), busy_cell, requested_cell
         )
         return False
 
@@ -899,15 +918,7 @@ async def _handle_cell_execute(
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
         return
 
     # Any raise before scheduling must release the reservation: the dispatch
@@ -1026,15 +1037,7 @@ async def _handle_notebook_run_all(
     requested_cell = runnable_cells[0]
     busy_cell = await _reserve_execution_request(execution_state, requested_cell)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, None)
         return
 
     environment_block_reason = session.environment_execution_block_message()
@@ -1090,15 +1093,7 @@ async def _handle_notebook_rerun_all(
     requested_cell = runnable_cells[0]
     busy_cell = await _reserve_execution_request(execution_state, requested_cell)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, None)
         return
 
     environment_block_reason = session.environment_execution_block_message()
@@ -1159,15 +1154,7 @@ async def _handle_cell_execute_cascade(
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
         return
 
     environment_block_reason = session.environment_execution_block_message()
@@ -1233,15 +1220,7 @@ async def _handle_cell_execute_force(
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
         return
 
     environment_block_reason = session.environment_execution_block_message()
@@ -1294,15 +1273,7 @@ async def _handle_cell_execute_rerun(
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
         return
 
     # Release on exception, as in _handle_cell_execute.
@@ -1413,15 +1384,7 @@ async def _handle_cell_run_tests(
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            seq,
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, seq, busy_cell, cell_id)
         return
 
     try:
@@ -1653,25 +1616,22 @@ async def _handle_cell_source_update(
                     ]
             cells_analysis.append(entry)
 
-        await _broadcast_message(
-            notebook_id,
-            _make_message(
-                MessageType.DAG_UPDATE,
-                next_notebook_sequence(notebook_id),
-                dag_update_payload(
-                    {
-                        "edges": dag_edges,
-                        "roots": list(session.dag.roots) if session.dag else [],
-                        "leaves": list(session.dag.leaves) if session.dag else [],
-                        "topological_order": (session.dag.topological_order if session.dag else []),
-                        "cells": cells_analysis,
-                        "variant_groups": [
-                            vg.model_dump() for vg in session.notebook_state.variant_groups
-                        ],
-                    }
-                ),
-            ),
-        )
+        dag_payload = {
+            "edges": dag_edges,
+            "roots": list(session.dag.roots) if session.dag else [],
+            "leaves": list(session.dag.leaves) if session.dag else [],
+            "topological_order": (session.dag.topological_order if session.dag else []),
+            "cells": cells_analysis,
+            "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
+        }
+        dag_seq = next_notebook_sequence(notebook_id)
+        own = _make_message(MessageType.DAG_UPDATE, dag_seq, dag_update_payload(dag_payload))
+        for entry in cells_analysis:
+            if entry["id"] == cell_id:
+                entry["source"] = source
+        others = _make_message(MessageType.DAG_UPDATE, dag_seq, dag_update_payload(dag_payload))
+        # Same sequence number: each connection receives exactly one of the two.
+        await _broadcast_message(notebook_id, own, sender=websocket, to_others=others)
 
         await _broadcast_staleness_updates(session, notebook_id, staleness_map)
 
@@ -3197,20 +3157,30 @@ async def _handle_cell_focus(
         await broadcast_presence(notebook_id, session)
 
 
-async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
-    """Broadcast a message to all connected clients for a notebook."""
+async def _broadcast_message(
+    notebook_id: str,
+    message: dict[str, Any],
+    *,
+    sender: WebSocket | None = None,
+    to_others: dict[str, Any] | None = None,
+) -> None:
+    """Broadcast a message to all connected clients for a notebook.
+
+    With ``to_others``, every connection but ``sender`` gets that message instead.
+    """
     connections = _notebook_connections.get(notebook_id, [])
     if not connections:
         return
 
     message_text = _json_encode(message)
+    others_text = message_text if to_others is None else _json_encode(to_others)
     disconnected = []
 
     # Copy: another coroutine can remove from the list during a send await,
     # which would skip the next client.
     for ws in list(connections):
         try:
-            await ws.send_text(message_text)
+            await ws.send_text(message_text if ws is sender else others_text)
         except Exception:
             disconnected.append(ws)
 
@@ -3344,15 +3314,7 @@ async def _handle_widget_update(
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
-        await _send_error_message(
-            websocket,
-            next_notebook_sequence(notebook_id),
-            (
-                f"Notebook is already executing cell {busy_cell}"
-                if busy_cell
-                else "Notebook is already executing another cell"
-            ),
-        )
+        await _send_busy_refusal(websocket, next_notebook_sequence(notebook_id), busy_cell, cell_id)
         return
 
     async def _operation() -> None:

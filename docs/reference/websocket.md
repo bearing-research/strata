@@ -118,7 +118,7 @@ All messages are JSON with this shape:
 
 | Type         | Payload                                               | Description                 |
 | ------------ | ----------------------------------------------------- | --------------------------- |
-| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `is_module_cell` / `module_exports`, and `created_by` / `updated_by` |
+| `dag_update` | `{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }` | DAG changed after cell edit. Each `cells` entry carries `id`, `defines`, `references`, `upstream_ids`, `downstream_ids`, `is_leaf`, `annotation_diagnostics`, `variant_group` / `variant_name` / `variant_active`, `is_module_cell` / `module_exports`, and `created_by` / `updated_by`. After a `cell_source_update`, the edited cell's entry also carries its new `source` on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere `source` is null |
 
 ### State
 
@@ -165,7 +165,7 @@ All messages are JSON with this shape:
 
 | Type    | Payload              | Description    |
 | ------- | -------------------- | -------------- |
-| `error` | `{ "error": "...", "code": "...", "cell_id": "...", "held_by": "..." }` | A request could not be served. Only `error` is always present; see [the `error` frame](notebook-protocol.md#the-error-frame) for the codes |
+| `error` | `{ "error": "...", "code": "...", "cell_id": "...", "held_by": "..." }` | A request could not be served. Only `error` is always present; see [the `error` frame](notebook-protocol.md#the-error-frame) for the codes. A run refused because another run holds the notebook has `code: "notebook_busy"` and the refused `cell_id`, so a client that showed the cell running can put it back |
 
 ## Sequence numbers
 
