@@ -7,6 +7,7 @@ refuses it with a 400 naming ``STRATA_CATALOG_URI``; a personal server keeps it.
 from __future__ import annotations
 
 import os
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -249,6 +250,8 @@ class TestServiceModeRefusalOverHttp:
 
 
 class TestTheRequestsWarehouseIsTheOneWritten:
+    # pyiceberg's local FileIO cannot resolve a Windows warehouse path (see temp_warehouse).
+    @pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg local FileIO on Windows")
     def test_a_configured_warehouse_does_not_take_a_new_tables_files(self, tmp_path):
         """``uri`` comes from the configuration, the warehouse from the request."""
         import pyarrow as pa
