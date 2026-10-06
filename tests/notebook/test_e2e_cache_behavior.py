@@ -139,7 +139,7 @@ class TestCascadeCache:
                 downstream = next(c for c in session.notebook_state.cells if c.id == "c2")
                 assert downstream.status == "ready"
 
-    def test_leaf_cell_not_cached(self, setup):
+    def test_leaf_cell_is_cached_on_its_console_record(self, setup):
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell("c1", "x = 42")
 
@@ -147,9 +147,10 @@ class TestCascadeCache:
             with ws_connect(client, sid) as ws:
                 r1 = execute_cell_and_wait(ws, "c1")
                 assert r1["type"] == "cell_output"
+                assert r1["payload"].get("cache_hit") is not True
 
                 r2 = execute_cell_and_wait(ws, "c1")
                 assert r2["type"] == "cell_output"
-                # Leaf cells don't get cached because their outputs
-                # aren't consumed by any downstream cell
-                assert r2["payload"].get("cache_hit") is not True
+                # Nothing reads x, so the cell's (empty) console is its record
+                # under this provenance; an unchanged run replays it.
+                assert r2["payload"].get("cache_hit") is True

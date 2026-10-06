@@ -457,6 +457,9 @@ def _run_one_batched_cell(
                         "cache_hit": True,
                         "outputs": cached_outputs,
                         "display_outputs": response.get("cached_displays") or [],
+                        # A leaf's replayed console, as single-cell returns it on a hit.
+                        "stdout": response.get("stdout", ""),
+                        "stderr": response.get("stderr", ""),
                     },
                 )
                 return ("ok", None)

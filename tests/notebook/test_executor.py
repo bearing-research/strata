@@ -252,6 +252,25 @@ class TestCellExecutor:
         assert "recoverable output" in console_file.read_text()
 
     @pytest.mark.asyncio
+    async def test_silent_leaf_hits_the_cache_on_rerun(self, sample_notebook):
+        """A leaf with nothing consumed and nothing printed still ran; an unchanged re-run is a
+        hit, not another subprocess.
+        """
+        executor = CellExecutor(sample_notebook)
+        # cell2 is empty, so nothing reads x: no variable artifact, no display, no console.
+        source = "import os\nx = 1\n"
+
+        first = await executor.execute_cell("cell1", source)
+        assert first.success is True
+        assert first.cache_hit is False
+
+        second = await executor.execute_cell("cell1", source)
+        assert second.success is True
+        assert second.cache_hit is True
+        assert second.stdout == ""
+        assert second.stderr == ""
+
+    @pytest.mark.asyncio
     async def test_execute_with_error(self, sample_notebook):
         executor = CellExecutor(sample_notebook)
 
@@ -2178,7 +2197,9 @@ class Person:
         await pool.start()
 
         try:
-            warm_result = await CellExecutor(sample_notebook, pool).execute_cell(
+            # The cold run stored cell2's (empty) console, so a plain run would be a cache hit;
+            # rerun bypasses it so the warm path actually executes.
+            warm_result = await CellExecutor(sample_notebook, pool).execute_cell_rerun(
                 "cell2", cell2.source
             )
             assert warm_result.success is True

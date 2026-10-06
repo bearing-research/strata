@@ -200,9 +200,9 @@ store:
   the reasons why.
 - A cell whose last run failed reports `error`, with its traceback, until it
   is edited or run again.
-- A **leaf** cell, one nothing else reads, can report either `idle` or `ready`
-  after it has run. A leaf stores no variable artifact, so `idle` on a leaf
-  does not mean it never ran.
+- A **leaf** cell, one nothing else reads, reports `ready` after it has run
+  like any other cell. It stores no variable artifact; its console, even an
+  empty one, is the record of the run.
 
 For "what is it doing right now", attach one of the live views above.
 
