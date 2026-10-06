@@ -30,6 +30,7 @@ from sqlglot import exp
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.models import TableSpec
 from strata.notebook.sql.adapter import QualifiedTable
+from strata.notebook.sql.time_travel import splice_after_tables
 
 if TYPE_CHECKING:
     from strata.notebook.models import ConnectionSpec, NotebookState
@@ -403,6 +404,7 @@ def pin_snapshots(sql: str, catalog: str, snapshots: dict[tuple[str, str], int])
     if not snapshots:
         return sql
     tree = sqlglot.parse_one(sql, read="duckdb")
+    clauses: list[tuple[exp.Table, str]] = []
     for reference in tree.find_all(exp.Table):
         found = catalog_table(
             catalog,
@@ -413,8 +415,6 @@ def pin_snapshots(sql: str, catalog: str, snapshots: dict[tuple[str, str], int])
         snapshot = snapshots.get(found) if found is not None else None
         if snapshot is None or reference.args.get("when"):
             continue
-        template = sqlglot.parse_one(f"SELECT * FROM t AT (VERSION => {int(snapshot)})", "duckdb")
-        clause = template.find(exp.Table)
-        assert clause is not None
-        reference.set("when", clause.args["when"])
-    return tree.sql(dialect="duckdb")
+        clauses.append((reference, f"AT (VERSION => {int(snapshot)})"))
+    # DuckDB takes the alias first: ``lake.ns.t AS x AT (VERSION => 1)``.
+    return splice_after_tables(sql, clauses, after_alias=True)

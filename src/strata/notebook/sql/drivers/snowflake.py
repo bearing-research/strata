@@ -436,10 +436,7 @@ class SnowflakeAdapter:
 
     def pin_query(self, sql: str, at: str) -> str:
         return pin_tables(
-            sql,
-            "snowflake",
-            f"SELECT * FROM t AT (TIMESTAMP => '{at}'::TIMESTAMP_TZ)",
-            "when",
+            sql, "snowflake", f"AT (TIMESTAMP => '{at}'::TIMESTAMP_TZ)", "when", after_alias=False
         )
 
     def probe_schema(
