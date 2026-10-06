@@ -58,7 +58,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Endpoint | Required scope |
 | --- | --- |
 | Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
-| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
+| Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
 | Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
@@ -77,7 +77,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 
 Without principal auth (personal mode, or `auth_mode="none"`), the scope gate returns immediately and none of this applies.
 
-Personal mode with no header configured is effectively trust-on-first-call - anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
+Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
 
 ### Error shape
 
@@ -97,10 +97,12 @@ and a `message`.
 {"detail": {"code": "cell_locked", "cell_id": "a1b2c3d4", "held_by": "alice", "message": "..."}}
 ```
 
-Three middleware responses are plain text, not JSON: the tenant check's `400`
-(missing or invalid tenant header) and `403` (tenant not enabled), and the rate
-limiter's `429`, which also sets `Retry-After` (whole seconds) and
-`X-RateLimit-Limit-Type`.
+Four middleware responses are plain text, not JSON: the host check's `400` (a
+`Host` the server does not answer to, see `STRATA_ALLOWED_HOSTS`), the tenant
+check's `400` (missing or invalid tenant header) and `403` (tenant not
+enabled), and the rate limiter's `429`, which also sets `Retry-After` (whole
+seconds) and `X-RateLimit-Limit-Type`. A stream refused by QoS admission is a
+JSON `429` (`{"error", "tier"}`) with `Retry-After`.
 
 Validation errors (`422`) come from Pydantic and contain structured field info:
 
@@ -121,6 +123,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | Status | Common cause |
 | --- | --- |
 | `200` | Success |
+| `307` | `GET /v1/streams/{id}` on a node that does not hold the stream, redirecting to the one that does (`STRATA_NODE_ADVERTISED_URL`) |
 | `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
@@ -130,6 +133,8 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which. A table the ACL denies is refused first, so its caller gets the `403`/`404` instead |
 | `429` | Rate limit exceeded - global, per-client, or per-tenant |
 | `500` | Server bug - captured to logs with the request ID |
+| `503` | The server is draining for shutdown and takes no new materialize requests |
+| `504` | Planning a scan exceeded its timeout |
 
 ### Request IDs
 
@@ -318,7 +323,9 @@ POST /v1/notebooks/recents/validate
 ```
 
 Returns `{"valid": [...]}`, the subset of the (at most 100) paths that still
-hold a `notebook.toml`. The UI uses it to prune its recent-notebooks list.
+hold a `notebook.toml` and lie inside the caller's notebook root (the tenant's
+folder on a multi-tenant server); any other path is left out like a missing
+one. The UI uses it to prune its recent-notebooks list. Needs `notebook:write`.
 
 ### Delete Notebook By Path
 
@@ -787,9 +794,10 @@ GET /v1/notebooks/{session_id}/connections/{name}/schema
 ```
 
 Enumerates the tables and columns visible through the named connection. Used by
-the schema sidebar. Opens the connection on the read path and returns backend
-errors directly as `4xx` so auth / driver / connectivity failures are visible
-to the UI.
+the schema sidebar. Opens the connection read-only; an unknown connection is a
+`404`, an unknown driver a `400`, and a driver that fails to connect or
+enumerate a `502` carrying its message, so auth / driver / connectivity
+failures are visible to the UI.
 
 ## Artifacts
 

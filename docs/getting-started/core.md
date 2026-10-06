@@ -43,7 +43,7 @@ Runs 2 and 3 are both artifact-store cache hits: the server finds the earlier re
 
 Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
 
-- `<scheme>` is the storage scheme - `file://` for a local Iceberg warehouse, `s3://` / `gs://` / `az://` for cloud blob storage.
+- `<scheme>` is the storage scheme - `file://` for a local Iceberg warehouse, `s3://` / `gs://` / `abfs://` (or `abfss://`) for cloud blob storage.
 - `<warehouse-path>` is the path to the warehouse root (the directory containing Iceberg metadata).
 - The fragment after `#` names the Iceberg table inside the warehouse, as `<namespace>.<table>`.
 
@@ -147,4 +147,4 @@ print(df.head())
 
 - [Configuration](../reference/configuration.md): all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
 - [Deployment Modes](../deployment/modes.md): `personal` vs `service` mode and the auth boundary
-- [REST API](../reference/rest-api.md): notebook protocol surface (separate from the `/v1/materialize` endpoint this page calls into)
+- [REST API](../reference/rest-api.md): the HTTP routes, including the `/v1/materialize` and `/v1/streams` endpoints this page calls into

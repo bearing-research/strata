@@ -155,6 +155,11 @@ flags from a service-mode config into a personal-mode deployment. Remove
 the service-specific flags or switch to `deployment_mode=service`. The
 service-mode errors name the setting to add.
 
+Other settings are checked at startup in either mode: a SQL catalog in object
+storage needs a `uri`, the team cache needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`
+and that URL must not be this server, and adaptive concurrency needs its slot
+counts inside its range and no multi-tenancy.
+
 ## Mode-independent settings
 
 These apply identically in either mode and can be tuned freely:
@@ -183,7 +188,8 @@ build URLs and every link on a [publication](../notebook/publishing.md) page
 carry the prefix. Open the UI with the trailing slash
 (`https://app.example.com/o/acme/lab/`), since its assets load relative to
 the page. The prefix's first segment must not be one of Strata's own
-(`v1`, `p`, `assets`, `docs`, `health`), or a stripped request is read as
+(`v1`, `p`, `assets`, `docs`, `redoc`, `openapi.json`, `health`, `metrics`,
+`oembed`, `mcp`), or a stripped request is read as
 already carrying it.
 
 Clients take the full URL, path included (`https://app.example.com/o/acme/lab`):

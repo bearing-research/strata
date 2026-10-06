@@ -107,7 +107,9 @@ STRATA_REGISTRY_PROTECTED_ALIASES=champion,production
 ```
 
 Moves (and deletes) of protected aliases return **202 pending** instead of
-applying. The queue is visible, and approval applies the move with the
+applying. Deleting an alias (`DELETE /v1/names/{name}/aliases/{alias}`) is a
+personal-mode route and answers 403 in service mode, so there only moves
+reach the queue. The queue is visible, and approval applies the move with the
 approver as the audit actor - atomically with the pending-consumption, so
 a crash can never swallow an approval:
 
