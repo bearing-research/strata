@@ -3756,7 +3756,7 @@ class CellExecutor:
             raise RuntimeError(
                 "duplicate @table name(s): "
                 + ", ".join(sorted(duplicates))
-                + " — each @table must have a unique name within the cell"
+                + "; each @table must have a unique name within the cell"
             )
 
         tables: dict[str, dict[str, Any]] = {}
@@ -4310,7 +4310,7 @@ class CellExecutor:
                             # A variant with no artifact is dropped. A failed one never gets here:
                             # _materialize_upstreams raises first.
                             logger.error(
-                                "Sweep variant '%s' of '%s' has no artifact — "
+                                "Sweep variant '%s' of '%s' has no artifact; "
                                 "dropping it from the dict.",
                                 variant_name,
                                 var_name,
@@ -4336,7 +4336,7 @@ class CellExecutor:
                         else:
                             logger.error(
                                 "Artifact %s still missing after upstream "
-                                "materialisation — skipping variable '%s'.",
+                                "materialisation; skipping variable '%s'.",
                                 artifact_id,
                                 var_name,
                             )
@@ -5180,7 +5180,7 @@ class CellExecutor:
                 cell_id=cell_id,
                 success=False,
                 error=(
-                    "Loop cells do not support rw mounts — they would make "
+                    "Loop cells do not support rw mounts, which would make "
                     "per-iteration caching incorrect. Use an ro mount or "
                     "move the side-effect to a non-loop cell."
                 ),
@@ -5470,7 +5470,7 @@ class CellExecutor:
             if captured is None:
                 logger.error(
                     "Loop cell %s defines '%s' (consumed downstream) but the final "
-                    "iteration did not produce it — downstream cells will miss it.",
+                    "iteration did not produce it, so downstream cells will miss it.",
                     cell_id,
                     extra_var,
                 )
@@ -6263,7 +6263,7 @@ class CellExecutor:
             display_artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
             display_art = artifact_mgr.artifact_store.get_latest_version(display_artifact_id)
             if display_art is None:
-                continue  # Should not happen — helper validated existence.
+                continue  # Should not happen: the helper validated existence.
             blob = artifact_mgr.artifact_store.read_blob(display_art.id, display_art.version)
             if blob is None:
                 continue

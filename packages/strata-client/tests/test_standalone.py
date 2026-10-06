@@ -19,7 +19,7 @@ from strata_client import Filter, FilterOp, RetryConfig, StrataClient, gt
 @pytest.mark.skipif(
     importlib.util.find_spec("strata") is not None,
     reason=(
-        "the server (strata) is installed — the no-server-deps guard only applies in "
+        "the server (strata) is installed; the no-server-deps guard only applies in "
         "the isolated client-only environment (the CI 'strata-client (no server deps)' "
         "job), where other tests haven't already imported the server"
     ),

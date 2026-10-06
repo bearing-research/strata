@@ -10,7 +10,7 @@
  */
 
 /**
- * `--name:` — a declaration in a stylesheet, or a key in an inline style
+ * `--name:` is a declaration in a stylesheet, or a key in an inline style
  * binding. A reference never has a colon after the name (`var(--name)` closes
  * with `)`, `var(--name, x)` with `,`), so the colon alone tells them apart.
  */

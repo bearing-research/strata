@@ -130,7 +130,7 @@ def _database_path(probe_conn) -> str | None:
         with probe_conn.cursor() as cursor:
             cursor.execute("PRAGMA database_list")
             rows = cursor.fetchall() or []
-    except Exception:  # noqa: BLE001 — a broken handle is the caller's problem
+    except Exception:  # noqa: BLE001 (a broken handle is the caller's problem)
         return None
     for row in rows:
         if len(row) >= 3 and str(row[1]) == "main":

@@ -236,7 +236,7 @@ def render_publication(
                 f"<p class='sub'>Published {escape(_when(publication.published_at))}, "
                 f"withdrawn {escape(_when(publication.revoked_at))}.</p>"
                 "<div class='banner'>The link is intact and still names the same "
-                "artifact — it was never repointed at other content. Whoever "
+                "artifact; it was never repointed at other content. Whoever "
                 "published it has withdrawn public access.</div>"
             ),
         )
@@ -253,7 +253,7 @@ def render_publication(
         "<div class='banner'><strong>What this page shows.</strong> The code, "
         "inputs and environment recorded when these bytes were produced, and "
         "the chain of steps behind them. It does <em>not</em> claim the result "
-        "was reproduced — that needs a re-run, and randomness, thread counts, "
+        "was reproduced. That needs a re-run, and randomness, thread counts, "
         "floating-point order and unavailable input data each break it. The "
         "integrity digest below shows the bytes have not changed since "
         + ("this bundle was made" if bundle_filename else "publication")
@@ -279,8 +279,8 @@ def render_publication(
                     "Computed by",
                     escape(artifact.principal)
                     if artifact.principal
-                    else "<span class='note'>not recorded — a local run has "
-                    "no authenticated identity</span>",
+                    else "<span class='note'>not recorded (a local run has "
+                    "no authenticated identity)</span>",
                 ),
                 (
                     "Environment",

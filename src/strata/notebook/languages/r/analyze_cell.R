@@ -2,7 +2,7 @@
 #
 # Reads R source on stdin, writes a JSON object with `defines`,
 # `references`, and (on syntax error) `parse_error` to stdout.
-# Counterpart of the Python `strata.notebook.analyzer` module — the
+# Counterpart of the Python `strata.notebook.analyzer` module: the
 # defines/references convention exactly mirrors the Python side.
 #
 # Loaded by `RLanguageAnalyzer` in this same package via
@@ -11,19 +11,19 @@
 #
 # Walks the parse tree manually rather than relying on
 # `codetools::findGlobals`. codetools treats anything assigned in the
-# cell body as "local" and excludes it from the free-variable set —
+# cell body as "local" and excludes it from the free-variable set:
 # fine in isolation, but it drops legitimate read-before-write
 # dependencies like ``y <- y + 1`` or ``df <- df[complete.cases(df), ]``
 # where the RHS reads a variable that the cell also defines.
 #
 # Definition of a cross-cell reference: a name is a reference iff it
 # is READ before being LOCALLY DEFINED (in source order). This matches
-# Python's semantics — a variable that's only used after being defined
+# Python's semantics: a variable that's only used after being defined
 # in the same cell isn't a cross-cell input, but a variable that's
 # read before being assigned is.
 
 # `jsonlite` is the de-facto standard JSON package. We need it on the
-# user's R install — `renv::init` from #55 will add it; for now we
+# user's R install. `renv::init` from #55 will add it; for now we
 # fall back to manually emitting JSON if `jsonlite` is missing so the
 # analyzer keeps working before renv lands.
 has_jsonlite <- requireNamespace("jsonlite", quietly = TRUE)
@@ -36,20 +36,20 @@ source <- paste(readLines("stdin", warn = FALSE), collapse = "\n")
 #
 # Skipped during read-collection (none of these is a data dependency):
 #
-# - The op of a call (the function being called — see acceptance examples:
+# - The op of a call (the function being called; see acceptance examples:
 #   ``y <- x + 1`` references only ``x``, not ``+``; ``df <- read_parquet(...)``
 #   should not reference ``read_parquet``).
 # - Args of ``library`` / ``require`` / ``requireNamespace`` /
-#   ``attachNamespace`` / ``loadNamespace`` — those are package names,
+#   ``attachNamespace`` / ``loadNamespace``: those are package names,
 #   not free variables.
-# - Both sides of ``::`` and ``:::`` — namespace access is a literal
+# - Both sides of ``::`` and ``:::``: namespace access is a literal
 #   package-then-symbol pair, not a cross-cell data reference.
-# - The RHS field of ``$`` and ``@`` — member access; the field name
+# - The RHS field of ``$`` and ``@``: member access; the field name
 #   doesn't lookup in the global env. The LHS does, so it recurses.
 # - Args of ``quote`` / ``bquote`` / ``substitute`` / ``as.name`` /
-#   ``as.symbol`` — non-standard evaluation; the args are symbolic
+#   ``as.symbol``: non-standard evaluation; the args are symbolic
 #   not evaluated.
-# - Function bodies — locals/formals shouldn't leak. The ``function``
+# - Function bodies: locals/formals shouldn't leak. The ``function``
 #   definition itself surfaces as a define via its parent ``<-`` /
 #   ``->`` / ``=``; we just skip the body. This loses references that
 #   only appear inside function bodies, which is an acceptable Phase 1
@@ -63,7 +63,7 @@ PKG_LOAD_NAMES <- c(
 ASSIGN_LEFT <- c("<-", "=", "<<-")
 ASSIGN_RIGHT <- c("->", "->>")
 
-# Collect every name that's read inside ``expr``. Pure — returns a
+# Collect every name that's read inside ``expr``. Pure; returns a
 # character vector. The caller decides which of those names count as
 # cross-cell references via the "read-before-locally-defined" rule.
 collect_reads <- function(expr) {
@@ -185,14 +185,14 @@ result <- tryCatch(
 if (has_jsonlite) {
   # ``I()`` pins ``defines`` / ``references`` as arrays so a single-name
   # cell (``c("df")``) round-trips as ``["df"]`` rather than the scalar
-  # ``"df"`` that ``auto_unbox = TRUE`` would emit — the Python side
+  # ``"df"`` that ``auto_unbox = TRUE`` would emit, which the Python side
   # then does ``list("df")`` and gets ``['d', 'f']``. ``parse_error``
   # is a true scalar string, so it stays auto-unboxed.
   result$defines <- I(result$defines)
   result$references <- I(result$references)
   cat(jsonlite::toJSON(result, auto_unbox = TRUE))
 } else {
-  # Manual JSON emit — keep this in lockstep with what the Python
+  # Manual JSON emit: keep this in lockstep with what the Python
   # side expects to deserialize. Strings need basic escaping; we
   # don't expect newlines / quotes inside identifier names so a
   # naive escape covers our needs.

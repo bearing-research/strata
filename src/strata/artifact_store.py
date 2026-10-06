@@ -562,7 +562,7 @@ CREATE INDEX IF NOT EXISTS idx_provenance ON artifact_versions(provenance_hash);
 
 -- Unique constraint for idempotent finalize: (tenant, provenance_hash) for ready artifacts.
 -- Prevents duplicate ready artifacts for the same computation within a tenant. Relies on
--- tenant being '' (never NULL) for tenantless rows — SQLite treats NULLs as distinct, which
+-- tenant being '' (never NULL) for tenantless rows: SQLite treats NULLs as distinct, which
 -- would let duplicate tenantless ready rows slip through (see _init_schema normalization).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_provenance_unique
 ON artifact_versions(tenant, provenance_hash)

@@ -598,7 +598,7 @@ async def put_artifact_by_provenance(
     if not content_type:
         raise HTTPException(
             status_code=400,
-            detail="Missing 'content_type' — a reader cannot decode the blob without it",
+            detail="Missing 'content_type': a reader cannot decode the blob without it",
         )
 
     blob = await data_file.read()

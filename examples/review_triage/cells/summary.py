@@ -1,5 +1,5 @@
 # @name triage_summary
-# Downstream cells consume the LLM output as structured data — no
+# Downstream cells consume the LLM output as structured data: no
 # parsing, no fallbacks, no "did the model actually return JSON this
 # time?" defensive code. The schema guarantees the shape.
 import pandas as pd
@@ -24,7 +24,7 @@ print()
 print("Sentiment distribution:")
 print(df["sentiment"].value_counts().to_string())
 
-# The final expression becomes the cell's display value — a compact
+# The final expression becomes the cell's display value: a compact
 # record of what the triage flagged as high-priority.
 high_priority = df[df["priority"] == "high"]
 {

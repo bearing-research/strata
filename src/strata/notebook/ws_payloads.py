@@ -97,7 +97,7 @@ class CellOutputDeltaPayload(WsPayload):
 
 
 class CellIterationProgressPayload(WsPayload):
-    """``cell_iteration_progress`` — one completed iteration of a ``@loop`` cell."""
+    """``cell_iteration_progress``: one completed iteration of a ``@loop`` cell."""
 
     cell_id: str
     iteration: int
@@ -133,7 +133,7 @@ class CascadePromptPayload(WsPayload):
 
 
 class CascadeProgressPayload(WsPayload):
-    """``cascade_progress`` — which cell of a confirmed cascade is now running."""
+    """``cascade_progress``: which cell of a confirmed cascade is now running."""
 
     plan_id: str
     current_cell_id: str
@@ -142,7 +142,7 @@ class CascadeProgressPayload(WsPayload):
 
 
 class CellTestStatusPayload(WsPayload):
-    """``cell_test_status`` — cell unit-test run lifecycle (mirrors cell_status)."""
+    """``cell_test_status``: cell unit-test run lifecycle (mirrors cell_status)."""
 
     cell_id: str
     status: Literal["running", "ready", "error"]
@@ -259,7 +259,7 @@ class CellProfileModel(WsPayload):
 
 
 class ProfilingSummaryPayload(WsPayload):
-    """``profiling_summary`` — notebook-level execution metrics."""
+    """``profiling_summary``: notebook-level execution metrics."""
 
     total_execution_ms: int
     cache_hits: int
@@ -308,7 +308,7 @@ class CellAnalysisModel(WsPayload):
     upstream_ids: list[str] = Field(default_factory=list)
     downstream_ids: list[str] = Field(default_factory=list)
     is_leaf: bool
-    # Already ``model_dump``-ed AnnotationDiagnostic rows — passed through.
+    # Already ``model_dump``-ed AnnotationDiagnostic rows, passed through.
     annotation_diagnostics: list[dict[str, Any]] = Field(default_factory=list)
     variant_group: str | None = None
     variant_name: str | None = None
@@ -335,7 +335,7 @@ class DagUpdatePayload(WsPayload):
     leaves: list[str] = Field(default_factory=list)
     topological_order: list[str] = Field(default_factory=list)
     cells: list[CellAnalysisModel] = Field(default_factory=list)
-    # Already ``model_dump``-ed VariantGroup rows — passed through.
+    # Already ``model_dump``-ed VariantGroup rows, passed through.
     variant_groups: list[dict[str, Any]] = Field(default_factory=list)
 
 

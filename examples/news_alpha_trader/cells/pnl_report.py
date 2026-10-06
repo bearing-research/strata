@@ -11,7 +11,7 @@ import pandas as pd
 
 conn = open_db()
 
-# Realized P&L is SUM(sell proceeds) - SUM(buy costs) per ticker —
+# Realized P&L is SUM(sell proceeds) - SUM(buy costs) per ticker,
 # only valid for tickers where quantity has round-tripped back to
 # zero. Mark unrealized P&L separately against the latest close.
 realized_by_ticker = conn.execute(
@@ -54,7 +54,7 @@ total_unrealized = (
 )
 total_costs = float(conn.execute("SELECT COALESCE(SUM(usd), 0) FROM costs").fetchone()[0])
 
-# The headline metric — does the strategy pay for itself?
+# The headline metric: does the strategy pay for itself?
 cost_adjusted_pnl = total_realized + total_unrealized - total_costs
 
 conn.close()

@@ -71,7 +71,7 @@ def test_every_payload_model_is_registered() -> None:
         and obj not in registered
     }
     assert not unregistered, (
-        f"payload models not in FRAME_PAYLOADS: {sorted(unregistered)} — "
+        f"payload models not in FRAME_PAYLOADS: {sorted(unregistered)}; "
         "register them so the frontend gets their types"
     )
 

@@ -232,7 +232,7 @@ def _tag_value(v: Any) -> list[Any]:
     # ``coerce_bind_value`` gates types; fail loudly rather than hash an unstable ``str()``.
     raise ValueError(
         f"cannot serialize bind value of type {t.__name__!r} for "
-        "provenance hashing — coerce_bind_value should have rejected it"
+        "provenance hashing; coerce_bind_value should have rejected it"
     )
 
 

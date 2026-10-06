@@ -2,7 +2,7 @@
 # @worker local
 # Load arXiv ML papers from Hugging Face and assign topic categories.
 # 118K real papers with titles and abstracts. We sample 20K and assign
-# topics via keyword matching — a common first step when you have text
+# topics via keyword matching, a common first step when you have text
 # data but no labels.
 import re
 

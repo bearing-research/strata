@@ -1,4 +1,4 @@
-# Downstream of `model`. Edit this cell and only this cell recomputes — the
+# Downstream of `model`. Edit this cell and only this cell recomputes; the
 # model above stays cached (no retraining).
 from sklearn.metrics import confusion_matrix
 

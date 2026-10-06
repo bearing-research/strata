@@ -328,7 +328,7 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        result = eval(code, namespace)  # noqa: S307 — predicate is declared by the user
+        result = eval(code, namespace)  # noqa: S307 (the user declares the predicate)
     except Exception as exc:
         return {
             "until_reached": False,

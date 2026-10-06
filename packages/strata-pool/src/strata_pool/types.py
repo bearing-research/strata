@@ -54,7 +54,7 @@ WORKER_TOKEN_ENV = "STRATA_WORKER_TOKEN"
 """Environment variable carrying a worker's own credential.
 
 The worker contract: reject any request to /execute that does not present
-this value as a bearer token. /health stays open — it is polled before the
+this value as a bearer token. /health stays open: it is polled before the
 machine is trusted with anything, and it reveals nothing.
 
 Lives here rather than in the pool because backends need it too: a backend
@@ -106,7 +106,7 @@ class MachineType:
     dropped packet, and retiring on that would trade a cold start for every
     hiccup. Three consecutive misses is a machine that is gone.
 
-    Zero disables probing for this type — for a backend whose health check
+    Zero disables probing for this type, for a backend whose health check
     costs something, or one whose machines are known to be slow to answer
     while busy.
     """
@@ -132,7 +132,7 @@ class MachineType:
 
     provider_options: dict[str, object] = field(default_factory=dict)
     """Merged into the backend's create request. The escape hatch for the
-    settings that are real but not shared — RunPod's cloudType, a region, a
+    settings that are real but not shared: RunPod's cloudType, a region, a
     network volume. A backend ignores what it does not understand."""
 
 
@@ -147,7 +147,7 @@ class Worker:
 
     A machine is never handed across tenants. Even scrubbed of files, a
     process that ran one tenant's code is not a boundary the next tenant
-    should have to trust — and for a GPU, memory is not reliably zeroed
+    should have to trust, and for a GPU, memory is not reliably zeroed
     between processes at all.
     """
 

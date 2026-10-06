@@ -20,6 +20,6 @@ sns.heatmap(
 )
 ax.set_xlabel("Predicted")
 ax.set_ylabel("Actual")
-ax.set_title(f"Confusion Matrix — {type(model).__name__}")
+ax.set_title(f"Confusion Matrix: {type(model).__name__}")
 plt.tight_layout()
 fig

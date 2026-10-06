@@ -43,7 +43,7 @@ class RscriptUnavailableError(RuntimeError):
 
 
 def _source_hash(source: str) -> str:
-    """Stable cache key for ``source`` — same hash function as Python's analyzer."""
+    """Stable cache key for ``source``: same hash function as Python's analyzer."""
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
@@ -57,7 +57,7 @@ def _run_rscript(source: str) -> AnalyzedCell:
     rscript = shutil.which("Rscript")
     if rscript is None:
         raise RscriptUnavailableError(
-            "Rscript not found on PATH — install R (https://www.r-project.org/) "
+            "Rscript not found on PATH; install R (https://www.r-project.org/) "
             "to enable R cell support."
         )
 
@@ -116,7 +116,7 @@ class _RAnalyzer:
     """Adapter that satisfies the ``LanguageAnalyzer`` protocol."""
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
-        del session  # not consumed — R has no dialect-style runtime context.
+        del session  # not consumed: R has no dialect-style runtime context.
         source = cell.source or ""
         if not source.strip():
             return AnalyzedCell()

@@ -1,5 +1,5 @@
 # @name Load Titanic dataset
-# Bundled with seaborn — no network fetch needed.
+# Bundled with seaborn, so no network fetch is needed.
 import seaborn as sns
 
 df = sns.load_dataset("titanic")

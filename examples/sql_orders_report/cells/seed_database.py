@@ -5,7 +5,7 @@
 -- adapter opens the connection without the read-only enforcement
 -- (mode=ro / PRAGMA query_only=ON) so the DROP / CREATE / INSERT
 -- statements below can run. Other SQL cells in the notebook stay
--- read-only by default — the override is per-cell, not per-
+-- read-only by default: the override is per-cell, not per-
 -- connection.
 --
 -- The default cache policy for a write cell is `session`, so this

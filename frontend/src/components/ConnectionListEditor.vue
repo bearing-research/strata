@@ -333,7 +333,7 @@ function preservedExtraSummary(d: DraftConnection): string {
       </div>
 
       <p v-if="isUnknownDriver(conn.driver)" class="conn-driver-hint">
-        Unknown driver — only the URI / path / auth fields are editable here. Everything else
+        Unknown driver: only the URI / path / auth fields are editable here. Everything else
         round-trips unchanged.
       </p>
       <p
@@ -391,7 +391,7 @@ function preservedExtraSummary(d: DraftConnection): string {
             v-if="isLiteralSecret(conn.authUser) || isLiteralSecret(conn.authPassword)"
             class="conn-secret-hint"
           >
-            Use <code>$&#123;VAR&#125;</code> indirection — literal credentials are blanked when
+            Use <code>$&#123;VAR&#125;</code> indirection; literal credentials are blanked when
             notebook.toml is saved.
           </p>
           <div class="conn-field-row">
@@ -492,7 +492,7 @@ function preservedExtraSummary(d: DraftConnection): string {
             v-if="isLiteralSecret(conn.authUser) || isLiteralSecret(conn.authPassword)"
             class="conn-secret-hint"
           >
-            Use <code>$&#123;VAR&#125;</code> indirection — literal credentials are blanked when
+            Use <code>$&#123;VAR&#125;</code> indirection; literal credentials are blanked when
             notebook.toml is saved.
           </p>
           <p class="conn-secret-hint">

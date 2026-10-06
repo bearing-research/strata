@@ -29,7 +29,7 @@ const OPTIONS: ExportOption[] = [
     format: 'html',
     appView: true,
     label: 'App snapshot',
-    description: 'Widgets + outputs only, no code — a portable frozen dashboard',
+    description: 'Widgets + outputs only, no code: a portable frozen dashboard',
   },
   {
     key: 'embed',

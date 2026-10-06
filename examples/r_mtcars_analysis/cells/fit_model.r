@@ -5,14 +5,14 @@
 # level). Three outputs leave this cell with three different fates in
 # the artifact store:
 #
-#   model        — the lm object itself. Not tabular, so the harness
+#   model        the lm object itself. Not tabular, so the harness
 #                  stores it as RDS and tags it `r_only`. A downstream
 #                  *R* cell reads it straight back with readRDS (see the
 #                  diagnostics cell); a Python cell consuming it would
 #                  instead get a structured "re-export as a data.frame"
 #                  error rather than a confusing NameError.
-#   coefs        — tidy coefficient table (data.frame -> Arrow IPC).
-#   model_stats  — one-row fit summary (data.frame -> Arrow IPC).
+#   coefs        tidy coefficient table (data.frame -> Arrow IPC).
+#   model_stats  one-row fit summary (data.frame -> Arrow IPC).
 
 model <- lm(mpg ~ wt + hp + cyl, data = cars)
 s <- summary(model)

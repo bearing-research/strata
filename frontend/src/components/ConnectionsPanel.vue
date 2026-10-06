@@ -31,7 +31,7 @@ async function save(connections: typeof notebook.connections) {
     <div v-if="showPanel" class="connections-content">
       <p class="connections-copy">
         SQL connections referenced by ``# @sql connection=&lt;name&gt;``. Use
-        <code>$&#123;VAR&#125;</code> for credentials — literal secrets are blanked when
+        <code>$&#123;VAR&#125;</code> for credentials; literal secrets are blanked when
         notebook.toml is saved.
       </p>
       <ConnectionListEditor

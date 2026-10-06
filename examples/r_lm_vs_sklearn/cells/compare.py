@@ -2,12 +2,12 @@
 #
 # Bring the two fits together. The reads here are the cross-language
 # payoff: ``lm_coefs`` came out of an R cell over Arrow IPC, and
-# pandas treats it exactly like ``sklearn_coefs`` — both are
+# pandas treats it exactly like ``sklearn_coefs``: both are
 # ordinary DataFrames at this point, nothing to glue.
 
 import pandas as pd
 
-# Coefficient comparison. Merge on ``term`` — R uses
+# Coefficient comparison. Merge on ``term``: R uses
 # ``locationrural`` / ``locationsuburb`` (no dot), and the sklearn
 # encoder we built matches. Inner join surfaces any mismatch loudly.
 coef_compare = pd.merge(
@@ -22,7 +22,7 @@ coef_compare = coef_compare.drop(columns=["_merge"])[
     ["term", "lm_estimate", "sklearn_estimate", "delta", "std_error", "lm_p_value"]
 ]
 
-# Model-stats comparison — both DataFrames are single-row; stack
+# Model-stats comparison. Both DataFrames are single-row; stack
 # them and add a label column so the row source is obvious.
 stats_compare = pd.concat(
     [
@@ -41,7 +41,7 @@ stats_compare = pd.concat(
     ]
 ]
 
-# Held-out predictions — same observations, two predictions each.
+# Held-out predictions: same observations, two predictions each.
 predictions_compare = pd.DataFrame(
     {
         "actual": lm_predictions["actual"],
@@ -65,6 +65,6 @@ print("=== Coefficients ===")
 print(coef_compare.to_string(index=False, float_format=lambda x: f"{x:9.4f}"))
 print("\n=== Model fit ===")
 print(stats_compare.to_string(index=False, float_format=lambda x: f"{x:9.4f}"))
-print(f"\nTest RMSE — R lm(): {rmse_lm:.3f}   sklearn: {rmse_sklearn:.3f}")
+print(f"\nTest RMSE for R lm(): {rmse_lm:.3f}   sklearn: {rmse_sklearn:.3f}")
 print(f"Max |R-sklearn| prediction gap on test set: "
       f"{predictions_compare['lm_sklearn_diff'].abs().max():.4f}")

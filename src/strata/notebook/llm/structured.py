@@ -118,7 +118,7 @@ def build_anthropic_tool_use_body(
                 "name": _ANTHROPIC_TOOL_NAME,
                 "description": (
                     "Respond with a single object matching the input schema. "
-                    "Do not return prose — only the structured data."
+                    "Do not return prose, only the structured data."
                 ),
                 "input_schema": output_schema,
             }
@@ -146,7 +146,7 @@ def parse_anthropic_tool_use_response(
             tool_input = block.get("input")
             if tool_input is None:
                 raise RuntimeError(
-                    "Anthropic tool_use block missing 'input' — cannot extract response"
+                    "Anthropic tool_use block missing 'input'; cannot extract response"
                 )
             usage = data.get("usage") or {}
             return LlmCompletionResult(

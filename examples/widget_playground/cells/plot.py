@@ -1,5 +1,5 @@
 # @name Plot
-# A second downstream cell — the same controls drive a matplotlib chart.
+# A second downstream cell: the same controls drive a matplotlib chart.
 # The Controls cell ships with ⚡ Live on, so dragging `alpha` (or changing
 # `curve`) updates this plot live, in the notebook or the app view.
 import matplotlib

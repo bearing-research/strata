@@ -253,7 +253,7 @@ class VariableAnalyzer(ast.NodeVisitor):
                 self._defined_so_far.add(name)
 
     def visit_For(self, node: ast.For) -> None:
-        """Handle: for x in ... — x is defined at top level."""
+        """Handle ``for x in ...``: x is defined at top level."""
         self._add_assign_target(node.target)
         self.visit(node.iter)
         _collect_name_targets(node.target, self._defined_so_far)
@@ -263,7 +263,7 @@ class VariableAnalyzer(ast.NodeVisitor):
             self.visit(stmt)
 
     def visit_With(self, node: ast.With) -> None:
-        """Handle: with ... as x: — x is defined at top level."""
+        """Handle ``with ... as x``: x is defined at top level."""
         for item in node.items:
             if item.optional_vars:
                 self._add_assign_target(item.optional_vars)
@@ -285,7 +285,7 @@ class VariableAnalyzer(ast.NodeVisitor):
             self.visit(stmt)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-        """Handle: except E as e: — e is defined at top level."""
+        """Handle ``except E as e``: e is defined at top level."""
         if node.name:
             self.defines.add(node.name)
         if node.type:
@@ -335,7 +335,7 @@ class VariableAnalyzer(ast.NodeVisitor):
         self._defined_so_far.add(name)
 
     def visit_Delete(self, node: ast.Delete) -> None:
-        """Handle: del x — x is referenced but not defined."""
+        """Handle ``del x``: x is referenced but not defined."""
         for target in node.targets:
             self._add_delete_target(target)
 

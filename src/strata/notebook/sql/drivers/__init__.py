@@ -33,7 +33,7 @@ def register_default_adapters() -> None:
         if not callable(register_fn):
             raise RuntimeError(
                 f"built-in driver module {module_name!r} is missing a "
-                "callable ``register()`` — every driver module must expose one"
+                "callable ``register()``; every driver module must expose one"
             )
         register_fn()
 

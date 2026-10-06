@@ -454,7 +454,7 @@ def _notebook_runtime_specifiers() -> list[str]:
         reqs = metadata("strata-notebook").get_all("Requires-Dist") or []
     except PackageNotFoundError as exc:
         raise RuntimeError(
-            "strata-notebook distribution metadata not found — install via "
+            "strata-notebook distribution metadata not found; install via "
             "`uv sync` so importlib.metadata can supply notebook venv "
             "dependency specifiers"
         ) from exc
@@ -469,7 +469,7 @@ def _notebook_runtime_specifiers() -> list[str]:
     if missing:
         raise RuntimeError(
             f"strata-notebook metadata missing required notebook runtime "
-            f"deps {missing} — they must stay in pyproject.toml (core deps "
+            f"deps {missing}; they must stay in pyproject.toml (core deps "
             f"or [project.optional-dependencies].notebook) for the venv "
             f"template to find them"
         )
@@ -608,7 +608,7 @@ def _uv_sync(notebook_dir: Path, *, timeout: int = 60, python_version: str | Non
         _logger.debug("uv sync succeeded in %s", notebook_dir)
         return True
     except FileNotFoundError:
-        _logger.warning("uv not found on PATH — skipping venv creation")
+        _logger.warning("uv not found on PATH; skipping venv creation")
     except subprocess.TimeoutExpired:
         _logger.warning("uv sync timed out after %ds in %s", timeout, notebook_dir)
     except subprocess.CalledProcessError as exc:
@@ -630,7 +630,7 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
     # Before the Rscript lookup: R cells with no ``renv.lock`` yet is the normal
     # pre-init state and must succeed whether or not R is installed.
     if not (notebook_dir / "renv.lock").exists():
-        _logger.debug("renv.lock missing in %s — nothing to restore", notebook_dir)
+        _logger.debug("renv.lock missing in %s; nothing to restore", notebook_dir)
         return True
 
     # Building a package from source runs its configure script, so the restore runs
@@ -657,7 +657,7 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
         process_lock.acquire(timeout=timeout)
     except filelock.Timeout:
         _logger.warning(
-            "renv restore skipped in %s — another process held the renv lock for over %ds",
+            "renv restore skipped in %s: another process held the renv lock for over %ds",
             notebook_dir,
             timeout,
         )
@@ -698,7 +698,7 @@ def _renv_restore_locked(
     """
     rscript = shutil.which("Rscript")
     if rscript is None:
-        _logger.warning("Rscript not found on PATH — skipping renv restore")
+        _logger.warning("Rscript not found on PATH; skipping renv restore")
         return False
 
     if harness_user is not None:

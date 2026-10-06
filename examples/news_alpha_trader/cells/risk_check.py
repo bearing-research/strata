@@ -1,7 +1,7 @@
 # @name Risk check & trade plan
 # Translates fresh signals into a concrete list of orders after
-# applying all hard risk constraints. Nothing here talks to Alpaca —
-# output is a DataFrame that place_orders either submits or drops
+# applying all hard risk constraints. Nothing here talks to Alpaca;
+# the output is a DataFrame that place_orders either submits or drops
 # on dry-run.
 import pandas as pd
 
@@ -34,7 +34,7 @@ trades_budget = max(0, Config.MAX_DAILY_TRADES - int(orders_today))
 #
 # Simple rule: one entry per fresh signal, sized proportionally to
 # signal strength (sentiment × confidence), capped at
-# MAX_POSITION_USD. No pyramiding on existing positions — if we
+# MAX_POSITION_USD. No pyramiding on existing positions: if we
 # already hold the ticker, skip.
 trade_plan_rows = []
 held = set(current_positions["ticker"]) if len(current_positions) else set()

@@ -117,7 +117,7 @@ async def set_alias(
                 "status": "pending",
                 "name": name,
                 "alias": alias,
-                "detail": f"Alias '{alias}' is protected — the change awaits approval "
+                "detail": f"Alias '{alias}' is protected; the change awaits approval "
                 "(POST /v1/registry/pending/approve).",
             },
         )

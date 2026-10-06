@@ -975,7 +975,7 @@ async def _handle_cell_execute_reserved(
     if plan:
         # Downstream staleness goes out via cell_status, not impact_preview.
         logger.info(
-            "Cascade needed for cell %s — upstream statuses: %s",
+            "Cascade needed for cell %s; upstream statuses: %s",
             cell_id,
             {
                 uid: next(
@@ -2658,7 +2658,7 @@ async def _handle_inspect_open(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle inspect_open — spawn REPL with cell's inputs loaded."""
+    """Handle inspect_open: spawn REPL with cell's inputs loaded."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         return
@@ -2692,7 +2692,7 @@ async def _handle_inspect_eval(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle inspect_eval — evaluate expression in REPL."""
+    """Handle inspect_eval: evaluate expression in REPL."""
     cell_id = payload.get("cell_id")
     expr = payload.get("expr", "")
     if not cell_id or not expr:
@@ -2745,7 +2745,7 @@ async def _handle_inspect_close(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle inspect_close — shut down REPL."""
+    """Handle inspect_close: shut down REPL."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         return
@@ -2778,7 +2778,7 @@ async def _handle_impact_preview_request(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle impact_preview_request — user wants to see impact before running."""
+    """Handle impact_preview_request: the user wants to see impact before running."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         return
@@ -2800,7 +2800,7 @@ async def _handle_profiling_request(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle profiling_request — return notebook profiling summary."""
+    """Handle profiling_request: return notebook profiling summary."""
     seq = execution_state.next_sequence()
 
     summary = session.get_profiling_summary()
@@ -2819,7 +2819,7 @@ async def _handle_dependency_add(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle dependency_add — submit an async env job for ``uv add``."""
+    """Handle dependency_add: submit an async env job for ``uv add``."""
     from strata.notebook.routes import validate_package_name
 
     package = payload.get("package", "")
@@ -2868,7 +2868,7 @@ async def _handle_dependency_remove(
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
-    """Handle dependency_remove — submit an async env job for ``uv remove``."""
+    """Handle dependency_remove: submit an async env job for ``uv remove``."""
     from strata.notebook.routes import validate_package_name
 
     package = payload.get("package", "")

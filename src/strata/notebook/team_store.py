@@ -316,7 +316,7 @@ async def pull_cell_outputs(
         logger.warning(
             "Team store returned cell %s with env_hash %s but its provenance was "
             "computed under %s; these cannot both be right. Keeping the local "
-            "value — treat the store's metadata as suspect.",
+            "value; treat the store's metadata as suspect.",
             cell_id,
             ", ".join(h[:12] for h in disputed),
             env_hash[:12],

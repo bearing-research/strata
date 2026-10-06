@@ -542,7 +542,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "audit",
         help="Show the registry audit: every name/alias/tag mutation",
         description=(
-            "Append-only history of name, alias, and tag mutations — "
+            "Append-only history of name, alias, and tag mutations; it "
             'answers "what did this name point to before?". Newest first.'
         ),
     )

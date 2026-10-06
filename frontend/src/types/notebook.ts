@@ -33,7 +33,7 @@ export interface ConnectionSpec {
   uri?: string | null
   /** Postgres: search_path / role / etc. Driver-defined keys. */
   options?: Record<string, unknown> | null
-  /** Auth credentials (``user``, ``password``, etc) — values are
+  /** Auth credentials (``user``, ``password``, etc). Values are
    * ``${VAR}`` indirections; literals are blanked at write time. */
   auth?: ConnectionAuth | null
   /** Postgres: SET ROLE applied at connection open. */
@@ -95,9 +95,9 @@ export interface CellAnnotations {
   timeout?: number | null
   env: Record<string, string>
   mounts: MountSpec[]
-  /** Loop cell annotations — present only when the cell declares ``# @loop``. */
+  /** Loop cell annotations, present only when the cell declares ``# @loop``. */
   loop?: LoopAnnotationInfo | null
-  /** Variant grouping — present only when the cell declares ``# @variant``. */
+  /** Variant grouping, present only when the cell declares ``# @variant``. */
   variant?: VariantAnnotationInfo | null
 }
 
@@ -106,7 +106,7 @@ export interface VariantAnnotationInfo {
   name: string
 }
 
-/** A single variant in a group — surfaced for tab rendering. */
+/** A single variant in a group, surfaced for tab rendering. */
 export interface VariantMember {
   cellId: CellId
   name: string
@@ -137,7 +137,7 @@ export type CellStatus =
   | 'queued' // waiting for upstream deps in cascade
   | 'running' // executing
   | 'ready' // has cached artifact (provenance matches)
-  | 'stale' // upstream changed, provenance mismatch (coarse — see StalenessReason)
+  | 'stale' // upstream changed, provenance mismatch (coarse; see StalenessReason)
   | 'error' // execution failed
 
 /** Fine-grained reason why a cell is stale. Multiple reasons can apply;
@@ -146,7 +146,7 @@ export type StalenessReason =
   | 'self' // cell source was edited since last run
   | 'upstream' // cell source unchanged, but an upstream input is stale or re-ran
   | 'env' // environment (uv.lock runtime deps) changed since last run
-  | 'forced' // ran with stale inputs ("Run this only") — result exists but suspect
+  | 'forced' // ran with stale inputs ("Run this only"): result exists but suspect
 
 /** State of a single input variable for a cell */
 export type InputState = 'ready' | 'stale' | 'missing' | 'error'
@@ -164,7 +164,7 @@ export type ArtifactContentType =
   | 'arrow/ipc' // Tier 1: DataFrames, Tables, arrays (zero-copy fast path)
   | 'json/object' // Tier 2: Dicts, lists, JSON-safe scalars (safe, portable)
   | 'msgpack/object' // Tier 2: Dicts with bytes/datetime (safe, portable)
-  | 'pickle/object' // Tier 3: Models, custom objects (unsafe — see security model)
+  | 'pickle/object' // Tier 3: Models, custom objects (unsafe; see security model)
   | 'image/png' // Display-only (plots, charts)
   | 'text/markdown' // Display-only rich text
 
@@ -232,7 +232,7 @@ export interface Cell {
   displayOutputs?: CellOutput[]
   /** Each stored variable's artifact: `{var_name: strata://artifact/<id>@v=<n>}` */
   artifactUris?: Record<string, string>
-  /** Structured input status — each input with its artifact state */
+  /** Structured input status: each input with its artifact state */
   inputs: CellInput[]
   /** Cells this cell depends on (reads variables from) */
   upstreamIds: CellId[]
@@ -244,7 +244,7 @@ export interface Cell {
   references: string[]
   /** Whether this is a leaf node (no downstream consumers of its outputs) */
   isLeaf: boolean
-  /** Strata provenance hash — if same as stored, result is cached */
+  /** Strata provenance hash; if same as stored, result is cached */
   provenanceHash?: string
   /** Last execution timestamp */
   lastRunAt?: number
@@ -298,7 +298,7 @@ export interface Cell {
   shadowWarnings?: string[]
   /** Annotation validation diagnostics (set on open/reload, never during typing) */
   annotationDiagnostics?: AnnotationDiagnostic[]
-  /** Live loop-cell progress — hydrated from WS ``cell_iteration_progress`` messages */
+  /** Live loop-cell progress, hydrated from WS ``cell_iteration_progress`` messages */
   loopProgress?: LoopProgress
   /** Live @per_variant fan-out progress from ``cell_variant_progress``;
    * reset when the cell starts running. */
@@ -341,7 +341,7 @@ export interface CellTestCase {
   name: string
   nodeid: string
   outcome: 'passed' | 'failed' | 'error' | 'skipped'
-  /** Failure/error detail — the rewritten-assert diff for failures. */
+  /** Failure/error detail: the rewritten-assert diff for failures. */
   message: string
 }
 
@@ -378,13 +378,13 @@ export interface LoopProgress {
   artifactUri?: string
   /** Content type of the stored carry artifact */
   contentType?: string
-  /** True when ``@loop_until`` fired on this iteration — the loop is done */
+  /** True when ``@loop_until`` fired on this iteration: the loop is done */
   untilReached: boolean
   /** Duration of the most recent iteration in ms */
   iterDurationMs?: number
 }
 
-/** One completed variant of a ``# @per_variant`` fan-out cell — hydrated from
+/** One completed variant of a ``# @per_variant`` fan-out cell, hydrated from
  * WS ``cell_variant_progress`` frames. */
 export interface VariantProgress {
   /** Variant name (the upstream sweep group's member name) */
@@ -401,7 +401,7 @@ export interface VariantProgress {
   error?: string
 }
 
-/** Causality chain — explains why a cell is stale */
+/** Causality chain: explains why a cell is stale */
 export interface CausalityChain {
   reason: StalenessReason
   details: CausalityDetail[]
@@ -433,7 +433,7 @@ export interface AssertionResult {
   actualValue?: string
 }
 
-/** Run impact preview — what will happen if a cell is executed */
+/** Run impact preview: what will happen if a cell is executed */
 export interface ImpactPreview {
   targetCellId: CellId
   /** Upstream cells that need to run first */
@@ -451,7 +451,7 @@ export interface DownstreamImpact {
   newStatus: 'stale:upstream'
 }
 
-/** Published output — a cell's artifact exposed as a stable endpoint */
+/** Published output: a cell's artifact exposed as a stable endpoint */
 export interface PublishedOutput {
   name: string
   cellId: CellId
@@ -462,7 +462,7 @@ export interface PublishedOutput {
   artifactUri?: string
 }
 
-/** Artifact lineage node — one level in the provenance chain */
+/** Artifact lineage node: one level in the provenance chain */
 export interface LineageNode {
   artifactUri: string
   artifactVersion: number
@@ -537,13 +537,13 @@ export interface RNotebookEnvironment {
   packages: RPackageInfo[]
   /** Outcome of the most recent ``installed.packages()`` probe.
    *
-   * - ``unknown``           — the panel hasn't fetched yet.
-   * - ``absent``            — no renv.lock; nothing to probe.
-   * - ``ok``                — listing succeeded.
-   * - ``rscript_missing``   — Rscript not on PATH.
-   * - ``renv_not_active``   — renv hasn't activated (pre-init).
-   * - ``failed``            — subprocess error; ``packagesError``
-   *                           has the message.
+   * - ``unknown``: the panel hasn't fetched yet.
+   * - ``absent``: no renv.lock; nothing to probe.
+   * - ``ok``: listing succeeded.
+   * - ``rscript_missing``: Rscript not on PATH.
+   * - ``renv_not_active``: renv hasn't activated (pre-init).
+   * - ``failed``: subprocess error; ``packagesError``
+   *   has the message.
    */
   packagesStatus: 'unknown' | 'absent' | 'ok' | 'rscript_missing' | 'renv_not_active' | 'failed'
   /** Short error message when ``packagesStatus === 'failed'``. */
@@ -680,7 +680,7 @@ export interface DagEdge {
   variable: string
 }
 
-/** Cascade plan — what needs to run before a target cell */
+/** Cascade plan: what needs to run before a target cell */
 export interface CascadePlan {
   /** Target cell the user wants to run */
   targetCellId: CellId
@@ -731,8 +731,8 @@ export interface CellProfile {
 /** WebSocket message types: client → server */
 export type WsClientMessageType =
   | 'cell_execute' // Run a cell (with cascade option)
-  | 'cell_execute_cascade' // User confirmed cascade — execute the plan
-  | 'cell_execute_force' // "Run this only" — execute with stale inputs
+  | 'cell_execute_cascade' // User confirmed cascade: execute the plan
+  | 'cell_execute_force' // "Run this only": execute with stale inputs
   | 'cell_execute_rerun' // Force re-execute target cell, refresh upstreams from cache
   | 'cell_cancel' // Cancel a running cell
   | 'cell_source_update' // Cell source changed (debounced)
@@ -740,7 +740,7 @@ export type WsClientMessageType =
   | 'cell_run_tests' // Persist + run a cell's unit tests (Python only)
   | 'notebook_run_all' // Run all cells (or just stale ones)
   | 'notebook_rerun_all' // Force re-execute every cell (cache off)
-  | 'notebook_sync' // Reconnection — request full state
+  | 'notebook_sync' // Reconnection: request full state
   | 'inspect_open' // Open inspect REPL for a cell
   | 'inspect_eval' // Evaluate expression in inspect REPL
   | 'inspect_close' // Close inspect REPL
@@ -774,7 +774,7 @@ export type WsServerMessageType =
   | 'inspect_result' // Result of an inspect REPL evaluation
   | 'notebook_status' // Batch status update (e.g., after open or env change)
   | 'notebook_state' // Full state sync (reconnection)
-  | 'dependency_changed' // Dependency added/removed — updated list
+  | 'dependency_changed' // Dependency added/removed: updated list
   | 'environment_job_started' // Background env job accepted and started
   | 'environment_job_progress' // Background env job emitted logs or phase changes
   | 'environment_job_finished' // Background env job completed or failed

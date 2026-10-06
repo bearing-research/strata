@@ -1,7 +1,7 @@
 [project]
 name = "titanic-ml"
 version = "0.1.0"
-description = "Titanic survival prediction — end-to-end ML pipeline"
+description = "Titanic survival prediction: end-to-end ML pipeline"
 requires-python = "==3.12.*"
 dependencies = [
     "pyarrow>=18.0.0",

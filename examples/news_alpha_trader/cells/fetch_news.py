@@ -1,6 +1,6 @@
 # @name Fetch overnight news
 # Pulls recent Benzinga headlines for every whitelisted ticker and
-# upserts into the ``news_raw`` table. Idempotent — re-running the
+# upserts into the ``news_raw`` table. Idempotent: re-running the
 # cell only inserts articles we haven't seen before, so the DB grows
 # monotonically across sessions.
 import datetime as dt
@@ -38,7 +38,7 @@ raw_news = response.data.get("news", []) if hasattr(response, "data") else list(
 inserted = 0
 for article in raw_news:
     # alpaca-py returns a NewsSet on some SDK versions and a list on
-    # others — normalize to the underlying attrs.
+    # others, so normalize to the underlying attrs.
     article_id = getattr(article, "id", None)
     headline = getattr(article, "headline", "") or ""
     summary = getattr(article, "summary", "") or ""
@@ -65,7 +65,7 @@ for article in raw_news:
             )
             inserted += 1
         except Exception:
-            # Primary key conflict — already have this article. Fine.
+            # Primary key conflict: already have this article. Fine.
             pass
 
 # Log "ingestion cost" as zero but record the row so the ledger has a
@@ -77,7 +77,7 @@ record_cost(
     detail={"articles_seen": len(raw_news), "inserted": inserted, "since": str(since)},
 )
 
-# What's unprocessed — used by extract_signals.
+# What's unprocessed, used by extract_signals.
 unprocessed = conn.execute(
     """
     SELECT n.article_id, n.ticker, n.headline, n.summary, n.published_at

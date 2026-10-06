@@ -34,7 +34,7 @@ const order = ref<'asc' | 'desc'>('desc')
 const offset = ref(0)
 
 function formatBytes(bytes: number | null): string {
-  if (bytes === null || bytes === undefined) return '—'
+  if (bytes === null || bytes === undefined) return 'n/a'
   if (bytes < 1024) return `${bytes} B`
   const units = ['KB', 'MB', 'GB', 'TB']
   let value = bytes / 1024
@@ -47,12 +47,12 @@ function formatBytes(bytes: number | null): string {
 }
 
 function formatRows(count: number | null): string {
-  if (count === null || count === undefined) return '—'
+  if (count === null || count === undefined) return 'n/a'
   return count.toLocaleString()
 }
 
 function formatTime(ts: number | null): string {
-  if (ts === null || ts === undefined) return '—'
+  if (ts === null || ts === undefined) return 'n/a'
   // created_at is epoch seconds.
   return new Date(ts * 1000).toLocaleString()
 }

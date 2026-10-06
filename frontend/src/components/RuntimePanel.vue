@@ -173,7 +173,7 @@ async function disconnectSecretManager() {
               class="secrets-select"
               :disabled="!connected || savingSecretsConfig"
             >
-              <option value="">— none —</option>
+              <option value="">(none)</option>
               <option value="infisical">Infisical</option>
             </select>
           </label>

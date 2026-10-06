@@ -4,7 +4,7 @@
 # Generate sentence-transformer embeddings for each paper's abstract.
 # This is the expensive step: ~3K abstracts × 384-dim on an A10G GPU
 # takes ~5 seconds. On CPU it would take ~90 seconds. On re-run it's
-# instant — the artifact store caches the result keyed by the exact
+# instant: the artifact store caches the result keyed by the exact
 # input data + model identity.
 import numpy as np
 from sentence_transformers import SentenceTransformer

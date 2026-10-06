@@ -1,7 +1,7 @@
 # @name Seed State
 # Seed the hill-climb search from a random point on Himmelblau's
 # surface. ``random`` and ``himmelblau`` come from the helpers cell
-# via the DAG — reusing them here keeps the example DRY and shows how
+# via the DAG. Reusing them here keeps the example DRY and shows how
 # a module cell's definitions flow through to runtime cells.
 random.seed(42)
 x = random.uniform(-5, 5)
@@ -20,7 +20,7 @@ state = {
     # kept moves.
     "history": [{"iter": 0, "x": x, "y": y, "score": score, "accepted": True}],
     # iteration counter lets each loop iteration deterministically
-    # seed its own RNG — running the notebook twice reproduces the
+    # seed its own RNG, so running the notebook twice reproduces the
     # same trajectory.
     "iter": 0,
 }

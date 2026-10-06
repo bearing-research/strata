@@ -86,7 +86,7 @@ export interface PublishedArtifact {
   tags: Record<string, string>
 }
 
-/** GET /v1/notebooks/{sid}/artifacts — keyed by cell id. */
+/** GET /v1/notebooks/{sid}/artifacts, keyed by cell id. */
 interface NotebookArtifactsResponse {
   cells: Record<string, PublishedArtifact[]>
   /** Per name, this notebook's cells whose stored results read it. */
@@ -950,7 +950,7 @@ async function getConnectionSchema(
     } catch {
       /* no JSON body: report the status alone */
     }
-    throw new Error(`Schema fetch failed: ${resp.status}${detail ? ` — ${detail}` : ''}`)
+    throw new Error(`Schema fetch failed: ${resp.status}${detail ? `: ${detail}` : ''}`)
   }
   return readJson<ConnectionSchemaResponse>(resp)
 }
@@ -981,7 +981,7 @@ async function updateNotebookConnections(
       // no JSON body: report the status alone
     }
     throw new Error(
-      `Failed to update notebook connections: ${resp.status}${detail ? ` — ${detail}` : ''}`,
+      `Failed to update notebook connections: ${resp.status}${detail ? `: ${detail}` : ''}`,
     )
   }
   return readJson<{

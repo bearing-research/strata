@@ -1,5 +1,5 @@
 # @name Helpers & Config
-# Module cell — pure defs + literal constants. Downstream cells import
+# Module cell: pure defs + literal constants. Downstream cells import
 # Config, the DuckDB/Alpaca factories, and the cost estimators by name.
 #
 # Keeping ALL connection and policy knobs in one place is deliberate:
@@ -33,7 +33,7 @@ class Config:
     MIN_ABS_SENTIMENT = 0.4
 
     # --- Cost model ----------------------------------------------------
-    # LLM pricing is fetched from LiteLLM's public catalog at runtime —
+    # LLM pricing is fetched from LiteLLM's public catalog at runtime;
     # see _fetch_litellm_pricing() below. Fallback rate used only when
     # the catalog can't be reached AND the model is unknown; matches
     # mid-tier Sonnet pricing so we overstate rather than log $0.
@@ -71,7 +71,7 @@ def open_db():
 
 
 def _ensure_schema(conn) -> None:
-    """Idempotent DDL. Run on every open_db() call — CREATE IF NOT EXISTS."""
+    """Idempotent DDL. Run on every open_db() call (CREATE IF NOT EXISTS)."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS news_raw (
@@ -162,7 +162,7 @@ def alpaca_trading_client():
 
     ``paper=True`` routes to paper-api.alpaca.markets; False routes to
     api.alpaca.markets (live). We never silently swap modes at call
-    time — the caller must own the mode decision.
+    time; the caller must own the mode decision.
     """
     from alpaca.trading.client import TradingClient
 
@@ -190,7 +190,7 @@ def _fetch_litellm_pricing() -> dict:
 
     LiteLLM maintains per-token USD rates for ~2000 models. If the fetch
     fails (offline, 403, etc.) we cache an empty dict so we don't retry
-    on every cost lookup — the fallback rate takes over downstream.
+    on every cost lookup; the fallback rate takes over downstream.
     """
     global _litellm_pricing_cache  # noqa: PLW0603
     if _litellm_pricing_cache is not None:
@@ -211,7 +211,7 @@ _litellm_pricing_cache: dict | None = None
 def active_llm_model() -> str | None:
     """The model the Runtime panel last wrote to notebook.toml [ai].model.
 
-    Returns None before the user picks one — callers then fall back to the
+    Returns None before the user picks one; callers then fall back to the
     conservative rate below. Notebook directory is CWD at cell execution
     time, so plain relative-path tomllib is enough.
     """
@@ -255,7 +255,7 @@ def estimate_trade_cost(qty: float, side: str, price: float) -> dict:
     - TAF fee (sells only, tiny)
     - slippage (Config.SLIPPAGE_BPS applied to notional, one-way)
 
-    Applied to paper trades too — that's the point, so the backtest
+    Applied to paper trades too. That's the point, so the backtest
     doesn't tell you a pleasant lie.
     """
     notional = abs(qty) * price

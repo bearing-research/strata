@@ -19,6 +19,6 @@ fig, ax = plt.subplots(figsize=(8, 6))
 ConfusionMatrixDisplay(cm, display_labels=classes).plot(
     ax=ax, cmap="Blues", colorbar=False, xticks_rotation=30
 )
-ax.set_title("arXiv Topic Classification — Confusion Matrix")
+ax.set_title("arXiv Topic Classification: Confusion Matrix")
 plt.tight_layout()
 fig

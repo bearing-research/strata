@@ -1,6 +1,6 @@
 # @name Prepare the mtcars data
 #
-# A pure-R notebook — every cell is R. Variables flow cell-to-cell
+# A pure-R notebook: every cell is R. Variables flow cell-to-cell
 # through the same content-addressed artifact store the Python cells
 # use: a data.frame crosses as Arrow IPC, so the next R cell receives
 # it as a data.frame with no glue code.

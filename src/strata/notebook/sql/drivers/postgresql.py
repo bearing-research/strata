@@ -107,7 +107,7 @@ class PostgresAdapter:
 
         Identity-shaping for Postgres: host, port, database, user, role,
         search_path. Excluded: password (secret), application_name and
-        ``connect_timeout`` (runtime tunables — they don't change which
+        ``connect_timeout`` (runtime tunables that don't change which
         objects the connection sees).
         """
         return hash_connection_identity(self.name, self._extract_identity(spec))

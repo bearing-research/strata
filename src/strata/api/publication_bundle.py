@@ -324,7 +324,7 @@ def _bundle_readme(
 ) -> str:
     title = publication.title or f"{artifact.id}@v={artifact.version}"
     parquet_line = (
-        f"\n- `{parquet_name}` — the same rows in Parquet, for tools that read it."
+        f"\n- `{parquet_name}`: the same rows in Parquet, for tools that read it."
         if parquet_name
         else ""
     )
@@ -338,12 +338,12 @@ def _bundle_readme(
 
 A Strata artifact and the record of what produced it.
 
-- `index.html` — the result, the code that produced it, and the code and
+- `index.html`: the result, the code that produced it, and the code and
   environment of every step behind it. Open it in a browser; it needs no
   server and makes no external requests.
-- `{filename}` — the bytes themselves.{parquet_line}
-- `manifest.json` — the same record, machine-readable.
-- `ro-crate-metadata.json` — the same chain as [RO-Crate](https://w3id.org/ro/crate/)
+- `{filename}`: the bytes themselves.{parquet_line}
+- `manifest.json`: the same record, machine-readable.
+- `ro-crate-metadata.json`: the same chain as [RO-Crate](https://w3id.org/ro/crate/)
   JSON-LD, which repositories and provenance tooling read directly.
 
 ## Checking it
@@ -358,7 +358,7 @@ sha256sum {filename}
 `{filename}` is what that digest covers.{parquet_note}
 
 That is the whole of what this bundle can prove about the contents. It shows
-nothing about whether the result was honestly produced — no digest could — and
+nothing about whether the result was honestly produced (no digest could), and
 it does not claim the computation was reproduced. Re-running it is a separate
 matter, and one only you can do: the source and environment in `index.html`
 are what it would take.

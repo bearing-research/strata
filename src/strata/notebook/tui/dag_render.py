@@ -89,7 +89,7 @@ def _layout(
 ) -> _Layout:
     try:
         return _grandalf_layout(order, labels, statuses, edges)
-    except Exception:  # noqa: BLE001 — grandalf missing / layout failure → fallback
+    except Exception:  # noqa: BLE001 (grandalf missing / layout failure → fallback)
         return _fallback_layout(order, labels, statuses, edges)
 
 
@@ -103,7 +103,7 @@ def _grandalf_layout(
     from grandalf.layouts import SugiyamaLayout
 
     texts = {cid: _box_text(cid, labels, statuses) for cid in order}
-    # grandalf is untyped and sets `.view` dynamically — keep these Any.
+    # grandalf is untyped and sets `.view` dynamically; keep these Any.
     vertices: dict[str, Any] = {cid: Vertex(cid) for cid in order}
     for cid, vertex in vertices.items():
         vertex.view = _VertexView(len(texts[cid]) + 2, _BOX_H)

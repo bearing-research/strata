@@ -234,7 +234,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
         print(
             f"error: notebook DAG could not be built: {detail}"
             if detail
-            else "error: notebook DAG could not be built — inspect the notebook "
+            else "error: notebook DAG could not be built; inspect the notebook "
             "in the UI and resolve the conflicting cells first",
             file=sys.stderr,
         )
@@ -556,7 +556,7 @@ def validate_main(args: argparse.Namespace) -> int:
                 "message": (
                     f"notebook DAG could not be built: {detail}"
                     if detail
-                    else "notebook DAG could not be built — inspect the notebook and "
+                    else "notebook DAG could not be built; inspect the notebook and "
                     "resolve the conflicting cells"
                 ),
             }
@@ -766,7 +766,7 @@ def add_export_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "App-view snapshot: render only what the app view shows (widgets, "
-            "markdown, display outputs) with no cell sources — a portable, "
+            "markdown, display outputs) with no cell sources: a portable, "
             "self-contained picture of the dashboard"
         ),
     )
@@ -998,7 +998,7 @@ def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
 
     try:
         return LocalNotebookOps(notebook_dir, author=author)
-    except Exception as exc:  # noqa: BLE001 — surface any open failure as exit 2
+    except Exception as exc:  # noqa: BLE001 (any open failure is exit 2)
         print(f"error: failed to open notebook: {exc}", file=sys.stderr)
         return None
 
@@ -1861,7 +1861,7 @@ async def _dep_async(args: argparse.Namespace, action: str) -> int:
     if args.format == "json":
         _emit_json(result.model_dump(mode="json"))
     else:
-        tail = "ok" if result.success else f"failed — {result.error or ''}"
+        tail = "ok" if result.success else f"failed: {result.error or ''}"
         print(f"{action} {result.package}: {tail}")
     return 0 if result.success else 1
 

@@ -8,7 +8,7 @@
 # column matches.
 #
 # sklearn doesn't surface std-errors or p-values from
-# ``LinearRegression`` — its OLS implementation gives only point
+# ``LinearRegression``; its OLS implementation gives only point
 # estimates. The comparison cell handles that gap by leaving those
 # columns NaN on the sklearn side.
 
@@ -51,7 +51,7 @@ reg.fit(X_train, y_train)
 
 # Match R's coefficient row layout: intercept first, then predictors
 # in design-matrix column order. Standard errors / p-values aren't
-# computable from sklearn's LinearRegression, so we leave them NaN —
+# computable from sklearn's LinearRegression, so we leave them NaN and
 # the compare cell drops them out of the side-by-side view.
 sklearn_coefs = pd.DataFrame(
     {
@@ -63,7 +63,7 @@ sklearn_coefs = pd.DataFrame(
     }
 )
 
-# Glance row matching R's lm_model_stats shape — R² we can compute,
+# Glance row matching R's lm_model_stats shape. R² we can compute,
 # adj R² needs df-residual which is n - p - 1, F statistic ditto.
 n = len(y_train)
 p = X_train.shape[1]

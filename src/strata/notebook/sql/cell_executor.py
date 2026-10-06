@@ -401,7 +401,7 @@ async def _execute_write_cell(
     cache_annotation = annotations.cache or CachePolicy(kind="session")
     if cache_annotation.kind in {"fingerprint", "snapshot"}:
         return _error_result(
-            f"@cache {cache_annotation.kind} isn't valid on a write cell — "
+            f"@cache {cache_annotation.kind} isn't valid on a write cell: "
             "writes mutate state, so probe-based invalidation has no anchor. "
             "Use `# @cache session` (run once per session) or `# @cache forever` "
             "(idempotent setup; cache by source).",
@@ -1290,9 +1290,9 @@ def _table_display(table: Any, *, max_rows: int = 5) -> dict[str, Any]:
 
 
 def _format_cell(value: Any) -> str:
-    """Render a value for the markdown preview; ``None`` shows as a dash, not ``None``."""
+    """Render a value for the markdown preview; ``None`` shows as SQL ``NULL``."""
     if value is None:
-        return "—"
+        return "NULL"
     return str(value)
 
 

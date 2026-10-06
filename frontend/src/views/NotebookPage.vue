@@ -102,7 +102,7 @@ const renderedCells = computed(() => {
 })
 // Deliberately fewer than AddCellMenu offers: get to a first cell, not a choice.
 const emptyStateKinds = [
-  { language: 'python', label: 'Python', description: 'Code cell — the default' },
+  { language: 'python', label: 'Python', description: 'Code cell (the default)' },
   { language: 'sql', label: 'SQL', description: 'Query a connected database' },
   { language: 'prompt', label: 'Prompt', description: 'LLM-powered template' },
   { language: 'markdown', label: 'Markdown', description: 'Documentation / prose' },

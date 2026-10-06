@@ -1,8 +1,8 @@
 # Unit tests for the "Create sample sales dataset" cell.
 #
 # The ``cell`` fixture exposes the cell's namespace after it runs: ``cell.X`` is
-# whatever ``X`` is at the end of the cell — here, the ``sales`` DataFrame the
-# cell builds. Run these from the Tests panel on the cell (or via the WS
+# whatever ``X`` is at the end of the cell (here, the ``sales`` DataFrame the
+# cell builds). Run these from the Tests panel on the cell (or via the WS
 # ``cell_run_tests`` request); pytest collects every ``test_*`` function below.
 
 

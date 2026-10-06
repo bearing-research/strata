@@ -1,7 +1,7 @@
 [project]
 name = "data-viewer"
 version = "0.1.0"
-description = "Interactive DataFrame viewer — paging + sort over a large frame"
+description = "Interactive DataFrame viewer: paging + sort over a large frame"
 requires-python = "==3.12.*"
 dependencies = [
     "pyarrow>=18.0.0",

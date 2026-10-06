@@ -1,6 +1,6 @@
 # @variant classifier gbm
 # @name Gradient boosting
-# Gradient boosting — sequential weak learners.
+# Gradient boosting: sequential weak learners.
 from sklearn.ensemble import GradientBoostingClassifier
 
 model = GradientBoostingClassifier(n_estimators=100, random_state=42)
