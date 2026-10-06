@@ -214,7 +214,10 @@ async def execute_sql_cell(
         except LakeError as exc:
             return _error_result(f"connection {spec.name!r}: {exc}", start_time)
         runtime_spec = lake.spec
-    runtime_spec = _confined(session, runtime_spec, lake)
+    try:
+        runtime_spec = _confined(session, runtime_spec, lake)
+    except LakeError as exc:
+        return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     pinned_lake = lake if pins_snapshots else None
 
     # ---- probes (optional) -----------------------------------------
@@ -431,7 +434,10 @@ async def _execute_write_cell(
         )
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
-    runtime_spec = _confined(session, runtime_spec, None)
+    try:
+        runtime_spec = _confined(session, runtime_spec, None)
+    except LakeError as exc:
+        return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     if spec.driver == "sqlite" and getattr(runtime_spec, "confine_to", None) is not None:
         violation = confined_write_violation(
             rewrite_named_to_positional(analysis.sql_body, adapter.sqlglot_dialect),
@@ -797,18 +803,42 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     return hashlib.sha256(connection_id.encode() + b"|" + policy.salt).hexdigest()
 
 
+# The files the server opens for a connection, by driver.
+_OPENED_FILES = {
+    "duckdb": ("path",),
+    "sqlite": ("path",),
+    "bigquery": ("credentials_path", "write_credentials_path"),
+}
+
+
 def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
     """In service mode, a connection confined to its own database and lake.
 
     SQL cells run in the server process. DuckDB is confined by
     ``duckdb._confine`` to its lake's locations; a SQLite write cell is refused
-    statements that reach other files (``confined_write_violation``).
+    statements that reach other files (``confined_write_violation``). The files
+    it opens are opened by their resolved paths, checked again here, so a link
+    changed since ``database_problem`` ran is not followed.
+
+    Raises:
+        LakeError: a file it opens is not one the notebook may read.
     """
-    if spec.driver not in ("duckdb", "sqlite"):
+    config = session._lake_config()
+    if getattr(config, "deployment_mode", "personal") != "service":
         return spec
-    if getattr(session._lake_config(), "deployment_mode", "personal") != "service":
-        return spec
-    return spec.model_copy(update={"confine_to": list(lake.locations) if lake else []})
+    update: dict[str, Any] = {}
+    extras = spec.model_extra or {}
+    for key in _OPENED_FILES.get(spec.driver, ()):
+        value = extras.get(key, getattr(spec, key, None))
+        if isinstance(value, str) and value and value != ":memory:":
+            update[key] = os.path.realpath(value)
+    if update:
+        problem = database_problem(spec.model_copy(update=update), session.path, config)
+        if problem is not None:
+            raise LakeError(problem)
+    if spec.driver in ("duckdb", "sqlite"):
+        update["confine_to"] = list(lake.locations) if lake else []
+    return spec.model_copy(update=update) if update else spec
 
 
 def database_problem(spec: ConnectionSpec, notebook_dir: Any, config: Any) -> str | None:

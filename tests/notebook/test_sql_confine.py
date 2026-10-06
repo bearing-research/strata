@@ -424,6 +424,76 @@ class TestDatabaseFile:
 
         assert result.success, result.error
 
+    @staticmethod
+    def _recording_connects(monkeypatch) -> list[str]:
+        from strata.notebook.sql.drivers.sqlite import SqliteAdapter
+
+        opened: list[str] = []
+        real = SqliteAdapter._invoke_connect
+
+        def record(self, uri):
+            opened.append(uri)
+            return real(self, uri)
+
+        monkeypatch.setattr(SqliteAdapter, "_invoke_connect", record)
+        return opened
+
+    @staticmethod
+    def _linked_notebook(tmp_path) -> tuple[Path, str, Path]:
+        import sqlite3
+
+        nb_dir, source = TestDatabaseFile._notebook(tmp_path, "")
+        own = nb_dir / "own.sqlite"
+        with sqlite3.connect(own) as conn:
+            conn.execute("CREATE TABLE secret(x)")
+            conn.execute("INSERT INTO secret VALUES ('mine')")
+        link = nb_dir / "link.sqlite"
+        link.symlink_to(own)
+        toml = nb_dir / "notebook.toml"
+        toml.write_text(toml.read_text().rstrip("\n") + f'\npath = "{link}"\n')
+        return nb_dir, source, link
+
+    @pytest.mark.asyncio
+    async def test_the_resolved_file_is_opened(self, tmp_path, monkeypatch, server):
+        import os
+
+        config = self._config(tmp_path, "service")
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        opened = self._recording_connects(monkeypatch)
+        nb_dir, source, _ = self._linked_notebook(tmp_path)
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+        assert opened and all(os.path.realpath(nb_dir / "own.sqlite") in uri for uri in opened)
+
+    @pytest.mark.asyncio
+    async def test_a_link_changed_after_the_check_is_not_followed(
+        self, tmp_path, monkeypatch, server
+    ):
+        from strata.notebook.sql import cell_executor
+
+        config = self._config(tmp_path, "service")
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        opened = self._recording_connects(monkeypatch)
+        nb_dir, source, link = self._linked_notebook(tmp_path)
+        real_resolve = cell_executor._resolve_runtime_spec
+
+        def swap_then_resolve(*args, **kwargs):
+            link.unlink()
+            link.symlink_to(server["metadata"])
+            return real_resolve(*args, **kwargs)
+
+        monkeypatch.setattr(cell_executor, "_resolve_runtime_spec", swap_then_resolve)
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert not result.success
+        assert "artifact store" in (result.error or "")
+        assert opened == []
+
     def test_a_link_out_of_the_notebook_is_followed(self, tmp_path, server):
         from strata.notebook.sql.cell_executor import database_problem
 

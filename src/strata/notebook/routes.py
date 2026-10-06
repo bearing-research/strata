@@ -2234,6 +2234,7 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
         _safely_close,
         database_problem,
     )
+    from strata.notebook.sql.lake import LakeError
     from strata.notebook.sql.registry import get_adapter
 
     spec = next(
@@ -2258,7 +2259,10 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
         runtime_spec = _resolve_runtime_spec(spec, session.path, auth_env=_auth_env(session))
     except CredentialError as exc:
         raise HTTPException(status_code=400, detail=f"connection {name!r}: {exc}") from exc
-    runtime_spec = _confined(session, runtime_spec, None)
+    try:
+        runtime_spec = _confined(session, runtime_spec, None)
+    except LakeError as exc:
+        raise HTTPException(status_code=400, detail=f"connection {name!r}: {exc}") from exc
     try:
         conn = adapter.open(runtime_spec, read_only=True)
     except Exception as exc:  # noqa: BLE001

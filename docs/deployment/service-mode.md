@@ -680,7 +680,9 @@ connection opens. After resolving `../` and following links, its `path` must be
 inside the notebook's own directory, or else pass the mount-root rule below and
 not be inside the server's state (the artifact directory, the cache directory,
 the metadata database's directory, the notebook storage directory or the
-server's home). A SQLite connection may not use `uri`, whose parameters can name
+server's home). The server opens the resolved file, checked again just before
+opening, so a link changed after the first check is not followed. A SQLite
+connection may not use `uri`, whose parameters can name
 any file. Saving such a connection fails with a 400, and one already in
 `notebook.toml` fails the cell and the connection's schema listing, naming it.
 The keys the server sets on a connection it opens (`confine_to`,
