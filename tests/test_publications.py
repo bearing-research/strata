@@ -774,6 +774,55 @@ class TestImportAcrossStores:
         assert second.written is False
         assert second.ref == first.ref, "the second import must resolve to the row already here"
 
+    def test_an_input_that_is_also_an_ancestor_is_copied_before_its_descendants(self, tmp_path):
+        """``load -> features(load) -> train(load, features)``, with ``load`` already on the target.
+
+        BFS reaches ``load`` at depth 1 and ``features`` too, so reversed BFS copied ``features``
+        first, with an edge naming ``load``'s source id that never landed on the target.
+        """
+        import json
+
+        from strata.artifact_store import TransformSpec
+        from strata.artifact_transfer import copy_chain
+        from strata.services.artifact import ArtifactService
+
+        def ready(store, artifact_id, provenance, inputs=None):
+            version = store.create_artifact(
+                artifact_id,
+                provenance,
+                TransformSpec("notebook/cell@v1", {"source": artifact_id}, []),
+                input_versions=inputs,
+            )
+            store.write_blob(artifact_id, version, b"x")
+            store.finalize_artifact(artifact_id, version, "", 1, 1)
+            return f"{artifact_id}@v={version}"
+
+        def edge(ref):
+            return {f"strata://artifact/{ref}": ref}
+
+        source = ArtifactStore(tmp_path / "source")
+        target = ArtifactStore(tmp_path / "target")
+        load = ready(source, "nb_A_cell_load_var_df", "prov-load")
+        features = ready(source, "nb_A_cell_feat_var_x", "prov-feat", edge(load))
+        ready(source, "nb_A_cell_train_var_m", "prov-train", {**edge(load), **edge(features)})
+        # A colleague's notebook already put the same load step on the target.
+        theirs = ready(target, "nb_B_cell_load_var_df", "prov-load")
+
+        train = source.get_artifact("nb_A_cell_train_var_m", 1)
+        copy_chain(source, target, train, 10)
+
+        landed = target.get_artifact("nb_A_cell_feat_var_x", 1)
+        assert json.loads(landed.input_versions) == edge(theirs)
+        chain = ArtifactService().build_lineage(
+            target,
+            artifact=target.get_artifact("nb_A_cell_train_var_m", 1),
+            artifact_id="nb_A_cell_train_var_m",
+            version=1,
+            tenant_filter=None,
+            max_depth=25,
+        )
+        assert "nb_A_cell_load_var_df" not in {n.artifact_id for n in chain.nodes}
+
     def test_import_does_not_deduplicate_across_tenants(self, tmp_path):
         """Dedup is per tenant: another tenant's row would hand out a ref the caller cannot read."""
         target = ArtifactStore(tmp_path / "central")
