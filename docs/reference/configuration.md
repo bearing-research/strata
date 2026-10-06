@@ -194,14 +194,24 @@ overrides the one Strata derives.
 ## Azure Storage
 
 Credentials for the Azure blob backend (`STRATA_ARTIFACT_BLOB_BACKEND=azure`).
-Supply exactly one of connection string, account key, SAS token, or default
-credential.
+Supply at least one of connection string, account key, SAS token, or default
+credential; with several set, the connection string wins, then the default
+credential, then the SAS token, then the account key.
 
 The same settings read lake tables on Azure. A table named by an `abfs://` or
 `abfss://` warehouse URI (see [Catalog](#catalog)) has its metadata read with the account name, key, SAS token, connection string and
 endpoint that are set, passed to its catalog as `adls.*` properties; with no
 secret set it uses `DefaultAzureCredential`. A key set in
 `STRATA_CATALOG_PROPERTIES` overrides the one Strata derives.
+
+`STRATA_AZURE_ENDPOINT_URL` names the blob host (`http://127.0.0.1:10000` for
+Azurite), with the account as the first path segment. `adlfs` takes such an
+endpoint only from a connection string, so with an account name and key set and
+no connection string, Strata derives one for the catalog
+(`DefaultEndpointsProtocol=<scheme>;AccountName=<name>;AccountKey=<key>;BlobEndpoint=<url>/<name>`).
+PyArrow reads the endpoint from `adls.blob-storage-authority` and
+`adls.blob-storage-scheme` instead, which are always set; with only a SAS
+token or the default credential, the endpoint reaches PyArrow alone.
 
 PyIceberg reads and writes that metadata with `adlfs`, which the `azure` extra
 installs. `STRATA_CATALOG_PROPERTIES` can set `py-io-impl` to
