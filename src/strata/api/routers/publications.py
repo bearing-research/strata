@@ -56,6 +56,9 @@ EXTERNAL_ID_SCHEMES = ("doi", "zenodo", "arxiv", "url")
 class Author(BaseModel):
     """Who wrote the work, as distinct from who made the grant."""
 
+    # So a whitespace-only name fails min_length rather than crediting nobody.
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(..., min_length=1, max_length=256)
     orcid: str | None = Field(default=None, max_length=64)
     affiliation: str | None = Field(default=None, max_length=512)
