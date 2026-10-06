@@ -2028,15 +2028,20 @@ class NotebookSession:
         # A fan-out instance over the same group binds only its own variant as a
         # scalar, so recording the whole set would name variants it never read.
         own_group = self._fanout_group_of(cell_id) if variant is not None else None
+        shadowed = self._shadowed_reads(cell)
 
         refs: dict[str, str] = {}
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
+            # The cell never read a shadowed name from a producer the DAG did not wire.
+            unread = shadowed - self.wired_variables(cell_id, upstream_id)
 
             uris: list[str] = []
             for var_name, uri in upstream_cell.artifact_uris.items():
+                if var_name in unread:
+                    continue
                 producer = self.dag.variable_producer.get(var_name) if self.dag else None
                 if isinstance(producer, SweepProducer) and producer.fanout_cell == upstream_id:
                     # A fan-out keeps one URI per variable (last variant stored), while a collapse

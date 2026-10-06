@@ -259,3 +259,23 @@ async def test_staleness_agrees_with_the_run_for_a_shadowed_read(tmp_path: Path,
     session.compute_staleness()
     assert session.notebook_state.get_cell("c2").status == "ready"
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other", _OTHER)
+async def test_lineage_records_only_the_wired_producer(tmp_path: Path, other: str):
+    import json
+
+    reader = f"out = state * 100 + {other}\n"
+    session = _session(tmp_path, other, "python", reader)
+    await _run_upstreams(session, other)
+    assert (await CellExecutor(session).execute_cell("c2", reader)).success
+
+    manager = session.get_artifact_manager()
+    console = manager.artifact_store.get_latest_version(
+        manager.cell_artifact_id("c2", "__console__")
+    )
+    assert console is not None
+    recorded = set(json.loads(console.input_versions))
+    c0 = session.notebook_state.get_cell("c0").artifact_uris
+    c1 = session.notebook_state.get_cell("c1").artifact_uris
+    assert recorded == {c0[other], c1["state"]}
