@@ -373,13 +373,12 @@ def _live_session(session_manager: SessionManager, session_id: str):
 
 
 async def _sync_and_broadcast(session_id: str, session: Any) -> None:
-    """Reload the live session from disk after a file mutation, then broadcast.
+    """Broadcast the live session after a file mutation.
 
-    ``LocalNotebookOps`` authoring verbs write files and reload a detached copy,
-    never the server's live session, so this ``reload()``s it in place (as the REST
-    CRUD routes do) before broadcasting.
+    The mutation already reloaded it: ``LocalNotebookOps.from_session`` verbs and the
+    session's variant setters ``reload()`` the server's live session in place, and a
+    second reload would recompute staleness again on the event loop.
     """
-    session.reload()
     await _broadcast_notebook(session_id, session)
 
 

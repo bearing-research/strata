@@ -681,6 +681,19 @@ def test_validate_recent_notebooks_filters_to_real_notebook_dirs(client, tmp_pat
     assert response.json() == {"valid": [str(real)]}
 
 
+def test_validate_recent_notebooks_skips_a_path_with_a_nul_byte(client, tmp_path):
+    """One bad localStorage entry must not hide every valid recent."""
+    real = create_notebook(tmp_path, "Real Notebook")
+
+    response = client.post(
+        "/v1/notebooks/recents/validate",
+        json={"paths": [str(tmp_path / "a\u0000b"), str(real)]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"valid": [str(real)]}
+
+
 def test_validate_recent_notebooks_handles_empty_list(client):
     response = client.post("/v1/notebooks/recents/validate", json={"paths": []})
     assert response.status_code == 200

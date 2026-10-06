@@ -1597,7 +1597,8 @@ async def validate_recent_notebooks(req: ValidateRecentsRequest, request: Reques
             continue
         try:
             path = _validate_notebook_path(raw_path, request=request)
-        except HTTPException:
+        # ValueError: a NUL byte in the path (``Path.resolve``).
+        except (HTTPException, ValueError):
             continue
         try:
             if (path / "notebook.toml").is_file():

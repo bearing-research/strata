@@ -68,7 +68,7 @@ def establish_ssh_worker(
     except NotebookOpsError:
         supervisor.teardown(worker_name)  # don't leave a tunnel with no registration
         raise
-    session.reload()
+    # add_worker reloaded the session.
     return record
 
 
@@ -87,6 +87,6 @@ def teardown_ssh_worker(
 
     existed = supervisor.teardown(name, stop_remote=stop_remote)
     if any(worker.name == name for worker in session.notebook_state.workers):
+        # remove_worker reloads the session.
         LocalNotebookOps.from_session(session).remove_worker(name)
-        session.reload()
     return existed
