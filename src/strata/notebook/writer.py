@@ -29,7 +29,7 @@ from strata.notebook.harness_user import (
     resolve_harness_user,
     spawn_kwargs,
 )
-from strata.notebook.layout import write_gitignore
+from strata.notebook.layout import cell_source_path, write_gitignore
 from strata.notebook.models import (
     ConnectionSpec,
     MalformedConnection,
@@ -308,9 +308,7 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
         # FileNotFoundError, not ValueError, so handlers can map it to 404.
         raise FileNotFoundError(f"Cell {cell_id} not found in notebook.toml")
 
-    cells_dir = notebook_dir / "cells"
-    cells_dir.mkdir(exist_ok=True)
-    cell_file = cells_dir / cell_meta["file"]
+    cell_file = cell_source_path(notebook_dir, cell_id, cell_meta["file"])
     cell_file.parent.mkdir(parents=True, exist_ok=True)
 
     _write_text_atomic(cell_file, source)
@@ -935,8 +933,7 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
         # FileNotFoundError, not ValueError, so handlers can map it to 404.
         raise FileNotFoundError(f"Cell {cell_id} not found")
 
-    cells_dir = notebook_dir / "cells"
-    cell_file = cells_dir / cell_meta["file"]
+    cell_file = cell_source_path(notebook_dir, cell_id, cell_meta["file"])
     if cell_file.exists():
         cell_file.unlink()
 

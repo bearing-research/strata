@@ -816,6 +816,30 @@ def test_import_name_pip_overrides_extended(tmp_path: Path) -> None:
     assert not leaked, f"raw import names leaked into deps: {leaked}"
 
 
+def test_a_google_cloud_import_names_its_own_distribution(tmp_path: Path) -> None:
+    """Each ``google.cloud.<x>`` is the ``google-cloud-<x>`` distribution, not the
+    Discovery API client the bare ``google`` namespace maps to."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("import google.cloud.bigquery\n"),
+            _code_cell("from google.cloud import storage, bigquery_storage\n"),
+            _code_cell("from google.cloud.pubsub_v1 import PublisherClient\n"),
+            _code_cell("from google.cloud import speech_v1p1beta1\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    assert {
+        "google-cloud-bigquery",
+        "google-cloud-storage",
+        "google-cloud-bigquery-storage",
+        "google-cloud-pubsub",
+        "google-cloud-speech",
+    } <= deps
+    assert "google-api-python-client" not in deps
+
+
 def test_stdlib_imports_not_captured(tmp_path: Path) -> None:
     """Standard-library imports are never PyPI deps; ``sys.stdlib_module_names`` covers them."""
     ipynb = _make_ipynb(
@@ -1087,3 +1111,113 @@ def test_strata_import_cli_accepts_check_deps_flag(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_requirement_lines_lose_comments_and_pip_options(tmp_path: Path) -> None:
+    """pip accepts these lines; pyproject needs bare PEP 508, or ``uv lock`` refuses them."""
+    from packaging.requirements import Requirement
+
+    (tmp_path / "requirements.txt").write_text(
+        "pandas==2.2.0  # pinned for CI\n"
+        "numpy>=1.26 --hash=sha256:abc\n"
+        "scipy==1.13 \\\n    --hash=sha256:def\n"
+        'tomli; python_version < "3.11"  # backport\n',
+        encoding="utf-8",
+    )
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+
+    result = import_notebook(ipynb)
+
+    assert result.captured_deps[:4] == [
+        "pandas==2.2.0",
+        "numpy>=1.26",
+        "scipy==1.13",
+        'tomli; python_version < "3.11"',
+    ]
+    for dep in tomllib.loads((result.notebook_dir / "pyproject.toml").read_text())["project"][
+        "dependencies"
+    ]:
+        Requirement(dep)
+
+
+def test_an_invalid_requirement_is_skipped_not_written(tmp_path: Path) -> None:
+    (tmp_path / "requirements.txt").write_text("pandas==2.2.0 junk\nrequests\n", encoding="utf-8")
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+
+    result = import_notebook(ipynb)
+
+    assert result.captured_deps == ["requests"]
+    assert any("pandas==2.2.0 junk" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize(
+    ("module", "package"), [("mpl_toolkits.mplot3d", "matplotlib"), ("pkg_resources", "setuptools")]
+)
+def test_an_import_from_a_bundled_module_names_its_distribution(
+    tmp_path: Path, module: str, package: str
+) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell(f"import {module}\n")])
+
+    result = import_notebook(ipynb)
+
+    assert package in result.captured_deps
+    assert module.split(".")[0] not in result.captured_deps
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'template = """\n%s: %d rows\n"""\n',
+        'doc = """\n![plot](fig.png)\n"""\n',
+        "r = (total\n     %count)\n",
+        "x = 1 + \\\n    !flag\n",
+    ],
+)
+def test_a_percent_or_bang_inside_python_is_left_alone(source: str) -> None:
+    """Only a line that starts a statement can be a magic; strings and continuations are Python."""
+    from strata.notebook.jupyter_import import _convert_code_source
+
+    conv = _convert_code_source(source)
+
+    assert conv.source == source
+    assert conv.dropped_magics == [] and conv.dropped_shells == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "if not done:\n    !wget http://x/data.zip\nprint(1)\n",
+        "try:\n    import foo\nexcept ImportError:\n    !pip install foo\n",
+        "if True:\n    %matplotlib inline\nx = 1\n",
+        "%timeit -n 10 -r 3 sum(range(10))\n",
+        "%timeit -q -o sum(range(10))\n",
+    ],
+)
+def test_a_translated_magic_leaves_python_that_compiles(source: str) -> None:
+    from strata.notebook.jupyter_import import _convert_code_source
+
+    conv = _convert_code_source(source)
+
+    compile(conv.source, "<cell>", "exec")
+    assert not [line for line in conv.source.splitlines() if line.lstrip()[:1] in ("%", "!")]
+
+
+def test_a_timeit_keeps_the_statement_without_its_options() -> None:
+    from strata.notebook.jupyter_import import _convert_code_source
+
+    assert _convert_code_source("%timeit -n 10 -r 3 sum(range(10))\n").source == (
+        "sum(range(10))\n"
+    )
+
+
+def test_an_env_magic_below_code_becomes_an_annotation_that_applies(tmp_path: Path) -> None:
+    """Annotations are read from the top of a cell, so a mid-cell ``%env`` is hoisted."""
+    from strata.notebook.annotations import parse_annotations
+
+    ipynb = _make_ipynb(tmp_path, [_code_cell("import os\n%env MODE=fast\nprint(1)\n")])
+
+    result = import_notebook(ipynb)
+
+    source = parse_notebook(result.notebook_dir).cells[0].source
+    assert parse_annotations(source).env == {"MODE": "fast"}
+    assert "%env" not in source

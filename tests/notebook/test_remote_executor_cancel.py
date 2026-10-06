@@ -132,6 +132,81 @@ async def test_the_route_kills_a_running_execution(tmp_path):
     assert proc.returncode is not None, "the harness process survived the cancel"
 
 
+@pytest.mark.asyncio
+async def test_a_cancel_while_the_environment_builds_stops_the_run(monkeypatch):
+    """Inputs and the locked env come before the harness; a cancel then must still stop it."""
+    import json
+    from types import SimpleNamespace
+
+    import httpx
+
+    from strata.notebook import remote_executor, worker_env
+
+    building = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_environment(_spec):
+        building.set()
+        await release.wait()
+        return SimpleNamespace(python=None, key="k", installed=False)
+
+    spawned: list[str | None] = []
+
+    async def _spy_run_harness(*_args, build_id=None, **_kwargs):
+        spawned.append(build_id)
+        return {"success": True, "variables": {}}
+
+    monkeypatch.setattr(worker_env, "ensure_environment", _slow_environment)
+    monkeypatch.setattr(remote_executor, "_run_harness", _spy_run_harness)
+    monkeypatch.delenv("STRATA_WORKER_TOKEN", raising=False)
+    app = create_notebook_executor_app()
+    metadata = {
+        "protocol_version": remote_executor.NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
+        "source": "x = 1",
+        "build_id": "b1",
+        "environment": {"lock": "pinned"},
+    }
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://worker") as client:
+        run = asyncio.create_task(
+            client.post(
+                "/v1/notebook-execute",
+                files={"metadata": ("metadata.json", json.dumps(metadata), "application/json")},
+            )
+        )
+        await asyncio.wait_for(building.wait(), timeout=30)
+        cancel = await client.post("/v1/executions/b1/cancel")
+        release.set()
+        response = await asyncio.wait_for(run, timeout=30)
+
+    assert cancel.json() == {"build_id": "b1", "cancelled": True}
+    assert response.status_code == 409
+    assert spawned == [], "the harness ran after the cancel"
+    assert "b1" not in app.state.in_flight
+
+
+@pytest.mark.asyncio
+async def test_a_harness_cancelled_while_it_starts_is_killed(tmp_path):
+    """The cancel can land between the pre-spawn check and the process registering."""
+    from strata.notebook.remote_executor import _PendingRun
+
+    script = tmp_path / "sleeper.py"
+    script.write_text("import time\ntime.sleep(300)\n")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
+    pending = _PendingRun()
+    pending.cancelled = True
+    in_flight: dict[str, object] = {"b1": pending}
+
+    with pytest.raises(RuntimeError, match="harness-result.json"):
+        await asyncio.wait_for(
+            _run_harness(script, manifest, 300.0, in_flight=in_flight, build_id="b1"),
+            timeout=30,
+        )
+    assert in_flight == {}
+
+
 class TestCancelUrlMapping:
     """The cancel URL lands on the worker the dispatch went to.
 

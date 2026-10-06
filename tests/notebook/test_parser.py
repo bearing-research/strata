@@ -1,10 +1,12 @@
 """Tests for notebook parser."""
 
 import tempfile
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import tomli_w
 
 from strata.notebook.models import (
     CellMeta,
@@ -15,7 +17,12 @@ from strata.notebook.models import (
     WorkerSpec,
 )
 from strata.notebook.parser import parse_notebook
-from strata.notebook.writer import create_notebook, write_cell, write_notebook_toml
+from strata.notebook.writer import (
+    add_cell_to_notebook,
+    create_notebook,
+    write_cell,
+    write_notebook_toml,
+)
 
 
 def test_parse_empty_notebook():
@@ -293,3 +300,32 @@ def test_parse_notebook_resolves_notebook_and_cell_runtime_settings():
             "APP_MODE": "override",
         }
         assert notebook_state.cells[1].env_overrides == {"APP_MODE": "override"}
+
+
+@pytest.mark.parametrize("hostile", ["absolute", "../../outside.txt", "../cells-twin/x.py"])
+def test_a_cell_file_outside_cells_refuses_the_notebook(tmp_path, hostile):
+    """A cloned notebook.toml names the cell's file; it must not read anything outside cells/."""
+    nb = create_notebook(tmp_path / "nbs", "Hostile", initialize_environment=False)
+    add_cell_to_notebook(nb, "c1")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("SECRET\n")
+    (nb / "cells-twin").mkdir()
+    (nb / "cells-twin" / "x.py").write_text("SECRET\n")
+    data = tomllib.loads((nb / "notebook.toml").read_text())
+    data["cells"][0]["file"] = str(outside) if hostile == "absolute" else hostile
+    (nb / "notebook.toml").write_text(tomli_w.dumps(data))
+
+    with pytest.raises(ValueError, match="'c1' names a source file outside cells/"):
+        parse_notebook(nb)
+
+
+def test_a_cell_file_in_a_subdirectory_of_cells_still_parses(tmp_path):
+    nb = create_notebook(tmp_path, "Nested", initialize_environment=False)
+    add_cell_to_notebook(nb, "c1")
+    data = tomllib.loads((nb / "notebook.toml").read_text())
+    data["cells"][0]["file"] = "sub/c1.py"
+    (nb / "notebook.toml").write_text(tomli_w.dumps(data))
+    (nb / "cells" / "sub").mkdir()
+    (nb / "cells" / "sub" / "c1.py").write_text("x = 1\n")
+
+    assert parse_notebook(nb).cells[0].source == "x = 1\n"

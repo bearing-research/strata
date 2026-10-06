@@ -136,6 +136,12 @@ class TestThePage:
         assert "by <a" in html
         assert "F. Li" in html and "B. Second" in html
 
+    def test_an_orcid_given_as_a_link_is_not_prefixed_twice(self, store):
+        html = self._page(store, authors=[{"name": "A", "orcid": f"https://orcid.org/{ORCID}"}])
+
+        assert f"href='https://orcid.org/{ORCID}'" in html
+        assert "orcid.org/https" not in html
+
     def test_the_byline_falls_back_to_who_published(self, store):
         html = self._page(store, published_by="alice")
 
@@ -185,6 +191,133 @@ class TestTheCrate:
         person = next(n for n in crate["@graph"] if n["@id"] == f"https://orcid.org/{ORCID}")
         assert person["@type"] == "Person"
         assert person["name"] == "F. Li"
+
+
+def _chain(store, steps: int, principal: str | None = None) -> str:
+    """``steps`` artifacts, each computed from the one before; returns the last id."""
+    from strata.artifact_store import TransformSpec
+
+    previous = None
+    for i in range(steps):
+        artifact_id = f"step{i:02d}"
+        spec = TransformSpec(
+            executor="notebook_cell@v1",
+            params={"content_type": "json/object", "source": f"x{i} = {i}"},
+            inputs=[previous] if previous else [],
+        )
+        version = store.create_artifact(
+            artifact_id,
+            f"{i:064d}",
+            transform_spec=spec,
+            input_versions={previous: previous.rsplit("/", 1)[1]} if previous else None,
+            principal=principal,
+        )
+        store.write_blob(artifact_id, version, b"{}")
+        store.finalize_artifact(artifact_id, version, "{}", 1, 2)
+        previous = f"strata://artifact/{artifact_id}@v={version}"
+    return f"step{steps - 1:02d}"
+
+
+def _chain_crate(store, last: str, *, max_depth: int = 25, **publish):
+    from strata.api.provenance_ld import build_crate
+    from strata.services.artifact import ArtifactService
+
+    artifact = store.get_artifact(last, 1)
+    lineage = ArtifactService().build_lineage(
+        store,
+        artifact=artifact,
+        artifact_id=last,
+        version=1,
+        tenant_filter=None,
+        max_depth=max_depth,
+    )
+    return build_crate(
+        publication=store.publish_artifact(last, 1, **publish),
+        artifact=artifact,
+        lineage=lineage,
+        content_type="application/json",
+        payload_id="artifact.json",
+        include_descriptor=True,
+    )
+
+
+def _ids_and_refs(crate) -> tuple[list[str], set[str]]:
+    ids = [entity["@id"] for entity in crate["@graph"]]
+    refs: set[str] = set()
+
+    def walk(value):
+        if isinstance(value, dict):
+            if set(value) == {"@id"}:
+                refs.add(value["@id"])
+            for inner in value.values():
+                walk(inner)
+        elif isinstance(value, list):
+            for inner in value:
+                walk(inner)
+
+    for entity in crate["@graph"]:
+        walk({k: v for k, v in entity.items() if k != "@id"})
+    return ids, {ref for ref in refs if not ref.startswith("https://w3id.org/")}
+
+
+class TestTheCrateGraph:
+    """Every ``@id`` is defined once and every reference resolves, or RDF tools drop nodes."""
+
+    def test_a_chain_cut_at_the_depth_limit_has_no_dangling_reference(self, tmp_path):
+        store = ArtifactStore(tmp_path / "deep")
+        last = _chain(store, 8)
+
+        crate = _chain_crate(store, last, max_depth=4)
+
+        ids, refs = _ids_and_refs(crate)
+        assert refs <= set(ids)
+        assert len(ids) == len(set(ids))
+
+    @pytest.mark.parametrize(
+        ("authors", "person_id"),
+        [
+            ([{"name": "alice"}], "#agent-alice"),
+            ([{"name": "alice", "orcid": ORCID}], f"https://orcid.org/{ORCID}"),
+        ],
+    )
+    def test_a_step_run_by_a_declared_author_is_one_person(self, tmp_path, authors, person_id):
+        store = ArtifactStore(tmp_path / "names")
+        last = _chain(store, 2, principal="alice")
+
+        crate = _chain_crate(store, last, authors=authors, published_by="alice")
+
+        persons = [e["@id"] for e in crate["@graph"] if e.get("@type") == "Person"]
+        assert persons == [person_id]
+        actions = [e for e in crate["@graph"] if e.get("@type") == "CreateAction"]
+        assert {a["agent"]["@id"] for a in actions} == {person_id}
+
+    def test_an_orcid_given_as_a_link_is_not_prefixed_twice(self, store):
+        crate = TestTheCrate()._crate(
+            store, authors=[{"name": "A", "orcid": f"https://orcid.org/{ORCID}"}]
+        )
+
+        root = next(n for n in crate["@graph"] if n["@id"] == "./")
+        assert root["author"] == [{"@id": f"https://orcid.org/{ORCID}"}]
+
+    def test_a_repeated_author_is_listed_once_and_a_blank_one_not_at_all(self, store):
+        crate = TestTheCrate()._crate(
+            store, authors=[{"name": "Zoë"}, {"name": " "}, {"name": "Zoë"}]
+        )
+
+        root = next(n for n in crate["@graph"] if n["@id"] == "./")
+        assert root["author"] == [{"@id": "#agent-Zo%C3%AB"}]
+        assert [e["@id"] for e in crate["@graph"] if e.get("@type") == "Person"] == [
+            "#agent-Zo%C3%AB"
+        ]
+
+
+def test_a_blank_author_name_is_refused_at_the_route():
+    from pydantic import ValidationError
+
+    from strata.api.routers.publications import Author
+
+    with pytest.raises(ValidationError):
+        Author(name="   ")
 
 
 class TestTheRoute:

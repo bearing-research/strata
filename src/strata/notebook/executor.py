@@ -2753,6 +2753,18 @@ class CellExecutor:
         environment = await self._locked_environment(worker_spec, language)
         if environment is not None:
             build_params["environment"] = environment
+        # The env holds secrets and the artifact and build rows are readable by the tenant,
+        # so what is stored names the keys and digests the values; only the manifest the
+        # worker receives carries them.
+        recorded_params = {
+            **build_params,
+            "env": {
+                "names": sorted(runtime_env),
+                "sha256": hashlib.sha256(
+                    json.dumps(runtime_env, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+            },
+        }
         transport_provenance = hashlib.sha256(
             json.dumps(
                 {
@@ -2766,14 +2778,14 @@ class CellExecutor:
                         }
                         for name, spec in sorted(input_specs.items())
                     ],
-                    "params": build_params,
+                    "params": recorded_params,
                 },
                 sort_keys=True,
             ).encode("utf-8")
         ).hexdigest()
         transform_spec = ArtifactTransformSpec(
             executor=NOTEBOOK_EXECUTOR_TRANSFORM_REF,
-            params=build_params,
+            params=recorded_params,
             inputs=input_uris,
         )
 
@@ -2795,7 +2807,7 @@ class CellExecutor:
                 tenant_id=tenant_id,
                 principal_id=principal_id,
                 input_uris=input_uris,
-                params=build_params,
+                params=recorded_params,
             )
             build_store.start_build(build_id)
 
@@ -2830,7 +2842,12 @@ class CellExecutor:
                     blob_store=(
                         artifact_store.blob_store if state.config.artifact_presigned_urls else None
                     ),
-                    url_expiry_seconds=state.config.signed_url_expiry_seconds,
+                    # The worker uploads and finalizes after provisioning plus the whole
+                    # cell run (and 5 minutes for the upload), so the setting is a floor.
+                    url_expiry_seconds=max(
+                        state.config.signed_url_expiry_seconds,
+                        timeout_seconds + state.config.worker_provisioning_timeout_seconds + 300.0,
+                    ),
                 )
             ).to_dict()
 
@@ -3823,7 +3840,8 @@ class CellExecutor:
                 error=(
                     "LLM not configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or "
                     "STRATA_AI_API_KEY in the notebook's environment (the Runtime panel, "
-                    "or [env] in notebook.toml), or STRATA_AI_API_KEY where the server starts."
+                    "or [env] in notebook.toml), or STRATA_AI_API_KEY where the server starts. "
+                    "The server's key is not sent to an [ai] base_url of the notebook's own."
                 ),
                 cache_hit=False,
                 duration_ms=int((time.time() - start_time) * 1000),

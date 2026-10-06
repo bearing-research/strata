@@ -176,6 +176,12 @@ inputs, made this".
 Upstream steps are `CreativeWork` entities, **not** files, and they are not
 listed under `hasPart`. Their bytes are deliberately not in the crate, and
 declaring files that are not there is a claim no validator would catch.
+An input past the depth limit is still named, as a stub saying the recorded
+chain stops there, so no reference dangles.
+
+People appear once each. A step run by someone listed as an author points at
+that author's node (the ORCID when one is given, as a bare id or a link), and an
+author listed twice is credited once.
 
 A step that read a URL through [`@fetch`](annotations.md#fetch) names it as
 an input. On the page it appears under "External inputs" with the digest of the

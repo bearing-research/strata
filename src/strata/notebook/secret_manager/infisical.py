@@ -5,9 +5,9 @@ Auth, highest first: Universal Auth (``INFISICAL_CLIENT_ID`` +
 neither, the provider fails naming both. Project routing comes from the
 notebook's ``[secret_manager]`` block, overridable by env vars.
 
-The host receives the server's credentials, so in service mode it is the
-operator's alone (``INFISICAL_HOST``, else the public default); a notebook
-``base_url`` naming anywhere else is refused before any login.
+The host receives the server's credentials, so it is the operator's alone
+(``INFISICAL_HOST``, else the public default); a notebook ``base_url`` naming
+anywhere else is refused before any login, in every mode.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import logging
 import os
 from typing import Any
 
-from strata.notebook.harness_user import running_server_config
 from strata.notebook.secret_manager.provider import (
     SECRET_FETCH_TIMEOUT_SECONDS,
     SecretFetchResult,
@@ -55,18 +54,15 @@ class InfisicalProvider:
         operator_host = (os.environ.get("INFISICAL_HOST") or _DEFAULT_HOST).rstrip("/")
         notebook_host = str(config.get("base_url") or "").rstrip("/")
         host = notebook_host or operator_host
-        if (
-            host != operator_host
-            and getattr(running_server_config(), "deployment_mode", None) == "service"
-        ):
-            # The login sends the server's machine identity to *host*; on a shared
-            # server the notebook's author is not the operator.
+        if host != operator_host:
+            # The login sends the server's credentials to *host*, and a cloned or
+            # shared notebook's author is not the one who set them.
             return SecretFetchResult.failure(
                 self.name,
-                f"[secret_manager] base_url {notebook_host!r} is refused on this server: "
-                "it would receive the server's Infisical credentials. The server logs in "
-                f"only at {operator_host} (INFISICAL_HOST); remove base_url from "
-                "notebook.toml, or ask the operator to set INFISICAL_HOST.",
+                f"[secret_manager] base_url {notebook_host!r} is refused: it would "
+                "receive the server's Infisical credentials. The server logs in only at "
+                f"{operator_host} (INFISICAL_HOST); remove base_url from notebook.toml, "
+                "or set INFISICAL_HOST where the server starts.",
             )
 
         client_id = os.environ.get("INFISICAL_CLIENT_ID")

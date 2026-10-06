@@ -236,6 +236,10 @@ Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
 - **`refetch=never`** uses the cached bytes once there are any.
 - **`refetch=always`** downloads again on every check, ignoring validators.
 
+The first download happens only when the cell runs: opening or editing a
+notebook sends no request to a URL it has never read, and the cell is never
+shown as ready before that first run.
+
 Each artifact the cell stores records the URL and the digest of the bytes the
 run read as one of its inputs, and when those bytes were downloaded. That
 record is how a [publication](publishing.md) page lists the URL under

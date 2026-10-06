@@ -97,7 +97,12 @@ class DockerBackend:
             await self.stop(container_id)
             raise DockerError(f"could not start {container_id}: {_message(started)}")
 
-        port = await self._published_port(container_id, port_key)
+        try:
+            port = await self._published_port(container_id, port_key)
+        except DockerError:
+            # The pool forgets a worker whose start failed, so nothing else would stop this one.
+            await self.stop(container_id)
+            raise
         return ProvisionedWorker(
             backend_id=container_id,
             endpoint=f"http://127.0.0.1:{port}",

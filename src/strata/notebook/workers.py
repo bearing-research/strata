@@ -535,7 +535,9 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
                 "name": worker.name,
                 "backend": worker.backend.value,
                 "runtime_id": worker.runtime_id,
-                "config": worker.config.model_dump(mode="json", exclude_none=True),
+                "config": worker.config.model_dump(
+                    mode="json", exclude_none=True, exclude={"token"}
+                ),
                 "source": source,
                 "health": health,
                 "allowed": allowed,
@@ -1012,7 +1014,9 @@ async def build_server_worker_catalog_with_health(
                 "name": worker.name,
                 "backend": worker.backend.value,
                 "runtime_id": worker.runtime_id,
-                "config": worker.config.model_dump(mode="json", exclude_none=True),
+                "config": worker.config.model_dump(
+                    mode="json", exclude_none=True, exclude={"token"}
+                ),
                 "source": "server",
                 "health": snapshot.health,
                 "allowed": record.enabled,

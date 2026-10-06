@@ -7,6 +7,7 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from strata.notebook.layout import cell_source_path
 from strata.notebook.models import (
     CellMeta,
     CellOutput,
@@ -84,6 +85,7 @@ def parse_notebook(directory: Path) -> NotebookState:
 
     Raises:
         FileNotFoundError: If notebook.toml is missing.
+        ValueError: If a cell's ``file`` points outside ``cells/``.
     """
     directory = Path(directory)
     notebook_toml_path = directory / "notebook.toml"
@@ -167,7 +169,7 @@ def parse_notebook(directory: Path) -> NotebookState:
     notebook_mounts = {m.name: m for m in notebook_toml.mounts}
 
     for cell_meta in notebook_toml.cells:
-        cell_file = cells_dir / cell_meta.file
+        cell_file = cell_source_path(directory, cell_meta.id, cell_meta.file)
         source = ""
 
         if cell_file.exists():

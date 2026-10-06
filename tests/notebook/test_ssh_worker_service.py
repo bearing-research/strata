@@ -100,6 +100,24 @@ def test_teardown_removes_registration_and_tunnel(session):
     assert session.notebook_state.worker is None  # default cleared with the worker
 
 
+def test_teardown_route_answers_403_when_definitions_are_server_managed(session, monkeypatch):
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from strata.notebook.routes import teardown_ssh_worker_endpoint
+
+    establish_ssh_worker(session, FakeSupervisor(), ssh_target="user@box", name="gpu")
+    monkeypatch.setattr(
+        "strata.notebook.workers.notebook_worker_definitions_editable", lambda state: False
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(teardown_ssh_worker_endpoint("nb", session, "gpu"))
+    assert excinfo.value.status_code == 403
+    assert "managed by the server" in excinfo.value.detail
+    assert [w.name for w in session.notebook_state.workers] == ["gpu"]
+
+
 def test_teardown_unregistered_name_still_tears_tunnel(session):
     sup = FakeSupervisor()
     sup.present.add("ghost")  # a tunnel with no notebook registration

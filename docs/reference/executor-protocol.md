@@ -404,14 +404,14 @@ change.
 **SSRF defenses on signed URLs:** Before fetching/posting, the worker validates each URL:
 
 - **Scheme allowlist**: only `http://` and `https://`. Blocks `file://`, `data:`, `javascript:`, etc.
-- **IP blocklist**: the URL's hostname is resolved (via `getaddrinfo`); every returned address must be public. Loopback / link-local (incl. cloud metadata `169.254.169.254` / `fd00:ec2::254`) / private / multicast / reserved / unspecified addresses are rejected with `400`. IPv4-mapped IPv6 is unmapped before checking.
+- **IP blocklist**: the URL's hostname is resolved (via `getaddrinfo`); every returned address must be public. Loopback / link-local (incl. cloud metadata `169.254.169.254` / `fd00:ec2::254`) / private / multicast / reserved / unspecified addresses, and any other non-global range such as shared address space `100.64.0.0/10`, are rejected with `400`. IPv4-mapped IPv6 is unmapped before checking.
 - **Connection pinning**: the fetch itself resolves the host once more, checks every address the same way, and connects only to one of those addresses, so a name cannot pass the check with a public address and then answer the connection with `127.0.0.1` (DNS rebinding). TLS still verifies the certificate against the hostname. These connections go direct: `HTTPS_PROXY` and the other proxy variables are ignored, because through a proxy the proxy would resolve the name. With `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` nothing is pinned and the proxy variables apply.
 
 `STRATA_WORKER_ALLOWED_HOSTS` names hosts that pass the IP check anyway (comma-separated; a leading dot is a suffix), for a server on a private address. Set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to bypass the IP check for every host (tests and local-dev with 127.0.0.1 servers only).
 
 ## `POST /v1/executions/{build_id}/cancel`
 
-Stops the harness running `build_id`, and every process it started, if it is still running. Answers `{"build_id": "...", "cancelled": true}`, or `"cancelled": false` when nothing by that id is running, which is a normal answer rather than an error: the cell may have finished before the cancel arrived. The server calls it when a remote cell is cancelled or times out, and `strata-pool` calls it with the machine's token when a running job is cancelled through `POST /v1/jobs/{id}/cancel`.
+Stops the harness running `build_id`, and every process it started, if it is still running. A cancel that arrives while the worker is still fetching inputs or building the locked environment stops the run before the harness starts; that execution then answers 409. Answers `{"build_id": "...", "cancelled": true}`, or `"cancelled": false` when nothing by that id is running, which is a normal answer rather than an error: the cell may have finished before the cancel arrived. The server calls it when a remote cell is cancelled or times out, and `strata-pool` calls it with the machine's token when a running job is cancelled through `POST /v1/jobs/{id}/cancel`.
 
 ## `POST /execute` (worker-pool alias)
 
@@ -524,6 +524,12 @@ With no `[tool.strata.transforms]` block, the registry holds only the
 in-process `duckdb_sql@v1`. With one, it holds only the listed entries, and
 only when `enabled = true`. A ref no entry matches is refused at
 `POST /v1/materialize` (`403` in service mode, `400` in personal mode).
+
+The in-process `duckdb_sql@v1` runs in the server process, so its DuckDB reads
+only the inputs registered as `input0`, `input1`, ...: file access (`read_csv`,
+`COPY ... TO`, `ATTACH`), extension loading and network reads are off, and the
+query cannot turn them back on or change any other setting. A query that needs
+those runs on an HTTP executor instead.
 
 ### `POST {executor_url}/v1/execute`
 

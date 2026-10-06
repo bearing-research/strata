@@ -30,6 +30,7 @@ from sqlglot import exp
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.models import TableSpec
 from strata.notebook.sql.adapter import QualifiedTable
+from strata.notebook.sql.time_travel import splice_after_tables
 
 if TYPE_CHECKING:
     from strata.notebook.models import ConnectionSpec, NotebookState
@@ -288,14 +289,15 @@ def _mount_location(uri: str) -> str:
 _SYSTEM_TREES = (Path("/proc"), Path("/sys"), Path("/dev"))
 
 
-def local_mount_root_problem(uri: str, config: Any) -> str | None:
+def local_mount_root_problem(uri: str, config: Any, notebook_dir: Any = None) -> str | None:
     """Why a confined SQL cell may not mount the local root *uri*, or ``None``.
 
     A confined handle reads everything under the root as the server, so after
     following links this refuses a root with fewer than two path components,
-    one holding server state (artifact store, cache, metadata DB, notebook
-    storage, the server's home), or one under the home, ``/proc``, ``/sys`` or
-    ``/dev``. Remote mounts are not checked.
+    one holding or inside server state (artifact store, cache, metadata DB,
+    notebook storage, the server's home) other than *notebook_dir*'s own tree,
+    or one under the home, ``/proc``, ``/sys`` or ``/dev``. Remote mounts are
+    not checked.
     """
     from strata.notebook.mounts import parse_mount_uri
 
@@ -306,24 +308,50 @@ def local_mount_root_problem(uri: str, config: Any) -> str | None:
     if len(root.parts) < 3:
         return f"its root {root} is too near the top of the filesystem"
     home = Path(os.path.realpath(Path.home()))
+    own = Path(os.path.realpath(notebook_dir)) if notebook_dir is not None else None
+    in_own = own is not None and (root == own or own in root.parents)
+    for label, resolved in _server_state(config).items():
+        if root == resolved or root in resolved.parents:
+            return f"its root {root} holds the server's {label} ({resolved})"
+        if resolved in root.parents and not in_own:
+            return f"its root {root} is inside the server's {label} ({resolved})"
+    for tree in (home, *_SYSTEM_TREES):
+        if tree in root.parents:
+            return f"its root {root} is inside {tree}"
+    return None
+
+
+def _server_state(config: Any) -> dict[str, Path]:
+    """Where the server keeps its own state, by label, links followed."""
     metadata_db = getattr(config, "metadata_db", None)
     state = {
         "artifact store": getattr(config, "artifact_dir", None),
         "cache": getattr(config, "cache_dir", None),
         "metadata database": Path(metadata_db).parent if metadata_db else None,
         "notebook storage": getattr(config, "notebook_storage_dir", None),
-        "home directory": home,
+        "home directory": Path.home(),
     }
-    for label, location in state.items():
-        if location is None:
-            continue
-        resolved = Path(os.path.realpath(location))
-        if root == resolved or root in resolved.parents:
-            return f"its root {root} holds the server's {label} ({resolved})"
-    for tree in (home, *_SYSTEM_TREES):
-        if tree in root.parents:
-            return f"its root {root} is inside {tree}"
-    return None
+    return {
+        label: Path(os.path.realpath(location))
+        for label, location in state.items()
+        if location is not None
+    }
+
+
+def local_database_problem(path: str, notebook_dir: Any, config: Any) -> str | None:
+    """Why a confined SQL cell may not open the database file *path*, or ``None``.
+
+    A file in the notebook's own directory is fine. Any other must pass the
+    mount-root rule and not be inside server state: the metadata database and
+    the artifact store are SQLite files, and other notebooks live in storage.
+    """
+    real = Path(os.path.realpath(path))
+    if Path(os.path.realpath(notebook_dir)) in real.parents:
+        return None
+    for label, resolved in _server_state(config).items():
+        if resolved in real.parents:
+            return f"it is inside the server's {label} ({resolved})"
+    return local_mount_root_problem(str(real), config)
 
 
 def _mount_sources(
@@ -358,7 +386,7 @@ def _mount_sources(
         if confined_config is not None:
             # Before anything under the root is read: fingerprinting ``/``
             # would walk the whole disk.
-            problem = local_mount_root_problem(mount.uri, confined_config)
+            problem = local_mount_root_problem(mount.uri, confined_config, session.path)
             if problem is not None:
                 raise LakeError(
                     f"mount {name!r}: {problem}, and a SQL cell on this server reads "
@@ -381,6 +409,7 @@ def pin_snapshots(sql: str, catalog: str, snapshots: dict[tuple[str, str], int])
     if not snapshots:
         return sql
     tree = sqlglot.parse_one(sql, read="duckdb")
+    clauses: list[tuple[exp.Table, str]] = []
     for reference in tree.find_all(exp.Table):
         found = catalog_table(
             catalog,
@@ -391,8 +420,6 @@ def pin_snapshots(sql: str, catalog: str, snapshots: dict[tuple[str, str], int])
         snapshot = snapshots.get(found) if found is not None else None
         if snapshot is None or reference.args.get("when"):
             continue
-        template = sqlglot.parse_one(f"SELECT * FROM t AT (VERSION => {int(snapshot)})", "duckdb")
-        clause = template.find(exp.Table)
-        assert clause is not None
-        reference.set("when", clause.args["when"])
-    return tree.sql(dialect="duckdb")
+        clauses.append((reference, f"AT (VERSION => {int(snapshot)})"))
+    # DuckDB takes the alias first: ``lake.ns.t AS x AT (VERSION => 1)``.
+    return splice_after_tables(sql, clauses, after_alias=True)

@@ -7,7 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class MountMode(StrEnum):
@@ -136,6 +136,10 @@ class DatasetSpec(BaseModel):
         return self.dataset
 
 
+# Set by the SQL executor on a connection's runtime copy, never read from input.
+_INTERNAL_CONNECTION_KEYS = frozenset({"catalog_properties", "confine_to", "mount_sources"})
+
+
 class ConnectionSpec(BaseModel):
     """A named database connection from ``[connections.<name>]``.
 
@@ -176,6 +180,15 @@ class ConnectionSpec(BaseModel):
             "identity; its values never are."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal_keys(cls, data: Any) -> Any:
+        # The executor sets these on a runtime copy (``model_copy`` skips this);
+        # written by a member they would choose what the server opens.
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if k not in _INTERNAL_CONNECTION_KEYS}
+        return data
 
 
 class MalformedConnection(BaseModel):

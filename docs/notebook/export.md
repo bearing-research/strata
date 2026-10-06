@@ -113,7 +113,10 @@ For each cell, the exporter emits in order:
 Markdown (markdown cells, markdown outputs, and the README intro) exports
 the way the UI shows it: raw HTML is escaped to visible text, and
 `javascript:`, `vbscript:` and non-image `data:` link targets become `#`.
-Code spans and fenced code keep their text unchanged.
+Code spans and fenced code keep their text unchanged. The markdown export
+treats the rest of the page the same way: cell and notebook names, widget
+values, notes, table headers and table values are escaped too, and an image is
+written only when its source is an inline `data:image/` URL.
 
 ## Cell-kind specifics
 
@@ -175,6 +178,9 @@ What travels is `--include`:
 | `all`      | Every artifact, and the bytes each `@fetch` last read (`.strata/fetch/`). Use it to move a project between machines. |
 | `selected` | Only the cells named by `--cells`; the rest are described by reference. The default. |
 | `none`     | No artifact bytes: the notebook and its provenance, nothing to replay from. |
+
+A carried loop cell brings every stored iteration (`@iter=k`) with it, so a
+cell that forks from one with `start_from` still runs after an import.
 
 ```bash
 # The whole thing, to carry to another machine
