@@ -172,7 +172,7 @@ onMounted(() => {
         <span class="stat-value building">{{ stats.building_versions.toLocaleString() }}</span>
         <span class="stat-label">building</span>
       </div>
-      <div v-if="stats.superseded_versions != null" class="stat-card">
+      <div class="stat-card">
         <span class="stat-value">{{ stats.superseded_versions.toLocaleString() }}</span>
         <span class="stat-label">superseded</span>
       </div>
