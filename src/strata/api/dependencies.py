@@ -7,6 +7,8 @@ imported lazily: server imports this module at load time, so the import stays on
 
 from __future__ import annotations
 
+import asyncio
+import functools
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException
@@ -15,6 +17,7 @@ from fastapi import Depends, HTTPException
 # and FastAPI resolves hints against the router module's globals, where a string forward ref would
 # not resolve.
 from strata.artifact_store import ArtifactStore
+from strata.pool_metrics import get_pool_tracker
 from strata.transforms.build_store import BuildStore
 from strata.types import Principal, TableIdentity
 
@@ -283,13 +286,15 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
         raise HTTPException(status_code=403, detail="Access denied")
 
 
-def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
+async def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     """Resolve an input URI to its current version, enforcing table ACL and artifact access.
 
+    A table input is planned in the planning pool under ``plan_timeout_seconds``, as a scan is.
     Side effect: records a use of an artifact input for retention.
 
     Raises:
-        HTTPException: 400/404 for an unresolvable URI; 401/403/404 for a denied input.
+        HTTPException: 400/404 for an unresolvable URI; 401/403/404 for a denied input; 504 for a
+            table plan that timed out.
     """
     from strata.server import (
         _authorize_artifact_read,
@@ -307,10 +312,29 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     # another identity.
     if not input_uri.startswith("strata://"):
         authorize_table_access(input_uri, _table_identity_from_uri(input_uri))
+    state = get_state()
+    resolve = functools.partial(
+        materialize_service.resolve_input_version,
+        input_uri,
+        store=store,
+        planner=state.planner,
+        tenant=tenant,
+    )
+    plan_timeout = state.config.plan_timeout_seconds
     try:
-        resolved = materialize_service.resolve_input_version(
-            input_uri, store=store, planner=get_state().planner, tenant=tenant
-        )
+        if input_uri.startswith("strata://"):
+            resolved = resolve()
+        else:
+            # A plan reads the catalog and manifests; on the loop it would stall every request.
+            with get_pool_tracker().track("planning"):
+                resolved = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(state._planning_executor, resolve),
+                    timeout=plan_timeout,
+                )
+    except TimeoutError as e:
+        raise HTTPException(
+            status_code=504, detail=f"Planning timed out after {plan_timeout}s."
+        ) from e
     except InputResolutionError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 

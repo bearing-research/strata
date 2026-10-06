@@ -118,6 +118,7 @@ def server_mode_app(server_mode_config):
     from strata.transforms.signed_urls import URLSigner
 
     mock_state = MagicMock()
+    mock_state._planning_executor = None  # the loop's default pool
     mock_state.config = server_mode_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
@@ -158,6 +159,7 @@ def personal_mode_app(personal_mode_config):
     from unittest.mock import MagicMock
 
     mock_state = MagicMock()
+    mock_state._planning_executor = None  # the loop's default pool
     mock_state.config = personal_mode_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
@@ -195,6 +197,7 @@ def server_mode_auth_app(server_mode_auth_config):
     from strata.transforms.signed_urls import URLSigner
 
     mock_state = MagicMock()
+    mock_state._planning_executor = None  # the loop's default pool
     mock_state.config = server_mode_auth_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
@@ -943,6 +946,7 @@ class TestTransformValidation:
         get_build_store(server_mode_config.artifact_dir / "artifacts.sqlite")
 
         mock_state = MagicMock()
+        mock_state._planning_executor = None  # the loop's default pool
         mock_state.config = server_mode_config
         mock_state.planner = MagicMock()
         mock_state.fetcher = MagicMock()
@@ -1259,6 +1263,7 @@ class TestMixedModeScenarios:
         (tmp_path / "artifacts").mkdir()
 
         mock_state = MagicMock()
+        mock_state._planning_executor = None  # the loop's default pool
         mock_state.config = config
 
         original_state = server_module._state
@@ -1294,7 +1299,7 @@ class TestServiceModeReviewFindings:
         """
         from fastapi import HTTPException
 
-        def deny(*_args, **_kwargs):
+        async def deny(*_args, **_kwargs):
             raise HTTPException(status_code=403, detail="Access denied")
 
         monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", deny)
@@ -1315,7 +1320,7 @@ class TestServiceModeReviewFindings:
         """A 400 from input resolution is the answer; the raw URI is never built past."""
         from fastapi import HTTPException
 
-        def unresolvable(*_args, **_kwargs):
+        async def unresolvable(*_args, **_kwargs):
             raise HTTPException(status_code=400, detail="Unknown input URI type")
 
         monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", unresolvable)
@@ -1358,6 +1363,100 @@ class TestServiceModeReviewFindings:
         )
         assert response.status_code == 400, response.text
         assert "Failed to read Parquet metadata" in response.json()["detail"]
+        assert get_artifact_store().stats()["total_versions"] == 0
+
+    @staticmethod
+    def _blocking_planner(entered, release, plan_done):
+        def plan(**_kwargs):
+            entered.set()
+            # A guard, so a plan stuck on the loop fails the test rather than hanging it.
+            release.wait(timeout=30)
+            plan_done.set()
+            raise RuntimeError("catalog unreachable")
+
+        return plan
+
+    async def test_a_table_input_plans_off_the_event_loop(self, server_mode_app):
+        """While a transform's table input plans, the server keeps answering other requests."""
+        import asyncio
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from httpx import ASGITransport, AsyncClient
+
+        import strata.server as server_module
+
+        entered, release, plan_done = threading.Event(), threading.Event(), threading.Event()
+        state = server_module._state
+        state.planner.plan.side_effect = self._blocking_planner(entered, release, plan_done)
+        state._planning_executor = ThreadPoolExecutor(max_workers=1)
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=server_module.app), base_url="http://test"
+            ) as client:
+                materialize = asyncio.create_task(
+                    client.post(
+                        "/v1/artifacts/materialize",
+                        json={
+                            "inputs": ["s3://lake/wh#taxi.trips"],
+                            "transform": {
+                                "executor": "duckdb_sql@v1",
+                                "params": {"sql": "SELECT 1"},
+                            },
+                        },
+                    )
+                )
+                assert await asyncio.to_thread(entered.wait, 30)
+                other = await client.get("/v1/builds/no-such-build")
+                served_while_planning = not plan_done.is_set()
+                release.set()
+                response = await materialize
+        finally:
+            release.set()
+            state._planning_executor.shutdown(wait=True)
+
+        assert other.status_code == 404
+        assert served_while_planning
+        assert response.status_code == 400
+        assert "catalog unreachable" in response.json()["detail"]
+
+    async def test_a_table_input_plan_past_the_timeout_is_a_504(
+        self, server_mode_app, server_mode_config
+    ):
+        """The transform-input plan gets the scan path's ``plan_timeout_seconds`` and 504."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from httpx import ASGITransport, AsyncClient
+
+        import strata.server as server_module
+
+        entered, release, plan_done = threading.Event(), threading.Event(), threading.Event()
+        state = server_module._state
+        state.config = server_mode_config.model_copy(update={"plan_timeout_seconds": 0.05})
+        state.planner.plan.side_effect = self._blocking_planner(entered, release, plan_done)
+        state._planning_executor = ThreadPoolExecutor(max_workers=1)
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=server_module.app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/v1/artifacts/materialize",
+                    json={
+                        "inputs": ["s3://lake/wh#taxi.trips"],
+                        "transform": {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT 1"}},
+                    },
+                )
+                answered_before_the_plan_ended = not plan_done.is_set()
+        finally:
+            release.set()
+            state._planning_executor.shutdown(wait=True)
+
+        assert response.status_code == 504, response.text
+        assert "Planning timed out" in response.json()["detail"]
+        assert answered_before_the_plan_ended
         assert get_artifact_store().stats()["total_versions"] == 0
 
     def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_auth_app):
