@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any, cast
 
@@ -815,13 +816,16 @@ def database_problem(spec: ConnectionSpec, notebook_dir: Any, config: Any) -> st
 
     The file is opened by the server process, so it must be one the notebook
     may read: see ``local_database_problem``. A SQLite ``uri`` is refused, since
-    its parameters can name any file.
+    its parameters can name any file. A BigQuery key file must be in the
+    notebook's directory.
     """
     from pathlib import Path
 
-    if spec.driver not in ("duckdb", "sqlite"):
-        return None
     if getattr(config, "deployment_mode", "personal") != "service":
+        return None
+    if spec.driver == "bigquery":
+        return _key_file_problem(spec, notebook_dir)
+    if spec.driver not in ("duckdb", "sqlite"):
         return None
     if spec.driver == "sqlite" and getattr(spec, "uri", None):
         return "a SQLite `uri` is not allowed on this server; name the database file with `path`"
@@ -832,6 +836,24 @@ def database_problem(spec: ConnectionSpec, notebook_dir: Any, config: Any) -> st
     if problem is None:
         return None
     return f"the database {path} is outside this notebook's directory and {problem}"
+
+
+def _key_file_problem(spec: ConnectionSpec, notebook_dir: Any) -> str | None:
+    """Why a service-mode BigQuery connection may not read its key files, or None."""
+    from pathlib import Path
+
+    own = Path(os.path.realpath(str(notebook_dir)))
+    extras = spec.model_extra or {}
+    for key in ("credentials_path", "write_credentials_path"):
+        value = extras.get(key, getattr(spec, key, None))
+        if not isinstance(value, str) or not value:
+            continue
+        if own not in Path(os.path.realpath(Path(str(notebook_dir)) / value)).parents:
+            return (
+                f"`{key}` {value} is outside this notebook's directory, "
+                "and this server reads a key file only from there"
+            )
+    return None
 
 
 def _with_credential(connection_id: str, spec: ConnectionSpec) -> str:

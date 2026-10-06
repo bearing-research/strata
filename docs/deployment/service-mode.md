@@ -705,6 +705,10 @@ harness user, whose own file permissions decide what a root exposes. A SQLite ce
 runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
+The server reads a BigQuery connection's `credentials_path` and
+`write_credentials_path` key files itself, so each must be a file in the
+notebook's own directory, after following links; one elsewhere fails the cell,
+the schema listing and saving the connection.
 A `${VAR}` in a connection's `auth` reads the notebook's env, never the server's
 environment, which would otherwise go to whatever host the notebook names; a
 secret the server holds reaches a connection only as a named `credential`.

@@ -472,6 +472,52 @@ async def test_a_service_mode_cell_reads_auth_vars_from_the_notebook_env(
     assert dialed == []
 
 
+@pytest.mark.parametrize(
+    ("mode", "key_file", "reads"),
+    [
+        ("service", "server", False),
+        ("service", "dotdot", False),
+        ("service", "own", True),
+        ("personal", "server", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_service_mode_bigquery_key_file_is_the_notebooks_own(
+    tmp_path, monkeypatch, outside, mode, key_file, reads
+):
+    """The server reads a BigQuery key file itself, so a member may not name one of its files."""
+    from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
+
+    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode)
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    opened: list[str] = []
+
+    def record(self, kwargs):
+        opened.append(kwargs["adbc.bigquery.sql.auth_credentials"])
+        raise RuntimeError("not dialing")
+
+    monkeypatch.setattr(BigQueryAdapter, "_invoke_connect", record)
+    nb_dir = create_notebook(tmp_path, "bq")
+    (nb_dir / "sa.json").write_text("{}")
+    path = {"server": str(outside), "dotdot": "../server-only/secret.txt", "own": "sa.json"}
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    source = "# @sql connection=db\nSELECT 1\n"
+    write_cell(nb_dir, "c1", source)
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "bigquery"\nproject_id = "p"\n'
+        f'credentials_path = "{path[key_file]}"\n'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    result = await CellExecutor(session).execute_cell("c1", source)
+
+    assert not result.success
+    assert bool(opened) is reads, result.error
+    if not reads:
+        assert "`credentials_path`" in (result.error or "")
+
+
 def test_adapter_internal_keys_are_not_read_from_a_connection_block(tmp_path):
     """``confine_to``, ``mount_sources`` and ``catalog_properties`` are set by the
     executor; from notebook.toml or a request they would steer what the server opens."""
