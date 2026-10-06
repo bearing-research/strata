@@ -370,6 +370,20 @@ class TestCleanup:
         assert store.get_artifact("test-id", version) is None
         assert store.blob_exists("test-id", version) is False
 
+    def test_cleanup_failed_takes_a_failed_build_row_with_it(self, store):
+        """A server build that failed leaves a build row, whose foreign key refused the delete."""
+        from strata.transforms.build_store import BuildStore
+
+        builds = BuildStore(store.db_path, dialect=store.dialect)
+        version = store.create_artifact("built", "hash-built")
+        builds.create_build("build-1", "built", version, "exec@v1")
+        builds.fail_build("build-1", "boom")
+        store.fail_artifact("built", version)
+
+        assert store.cleanup_failed(max_age_seconds=-10) == 1
+        assert store.get_artifact("built", version) is None
+        assert builds.get_build("build-1") is None
+
     def test_cleanup_preserves_ready(self, store):
         version = store.create_artifact("test-id", "hash123")
         store.finalize_artifact("test-id", version, "{}", 100, 1000)

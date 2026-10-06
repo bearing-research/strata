@@ -4732,6 +4732,8 @@ class ArtifactStore:
             # Metadata first, then blobs: a mid-sweep failure then orphans bytes rather than leaving
             # rows pointing at deleted blobs, as garbage_collect does.
             for row in rows:
+                # A failed build's row still references the version.
+                self._delete_version_children(conn, row["id"], row["version"])
                 conn.execute(
                     "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
                     (row["id"], row["version"]),

@@ -486,6 +486,27 @@ class TestGarbageCollection:
             assert (store.get_artifact(artifact_id, 1) is not None) == (i == raced)
             assert store.blob_store.blob_exists(artifact_id, 1) == (i == raced)
 
+    def test_cleanup_failed_takes_a_failed_build_row_with_it(self, store, tmp_path):
+        """The build row's foreign key refused deleting the failed version it references."""
+        from strata.transforms.build_store import BuildStore
+
+        # The fixture's CASCADE drop leaves a prior test's build table without its foreign key.
+        conn = store._get_connection()
+        try:
+            conn.executescript("DROP TABLE IF EXISTS artifact_builds;")
+            conn.commit()
+        finally:
+            conn.close()
+        builds = BuildStore(tmp_path / "builds.sqlite", dialect=store.dialect)
+        version = store.create_artifact("built", "prov-built", _spec())
+        builds.create_build("build-1", "built", version, "exec@v1")
+        builds.fail_build("build-1", "boom")
+        store.fail_artifact("built", version)
+
+        assert store.cleanup_failed(max_age_seconds=-10) == 1
+        assert store.get_artifact("built", version) is None
+        assert builds.get_build("build-1") is None
+
 
 class TestConnectionPool:
     """A bounded pool is only safe here because acquisition is re-entrant."""
