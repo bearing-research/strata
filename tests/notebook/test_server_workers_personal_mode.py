@@ -72,6 +72,37 @@ class TestMergedCatalogue:
         assert resolve_worker_spec(notebook, "retired") is None
 
 
+class TestTheTokenIsNotListed:
+    """A managed worker's literal token stays on the server; the catalogue omits it."""
+
+    def _register(self):
+        spec = _spec("gpu-a100", "http://gpu.internal:9000")
+        spec.config.token = "LITERAL-TOKEN"
+        replace_server_managed_worker_records([ManagedWorkerRecord(spec, True)])
+
+    def test_the_notebook_catalogue(self, personal_server, notebook):
+        self._register()
+
+        entry = next(e for e in build_worker_catalog(notebook) if e["name"] == "gpu-a100")
+
+        assert entry["config"] == {"url": "http://gpu.internal:9000"}
+        assert resolve_worker_spec(notebook, "gpu-a100").config.token == "LITERAL-TOKEN"
+
+    async def test_the_server_catalogue(self, personal_server, monkeypatch):
+        from strata.notebook import workers
+
+        async def healthy(worker, **_kwargs):
+            return workers.WorkerHealthSnapshot(checked_at=0.0, health="healthy")
+
+        monkeypatch.setattr(workers, "probe_worker_health", healthy)
+        self._register()
+
+        catalog = await workers.build_server_worker_catalog_with_health()
+
+        entry = next(e for e in catalog if e["name"] == "gpu-a100")
+        assert entry["config"] == {"url": "http://gpu.internal:9000"}
+
+
 class TestNotebookWins:
     """A name the notebook defines beats the server's, in both places.
 
