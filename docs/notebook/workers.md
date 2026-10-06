@@ -509,6 +509,13 @@ effect. Delete the file to go back to the configured table. An *empty*
 registry is a decision, not an absence, so removing every worker through the
 API does not fall back.
 
+**A `signed` worker needs transforms enabled.** It runs as a build on the
+server, so in service mode set `STRATA_TRANSFORMS_ENABLED=true`
+(`[tool.strata.transforms] enabled = true`), which also needs
+`STRATA_ARTIFACT_DIR`. Without it the cell fails with
+"Signed notebook executor transport requires personal-mode writes or
+server-mode transforms to be enabled". A `direct` worker needs neither.
+
 `POST /v1/admin/notebook-workers/reload` re-reads the file, for a fleet
 manager writing it underneath a running server. A restart would work too, but
 it interrupts every cell currently executing.

@@ -147,6 +147,13 @@ Two constraints are enforced at startup rather than papered over at runtime:
 | `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files. An entry's `credential` names one in `STRATA_NOTEBOOK_CREDENTIALS` whose fields fill its properties, so no secret is written here (see [Named credentials](notebook-toml.md#named-credentials)) |
 | `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject. Environment only |
 
+A SQL catalog keeps its tables under the catalog's name, so
+`STRATA_CATALOG_NAME` (or the `STRATA_CATALOGS` key) must match the name
+the tables were created under; otherwise a bare `ns.table` (or
+`<name>:ns.table`) is "Table not found". A warehouse URI
+(`file:///wh#ns.table`, `s3://bucket/wh#ns.table`) always reads its SQL
+catalog under the name `strata`.
+
 A SQL catalog (no `type`, or `type = "sql"`) whose `warehouse` is in object
 storage (`s3://`, `gs://`, `abfss://`, any scheme but `file://`) needs a `uri`,
 in `catalog_properties`, in a `STRATA_CATALOGS` entry, or in the named
