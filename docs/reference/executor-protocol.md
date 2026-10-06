@@ -404,7 +404,7 @@ change.
 **SSRF defenses on signed URLs:** Before fetching/posting, the worker validates each URL:
 
 - **Scheme allowlist**: only `http://` and `https://`. Blocks `file://`, `data:`, `javascript:`, etc.
-- **IP blocklist**: the URL's hostname is resolved (via `getaddrinfo`); every returned address must be public. Loopback / link-local (incl. cloud metadata `169.254.169.254` / `fd00:ec2::254`) / private / multicast / reserved / unspecified addresses are rejected with `400`. IPv4-mapped IPv6 is unmapped before checking.
+- **IP blocklist**: the URL's hostname is resolved (via `getaddrinfo`); every returned address must be public. Loopback / link-local (incl. cloud metadata `169.254.169.254` / `fd00:ec2::254`) / private / multicast / reserved / unspecified addresses, and any other non-global range such as shared address space `100.64.0.0/10`, are rejected with `400`. IPv4-mapped IPv6 is unmapped before checking.
 - **Connection pinning**: the fetch itself resolves the host once more, checks every address the same way, and connects only to one of those addresses, so a name cannot pass the check with a public address and then answer the connection with `127.0.0.1` (DNS rebinding). TLS still verifies the certificate against the hostname. These connections go direct: `HTTPS_PROXY` and the other proxy variables are ignored, because through a proxy the proxy would resolve the name. With `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` nothing is pinned and the proxy variables apply.
 
 `STRATA_WORKER_ALLOWED_HOSTS` names hosts that pass the IP check anyway (comma-separated; a leading dot is a suffix), for a server on a private address. Set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to bypass the IP check for every host (tests and local-dev with 127.0.0.1 servers only).

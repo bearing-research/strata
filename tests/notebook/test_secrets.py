@@ -212,24 +212,24 @@ class TestInfisicalProvider:
         assert result.error is None
         assert sent == [7.5]
 
-    def test_host_routing_uses_config_then_env_then_default(self, monkeypatch) -> None:
-        """config.base_url beats INFISICAL_HOST beats the public default."""
+    def test_host_routing_uses_env_then_default(self, monkeypatch) -> None:
+        """INFISICAL_HOST beats the public default."""
         monkeypatch.setenv("INFISICAL_TOKEN", "tok")
-        monkeypatch.setenv("INFISICAL_HOST", "https://env.example.com/")
         client = _FakeClient(list_secrets_return=SimpleNamespace(secrets=[]))
         hosts = _install_fake_sdk_client(monkeypatch, client)
-        InfisicalProvider().fetch(
-            {"project_id": "p", "base_url": "https://self-hosted.example.com"}
-        )
-        # Config value wins; trailing slash stripped.
-        assert hosts == ["https://self-hosted.example.com"]
+        monkeypatch.delenv("INFISICAL_HOST", raising=False)
+        InfisicalProvider().fetch({"project_id": "p"})
+        monkeypatch.setenv("INFISICAL_HOST", "https://env.example.com/")
+        InfisicalProvider().fetch({"project_id": "p"})
+        # Trailing slash stripped.
+        assert hosts == ["https://app.infisical.com", "https://env.example.com"]
 
 
-class TestInfisicalHostInServiceMode:
-    """In service mode the Infisical host is the operator's, never ``notebook.toml``'s.
+class TestInfisicalHostIsTheOperators:
+    """The Infisical host is the operator's, never ``notebook.toml``'s, in every mode.
 
-    The provider logs in with the server's credentials, and the notebook author is
-    not the operator.
+    The provider logs in with the server's credentials, and a cloned or shared
+    notebook's author is not the one who set them.
     """
 
     @pytest.fixture(autouse=True)
@@ -246,9 +246,12 @@ class TestInfisicalHostInServiceMode:
             "strata.server._state", SimpleNamespace(config=SimpleNamespace(deployment_mode=mode))
         )
 
+    @pytest.mark.parametrize("mode", ["personal", "service"])
     @pytest.mark.parametrize("operator_host", [None, "https://infisical.internal"])
-    def test_a_notebook_host_is_refused_before_any_login(self, monkeypatch, operator_host) -> None:
-        self._server(monkeypatch, "service")
+    def test_a_notebook_host_is_refused_before_any_login(
+        self, monkeypatch, operator_host, mode
+    ) -> None:
+        self._server(monkeypatch, mode)
         if operator_host:
             monkeypatch.setenv("INFISICAL_HOST", operator_host)
         client = _FakeClient(list_secrets_return=SimpleNamespace(secrets=[]))
@@ -264,8 +267,9 @@ class TestInfisicalHostInServiceMode:
         assert hosts == []
         assert client.login_calls == []
 
-    def test_the_operators_host_is_used(self, monkeypatch) -> None:
-        self._server(monkeypatch, "service")
+    @pytest.mark.parametrize("mode", ["personal", "service"])
+    def test_the_operators_host_is_used(self, monkeypatch, mode) -> None:
+        self._server(monkeypatch, mode)
         monkeypatch.setenv("INFISICAL_HOST", "https://infisical.internal/")
         client = _FakeClient(list_secrets_return=SimpleNamespace(secrets=[]))
         hosts = _install_fake_sdk_client(monkeypatch, client)
@@ -279,18 +283,6 @@ class TestInfisicalHostInServiceMode:
         assert without.error is None and restated.error is None
         assert hosts == ["https://infisical.internal"] * 2
         assert len(client.login_calls) == 2
-
-    def test_personal_mode_uses_the_notebooks_host(self, monkeypatch) -> None:
-        self._server(monkeypatch, "personal")
-        client = _FakeClient(list_secrets_return=SimpleNamespace(secrets=[]))
-        hosts = _install_fake_sdk_client(monkeypatch, client)
-
-        result = InfisicalProvider().fetch(
-            {"project_id": "p", "base_url": "https://self-hosted.example.com"}
-        )
-
-        assert result.error is None
-        assert hosts == ["https://self-hosted.example.com"]
 
 
 # --- Session merge ---

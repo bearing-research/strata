@@ -67,9 +67,10 @@ def url_safety_problem(
 
     1. Scheme: only http and https.
     2. Address: every address the host resolves to must be public (not loopback,
-       link-local including cloud metadata, private, multicast, reserved or unspecified;
-       IPv4-mapped IPv6 is unmapped first). A blocklist on internal ranges rather than a host
-       allowlist, because signed S3/GCS URLs resolve to many public addresses.
+       link-local including cloud metadata, private, multicast, reserved, unspecified or
+       otherwise not global such as 100.64.0.0/10; IPv4-mapped IPv6 is unmapped first).
+       A blocklist on internal ranges rather than a host allowlist, because signed
+       S3/GCS URLs resolve to many public addresses.
 
     ``STRATA_WORKER_ALLOWED_HOSTS`` exempts named hosts from the address rule (a server on a
     private address); ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`` exempts every host, for tests and
@@ -134,6 +135,9 @@ def _address_problem(host: str, addresses: list[str]) -> str | None:
             or ip.is_multicast
             or ip.is_reserved
             or ip.is_unspecified
+            # Catches ranges the flags above miss, such as 100.64.0.0/10 (carrier-grade NAT,
+            # pod networks, Tailscale, a cloud metadata address).
+            or not ip.is_global
         ):
             return f"host {host!r} resolves to non-routable address {ip}; refusing to fetch"
     return None

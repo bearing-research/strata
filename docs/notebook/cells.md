@@ -425,6 +425,8 @@ The `[ai]` section accepts `api_key` (use sparingly: it persists in `notebook.to
 
 On a server in service mode the request is made by the server, so a `base_url` set here is checked like an `@fetch` URL: a host on a private, loopback or link-local address is refused unless the operator lists it in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. Personal mode reaches `localhost` as before.
 
+The server's `STRATA_AI_API_KEY` is sent only to the server's own `STRATA_AI_BASE_URL` or a provider's default URL. A `base_url` set here that names another host needs a key from the notebook (the Runtime panel, or `api_key`), in every mode; otherwise the cell reports that the LLM is not configured.
+
 ---
 
 ## SQL Cells

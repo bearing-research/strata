@@ -715,7 +715,8 @@ address (the cloud metadata address among them) is refused unless it is named in
 `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`, the same list `@fetch` uses. The
 connection goes only to an address that passed the check, so it ignores proxy
 settings. `STRATA_AI_BASE_URL` is yours and is not checked, nor is a notebook
-naming that same URL or a provider's default one.
+naming that same URL or a provider's default one. Your `STRATA_AI_API_KEY` is
+sent only to those URLs; a notebook naming another host must bring its own key.
 
 Installing a notebook's Python packages runs as the server's user too, and building
 a package from a source distribution runs that package's build backend, code

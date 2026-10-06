@@ -1395,6 +1395,43 @@ def test_secret_env_values_never_reach_clients(client, tmp_path):
     assert session.notebook_state.env == {"OPENAI_API_KEY": "sk-new"}
 
 
+def test_saving_the_env_panel_keeps_a_secret_reader_ready(client, tmp_path):
+    """Staleness after a save sees the secret the cells run with, not the blank on disk."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.secret_manager.session_integration import MASKED_ENV_VALUE
+
+    notebook_dir = create_notebook(tmp_path, "Env Save Status")
+    add_cell_to_notebook(notebook_dir, "c1")
+    reader = 'import os\nk = os.environ.get("MY_API_KEY", "")'
+    write_cell(notebook_dir, "c1", reader)
+    add_cell_to_notebook(notebook_dir, "c2", "c1")
+    write_cell(notebook_dir, "c2", "y = len(k)")
+    session_id = open_session_id(client, notebook_dir)
+    response = client.put(f"/v1/notebooks/{session_id}/env", json={"env": {"MY_API_KEY": "sk-1"}})
+    assert response.status_code == 200, response.text
+    session = get_session_manager().get_session(session_id)
+    assert session is not None
+    for cell_id, source in (("c1", reader), ("c2", "y = len(k)")):
+        result = asyncio.run(CellExecutor(session).execute_cell(cell_id, source))
+        assert result.success, result.error
+
+    # The panel sends every row back, the secret as the masked marker.
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env",
+        json={"env": {"MY_API_KEY": MASKED_ENV_VALUE, "LOG_LEVEL": "info"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert {cell["id"]: cell["status"] for cell in response.json()["cells"]} == {
+        "c1": "ready",
+        "c2": "ready",
+    }
+    assert {cell.id: cell.status.value for cell in session.notebook_state.cells} == {
+        "c1": "ready",
+        "c2": "ready",
+    }
+
+
 @pytest.mark.parametrize(
     "others",
     [{}, {"LOG_LEVEL": "info"}],

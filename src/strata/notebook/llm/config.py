@@ -64,10 +64,13 @@ def resolve_llm_config(
 
     Priority, highest first: notebook.toml ``[ai]``, notebook env vars (Runtime
     panel), server config (``STRATA_AI_*`` read at startup). Process env vars are
-    not consulted. Returns ``None`` if no API key can be found.
+    not consulted. The server's key goes only to a trusted base_url (the
+    operator's ``ai_base_url`` or a provider default), never to one
+    ``notebook.toml`` chose. Returns ``None`` if no API key can be found.
     """
     base_url: str | None = None
     api_key: str | None = None
+    server_key = False
     model: str | None = None
     max_output_tokens = 4096
     timeout_seconds = 60.0
@@ -76,6 +79,7 @@ def resolve_llm_config(
     if server_config is not None:
         if getattr(server_config, "ai_api_key", None):
             api_key = server_config.ai_api_key
+            server_key = True
         if getattr(server_config, "ai_base_url", None):
             base_url = server_config.ai_base_url
         if getattr(server_config, "ai_model", None):
@@ -92,6 +96,7 @@ def resolve_llm_config(
             key = notebook_env.get(env_var)
             if key:
                 api_key = key
+                server_key = False
                 base_url = default_url
                 model = default_model
                 break
@@ -99,12 +104,14 @@ def resolve_llm_config(
             # Generic key: overrides the server's key, keeps its base_url and model.
             if notebook_env.get("STRATA_AI_API_KEY"):
                 api_key = notebook_env["STRATA_AI_API_KEY"]
+                server_key = False
 
     # Layer 3 (highest): notebook.toml [ai] section
     notebook_base_url: str | None = None
     if notebook_config:
         if notebook_config.get("api_key"):
             api_key = notebook_config["api_key"]
+            server_key = False
         if notebook_config.get("base_url"):
             base_url = notebook_base_url = notebook_config["base_url"]
         if notebook_config.get("model"):
@@ -113,6 +120,11 @@ def resolve_llm_config(
             max_output_tokens = int(notebook_config["max_output_tokens"])
         if notebook_config.get("timeout_seconds"):
             timeout_seconds = float(notebook_config["timeout_seconds"])
+
+    # A committed notebook could otherwise name its own host and receive the operator's key.
+    if server_key and notebook_base_url is not None:
+        if notebook_base_url.rstrip("/") not in _trusted_base_urls(server_config):
+            api_key = None
 
     if not api_key:
         return None
@@ -140,13 +152,18 @@ def _base_url_guard(notebook_base_url: str | None, server_config: Any) -> tuple[
         return None
     if getattr(server_config, "deployment_mode", None) != "service":
         return None
+    if notebook_base_url.rstrip("/") in _trusted_base_urls(server_config):
+        return None
+    return tuple(getattr(server_config, "notebook_fetch_allowed_hosts", None) or ())
+
+
+def _trusted_base_urls(server_config: Any) -> set[str]:
+    """Provider defaults plus the operator's ``ai_base_url``, without trailing slashes."""
     trusted = {url for url, _ in _PROVIDER_DEFAULTS.values()}
     operator_url = getattr(server_config, "ai_base_url", None)
     if operator_url:
         trusted.add(str(operator_url).rstrip("/"))
-    if notebook_base_url.rstrip("/") in trusted:
-        return None
-    return tuple(getattr(server_config, "notebook_fetch_allowed_hosts", None) or ())
+    return trusted
 
 
 def max_output_tokens_param(base_url: str) -> str:
