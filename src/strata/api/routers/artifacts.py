@@ -343,6 +343,16 @@ def _copy_staged_blob(store: ArtifactStore, tenant: str | None, digest: str, des
     return True
 
 
+def _is_json_object(value: object) -> bool:
+    """Whether *value* is a string holding a JSON object, as ``transform_spec`` and edges are."""
+    if not isinstance(value, str):
+        return False
+    try:
+        return isinstance(json.loads(value), dict)
+    except json.JSONDecodeError:
+        return False
+
+
 @router.post("/v1/artifacts/import")
 async def import_artifact_route(
     request: Request,
@@ -433,6 +443,27 @@ async def _import_artifact(
             status_code=400,
             detail="Metadata 'created_at' must be the source's creation time, in epoch seconds",
         )
+    # The record is stored as sent, and a string byte_size broke every later sweep.
+    for field in ("row_count", "byte_size"):
+        value = metadata.get(field)
+        if value is not None and (type(value) is not int or value < 0):
+            raise HTTPException(
+                status_code=400, detail=f"Metadata '{field}' must be a non-negative integer"
+            )
+    for field in ("schema_json", "principal"):
+        if not isinstance(metadata.get(field), str | None):
+            raise HTTPException(status_code=400, detail=f"Metadata '{field}' must be a string")
+    for field in ("transform_spec", "input_versions"):
+        if metadata.get(field) is not None and not _is_json_object(metadata[field]):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Metadata '{field}' must be a JSON object encoded as a string",
+            )
+    state = metadata.get("state") or "ready"
+    if state not in ("ready", "superseded"):
+        raise HTTPException(
+            status_code=400, detail="Metadata 'state' must be 'ready' or 'superseded'"
+        )
 
     declared_digest = str(metadata.get("content_sha256") or "").strip()
     if staged:
@@ -463,7 +494,7 @@ async def _import_artifact(
     record = ArtifactVersion(
         id=artifact_id,
         version=version,
-        state=str(metadata.get("state") or "ready"),
+        state=state,
         provenance_hash=provenance_hash,
         schema_json=metadata.get("schema_json"),
         row_count=metadata.get("row_count"),

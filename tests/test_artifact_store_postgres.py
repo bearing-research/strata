@@ -13,6 +13,7 @@ import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
+from strata.artifact_cli import _server_store as _configured_server_store
 from strata.artifact_store import ArtifactStore, TransformSpec
 from strata.sql_backend import PostgresDialect, advisory_lock_id
 
@@ -933,6 +934,43 @@ class TestTheCliOnAPostgresStore:
         finally:
             dialect.close()
 
+    def test_publish_mints_the_grant_in_the_store_the_server_serves(
+        self, store, tmp_path, monkeypatch, postgres_dsn
+    ):
+        """The publish target is built like the server's store, not from ``artifact_dir`` alone.
+
+        Built from the directory, it was an empty SQLite file: "not found", and a stray database.
+        """
+        import argparse
+
+        from strata.artifact_cli import cmd_publish
+
+        version = store.create_artifact("fig", "prov-fig", _spec())
+        with store.open_blob_writer("fig", version) as writer:
+            writer.write(b"figure bytes")
+        store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
+
+        monkeypatch.setenv("STRATA_ARTIFACT_METADATA_DSN", postgres_dsn)
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
+        # The suite stubs this out so no test publishes into a developer's own store.
+        monkeypatch.setattr("strata.artifact_cli._server_store", _configured_server_store)
+        args = argparse.Namespace(
+            ref=f"fig@v={version}",
+            artifact_dir=None,
+            format="json",
+            title="Figure",
+            author=None,
+            tenant=None,
+            here=False,
+            into=None,
+            to_url=None,
+            max_depth=10,
+        )
+        assert cmd_publish(args) == 0
+
+        assert [p.artifact_id for p in store.list_publications()] == ["fig"]
+        assert not (tmp_path / "artifacts" / "artifacts.sqlite").exists()
+
 
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
@@ -981,6 +1019,56 @@ class TestWriterSerialization:
 
         assert errors == []
         assert sorted(versions) == list(range(1, 9))
+
+    def test_an_events_follower_never_skips_an_event_that_commits_late(self, store):
+        """``seq`` is drawn at insert: a writer that inserts first and commits last was skipped.
+
+        The follower saw the later writer's event, advanced its cursor past the earlier ``seq``,
+        and never got the earlier event once it committed.
+        """
+        version = store.create_artifact("m1", "prov-m1", _spec())
+        store.finalize_artifact("m1", version, "{}", row_count=0, byte_size=0)
+
+        inserted, release = threading.Event(), threading.Event()
+
+        def slow_writer() -> None:
+            # Its own thread: connections are shared per thread, so a commit elsewhere on this
+            # thread would commit this insert too.
+            conn = store._get_connection()
+            try:
+                store._audit_in_connection(conn, action="name_set", name="slow")
+                inserted.set()
+                release.wait()
+                conn.commit()
+            finally:
+                conn.close()
+
+        slow = threading.Thread(target=slow_writer)
+        slow.start()
+        inserted.wait()
+        tagging = threading.Thread(target=store.set_tag, args=("m1", version, "k", "v"))
+        tagging.start()
+        probe = store._get_connection()
+        try:
+            # Until the tag writer waits behind the slow one (or, unserialized, has committed).
+            while tagging.is_alive():
+                row = probe.execute(
+                    "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                ).fetchone()
+                probe.commit()
+                if row["n"]:
+                    break
+                tagging.join(timeout=0.05)
+        finally:
+            probe.close()
+        seen = store.read_events()
+        cursor = seen[-1]["seq"] if seen else 0
+        release.set()
+        slow.join()
+        tagging.join()
+
+        later = store.read_events(since=cursor)
+        assert sorted(e["action"] for e in seen + later) == ["name_set", "tag_set"]
 
     def test_duplicate_provenance_finalize_is_idempotent(self, store):
         # Exercises the dialect's integrity_error: the partial unique index on

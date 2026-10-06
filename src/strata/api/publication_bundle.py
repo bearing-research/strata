@@ -164,6 +164,10 @@ PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
 # publication's archive stays the same bytes on every build.
 PARQUET_COMPANION_MAX_BYTES = 128 * 1024 * 1024
 
+# How far a publication's page, record, card, crate and archive walk its chain: one depth, so
+# the archive never shows fewer steps than the page.
+PUBLICATION_MAX_DEPTH = 25
+
 # Under the store's directory: each publication's built archive, in a directory per token.
 ARCHIVE_CACHE_DIRNAME = "publication-archives"
 
@@ -237,7 +241,9 @@ def cached_bundle_zip(
     cache_dir.mkdir(parents=True, exist_ok=True)
     partial = cache_dir / f"{prefix}{uuid.uuid4().hex}.partial"
     try:
-        digest = bundle_zip(store, artifact, partial, publication=publication)
+        digest = bundle_zip(
+            store, artifact, partial, publication=publication, max_depth=PUBLICATION_MAX_DEPTH
+        )
     except BaseException:
         partial.unlink(missing_ok=True)
         raise

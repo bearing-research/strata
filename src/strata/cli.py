@@ -519,7 +519,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Write into a non-empty directory (may leave a stale payload beside the new one)",
     )
     archive_parser.add_argument(
-        "--max-depth", type=int, default=10, help="Recursion limit when walking the chain"
+        "--max-depth",
+        type=int,
+        default=None,
+        help="Recursion limit when walking the chain (default 10; with --token, the page's 25)",
     )
     _add_tenant_arg(archive_parser)
     archive_parser.set_defaults(func=_dispatch_artifact("cmd_archive"))

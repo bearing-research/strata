@@ -59,6 +59,37 @@ def _fetch(base_url: str, token: str) -> httpx.Response:
     return httpx.get(f"{base_url}/p/{token}/archive.zip", timeout=30)
 
 
+class TestACoreResult:
+    def test_a_transform_result_is_archived_as_arrow(self, tmp_path):
+        """Only notebook cells declare a content type; a ``duckdb_sql`` result was ``.bin``."""
+        from strata.api.publication_bundle import write_bundle
+        from strata.api.publication_page import content_type_of
+
+        store = ArtifactStore(tmp_path / "artifacts")
+        payload = _arrow_bytes()
+        version = store.create_artifact(
+            "features",
+            hashlib.sha256(payload).hexdigest(),
+            transform_spec=TransformSpec(
+                executor="duckdb_sql@v1", params={"sql": "SELECT 1"}, inputs=[]
+            ),
+        )
+        store.write_blob("features", version, payload)
+        store.finalize_artifact(
+            "features", version, TABLE.schema.to_string(), TABLE.num_rows, len(payload)
+        )
+        artifact = store.get_artifact("features", version)
+        publication = store.publish_artifact("features", version)
+        dest = tmp_path / "bundle"
+        dest.mkdir()
+
+        written = write_bundle(store, artifact, dest, publication=publication)
+
+        assert content_type_of(artifact) == "arrow/ipc"
+        assert "artifact.arrow" in written
+        assert "artifact.parquet" in written
+
+
 class TestTheBundle:
     def test_it_is_the_same_files_the_cli_writes(self, served, tmp_path):
         """Two implementations of mutually describing files would drift silently, so both must
@@ -181,6 +212,41 @@ class TestTheSameBytesEachTime:
             manifest = bundle.read("manifest.json").decode()
         assert "10.5555/figure-1" in manifest
         assert "0000-0002-1825-0097" in manifest
+
+
+class TestADeepChain:
+    def test_the_archive_walks_as_far_as_the_page(self, tmp_path):
+        """The page walked 25 steps and the archive 10, so a long chain lost steps in its zip."""
+        import json
+
+        from strata.api.publication_bundle import cached_bundle_zip
+
+        store = ArtifactStore(tmp_path / "artifacts")
+        payload = _arrow_bytes()
+        inputs = None
+        for step in range(12):
+            store.create_artifact(
+                f"step{step}",
+                f"prov-{step}",
+                transform_spec=TransformSpec(executor="duckdb_sql@v1", params={}, inputs=[]),
+                input_versions=inputs,
+            )
+            store.write_blob(f"step{step}", 1, payload)
+            store.finalize_artifact(f"step{step}", 1, "schema", TABLE.num_rows, len(payload))
+            inputs = {f"strata://artifact/step{step}@v=1": f"step{step}@v=1"}
+        publication = store.publish_artifact("step11", 1)
+
+        served, _ = cached_bundle_zip(
+            store, store.get_artifact("step11", 1), publication=publication
+        )
+
+        with zipfile.ZipFile(served) as bundle:
+            nodes = json.loads(bundle.read("manifest.json"))["lineage"]["nodes"]
+        assert len(nodes) == 12
+        # And the CLI by token, with no --max-depth, still writes the same zip.
+        out = tmp_path / "deposit.zip"
+        assert _archive(store.artifact_dir, out, token=publication.token, max_depth=None) == 0
+        assert out.read_bytes() == served.read_bytes()
 
 
 class TestTheCliByToken:

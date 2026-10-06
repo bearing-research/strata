@@ -135,7 +135,8 @@ class TestArtifactHttpAccessors:
         assert info == {"state": "ready", "size_bytes": 1234}
         assert "/v1/artifacts/abc/v/2" in captured[0]
 
-    def test_lineage_passes_params(self):
+    def test_lineage_sends_only_what_the_route_reads(self):
+        """The route walks upstream only, so a ``direction`` parameter was silently ignored."""
         captured: list[httpx.URL] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -144,13 +145,13 @@ class TestArtifactHttpAccessors:
 
         client = _make_client(handler)
         artifact = Artifact(_client=client, artifact_id="abc", version=2)
-        artifact.lineage(direction="downstream", max_depth=5)
+        artifact.lineage(max_depth=5)
         url = captured[0]
         assert "/v1/artifacts/abc/v/2/lineage" in str(url)
-        assert url.params["direction"] == "downstream"
-        assert url.params["max_depth"] == "5"
+        assert dict(url.params) == {"max_depth": "5"}
 
-    def test_dependents_passes_max_depth(self):
+    def test_dependents_passes_the_limit_the_route_reads(self):
+        """Dependents are one hop and capped by ``limit``; ``max_depth`` was silently ignored."""
         captured: list[httpx.URL] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -159,10 +160,10 @@ class TestArtifactHttpAccessors:
 
         client = _make_client(handler)
         artifact = Artifact(_client=client, artifact_id="abc", version=2)
-        artifact.dependents(max_depth=3)
+        artifact.dependents(limit=3)
         url = captured[0]
         assert "/v1/artifacts/abc/v/2/dependents" in str(url)
-        assert url.params["max_depth"] == "3"
+        assert dict(url.params) == {"limit": "3"}
 
 
 # --- Artifact: to_table / to_pandas / to_polars via cached stream ---
@@ -260,7 +261,7 @@ class TestFetchStreamRetry:
 
         client = _make_client(handler)
         client.retry_config = RetryConfig(max_retries=3, base_delay=0.0, jitter=0.0)
-        assert client._fetch_stream_with_retry("/streams/abc") == b"payload"
+        assert client._fetch_stream_with_retry("/streams/abc").content == b"payload"
 
     def test_retries_on_429_then_succeeds(self, monkeypatch):
         monkeypatch.setattr("time.sleep", lambda _: None)
@@ -274,7 +275,7 @@ class TestFetchStreamRetry:
 
         client = _make_client(handler)
         client.retry_config = RetryConfig(max_retries=5, base_delay=0.0, jitter=0.0)
-        assert client._fetch_stream_with_retry("/streams/abc") == b"after-retry"
+        assert client._fetch_stream_with_retry("/streams/abc").content == b"after-retry"
         assert calls["n"] == 3
 
     def test_max_retries_exceeded_raises(self, monkeypatch):
@@ -300,7 +301,7 @@ class TestFetchStreamRetry:
 
         client = _make_client(handler)
         client.retry_config = RetryConfig(max_retries=3, base_delay=0.0, jitter=0.0)
-        assert client._fetch_stream_with_retry("/streams/abc") == b"ok"
+        assert client._fetch_stream_with_retry("/streams/abc").content == b"ok"
 
 
 # --- _fetch_artifact_data_with_wait: state machine ---
