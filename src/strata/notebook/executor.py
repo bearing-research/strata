@@ -5501,6 +5501,18 @@ class CellExecutor:
             source_hash,
             env_hash,
         )
+        # A leaf's console is its record of the run, so a cold open reads it ready.
+        if not consumed_vars and not annotations.nocache:
+            self._store_console_outputs(
+                cell_id,
+                cell_provenance,
+                "\n".join(combined_stdout),
+                "\n".join(combined_stderr),
+                prov.input_hashes,
+                source_hash=source_hash,
+                source=source,
+                env_hash=env_hash,
+            )
 
         duration_ms = loop_duration_ms
         raw_displays = final_result.get("displays") if final_result else None
