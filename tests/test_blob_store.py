@@ -880,6 +880,38 @@ class TestAzureBlobStore:
                 # No auth method provided
             )
 
+    def test_endpoint_url_is_the_host_and_the_account_is_its_first_path_segment(self):
+        """The documented meaning of ``STRATA_AZURE_ENDPOINT_URL``, shared with the lake path."""
+        pytest.importorskip("azure.storage.blob")
+        from strata.blob_store import AzureBlobStore
+
+        store = AzureBlobStore(
+            account_name="devstoreaccount1",
+            container_name="test-container",
+            account_key="dGVzdGtleQ==",
+            endpoint_url="http://127.0.0.1:10000/",
+        )
+
+        assert store._account_url == "http://127.0.0.1:10000/devstoreaccount1"
+        assert store._client.url == "http://127.0.0.1:10000/devstoreaccount1/test-container"
+        assert store._client.account_name == "devstoreaccount1"
+
+    def test_endpoint_url_without_an_account_name_is_used_as_given(self):
+        pytest.importorskip("azure.storage.blob")
+        from strata.blob_store import AzureBlobStore
+
+        store = AzureBlobStore(
+            account_name="",
+            container_name="test-container",
+            sas_token="sv=2024&sig=abc",
+            endpoint_url="https://acct.blob.core.windows.net",
+        )
+
+        assert store._account_url == "https://acct.blob.core.windows.net"
+        assert (
+            store._client.url == "https://acct.blob.core.windows.net/test-container?sv=2024&sig=abc"
+        )
+
     @pytest.mark.skip(reason="Requires actual Azure Storage or Azurite emulator")
     def test_write_and_read_blob_integration(self):
         """Round-trip against real Azure Storage; skipped unless Azurite or a connection string is

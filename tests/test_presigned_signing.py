@@ -229,6 +229,26 @@ def test_an_azure_account_key_signs_a_read_sas_and_a_create_write_sas():
     assert store.presign_post("out", 7, 16, 60) is None
 
 
+def test_an_azure_endpoint_url_signs_urls_under_the_account_segment():
+    """A host-form endpoint (Azurite) signs for the account at its first path segment."""
+    store = AzureBlobStore(
+        account_name="devstoreaccount1",
+        container_name="c",
+        account_key=ACCOUNT_KEY,
+        endpoint_url="http://127.0.0.1:10000",
+    )
+
+    url = store.presign_get("fig", 1, ttl_seconds=60)
+    put = store.presign_put("out", 7, ttl_seconds=60)
+
+    assert url is not None and put is not None
+    parts = urlsplit(url)
+    assert parts.scheme == "http" and parts.netloc == "127.0.0.1:10000"
+    assert unquote(parts.path) == "/devstoreaccount1/c/artifacts/fig@v=1.arrow"
+    assert "sig" in parse_qs(parts.query)
+    assert unquote(urlsplit(put[0]).path) == "/devstoreaccount1/c/artifacts/out@v=7.arrow"
+
+
 def test_an_azure_sas_token_is_not_handed_to_workers():
     store = AzureBlobStore(account_name="acct", container_name="c", sas_token="sv=2024&sig=abc")
 
