@@ -327,6 +327,22 @@ def test_open_notebook_not_found(client):
     assert response.status_code == 404
 
 
+def test_open_refuses_a_notebook_whose_cell_file_leaves_cells(client, tmp_path):
+    """A cloned notebook.toml naming ``../../x`` must not show that file or let edits rewrite it."""
+    notebook_dir = create_notebook(tmp_path / "nbs", "Cloned")
+    add_cell_to_notebook(notebook_dir, "c1")
+    (tmp_path / "outside.txt").write_text("SECRET\n")
+    toml_path = notebook_dir / "notebook.toml"
+    toml_path.write_text(
+        toml_path.read_text().replace('file = "c1.py"', 'file = "../../outside.txt"')
+    )
+
+    response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+
+    assert response.status_code == 400
+    assert "'c1' names a source file outside cells/" in response.json()["detail"]
+
+
 def test_open_notebook_rejects_path_outside_configured_storage_root(client, monkeypatch, tmp_path):
     storage_root = tmp_path / "allowed"
     storage_root.mkdir()

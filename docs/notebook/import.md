@@ -341,6 +341,9 @@ The destination must be absent or empty. The import is built beside it and
 moved into place only once it's complete. A failure partway leaves nothing
 behind, and a retry works.
 
-A bundle is a file somebody sent you, so its member names, cell ids and
-artifact ids are checked before anything is written. One that names a path
-outside the notebook is refused rather than unpacked.
+A bundle is a file somebody sent you, so its member names, cell ids, cell
+files and artifact ids are checked before anything is written. One that names a
+path outside the notebook is refused rather than unpacked. The same rule holds
+for any notebook you open: a `notebook.toml` whose cell `file` points outside
+`cells/` (an absolute path, or one climbing out with `..`) is refused with an
+error naming the cell, so a cloned notebook can't read or rewrite other files.

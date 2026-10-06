@@ -43,11 +43,11 @@ def _member_target(dest: Path, name: str) -> Path:
     segment is checked rather than the joined path, so a name that resolves outside
     only through symlinks still cannot be written.
     """
-    parts = PurePosixPath(name).parts
-    if not parts or PurePosixPath(name).is_absolute():
-        raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}")
+    # Split by hand: PurePosixPath collapses ``//`` and ``.``, so ``cells//etc/x`` would
+    # pass as ``cells/etc/x`` while notebook.toml names ``/etc/x``.
+    parts = name.split("/")
     for part in parts:
-        if not _SAFE_SEGMENT.match(part) or part == "..":
+        if not _SAFE_SEGMENT.match(part) or part in (".", ".."):
             raise NotASnapshotError(f"the bundle names a member it cannot write: {name!r}")
     return dest.joinpath(*parts)
 
@@ -175,6 +175,13 @@ def _validate(archive: zipfile.ZipFile) -> tuple[dict[str, Any], dict[str, Any]]
         )
 
     notebook_toml = tomllib.loads(archive.read("notebook.toml").decode("utf-8"))
+    for cell in notebook_toml.get("cells", []):
+        file = cell.get("file", "")
+        # The parser joins this onto cells/, so it must stay a relative path inside it.
+        if any(part in ("", ".", "..") for part in str(file).split("/")):
+            raise NotASnapshotError(
+                f"the bundle names a cell file outside cells/: {cell.get('id')!r} -> {file!r}"
+            )
     missing = [
         cell["file"]
         for cell in notebook_toml.get("cells", [])

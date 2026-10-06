@@ -437,6 +437,84 @@ class TestABundleWritesOnlyIntoTheNotebook:
         assert (imported.notebook_dir / "cells").is_dir()
 
 
+def _minimal_bundle(path, *, file: str, members: dict[str, bytes]):
+    """A bundle with one cell whose ``file`` is *file*, built by hand as an attacker would."""
+    from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
+
+    manifest = {
+        "format_version": SNAPSHOT_FORMAT_VERSION,
+        "notebook_id": "nbx",
+        "records": {},
+        "carried": [],
+        "artifacts": {},
+    }
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "notebook.toml",
+            f'notebook_id = "nbx"\nname = "x"\n[[cells]]\nid = "aaaaaaaa"\n'
+            f'file = "{file}"\nlanguage = "python"\norder = 0\n',
+        )
+        archive.writestr("artifacts.json", json.dumps(manifest))
+        for name, data in members.items():
+            archive.writestr(name, data)
+    return path
+
+
+class TestACellFileOutsideCells:
+    """``cells[].file`` is joined onto cells/; an absolute path or ``..`` must not escape it."""
+
+    @pytest.fixture
+    def outside(self, tmp_path):
+        target = tmp_path / "outside.txt"
+        target.write_text("SECRET\n")
+        return target
+
+    def test_an_absolute_file_is_refused(self, tmp_path, outside):
+        # PurePosixPath collapses ``cells//abs`` to ``cells/abs``, so the member check
+        # alone let this through and notebook.toml named the absolute path.
+        bundle = _minimal_bundle(
+            tmp_path / "evil.zip", file=str(outside), members={f"cells/{outside}": b"x = 1\n"}
+        )
+
+        with pytest.raises(NotASnapshotError, match="outside cells/"):
+            import_snapshot(bundle, tmp_path / "dst")
+
+        assert not (tmp_path / "dst").exists()
+        assert outside.read_text() == "SECRET\n"
+
+    def test_a_file_that_climbs_out_is_refused(self, tmp_path, outside):
+        bundle = _minimal_bundle(
+            tmp_path / "evil.zip",
+            file="../../outside.txt",
+            members={"cells/../../outside.txt": b"x = 1\n"},
+        )
+
+        with pytest.raises(NotASnapshotError, match="outside cells/"):
+            import_snapshot(bundle, tmp_path / "dst")
+
+        assert outside.read_text() == "SECRET\n"
+
+    @pytest.mark.parametrize("member", ["cells//abs/x.py", "cells/./x.py"])
+    def test_a_member_name_that_collapses_is_refused(self, tmp_path, member):
+        bundle = _minimal_bundle(
+            tmp_path / "evil.zip",
+            file="aaaaaaaa.py",
+            members={"cells/aaaaaaaa.py": b"x = 1\n", member: b"x = 2\n"},
+        )
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(bundle, tmp_path / "dst")
+
+    def test_a_well_formed_bundle_still_imports(self, tmp_path):
+        bundle = _minimal_bundle(
+            tmp_path / "ok.zip", file="aaaaaaaa.py", members={"cells/aaaaaaaa.py": b"x = 1\n"}
+        )
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert parse_notebook(imported.notebook_dir).cells[0].source == "x = 1\n"
+
+
 class TestWidgetSelections:
     """Widget values travel with the snapshot.
 
