@@ -1083,3 +1083,64 @@ Both are unauthenticated, for scrapers. Under principal auth
 `/metrics/prometheus` leaves out the per-table series, since table names are
 `admin:*` data (`GET /metrics/tables`), and the AI usage series carry no
 `principal` label: they are per-tenant, per-model totals.
+
+### Artifacts, names, cache and diagnostics
+
+The routes the client SDK and the web UI call that no feature page covers.
+The gate column uses these terms:
+
+- **read**: open in both modes; under principal auth scoped to the caller's
+  tenant (`admin:*` sees every tenant).
+- **write**: personal mode, or service mode with
+  `STRATA_SERVICE_WRITES_ENABLED` and the `artifacts:write` scope.
+- **personal**: personal mode only; `403` in service mode.
+- **build**: personal mode, or service mode with transforms enabled.
+- **open**: no gate beyond the server's authentication.
+
+Name, alias, tag and registry reads on a server with
+`STRATA_NOTEBOOK_REMOTE_STORE_URL` set answer from that team store.
+
+| Method | Path | Gate | What it does |
+| --- | --- | --- | --- |
+| `GET` | `/v1/artifacts/{id}/v/{n}` | read | An artifact version's metadata, including `input_versions` |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}` | personal | Delete a version, its blob and its name pointers |
+| `GET` | `/v1/artifacts/{id}/v/{n}/lineage` | read | The transitive input graph (artifacts and tables), up to `max_depth` |
+| `GET` | `/v1/artifacts/{id}/v/{n}/dependents` | read | Ready artifacts that take this one as a direct input |
+| `GET` | `/v1/artifacts/{id}/v/{n}/tags` | read | The version's tags |
+| `PUT` | `/v1/artifacts/{id}/v/{n}/tags` | write | Set one key/value tag |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}/tags/{key}` | write | Delete one tag |
+| `GET` | `/v1/artifacts/by-provenance/{hash}` | read | A ready artifact by provenance hash (the team-cache lookup) |
+| `PUT` | `/v1/artifacts/by-provenance/{hash}` | write | Store a result under a provenance key the caller computed |
+| `POST` | `/v1/artifacts/upload/{id}/v/{n}` | personal | Upload a version's Arrow IPC bytes |
+| `POST` | `/v1/artifacts/finalize` | personal | Mark an uploaded version ready, optionally naming it |
+| `POST` | `/v1/artifacts/explain-materialize` | read | Dry-run materialize: hit or miss, and why a rebuild would be needed |
+| `POST` | `/v1/artifacts/materialize` | build | The cached artifact on a provenance hit, else a `building` artifact and its build spec |
+| `GET` | `/v1/artifacts/builds/{build_id}` | build | Poll an asynchronous build started by materialize (the caller's own builds) |
+| `GET` | `/v1/artifacts/names/{name}/status` | read | A named artifact's state and whether any input has a newer version |
+| `GET` | `/v1/names` | read | Every name pointer and its artifact |
+| `POST` | `/v1/names` | write | Set or move a name pointer |
+| `GET` | `/v1/names/{name}` | read | Resolve a name to its artifact URI |
+| `DELETE` | `/v1/names/{name}` | personal | Delete a name pointer |
+| `GET` | `/v1/names/{name}/aliases` | read | The aliases a name holds |
+| `GET` | `/v1/names/{name}/aliases/{alias}` | read | Resolve `name @ alias` to its version |
+| `PUT` | `/v1/names/{name}/aliases/{alias}` | write | Point an alias at a version; a protected alias answers `202` and queues |
+| `DELETE` | `/v1/names/{name}/aliases/{alias}` | personal | Delete an alias; a protected alias answers `202` and queues |
+| `GET` | `/v1/registry/artifacts` | read | Ready artifacts carrying one tag (`tag_key`, optional `tag_value`) |
+| `GET` | `/v1/registry/pending` | read | Protected-alias changes awaiting approval |
+| `GET` | `/v1/cache/stats` | open | Disk cache statistics |
+| `GET` | `/v1/cache/evictions` | open | Eviction rate and pressure level; `include_events=true` adds recent events |
+| `POST` | `/v1/cache/warm` | table ACL | Warm the cache for some tables and wait until every row group is fetched |
+| `GET` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | A warming job's progress |
+| `DELETE` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | Cancel a warming job; what it cached stays |
+| `GET` | `/v1/metadata/stats` | open | Hit/miss counters and entry counts for the metadata store and its caches |
+| `GET` | `/v1/config/timeouts` | open | Every timeout setting, grouped by planning, scanning, QoS queue, fetching and S3 |
+| `GET` | `/v1/debug/latency` | `admin:*` | Latency histograms per stage (plan, first byte, fetch, total) |
+| `GET` | `/v1/debug/gc/pauses` | `admin:*` | Recent Python GC pauses and their totals |
+| `GET` | `/v1/debug/pools` | `admin:*` | Planning and fetch thread pool use and queue depth |
+| `GET` | `/v1/debug/connections` | `admin:*` | HTTP connection metrics: in flight, totals, peak, rate, keep-alive share |
+| `GET` | `/v1/debug/memory` | `admin:*` | Arrow pool, Python GC and process memory |
+| `GET` | `/v1/debug/rate-limits` | `admin:*` | Rate limiter allowed and rejected counts |
+| `GET` | `/v1/debug/cache/inspect` | `admin:cache` | Disk cache entries: key hash, file path, size and stored metadata |
+
+The `admin:*` and `admin:cache` gates apply under principal auth; without it
+those routes are open.
