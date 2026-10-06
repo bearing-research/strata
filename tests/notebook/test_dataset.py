@@ -23,6 +23,7 @@ def _store_version(
     artifact_id="taxi-model",
     input_versions=None,
     provenance_hash=None,
+    tenant=None,
 ):
     params = {"content_type": content_type} if content_type else {}
     version = store.create_artifact(
@@ -30,6 +31,7 @@ def _store_version(
         provenance_hash=provenance_hash or hashlib.sha256(blob + artifact_id.encode()).hexdigest(),
         transform_spec=TransformSpec(executor="test@v1", params=params, inputs=[]),
         input_versions=input_versions,
+        tenant=tenant,
     )
     store.write_blob(artifact_id, version, blob)
     store.finalize_artifact(
@@ -402,6 +404,163 @@ class TestLineage:
             "features-here@v=1",
             "raw@v=1",
         ]
+
+
+class TestSameIdOtherBytes:
+    """Clones of one notebook make the same output ids for different bytes."""
+
+    def _counting(self, registry):
+        downloads: list[str] = []
+        real = registry.download
+
+        def download(artifact_id, version):
+            downloads.append(f"{artifact_id}@v={version}")
+            return real(artifact_id, version)
+
+        registry.download = download
+        return downloads
+
+    def test_a_local_row_with_the_id_but_another_computation_is_not_bound(self, tmp_path):
+        from strata.artifact_store import ArtifactStore
+        from strata.notebook.models import DatasetSpec
+
+        registry_store = ArtifactStore(tmp_path / "registry")
+        notebook_store = ArtifactStore(tmp_path / "notebook")
+        aid = "nb_x_cell_train_var_model"
+        _store_version(registry_store, b'{"t": 999}', content_type="json/object", artifact_id=aid)
+        registry_store.set_alias("taxi/model", "champion", aid, 1)
+        _store_version(notebook_store, b'{"t": 111}', content_type="json/object", artifact_id=aid)
+        registry = datasets_module.LocalRegistry(registry_store)
+        downloads = self._counting(registry)
+        spec = DatasetSpec(name="champion", dataset="taxi/model", alias="champion")
+        resolved = registry.resolve(spec)
+
+        copied = datasets_module.copy_into(registry, resolved, notebook_store)
+
+        landed_id, _, landed_version = copied.local_ref.partition("@v=")
+        assert copied.local_ref != f"{aid}@v=1"
+        assert notebook_store.read_blob(landed_id, int(landed_version)) == b'{"t": 999}'
+        assert notebook_store.read_blob(aid, 1) == b'{"t": 111}', "this clone's row is untouched"
+        assert downloads == [f"{aid}@v=1"]
+
+        again = datasets_module.copy_into(registry, resolved, notebook_store)
+
+        assert again.local_ref == copied.local_ref
+        assert downloads == [f"{aid}@v=1"], "the earlier copy is found without a download"
+
+    async def test_a_colleagues_promoted_output_is_read_not_this_clones(
+        self, tmp_path, notebook_personal_server
+    ):
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path / "nb", "Champion")
+        add_cell_to_notebook(nb, "train", None)
+        write_cell(nb, "train", 'model = {"t": 111}')
+        add_cell_to_notebook(nb, "use", "train")
+        write_cell(nb, "use", "mine = model")
+        read_src = '# @dataset champion taxi/model@champion\nscore = champion["t"]'
+        add_cell_to_notebook(nb, "read", "use")
+        write_cell(nb, "read", read_src)
+        add_cell_to_notebook(nb, "show", "read")
+        write_cell(nb, "show", "shown = score")
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        # Another clone's train output, promoted under the id this clone also makes.
+        registry = notebook_personal_server["artifact_store"]
+        aid = session.get_artifact_manager().cell_artifact_id("train", "model")
+        v = _store_version(registry, b'{"t": 999}', content_type="json/object", artifact_id=aid)
+        registry.set_alias("taxi/model", "champion", aid, v)
+        trained = await CellExecutor(session).execute_cell("train", 'model = {"t": 111}')
+        assert trained.success, trained.error
+
+        out = await CellExecutor(session).execute_cell("read", read_src)
+
+        assert out.success, out.error
+        assert out.outputs["score"]["preview"] == 999
+
+    def test_a_local_row_with_the_id_and_the_computation_is_reused(self, tmp_path):
+        from strata.artifact_store import ArtifactStore
+        from strata.notebook.models import DatasetSpec
+
+        registry_store = ArtifactStore(tmp_path / "registry")
+        notebook_store = ArtifactStore(tmp_path / "notebook")
+        _store_version(registry_store, b'{"t": 1}', content_type="json/object")
+        registry_store.set_name("taxi/model", "taxi-model", 1)
+        _store_version(notebook_store, b'{"t": 1}', content_type="json/object")
+        registry = datasets_module.LocalRegistry(registry_store)
+        downloads = self._counting(registry)
+        resolved = registry.resolve(DatasetSpec(name="m", dataset="taxi/model"))
+
+        copied = datasets_module.copy_into(registry, resolved, notebook_store)
+
+        assert copied.local_ref == "taxi-model@v=1"
+        assert downloads == []
+
+
+class TestTenant:
+    """On a multi-tenant server, a session resolves names as its own tenant."""
+
+    def test_names_resolve_in_the_sessions_tenant(self, tmp_path):
+        from strata.artifact_store import ArtifactStore
+        from strata.notebook.models import DatasetSpec
+
+        store = ArtifactStore(tmp_path / "registry")
+        _store_version(store, b"{}", content_type="json/object", artifact_id="payroll")
+        store.set_name("finance/payroll", "payroll", 1)
+        _store_version(store, b"{}", content_type="json/object", artifact_id="m", tenant="acme")
+        store.set_name("acme/model", "m", 1, tenant="acme")
+        acme = datasets_module.LocalRegistry(store, "acme")
+
+        assert acme.resolve(DatasetSpec(name="m", dataset="acme/model")).ref == "m@v=1"
+        with pytest.raises(datasets_module.DatasetError, match="not in the registry"):
+            acme.resolve(DatasetSpec(name="p", dataset="finance/payroll"))
+        with pytest.raises(datasets_module.DatasetError, match="not in the registry"):
+            datasets_module.LocalRegistry(store).resolve(
+                DatasetSpec(name="m", dataset="acme/model")
+            )
+
+    def test_another_tenants_version_is_not_handed_over(self, tmp_path):
+        from strata.artifact_store import ArtifactStore
+
+        store = ArtifactStore(tmp_path / "registry")
+        _store_version(store, b"{}", content_type="json/object", artifact_id="m", tenant="acme")
+        _store_version(store, b"{}", content_type="json/object", artifact_id="shared")
+
+        assert datasets_module.LocalRegistry(store, "other").download("m", 1) is None
+        assert datasets_module.LocalRegistry(store, "acme").download("m", 1) is not None
+        assert datasets_module.LocalRegistry(store, "other").download("shared", 1) is not None
+
+    async def test_the_executor_and_staleness_pass_the_sessions_tenant(self, monkeypatch, tmp_path):
+        from strata.notebook import datasets
+        from strata.notebook.annotations import parse_annotations
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        seen: list[str | None] = []
+
+        def registry_for(config, tenant=None):
+            seen.append(tenant)
+            raise datasets.DatasetError("stop")
+
+        monkeypatch.setattr(datasets, "registry_for", registry_for)
+        nb = create_notebook(tmp_path / "nb", "Tenant")
+        add_cell_to_notebook(nb, "c1", None)
+        write_cell(nb, "c1", "# @dataset m acme/model\nx = m")
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.opened_by = ("alice", "acme")
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: None)
+        monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: None)
+        cell = session.notebook_state.get_cell("c1")
+
+        session._collect_dataset_fingerprints(cell)
+        await CellExecutor(session)._resolve_datasets(parse_annotations(cell.source).datasets)
+
+        assert seen == ["acme", "acme"]
 
 
 class TestReaders:

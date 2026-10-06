@@ -2079,6 +2079,7 @@ class NotebookSession:
             return []
         from strata.notebook import datasets
 
+        tenant = self.opened_by[1] if self.opened_by else None
         fingerprints: list[str] = []
         for spec in sorted(annotations.datasets, key=lambda s: s.name):
             checked = self._dataset_checks.get((spec.name, spec.reference))
@@ -2089,7 +2090,8 @@ class NotebookSession:
                 fingerprints.append(checked[1])
                 continue
             try:
-                fingerprint = datasets.registry_for(self._lake_config()).resolve(spec).fingerprint
+                registry = datasets.registry_for(self._lake_config(), tenant)
+                fingerprint = registry.resolve(spec).fingerprint
             except datasets.DatasetError:
                 fingerprint = datasets.unresolved_fingerprint(spec)
             self.remember_dataset_fingerprint(spec, fingerprint)

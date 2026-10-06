@@ -3459,12 +3459,13 @@ class CellExecutor:
         )
 
         store = self.session.get_artifact_manager().artifact_store
+        tenant = self.session.opened_by[1] if self.session.opened_by else None
         fingerprints: list[str] = []
         datasets: dict[str, DatasetInput] = {}
         error: str | None = None
         for spec in sorted(dataset_specs, key=lambda item: item.name):
             try:
-                registry = registry_for(self._lake_config())
+                registry = registry_for(self._lake_config(), tenant)
                 resolved = await asyncio.to_thread(registry.resolve, spec)
                 dataset = await asyncio.to_thread(copy_into, registry, resolved, store)
             except DatasetError as exc:
