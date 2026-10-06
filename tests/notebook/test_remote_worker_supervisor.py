@@ -29,9 +29,28 @@ _MISSING = "worker=\nuv=/usr/bin/uv\nplatform=Linux x86_64\nversion=\n"
 _NO_UV = "worker=\nuv=\nplatform=Linux x86_64\nversion=\n"
 
 
+class _BoxRunner(ScriptedSshRunner):
+    """A scripted runner whose pidfile names the launched worker until it is stopped."""
+
+    launched: str | None = None
+
+    def run(self, command, *, timeout=None, stdin_data=None):
+        result = super().run(command, timeout=timeout, stdin_data=stdin_data)
+        if "nohup strata-worker" in command:
+            port = command.split("--port ")[1].split()[0]
+            self.launched = f'{{"pid": {result.stdout.strip()}, "port": {port}}}'
+        elif "kill" in command and "kill -0" not in command:
+            self.launched = None
+        elif command.startswith("cat ") and self.launched:
+            return _ok(self.launched)
+        elif command.startswith("kill -0") and self.launched:
+            return _ok("up")
+        return result
+
+
 def _runner(detect: str = _INSTALLED):
     """A scripted SSH runner for a box that provisions and launches cleanly."""
-    return ScriptedSshRunner(
+    return _BoxRunner(
         [
             (lambda c: c == "true", _ok()),  # preflight
             (lambda c: "command -v strata-worker" in c, _ok(detect)),  # detect probe
@@ -117,6 +136,30 @@ def test_establish_health_failure_cleans_up():
         sup.establish("gpu", "user@box", health_timeout=0)
     assert launcher.handles[0].terminated == 1  # tunnel torn down on failure
     assert sup.get("gpu") is None  # not recorded
+
+
+@pytest.mark.parametrize(
+    "pidfile",
+    ["", '{"pid": 999, "port": 9000}'],
+    ids=["launched-worker-exited", "pidfile-names-another-pid"],
+)
+def test_establish_refuses_when_health_is_not_from_the_launched_worker(pidfile):
+    """Something else on the remote port answers /health; the token must not go to it."""
+    runner = ScriptedSshRunner(
+        [
+            (lambda c: c == "true", _ok()),
+            (lambda c: "command -v strata-worker" in c, _ok(_INSTALLED)),
+            (lambda c: c.startswith("cat "), _ok(pidfile)),
+            ("kill -0 ", _ok("up")),
+            (lambda c: "nohup strata-worker" in c, _ok("4321\n")),
+        ]
+    )
+    sup, launcher, _ = _supervisor(runner=runner)
+    with pytest.raises(SshWorkerError, match="pid 4321 is not running"):
+        sup.establish("gpu", "user@box")
+    assert launcher.handles[0].terminated == 1
+    assert sup.get("gpu") is None
+    assert sup.token_for("gpu") is None
 
 
 def test_establish_install_false_when_missing_raises():
@@ -269,7 +312,7 @@ def test_concurrent_establish_same_name_is_rejected():
     first_in_preflight = threading.Event()
     release_first = threading.Event()
 
-    class _BlockingRunner(ScriptedSshRunner):
+    class _BlockingRunner(_BoxRunner):
         def run(self, command, *, timeout=None, stdin_data=None):
             if command == "true":  # preflight: hold the first establish here
                 first_in_preflight.set()

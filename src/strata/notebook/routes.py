@@ -2370,6 +2370,7 @@ async def teardown_ssh_worker_endpoint(
     """Close a worker's SSH tunnel and remove its notebook registration."""
     import asyncio
 
+    from strata.notebook.ops import NotebookOpsError
     from strata.notebook.ssh_worker_service import teardown_ssh_worker
 
     supervisor = get_worker_supervisor()
@@ -2377,6 +2378,8 @@ async def teardown_ssh_worker_endpoint(
         existed = await asyncio.to_thread(
             teardown_ssh_worker, session, supervisor, worker_name, stop_remote=stop_remote
         )
+    except NotebookOpsError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     except NotebookQuiesced as exc:
         raise _quiesced_conflict(exc) from exc
     except Exception:
