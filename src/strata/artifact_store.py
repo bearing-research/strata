@@ -1904,8 +1904,19 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    @staticmethod
+    def _serialize_audit(self, conn: StoreConnection) -> None:
+        """On Postgres, hold the audit lock until commit, so ``seq`` order is commit order.
+
+        A ``BIGSERIAL`` is drawn at insert, so without it two writers can commit out of order and a
+        follower of ``read_events`` skips the earlier one for good. Take it before a transaction's
+        first write: waiting for it while holding a row lock can deadlock. SQLite already
+        serializes writers.
+        """
+        if self._dialect.name != "sqlite":
+            self._dialect.begin_write(conn, "registry_audit")
+
     def _audit_in_connection(
+        self,
         conn: StoreConnection,
         *,
         action: str,
@@ -1924,6 +1935,7 @@ class ArtifactStore:
 
         It commits or rolls back with the mutation it records.
         """
+        self._serialize_audit(conn)
         conn.execute(
             """
             INSERT INTO registry_audit
@@ -2513,6 +2525,7 @@ class ArtifactStore:
                 (name, effective_tenant),
             )
             previous = cursor.fetchone()
+            self._serialize_audit(conn)
             cursor = conn.execute(
                 "DELETE FROM artifact_names WHERE name = ? AND tenant = ?",
                 (name, effective_tenant),
@@ -3013,6 +3026,7 @@ class ArtifactStore:
                 (name, alias, effective_tenant),
             )
             previous = cursor.fetchone()
+            self._serialize_audit(conn)
             cursor = conn.execute(
                 "DELETE FROM artifact_aliases WHERE name = ? AND alias = ? AND tenant = ?",
                 (name, alias, effective_tenant),
@@ -3158,6 +3172,7 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             effective_tenant = tenant if tenant is not None else ""
+            self._serialize_audit(conn)
             cursor = conn.execute(
                 "DELETE FROM artifact_tags "
                 "WHERE artifact_id = ? AND version = ? AND key = ? AND tenant = ?",
@@ -3397,6 +3412,7 @@ class ArtifactStore:
                         "change or submit a new request"
                     )
 
+            self._serialize_audit(conn)
             conn.execute(
                 "DELETE FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
                 (name, alias, effective_tenant),
@@ -3495,6 +3511,7 @@ class ArtifactStore:
             pending = cursor.fetchone()
             if pending is None:
                 raise ValueError(f"No pending change for alias '{name}@{alias}'")
+            self._serialize_audit(conn)
             conn.execute(
                 "DELETE FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
                 (name, alias, effective_tenant),

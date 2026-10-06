@@ -958,6 +958,56 @@ class TestWriterSerialization:
         assert errors == []
         assert sorted(versions) == list(range(1, 9))
 
+    def test_an_events_follower_never_skips_an_event_that_commits_late(self, store):
+        """``seq`` is drawn at insert: a writer that inserts first and commits last was skipped.
+
+        The follower saw the later writer's event, advanced its cursor past the earlier ``seq``,
+        and never got the earlier event once it committed.
+        """
+        version = store.create_artifact("m1", "prov-m1", _spec())
+        store.finalize_artifact("m1", version, "{}", row_count=0, byte_size=0)
+
+        inserted, release = threading.Event(), threading.Event()
+
+        def slow_writer() -> None:
+            # Its own thread: connections are shared per thread, so a commit elsewhere on this
+            # thread would commit this insert too.
+            conn = store._get_connection()
+            try:
+                store._audit_in_connection(conn, action="name_set", name="slow")
+                inserted.set()
+                release.wait()
+                conn.commit()
+            finally:
+                conn.close()
+
+        slow = threading.Thread(target=slow_writer)
+        slow.start()
+        inserted.wait()
+        tagging = threading.Thread(target=store.set_tag, args=("m1", version, "k", "v"))
+        tagging.start()
+        probe = store._get_connection()
+        try:
+            # Until the tag writer waits behind the slow one (or, unserialized, has committed).
+            while tagging.is_alive():
+                row = probe.execute(
+                    "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                ).fetchone()
+                probe.commit()
+                if row["n"]:
+                    break
+                tagging.join(timeout=0.05)
+        finally:
+            probe.close()
+        seen = store.read_events()
+        cursor = seen[-1]["seq"] if seen else 0
+        release.set()
+        slow.join()
+        tagging.join()
+
+        later = store.read_events(since=cursor)
+        assert sorted(e["action"] for e in seen + later) == ["name_set", "tag_set"]
+
     def test_duplicate_provenance_finalize_is_idempotent(self, store):
         # Exercises the dialect's integrity_error: the partial unique index on
         # (tenant, provenance_hash) rejects the second ready row, and the store
