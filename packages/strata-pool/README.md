@@ -186,9 +186,15 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `GET /health` | Outside the token check, for load balancers |
 
 Both job submit routes take their options as query parameters: `machine_type`
-(required), `priority` (default 0, higher runs first), `session_id` and
-`timeout_seconds` (both optional). `POST /v1/jobs/sync` also takes
-`wait_seconds` (default 300), which bounds the wait and not the job.
+(required), `priority` (default 0, higher runs first; a 64-bit integer), `session_id` and
+`timeout_seconds` (both optional). `timeout_seconds` can shorten the machine type's
+`job_timeout_seconds` but not extend it. `POST /v1/jobs/sync` also takes
+`wait_seconds` (default 300), which bounds the wait and not the job, and is cut to
+the type's `boot_timeout_seconds` plus `job_timeout_seconds`. Both times must be
+positive and finite; anything else is a 422 and no job is queued.
+
+`PUT /v1/machine-types` checks each field's type before storing anything: a
+number sent as a string, an unknown key or a non-finite number is a 400.
 
 Replacing the catalogue needs the **admin token**. A catalogue entry decides
 which image receives a tenant's jobs, and with them the signed URLs for that

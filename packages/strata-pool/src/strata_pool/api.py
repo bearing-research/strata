@@ -12,6 +12,7 @@ from typing import Annotated
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from strata_pool.pool import Pool
 from strata_pool.types import TERMINAL_JOB_STATES, Job, JobState, MachineType, UsageEvent, Worker
@@ -20,6 +21,12 @@ logger = logging.getLogger(__name__)
 
 TENANT_HEADER = "X-Strata-Tenant"
 REDACTED = "<redacted>"
+
+# Strict: a string "300" stored as a timeout breaks every later scaler pass.
+_CATALOGUE = TypeAdapter(list[MachineType], config=ConfigDict(extra="forbid", allow_inf_nan=False))
+# Stored in a SQLite INTEGER column.
+Priority = Annotated[int, Query(ge=-(2**63), le=2**63 - 1)]
+PositiveSeconds = Annotated[float, Query(gt=0, allow_inf_nan=False)]
 
 
 def _job_json(job: Job) -> dict:
@@ -145,9 +152,9 @@ def create_app(
         request: Request,
         machine_type: str,
         tenant_id: Annotated[str, Depends(tenant)],
-        priority: int = 0,
+        priority: Priority = 0,
         session_id: str | None = None,
-        timeout_seconds: float | None = None,
+        timeout_seconds: PositiveSeconds | None = None,
     ) -> JSONResponse:
         """Queue a job. The request body is the payload, verbatim."""
         job = await _submit(
@@ -167,10 +174,10 @@ def create_app(
         request: Request,
         machine_type: str,
         tenant_id: Annotated[str, Depends(tenant)],
-        priority: int = 0,
+        priority: Priority = 0,
         session_id: str | None = None,
-        timeout_seconds: float | None = None,
-        wait_seconds: float = 300.0,
+        timeout_seconds: PositiveSeconds | None = None,
+        wait_seconds: PositiveSeconds = 300.0,
     ) -> Response:
         """Queue a job and block until it finishes.
 
@@ -187,6 +194,10 @@ def create_app(
             timeout_seconds=timeout_seconds,
             trace_context=_trace_context(request),
         )
+        spec = pool.machine_types.get(machine_type)
+        if spec is not None:
+            # The job cannot outlast its boot and run timeouts, so neither need the wait.
+            wait_seconds = min(wait_seconds, spec.boot_timeout_seconds + spec.job_timeout_seconds)
         try:
             done = await pool.wait(job.id, timeout=wait_seconds)
         except TimeoutError:
@@ -256,13 +267,16 @@ def create_app(
         pool process over the same store applies it on its next submit or
         scaler pass.
         """
-        body = await request.json()
-        if not isinstance(body, list):
-            raise HTTPException(status_code=400, detail="expected a list of machine types")
         try:
-            specs = [MachineType(**entry) for entry in body]
-        except TypeError as exc:
-            raise HTTPException(status_code=400, detail=f"invalid machine type: {exc}") from exc
+            specs = _CATALOGUE.validate_json(await request.body(), strict=True)
+        except ValidationError as exc:
+            problems = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                for error in exc.errors()
+            )
+            raise HTTPException(
+                status_code=400, detail=f"invalid machine types: {problems}"
+            ) from exc
         names = [spec.name for spec in specs]
         if len(set(names)) != len(names):
             raise HTTPException(status_code=400, detail="machine type names must be unique")

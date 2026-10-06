@@ -202,7 +202,7 @@ class Job:
     session_id: str | None = None
     worker_id: str | None = None
     timeout_seconds: float | None = None
-    """Overrides the machine type's job timeout when set."""
+    """Shortens the machine type's job timeout when set; it cannot extend it."""
 
     result: bytes | None = None
     error: str | None = None

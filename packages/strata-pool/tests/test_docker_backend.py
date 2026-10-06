@@ -114,6 +114,10 @@ async def test_an_image_that_publishes_nothing_says_so():
     with pytest.raises(DockerError, match="published no host port"):
         await _backend(daemon).start(_spec())
 
+    # The pool forgets a worker whose start failed, so a running container would leak.
+    assert "/containers/c0ffee/stop" in [r.url.path for r in daemon.requests]
+    assert ("DELETE", "/containers/c0ffee") in [(r.method, r.url.path) for r in daemon.requests]
+
 
 async def test_a_missing_image_surfaces_the_daemons_own_message():
     daemon = FakeDaemon(

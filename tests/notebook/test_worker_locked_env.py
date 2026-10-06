@@ -452,6 +452,31 @@ class TestTheWorkerSide:
         with pytest.raises(worker_env.WorkerEnvironmentError, match=f"{message}.*timed out"):
             step(tmp_path)
 
+    @pytest.mark.parametrize("language", ["python", "r"])
+    def test_waiting_out_another_cells_build_is_an_environment_error(
+        self, tmp_path, monkeypatch, language
+    ):
+        """The worker answers env errors with a body; a bare lock Timeout was a framework 500."""
+        import hashlib
+
+        import filelock
+
+        monkeypatch.setenv(worker_env.ENV_ROOT_VAR, str(tmp_path / "envs"))
+        monkeypatch.setattr(worker_env, "INSTALL_TIMEOUT_SECONDS", 0.01)
+        monkeypatch.setattr(worker_env, "_interpreter", lambda python: (Path("py"), "build"))
+        monkeypatch.setattr(worker_env, "_r_build", lambda rscript: "build")
+        spec = {"key": "k", "python": "", "lockfile": "{}", "pyproject": ""}
+        root = worker_env.env_root() / (worker_env.R_DIR if language == "r" else "")
+        root.mkdir(parents=True)
+        directory_key = hashlib.sha256(b"k\nbuild").hexdigest()[:32]
+
+        with filelock.FileLock(str(root / f"{directory_key}.lock")):
+            with pytest.raises(worker_env.WorkerEnvironmentError, match="still building"):
+                if language == "r":
+                    worker_env._prepare_r(spec, "Rscript")
+                else:
+                    worker_env._prepare(spec)
+
 
 class TestAnEnvironmentIsCompleteWhenItRuns:
     """The marker lets a worker reuse a directory without installing, so an archive with no

@@ -506,8 +506,11 @@ class Pool:
     async def _execute(self, worker: Worker, job: Job) -> None:
         """Forward the payload to the worker and record what came back."""
         spec = self.machine_types[job.machine_type]
+        # A job may shorten its type's timeout, never extend it past what the operator set.
         timeout = (
-            job.timeout_seconds if job.timeout_seconds is not None else spec.job_timeout_seconds
+            min(job.timeout_seconds, spec.job_timeout_seconds)
+            if job.timeout_seconds is not None
+            else spec.job_timeout_seconds
         )
 
         # Another process may have reclaimed this job after this one stalled past its lease,

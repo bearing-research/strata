@@ -244,6 +244,16 @@ class RemoteWorkerSupervisor:
                 f"{name}: tunnel opened but the worker's /health didn't respond on "
                 f"127.0.0.1:{lport} within {health_timeout}s"
             )
+        # Another listener already on the remote port would answer /health and then
+        # receive the bearer token; our worker would have exited on the bind failure.
+        live = worker.is_running()
+        if live is None or live.pid != running.pid:
+            handle.terminate()
+            raise SshWorkerError(
+                f"{name}: /health answered on remote port {running.port}, but the worker "
+                f"launched as pid {running.pid} is not running; another process may hold "
+                f"that port (see ~/.strata/worker-{name}.log on the box)"
+            )
 
         record = TunnelRecord(
             name=name,
