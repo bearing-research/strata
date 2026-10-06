@@ -5193,6 +5193,12 @@ class CellExecutor:
         # var -> (blob, content_type), captured each iteration (the tmpdir dies with the
         # ``with`` block); the last capture is the final state.
         extra_blobs: dict[str, tuple[bytes, str]] = {}
+        # An in-place update (``state["i"] += 1``) keeps the carry's id(), so the harness
+        # serializes it only when it is listed as mutated.
+        loop_cell = self.session.notebook_state.get_cell(cell_id)
+        mutation_defines = sorted(
+            {loop.carry, *(loop_cell.mutation_defines if loop_cell is not None else [])}
+        )
 
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
@@ -5228,6 +5234,7 @@ class CellExecutor:
                     output_dir,
                     runtime_env,
                     resolved_mounts,
+                    mutation_defines=mutation_defines,
                     loop_config=loop_config,
                     cell_id=cell_id,
                 )
@@ -5256,15 +5263,37 @@ class CellExecutor:
                 final_result = result
 
                 if not result.get("success", False):
-                    error_msg = result.get("error", "Unknown error")
+                    traceback_text = result.get("traceback") or None
+                    # ``str()`` of a bare ``assert`` is empty; the traceback's last line is not.
+                    error_msg = result.get("error") or (
+                        traceback_text.strip().splitlines()[-1]
+                        if traceback_text
+                        else "Unknown error"
+                    )
                     duration_ms = (time.time() - start_time) * 1000
                     return CellExecutionResult(
                         cell_id=cell_id,
                         success=False,
                         error=f"Loop cell iter {k} failed: {error_msg}",
+                        traceback=traceback_text,
                         stdout="\n".join(combined_stdout),
                         stderr="\n".join(combined_stderr),
                         duration_ms=duration_ms,
+                        execution_method="loop",
+                        mutation_warnings=all_mutation_warnings,
+                    )
+
+                loop_state = result.get("loop") or {}
+                if loop_state.get("error"):
+                    # A predicate that cannot be evaluated would otherwise run every iteration and
+                    # report success.
+                    return CellExecutionResult(
+                        cell_id=cell_id,
+                        success=False,
+                        error=f"Loop cell iter {k}: {loop_state['error']}",
+                        stdout="\n".join(combined_stdout),
+                        stderr="\n".join(combined_stderr),
+                        duration_ms=(time.time() - start_time) * 1000,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
                     )
@@ -5345,7 +5374,6 @@ class CellExecutor:
                 carry_blob = new_carry_blob
                 carry_content_type = new_content_type
 
-                loop_state = result.get("loop") or {}
                 iter_duration_ms = (time.time() - start_time) * 1000
                 if self.on_iteration_complete is not None:
                     try:

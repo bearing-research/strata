@@ -879,7 +879,7 @@ After execution, `state` holds the final iteration's value and every intermediat
 | Directive            | What it does                                                                                                                                         |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `# @loop max_iter=N` | Hard cap on iterations. Required: it is the safety bound on the loop.                                                                               |
-| `# @loop carry=VAR`  | The variable threaded between iterations. Required. Must be re-bound by the cell body each iteration, and seeded by an upstream cell on iteration 0. |
+| `# @loop carry=VAR`  | The variable threaded between iterations. Required. Must be re-bound (or updated in place) by the cell body each iteration, and seeded by an upstream cell on iteration 0. |
 
 These can be on the same line: `# @loop max_iter=40 carry=state`.
 

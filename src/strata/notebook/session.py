@@ -616,6 +616,16 @@ class NotebookSession:
                 if loop is not None and loop.carry and loop.start_from_cell is not None
                 else None
             )
+            if loop is not None and loop.until_expr:
+                # The predicate runs in the cell's namespace: a name the body doesn't bind
+                # (a tolerance set upstream) is an input like any other.
+                from strata.notebook.analyzer import analyze_cell
+
+                references = references + [
+                    name
+                    for name in analyze_cell(loop.until_expr).references
+                    if name not in defines and name not in references
+                ]
 
             variant_group = annotations.variant.group if annotations.variant is not None else None
             variant_name = annotations.variant.name if annotations.variant is not None else None
