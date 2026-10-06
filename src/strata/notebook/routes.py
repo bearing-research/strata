@@ -345,9 +345,18 @@ def _validate_notebook_path(
 
 def _safe_filename(name: str) -> str:
     """Sanitize a string for use in Content-Disposition."""
-    safe = re.sub(r"[^\w\s.-]", "", name)
+    # ASCII only: Starlette encodes headers as latin-1, so a CJK name would 500.
+    safe = re.sub(r"[^\w\s.-]", "", name, flags=re.ASCII)
     safe = re.sub(r"\s+", "_", safe).strip("_") or "notebook"
     return safe
+
+
+def _attachment(stem: str, suffix: str) -> str:
+    """``Content-Disposition`` for ``stem + suffix``: an ASCII name plus the RFC 5987 original."""
+    from urllib.parse import quote
+
+    original = quote(f"{stem}{suffix}", safe="")
+    return f"attachment; filename=\"{_safe_filename(stem)}{suffix}\"; filename*=UTF-8''{original}"
 
 
 def validate_env_vars(env: dict[str, str]) -> dict[str, str]:
@@ -1817,10 +1826,11 @@ async def export_environment_requirements(
 ) -> PlainTextResponse:
     """Export direct notebook dependencies as ``requirements.txt`` text."""
 
-    filename = f"{_safe_filename(session.notebook_state.name)}-requirements.txt"
     return PlainTextResponse(
         export_requirements_text(session.path),
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": _attachment(session.notebook_state.name, "-requirements.txt")
+        },
     )
 
 
@@ -3200,11 +3210,10 @@ async def export_cell_data(
         raise HTTPException(status_code=400, detail="Output is not an exportable table")
 
     media_type = "text/csv" if fmt == "csv" else "application/vnd.apache.parquet"
-    filename = f"{cell_id}.{fmt}"
     return Response(
         content=data,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _attachment(cell_id, f".{fmt}")},
     )
 
 
@@ -3544,9 +3553,7 @@ def _render_notebook_export(
     return Response(
         content=body,
         media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}.{extension}"',
-        },
+        headers={"Content-Disposition": _attachment(safe_name, f".{extension}")},
     )
 
 
@@ -3627,9 +3634,12 @@ async def export_notebook(
 
     buf.seek(0)
     suffix = "snapshot.zip" if fmt == "snapshot" else "zip"
-    filename = f"{_safe_filename(session.notebook_state.name or 'notebook')}.{suffix}"
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": _attachment(
+                session.notebook_state.name or "notebook", f".{suffix}"
+            )
+        },
     )

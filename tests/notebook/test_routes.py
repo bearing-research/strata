@@ -2049,6 +2049,33 @@ def test_export_endpoint_html_format(client, tmp_path):
     assert ".html" in resp.headers["content-disposition"]
 
 
+@pytest.mark.parametrize(
+    ("path", "suffix"),
+    [
+        ("export", ".zip"),
+        ("export?fmt=snapshot&include=none", ".snapshot.zip"),
+        ("export?fmt=markdown", ".md"),
+        ("environment/requirements.txt", "-requirements.txt"),
+    ],
+)
+def test_a_non_latin_1_notebook_name_downloads_under_an_ascii_name(client, tmp_path, path, suffix):
+    """Headers go out as latin-1, so the raw name 500s; the original rides in ``filename*``."""
+    from urllib.parse import unquote
+
+    notebook_dir = create_notebook(tmp_path, "分析 notebook", initialize_environment=False)
+    nb_id = open_session_id(client, notebook_dir)
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/{path}")
+
+    assert resp.status_code == 200, resp.text
+    disposition = resp.headers["content-disposition"]
+    ascii_name, _, encoded = disposition.partition("; filename*=UTF-8''")
+    assert ascii_name.startswith('attachment; filename="')
+    assert ascii_name.endswith(f'{suffix}"')
+    assert ascii_name.isascii()
+    assert unquote(encoded).startswith("分析") and unquote(encoded).endswith(suffix)
+
+
 def test_export_endpoint_rejects_unknown_format(client, tmp_path):
     notebook_dir = create_notebook(tmp_path, "ExportBadFmt", initialize_environment=False)
     nb_id = open_session_id(client, notebook_dir)
