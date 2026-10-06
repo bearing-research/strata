@@ -1368,6 +1368,46 @@ class Person:
         assert metadata["cell_provenance_hash"] != artifact.provenance_hash
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("cell_timeout", "floor", "expected"),
+        [(3600.0, 600.0, 3600.0 + 600.0 + 300.0), (30.0, 7200.0, 7200.0)],
+        ids=["outlives-a-long-cell", "setting-is-a-floor"],
+    )
+    async def test_signed_urls_outlive_provisioning_and_the_cell_timeout(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+        cell_timeout,
+        floor,
+        expected,
+    ):
+        """A cell that runs past signed_url_expiry_seconds must still upload and finalize."""
+        import strata.server as server_module
+
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        config = notebook_build_server["config"]
+        monkeypatch.setattr(config, "signed_url_expiry_seconds", floor)
+        monkeypatch.setattr(config, "worker_provisioning_timeout_seconds", 600.0)
+        signer = server_module._state.url_signer
+        real = signer.generate_build_manifest
+        expiries: list[float] = []
+
+        def _capturing(*args, **kwargs):
+            expiries.append(kwargs["url_expiry_seconds"])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(signer, "generate_build_manifest", _capturing)
+
+        result = await CellExecutor(sample_notebook).execute_cell(
+            "cell1", "x = 1", timeout_seconds=cell_timeout
+        )
+
+        assert result.success, result.error
+        assert expiries == [expected]
+
+    @pytest.mark.asyncio
     async def test_the_signed_manifest_is_built_off_the_event_loop(
         self,
         sample_notebook,
