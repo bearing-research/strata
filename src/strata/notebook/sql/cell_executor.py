@@ -884,7 +884,9 @@ def _load_upstream_variables(
         )
         if upstream_cell is None:
             continue
-        for var_name in upstream_cell.defines:
+        # Only the names wired from this upstream: an earlier definer of a shadowed name
+        # must not bind in place of its real producer.
+        for var_name in sorted(session.wired_variables(cell_id, upstream_id)):
             if var_name not in references_set:
                 continue
             canonical_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"

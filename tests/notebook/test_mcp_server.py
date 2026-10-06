@@ -626,6 +626,28 @@ class TestResolvingAnOutput:
         with pytest.raises(ValueError, match="Stored: x"):
             _cell_output(sm, session_id, "a", "not_a_variable")
 
+    def test_the_console_record_is_not_listed_as_an_output(self, sm_with_session):
+        """A leaf's ``__console__`` record is not a variable: the error and the run report's
+        digests leave it out.
+        """
+        from strata.notebook.mcp_server import _cell_output
+
+        sm, session_id, _ = sm_with_session
+        manager = sm._sessions[session_id].get_artifact_manager()
+        manager.store_cell_output(
+            cell_id="a",
+            variable_name="__console__",
+            blob_data=b'{"stdout": "", "stderr": ""}',
+            content_type="json/object",
+            provenance_hash="c1" * 32,
+            input_versions={},
+            source="x = 1",
+        )
+
+        with pytest.raises(ValueError, match="Stored: none"):
+            _cell_output(sm, session_id, "a", "not_a_variable")
+        assert manager.cell_output_digests("a") == []
+
 
 class TestLineage:
     def test_it_reports_the_chain_with_the_code_each_step_ran(self, sm_with_a_stored_output):

@@ -610,10 +610,13 @@ def _cell_output(session_manager: SessionManager, session_id: str, cell_id: str,
     for name, artifact in manager.list_cell_artifacts(cell_id):
         if name == variable:
             return manager.artifact_store, artifact
-    stored = sorted(name for name, _ in manager.list_cell_artifacts(cell_id))
+    # ``__console__`` / ``__display__N`` are the cell's records, not variables it defined.
+    stored = sorted(
+        name for name, _ in manager.list_cell_artifacts(cell_id) if not name.startswith("__")
+    )
     raise ValueError(
         f"Cell {cell_id} has no stored output named {variable!r}. "
-        f"Stored: {', '.join(stored) or 'none'} — only variables a downstream "
+        f"Stored: {', '.join(stored) or 'none'}. Only variables a downstream "
         f"cell reads are kept as artifacts."
     )
 

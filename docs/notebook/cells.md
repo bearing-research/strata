@@ -879,7 +879,7 @@ After execution, `state` holds the final iteration's value and every intermediat
 | Directive            | What it does                                                                                                                                         |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `# @loop max_iter=N` | Hard cap on iterations. Required: it is the safety bound on the loop.                                                                               |
-| `# @loop carry=VAR`  | The variable threaded between iterations. Required. Must be re-bound by the cell body each iteration, and seeded by an upstream cell on iteration 0. |
+| `# @loop carry=VAR`  | The variable threaded between iterations. Required. Must be re-bound (or updated in place) by the cell body each iteration, and seeded by an upstream cell on iteration 0. |
 
 These can be on the same line: `# @loop max_iter=40 carry=state`.
 
@@ -930,7 +930,9 @@ happens if you push harder from that exact state with a different step size.
    iterations as its own artifact chain. The original run stays untouched.
 
 You now have two parallel forks materialized in the artifact store. Either
-one can be forked further, and the inspect panel shows both chains.
+one can be forked further, and the inspect panel shows both chains. The fork
+is downstream of the cell it starts from: when that cell's result changes, the
+fork and everything reading it run again.
 
 This is the escape hatch for "that intermediate state looked promising, let
 me explore from there": the thing that's hard to do in a plain for-loop

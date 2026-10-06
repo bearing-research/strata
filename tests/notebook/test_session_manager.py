@@ -122,6 +122,31 @@ def test_cold_open_restores_a_leaf_whose_only_product_is_stdout(tmp_path: Path):
     assert LocalNotebookOps(notebook_dir).get_cell("c2").status == "ready"
 
 
+def test_cold_open_restores_a_leaf_only_ever_rerun(tmp_path: Path):
+    """A rerun (also what ``strata run --force`` does) records the leaf's console, so a leaf
+    that never had a plain run still reads ready on a cold open.
+    """
+    notebook_dir = create_notebook(tmp_path, "cold_open_rerun_leaf")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "print('hi')")
+
+    manager = SessionManager()
+    session = manager.open_notebook(notebook_dir)
+
+    from strata.notebook.executor import CellExecutor
+
+    async def _prime() -> None:
+        assert (await CellExecutor(session).execute_cell_rerun("c1", "print('hi')")).success
+
+    asyncio.run(_prime())
+    manager.close_session(session.id)
+
+    reopened = SessionManager().open_notebook(notebook_dir)
+    leaf = reopened.notebook_state.cells[0]
+    assert leaf.status == "ready"
+    assert leaf.console_stdout == "hi\n"
+
+
 def test_cold_open_restores_a_silent_leaf(tmp_path: Path):
     """A leaf that stores no variable and prints nothing still ran; its empty console is the
     record of that run, and a cold open must find it.

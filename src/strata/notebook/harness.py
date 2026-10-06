@@ -317,8 +317,7 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
     """Evaluate ``@loop_until`` in the cell namespace.
 
     Returns ``until_reached`` (bool) and, if compiling or evaluating fails, an
-    ``error`` message. A failure does not abort the cell; it surfaces as a
-    termination signal.
+    ``error`` message, which the parent reports as the cell's failure.
     """
     try:
         code = compile(expr, "<loop_until>", "eval")

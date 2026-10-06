@@ -608,3 +608,71 @@ class TestWhatAReopenedPromptCellRestsOn:
         with_other = self._identity(tmp_path, source, '[ai]\nmodel = "claude-opus-5"\n')
 
         assert with_one != with_other
+
+
+class TestUpstreamScalars:
+    """An upstream scalar stored as a one-row Arrow table renders as the scalar."""
+
+    @staticmethod
+    def _round_trip(tmp_path, value):
+        from strata.notebook.prompt_executor import _parse_output
+        from strata.notebook.serializer import serialize_value
+
+        meta = serialize_value(value, tmp_path, "v")
+        assert meta["content_type"] == "arrow/ipc"
+        return _parse_output((tmp_path / meta["file"]).read_bytes(), meta["content_type"])
+
+    @pytest.mark.parametrize(
+        ("value", "text"),
+        [
+            ("float64", "3.5"),
+            ("int64", "7"),
+            ("decimal", "1.50"),
+            ("datetime", "2026-10-06 12:30:00"),
+        ],
+    )
+    def test_a_scalar_renders_as_itself(self, tmp_path, value, text):
+        import datetime
+        from decimal import Decimal
+
+        import numpy as np
+
+        from strata.notebook.llm.prompts import render_prompt_template
+
+        values = {
+            "float64": np.float64(3.5),
+            "int64": np.int64(7),
+            "decimal": Decimal("1.50"),
+            "datetime": datetime.datetime(2026, 10, 6, 12, 30),
+        }
+        parsed = self._round_trip(tmp_path, values[value])
+        assert render_prompt_template("x={{ v }}", {"v": parsed}) == f"x={text}"
+
+    def test_a_table_still_renders_as_a_table(self, tmp_path):
+        import pyarrow as pa
+
+        parsed = self._round_trip(tmp_path, pa.table({"a": [1, 2]}))
+        assert list(parsed["a"]) == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_timeout_names_itself(tmp_path):
+    """``str(httpx.ReadTimeout(""))`` is empty; the error still says what failed."""
+    import httpx
+
+    from strata.notebook.llm import LlmConfig
+    from strata.notebook.prompt_executor import execute_prompt_cell
+
+    session = _prompt_session(tmp_path, "Tell me something.")
+
+    async def timing_out(config, messages, **kwargs):
+        raise httpx.ReadTimeout("")
+
+    cfg = LlmConfig(base_url="https://api.openai.com/v1", api_key="sk", model="m")
+    with mock.patch("strata.notebook.prompt_executor.chat_completion", timing_out):
+        result = await execute_prompt_cell(
+            session, "p1", session.notebook_state.cells[0].source, cfg
+        )
+
+    assert result["success"] is False
+    assert result["error"] == "LLM call failed: ReadTimeout"

@@ -1139,10 +1139,10 @@ class CellExecutor:
             if fanout_variant is not None:
                 provenance_hash = derive_subkey(provenance_hash, f"variant={fanout_variant}")
 
-            # RW mounts have side effects: not cacheable.
-            if prov.has_rw_mount:
-                use_cache = False
-            if prov.annotations.nocache:
+            # RW mounts have side effects: not cacheable. A rerun bypasses the cache but still
+            # records a cacheable leaf's console, or the next plain run replays an older one.
+            cacheable = not prov.has_rw_mount and not prov.annotations.nocache
+            if not cacheable:
                 use_cache = False
 
             worker_spec = resolve_worker_spec(
@@ -1391,7 +1391,9 @@ class CellExecutor:
                 cell_id,
                 consumed_vars,
                 use_cache,
-                cached_artifact is not None or bool(cached_display_outputs),
+                cached_artifact is not None
+                or bool(cached_display_outputs)
+                or cached_console is not None,
             )
 
             if cached_artifact is not None or (
@@ -1597,7 +1599,7 @@ class CellExecutor:
                             exec_result.display_outputs[-1] if exec_result.display_outputs else None
                         )
                         # Cache a leaf cell's console by provenance so a re-run replays it.
-                        if use_cache and not consumed_vars:
+                        if cacheable and not consumed_vars:
                             self._store_console_outputs(
                                 cell_id,
                                 provenance_hash,
@@ -4212,11 +4214,11 @@ class CellExecutor:
                 continue
 
             # builtin_references holds builtin-shadowing names (``input``) the display-facing
-            # list filters out; the upstream-defines intersect gates them too.
+            # list filters out. Only names wired from this upstream load, so a shadowed earlier
+            # definer never overwrites the real producer's value.
+            wired = self.session.wired_variables(cell_id, upstream_id)
             referenced_vars = [
-                v
-                for v in (*cell.references, *cell.builtin_references)
-                if v in upstream_cell.defines
+                v for v in (*cell.references, *cell.builtin_references) if v in wired
             ]
 
             for var_name in referenced_vars:
@@ -5017,28 +5019,36 @@ class CellExecutor:
         self,
         cell_id: str,
         loop: LoopAnnotation,
-        carry_var_provenance: str,
+        cell_provenance: str,
         start_time: float,
     ) -> CellExecutionResult | None:
         """The loop's own result from a previous identical run, or None.
 
-        A hit needs the provenance in the store and the cell's canonical artifact
-        to be that row, so it is this cell's result, not a duplicate.
+        A hit needs the carry and every consumed variable to be the cell's canonical
+        rows under this provenance: a duplicate's row is not this cell's result, and
+        an output read only since the last run was never stored.
         """
         artifact_mgr = self.session.get_artifact_manager()
-        if artifact_mgr.find_cached(carry_var_provenance) is None:
+        if artifact_mgr.find_cached(derive_subkey(cell_provenance, loop.carry)) is None:
             return None
+        consumed_vars = (
+            self.session.dag.consumed_variables.get(cell_id, set()) if self.session.dag else set()
+        )
         notebook_id = self.session.notebook_state.id
-        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{loop.carry}"
-        canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-        if canonical is None or canonical.provenance_hash != carry_var_provenance:
-            return None
-        uri = f"strata://artifact/{canonical.id}@v={canonical.version}"
+        uris: dict[str, str] = {}
+        for var_name in sorted({loop.carry, *consumed_vars}):
+            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+            canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+            if canonical is None or canonical.provenance_hash != derive_subkey(
+                cell_provenance, var_name
+            ):
+                return None
+            uris[var_name] = f"strata://artifact/{canonical.id}@v={canonical.version}"
+        uri = uris[loop.carry]
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is not None:
             cell.cache_hit = True
-            cell.artifact_uris[loop.carry] = uri
-            cell.artifact_uri = uri
+        self._set_loop_artifact_uris(cell_id, uri, consumed_vars, uris)
         result = CellExecutionResult(
             cell_id=cell_id,
             success=True,
@@ -5050,6 +5060,22 @@ class CellExecutor:
         )
         self.session.apply_execution_result_metadata(cell_id, result)
         return result
+
+    def _set_loop_artifact_uris(
+        self,
+        cell_id: str,
+        carry_uri: str,
+        consumed_vars: set[str],
+        uris: dict[str, str],
+    ) -> None:
+        """Record a loop's outputs on the cell the way ``_store_outputs`` does: consumed only."""
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            return
+        for var_name, uri in uris.items():
+            if var_name in consumed_vars:
+                cell.artifact_uris[var_name] = uri
+        cell.artifact_uri = carry_uri
 
     async def _execute_loop_cell(
         self,
@@ -5142,7 +5168,7 @@ class CellExecutor:
         source_hash = prov.source_hash
         carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
         if use_cache:
-            cached = self._cached_loop_result(cell_id, loop, carry_var_provenance, start_time)
+            cached = self._cached_loop_result(cell_id, loop, cell_provenance, start_time)
             if cached is not None:
                 return cached
 
@@ -5167,6 +5193,12 @@ class CellExecutor:
         # var -> (blob, content_type), captured each iteration (the tmpdir dies with the
         # ``with`` block); the last capture is the final state.
         extra_blobs: dict[str, tuple[bytes, str]] = {}
+        # An in-place update (``state["i"] += 1``) keeps the carry's id(), so the harness
+        # serializes it only when it is listed as mutated.
+        loop_cell = self.session.notebook_state.get_cell(cell_id)
+        mutation_defines = sorted(
+            {loop.carry, *(loop_cell.mutation_defines if loop_cell is not None else [])}
+        )
 
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
@@ -5202,6 +5234,7 @@ class CellExecutor:
                     output_dir,
                     runtime_env,
                     resolved_mounts,
+                    mutation_defines=mutation_defines,
                     loop_config=loop_config,
                     cell_id=cell_id,
                 )
@@ -5230,15 +5263,37 @@ class CellExecutor:
                 final_result = result
 
                 if not result.get("success", False):
-                    error_msg = result.get("error", "Unknown error")
+                    traceback_text = result.get("traceback") or None
+                    # ``str()`` of a bare ``assert`` is empty; the traceback's last line is not.
+                    error_msg = result.get("error") or (
+                        traceback_text.strip().splitlines()[-1]
+                        if traceback_text
+                        else "Unknown error"
+                    )
                     duration_ms = (time.time() - start_time) * 1000
                     return CellExecutionResult(
                         cell_id=cell_id,
                         success=False,
                         error=f"Loop cell iter {k} failed: {error_msg}",
+                        traceback=traceback_text,
                         stdout="\n".join(combined_stdout),
                         stderr="\n".join(combined_stderr),
                         duration_ms=duration_ms,
+                        execution_method="loop",
+                        mutation_warnings=all_mutation_warnings,
+                    )
+
+                loop_state = result.get("loop") or {}
+                if loop_state.get("error"):
+                    # A predicate that cannot be evaluated would otherwise run every iteration and
+                    # report success.
+                    return CellExecutionResult(
+                        cell_id=cell_id,
+                        success=False,
+                        error=f"Loop cell iter {k}: {loop_state['error']}",
+                        stdout="\n".join(combined_stdout),
+                        stderr="\n".join(combined_stderr),
+                        duration_ms=(time.time() - start_time) * 1000,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
                     )
@@ -5319,7 +5374,6 @@ class CellExecutor:
                 carry_blob = new_carry_blob
                 carry_content_type = new_content_type
 
-                loop_state = result.get("loop") or {}
                 iter_duration_ms = (time.time() - start_time) * 1000
                 if self.on_iteration_complete is not None:
                     try:
@@ -5409,8 +5463,19 @@ class CellExecutor:
                 ),
             }
 
-        canonical_artifact = artifact_mgr.finalize_cell_outputs(staged)[0]
+        stored = artifact_mgr.finalize_cell_outputs(staged)
+        canonical_artifact = stored[0]
         canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
+        # Downstream provenance hashes these, as for any other cell's consumed outputs.
+        self._set_loop_artifact_uris(
+            cell_id,
+            canonical_uri,
+            consumed_vars,
+            {
+                name: f"strata://artifact/{artifact.id}@v={artifact.version}"
+                for name, artifact in zip([loop.carry, *extra_outputs], stored, strict=True)
+            },
+        )
 
         # Lets ``compute_staleness`` hit the "uncached ready" path for leaf loop cells.
         self.session.record_successful_execution_provenance(
@@ -5485,7 +5550,9 @@ class CellExecutor:
         notebook_id = self.session.notebook_state.id
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
-            if upstream_cell is None or loop.carry not in upstream_cell.defines:
+            if upstream_cell is None or loop.carry not in self.session.wired_variables(
+                cell_id, upstream_id
+            ):
                 continue
             upstream_artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{loop.carry}"
             artifact = artifact_mgr.artifact_store.get_latest_version(upstream_artifact_id)
@@ -5886,7 +5953,6 @@ class CellExecutor:
                         payload,
                         batch_tmpdir,
                         executed_sources=executed_sources,
-                        use_cache=use_cache,
                     )
                 )
                 cell_id_pl = payload["cell_id"]
@@ -5992,8 +6058,9 @@ class CellExecutor:
                 upstream_cell = self.session.notebook_state.get_cell(upstream_id)
                 if upstream_cell is None:
                     continue
+                wired = self.session.wired_variables(cell_id, upstream_id)
                 for var_name, uri in upstream_cell.artifact_uris.items():
-                    if var_name in inputs:
+                    if var_name in inputs or var_name not in wired:
                         continue
                     spec_dict = self._materialize_artifact_to_dir(uri, upstream_dir, var_name)
                     if spec_dict is not None:
@@ -6042,14 +6109,14 @@ class CellExecutor:
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
             return {}
-        references = set(cell.references or [])
         inputs: dict[str, dict[str, str]] = {}
         for upstream_id in cell.upstream_ids:
             upstream = self.session.notebook_state.get_cell(upstream_id)
             if upstream is None:
                 continue
+            wired = self.session.wired_variables(cell_id, upstream_id)
             for var_name, uri in upstream.artifact_uris.items():
-                if var_name in references:
+                if var_name in wired:
                     inputs.setdefault(var_name, {"uri": uri})
         return inputs
 
@@ -6213,7 +6280,6 @@ class CellExecutor:
         batch_tmpdir: Path,
         *,
         executed_sources: dict[str, str],
-        use_cache: bool,
     ) -> dict[str, Any]:
         """Service a ``persist`` request from the batch harness.
 
@@ -6291,14 +6357,14 @@ class CellExecutor:
         if not stored_ok:
             return {"ok": False, "error": "store_outputs returned False"}
 
-        # A leaf's console is its record, as in single-cell: rerun-all and ``# @nocache``
-        # store none, so the next Run All and the next open run the cell again.
+        # A leaf's console is its record, as in single-cell. Rerun All stores it too, or the
+        # next Run All replays an older run's; only ``# @nocache`` stores none.
         consumed_vars = (
             self.session.dag.consumed_variables.get(cell_id, set())
             if self.session.dag is not None
             else set()
         )
-        if use_cache and not prov.annotations.nocache and not consumed_vars:
+        if not prov.annotations.nocache and not consumed_vars:
             self._store_console_outputs(
                 cell_id,
                 provenance_hash,

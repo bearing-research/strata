@@ -271,6 +271,45 @@ class TestCellExecutor:
         assert second.stderr == ""
 
     @pytest.mark.asyncio
+    async def test_plain_run_after_a_rerun_replays_the_reruns_console(
+        self, sample_notebook, tmp_path
+    ):
+        """A rerun bypasses the cache but still records the leaf's console, so the next plain
+        run replays what the rerun printed, not an older run's output.
+        """
+        data = tmp_path / "data.txt"
+        data.write_text("v1")
+        source = f"import pathlib\nprint(pathlib.Path({str(data)!r}).read_text())\n"
+        executor = CellExecutor(sample_notebook)
+
+        first = await executor.execute_cell("cell1", source)
+        assert first.stdout == "v1\n"
+        data.write_text("v2")
+        rerun = await executor.execute_cell_rerun("cell1", source)
+        assert rerun.cache_hit is False
+        assert rerun.stdout == "v2\n"
+
+        plain = await executor.execute_cell("cell1", source)
+        assert plain.cache_hit is True
+        assert plain.stdout == "v2\n"
+        cell = sample_notebook.notebook_state.get_cell("cell1")
+        assert cell.console_stdout == "v2\n"
+
+    @pytest.mark.asyncio
+    async def test_nocache_leaf_stores_no_console_on_rerun(self, sample_notebook):
+        """``# @nocache`` keeps a leaf out of the cache on every run mode."""
+        source = "# @nocache\nprint('hi')\n"
+        executor = CellExecutor(sample_notebook)
+
+        assert (await executor.execute_cell("cell1", source)).success
+        assert (await executor.execute_cell_rerun("cell1", source)).success
+
+        manager = sample_notebook.get_artifact_manager()
+        assert [name for name, _ in manager.list_cell_artifacts("cell1")] == []
+        again = await executor.execute_cell("cell1", source)
+        assert again.cache_hit is False
+
+    @pytest.mark.asyncio
     async def test_execute_with_error(self, sample_notebook):
         executor = CellExecutor(sample_notebook)
 
@@ -2476,9 +2515,9 @@ class TestLoopCellExecution:
         from strata.notebook.writer import write_cell
 
         notebook_dir, session = loop_notebook
-        # The body mutates in place but never rebinds `state`, so the harness emits no
-        # fresh ``state`` output; the loop must surface this.
-        loop_source = "# @loop max_iter=2 carry=state\nstate['n'] += 1\n"
+        # The body drops `state`, so the harness emits no ``state`` output; the loop must
+        # surface this.
+        loop_source = "# @loop max_iter=2 carry=state\ndone = state['n']\ndel state\n"
         write_cell(notebook_dir, "loop", loop_source)
         session.reload()
 
@@ -2489,6 +2528,84 @@ class TestLoopCellExecution:
         assert not result.success
         assert "carry" in (result.error or "").lower()
         assert result.execution_method == "loop"
+
+    @pytest.mark.asyncio
+    async def test_a_carry_updated_in_place_threads_through(self, loop_notebook):
+        """Mutating the carry instead of rebinding it still hands the new value on."""
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        loop_source = "# @loop max_iter=3 carry=state\nstate['n'] += 1\n"
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+
+        executor = CellExecutor(session)
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        result = await executor.execute_cell("loop", loop_source)
+
+        assert result.success, result.error
+        blob = session.get_artifact_manager().load_iteration_blob("loop", "state", 2)
+        assert json.loads(blob) == {"n": 3, "history": []}
+
+    @pytest.mark.asyncio
+    async def test_a_loop_until_that_raises_fails_the_cell(self, loop_notebook):
+        """A predicate that cannot be evaluated is an error, not ``max_iter`` silent runs."""
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        loop_source = (
+            "# @loop max_iter=4 carry=state\n"
+            "# @loop_until stat['n'] >= 2\n"
+            "state = {'n': state['n'] + 1, 'history': []}\n"
+        )
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+
+        executor = CellExecutor(session)
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        result = await executor.execute_cell("loop", loop_source)
+
+        assert not result.success
+        assert "NameError" in (result.error or "")
+        assert session.get_artifact_manager().get_iteration_artifact("loop", "state", 1) is None
+
+    @pytest.mark.asyncio
+    async def test_a_loop_until_name_from_upstream_is_an_input(self, tmp_path):
+        """A name the predicate reads and the body never binds comes from upstream."""
+        loop = (
+            "# @loop max_iter=10 carry=state\n"
+            "# @loop_until state['n'] >= tol\n"
+            "state = {'n': state['n'] + 1}\n"
+        )
+        session = self._cells_session(
+            tmp_path, [("seed", "state = {'n': 0}\ntol = 2\n"), ("loop", loop)]
+        )
+        assert "tol" in session.notebook_state.get_cell("loop").references
+        assert session.dag.wired_variables("loop", "seed") == {"state", "tol"}
+
+        result = await CellExecutor(session).execute_cell("loop", loop)
+
+        assert result.success, result.error
+        manager = session.get_artifact_manager()
+        assert manager.get_iteration_artifact("loop", "state", 1) is not None
+        assert manager.get_iteration_artifact("loop", "state", 2) is None
+
+    @pytest.mark.asyncio
+    async def test_a_bare_assert_in_the_body_names_the_exception(self, loop_notebook):
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        loop_source = "# @loop max_iter=3 carry=state\nassert state['n'] < 0\n"
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+
+        executor = CellExecutor(session)
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        result = await executor.execute_cell("loop", loop_source)
+
+        assert not result.success
+        assert result.error == "Loop cell iter 0 failed: AssertionError"
+        assert result.traceback
 
     @pytest.mark.asyncio
     async def test_loop_body_failure_returns_error(self, loop_notebook):
@@ -2563,6 +2680,100 @@ class TestLoopCellExecution:
 
         forked_iter0 = json.loads(forked_iter0_blob)
         assert forked_iter0 == {"n": 20}
+
+    @staticmethod
+    def _cells_session(tmp_path, cells: list[tuple[str, str]]) -> NotebookSession:
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        notebook_dir = create_notebook(tmp_path, "loop_cells")
+        previous = None
+        for cell_id, source in cells:
+            add_cell_to_notebook(notebook_dir, cell_id, after_cell_id=previous)
+            write_cell(notebook_dir, cell_id, source)
+            previous = cell_id
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
+        return session
+
+    @staticmethod
+    def _edit(session: NotebookSession, cell_id: str, source: str) -> None:
+        session.notebook_state.get_cell(cell_id).source = source
+        for cell in session.notebook_state.cells:
+            session.re_analyze_cell(cell.id)
+
+    @pytest.mark.asyncio
+    async def test_downstream_reruns_when_the_loops_output_changes(self, tmp_path):
+        """A fresh loop run records its output URIs, so a reader's provenance includes them."""
+        loop = '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'
+        reader = "print(state)\n"
+        session = self._cells_session(
+            tmp_path, [("seed", 'state = {"i": 0}\n'), ("loop", loop), ("out", reader)]
+        )
+        executor = CellExecutor(session)
+
+        first = await executor.execute_cell("out", reader)
+        assert first.stdout == "{'i': 3}\n"
+        assert session.notebook_state.get_cell("loop").artifact_uris.keys() == {"state"}
+
+        self._edit(session, "seed", 'state = {"i": 50}\n')
+        second = await executor.execute_cell("out", reader)
+        assert second.cache_hit is False
+        assert second.stdout == "{'i': 53}\n"
+
+    @pytest.mark.asyncio
+    async def test_a_start_from_seed_is_an_input_of_the_fork(self, tmp_path):
+        """``start_from`` wires the seeding loop into the DAG and provenance, even when another
+        cell defines the carry in between.
+        """
+        hill = "# @loop max_iter=3 carry=state\nstate = state + 1\n"
+        fork = "# @loop max_iter=2 carry=state start_from=hill@iter=1\nstate = state + 10\n"
+        reader = "final = state\nprint(final)\n"
+        session = self._cells_session(
+            tmp_path,
+            [
+                ("seed", "state = 0\n"),
+                ("hill", hill),
+                ("mid", "state = -1\n"),
+                ("fork", fork),
+                ("last", reader),
+            ],
+        )
+        assert "hill" in session.dag.cell_upstream["fork"]
+        assert session.dag.wired_variables("fork", "hill") == {"state"}
+        executor = CellExecutor(session)
+
+        first = await executor.execute_cell("last", reader)
+        assert first.success, first.error
+        assert first.stdout == "22\n"
+
+        self._edit(session, "seed", "state = 5\n")
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("fork").status == "stale"
+        second = await executor.execute_cell("last", reader)
+        assert second.cache_hit is False
+        assert second.stdout == "27\n"
+
+    @pytest.mark.asyncio
+    async def test_a_loop_output_read_since_the_last_run_is_stored(self, tmp_path):
+        """A cached loop only hits when every output now read is stored under its provenance;
+        otherwise it runs again and stores the new reader's input.
+        """
+        loop = (
+            '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'
+            'metrics = {"m": state["i"] * 10}\n'
+        )
+        session = self._cells_session(
+            tmp_path, [("seed", 'state = {"i": 0}\n'), ("loop", loop), ("out", "x = 1\n")]
+        )
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("loop", loop)).success
+
+        self._edit(session, "out", "print(metrics)\n")
+        result = await executor.execute_cell("out", "print(metrics)\n")
+        assert result.success, result.error
+        assert result.stdout == "{'m': 30}\n"
+        again = await executor.execute_cell("loop", loop)
+        assert again.cache_hit is True
 
     @pytest.mark.asyncio
     async def test_loop_iteration_progress_callback_fires_per_iter(self, loop_notebook):

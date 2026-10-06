@@ -610,6 +610,23 @@ class NotebookSession:
             ):
                 references = references + [annotations.loop.carry]
 
+            loop = annotations.loop
+            seed_from = (
+                (loop.start_from_cell, loop.carry)
+                if loop is not None and loop.carry and loop.start_from_cell is not None
+                else None
+            )
+            if loop is not None and loop.until_expr:
+                # The predicate runs in the cell's namespace: a name the body doesn't bind
+                # (a tolerance set upstream) is an input like any other.
+                from strata.notebook.analyzer import analyze_cell
+
+                references = references + [
+                    name
+                    for name in analyze_cell(loop.until_expr).references
+                    if name not in defines and name not in references
+                ]
+
             variant_group = annotations.variant.group if annotations.variant is not None else None
             variant_name = annotations.variant.name if annotations.variant is not None else None
             builtin_references = list(analyzed.builtin_references)
@@ -624,6 +641,7 @@ class NotebookSession:
                     variant_name=variant_name,
                     per_variant=annotations.per_variant,
                     per_variant_group=annotations.per_variant_group,
+                    seed_from=seed_from,
                 )
             )
             cell.defines = defines
@@ -1356,18 +1374,25 @@ class NotebookSession:
         Keyed by ``derive_subkey(provenance_hash, "__console__")``, so it replays only
         on an identical provenance.
         """
+        artifact = self._cached_console_record(cell_id, provenance_hash)
+        if artifact is None:
+            return None
+        try:
+            blob = self.artifact_manager.load_artifact_data(artifact.id, artifact.version)
+            payload = json.loads(blob)
+        except (ValueError, OSError, KeyError):
+            return None
+        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
+
+    def _cached_console_record(self, cell_id: str, provenance_hash: str) -> ArtifactVersion | None:
+        """The leaf's console artifact for this exact provenance, without reading its blob."""
         notebook_id = self.notebook_state.id
         artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___console__"
         expected_hash = hashlib.sha256(f"{provenance_hash}:__console__".encode()).hexdigest()
         artifact = self.artifact_manager.artifact_store.get_latest_version(artifact_id)
         if artifact is None or artifact.provenance_hash != expected_hash:
             return None
-        try:
-            blob = self.artifact_manager.load_artifact_data(artifact_id, artifact.version)
-            payload = json.loads(blob)
-        except (ValueError, OSError, KeyError):
-            return None
-        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
+        return artifact
 
     def _hydrate_display_output(self, output: CellOutput | dict[str, Any]) -> dict[str, Any] | None:
         """Return a serialized display payload with any transient inline data added."""
@@ -1794,7 +1819,7 @@ class NotebookSession:
         if not consumed_vars:
             # A leaf's only product is its console, stored under its own subkey; that is
             # what the executor replays as a hit, so it is what makes the cell ready.
-            if self._resolve_cached_console(cell_id, provenance_hash) is not None:
+            if self._cached_console_record(cell_id, provenance_hash) is not None:
                 return {}
             return None
 
@@ -1816,6 +1841,10 @@ class NotebookSession:
             cached_outputs[var_name] = (canonical.id, canonical.version)
 
         return cached_outputs
+
+    def wired_variables(self, cell_id: str, upstream_id: str) -> set[str]:
+        """The variables ``cell_id`` reads from ``upstream_id``, as the DAG wired them."""
+        return self.dag.wired_variables(cell_id, upstream_id) if self.dag is not None else set()
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
         """Provenance hashes from upstream artifacts, with sweep refs grouped.

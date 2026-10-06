@@ -504,7 +504,8 @@ state = step(state)
 ```
 
 Iteration 0 reads `state` from the upstream cell that defines it (or from
-`start_from=`, below); the body must rebind it every iteration.
+`start_from=`, below); the body must rebind it, or update it in place, every
+iteration.
 
 Key/value parameters:
 
@@ -513,7 +514,8 @@ Key/value parameters:
 - `start_from=<cell-id>@iter=<k>`, (optional) resume from another loop cell's
   stored iteration `k`. Useful for forking a converged run to explore a
   variant. `<cell-id>` is the upstream loop cell's `id` in
-  `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids).
+  `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids). The fork
+  depends on that cell: when its result changes, the fork runs again.
 - `until=<expr>`, (optional) the same early exit as `@loop_until`, inline.
   Parameters are split on whitespace, so the expression cannot contain a
   space (`until=acc["loss"]<0.05`); use `@loop_until` for anything longer.
@@ -521,7 +523,9 @@ Key/value parameters:
 ### `@loop_until`
 
 Python expression evaluated after each iteration in the cell's namespace. When
-it returns truthy, the loop exits early.
+it returns truthy, the loop exits early. A name it reads that the body does not
+bind (a tolerance set upstream) is an input of the cell, like any other
+reference. An expression that raises fails the cell at that iteration.
 
 ```python
 # @loop max_iter=100 carry=acc
