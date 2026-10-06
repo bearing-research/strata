@@ -237,7 +237,7 @@ class TestPublishTo:
     """``strata artifact publish --to`` end to end: a notebook's chain sent to a remote server."""
 
     def test_a_chain_travels_and_the_link_resolves_on_the_far_side(
-        self, client, tmp_path, served_dir
+        self, client, tmp_path, served_dir, capsys
     ):
         import argparse
 
@@ -283,6 +283,8 @@ class TestPublishTo:
             )
         )
         assert rc == 0
+        # unpublish only reaches a local store, so it would answer "No active publication".
+        assert "Withdraw it with" not in capsys.readouterr().out
 
         served = ArtifactStore(served_dir)
         published = served.list_publications()

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 import time
 from dataclasses import asdict
@@ -610,8 +611,17 @@ def cmd_publish(args: argparse.Namespace) -> int:
     print("and it is worth knowing before sending the link:")
     for step in _published_steps(store, artifact, getattr(args, "max_depth", 10)):
         print(f"  - {step}")
-    print()
-    print(f"Withdraw it with: strata artifact unpublish {publication.token}")
+    if not getattr(args, "to_url", None):
+        # Only a local store can be withdrawn from here, and unpublish reads the configured
+        # store unless told which.
+        local = getattr(args, "into", None) or (args.artifact_dir if target is store else None)
+        command = ["strata", "artifact", "unpublish"]
+        if local:
+            command += ["--artifact-dir", str(local)]
+        if getattr(args, "tenant", None):
+            command += ["--tenant", args.tenant]
+        print()
+        print(f"Withdraw it with: {shlex.join([*command, publication.token])}")
     return 0
 
 
@@ -643,6 +653,8 @@ def _published_steps(store: ArtifactStore, artifact: ArtifactVersion, max_depth:
 
 
 def cmd_unpublish(args: argparse.Namespace) -> int:
+    from strata.api.publication_bundle import drop_cached_bundles
+
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
@@ -650,6 +662,8 @@ def cmd_unpublish(args: argparse.Namespace) -> int:
     if not store.revoke_publication(args.token, tenant=getattr(args, "tenant", None)):
         print("No active publication with that token")
         return 1
+    # The route never serves a withdrawn archive, so the cached copy is only disk.
+    drop_cached_bundles(store, args.token)
 
     print("Withdrawn. The link now reports that it was withdrawn rather than")
     print("resolving to anything — it is never reissued for other content.")

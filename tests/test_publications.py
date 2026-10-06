@@ -624,6 +624,48 @@ class TestPublishDestination:
         # …and not in the store it was read from.
         assert ArtifactStore(tmp_path / "source").list_publications() == []
 
+    def test_the_withdraw_hint_names_the_store_it_was_published_into(self, tmp_path, capsys):
+        """``unpublish`` reads the configured store, so a hint without ``--artifact-dir`` answered
+        "No active publication" for a ``--into`` publish.
+        """
+        import argparse
+        import shlex
+
+        from strata.artifact_cli import cmd_unpublish
+        from strata.artifact_store import ArtifactStore
+
+        elsewhere = tmp_path / "else where"
+        out, _ = self._publish(tmp_path, capsys, into=str(elsewhere))
+        hint = next(line for line in out.splitlines() if line.startswith("Withdraw it with: "))
+        words = shlex.split(hint.removeprefix("Withdraw it with: "))
+
+        assert words[:5] == ["strata", "artifact", "unpublish", "--artifact-dir", str(elsewhere)]
+        args = argparse.Namespace(token=words[5], artifact_dir=words[4], tenant=None)
+        assert cmd_unpublish(args) == 0
+        assert ArtifactStore(elsewhere).list_publications() == []
+
+    def test_unpublish_drops_the_cached_archive(self, tmp_path, capsys):
+        """The route answers 410 for a withdrawn token, so its built zip is just disk in use."""
+        import argparse
+
+        from strata.api.publication_bundle import ARCHIVE_CACHE_DIRNAME, cached_bundle_zip
+        from strata.artifact_cli import cmd_unpublish
+        from strata.artifact_store import ArtifactStore
+
+        self._publish(tmp_path, capsys, here=True)
+        store = ArtifactStore(tmp_path / "source")
+        publication = store.list_publications()[0]
+        artifact = store.get_artifact(publication.artifact_id, publication.version)
+        cached, _ = cached_bundle_zip(store, artifact, publication=publication)
+        assert cached.exists()
+
+        args = argparse.Namespace(
+            token=publication.token, artifact_dir=str(tmp_path / "source"), tenant=None
+        )
+        assert cmd_unpublish(args) == 0
+
+        assert not (tmp_path / "source" / ARCHIVE_CACHE_DIRNAME / publication.token).exists()
+
     def test_here_keeps_it_in_the_source_store(self, tmp_path, capsys):
         from strata.artifact_store import ArtifactStore
 
