@@ -1563,28 +1563,21 @@ class ArtifactStore:
                 hasher.update(chunk)
                 copied += len(chunk)
 
-        schema_json = source.schema_json or ""
-        row_count = source.row_count or 0
-        byte_size = source.byte_size or copied
-        finalized = self.finalize_artifact(
-            artifact_id=artifact_id,
-            version=new_version,
-            schema_json=schema_json,
-            row_count=row_count,
-            byte_size=byte_size,
-            content_sha256=hasher.hexdigest(),
+        # Canonical, not finalize_artifact: the caller resolves by *this* id, and dedup onto
+        # another id holding the provenance (two notebooks running the same cell) would drop the
+        # copy just written for that id's bytes.
+        (finalized,) = self.finalize_canonical_together(
+            [
+                StagedVersion(
+                    artifact_id=artifact_id,
+                    version=new_version,
+                    schema_json=source.schema_json or "",
+                    row_count=source.row_count or 0,
+                    byte_size=copied,
+                    content_sha256=hasher.hexdigest(),
+                )
+            ]
         )
-        if finalized is not None and finalized.id != artifact_id:
-            # Dedup sent us to another artifact with the same provenance (two notebooks running the
-            # same cell is enough). The caller resolves by *this* id, so the equivalent under
-            # another id is no answer; same recovery store_cell_output uses on the write path.
-            return self.force_finalize_canonical(
-                artifact_id=artifact_id,
-                version=new_version,
-                schema_json=schema_json,
-                row_count=row_count,
-                byte_size=byte_size,
-            )
         return finalized
 
     def force_finalize_canonical(
@@ -1664,6 +1657,9 @@ class ArtifactStore:
 
         A ready row must own its blob: the canonical it read through becomes
         superseded on promotion and retention may collect it.
+
+        Raises:
+            ValueError: If the canonical's blob is gone, so there is nothing to copy.
         """
         conn = self._get_connection()
         try:
@@ -1677,7 +1673,9 @@ class ArtifactStore:
             return
         reader_cm = self.blob_store.open_blob_reader(*self._blob_key(artifact_id, version))
         if reader_cm is None:
-            return
+            raise ValueError(
+                f"{artifact_id}@v={version} reads {row['superseded_by']}, whose blob is gone"
+            )
         from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         with reader_cm as src, self.blob_store.open_blob_writer(artifact_id, version) as dst:
@@ -3887,6 +3885,28 @@ class ArtifactStore:
                     f"{artifact_id}@v={version} is published as {published['token']}; "
                     "revoke the publication before deleting it"
                 )
+            # A published or pinned version reading these bytes through superseded_by gets
+            # its own copy first: deleting this version must not empty a link somebody holds.
+            ref = f"{artifact_id}@v={version}"
+            held_pointers = conn.execute(
+                """
+                SELECT id, version FROM artifact_versions av
+                WHERE av.superseded_by = ?
+                  AND (EXISTS (SELECT 1 FROM artifact_publications pub
+                               WHERE pub.artifact_id = av.id AND pub.version = av.version
+                                 AND pub.revoked_at IS NULL)
+                       OR EXISTS (SELECT 1 FROM artifact_pins p
+                                  WHERE p.artifact_id = av.id AND p.version = av.version))
+                """,
+                (ref,),
+            ).fetchall()
+            for pointer in held_pointers:
+                self._reclaim_blob(pointer["id"], pointer["version"])
+                conn.execute(
+                    "UPDATE artifact_versions SET superseded_by = NULL "
+                    "WHERE id = ? AND version = ? AND superseded_by = ?",
+                    (pointer["id"], pointer["version"], ref),
+                )
             # Past this point the delete is committed to; the blob cleanup
             # below the finally runs only for rows that actually existed.
 
@@ -4164,7 +4184,7 @@ class ArtifactStore:
             used = "COALESCE(av.last_used_at, av.created_at)"
             # A version reading its canonical's bytes through superseded_by holds none.
             query = f"""
-                SELECT av.id, av.version, av.state, av.blob_attempt,
+                SELECT av.id, av.version, av.state, av.blob_attempt, av.superseded_by,
                        CASE WHEN av.superseded_by IS NULL THEN av.byte_size ELSE 0 END AS byte_size,
                        {used} AS used
                 FROM artifact_versions av
@@ -4256,7 +4276,7 @@ class ArtifactStore:
                         continue
                     chosen.setdefault((row["id"], row["version"]), row)
 
-            chosen = self._without_version_gaps(conn, chosen)
+            chosen = self._with_their_pointers(conn, chosen, candidates)
 
             if dry_run:
                 return {
@@ -4282,11 +4302,16 @@ class ArtifactStore:
             # 'ready' rows whose blob is gone after a crash or a raising backend, a corrupt store;
             # losing a blob whose row is gone only wastes bytes.
             collected: list[tuple[str, int]] = []
-            for position, row in enumerate(chosen.values()):
+            pending: list[tuple[str, int]] = []
+            # Pointers before their canonicals, so a canonical goes only once nothing reads it.
+            ordered = sorted(chosen.values(), key=lambda r: r["superseded_by"] is None)
+            for position, row in enumerate(ordered):
                 # Committed in batches: one transaction over a large sweep holds SQLite's write
                 # lock long enough to stall every writer behind it.
                 if position and position % _GC_DELETE_BATCH == 0:
                     conn.commit()
+                    collected.extend(pending)
+                    pending.clear()
                     if self._dialect.name == "sqlite":
                         # A waiting writer polls the lock (up to every 100 ms) rather than
                         # queueing, so it only gets in if the lock stays free that long.
@@ -4308,8 +4333,16 @@ class ArtifactStore:
                                       WHERE p.artifact_id = ? AND p.version = ?)
                       AND NOT EXISTS (SELECT 1 FROM artifact_publications pub
                                       WHERE pub.artifact_id = ? AND pub.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM artifact_versions ptr
+                                      WHERE ptr.superseded_by = ?)
                     """,
-                    (artifact_id, version, row["used"], *(artifact_id, version) * 4),
+                    (
+                        artifact_id,
+                        version,
+                        row["used"],
+                        *(artifact_id, version) * 4,
+                        f"{artifact_id}@v={version}",
+                    ),
                 )
                 if claimed.rowcount == 0:
                     logger.info(
@@ -4319,8 +4352,11 @@ class ArtifactStore:
                     )
                     continue
 
-                self._delete_version_children(conn, artifact_id, version)
+                # A savepoint per row: on Postgres a failed statement aborts the whole
+                # transaction, and the closing commit would then silently roll back every row.
+                conn.execute("SAVEPOINT gc_row")
                 try:
+                    self._delete_version_children(conn, artifact_id, version)
                     conn.execute(
                         "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
                         (artifact_id, version),
@@ -4329,6 +4365,7 @@ class ArtifactStore:
                     # A name or alias was pointed at this version since the SELECT above; the
                     # pointer wins. Skip it (uncounted, blob untouched) rather than fail the whole
                     # sweep on one race.
+                    conn.execute("ROLLBACK TO SAVEPOINT gc_row")
                     logger.info(
                         "garbage_collect: skipping %s@v=%d, something referenced "
                         "it after it was selected.",
@@ -4336,14 +4373,17 @@ class ArtifactStore:
                         version,
                     )
                     continue
+                conn.execute("RELEASE SAVEPOINT gc_row")
 
                 attempt = row["blob_attempt"]
                 blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
-                collected.append((blob_id, version))
+                pending.append((blob_id, version))
                 deleted_count += 1
                 deleted_bytes += byte_size
 
             conn.commit()
+            # Only rows whose delete committed lose their bytes.
+            collected.extend(pending)
         finally:
             conn.close()
 
@@ -4373,6 +4413,41 @@ class ArtifactStore:
             "store_bytes": store_bytes,
             "dry_run": False,
         }
+
+    def _with_their_pointers(
+        self, conn: StoreConnection, chosen: dict[tuple[str, int], Any], candidates: list
+    ) -> dict[tuple[str, int], Any]:
+        """``chosen`` without version gaps, with each chosen canonical's pointers.
+
+        A version overtaken by a duplicate reads its canonical's bytes, so it goes with
+        the canonical; a canonical whose pointer must stay (held, recently used, or the
+        top of its id) stays too.
+        """
+        pointers = {
+            (row["id"], row["version"]): _split_ref(row["superseded_by"])
+            for row in conn.execute(
+                "SELECT id, version, superseded_by FROM artifact_versions "
+                "WHERE superseded_by IS NOT NULL"
+            ).fetchall()
+        }
+        by_key = {(row["id"], row["version"]): row for row in candidates}
+        # A pointer the gap rule dropped is never offered again, so this ends.
+        dropped: set[tuple[str, int]] = set()
+        while True:
+            gapless = self._without_version_gaps(conn, chosen)
+            dropped |= chosen.keys() - gapless.keys()
+            chosen = gapless
+            changed = False
+            for pointer, canonical in pointers.items():
+                if canonical not in chosen or pointer in chosen:
+                    continue
+                if pointer in by_key and pointer not in dropped:
+                    chosen[pointer] = by_key[pointer]
+                else:
+                    del chosen[canonical]
+                changed = True
+            if not changed:
+                return chosen
 
     @staticmethod
     def _without_version_gaps(

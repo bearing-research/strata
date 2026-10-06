@@ -620,6 +620,34 @@ class TestVersionPromotion:
         assert promoted.id == "art-1"
         assert store.get_latest_version("art-1").provenance_hash == "prov-a"
 
+    def test_promotion_keeps_its_own_bytes_when_another_id_holds_the_provenance(self, store):
+        """A non-deterministic cell's twin holds other bytes; the reverted cell gets its own."""
+        from strata.artifact_store import StagedVersion
+
+        self._ready(store, "art-1", "prov-a", b"mine-bytes")
+        self._ready(store, "art-1", "prov-b", b"second")
+        twin = store.create_artifact("art-twin", "prov-a")
+        store.write_blob("art-twin", twin, b"twin-bytes-differ")
+        store.finalize_canonical_together([StagedVersion("art-twin", twin, "{}", 1, 17, "digest")])
+
+        promoted = store.promote_version("art-1", 1)
+
+        assert promoted is not None
+        assert (promoted.id, promoted.state) == ("art-1", "ready")
+        assert store.read_blob("art-1", promoted.version) == b"mine-bytes"
+        assert promoted.byte_size == len(b"mine-bytes")
+        assert store.read_blob("art-twin", twin) == b"twin-bytes-differ"
+
+    def test_reclaiming_bytes_whose_canonical_blob_is_gone_raises(self, store):
+        """Promoted with no blob at all, the version would read ready and serve nothing."""
+        self._ready(store, "art-1", "prov-a", b"bytes")
+        self._ready(store, "art-2", "prov-a", b"bytes")
+        store.blob_store.delete_blob("art-1", 1)
+
+        with pytest.raises(ValueError, match="whose blob is gone"):
+            store.force_finalize_canonical("art-2", 1, "{}", 1, 5)
+        assert store.get_artifact("art-2", 1).state == "superseded"
+
 
 class TestRefreshSupersede:
     """Refresh rebuilds become new versions of the same artifact."""
@@ -700,6 +728,26 @@ class TestRefreshSupersede:
         [finding] = store.verify_artifacts()
         assert (finding["artifact_id"], finding["problem"]) == ("art-2", "missing_blob")
         assert "art-1@v=1" in finding["detail"]
+
+    @pytest.mark.parametrize("hold", ["publish", "pin"])
+    def test_deleting_a_canonical_hands_its_bytes_to_a_held_version_reading_them(self, store, hold):
+        """A published or pinned version is a link somebody holds; the delete must not empty it."""
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-2", 1, "{}", 10, 100)
+        if hold == "publish":
+            store.publish_artifact("art-2", 1)
+        else:
+            store.pin_artifact("art-2", 1, "review")
+
+        assert store.delete_artifact("art-1", 1)
+
+        assert store.read_blob("art-2", 1) == _ipc_bytes(10)
+        assert store.blob_store.blob_exists("art-2", 1)
+        assert store.verify_artifacts() == []
 
     def test_finalize_and_set_name_supersedes(self, store):
         """The atomic finalize+name path supersedes the same way."""
@@ -1357,6 +1405,7 @@ class TestTenantNormalization:
         import sqlite3
 
         store.create_artifact("equiv", "race-prov", tenant="team-a")
+        store.write_blob("equiv", 1, b"x" * 10)
         store.finalize_artifact("equiv", 1, "{}", 1, 10)
         store.create_artifact("canonical", "race-prov", tenant="team-a")
         store.finalize_artifact("canonical", 1, "{}", 1, 10)
@@ -1395,6 +1444,7 @@ class TestTenantNormalization:
         import sqlite3
 
         store.create_artifact("equiv", "race-prov", tenant="team-a")
+        store.write_blob("equiv", 1, b"x" * 10)
         store.finalize_artifact("equiv", 1, "{}", 1, 10)
         store.create_artifact("canonical", "race-prov", tenant="team-a")
         store.finalize_artifact("canonical", 1, "{}", 1, 10)
@@ -1423,6 +1473,7 @@ class TestTenantNormalization:
         ready row per (tenant, provenance), for tenant-scoped rows too.
         """
         store.create_artifact("equiv", "canon-prov", tenant="team-a")
+        store.write_blob("equiv", 1, b"x" * 10)
         store.finalize_artifact("equiv", 1, "{}", 1, 10)
         # Canonical row dedups to 'equiv' and is marked failed.
         store.create_artifact("canonical", "canon-prov", tenant="team-a")
