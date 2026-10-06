@@ -179,6 +179,9 @@ What travels is `--include`:
 | `selected` | Only the cells named by `--cells`; the rest are described by reference. The default. |
 | `none`     | No artifact bytes: the notebook and its provenance, nothing to replay from. |
 
+A carried loop cell brings every stored iteration (`@iter=k`) with it, so a
+cell that forks from one with `start_from` still runs after an import.
+
 ```bash
 # The whole thing, to carry to another machine
 strata export ./my_analysis --to snapshot --include all --out my_analysis.zip

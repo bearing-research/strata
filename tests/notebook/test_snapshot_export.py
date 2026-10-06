@@ -84,6 +84,15 @@ class TestIncludeModes:
         assert len(carried) == 1
         assert bundle.read(f"artifacts/{carried[0]}") == b"[1, 2, 3]"
 
+    def test_an_artifact_past_the_zip64_limit_is_written_whole(self, session, monkeypatch):
+        """Stands in for a blob over 2 GiB: a streamed member is sized only at close."""
+        monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 4)
+
+        bundle = _bundle(session, include="all")
+
+        carried = _manifest(bundle)["carried"]
+        assert bundle.read(f"artifacts/{carried[0]}") == b"[1, 2, 3]"
+
     def test_none_carries_none(self, session):
         bundle = _bundle(session, include="none")
 
