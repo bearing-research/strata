@@ -1478,6 +1478,8 @@ export interface ArtifactStats {
   ready_versions: number
   building_versions: number
   failed_versions: number
+  // Absent from servers that do not count them yet.
+  superseded_versions?: number
   total_bytes: number
   total_rows: number
   name_count: number
