@@ -4512,10 +4512,10 @@ class CellExecutor:
     ) -> None:
         """Persist a leaf cell's console output as a provenance-keyed artifact.
 
-        So a cell that only prints can still cache-hit and replay its output.
+        So a cell that only prints can still cache-hit and replay its output. Stored
+        even when both streams are empty: a leaf has no other artifact, so the console
+        is the record that it ran under this provenance (cache hit, ready on reopen).
         """
-        if not stdout and not stderr:
-            return
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
@@ -5883,7 +5883,10 @@ class CellExecutor:
             elif ftype == "persist":
                 response = await _serviced(
                     self._batch_service_persist(
-                        payload, batch_tmpdir, executed_sources=executed_sources
+                        payload,
+                        batch_tmpdir,
+                        executed_sources=executed_sources,
+                        use_cache=use_cache,
                     )
                 )
                 cell_id_pl = payload["cell_id"]
@@ -5931,6 +5934,8 @@ class CellExecutor:
                             cell_id=active_cell_id,
                             status="cache_hit",
                             cache_hit=True,
+                            stdout=payload.get("stdout", ""),
+                            stderr=payload.get("stderr", ""),
                             outputs=payload.get("outputs") or {},
                             display_outputs=payload.get("display_outputs") or [],
                         ),
@@ -6156,9 +6161,14 @@ class CellExecutor:
             meta["file"] = file_name
             cached_displays.append(meta)
 
-        # No consumed vars and no cached displays: nothing to cache, so run for side effects.
-        # A display-only cell with cached displays is a real hit.
-        if not consumed_vars and not cached_displays:
+        # A leaf's record is its console (empty when it printed nothing), as in single-cell;
+        # without one, or any cached display, there is nothing to serve, so run it.
+        cached_console = (
+            self.session._resolve_cached_console(cell_id, provenance_hash)
+            if not consumed_vars
+            else None
+        )
+        if not consumed_vars and not cached_displays and cached_console is None:
             return {"cache_hit": False, "provenance_hash": provenance_hash}
 
         cached_outputs = self._materialize_batch_cache_hit(
@@ -6193,6 +6203,8 @@ class CellExecutor:
             "provenance_hash": provenance_hash,
             "cached_outputs": cached_outputs,
             "cached_displays": cached_displays,
+            "stdout": cached_console[0] if cached_console else "",
+            "stderr": cached_console[1] if cached_console else "",
         }
 
     async def _batch_service_persist(
@@ -6201,6 +6213,7 @@ class CellExecutor:
         batch_tmpdir: Path,
         *,
         executed_sources: dict[str, str],
+        use_cache: bool,
     ) -> dict[str, Any]:
         """Service a ``persist`` request from the batch harness.
 
@@ -6277,6 +6290,25 @@ class CellExecutor:
 
         if not stored_ok:
             return {"ok": False, "error": "store_outputs returned False"}
+
+        # A leaf's console is its record, as in single-cell: rerun-all and ``# @nocache``
+        # store none, so the next Run All and the next open run the cell again.
+        consumed_vars = (
+            self.session.dag.consumed_variables.get(cell_id, set())
+            if self.session.dag is not None
+            else set()
+        )
+        if use_cache and not prov.annotations.nocache and not consumed_vars:
+            self._store_console_outputs(
+                cell_id,
+                provenance_hash,
+                payload.get("stdout", ""),
+                payload.get("stderr", ""),
+                input_hashes,
+                source_hash=source_hash,
+                source=executed_source,
+                env_hash=env_hash,
+            )
 
         # Offer it to the team, as a single run does. Inert unless configured, and it
         # swallows its own failures: a shared-cache problem must not fail a finished cell.

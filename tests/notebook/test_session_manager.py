@@ -122,6 +122,80 @@ def test_cold_open_restores_a_leaf_whose_only_product_is_stdout(tmp_path: Path):
     assert LocalNotebookOps(notebook_dir).get_cell("c2").status == "ready"
 
 
+def test_cold_open_restores_a_silent_leaf(tmp_path: Path):
+    """A leaf that stores no variable and prints nothing still ran; its empty console is the
+    record of that run, and a cold open must find it.
+    """
+    notebook_dir = create_notebook(tmp_path, "cold_open_silent_leaf")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    add_cell_to_notebook(notebook_dir, "c2", "c1")
+    write_cell(notebook_dir, "c2", "import os\ny = x + 1")
+
+    manager = SessionManager()
+    session = manager.open_notebook(notebook_dir)
+
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.ops import LocalNotebookOps
+
+    async def _prime() -> None:
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("c1", "x = 1")).success
+        assert (await executor.execute_cell("c2", "import os\ny = x + 1")).success
+
+    asyncio.run(_prime())
+    manager.close_session(session.id)
+
+    reopened = SessionManager().open_notebook(notebook_dir)
+    leaf = next(c for c in reopened.notebook_state.cells if c.id == "c2")
+    assert leaf.status == "ready"
+    assert leaf.console_stdout == ""
+    assert LocalNotebookOps(notebook_dir).get_cell("c2").status == "ready"
+
+
+def test_cold_open_restores_a_silent_leaf_run_in_a_batch(tmp_path: Path):
+    """Run All persists a silent leaf's record too, so a cold open after it reads ready."""
+    notebook_dir = create_notebook(tmp_path, "cold_open_silent_leaf_batch")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    add_cell_to_notebook(notebook_dir, "c2", "c1")
+    write_cell(notebook_dir, "c2", "import os\ny = x + 1")
+
+    manager = SessionManager()
+    session = manager.open_notebook(notebook_dir)
+
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.ops import LocalNotebookOps
+
+    specs = [
+        {
+            "cell_id": cell.id,
+            "source": cell.source,
+            "consumed_vars": sorted(session.dag.consumed_variables.get(cell.id, set())),
+            "env": {},
+            "mount_manifest": {},
+            "source_hash": "",
+            "env_hash": "",
+        }
+        for cell in session.notebook_state.cells
+    ]
+
+    async def _prime() -> None:
+        result = await CellExecutor(session).execute_batch(specs)
+        assert result.completed, result.end_reason
+        assert {r.cell_id: r.status for r in result.cell_results} == {"c1": "ok", "c2": "ok"}
+
+    asyncio.run(_prime())
+    manager.close_session(session.id)
+
+    reopened = SessionManager().open_notebook(notebook_dir)
+    assert {c.id: c.status for c in reopened.notebook_state.cells} == {
+        "c1": "ready",
+        "c2": "ready",
+    }
+    assert LocalNotebookOps(notebook_dir).get_cell("c2").status == "ready"
+
+
 def test_reload_does_not_restore_ready_state_after_mount_change(tmp_path: Path):
     notebook_dir = create_notebook(tmp_path, "reload_mount_state")
     add_cell_to_notebook(notebook_dir, "c1")

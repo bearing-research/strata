@@ -386,6 +386,36 @@ async def test_display_only_cell_is_cacheable(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_leaf_cells_cache_hit_in_a_batch_on_their_console(tmp_path: Path):
+    """A leaf's record is its console, empty or not: a silent leaf and a print-only leaf both
+    hit on the second Run All, and the printing one gets its stdout back.
+    """
+    cells = [
+        ("c1", "x = 1\n"),
+        ("c2", "import os\ny = x + 1\n"),
+        ("c3", "print('seen', x)\n"),
+    ]
+    session = _make_session_with_cells(tmp_path, cells)
+    specs = _populate_consumed_vars([_cell_spec(cid, src) for cid, src in cells], session)
+
+    executor = CellExecutor(session)
+    first = await executor.execute_batch(specs)
+    assert first.completed
+    assert {r.cell_id: r.status for r in first.cell_results} == {
+        "c1": "ok",
+        "c2": "ok",
+        "c3": "ok",
+    }
+
+    second = await executor.execute_batch(specs)
+    assert second.completed, f"second batch failed: {second.end_reason}"
+    by_id = {r.cell_id: r for r in second.cell_results}
+    assert by_id["c2"].status == "cache_hit", f"silent leaf re-ran: {by_id['c2']}"
+    assert by_id["c3"].status == "cache_hit", f"print-only leaf re-ran: {by_id['c3']}"
+    assert by_id["c3"].stdout == "seen 1\n"
+
+
+@pytest.mark.asyncio
 async def test_batch_warns_on_inplace_input_mutation_end_to_end(tmp_path: Path):
     """An in-place mutation of an upstream DataFrame warns on the BatchCellResult.
 
@@ -541,9 +571,8 @@ async def test_nocache_runs_every_time_in_a_batch_too(tmp_path: Path):
     cell, not serve it from cache.
     """
     source = "# @nocache\nimport pathlib\nx = 1\n"
-    # c3 exists so c2 has a consumer: a cell nothing reads has no consumed
-    # vars, which the batch treats as a miss every time, and would make the
-    # control below prove nothing.
+    # c3 exists so c2 has a consumer and the control below is an ordinary
+    # variable hit, not a leaf's console hit.
     session = _make_session_with_cells(
         tmp_path,
         [("c1", source), ("c2", "y = x + 1\n"), ("c3", "z = y + 1\n")],
