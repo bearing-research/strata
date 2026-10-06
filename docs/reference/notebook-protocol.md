@@ -26,8 +26,9 @@ client can do - there's no internal API.
 The minimum sequence to render a notebook view:
 
 1. **Open the notebook.** `POST /v1/notebooks/open` with the notebook
-   directory path. The response carries everything you need to render the UI
-   cold - see [Cold-start payload](#cold-start-payload) below. The
+   directory path, which must be inside `STRATA_NOTEBOOK_STORAGE_DIR` (a
+   relative path is taken from there; any other path is a `400`). The
+   response carries everything you need to render the UI cold - see [Cold-start payload](#cold-start-payload) below. The
    `session_id` in the response is the route parameter for every subsequent
    call. The environment sync (`uv sync`, `renv` restore) runs as an
    environment job that the open waits for, so cells can run once it
@@ -38,11 +39,13 @@ The minimum sequence to render a notebook view:
    (page refresh case), `GET /v1/notebooks/sessions/{session_id}` returns
    the same payload shape.
 2. **Connect the WebSocket.** `ws://.../v1/notebooks/ws/{session_id}`. The
-   handler verifies the session exists and is visible to the caller's tenant -
-   refuses with close code `1008 Notebook not found` otherwise. A
-   browser upgrade whose `Origin` is neither the server's own nor listed in
-   `STRATA_CORS_ALLOW_ORIGINS` closes first with `1008 Origin not allowed`;
-   clients that send no `Origin` (the TUI, scripts) are unaffected. The
+   handler verifies the session exists and is visible to the caller's tenant,
+   and refuses the upgrade otherwise. A browser upgrade whose `Origin` is
+   neither the server's own nor listed in `STRATA_CORS_ALLOW_ORIGINS` is
+   refused too; clients that send no `Origin` (the TUI, scripts) are
+   unaffected. A refused upgrade is an HTTP `403` handshake response, before
+   any WebSocket exists: there is no close code or reason, so a client cannot
+   tell an unknown session from a bad `Origin` or failed auth. The
    only frame sent on accept is `presence` (see
    [Presence and soft locks](#presence-and-soft-locks)).
 3. **Send `notebook_sync`** as the first client → server message. The server
@@ -84,10 +87,10 @@ every endpoint. This is the local-dev default.
 - Under `trusted_proxy`, every `/v1/*` request needs `X-Strata-Principal`,
   `X-Strata-Proxy-Token`, and `X-Tenant-ID` (if multi-tenant); under
   `api_key`, `Authorization: Bearer <key>`. The WS upgrade carries the same
-  credentials; a missing or invalid one closes with `1008`. Under `api_key`
-  the key is checked again on every frame that needs `notebook:write` or
-  `notebook:execute`, and the socket closes with `1008 Unauthorized` once
-  the key is revoked or expired.
+  credentials; a missing or invalid one refuses the upgrade with HTTP
+  `403`. Under `api_key` the key is checked again on every frame that needs
+  `notebook:write` or `notebook:execute`, and the open socket closes with
+  `1008 Unauthorized` once the key is revoked or expired.
 - `/open`, `/create` and `/discover` work in service mode. What is
   personal-mode-only is narrower: the two delete routes (`DELETE
   /{session_id}` and the path-keyed `POST /delete-by-path`) and the two
@@ -98,7 +101,7 @@ every endpoint. This is the local-dev default.
   other's live sessions. Without a principal, every open starts a new session.
 - A session records the tenant of whoever opened, created or imported it.
   Another tenant's session looks missing: every `/{session_id}` REST route
-  answers `404` and the WS upgrade closes with `1008 Notebook not found`, as
+  answers `404` and the WS upgrade is refused with HTTP `403`, as
   for an unknown id (MCP applies the same rule). `admin:*` reaches every
   session, and a session opened without a tenant is open to all. With
   `multi_tenant_enabled`, `/discover`, `/open`, `/create` and the imports
@@ -172,7 +175,9 @@ What this means for a client:
   `cell_status`, latest `cell_output`) survives - it's recovered through
   the snapshot. So does a running remote cell's console: the snapshot's
   `console_stdout` / `console_stderr` hold the last 64 KiB of what it has
-  streamed so far, and the `cell_console` frames after it append.
+  streamed so far, and the `cell_console` frames after it append. A running
+  local cell's console is empty there; it arrives with the result. The full
+  console rules are in [WebSocket Protocol](websocket.md#console).
 - **Sequence numbers continue across reconnects.** Every server-to-client
   message carries a `seq` from a per-notebook counter. The counter doesn't
   reset on reconnect; if you see a large gap, that's expected - treat it as
@@ -218,8 +223,8 @@ or a [quiesce](rest-api.md) hold. Before the socket closes (code `1000`,
 ```
 
 `reason` is `idle`, `session_limit`, `memory`, `closed` or `deleted`. Do not
-reconnect to the old `session_id` (the upgrade closes with `1008 Notebook not
-found`); reopen the notebook by path with `POST /v1/notebooks/open`, which
+reconnect to the old `session_id` (the upgrade is refused with HTTP `403`);
+reopen the notebook by path with `POST /v1/notebooks/open`, which
 starts a new session. The browser shows the message with a Reopen button;
 the [terminal viewer](../notebook/tui.md#when-the-server-closes-the-session)
 shows it in a notification and reopens on `r`.
