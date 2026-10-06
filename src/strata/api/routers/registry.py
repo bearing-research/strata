@@ -9,7 +9,7 @@ notebook's names actually live.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from strata.api.dependencies import CurrentPrincipal, ReadStore, RegistryDecisionContext
@@ -25,7 +25,7 @@ async def registry_audit(
     principal: CurrentPrincipal,
     name: str | None = None,
     artifact_id: str | None = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=1000),
 ):
     """Read the append-only registry audit, newest first, scoped to the caller's tenant."""
     target = remote_registry()

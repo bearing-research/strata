@@ -268,3 +268,29 @@ class TestTheRoute:
         events = client.get("/v1/events").json()["events"]
 
         assert {e["tenant"] for e in events} == {"acme", "globex"}
+
+    def test_the_audit_limit_is_bounded(self, store):
+        """``limit=-1`` read the whole audit on SQLite and was a 500 on Postgres."""
+        self._seed(store)
+        client = self._client(store, None)
+
+        assert client.get("/v1/registry/audit", params={"limit": -1}).status_code == 422
+        assert client.get("/v1/registry/audit", params={"limit": 1001}).status_code == 422
+        assert len(client.get("/v1/registry/audit", params={"limit": 1}).json()["entries"]) == 1
+
+    def test_admin_summary_lists_every_tenants_names(self, store):
+        self._seed(store)
+        client = self._client(store, Principal(id="ops", scopes=frozenset({"admin:*"})))
+
+        names = client.get("/v1/registry/summary").json()["names"]
+
+        assert [n["name"] for n in names] == ["acme/fig"]
+
+    def test_a_tenants_tag_lookup_names_its_artifacts(self, store):
+        self._seed(store)
+        store.set_tag("acme-fig", 1, "nb_cell", "c1", tenant="acme")
+        client = self._client(store, Principal(id="ana", tenant="acme"))
+
+        found = client.get("/v1/registry/artifacts", params={"tag_key": "nb_cell"}).json()
+
+        assert [a["names"] for a in found["artifacts"]] == [["acme/fig"]]
