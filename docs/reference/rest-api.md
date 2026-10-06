@@ -1036,13 +1036,24 @@ A table with no snapshots yet streams zero rows with the table's schema
 (projected by `columns`). Nothing read from it is reused: each request is a
 miss, as is a transform that takes the table as an input.
 
+A transform's table inputs take every URI form `scan@v1` reads (`file://`,
+`s3://`, `gs://`, `abfs://`, a schemeless `/wh#ns.t`, a named catalog's
+`cat:ns.t`, a bare `ns.t`). An input that does not resolve (denied, missing,
+unreadable, or a plan that failed) answers 4xx with the planner's message;
+the request never becomes a pending build.
+
 ### Get Stream
 
 ```
 GET /v1/streams/{stream_id}
 ```
 
-Returns Arrow IPC stream.
+Returns Arrow IPC stream. With an artifact store, the response carries
+`X-Arrow-Row-Count` and `X-Strata-Artifact-Uri`, the canonical
+`strata://artifact/{id}@v={n}` of the rows it serves. That URI can differ from the
+materialize response's: when two misses for one scan were in flight together,
+one artifact becomes the ready result and the other reads `superseded` (its own
+URI still serves the same rows). Read the header to keep the canonical one.
 
 ### Health
 

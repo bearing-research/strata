@@ -469,15 +469,9 @@ class BuildRunner:
                     raise ValueError(
                         f"Failed to finalize build artifact {build.artifact_id}@v={build.version}"
                     )
-                if (
-                    finalized_artifact.id != build.artifact_id
-                    or finalized_artifact.version != build.version
-                ):
-                    # Deduplicated to an artifact that already existed, and the
-                    # build now points at it; nothing reads this attempt.
-                    self.artifact_store.delete_attempt_blob(
-                        build.artifact_id, build.version, attempt
-                    )
+                # Deduplicated to an artifact that already existed: the build points at it, and
+                # this attempt's bytes stay as the superseded version's blob, readable by the URI
+                # the materialize response handed out, until retention collects it.
 
                 # Set here because the materialize endpoint can't: the build is async.
                 if build.name:
@@ -618,11 +612,11 @@ class BuildRunner:
             temp_files.append(temp_file)
             return temp_file
 
-        if input_uri.startswith("file://") or input_uri.startswith("s3://"):
-            temp_file = await self._scan_to_file(input_uri, temp_files)
-            return temp_file
+        if input_uri.startswith("strata://"):
+            raise ValueError(f"Unsupported input URI: {input_uri}")
 
-        raise ValueError(f"Unsupported input URI: {input_uri}")
+        # Any other URI is a table in a form the planner reads, as admission resolved it.
+        return await self._scan_to_file(input_uri, temp_files)
 
     async def _scan_to_file(
         self,

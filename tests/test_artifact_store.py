@@ -648,18 +648,29 @@ class TestRefreshSupersede:
         assert found is not None
         assert (found.id, found.version) == ("art-1", 2)
 
-    def test_different_id_still_dedup_fails(self, store):
-        """The cross-id duplicate race keeps its existing semantics."""
+    def test_different_id_dedup_supersedes_the_duplicate(self, store):
+        """The cross-id duplicate race keeps one ready row; the loser is overtaken, not failed.
+
+        It finished, so it keeps its metadata and stays readable by its own id and version,
+        and usage counts no failure.
+        """
         store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
         store.finalize_artifact("art-1", 1, "{}", 10, 100)
 
         store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
         result = store.finalize_artifact("art-2", 1, "{}", 10, 100)
 
-        # Returns the existing artifact; the duplicate is failed
         assert (result.id, result.version) == ("art-1", 1)
-        assert store.get_artifact("art-2", 1).state == "failed"
         assert store.get_artifact("art-1", 1).state == "ready"
+        overtaken = store.get_artifact("art-2", 1)
+        assert overtaken.state == "superseded"
+        assert (overtaken.row_count, overtaken.byte_size) == (10, 100)
+        assert overtaken.content_sha256 is not None
+        assert store.read_blob("art-2", 1) == _ipc_bytes(10)
+        assert store.get_usage()["failed_versions"] == 0
+        assert store.verify_artifacts() == []
 
     def test_finalize_and_set_name_supersedes(self, store):
         """The atomic finalize+name path supersedes the same way."""

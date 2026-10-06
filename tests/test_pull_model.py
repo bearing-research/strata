@@ -777,9 +777,11 @@ class TestFinalizeEndpoint:
         assert build.artifact_id == "canonical-output"
         assert build.version == existing_version
 
+        # Overtaken, not failed: the URI materialize handed out still serves its rows.
         duplicate_artifact = artifact_store.get_artifact("duplicate-output", duplicate_version)
         assert duplicate_artifact is not None
-        assert duplicate_artifact.state == "failed"
+        assert duplicate_artifact.state == "superseded"
+        assert artifact_store.read_blob("duplicate-output", duplicate_version) == blob
 
     def test_finalize_without_upload_rejected(self, client, build_store, artifact_store):
         version = create_test_artifact(artifact_store, "fin-output2", finalize=False)

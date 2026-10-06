@@ -225,5 +225,10 @@ async def get_stream(stream_id: str, request: Request):
     return StreamingResponse(
         serve_blob(),
         media_type="application/vnd.apache.arrow.stream",
-        headers={"X-Arrow-Row-Count": str(artifact.row_count or 0)},
+        headers={
+            "X-Arrow-Row-Count": str(artifact.row_count or 0),
+            # The canonical artifact: when two misses for one scan were in flight, finalize
+            # superseded this stream's own artifact and the materialize response's URI is not it.
+            "X-Strata-Artifact-Uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+        },
     )

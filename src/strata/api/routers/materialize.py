@@ -18,7 +18,6 @@ from strata.api.dependencies import (
     CurrentPrincipal,
     ReadStore,
     authorize_table_access,
-    refuse_unconfigured_warehouses,
     resolve_input_version,
     table_identity_or_400,
 )
@@ -101,7 +100,7 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
                 detail={
                     "error": "transform_unknown",
                     "message": f"Transform '{executor_ref}' is not registered on "
-                    "this server — nothing can execute it. "
+                    "this server: nothing can execute it. "
                     f"Available transforms: {available}.",
                     "executor": executor_ref,
                 },
@@ -196,21 +195,13 @@ async def materialize_artifact(request: MaterializeRequest):
         inputs=request.inputs,
     )
 
-    # Versions feed both the hash and staleness tracking.
-    input_versions: dict[str, str] = {}
-    for input_uri in request.inputs:
-        try:
-            input_versions[input_uri] = resolve_input_version(input_uri, tenant=tenant_id)
-        except HTTPException as e:
-            # Denied, missing or unreadable inputs must never fall back to
-            # building. Only an unresolvable URI (400) uses the raw URI as its
-            # version; table inputs pass the ACL before planning, so a 400
-            # cannot bypass it.
-            if e.status_code in (401, 403, 404, 422):
-                raise
-            # A warehouse with no catalog here is the server's config, not an unresolvable URI.
-            refuse_unconfigured_warehouses([input_uri])
-            input_versions[input_uri] = input_uri
+    # Versions feed both the hash and staleness tracking. An input that does not resolve
+    # (denied, missing, unreadable, or a plan that failed) refuses the request: building past
+    # it would record a snapshot-less version and dedup later runs onto the result.
+    input_versions: dict[str, str] = {
+        input_uri: resolve_input_version(input_uri, tenant=tenant_id)
+        for input_uri in request.inputs
+    }
 
     from strata.services.materialize import materialize_service
 

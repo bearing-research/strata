@@ -252,6 +252,44 @@ class TestUnifiedMaterialize:
         assert data2["state"] == "ready"
         assert data2["artifact_uri"] == data1["artifact_uri"]
 
+    def test_two_in_flight_misses_both_serve_and_the_second_is_superseded(
+        self, server_with_personal_mode
+    ):
+        """Two misses for one scan before either streams: both serve every row.
+
+        Finalize keeps one ready row per provenance; the second artifact is overtaken, not
+        failed: it reads ``superseded``, its data stays fetchable by its own URI, usage counts no
+        failure, and its stream names the canonical artifact.
+        """
+        base_url = server_with_personal_mode["base_url"]
+        table_uri = server_with_personal_mode["warehouse"]["table_uri"]
+        body = {"inputs": [table_uri], "transform": {"executor": "scan@v1", "params": {}}}
+
+        first = requests.post(f"{base_url}/v1/materialize", json=body).json()
+        second = requests.post(f"{base_url}/v1/materialize", json=body).json()
+        assert first["state"] == second["state"] == "building"
+        assert first["artifact_uri"] != second["artifact_uri"]
+
+        for response in (first, second):
+            stream = requests.get(f"{base_url}{response['stream_url']}")
+            assert stream.status_code == 200
+            assert ipc.open_stream(stream.content).read_all().num_rows == 100
+            assert stream.headers["X-Strata-Artifact-Uri"] == first["artifact_uri"]
+
+        overtaken = second["artifact_uri"].removeprefix("strata://artifact/")
+        artifact_id, version = overtaken.split("@v=")
+        info = requests.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}")
+        assert info.status_code == 200
+        assert info.json()["state"] == "superseded"
+        assert info.json()["row_count"] == 100
+        data = requests.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data")
+        assert data.status_code == 200
+        assert ipc.open_stream(data.content).read_all().num_rows == 100
+
+        usage = requests.get(f"{base_url}/v1/artifacts/usage").json()
+        assert usage["failed_versions"] == 0
+        assert usage["ready_versions"] == 1
+
     def test_identity_materialize_artifact_mode(self, server_with_personal_mode):
         """scan@v1 in artifact mode."""
         base_url = server_with_personal_mode["base_url"]
@@ -706,6 +744,29 @@ class TestTransformOverATable:
             )
             client.fetch(artifact.uri)
             assert client.get_name_status("events_scan")["is_stale"] is False
+        finally:
+            client.close()
+
+    def test_a_table_uri_the_scan_path_reads_runs_to_ready(self, server_with_personal_mode):
+        """Every table URI form scan accepts is a transform input too.
+
+        A schemeless ``/wh#ns.t`` scans fine; as a transform input it must either run or be
+        refused at admission, never answer pending and fail in the runner.
+        """
+        from strata_client.client import StrataClient
+
+        base_url = server_with_personal_mode["base_url"]
+        warehouse = server_with_personal_mode["warehouse"]
+        path_uri = f"{warehouse['warehouse_path']}#test_db.events"
+        sql = {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT * FROM input0"}}
+
+        client = StrataClient(base_url=base_url)
+        try:
+            scanned = client.materialize(inputs=[path_uri], transform={"executor": "scan@v1"})
+            assert client.fetch(scanned.uri).num_rows == 100
+
+            artifact = client.materialize(inputs=[path_uri], transform=sql)
+            assert client.fetch(artifact.uri).num_rows == 100
         finally:
             client.close()
 

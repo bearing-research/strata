@@ -344,9 +344,9 @@ class TestIdempotentFinalize:
         assert result2.id == artifact1_id  # Returns the first artifact
         assert result2.version == version1
 
-        # The second artifact is marked failed.
+        # The second artifact is overtaken, not failed: it finished.
         artifact2 = artifact_store.get_artifact(artifact2_id, version2)
-        assert artifact2.state == "failed"
+        assert artifact2.state == "superseded"
 
 
 class TestAtomicFinalizeAndName:

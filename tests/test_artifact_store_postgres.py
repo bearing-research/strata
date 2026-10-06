@@ -299,7 +299,7 @@ class TestCanonicalPromotion:
     def test_promotion_returns_the_canonical_id_never_a_foreign_one(self, store):
         # The only caller reaches force_finalize_canonical *because* finalize
         # landed under a different id, so returning that foreign id back would
-        # leave the canonical row 'failed' and the caller unaware.
+        # leave the canonical row 'superseded' and the caller unaware.
         first = store.create_artifact("a1", "shared-prov", _spec())
         store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
 

@@ -275,6 +275,37 @@ class TestParquetMetadataCache:
         assert sample_parquet_file in result
         assert store.get_parquet_meta(sample_parquet_file) is not None
 
+    def test_a_failed_persist_keeps_the_memory_entry_and_logs(self, sample_parquet_file, caplog):
+        """A SQLite failure on persist (locked file, read-only mount) is logged, not raised."""
+        import logging
+        import sqlite3
+
+        class _LockedStore:
+            def get_parquet_meta(self, file_path):
+                return None
+
+            def get_parquet_meta_many(self, file_paths):
+                return {}
+
+            def put_parquet_meta(self, file_path, meta):
+                raise sqlite3.OperationalError("database is locked")
+
+            def put_parquet_meta_many(self, items):
+                raise sqlite3.OperationalError("database is locked")
+
+        cache = ParquetMetadataCache(max_size=10, store=_LockedStore())
+        with caplog.at_level(logging.DEBUG, logger="strata.metadata_cache"):
+            loaded = cache.get_or_load(sample_parquet_file)
+            cache.clear()
+            many = cache.get_or_load_many([sample_parquet_file])
+
+        assert loaded.num_row_groups == 3
+        assert many[sample_parquet_file].num_row_groups == 3
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("Could not persist Parquet metadata" in m for m in messages)
+        assert any("Could not persist 1 Parquet footers" in m for m in messages)
+        assert all("database is locked" in m for m in messages if "Could not persist" in m)
+
 
 class TestManifestCache:
     """Manifest resolution caching."""
@@ -301,6 +332,31 @@ class TestManifestCache:
         assert cache.get("default", "strata.ns.other", 123) is None
 
         assert cache.get("other_catalog", "strata.ns.table", 123) is None
+
+    def test_a_failed_persist_keeps_the_memory_entry_and_logs(self, caplog):
+        """A SQLite failure on persist (locked file, read-only mount) is logged, not raised."""
+        import logging
+        import sqlite3
+
+        class _LockedStore:
+            def get_manifest(self, catalog_name, table_identity, snapshot_id):
+                return None
+
+            def put_manifest(self, catalog_name, table_identity, snapshot_id, data_files):
+                raise sqlite3.OperationalError("database is locked")
+
+        cache = ManifestCache(max_size=10, store=_LockedStore())
+        resolution = ManifestResolution(
+            data_files=[ManifestEntry(file_path="/data/f.parquet", actual_path="/abs/f.parquet")]
+        )
+        with caplog.at_level(logging.DEBUG, logger="strata.metadata_cache"):
+            cache.put("default", "strata.ns.table", 123, resolution)
+
+        assert cache.get("default", "strata.ns.table", 123) is resolution
+        messages = [record.getMessage() for record in caplog.records]
+        assert messages == [
+            "Could not persist the manifest resolution of strata.ns.table@123: database is locked"
+        ]
 
     def test_cache_key_includes_snapshot_id(self):
         """Different snapshots get different cache entries."""

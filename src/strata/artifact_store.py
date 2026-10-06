@@ -1305,8 +1305,9 @@ class ArtifactStore:
         """Mark a building artifact ready after its blob is written.
 
         Idempotent. When a different id already holds this ``(tenant,
-        provenance_hash)`` ready, this version is marked failed and the existing one
-        is returned. An older ready version of the same id is superseded.
+        provenance_hash)`` ready, this version is marked superseded (its blob stays
+        readable by id and version) and the existing one is returned. An older ready
+        version of the same id is superseded.
 
         ``content_sha256`` saves rehashing the blob when the caller has it.
         ``blob_attempt`` records which attempt's bytes the version reads. ``fence``
@@ -1354,16 +1355,22 @@ class ArtifactStore:
             provenance_hash = row["provenance_hash"]
             tenant = row["tenant"]
 
+            # Recorded here, not at write time: every write path (bytes, streamed writer, file,
+            # import) arrives here, and this is the moment the bytes become final.
+            digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
+
             # Two builds with the same (tenant, provenance_hash) can complete at once.
             existing = self.find_by_provenance(provenance_hash, tenant=tenant)
             if existing is not None and existing.id != artifact_id:
-                conn.execute(
-                    """
-                    UPDATE artifact_versions
-                    SET state = 'failed'
-                    WHERE id = ? AND version = ?
-                    """,
-                    (artifact_id, version),
+                self._supersede_duplicate(
+                    conn,
+                    artifact_id,
+                    version,
+                    schema_json,
+                    row_count,
+                    byte_size,
+                    digest,
+                    blob_attempt,
                 )
                 _commit_through_fence(conn, existing.id, existing.version)
                 return existing
@@ -1381,10 +1388,6 @@ class ArtifactStore:
                     """,
                     (existing.id, existing.version),
                 )
-
-            # Recorded here, not at write time: every write path (bytes, streamed writer, file,
-            # import) arrives here, and this is the moment the bytes become final.
-            digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
 
             try:
                 cursor = conn.execute(
@@ -1423,13 +1426,15 @@ class ArtifactStore:
                 conn.rollback()
                 existing = self.find_by_provenance(provenance_hash, tenant=tenant)
                 if existing is not None:
-                    conn.execute(
-                        """
-                        UPDATE artifact_versions
-                        SET state = 'failed'
-                        WHERE id = ? AND version = ?
-                        """,
-                        (artifact_id, version),
+                    self._supersede_duplicate(
+                        conn,
+                        artifact_id,
+                        version,
+                        schema_json,
+                        row_count,
+                        byte_size,
+                        digest,
+                        blob_attempt,
                     )
                     _commit_through_fence(conn, existing.id, existing.version)
                     return existing
@@ -1586,10 +1591,10 @@ class ArtifactStore:
         row_count: int,
         byte_size: int,
     ) -> ArtifactVersion | None:
-        """Promote a dedup-failed version to ready under its canonical id.
+        """Promote a version dedup superseded to ready under its canonical id.
 
-        ``finalize_artifact`` fails a version whose provenance is already ready under
-        another id. Notebook cells resolve inputs by their own canonical id, so this
+        ``finalize_artifact`` supersedes a version whose provenance is already ready
+        under another id. Notebook cells resolve inputs by their own canonical id, so this
         supersedes the other ready row (still fetchable by id and version) and makes
         this one the single ready row. Returns the promoted version, or ``None`` if it
         cannot be found afterwards.
@@ -1632,7 +1637,7 @@ class ArtifactStore:
                         row_count = ?,
                         byte_size = ?,
                         last_used_at = ?
-                    WHERE id = ? AND version = ? AND state = 'failed'
+                    WHERE id = ? AND version = ? AND state = 'superseded'
                     """,
                     (schema_json, row_count, byte_size, time.time(), artifact_id, version),
                 )
@@ -1789,15 +1794,17 @@ class ArtifactStore:
 
             existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
             if existing is not None and existing.id != artifact_id:
-                # Another artifact has this provenance: mark this one failed and point the name at
-                # the existing one.
-                conn.execute(
-                    """
-                    UPDATE artifact_versions
-                    SET state = 'failed'
-                    WHERE id = ? AND version = ?
-                    """,
-                    (artifact_id, version),
+                # Another artifact has this provenance: this one is overtaken and the name points
+                # at the existing one.
+                self._supersede_duplicate(
+                    conn,
+                    artifact_id,
+                    version,
+                    schema_json,
+                    row_count,
+                    byte_size,
+                    None,
+                    blob_attempt,
                 )
                 if name:
                     self._set_name_in_connection(conn, name, existing.id, existing.version, tenant)
@@ -1858,13 +1865,15 @@ class ArtifactStore:
                 conn.rollback()
                 existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
                 if existing is not None:
-                    conn.execute(
-                        """
-                        UPDATE artifact_versions
-                        SET state = 'failed'
-                        WHERE id = ? AND version = ?
-                        """,
-                        (artifact_id, version),
+                    self._supersede_duplicate(
+                        conn,
+                        artifact_id,
+                        version,
+                        schema_json,
+                        row_count,
+                        byte_size,
+                        None,
+                        blob_attempt,
                     )
                     if name:
                         self._set_name_in_connection(
@@ -1960,6 +1969,41 @@ class ArtifactStore:
                 updated_at = excluded.updated_at
             """,
             (name, artifact_id, version, time.time(), effective_tenant),
+        )
+
+    def _supersede_duplicate(
+        self,
+        conn: StoreConnection,
+        artifact_id: str,
+        version: int,
+        schema_json: str,
+        row_count: int,
+        byte_size: int,
+        content_sha256: str | None,
+        blob_attempt: str | None,
+    ) -> None:
+        """Record a finished build another id already holds ready under the same provenance.
+
+        Superseded, not failed: the computation succeeded, so its metadata and blob stay,
+        readable by the id and version its caller was handed, until retention collects them.
+        """
+        conn.execute(
+            """
+            UPDATE artifact_versions
+            SET state = 'superseded', schema_json = ?, row_count = ?, byte_size = ?,
+                content_sha256 = ?, blob_attempt = ?, last_used_at = ?
+            WHERE id = ? AND version = ?
+            """,
+            (
+                schema_json,
+                row_count,
+                byte_size,
+                content_sha256,
+                blob_attempt,
+                time.time(),
+                artifact_id,
+                version,
+            ),
         )
 
     def fail_artifact(self, artifact_id: str, version: int) -> None:
