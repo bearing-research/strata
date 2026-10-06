@@ -470,8 +470,8 @@ class BuildRunner:
                         f"Failed to finalize build artifact {build.artifact_id}@v={build.version}"
                     )
                 # Deduplicated to an artifact that already existed: the build points at it, and
-                # this attempt's bytes stay as the superseded version's blob, readable by the URI
-                # the materialize response handed out, until retention collects it.
+                # finalize dropped this attempt's bytes, leaving the superseded version reading
+                # the canonical's by the URI the materialize response handed out.
 
                 # Set here because the materialize endpoint can't: the build is async.
                 if build.name:

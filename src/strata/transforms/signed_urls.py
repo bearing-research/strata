@@ -345,14 +345,15 @@ class URLSigner:
         lease_owner: str | None = None,
         lease_expires_at: float | None = None,
         blob_store: Any = None,
-        blob_id: Callable[[str, int], str] | None = None,
+        blob_key: Callable[[str, int], tuple[str, int]] | None = None,
     ) -> BuildManifest:
         """Assemble the signed-URL manifest for a build: inputs, output, finalize and log.
 
         ``input_artifacts`` are ``(artifact_id, version)`` pairs. With a ``blob_store`` that can
         presign, inputs and output go straight to the object store and only finalize and log stay
         Strata routes; the output key is ``metadata["artifact_id"]`` / ``["version"]``.
-        ``blob_id`` maps an input to its presigned blob id, which may be an attempt's key.
+        ``blob_key`` maps an input to the key its bytes are presigned under, which may be an
+        attempt's or another version's.
         """
         expires_at = time.time() + url_expiry_seconds
         # The executor writes under this claim's own attempt, so an earlier
@@ -360,9 +361,11 @@ class URLSigner:
         attempt = lease_attempt(lease_token(lease_owner, lease_expires_at))
         input_urls = []
         for artifact_id, version in input_artifacts:
-            stored_as = blob_id(artifact_id, version) if blob_id is not None else artifact_id
+            stored_as = (
+                blob_key(artifact_id, version) if blob_key is not None else (artifact_id, version)
+            )
             presigned = (
-                blob_store.presign_get(stored_as, version, int(url_expiry_seconds))
+                blob_store.presign_get(*stored_as, int(url_expiry_seconds))
                 if blob_store is not None
                 else None
             )

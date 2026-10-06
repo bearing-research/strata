@@ -86,6 +86,7 @@ def server_with_personal_mode(temp_warehouse, tmp_path):
             "base_url": ctx.base_url,
             "config": ctx.config,
             "warehouse": temp_warehouse,
+            "artifact_dir": artifact_dir,
         }
 
 
@@ -259,8 +260,12 @@ class TestUnifiedMaterialize:
 
         Finalize keeps one ready row per provenance; the second artifact is overtaken, not
         failed: it reads ``superseded``, its data stays fetchable by its own URI, usage counts no
-        failure, and its stream names the canonical artifact.
+        failure, and its stream names the canonical artifact. Its own blob goes as soon as it
+        finalizes: the data it serves is the canonical's, the store holds the bytes once, and
+        retention collects the overtaken row without touching them.
         """
+        from strata.artifact_store import ArtifactStore
+
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
         body = {"inputs": [table_uri], "transform": {"executor": "scan@v1", "params": {}}}
@@ -286,9 +291,30 @@ class TestUnifiedMaterialize:
         assert data.status_code == 200
         assert ipc.open_stream(data.content).read_all().num_rows == 100
 
+        canonical_id, canonical_version = (
+            first["artifact_uri"].removeprefix("strata://artifact/").split("@v=")
+        )
+        canonical = requests.get(
+            f"{base_url}/v1/artifacts/{canonical_id}/v/{canonical_version}"
+        ).json()
         usage = requests.get(f"{base_url}/v1/artifacts/usage").json()
         assert usage["failed_versions"] == 0
         assert usage["ready_versions"] == 1
+        assert usage["total_bytes"] == canonical["byte_size"]
+
+        # The same store the server runs on: the overtaken blob is already gone from disk.
+        store = ArtifactStore(server_with_personal_mode["artifact_dir"])
+        assert not store.blob_store.blob_exists(artifact_id, int(version))
+        assert store.blob_store.blob_exists(canonical_id, int(canonical_version))
+        assert store.garbage_collect(dry_run=True)["store_bytes"] == canonical["byte_size"]
+        assert store.verify_artifacts() == []
+
+        store.set_name("scan", canonical_id, int(canonical_version))
+        assert store.garbage_collect(max_idle_days=0)["deleted_count"] == 1
+        assert store.get_artifact(artifact_id, int(version)) is None
+        assert store.verify_artifacts() == []
+        data = requests.get(f"{base_url}/v1/artifacts/{canonical_id}/v/{canonical_version}/data")
+        assert ipc.open_stream(data.content).read_all().num_rows == 100
 
     def test_identity_materialize_artifact_mode(self, server_with_personal_mode):
         """scan@v1 in artifact mode."""

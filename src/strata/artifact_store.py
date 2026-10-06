@@ -115,6 +115,12 @@ def _ancestor_of(input_uri: str, recorded: object) -> tuple[str, int] | None:
     return artifact_id, int(version)
 
 
+def _split_ref(ref: str) -> tuple[str, int]:
+    """``id@v=N`` as the store writes it, split."""
+    artifact_id, _, version = ref.partition("@v=")
+    return artifact_id, int(version)
+
+
 @dataclass(frozen=True)
 class ArtifactVersion:
     """Immutable artifact version metadata.
@@ -503,6 +509,13 @@ def _add_use_and_minted(conn: StoreConnection, dialect: SqlDialect) -> None:
                 conn.execute("UPDATE artifact_versions SET minted = 1 WHERE id = ?", (artifact_id,))
 
 
+def _add_superseded_by(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Add the nullable ``superseded_by`` column: the canonical version whose bytes a
+    version overtaken by a duplicate build reads, having dropped its own blob."""
+    if not dialect.column_exists(conn, "artifact_versions", "superseded_by"):
+        conn.execute("ALTER TABLE artifact_versions ADD COLUMN superseded_by TEXT")
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
@@ -510,6 +523,7 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(4, "artifact_versions.blob_attempt", _add_blob_attempt),
     _Migration(5, "import_staging", _add_import_staging),
     _Migration(6, "artifact_versions.last_used_at + minted", _add_use_and_minted),
+    _Migration(7, "artifact_versions.superseded_by", _add_superseded_by),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -534,6 +548,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     blob_attempt TEXT,  -- Build attempt whose bytes this reads; NULL = shared key (migration 4)
     last_used_at REAL,  -- Last finalize, hit or read; NULL reads as created_at (migration 6)
     minted INTEGER NOT NULL DEFAULT 0,  -- 1 = the store made up the id (migration 6)
+    superseded_by TEXT,  -- id@v=N whose blob this reads, having none of its own (migration 7)
     PRIMARY KEY (id, version)
 );
 
@@ -1305,9 +1320,10 @@ class ArtifactStore:
         """Mark a building artifact ready after its blob is written.
 
         Idempotent. When a different id already holds this ``(tenant,
-        provenance_hash)`` ready, this version is marked superseded (its blob stays
-        readable by id and version) and the existing one is returned. An older ready
-        version of the same id is superseded.
+        provenance_hash)`` ready, this version is marked superseded, its blob is
+        dropped for the existing one's (still readable by its own id and version), and
+        the existing one is returned. An older ready version of the same id is
+        superseded.
 
         ``content_sha256`` saves rehashing the blob when the caller has it.
         ``blob_attempt`` records which attempt's bytes the version reads. ``fence``
@@ -1355,25 +1371,19 @@ class ArtifactStore:
             provenance_hash = row["provenance_hash"]
             tenant = row["tenant"]
 
-            # Recorded here, not at write time: every write path (bytes, streamed writer, file,
-            # import) arrives here, and this is the moment the bytes become final.
-            digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
-
             # Two builds with the same (tenant, provenance_hash) can complete at once.
             existing = self.find_by_provenance(provenance_hash, tenant=tenant)
             if existing is not None and existing.id != artifact_id:
-                self._supersede_duplicate(
-                    conn,
-                    artifact_id,
-                    version,
-                    schema_json,
-                    row_count,
-                    byte_size,
-                    digest,
-                    blob_attempt,
+                duplicate_blob = self._supersede_duplicate(
+                    conn, artifact_id, version, schema_json, row_count, existing, blob_attempt
                 )
                 _commit_through_fence(conn, existing.id, existing.version)
+                self.blob_store.delete_blob(*duplicate_blob)
                 return existing
+
+            # Recorded here, not at write time: every write path (bytes, streamed writer, file,
+            # import) arrives here, and this is the moment the bytes become final.
+            digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
 
             if existing is not None and existing.version != version:
                 # Same id, older ready version with the same provenance: a refresh rebuild.
@@ -1426,17 +1436,11 @@ class ArtifactStore:
                 conn.rollback()
                 existing = self.find_by_provenance(provenance_hash, tenant=tenant)
                 if existing is not None:
-                    self._supersede_duplicate(
-                        conn,
-                        artifact_id,
-                        version,
-                        schema_json,
-                        row_count,
-                        byte_size,
-                        digest,
-                        blob_attempt,
+                    duplicate_blob = self._supersede_duplicate(
+                        conn, artifact_id, version, schema_json, row_count, existing, blob_attempt
                     )
                     _commit_through_fence(conn, existing.id, existing.version)
+                    self.blob_store.delete_blob(*duplicate_blob)
                     return existing
                 raise
         finally:
@@ -1607,6 +1611,7 @@ class ArtifactStore:
         # Returning the winner would be wrong: the only caller (`notebook/artifact_integration.py`)
         # is here because finalize landed under a foreign id. The next pass supersedes the winner's
         # now-committed row and promotes ours.
+        self._reclaim_blob(artifact_id, version)
         for attempt in range(_CANONICAL_PROMOTE_ATTEMPTS):
             conn = self._get_connection()
             try:
@@ -1636,6 +1641,7 @@ class ArtifactStore:
                         schema_json = ?,
                         row_count = ?,
                         byte_size = ?,
+                        superseded_by = NULL,
                         last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'superseded'
                     """,
@@ -1652,6 +1658,31 @@ class ArtifactStore:
             finally:
                 conn.close()
         return self.get_artifact(artifact_id, version)
+
+    def _reclaim_blob(self, artifact_id: str, version: int) -> None:
+        """Give a version dedup pointed at another's bytes a copy of its own.
+
+        A ready row must own its blob: the canonical it read through becomes
+        superseded on promotion and retention may collect it.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT superseded_by FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None or not row["superseded_by"]:
+            return
+        reader_cm = self.blob_store.open_blob_reader(*self._blob_key(artifact_id, version))
+        if reader_cm is None:
+            return
+        from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+
+        with reader_cm as src, self.blob_store.open_blob_writer(artifact_id, version) as dst:
+            while chunk := src.read(BLOB_STREAM_CHUNK_BYTES):
+                dst.write(chunk)
 
     def finalize_canonical_together(
         self, staged: list[StagedVersion]
@@ -1796,19 +1827,13 @@ class ArtifactStore:
             if existing is not None and existing.id != artifact_id:
                 # Another artifact has this provenance: this one is overtaken and the name points
                 # at the existing one.
-                self._supersede_duplicate(
-                    conn,
-                    artifact_id,
-                    version,
-                    schema_json,
-                    row_count,
-                    byte_size,
-                    None,
-                    blob_attempt,
+                duplicate_blob = self._supersede_duplicate(
+                    conn, artifact_id, version, schema_json, row_count, existing, blob_attempt
                 )
                 if name:
                     self._set_name_in_connection(conn, name, existing.id, existing.version, tenant)
                 _commit_through_fence(conn, existing.id, existing.version)
+                self.blob_store.delete_blob(*duplicate_blob)
                 return existing
 
             if existing is not None and existing.version != version:
@@ -1865,21 +1890,15 @@ class ArtifactStore:
                 conn.rollback()
                 existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
                 if existing is not None:
-                    self._supersede_duplicate(
-                        conn,
-                        artifact_id,
-                        version,
-                        schema_json,
-                        row_count,
-                        byte_size,
-                        None,
-                        blob_attempt,
+                    duplicate_blob = self._supersede_duplicate(
+                        conn, artifact_id, version, schema_json, row_count, existing, blob_attempt
                     )
                     if name:
                         self._set_name_in_connection(
                             conn, name, existing.id, existing.version, tenant
                         )
                     _commit_through_fence(conn, existing.id, existing.version)
+                    self.blob_store.delete_blob(*duplicate_blob)
                     return existing
                 raise
         finally:
@@ -1978,33 +1997,37 @@ class ArtifactStore:
         version: int,
         schema_json: str,
         row_count: int,
-        byte_size: int,
-        content_sha256: str | None,
+        existing: ArtifactVersion,
         blob_attempt: str | None,
-    ) -> None:
-        """Record a finished build another id already holds ready under the same provenance.
+    ) -> tuple[str, int]:
+        """Record a finished build ``existing`` already holds ready under the same provenance.
 
-        Superseded, not failed: the computation succeeded, so its metadata and blob stay,
-        readable by the id and version its caller was handed, until retention collects them.
+        Superseded, not failed: the computation succeeded, so the version stays readable
+        by the id and version its caller was handed, until retention collects it. It
+        reads ``existing``'s bytes through ``superseded_by`` rather than keeping a second
+        copy; returns the key of its own blob for the caller to delete once committed.
         """
         conn.execute(
             """
             UPDATE artifact_versions
             SET state = 'superseded', schema_json = ?, row_count = ?, byte_size = ?,
-                content_sha256 = ?, blob_attempt = ?, last_used_at = ?
+                content_sha256 = ?, blob_attempt = NULL, superseded_by = ?, last_used_at = ?
             WHERE id = ? AND version = ?
             """,
             (
                 schema_json,
                 row_count,
-                byte_size,
-                content_sha256,
-                blob_attempt,
+                existing.byte_size,
+                existing.content_sha256,
+                f"{existing.id}@v={existing.version}",
                 time.time(),
                 artifact_id,
                 version,
             ),
         )
+        return (
+            attempt_blob_id(artifact_id, blob_attempt) if blob_attempt else artifact_id
+        ), version
 
     def fail_artifact(self, artifact_id: str, version: int) -> None:
         """Mark an artifact version as failed."""
@@ -2237,35 +2260,52 @@ class ArtifactStore:
 
     # --- Blob I/O ---
 
-    def _blob_id(
+    def _blob_key(
         self,
         artifact_id: str,
         version: int,
         attempt: str | None = None,
         *,
         note_use: bool = False,
-    ) -> str:
-        """The id a version's bytes are stored under in the blob store.
+    ) -> tuple[str, int]:
+        """The ``(id, version)`` a version's bytes are stored under in the blob store.
 
         A transform build writes each attempt under its own id, so an attempt that
         lost its lease writes bytes nobody reads; the row records the promoted
-        attempt. Everything else uses the artifact id. ``attempt`` selects one
-        explicitly.
+        attempt. A version a duplicate build overtook has no bytes of its own and
+        reads its canonical's (``superseded_by``). Everything else uses the artifact
+        id. ``attempt`` selects one explicitly.
         """
-        if attempt is None:
-            conn = self._get_connection()
-            try:
+        if attempt is not None:
+            return attempt_blob_id(artifact_id, attempt), version
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT blob_attempt, superseded_by, last_used_at FROM artifact_versions "
+                "WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            if row is None:
+                return artifact_id, version
+            if note_use:
+                self._note_use(conn, artifact_id, version, row["last_used_at"])
+            if row["superseded_by"]:
+                # Reading through the pointer is a use of the canonical too, so retention
+                # cannot collect the bytes while something still reads them this way.
+                artifact_id, version = _split_ref(row["superseded_by"])
                 row = conn.execute(
                     "SELECT blob_attempt, last_used_at FROM artifact_versions "
                     "WHERE id = ? AND version = ?",
                     (artifact_id, version),
                 ).fetchone()
-                if row is not None and note_use:
+                if row is None:
+                    return artifact_id, version
+                if note_use:
                     self._note_use(conn, artifact_id, version, row["last_used_at"])
-            finally:
-                conn.close()
-            attempt = row["blob_attempt"] if row is not None else None
-        return attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
+        finally:
+            conn.close()
+        attempt = row["blob_attempt"]
+        return (attempt_blob_id(artifact_id, attempt) if attempt else artifact_id), version
 
     def write_blob(
         self, artifact_id: str, version: int, data: bytes, attempt: str | None = None
@@ -2279,13 +2319,13 @@ class ArtifactStore:
         # Reading a version's bytes is a use; reading one build attempt's
         # bytes (finalize checking what it wrote) is not.
         return self.blob_store.read_blob(
-            self._blob_id(artifact_id, version, attempt, note_use=attempt is None), version
+            *self._blob_key(artifact_id, version, attempt, note_use=attempt is None)
         )
 
     def open_blob_reader(self, artifact_id: str, version: int, attempt: str | None = None):
         """Open a streaming reader (context manager) for a blob, or ``None`` if there is none."""
         return self.blob_store.open_blob_reader(
-            self._blob_id(artifact_id, version, attempt, note_use=attempt is None), version
+            *self._blob_key(artifact_id, version, attempt, note_use=attempt is None)
         )
 
     def open_blob_writer(self, artifact_id: str, version: int):
@@ -2294,7 +2334,7 @@ class ArtifactStore:
 
     def blob_size(self, artifact_id: str, version: int, attempt: str | None = None) -> int | None:
         """Return the size of an artifact blob without materializing it."""
-        return self.blob_store.blob_size(self._blob_id(artifact_id, version, attempt), version)
+        return self.blob_store.blob_size(*self._blob_key(artifact_id, version, attempt))
 
     def publish_blob_from_path(
         self, artifact_id: str, version: int, source_path: Path, attempt: str | None = None
@@ -2312,13 +2352,13 @@ class ArtifactStore:
         Keeps the bytes when the version was promoted from this attempt: two finalize
         requests under one lease share an attempt id.
         """
-        if self._blob_id(artifact_id, version) == attempt_blob_id(artifact_id, attempt):
+        if self._blob_key(artifact_id, version) == (attempt_blob_id(artifact_id, attempt), version):
             return
         self.blob_store.delete_blob(attempt_blob_id(artifact_id, attempt), version)
 
     def blob_exists(self, artifact_id: str, version: int, attempt: str | None = None) -> bool:
         """Check whether a version's blob (or ``attempt``'s) exists."""
-        return self.blob_store.blob_exists(self._blob_id(artifact_id, version, attempt), version)
+        return self.blob_store.blob_exists(*self._blob_key(artifact_id, version, attempt))
 
     # --- Name pointers ---
 
@@ -2566,9 +2606,7 @@ class ArtifactStore:
         """SHA-256 of an artifact's bytes, streamed so memory stays bounded. ``None`` if no blob."""
         # Below open_blob_reader: hashing a version's bytes (finalize, verify)
         # is bookkeeping, not somebody using the result.
-        reader_cm = self.blob_store.open_blob_reader(
-            self._blob_id(artifact_id, version, attempt), version
-        )
+        reader_cm = self.blob_store.open_blob_reader(*self._blob_key(artifact_id, version, attempt))
         if reader_cm is None:
             return None
         hasher = hashlib.sha256()
@@ -3959,6 +3997,15 @@ class ArtifactStore:
                 "WHERE input_versions IS NOT NULL"
             ).fetchall()
         }
+        # A version a duplicate build overtook reads its canonical's bytes, so whatever
+        # holds it holds those.
+        canonical: dict[tuple[str, int], tuple[str, int]] = {
+            (row["id"], row["version"]): _split_ref(row["superseded_by"])
+            for row in conn.execute(
+                "SELECT id, version, superseded_by FROM artifact_versions "
+                "WHERE superseded_by IS NOT NULL"
+            ).fetchall()
+        }
 
         reachable: set[tuple[str, int]] = set()
         pending = [(row["artifact_id"], row["version"]) for row in roots]
@@ -3967,6 +4014,8 @@ class ArtifactStore:
             if node in reachable:
                 continue
             reachable.add(node)
+            if node in canonical:
+                pending.append(canonical[node])
             recorded_inputs = inputs.get(node)
             if not recorded_inputs:
                 continue
@@ -4113,8 +4162,10 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             used = "COALESCE(av.last_used_at, av.created_at)"
+            # A version reading its canonical's bytes through superseded_by holds none.
             query = f"""
-                SELECT av.id, av.version, av.state, av.byte_size, av.blob_attempt,
+                SELECT av.id, av.version, av.state, av.blob_attempt,
+                       CASE WHEN av.superseded_by IS NULL THEN av.byte_size ELSE 0 END AS byte_size,
                        {used} AS used
                 FROM artifact_versions av
                 LEFT JOIN artifact_names an ON av.id = an.artifact_id AND av.version = an.version
@@ -4170,10 +4221,13 @@ class ArtifactStore:
             # Measured over what the sweep may collect: a tenant's cap is on
             # its own share, or one tenant's sweep would empty its cache while
             # the others kept the store over the cap.
-            size_sql = "SELECT COALESCE(SUM(byte_size), 0) FROM artifact_versions"
+            size_sql = (
+                "SELECT COALESCE(SUM(byte_size), 0) FROM artifact_versions "
+                "WHERE superseded_by IS NULL"
+            )
             size_params: list[str] = []
             if tenant is not None:
-                size_sql += " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
+                size_sql += " AND (tenant = ? OR tenant = '' OR tenant IS NULL)"
                 size_params.append(tenant)
             store_bytes = int(conn.execute(size_sql, size_params).fetchone()[0])
 
@@ -4466,7 +4520,7 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             query = """
-                SELECT id, version, state, row_count, content_sha256, blob_attempt
+                SELECT id, version, state, row_count, content_sha256, blob_attempt, superseded_by
                 FROM artifact_versions
                 WHERE state IN ('ready', 'superseded')
             """
@@ -4475,15 +4529,19 @@ class ArtifactStore:
                 query += " AND (tenant = ? OR tenant = '' OR tenant IS NULL)"
                 params.append(tenant)
             rows = conn.execute(query, params).fetchall()
+            attempts = {(row["id"], row["version"]): row["blob_attempt"] for row in rows}
         finally:
             conn.close()
 
         findings: list[dict] = []
         for row in rows:
             artifact_id, version = row["id"], row["version"]
-            attempt = row["blob_attempt"]
-            blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
-            data = self.blob_store.read_blob(blob_id, version)
+            # A version a duplicate build overtook reads its canonical's bytes.
+            blob_owner = _split_ref(row["superseded_by"]) if row["superseded_by"] else None
+            owner_id, owner_version = blob_owner or (artifact_id, version)
+            attempt = attempts.get((owner_id, owner_version))
+            blob_id = attempt_blob_id(owner_id, attempt) if attempt else owner_id
+            data = self.blob_store.read_blob(blob_id, owner_version)
             if data is None:
                 findings.append(
                     {
@@ -4491,7 +4549,11 @@ class ArtifactStore:
                         "version": version,
                         "state": row["state"],
                         "problem": "missing_blob",
-                        "detail": "metadata row exists but blob is gone",
+                        "detail": (
+                            f"metadata row reads {row['superseded_by']}, whose blob is gone"
+                            if blob_owner
+                            else "metadata row exists but blob is gone"
+                        ),
                     }
                 )
                 continue
