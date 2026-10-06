@@ -554,6 +554,19 @@ class TestArtifactReadAcl:
         finally:
             set_principal(None)
 
+    @pytest.mark.parametrize(
+        "input_uri", ["strata://name/features.daily", "strata://artifact/a.b@v=1"]
+    )
+    def test_a_dotted_artifact_or_name_input_is_not_a_table(self, monkeypatch, store, input_uri):
+        """A dot in a name or id does not make it a table the ACL could deny."""
+        server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
+        art = self._artifact(input_uri)
+        set_principal(Principal(id="analyst"))
+        try:
+            server_module._authorize_artifact_read(art, store)  # no raise
+        finally:
+            set_principal(None)
+
 
 class TestDerivedResultsInheritTheAcl:
     """A result computed from a denied table is denied too, however many steps removed.
