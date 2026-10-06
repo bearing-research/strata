@@ -40,7 +40,8 @@ def database(tmp_path) -> Path:
 
 
 def _open(path: Path, confine_to: list[str], *, read_only: bool = True):
-    spec = ConnectionSpec(name="db", driver="duckdb", path=str(path), confine_to=confine_to)
+    spec = ConnectionSpec(name="db", driver="duckdb", path=str(path))
+    spec = spec.model_copy(update={"confine_to": confine_to})
     return get_adapter("duckdb").open(spec, read_only=read_only)
 
 
@@ -261,3 +262,141 @@ class TestLocalMountRoots:
         assert self._problem((tmp_path / "notebooks" / "nb" / "data").as_uri(), config) is None
         assert self._problem((tmp_path / "lake" / "raw").as_uri(), config) is None
         assert self._problem("s3://bucket/", config) is None
+
+
+# --- A service-mode cell opens only a database file its notebook may read ---
+
+
+class TestDatabaseFile:
+    """The server opens a SQLite or DuckDB file itself, so in service mode the file
+    must be in the notebook's directory or somewhere a mount root could be: never
+    the metadata database, the artifact store or another notebook.
+    """
+
+    @pytest.fixture
+    def server(self, tmp_path):
+        import sqlite3
+
+        state = tmp_path / "state" / "artifacts"
+        state.mkdir(parents=True)
+        metadata = state / "artifacts.sqlite"
+        other = tmp_path / "notebooks" / "other" / "data.sqlite"
+        other.parent.mkdir(parents=True)
+        shared = tmp_path / "shared" / "warehouse.sqlite"
+        shared.parent.mkdir()
+        for path in (metadata, other, shared):
+            with sqlite3.connect(path) as conn:
+                conn.execute("CREATE TABLE secret(x)")
+                conn.execute("INSERT INTO secret VALUES ('token')")
+        return {"metadata": metadata, "other": other, "shared": shared}
+
+    @staticmethod
+    def _config(tmp_path, mode):
+        return StrataConfig(
+            cache_dir=tmp_path / "state" / "cache",
+            artifact_dir=tmp_path / "state" / "artifacts",
+            notebook_storage_dir=tmp_path / "notebooks",
+            deployment_mode=mode,
+        )
+
+    @staticmethod
+    def _notebook(tmp_path, connection: str, *, write: bool = False) -> tuple[Path, str]:
+        nb_dir = create_notebook(tmp_path / "notebooks", "mine")
+        add_cell_to_notebook(nb_dir, "c1", language="sql")
+        if write:
+            source = "# @sql connection=db write=true\nUPDATE secret SET x = 'mine'\n"
+        else:
+            source = "# @sql connection=db\nSELECT x FROM secret\n"
+        write_cell(nb_dir, "c1", source)
+        toml = nb_dir / "notebook.toml"
+        toml.write_text(toml.read_text() + f'\n[connections.db]\ndriver = "sqlite"\n{connection}\n')
+        return nb_dir, source
+
+    @pytest.mark.parametrize("write", [False, True], ids=["read", "write"])
+    @pytest.mark.parametrize(
+        "connection",
+        [
+            'path = "{metadata}"',
+            'path = "../other/data.sqlite"',
+            'uri = "file:{metadata}"',
+        ],
+        ids=["absolute", "dotdot", "uri"],
+    )
+    @pytest.mark.parametrize("mode", ["personal", "service"])
+    @pytest.mark.asyncio
+    async def test_a_server_file_is_refused_in_service_mode(
+        self, tmp_path, monkeypatch, server, connection, write, mode
+    ):
+        import sqlite3
+
+        config = self._config(tmp_path, mode)
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        nb_dir, source = self._notebook(
+            tmp_path, connection.format(metadata=server["metadata"]), write=write
+        )
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        if mode == "personal":
+            assert result.success, result.error
+            return
+        assert not result.success
+        assert "connection 'db'" in (result.error or "")
+        for path in (server["metadata"], server["other"]):
+            with sqlite3.connect(path) as conn:
+                assert conn.execute("SELECT x FROM secret").fetchall() == [("token",)]
+
+    @pytest.mark.parametrize("where", ["own", "shared"])
+    @pytest.mark.asyncio
+    async def test_its_own_file_and_one_outside_server_state_open(
+        self, tmp_path, monkeypatch, server, where
+    ):
+        import sqlite3
+
+        config = self._config(tmp_path, "service")
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        path = "own.sqlite" if where == "own" else str(server["shared"])
+        nb_dir, source = self._notebook(tmp_path, f'path = "{path}"')
+        if where == "own":
+            with sqlite3.connect(nb_dir / path) as conn:
+                conn.execute("CREATE TABLE secret(x)")
+                conn.execute("INSERT INTO secret VALUES ('mine')")
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+
+    def test_a_link_out_of_the_notebook_is_followed(self, tmp_path, server):
+        from strata.notebook.sql.cell_executor import database_problem
+
+        nb_dir = create_notebook(tmp_path / "notebooks", "mine")
+        (nb_dir / "data.sqlite").symlink_to(server["metadata"])
+        spec = ConnectionSpec(name="db", driver="sqlite", path="data.sqlite")
+
+        problem = database_problem(spec, nb_dir, self._config(tmp_path, "service"))
+
+        assert problem is not None and "artifact store" in problem
+
+
+def test_adapter_internal_keys_are_not_read_from_a_connection_block(tmp_path):
+    """``confine_to``, ``mount_sources`` and ``catalog_properties`` are set by the
+    executor; from notebook.toml or a request they would steer what the server opens."""
+    internal = {
+        "confine_to": [],
+        "mount_sources": [{"name": "m", "uri": "file:///", "storage_options": {}}],
+        "catalog_properties": {"uri": "http://attacker.example"},
+    }
+
+    spec = ConnectionSpec(name="db", driver="duckdb", path=":memory:", **internal)
+
+    assert not set(internal) & set(spec.model_dump())
+    nb_dir = create_notebook(tmp_path, "internal")
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "duckdb"\npath = ":memory:"\n'
+        "confine_to = []\n"
+    )
+    (parsed,) = parse_notebook(nb_dir).connections
+    assert "confine_to" not in parsed.model_dump()

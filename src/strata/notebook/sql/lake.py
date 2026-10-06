@@ -306,24 +306,46 @@ def local_mount_root_problem(uri: str, config: Any) -> str | None:
     if len(root.parts) < 3:
         return f"its root {root} is too near the top of the filesystem"
     home = Path(os.path.realpath(Path.home()))
-    metadata_db = getattr(config, "metadata_db", None)
-    state = {
-        "artifact store": getattr(config, "artifact_dir", None),
-        "cache": getattr(config, "cache_dir", None),
-        "metadata database": Path(metadata_db).parent if metadata_db else None,
-        "notebook storage": getattr(config, "notebook_storage_dir", None),
-        "home directory": home,
-    }
-    for label, location in state.items():
-        if location is None:
-            continue
-        resolved = Path(os.path.realpath(location))
+    for label, resolved in _server_state(config).items():
         if root == resolved or root in resolved.parents:
             return f"its root {root} holds the server's {label} ({resolved})"
     for tree in (home, *_SYSTEM_TREES):
         if tree in root.parents:
             return f"its root {root} is inside {tree}"
     return None
+
+
+def _server_state(config: Any) -> dict[str, Path]:
+    """Where the server keeps its own state, by label, links followed."""
+    metadata_db = getattr(config, "metadata_db", None)
+    state = {
+        "artifact store": getattr(config, "artifact_dir", None),
+        "cache": getattr(config, "cache_dir", None),
+        "metadata database": Path(metadata_db).parent if metadata_db else None,
+        "notebook storage": getattr(config, "notebook_storage_dir", None),
+        "home directory": Path.home(),
+    }
+    return {
+        label: Path(os.path.realpath(location))
+        for label, location in state.items()
+        if location is not None
+    }
+
+
+def local_database_problem(path: str, notebook_dir: Any, config: Any) -> str | None:
+    """Why a confined SQL cell may not open the database file *path*, or ``None``.
+
+    A file in the notebook's own directory is fine. Any other must pass the
+    mount-root rule and not be inside server state: the metadata database and
+    the artifact store are SQLite files, and other notebooks live in storage.
+    """
+    real = Path(os.path.realpath(path))
+    if Path(os.path.realpath(notebook_dir)) in real.parents:
+        return None
+    for label, resolved in _server_state(config).items():
+        if resolved in real.parents:
+            return f"it is inside the server's {label} ({resolved})"
+    return local_mount_root_problem(str(real), config)
 
 
 def _mount_sources(

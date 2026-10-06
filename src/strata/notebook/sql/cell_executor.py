@@ -34,6 +34,7 @@ from strata.notebook.sql.lake import (
     Lake,
     LakeError,
     lake_options,
+    local_database_problem,
     pin_snapshots,
     resolve_lake,
     snapshot_problem,
@@ -99,6 +100,9 @@ async def execute_sql_cell(
         adapter = get_adapter(spec.driver)
     except KeyError as exc:
         return _error_result(str(exc), start_time)
+    problem = database_problem(spec, session.path, session._lake_config())
+    if problem is not None:
+        return _error_result(f"connection {spec.name!r}: {problem}", start_time)
 
     # Write cells: no freshness probe (the key is source-derived) and no
     # read-only enforcement.
@@ -791,6 +795,30 @@ def _confined(session: Any, spec: ConnectionSpec, lake: Any) -> ConnectionSpec:
     if getattr(session._lake_config(), "deployment_mode", "personal") != "service":
         return spec
     return spec.model_copy(update={"confine_to": list(lake.locations) if lake else []})
+
+
+def database_problem(spec: ConnectionSpec, notebook_dir: Any, config: Any) -> str | None:
+    """Why a service-mode SQL cell may not open *spec*'s database file, or None.
+
+    The file is opened by the server process, so it must be one the notebook
+    may read: see ``local_database_problem``. A SQLite ``uri`` is refused, since
+    its parameters can name any file.
+    """
+    from pathlib import Path
+
+    if spec.driver not in ("duckdb", "sqlite"):
+        return None
+    if getattr(config, "deployment_mode", "personal") != "service":
+        return None
+    if spec.driver == "sqlite" and getattr(spec, "uri", None):
+        return "a SQLite `uri` is not allowed on this server; name the database file with `path`"
+    path = getattr(spec, "path", None)
+    if not isinstance(path, str) or not path or path == ":memory:":
+        return None
+    problem = local_database_problem(str(Path(str(notebook_dir)) / path), notebook_dir, config)
+    if problem is None:
+        return None
+    return f"the database {path} is outside this notebook's directory and {problem}"
 
 
 def _with_credential(connection_id: str, spec: ConnectionSpec) -> str:

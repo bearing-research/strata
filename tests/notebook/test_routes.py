@@ -1988,6 +1988,61 @@ def test_get_connection_schema_endpoint_unknown_connection_404(client, tmp_path)
     assert "nope" in resp.json()["detail"]
 
 
+def _service_mode_sessions(monkeypatch, tmp_path):
+    """Sessions see a service-mode server whose artifact store holds a SQLite file."""
+    import sqlite3
+
+    from strata.config import StrataConfig
+    from strata.notebook.session import NotebookSession
+
+    store = tmp_path / "state" / "artifacts" / "artifacts.sqlite"
+    store.parent.mkdir(parents=True)
+    with sqlite3.connect(store) as conn:
+        conn.execute("CREATE TABLE artifact_publications (token TEXT)")
+    config = StrataConfig(
+        cache_dir=tmp_path / "state" / "cache",
+        artifact_dir=store.parent,
+        deployment_mode="service",
+    )
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    return store
+
+
+def test_service_mode_refuses_saving_a_connection_to_a_server_file(client, tmp_path, monkeypatch):
+    store = _service_mode_sessions(monkeypatch, tmp_path)
+    notebook_dir = create_notebook(tmp_path / "notebooks", "Conn Confined")
+    nb_id = open_session_id(client, notebook_dir)
+
+    for connection in (
+        {"name": "db", "driver": "sqlite", "path": str(store)},
+        {"name": "db", "driver": "sqlite", "uri": f"file:{store}"},
+        {"name": "db", "driver": "duckdb", "path": f"../../state/artifacts/{store.name}"},
+    ):
+        resp = client.put(f"/v1/notebooks/{nb_id}/connections", json={"connections": [connection]})
+
+        assert resp.status_code == 400, connection
+        assert "connection 'db'" in resp.json()["detail"]
+    resp = client.put(
+        f"/v1/notebooks/{nb_id}/connections",
+        json={"connections": [{"name": "db", "driver": "sqlite", "path": "mine.sqlite"}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_service_mode_schema_route_refuses_a_server_file(client, tmp_path, monkeypatch):
+    pytest.importorskip("adbc_driver_sqlite")
+    store = _service_mode_sessions(monkeypatch, tmp_path)
+    notebook_dir = create_notebook(tmp_path / "notebooks", "Schema Confined")
+    toml = notebook_dir / "notebook.toml"
+    toml.write_text(toml.read_text() + f'\n[connections.db]\ndriver = "sqlite"\npath = "{store}"\n')
+    nb_id = open_session_id(client, notebook_dir)
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/connections/db/schema")
+
+    assert resp.status_code == 400, resp.text
+    assert "artifact_publications" not in resp.text
+
+
 # Export
 
 

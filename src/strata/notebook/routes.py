@@ -2164,6 +2164,7 @@ async def update_notebook_connections_endpoint(
     literals are scrubbed on write, and the response reflects disk, so the UI sees
     the blanked secrets.
     """
+    from strata.notebook.sql.cell_executor import database_problem
 
     seen: set[str] = set()
     for conn in req.connections:
@@ -2173,6 +2174,12 @@ async def update_notebook_connections_endpoint(
                 detail=f"duplicate connection name {conn.name!r}",
             )
         seen.add(conn.name)
+    # Cells refuse these too; saying so here spares a member the broken connection.
+    config = session._lake_config()
+    for conn in req.connections:
+        problem = database_problem(conn, session.path, config)
+        if problem is not None:
+            raise HTTPException(status_code=400, detail=f"connection {conn.name!r}: {problem}")
 
     try:
         # Keep [connections.<name>] blocks that failed to parse, so a typo in one
@@ -2210,8 +2217,10 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
     Open and enumeration failures return 502 with the driver's message.
     """
     from strata.notebook.sql.cell_executor import (
+        _confined,
         _resolve_runtime_spec,
         _safely_close,
+        database_problem,
     )
     from strata.notebook.sql.registry import get_adapter
 
@@ -2228,8 +2237,12 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
         adapter = get_adapter(spec.driver)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    problem = database_problem(spec, session.path, session._lake_config())
+    if problem is not None:
+        raise HTTPException(status_code=400, detail=f"connection {name!r}: {problem}")
 
-    runtime_spec = _resolve_runtime_spec(spec, session.path)
+    # Confined as a cell's connection is: the server opens it.
+    runtime_spec = _confined(session, _resolve_runtime_spec(spec, session.path), None)
     try:
         conn = adapter.open(runtime_spec, read_only=True)
     except Exception as exc:  # noqa: BLE001
