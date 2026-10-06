@@ -141,6 +141,21 @@ class TestStoreSettingsReachTheCatalog:
         )
         assert catalog.properties["adls.blob-storage-authority"] == "127.0.0.1:10000"
 
+    def test_an_azure_endpoint_already_naming_the_account_is_not_doubled(self, tmp_path):
+        config = _config(
+            tmp_path,
+            "personal",
+            azure_account_name="devstoreaccount1",
+            azure_account_key="a2V5",
+            azure_endpoint_url="http://127.0.0.1:10000/devstoreaccount1",
+        )
+
+        catalog = PyIcebergCatalog(config)._build_catalog("abfs://lake@devstoreaccount1/wh")
+
+        assert catalog.properties["adls.connection-string"].endswith(
+            ";BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1"
+        )
+
     def test_an_azure_endpoint_without_a_key_derives_no_connection_string(self, tmp_path):
         config = _config(
             tmp_path,

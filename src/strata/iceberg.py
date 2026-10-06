@@ -19,7 +19,7 @@ from pyiceberg.schema import Schema
 from pyiceberg.table import Table
 from pyiceberg.table.snapshots import Operation, Snapshot
 
-from strata.blob_store import _resolve_gcs_credentials
+from strata.blob_store import _resolve_gcs_credentials, azure_account_url
 from strata.config import StrataConfig
 from strata.lake_files import _AZURE_SCHEMES
 from strata.types import ACL_STORE_NAMES, TableIdentity
@@ -224,7 +224,7 @@ class PyIcebergCatalog:
             if name and key and "adls.connection-string" not in props:
                 props["adls.connection-string"] = (
                     f"DefaultEndpointsProtocol={parsed.scheme};AccountName={name};"
-                    f"AccountKey={key};BlobEndpoint={endpoint.rstrip('/')}/{name}"
+                    f"AccountKey={key};BlobEndpoint={azure_account_url(endpoint, name)}"
                 )
         return props
 
