@@ -3109,13 +3109,22 @@ overrides the one Strata derives.</p>
 </table>
 <h2 id="azure-storage">Azure Storage<a class="headerlink" href="#azure-storage" title="Permanent link">&para;</a></h2>
 <p>Credentials for the Azure blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=azure</code>).
-Supply exactly one of connection string, account key, SAS token, or default
-credential.</p>
+Supply at least one of connection string, account key, SAS token, or default
+credential; with several set, the connection string wins, then the default
+credential, then the SAS token, then the account key.</p>
 <p>The same settings read lake tables on Azure. A table named by an <code>abfs://</code> or
 <code>abfss://</code> warehouse URI (see <a href="#catalog">Catalog</a>) has its metadata read with the account name, key, SAS token, connection string and
 endpoint that are set, passed to its catalog as <code>adls.*</code> properties; with no
 secret set it uses <code>DefaultAzureCredential</code>. A key set in
 <code>STRATA_CATALOG_PROPERTIES</code> overrides the one Strata derives.</p>
+<p><code>STRATA_AZURE_ENDPOINT_URL</code> names the blob host (<code>http://127.0.0.1:10000</code> for
+Azurite), with the account as the first path segment. <code>adlfs</code> takes such an
+endpoint only from a connection string, so with an account name and key set and
+no connection string, Strata derives one for the catalog
+(<code>DefaultEndpointsProtocol=&lt;scheme&gt;;AccountName=&lt;name&gt;;AccountKey=&lt;key&gt;;BlobEndpoint=&lt;url&gt;/&lt;name&gt;</code>).
+PyArrow reads the endpoint from <code>adls.blob-storage-authority</code> and
+<code>adls.blob-storage-scheme</code> instead, which are always set; with only a SAS
+token or the default credential, the endpoint reaches PyArrow alone.</p>
 <p>PyIceberg reads and writes that metadata with <code>adlfs</code>, which the <code>azure</code> extra
 installs. <code>STRATA_CATALOG_PROPERTIES</code> can set <code>py-io-impl</code> to
 <code>pyiceberg.io.pyarrow.PyArrowFileIO</code> instead; PyArrow ignores the connection string and
