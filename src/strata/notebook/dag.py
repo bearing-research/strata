@@ -74,6 +74,9 @@ class CellAnalysisWithId:
     # ``per_variant_group`` (or the single sweep group it reads when None).
     per_variant: bool = False
     per_variant_group: str | None = None
+    # ``# @loop start_from=<cell>@iter=k``: ``(cell, carry)``. The seed is that cell's
+    # iteration, so the loop depends on it whichever cell last defined the carry.
+    seed_from: tuple[str, str] | None = None
 
 
 class VariantNameCollisionError(ValueError):
@@ -215,6 +218,18 @@ class NotebookDag:
                         _wire_variable_edge(dag, member_id, cell.id, var)
                 else:
                     _wire_variable_edge(dag, producer, cell.id, var)
+
+            if cell.seed_from is not None:
+                seed_id, carry = cell.seed_from
+                seed_cell = cell_by_id.get(seed_id)
+                if (
+                    seed_cell is not None
+                    and seed_id != cell.id
+                    and seed_id not in inactive
+                    and carry in seed_cell.defines
+                    and carry not in dag.wired_variables(cell.id, seed_id)
+                ):
+                    _wire_variable_edge(dag, seed_id, cell.id, carry)
 
             # ``# @after <cell-id>``: ordering-only edge (e.g. a setup cell seeding a SQLite
             # file). It affects wiring and topological order but not consumed_variables, so

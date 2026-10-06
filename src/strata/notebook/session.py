@@ -610,6 +610,13 @@ class NotebookSession:
             ):
                 references = references + [annotations.loop.carry]
 
+            loop = annotations.loop
+            seed_from = (
+                (loop.start_from_cell, loop.carry)
+                if loop is not None and loop.carry and loop.start_from_cell is not None
+                else None
+            )
+
             variant_group = annotations.variant.group if annotations.variant is not None else None
             variant_name = annotations.variant.name if annotations.variant is not None else None
             builtin_references = list(analyzed.builtin_references)
@@ -624,6 +631,7 @@ class NotebookSession:
                     variant_name=variant_name,
                     per_variant=annotations.per_variant,
                     per_variant_group=annotations.per_variant_group,
+                    seed_from=seed_from,
                 )
             )
             cell.defines = defines

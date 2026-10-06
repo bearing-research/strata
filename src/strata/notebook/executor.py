@@ -5019,28 +5019,36 @@ class CellExecutor:
         self,
         cell_id: str,
         loop: LoopAnnotation,
-        carry_var_provenance: str,
+        cell_provenance: str,
         start_time: float,
     ) -> CellExecutionResult | None:
         """The loop's own result from a previous identical run, or None.
 
-        A hit needs the provenance in the store and the cell's canonical artifact
-        to be that row, so it is this cell's result, not a duplicate.
+        A hit needs the carry and every consumed variable to be the cell's canonical
+        rows under this provenance: a duplicate's row is not this cell's result, and
+        an output read only since the last run was never stored.
         """
         artifact_mgr = self.session.get_artifact_manager()
-        if artifact_mgr.find_cached(carry_var_provenance) is None:
+        if artifact_mgr.find_cached(derive_subkey(cell_provenance, loop.carry)) is None:
             return None
+        consumed_vars = (
+            self.session.dag.consumed_variables.get(cell_id, set()) if self.session.dag else set()
+        )
         notebook_id = self.session.notebook_state.id
-        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{loop.carry}"
-        canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-        if canonical is None or canonical.provenance_hash != carry_var_provenance:
-            return None
-        uri = f"strata://artifact/{canonical.id}@v={canonical.version}"
+        uris: dict[str, str] = {}
+        for var_name in sorted({loop.carry, *consumed_vars}):
+            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+            canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+            if canonical is None or canonical.provenance_hash != derive_subkey(
+                cell_provenance, var_name
+            ):
+                return None
+            uris[var_name] = f"strata://artifact/{canonical.id}@v={canonical.version}"
+        uri = uris[loop.carry]
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is not None:
             cell.cache_hit = True
-            cell.artifact_uris[loop.carry] = uri
-            cell.artifact_uri = uri
+        self._set_loop_artifact_uris(cell_id, uri, consumed_vars, uris)
         result = CellExecutionResult(
             cell_id=cell_id,
             success=True,
@@ -5052,6 +5060,22 @@ class CellExecutor:
         )
         self.session.apply_execution_result_metadata(cell_id, result)
         return result
+
+    def _set_loop_artifact_uris(
+        self,
+        cell_id: str,
+        carry_uri: str,
+        consumed_vars: set[str],
+        uris: dict[str, str],
+    ) -> None:
+        """Record a loop's outputs on the cell the way ``_store_outputs`` does: consumed only."""
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            return
+        for var_name, uri in uris.items():
+            if var_name in consumed_vars:
+                cell.artifact_uris[var_name] = uri
+        cell.artifact_uri = carry_uri
 
     async def _execute_loop_cell(
         self,
@@ -5144,7 +5168,7 @@ class CellExecutor:
         source_hash = prov.source_hash
         carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
         if use_cache:
-            cached = self._cached_loop_result(cell_id, loop, carry_var_provenance, start_time)
+            cached = self._cached_loop_result(cell_id, loop, cell_provenance, start_time)
             if cached is not None:
                 return cached
 
@@ -5411,8 +5435,19 @@ class CellExecutor:
                 ),
             }
 
-        canonical_artifact = artifact_mgr.finalize_cell_outputs(staged)[0]
+        stored = artifact_mgr.finalize_cell_outputs(staged)
+        canonical_artifact = stored[0]
         canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
+        # Downstream provenance hashes these, as for any other cell's consumed outputs.
+        self._set_loop_artifact_uris(
+            cell_id,
+            canonical_uri,
+            consumed_vars,
+            {
+                name: f"strata://artifact/{artifact.id}@v={artifact.version}"
+                for name, artifact in zip([loop.carry, *extra_outputs], stored, strict=True)
+            },
+        )
 
         # Lets ``compute_staleness`` hit the "uncached ready" path for leaf loop cells.
         self.session.record_successful_execution_provenance(

@@ -2603,6 +2603,100 @@ class TestLoopCellExecution:
         forked_iter0 = json.loads(forked_iter0_blob)
         assert forked_iter0 == {"n": 20}
 
+    @staticmethod
+    def _cells_session(tmp_path, cells: list[tuple[str, str]]) -> NotebookSession:
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        notebook_dir = create_notebook(tmp_path, "loop_cells")
+        previous = None
+        for cell_id, source in cells:
+            add_cell_to_notebook(notebook_dir, cell_id, after_cell_id=previous)
+            write_cell(notebook_dir, cell_id, source)
+            previous = cell_id
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.refresh_environment_runtime()
+        return session
+
+    @staticmethod
+    def _edit(session: NotebookSession, cell_id: str, source: str) -> None:
+        session.notebook_state.get_cell(cell_id).source = source
+        for cell in session.notebook_state.cells:
+            session.re_analyze_cell(cell.id)
+
+    @pytest.mark.asyncio
+    async def test_downstream_reruns_when_the_loops_output_changes(self, tmp_path):
+        """A fresh loop run records its output URIs, so a reader's provenance includes them."""
+        loop = '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'
+        reader = "print(state)\n"
+        session = self._cells_session(
+            tmp_path, [("seed", 'state = {"i": 0}\n'), ("loop", loop), ("out", reader)]
+        )
+        executor = CellExecutor(session)
+
+        first = await executor.execute_cell("out", reader)
+        assert first.stdout == "{'i': 3}\n"
+        assert session.notebook_state.get_cell("loop").artifact_uris.keys() == {"state"}
+
+        self._edit(session, "seed", 'state = {"i": 50}\n')
+        second = await executor.execute_cell("out", reader)
+        assert second.cache_hit is False
+        assert second.stdout == "{'i': 53}\n"
+
+    @pytest.mark.asyncio
+    async def test_a_start_from_seed_is_an_input_of_the_fork(self, tmp_path):
+        """``start_from`` wires the seeding loop into the DAG and provenance, even when another
+        cell defines the carry in between.
+        """
+        hill = "# @loop max_iter=3 carry=state\nstate = state + 1\n"
+        fork = "# @loop max_iter=2 carry=state start_from=hill@iter=1\nstate = state + 10\n"
+        reader = "final = state\nprint(final)\n"
+        session = self._cells_session(
+            tmp_path,
+            [
+                ("seed", "state = 0\n"),
+                ("hill", hill),
+                ("mid", "state = -1\n"),
+                ("fork", fork),
+                ("last", reader),
+            ],
+        )
+        assert "hill" in session.dag.cell_upstream["fork"]
+        assert session.dag.wired_variables("fork", "hill") == {"state"}
+        executor = CellExecutor(session)
+
+        first = await executor.execute_cell("last", reader)
+        assert first.success, first.error
+        assert first.stdout == "22\n"
+
+        self._edit(session, "seed", "state = 5\n")
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("fork").status == "stale"
+        second = await executor.execute_cell("last", reader)
+        assert second.cache_hit is False
+        assert second.stdout == "27\n"
+
+    @pytest.mark.asyncio
+    async def test_a_loop_output_read_since_the_last_run_is_stored(self, tmp_path):
+        """A cached loop only hits when every output now read is stored under its provenance;
+        otherwise it runs again and stores the new reader's input.
+        """
+        loop = (
+            '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'
+            'metrics = {"m": state["i"] * 10}\n'
+        )
+        session = self._cells_session(
+            tmp_path, [("seed", 'state = {"i": 0}\n'), ("loop", loop), ("out", "x = 1\n")]
+        )
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("loop", loop)).success
+
+        self._edit(session, "out", "print(metrics)\n")
+        result = await executor.execute_cell("out", "print(metrics)\n")
+        assert result.success, result.error
+        assert result.stdout == "{'m': 30}\n"
+        again = await executor.execute_cell("loop", loop)
+        assert again.cache_hit is True
+
     @pytest.mark.asyncio
     async def test_loop_iteration_progress_callback_fires_per_iter(self, loop_notebook):
         """``on_iteration_complete`` fires once per completed iteration with that iteration's

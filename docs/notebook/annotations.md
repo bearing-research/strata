@@ -513,7 +513,8 @@ Key/value parameters:
 - `start_from=<cell-id>@iter=<k>`, (optional) resume from another loop cell's
   stored iteration `k`. Useful for forking a converged run to explore a
   variant. `<cell-id>` is the upstream loop cell's `id` in
-  `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids).
+  `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids). The fork
+  depends on that cell: when its result changes, the fork runs again.
 - `until=<expr>`, (optional) the same early exit as `@loop_until`, inline.
   Parameters are split on whitespace, so the expression cannot contain a
   space (`until=acc["loss"]<0.05`); use `@loop_until` for anything longer.
