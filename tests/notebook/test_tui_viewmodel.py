@@ -5,11 +5,116 @@ Feeds fake WS frames and asserts the folded per-cell state; the app is a thin re
 
 from __future__ import annotations
 
+import pytest
+
+from strata.notebook import console_relay
 from strata.notebook.tui.viewmodel import NotebookViewModel
 
 
 def _state(*cells: dict) -> dict:
     return {"name": "My Notebook", "cells": list(cells)}
+
+
+@pytest.fixture
+def server_frames(monkeypatch):
+    """Frames exactly as ws.py builds them, collected from its broadcast hook."""
+    sent: list[tuple[str, dict]] = []
+
+    async def _capture(notebook_id, message):
+        sent.append((str(message["type"]), message["payload"]))
+
+    monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
+    console_relay._runs.clear()
+    console_relay._streamed.clear()
+    yield sent
+    console_relay._runs.clear()
+    console_relay._streamed.clear()
+
+
+async def _run(vm, sent, cell_id: str, **result_fields) -> None:
+    """One run as the server announces it: ``running``, then console and result."""
+    from strata.notebook.executor import CellExecutionResult
+    from strata.notebook.ws import _broadcast_execution_result
+    from strata.notebook.ws_payloads import cell_status_payload
+
+    sent.append(("cell_status", cell_status_payload(cell_id, "running")))
+    result = CellExecutionResult(cell_id=cell_id, **result_fields)
+    await _broadcast_execution_result("nb1", cell_id, result)
+    _apply(vm, sent)
+
+
+def _apply(vm, sent) -> None:
+    for msg_type, payload in sent:
+        vm.apply_frame(msg_type, payload)
+    sent.clear()
+
+
+@pytest.mark.asyncio
+async def test_a_local_cell_run_twice_shows_only_the_last_runs_console(server_frames):
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    await _run(vm, server_frames, "a", success=True, stdout="a\n")
+    await _run(vm, server_frames, "a", success=True, stdout="a\n")
+    assert vm.cells["a"].console == "a\n"
+    await _run(vm, server_frames, "a", success=True)
+    assert vm.cells["a"].console == ""
+
+
+@pytest.mark.asyncio
+async def test_a_failing_local_cell_run_twice_shows_only_the_last_runs_console(server_frames):
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    for _ in range(2):
+        await _run(vm, server_frames, "a", success=False, stdout="world\n", error="ValueError")
+    assert vm.cells["a"].console == "world\n"
+    assert vm.cells["a"].error == "ValueError"
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_run_keeps_the_order_its_streams_arrived_in(server_frames):
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    server_frames.append(("cell_status", {"cell_id": "a", "status": "running"}))
+    console_relay.register("b1", "nb1", "a")
+    await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
+    await console_relay.deliver("b1", "stderr", 0, "warn 1\n")
+    await console_relay.deliver("b1", "stdout", 1, "epoch 2\n")
+    console_relay.unregister("b1")
+    _apply(vm, server_frames)
+    assert vm.cells["a"].console == "epoch 1\nwarn 1\nepoch 2\n"
+
+    from strata.notebook.executor import CellExecutionResult
+    from strata.notebook.ws import _broadcast_execution_result
+
+    result = CellExecutionResult(
+        cell_id="a", success=True, stdout="epoch 1\nepoch 2\ndone\n", stderr="warn 1\n"
+    )
+    await _broadcast_execution_result("nb1", "a", result)
+    _apply(vm, server_frames)
+    assert vm.cells["a"].console == "epoch 1\nwarn 1\nepoch 2\ndone\n"
+
+
+@pytest.mark.asyncio
+async def test_live_outputs_arrive_as_the_server_sends_them(server_frames):
+    """``outputs`` is a dict by variable; ``_`` is the display, kept out of the list."""
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    preview = {"content_type": "json/object", "preview": 1}
+    await _run(vm, server_frames, "a", success=True, outputs={"x": preview, "_": preview})
+    assert vm.cells["a"].outputs == [{"name": "x", "content_type": "json/object", "preview": 1}]
+
+
+def test_a_resync_takes_the_snapshots_console_unless_the_cell_is_running():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a", "console_stdout": "old\n"}))
+    assert vm.cells["a"].console == "old\n"
+    vm.apply_frame("cell_status", {"cell_id": "a", "status": "running"})
+    vm.apply_frame("cell_console", {"cell_id": "a", "stream": "stdout", "text": "new\n"})
+    # The snapshot of a running local cell still holds the last run's console.
+    vm.apply_notebook_state(_state({"id": "a", "status": "running", "console_stdout": "old\n"}))
+    assert vm.cells["a"].console == "new\n"
+    vm.apply_notebook_state(_state({"id": "a", "status": "ready", "console_stdout": "fixed\n"}))
+    assert vm.cells["a"].console == "fixed\n"
 
 
 def test_apply_notebook_state_seeds_cells_in_order():
@@ -104,7 +209,7 @@ def test_cell_output_sets_outputs_and_clears_error():
     assert vm.cells["a"].error == "boom"
     vm.apply_frame(
         "cell_output",
-        {"cell_id": "a", "outputs": [{"name": "x", "preview": 1}], "duration_ms": 250},
+        {"cell_id": "a", "outputs": {"x": {"preview": 1}}, "duration_ms": 250},
     )
     assert vm.cells["a"].outputs == [{"name": "x", "preview": 1}]
     assert vm.cells["a"].error is None
@@ -137,7 +242,7 @@ def test_resync_preserves_live_console_and_outputs():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a", "status": "idle"}))
     vm.apply_frame("cell_console", {"cell_id": "a", "text": "kept\n"})
-    vm.apply_frame("cell_output", {"cell_id": "a", "outputs": [{"name": "x"}]})
+    vm.apply_frame("cell_output", {"cell_id": "a", "outputs": {"x": {}}})
     # A fresh snapshot (e.g. manual resync) must not wipe what we already saw.
     vm.apply_notebook_state(_state({"id": "a", "status": "ready"}))
     assert vm.cells["a"].status == "ready"  # snapshot wins for status

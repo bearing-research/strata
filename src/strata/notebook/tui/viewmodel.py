@@ -28,9 +28,8 @@ class CellView:
     outputs: list[dict[str, Any]] = field(default_factory=list)
     # ``cell_output_delta``
     stream_text: str = ""
-    # ``cell_console``, per stream: chunk 0 of a remote run starts that stream afresh.
-    console_stdout: str = ""
-    console_stderr: str = ""
+    # The run's console as (stream, text) in arrival order. See ``_append_console``.
+    console_parts: list[tuple[str, str]] = field(default_factory=list)
     error: str | None = None
     # e.g. "iter 3/10" (``cell_iteration_progress``)
     iteration: str = ""
@@ -47,7 +46,15 @@ class CellView:
 
     @property
     def console(self) -> str:
-        return self.console_stdout + self.console_stderr
+        return "".join(text for _, text in self.console_parts)
+
+    @property
+    def console_stdout(self) -> str:
+        return "".join(text for stream, text in self.console_parts if stream == "stdout")
+
+    @property
+    def console_stderr(self) -> str:
+        return "".join(text for stream, text in self.console_parts if stream == "stderr")
 
 
 class NotebookViewModel:
@@ -70,8 +77,9 @@ class NotebookViewModel:
     def apply_notebook_state(self, payload: dict[str, Any]) -> None:
         """Seed (or re-seed) all cells from a ``notebook_state`` snapshot.
 
-        Live-only fields the snapshot lacks (console, streamed deltas, last live
-        ``cell_output``) are kept for cells that still exist.
+        Live-only fields the snapshot lacks (streamed deltas, last live
+        ``cell_output``) are kept for cells that still exist. The snapshot's console
+        wins unless the cell is running, whose frames are newer than the snapshot.
         """
         self.notebook_name = str(payload.get("name") or "")
         raw_cells = payload.get("cells") or []
@@ -87,19 +95,19 @@ class NotebookViewModel:
             order.append(cid)
             prior = self.cells.get(cid)
             source = str(raw.get("source") or "")
-            new_cells[cid] = CellView(
+            status = str(raw.get("status") or "idle")
+            cell = new_cells[cid] = CellView(
                 id=cid,
                 # ``# @name`` wins over the persisted notebook.toml name, as in the web UI.
                 name=parse_annotations(source).name or str(raw.get("name") or ""),
                 language=str(raw.get("language") or "python"),
                 source=source,
                 test_source=str(raw.get("test_source") or ""),
-                status=str(raw.get("status") or "idle"),
+                status=status,
                 display_outputs=_snapshot_display_outputs(raw),
                 outputs=prior.outputs if prior else [],
                 stream_text=prior.stream_text if prior else "",
-                console_stdout=prior.console_stdout if prior else "",
-                console_stderr=prior.console_stderr if prior else "",
+                console_parts=list(prior.console_parts) if prior else [],
                 error=prior.error if prior else None,
                 duration_ms=prior.duration_ms if prior else None,
                 cache_hit=prior.cache_hit if prior else False,
@@ -109,6 +117,8 @@ class NotebookViewModel:
                 test_cases=prior.test_cases if prior else [],
                 test_unavailable=prior.test_unavailable if prior else False,
             )
+            if prior is None or status != "running":
+                _replace_console(cell, raw.get("console_stdout"), raw.get("console_stderr"))
 
         self.cell_order = order
         self.cells = new_cells
@@ -150,18 +160,14 @@ class NotebookViewModel:
 
         if msg_type == "cell_status":
             cell.status = str(payload.get("status") or cell.status)
+            if cell.status == "running":
+                cell.console_parts = []
         elif msg_type == "cell_console":
-            text = str(payload.get("text") or "")
-            # Chunk 0 starts the stream for this run, so the last run's text goes.
-            fresh = payload.get("chunk_seq") == 0
-            if payload.get("stream") == "stderr":
-                cell.console_stderr = ("" if fresh else cell.console_stderr) + text
-            else:
-                cell.console_stdout = ("" if fresh else cell.console_stdout) + text
+            _append_console(cell, payload)
         elif msg_type == "cell_output":
-            outputs = payload.get("outputs")
-            cell.outputs = outputs if isinstance(outputs, list) else []
+            cell.outputs = _live_outputs(payload.get("outputs"))
             cell.error = None
+            _replace_console(cell, payload.get("stdout"), payload.get("stderr"))
             duration = payload.get("duration_ms")
             cell.duration_ms = int(duration) if isinstance(duration, (int, float)) else None
             cell.cache_hit = bool(payload.get("cache_hit"))
@@ -171,6 +177,7 @@ class NotebookViewModel:
             cell.stream_text += str(payload.get("text") or "")
         elif msg_type == "cell_error":
             cell.error = str(payload.get("error") or "error")
+            _replace_console(cell, payload.get("stdout"), payload.get("stderr"))
         elif msg_type == "cell_iteration_progress":
             iteration = payload.get("iteration")
             max_iter = payload.get("max_iter")
@@ -201,6 +208,42 @@ class NotebookViewModel:
         self.agent_feed.append(f"{glyph} {text}")
         self.agent_status = source
         self.banner = f"🤖 {source}: {text}"
+
+
+def _append_console(cell: CellView, payload: dict[str, Any]) -> None:
+    """Append one ``cell_console`` frame; chunk 0 of a stream drops that stream's text."""
+    stream = "stderr" if payload.get("stream") == "stderr" else "stdout"
+    if payload.get("chunk_seq") == 0:
+        cell.console_parts = [part for part in cell.console_parts if part[0] != stream]
+    text = str(payload.get("text") or "")
+    if text:
+        cell.console_parts.append((stream, text))
+
+
+def _replace_console(cell: CellView, stdout: Any, stderr: Any) -> None:
+    """Make the console the given whole text per stream (a non-string keeps that stream).
+
+    Text that already matches keeps its arrival order, which the per-stream
+    strings of ``cell_output`` and the snapshot cannot carry.
+    """
+    out = stdout if isinstance(stdout, str) else cell.console_stdout
+    err = stderr if isinstance(stderr, str) else cell.console_stderr
+    if (out, err) != (cell.console_stdout, cell.console_stderr):
+        cell.console_parts = [(s, t) for s, t in (("stdout", out), ("stderr", err)) if t]
+
+
+def _live_outputs(outputs: Any) -> list[dict[str, Any]]:
+    """A ``cell_output`` frame's variables (a dict by name) as a list with ``name``.
+
+    ``_`` is the cell's display value, which ``display_outputs`` already holds.
+    """
+    if not isinstance(outputs, dict):
+        return []
+    return [
+        {"name": name, **meta}
+        for name, meta in outputs.items()
+        if name != "_" and isinstance(meta, dict)
+    ]
 
 
 def _test_badge(payload: dict[str, Any]) -> str:

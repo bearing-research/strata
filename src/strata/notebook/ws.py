@@ -3014,7 +3014,12 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
     build_state, error_code) appear on both, so the UI shows where a cell ran either
     way.
     """
-    payload: dict[str, Any] = {"cell_id": cell_id}
+    # Both frames carry the run's whole console, which replaces the client's.
+    payload: dict[str, Any] = {
+        "cell_id": cell_id,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
     if result.success:
         payload.update(
             {
@@ -3022,8 +3027,6 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
                 "cache_hit": result.cache_hit,
                 "duration_ms": int(result.duration_ms),
                 "artifact_uri": result.artifact_uri,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
                 "execution_method": result.execution_method,
                 "mutation_warnings": result.mutation_warnings,
             }
@@ -3144,6 +3147,11 @@ async def _broadcast_output_or_error(
         cell = session.notebook_state.get_cell(cell_id) if session else None
         if cell is not None:
             payload["artifact_uris"] = dict(cell.artifact_uris)
+            # A hit that replays no console keeps the cell's last one, so the
+            # frame says what a resync or reopen shows.
+            if result.cache_hit and not (result.stdout or result.stderr):
+                payload["stdout"] = cell.console_stdout
+                payload["stderr"] = cell.console_stderr
     await _broadcast_message(
         notebook_id,
         _make_message(

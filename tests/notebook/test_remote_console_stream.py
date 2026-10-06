@@ -170,6 +170,28 @@ class TestNoDoubleDelivery:
 
         assert [m["type"] for m in sent] == ["cell_console", "cell_console", "cell_output"]
 
+    @pytest.mark.asyncio
+    async def test_a_failed_run_carries_its_console_on_cell_error(self, monkeypatch):
+        """A client replaces the console from ``cell_error``, as from ``cell_output``."""
+        from strata.notebook.executor import CellExecutionResult
+        from strata.notebook.ws import _broadcast_execution_result
+
+        sent: list[dict] = []
+
+        async def _capture(notebook_id, message):
+            sent.append(message)
+
+        monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
+
+        result = CellExecutionResult(
+            cell_id="cell9", success=False, stdout="world\n", stderr="Traceback\n", error="boom"
+        )
+        await _broadcast_execution_result("nb1", "cell9", result)
+
+        (error,) = [m for m in sent if m["type"] == "cell_error"]
+        assert error["payload"]["stdout"] == "world\n"
+        assert error["payload"]["stderr"] == "Traceback\n"
+
 
 def remote_executor_module():
     from strata.notebook import remote_executor
@@ -477,7 +499,8 @@ class TestWhatIsShownStaysAPrefix:
             drain = _asyncio.create_task(_drain_via(remote_executor, proc))
             # Release only once both pipes are read to the end: the queue is then
             # full and every later chunk was dropped, whatever the machine's speed.
-            while not (proc.stdout.at_eof() and proc.stderr.at_eof()):
+            # Watching the drain too lets its exception surface instead of a hang.
+            while not drain.done() and not (proc.stdout.at_eof() and proc.stderr.at_eof()):
                 await _asyncio.sleep(0.01)
             release.set()
             stdout, _ = await drain
@@ -679,6 +702,7 @@ class TestLateJoiner:
         from strata.notebook.ws import _handle_notebook_sync
 
         _capture_broadcasts(monkeypatch)
+        session.mark_cell_running("cell1")
         console_relay.register("b1", session.id, "cell1")
         await console_relay.deliver("b1", "stdout", 0, "epoch 1\n")
         await console_relay.deliver("b1", "stdout", 1, "epoch 2\n")
@@ -697,8 +721,35 @@ class TestLateJoiner:
         assert frame["type"] == "notebook_state"
         (cell,) = frame["payload"]["cells"]
         assert cell["console_stdout"] == "epoch 1\nepoch 2\n"
-        # Nothing on stderr yet this run: it keeps what every connected viewer still shows.
-        assert cell["console_stderr"] == "last run's warning\n"
+        # Nothing on stderr yet this run, and viewers cleared the last run's on `running`.
+        assert cell["console_stderr"] == ""
+
+    @pytest.mark.asyncio
+    async def test_a_hit_that_replays_no_console_sends_the_kept_one(self, session, monkeypatch):
+        """The frame replaces the console with what a resync of the session shows."""
+        from types import SimpleNamespace
+
+        import strata.notebook.ws as notebook_ws
+        from strata.notebook.executor import CellExecutionResult
+
+        sent = _capture_broadcasts(monkeypatch)
+        monkeypatch.setattr(
+            notebook_ws,
+            "_get_session_manager",
+            lambda: SimpleNamespace(get_session=lambda _id: session),
+        )
+        result = CellExecutionResult(cell_id="cell1", success=True, cache_hit=True)
+        await notebook_ws._broadcast_execution_result(session.id, "cell1", result)
+
+        (output,) = [m for m in sent if m["type"] == "cell_output"]
+        assert output["payload"]["stdout"] == "last run's output\n"
+        assert output["payload"]["stderr"] == "last run's warning\n"
+
+    def test_a_running_local_cell_does_not_serialize_the_last_runs_console(self, session):
+        session.mark_cell_running("cell1")
+        cell = session.notebook_state.cells[0]
+        data = session.serialize_cell(cell)
+        assert (data["console_stdout"], data["console_stderr"]) == ("", "")
 
     @pytest.mark.asyncio
     async def test_a_finished_run_serializes_its_own_console_again(self, session, monkeypatch):

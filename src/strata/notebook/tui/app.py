@@ -943,11 +943,19 @@ def _is_table(output: dict[str, Any]) -> bool:
     )
 
 
+def _output_candidates(cell: CellView) -> list[dict[str, Any]]:
+    """What the Output tab may render whole: the displayed values, else the variables.
+
+    A displayed variable is also a stored one, so taking both would count it twice.
+    """
+    return [o for o in (cell.display_outputs or cell.outputs) if isinstance(o, dict)]
+
+
 def _single_table(cell: CellView) -> tuple[list[str], list[Any], int | None] | None:
     """Return ``(columns, preview_rows, total_rows)`` for a single tabular output, else None."""
     if cell.error or cell.stream_text:
         return None
-    candidates = [o for o in (*cell.display_outputs, *cell.outputs) if isinstance(o, dict)]
+    candidates = _output_candidates(cell)
     if len(candidates) != 1 or not _is_table(candidates[0]):
         return None
     output = candidates[0]
@@ -967,7 +975,7 @@ def _single_table_uri(cell: CellView) -> str | None:
     """
     if cell.error or cell.stream_text:
         return None
-    candidates = [o for o in (*cell.display_outputs, *cell.outputs) if isinstance(o, dict)]
+    candidates = _output_candidates(cell)
     if len(candidates) != 1 or not _is_table(candidates[0]):
         return None
     uri = candidates[0].get("artifact_uri")
@@ -1032,7 +1040,7 @@ def _single_image(cell: CellView) -> str | None:
     """Return the data URL when the cell's output is exactly one image, else None."""
     if cell.error or cell.stream_text:
         return None
-    candidates = [o for o in (*cell.display_outputs, *cell.outputs) if isinstance(o, dict)]
+    candidates = _output_candidates(cell)
     if len(candidates) != 1:
         return None
     output = candidates[0]

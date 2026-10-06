@@ -52,7 +52,7 @@ import type {
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import type { DatasetReader } from '../utils/datasetReaders'
 import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
-import { applyConsoleChunk } from '../utils/consoleChunk'
+import { appendConsole, replaceConsole, startConsoleRun } from '../utils/consoleChunk'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
 import { refusalNotice } from '../utils/refusal'
@@ -1905,6 +1905,7 @@ function initializeWebSocket() {
       if (cell && status === 'running') {
         cell.streamBuffer = undefined
         cell.streamAttempt = undefined
+        startConsoleRun(cell)
       }
 
       if (cell && status !== 'error' && cell.suggestInstall) {
@@ -1978,11 +1979,6 @@ function initializeWebSocket() {
       output.cacheHit = p.cache_hit || false
       output.cacheLoadMs = p.duration_ms
 
-      // Console lives on the Cell, not output.scalar, to keep the display
-      // value clean.
-      const stdout = typeof p.stdout === 'string' ? p.stdout : undefined
-      const stderr = typeof p.stderr === 'string' ? p.stderr : undefined
-
       const cell = cellMap.value.get(cellId)
       if (cell) {
         cell.streamBuffer = undefined
@@ -1990,10 +1986,9 @@ function initializeWebSocket() {
         cell.durationMs = p.duration_ms
         cell.displayOutputs = displayOutputs
         if (p.artifact_uris !== undefined) cell.artifactUris = parseArtifactUris(p.artifact_uris)
-        // Absent stdout/stderr keeps the streamed console (cache hits don't
-        // re-stream).
-        if (stdout !== undefined) cell.consoleStdout = stdout
-        if (stderr !== undefined) cell.consoleStderr = stderr
+        // Console lives on the Cell, not output.scalar, to keep the display
+        // value clean.
+        replaceConsole(cell, p)
         if (p.execution_method) {
           cell.executorName = p.execution_method
         }
@@ -2074,17 +2069,8 @@ function initializeWebSocket() {
 
     wsInstance.onMessage('cell_console', (msg: WsMessage) => {
       const p = msg.payload as Record<string, any>
-      const cellId = p.cell_id as CellId
-      const text = typeof p.text === 'string' ? p.text : ''
-      const stream = p.stream === 'stderr' ? 'stderr' : 'stdout'
-      const cell = cellMap.value.get(cellId)
-      if (cell && text) {
-        if (stream === 'stderr') {
-          cell.consoleStderr = applyConsoleChunk(cell.consoleStderr, text, p.chunk_seq)
-        } else {
-          cell.consoleStdout = applyConsoleChunk(cell.consoleStdout, text, p.chunk_seq)
-        }
-      }
+      const cell = cellMap.value.get(p.cell_id as CellId)
+      if (cell) appendConsole(cell, p)
     })
 
     wsInstance.onMessage('cell_error', (msg: WsMessage) => {
@@ -2097,6 +2083,7 @@ function initializeWebSocket() {
         cell.streamBuffer = undefined
         cell.streamAttempt = undefined
         cell.displayOutputs = []
+        replaceConsole(cell, p)
         applyRemoteExecutionMetadata(cell, p)
         const workerName = effectiveWorkerNameForCell(cell)
         const workerEntry = availableWorkers.value.find((worker) => worker.name === workerName)

@@ -1300,9 +1300,14 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
-        # A viewer joining mid-run gets what the running cell has printed so far.
-        for stream, text in console_relay.live_console(self.id, cell.id).items():
-            data[f"console_{stream}"] = text
+        # A viewer joining mid-run gets what the running cell has printed so far;
+        # clients cleared the last run's console when this run started.
+        live = console_relay.live_console(self.id, cell.id)
+        for stream in ("stdout", "stderr"):
+            if stream in live:
+                data[f"console_{stream}"] = live[stream]
+            elif cell.status == CellStatus.RUNNING:
+                data[f"console_{stream}"] = ""
         if cell.test_result is not None and data.get("test_result") is not None:
             result = cell.test_result
             ran_against = (
