@@ -477,7 +477,8 @@ class TestWhatIsShownStaysAPrefix:
             drain = _asyncio.create_task(_drain_via(remote_executor, proc))
             # Release only once both pipes are read to the end: the queue is then
             # full and every later chunk was dropped, whatever the machine's speed.
-            while not (proc.stdout.at_eof() and proc.stderr.at_eof()):
+            # Watching the drain too lets its exception surface instead of a hang.
+            while not drain.done() and not (proc.stdout.at_eof() and proc.stderr.at_eof()):
                 await _asyncio.sleep(0.01)
             release.set()
             stdout, _ = await drain
