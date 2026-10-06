@@ -28,6 +28,8 @@ dependencies = [
 [project.optional-dependencies]
 server = [
     "fastapi>=0.115.0",
+    # Imported directly by the API (the machine-type catalogue), not only through FastAPI.
+    "pydantic>=2.13.5",
     # FastAPI only asks for starlette>=0.46.0; 1.3.1 fixes the 2026 advisories.
     "starlette>=1.3.1",
     "uvicorn>=0.30.0",

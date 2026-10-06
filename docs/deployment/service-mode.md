@@ -675,7 +675,20 @@ can. A notebook that needs more isolation than that wants a worker on another
 machine.
 
 SQL cells are different: their queries run inside the server process, not as
-the harness user. A DuckDB SQL cell is confined instead. Once its connection is
+the harness user, so the server checks which database file a SQLite or DuckDB
+connection opens. After resolving `../` and following links, its `path` must be
+inside the notebook's own directory, or else pass the mount-root rule below and
+not be inside the server's state (the artifact directory, the cache directory,
+the metadata database's directory, the notebook storage directory or the
+server's home). The server opens the resolved file, checked again just before
+opening, so a link changed after the first check is not followed. A SQLite
+connection may not use `uri`, whose parameters can name
+any file. Saving such a connection fails with a 400, and one already in
+`notebook.toml` fails the cell and the connection's schema listing, naming it.
+The keys the server sets on a connection it opens (`confine_to`,
+`mount_sources`, `catalog_properties`) are dropped from a connection block.
+
+A DuckDB SQL cell is also confined. Once its connection is
 set up, it can reach only its own database, the roots of the mounts it reads,
 and the locations of the catalog tables it reads; file access outside those is
 refused, and the cell cannot turn it back on. So `read_text` of a server file,
@@ -685,14 +698,22 @@ files live outside its own location cannot be read this way.
 A mount's root is therefore as much of the disk as the cell may read, as the
 server, so a SQL cell refuses a local (`file://`) mount root, after following
 links, that is `/` or has fewer than two path components (`/data`); that holds
-the server's state (the artifact directory, the cache directory, the metadata
-database's directory, the notebook storage directory or the server's home); or
-that is inside the server's home, `/proc`, `/sys` or `/dev`. The cell fails
+or is inside the server's state (the artifact directory, the cache directory,
+the metadata database's directory, the notebook storage directory or the
+server's home), other than the notebook's own directory; or that is inside the
+server's home, `/proc`, `/sys` or `/dev`. The cell fails
 naming the mount. Python cells mount the same roots unchecked: they run as the
 harness user, whose own file permissions decide what a root exposes. A SQLite cell also
 runs in the server process: in a write cell `ATTACH`, `DETACH` and `VACUUM` are
 refused, since they reach other files (a read cell runs only reads already).
 Postgres, Snowflake and BigQuery cells send the query to their database server.
+The server reads a BigQuery connection's `credentials_path` and
+`write_credentials_path` key files itself, so each must be a file in the
+notebook's own directory, after following links; one elsewhere fails the cell,
+the schema listing and saving the connection.
+A `${VAR}` in a connection's `auth` reads the notebook's env, never the server's
+environment, which would otherwise go to whatever host the notebook names; a
+secret the server holds reaches a connection only as a named `credential`.
 
 Prompt cells call their model from the server process too, and show the author
 what came back. A `base_url` from the notebook's `[ai]` section is checked like
@@ -701,7 +722,8 @@ address (the cloud metadata address among them) is refused unless it is named in
 `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`, the same list `@fetch` uses. The
 connection goes only to an address that passed the check, so it ignores proxy
 settings. `STRATA_AI_BASE_URL` is yours and is not checked, nor is a notebook
-naming that same URL or a provider's default one.
+naming that same URL or a provider's default one. Your `STRATA_AI_API_KEY` is
+sent only to those URLs; a notebook naming another host must bring its own key.
 
 Installing a notebook's Python packages runs as the server's user too, and building
 a package from a source distribution runs that package's build backend, code

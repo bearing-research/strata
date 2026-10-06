@@ -730,10 +730,15 @@ def _load_readme(notebook_dir: Path) -> str | None:
 
 def _emit_markdown(blocks: list[Block]) -> str:
     """Walk the block tree and emit CommonMark."""
+    from html import escape
+
+    # Names, widget values, notes and table values come from cells and data; the
+    # published page renders raw HTML, so they get the markdown-cell sanitizer too.
+    inline = _sanitize_markdown_prose
     pieces: list[str] = []
     for block in blocks:
         if isinstance(block, HeadingBlock):
-            pieces.append(f"{'#' * block.level} {block.text}")
+            pieces.append(f"{'#' * block.level} {inline(block.text)}")
         elif isinstance(block, MarkdownBlock):
             pieces.append(_sanitize_markdown_body(block.body).rstrip("\n"))
         elif isinstance(block, CodeBlock):
@@ -743,12 +748,17 @@ def _emit_markdown(blocks: list[Block]) -> str:
                 f"{fence}{block.language}{title_suffix}\n{block.body.rstrip()}\n{fence}",
             )
         elif isinstance(block, ChipsBlock):
-            chip_text = "  ·  ".join(f"**{k}** {v}" for k, v in block.items)
+            chip_text = "  ·  ".join(f"**{inline(k)}** {inline(v)}" for k, v in block.items)
             pieces.append(f"<sub>{chip_text}</sub>")
         elif isinstance(block, NoteBlock):
-            pieces.append(f"*{block.text}*")
+            pieces.append(f"*{inline(block.text)}*")
         elif isinstance(block, ImageBlock):
-            pieces.append(f'<img src="{block.data_url}" alt="{block.alt}">')
+            # An imported snapshot's display URL is untrusted: only an inline image is emitted.
+            if block.data_url.startswith("data:image/"):
+                src, alt = escape(block.data_url, quote=True), escape(block.alt, quote=True)
+                pieces.append(f'<img src="{src}" alt="{alt}">')
+            else:
+                pieces.append("*Image output omitted: its source is not an inline image.*")
         elif isinstance(block, TableBlock):
             pieces.append(_emit_markdown_table(block))
     return "\n\n".join(pieces) + "\n"
@@ -757,7 +767,7 @@ def _emit_markdown(blocks: list[Block]) -> str:
 def _emit_markdown_table(block: TableBlock) -> str:
     """Render a TableBlock as a GitHub-flavored markdown table."""
     columns = list(block.columns)
-    header = "| " + " | ".join(columns) + " |"
+    header = "| " + " | ".join(_format_table_cell(str(col)) for col in columns) + " |"
     separator = "| " + " | ".join("---" for _ in columns) + " |"
     body_lines: list[str] = []
     for row in block.rows:
@@ -772,7 +782,7 @@ def _emit_markdown_table(block: TableBlock) -> str:
     ):
         suffix = f"\n\n*…showing {block.truncated_to} of {block.total_rows} rows*"
 
-    title_line = f"**{block.title}**\n\n" if block.title else ""
+    title_line = f"**{_sanitize_markdown_prose(block.title)}**\n\n" if block.title else ""
     return title_line + "\n".join([header, separator, *body_lines]) + suffix
 
 
@@ -794,12 +804,11 @@ def _format_table_cell(value: object) -> str:
     """Coerce a single cell value to a markdown-safe inline string."""
     if value is None:
         return ""
-    if isinstance(value, str):
-        return value.replace("|", "\\|").replace("\n", " ")
     if isinstance(value, float):
         # 5.000000 -> 5.0, with enough precision for stats tables.
         return f"{value:.4g}"
-    return str(value)
+    text = str(value).replace("|", "\\|").replace("\n", " ")
+    return _sanitize_markdown_prose(text)
 
 
 def _emit_html(blocks: list[Block], *, title: str) -> str:

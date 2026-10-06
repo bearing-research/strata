@@ -532,7 +532,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `STRATA_TRANSFORM_MODE`                 | `embedded` | Accepted but **not currently wired up**: the registry is always built in embedded mode, so setting `registry` has no effect. Configure transforms through `transforms_config` instead. |
 | `STRATA_TRANSFORMS_CONFIG`              | `{}`    | The whole transforms block as a JSON object (`enabled`, `registry`, …). Normally written as `[tool.strata.transforms]` instead; `STRATA_TRANSFORMS_ENABLED` merges into it rather than replacing it. |
-| `STRATA_SIGNED_URL_EXPIRY_SECONDS`      | `600`   | Validity window for pull-model signed build URLs.                                               |
+| `STRATA_SIGNED_URL_EXPIRY_SECONDS`      | `600`   | Validity window for pull-model signed build URLs. For a notebook cell on a `signed` worker it is a floor: the URLs last at least the cell's timeout plus `STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` plus 5 minutes, so a long cell can still upload its result. |
 | `STRATA_ARTIFACT_PRESIGNED_URLS` | `false` | Put presigned object-store URLs in build manifests where the blob store can sign them, so a worker's inputs and output bypass the server: S3 with an access key pair or a role (the `s3` extra), GCS with a service-account key or workload identity (the `gcs` extra), Azure with the account key or a managed identity. The output becomes a form upload (`output.fields`) or, on Azure, a `PUT` (`output.method`), which older workers don't send, so enable it once the workers are upgraded. The [executor protocol](executor-protocol.md) says what each store signs with. |
 | `STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` | `600` | For a worker that answers a dispatch (direct or signed) with 202: how long the job may take to start running. The cell's own timeout starts once it runs. See [Executor protocol](executor-protocol.md). |
 | `STRATA_TRANSFORM_SIGNING_SECRET`       | `None`  | HMAC secret signing pull-model build URLs. Unset → a random per-process secret (signed URLs break on restart and differ across replicas); set a stable value for multi-replica / restart-surviving deployments. |
@@ -667,7 +667,9 @@ also sets its provider's `base_url` and `model`, so it replaces the server's
 link-local address is refused unless its host is in
 `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. `STRATA_AI_BASE_URL` is the operator's
 and is not checked, nor is a notebook naming that same URL or a provider's
-default.
+default. In every mode the server's `STRATA_AI_API_KEY` goes only to those
+trusted URLs: a notebook whose `[ai] base_url` names another host needs its own
+key (the Runtime panel, or `[ai] api_key`).
 
 ```toml
 [ai]

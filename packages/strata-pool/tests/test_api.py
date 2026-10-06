@@ -5,6 +5,7 @@ Driven through `httpx.ASGITransport` on the test's own loop, not `TestClient`
 """
 
 import asyncio
+import json
 import os
 
 import httpx
@@ -342,6 +343,86 @@ class TestCatalogueWrites:
         assert response.status_code == 200
         assert api.pool.machine_types["cpu"].image == "w2"
         assert [spec.image for spec in api.pool.store.load_machine_types()] == ["w2"]
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"name": "cpu", "image": "w", "cool_down_seconds": "300"},
+            {"name": "cpu", "image": "w", "max_workers": "2"},
+            {"name": "cpu", "image": "w", "env": {"A": 1}},
+            {"name": "cpu", "image": "w", "cool_down_seconds": float("inf")},
+            {"name": "cpu", "image": "w", "unknown": 1},
+            {"name": "cpu"},
+        ],
+        ids=[
+            "string-cool-down",
+            "string-max-workers",
+            "non-string-env",
+            "infinite-cool-down",
+            "unknown-key",
+            "no-image",
+        ],
+    )
+    async def test_a_badly_typed_catalogue_is_refused_before_it_is_stored(self, api, entry):
+        """A stored string timeout made every later scaler pass raise, so nothing was reaped."""
+        # json.dumps, not httpx's json=, which refuses to send Infinity.
+        response = await api.put("/v1/machine-types", content=json.dumps([entry]), headers=ADMIN)
+
+        assert response.status_code == 400
+        assert api.pool.store.load_machine_types() is None
+        assert api.pool.machine_types["cpu"].cool_down_seconds == 300.0
+
+    async def test_a_catalogue_that_is_not_a_list_is_refused(self, api):
+        response = await api.put("/v1/machine-types", json={"name": "cpu"}, headers=ADMIN)
+
+        assert response.status_code == 400
+        assert api.pool.store.load_machine_types() is None
+
+
+class TestJobOptionValidation:
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "timeout_seconds=inf",
+            "timeout_seconds=nan",
+            "timeout_seconds=0",
+            "timeout_seconds=-1",
+            "priority=1000000000000000000000000000000",
+        ],
+    )
+    async def test_an_unusable_option_is_refused_before_the_job_is_stored(self, api, query):
+        """`inf` was stored and queued, then the 202 itself failed to serialize: a 500."""
+        response = await api.post(f"/v1/jobs?machine_type=cpu&{query}", content=b"x", headers=AUTH)
+
+        assert response.status_code == 422
+        assert api.pool.store.list_jobs() == []
+
+    @pytest.mark.parametrize("wait", ["inf", "nan", "0"])
+    async def test_an_unusable_wait_is_refused(self, api, wait):
+        response = await api.post(
+            f"/v1/jobs/sync?machine_type=cpu&wait_seconds={wait}", content=b"x", headers=AUTH
+        )
+
+        assert response.status_code == 422
+        assert api.pool.store.list_jobs() == []
+
+    async def test_the_wait_is_capped_at_what_the_job_can_take(self, api, monkeypatch):
+        waits: list[float] = []
+        real_wait = api.pool.wait
+
+        async def _recording_wait(job_id, timeout=30.0):
+            waits.append(timeout)
+            return await real_wait(job_id, timeout=timeout)
+
+        monkeypatch.setattr(api.pool, "wait", _recording_wait)
+        spec = api.pool.machine_types["cpu"]
+
+        response = await api.post(
+            "/v1/jobs/sync?machine_type=cpu&wait_seconds=1e12", content=b"x", headers=AUTH
+        )
+
+        assert response.status_code == 200
+        assert waits == [spec.boot_timeout_seconds + spec.job_timeout_seconds]
 
     async def test_the_admin_token_also_runs_jobs(self, api):
         response = await api.post(

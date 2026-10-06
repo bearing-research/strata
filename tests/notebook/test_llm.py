@@ -145,6 +145,51 @@ class TestResolveLlmConfig:
             assert config.max_output_tokens == 2048
 
 
+class TestServerKeyStaysWithTrustedBaseUrls:
+    """The server's key never goes to a base_url a notebook committed, in any mode."""
+
+    @pytest.mark.parametrize("mode", ["personal", "service"])
+    def test_untrusted_notebook_base_url_gets_no_server_key(self, mode):
+        server = _FakeServerConfig(ai_api_key="sk-server", ai_base_url="https://llm.corp/v1")
+        server.deployment_mode = mode
+        config = resolve_llm_config(
+            notebook_config={"base_url": "https://attacker.example/v1"},
+            server_config=server,
+        )
+        assert config is None
+
+    @pytest.mark.parametrize(
+        "base_url", ["https://llm.corp/v1", "https://llm.corp/v1/", "https://api.anthropic.com/v1"]
+    )
+    def test_operator_and_provider_base_urls_keep_the_server_key(self, base_url):
+        config = resolve_llm_config(
+            notebook_config={"base_url": base_url},
+            server_config=_FakeServerConfig(
+                ai_api_key="sk-server", ai_base_url="https://llm.corp/v1"
+            ),
+        )
+        assert config is not None
+        assert config.api_key == "sk-server"
+        assert config.base_url == base_url
+
+    @pytest.mark.parametrize(
+        ("notebook_config", "notebook_env"),
+        [
+            ({"base_url": "https://mine.example/v1", "api_key": "sk-nb"}, None),
+            ({"base_url": "https://mine.example/v1"}, {"STRATA_AI_API_KEY": "sk-nb"}),
+        ],
+    )
+    def test_a_notebook_key_goes_to_its_own_base_url(self, notebook_config, notebook_env):
+        config = resolve_llm_config(
+            notebook_config=notebook_config,
+            server_config=_FakeServerConfig(ai_api_key="sk-server"),
+            notebook_env=notebook_env,
+        )
+        assert config is not None
+        assert config.api_key == "sk-nb"
+        assert config.base_url == "https://mine.example/v1"
+
+
 class TestInferProviderName:
     """Provider name inference."""
 

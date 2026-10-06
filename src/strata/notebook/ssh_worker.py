@@ -249,14 +249,16 @@ class RemoteWorker:
         if token and "\n" in token:
             raise SshWorkerError("worker token must not contain newlines")
         read_token = "IFS= read -r STRATA_WORKER_TOKEN && export STRATA_WORKER_TOKEN && "
+        # Only the worker goes in the background: POSIX shells give an asynchronous
+        # list /dev/null as stdin, so a backgrounded `read` would never see the token.
         cmd = (
             f"{read_token if token else ''}"
-            f"mkdir -p {_REMOTE_STATE_DIR} && "
+            f"mkdir -p {_REMOTE_STATE_DIR} && {{ "
             f"nohup strata-worker --host {shlex.quote(host)} --port {port} "
             f"> {logfile} 2>&1 & "
             "pid=$!; "
             f'printf \'{{"pid": %s, "port": %s}}\\n\' "$pid" {port} > {pidfile}; '
-            "echo $pid"
+            "echo $pid; }"
         )
         res = self.runner.run(cmd, timeout=30, stdin_data=f"{token}\n" if token else None)
         if not res.ok:

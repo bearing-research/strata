@@ -345,9 +345,18 @@ def _validate_notebook_path(
 
 def _safe_filename(name: str) -> str:
     """Sanitize a string for use in Content-Disposition."""
-    safe = re.sub(r"[^\w\s.-]", "", name)
+    # ASCII only: Starlette encodes headers as latin-1, so a CJK name would 500.
+    safe = re.sub(r"[^\w\s.-]", "", name, flags=re.ASCII)
     safe = re.sub(r"\s+", "_", safe).strip("_") or "notebook"
     return safe
+
+
+def _attachment(stem: str, suffix: str) -> str:
+    """``Content-Disposition`` for ``stem + suffix``: an ASCII name plus the RFC 5987 original."""
+    from urllib.parse import quote
+
+    original = quote(f"{stem}{suffix}", safe="")
+    return f"attachment; filename=\"{_safe_filename(stem)}{suffix}\"; filename*=UTF-8''{original}"
 
 
 def validate_env_vars(env: dict[str, str]) -> dict[str, str]:
@@ -1818,10 +1827,11 @@ async def export_environment_requirements(
 ) -> PlainTextResponse:
     """Export direct notebook dependencies as ``requirements.txt`` text."""
 
-    filename = f"{_safe_filename(session.notebook_state.name)}-requirements.txt"
     return PlainTextResponse(
         export_requirements_text(session.path),
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": _attachment(session.notebook_state.name, "-requirements.txt")
+        },
     )
 
 
@@ -2165,6 +2175,7 @@ async def update_notebook_connections_endpoint(
     literals are scrubbed on write, and the response reflects disk, so the UI sees
     the blanked secrets.
     """
+    from strata.notebook.sql.cell_executor import database_problem
 
     seen: set[str] = set()
     for conn in req.connections:
@@ -2174,6 +2185,12 @@ async def update_notebook_connections_endpoint(
                 detail=f"duplicate connection name {conn.name!r}",
             )
         seen.add(conn.name)
+    # Cells refuse these too; saying so here spares a member the broken connection.
+    config = session._lake_config()
+    for conn in req.connections:
+        problem = database_problem(conn, session.path, config)
+        if problem is not None:
+            raise HTTPException(status_code=400, detail=f"connection {conn.name!r}: {problem}")
 
     try:
         # Keep [connections.<name>] blocks that failed to parse, so a typo in one
@@ -2210,10 +2227,15 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
 
     Open and enumeration failures return 502 with the driver's message.
     """
+    from strata.notebook.credentials import CredentialError
     from strata.notebook.sql.cell_executor import (
+        _auth_env,
+        _confined,
         _resolve_runtime_spec,
         _safely_close,
+        database_problem,
     )
+    from strata.notebook.sql.lake import LakeError
     from strata.notebook.sql.registry import get_adapter
 
     spec = next(
@@ -2229,8 +2251,19 @@ async def get_connection_schema(notebook_id: str, session: SessionDep, name: str
         adapter = get_adapter(spec.driver)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    problem = database_problem(spec, session.path, session._lake_config())
+    if problem is not None:
+        raise HTTPException(status_code=400, detail=f"connection {name!r}: {problem}")
 
-    runtime_spec = _resolve_runtime_spec(spec, session.path)
+    # Confined as a cell's connection is: the server opens it.
+    try:
+        runtime_spec = _resolve_runtime_spec(spec, session.path, auth_env=_auth_env(session))
+    except CredentialError as exc:
+        raise HTTPException(status_code=400, detail=f"connection {name!r}: {exc}") from exc
+    try:
+        runtime_spec = _confined(session, runtime_spec, None)
+    except LakeError as exc:
+        raise HTTPException(status_code=400, detail=f"connection {name!r}: {exc}") from exc
     try:
         conn = adapter.open(runtime_spec, read_only=True)
     except Exception as exc:  # noqa: BLE001
@@ -2371,6 +2404,7 @@ async def teardown_ssh_worker_endpoint(
     """Close a worker's SSH tunnel and remove its notebook registration."""
     import asyncio
 
+    from strata.notebook.ops import NotebookOpsError
     from strata.notebook.ssh_worker_service import teardown_ssh_worker
 
     supervisor = get_worker_supervisor()
@@ -2378,6 +2412,8 @@ async def teardown_ssh_worker_endpoint(
         existed = await asyncio.to_thread(
             teardown_ssh_worker, session, supervisor, worker_name, stop_remote=stop_remote
         )
+    except NotebookOpsError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     except NotebookQuiesced as exc:
         raise _quiesced_conflict(exc) from exc
     except Exception:
@@ -2621,8 +2657,14 @@ async def update_notebook_env_endpoint(
         to_write = {key: value for key, value in env.items() if key not in fetched}
         to_write.update({key: "" for key in fetched if key in declared})
         update_notebook_env(session.path, to_write)
-        # The request is the whole env: a secret it leaves out is removed.
-        session.reload(keep_typed_secrets=False)
+        # The request is the whole env: a secret it leaves out is removed. Set it before
+        # the reload, which carries typed secrets over from it, so the staleness the reload
+        # computes sees the values cells run with rather than the blanks on disk.
+        state.env = dict(env)
+        state.env_sources = {
+            key: previous_sources[key] if key in fetched else MANUAL_SOURCE for key in env
+        }
+        session.reload()
         # The disk writer blanks sensitive values to keep them out of git; restore
         # them in memory for the LLM config and Runtime panel. Edits are manual
         # overrides (for the UI badge).
@@ -3201,11 +3243,10 @@ async def export_cell_data(
         raise HTTPException(status_code=400, detail="Output is not an exportable table")
 
     media_type = "text/csv" if fmt == "csv" else "application/vnd.apache.parquet"
-    filename = f"{cell_id}.{fmt}"
     return Response(
         content=data,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _attachment(cell_id, f".{fmt}")},
     )
 
 
@@ -3545,9 +3586,7 @@ def _render_notebook_export(
     return Response(
         content=body,
         media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}.{extension}"',
-        },
+        headers={"Content-Disposition": _attachment(safe_name, f".{extension}")},
     )
 
 
@@ -3628,9 +3667,12 @@ async def export_notebook(
 
     buf.seek(0)
     suffix = "snapshot.zip" if fmt == "snapshot" else "zip"
-    filename = f"{_safe_filename(session.notebook_state.name or 'notebook')}.{suffix}"
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": _attachment(
+                session.notebook_state.name or "notebook", f".{suffix}"
+            )
+        },
     )

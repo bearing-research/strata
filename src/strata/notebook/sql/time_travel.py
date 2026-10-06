@@ -68,23 +68,39 @@ def plus(at: str, delta: timedelta) -> str:
     return (datetime.fromisoformat(at) + delta).astimezone(UTC).isoformat()
 
 
-def pin_tables(sql: str, dialect: str, template: str, clause_key: str) -> str:
-    """Attach the time-travel clause of *template* to every table *sql* reads.
+def pin_tables(sql: str, dialect: str, clause: str, clause_key: str, *, after_alias: bool) -> str:
+    """Write the time-travel *clause* after every table *sql* reads.
 
-    *template* is a one-table query in *dialect* carrying the clause; *clause_key*
-    is where sqlglot keeps it on a ``Table`` (``when`` for Snowflake, ``version``
-    for BigQuery). Tables are chosen scope by scope as the analyzer does, so a base
-    table sharing a name with a CTE elsewhere is still pinned. A table the author
-    already pinned keeps its moment.
+    *clause_key* is where sqlglot keeps such a clause on a ``Table`` (``when`` for
+    Snowflake, ``version`` for BigQuery). Tables are chosen scope by scope as the
+    analyzer does, so a base table sharing a name with a CTE elsewhere is still
+    pinned. A table the author already pinned keeps its moment.
     """
     from strata.notebook.sql.analyzer import base_table_nodes
 
-    table = sqlglot.parse_one(template, read=dialect).find(exp.Table)
-    assert table is not None
-    clause = table.args[clause_key]
     tree = sqlglot.parse_one(sql, read=dialect)
-    for reference in base_table_nodes(tree, dialect):
-        if reference.args.get(clause_key):
-            continue
-        reference.set(clause_key, clause.copy())
-    return tree.sql(dialect=dialect)
+    tables = [t for t in base_table_nodes(tree, dialect) if not t.args.get(clause_key)]
+    return splice_after_tables(sql, [(t, clause) for t in tables], after_alias=after_alias)
+
+
+def splice_after_tables(sql: str, clauses: list[tuple[Any, str]], *, after_alias: bool) -> str:
+    """*sql* with each clause written after its parsed ``exp.Table``, all else as written.
+
+    Not sqlglot's regeneration of the query, which can compute something else
+    (DuckDB ``MAP {a: b}`` becomes ``MAP {'a': b}``, BigQuery ``NUMERIC(10,2)``
+    loses its precision). The tables must come from parsing *sql* itself.
+    """
+    points: list[tuple[int, str]] = []
+    for table, clause in clauses:
+        alias = table.args.get("alias") if after_alias else None
+        anchor = alias.find_all(exp.Identifier) if alias is not None else table.parts
+        ends = [part.meta["end"] for part in anchor if "end" in part.meta]
+        if not ends:
+            raise ValueError(f"cannot place a snapshot clause after {table.sql()}")
+        end = max(ends) + 1
+        if alias is not None and alias.columns:
+            end = sql.index(")", end) + 1
+        points.append((end, clause))
+    for end, clause in sorted(points, reverse=True):
+        sql = f"{sql[:end]} {clause}{sql[end:]}"
+    return sql

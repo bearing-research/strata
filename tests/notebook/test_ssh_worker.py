@@ -204,6 +204,60 @@ def test_launch_rejects_token_with_newline():
         RemoteWorker("gpu", runner).launch(port=9000, token="bad\ntoken")
 
 
+class LocalShellRunner:
+    """Runs each command through a real ``<shell> -c`` with HOME and PATH pinned."""
+
+    def __init__(self, shell: str, env: dict[str, str]) -> None:
+        self.shell = shell
+        self.env = env
+
+    def run(
+        self, command: str, *, timeout: float | None = None, stdin_data: str | None = None
+    ) -> CommandResult:
+        import subprocess
+
+        proc = subprocess.run(
+            [self.shell, "-c", command],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            input=stdin_data,
+            env=self.env,
+        )
+        return CommandResult(proc.returncode, proc.stdout, proc.stderr)
+
+
+@pytest.mark.parametrize("shell", ["/bin/sh", "/bin/bash", "/bin/dash", "/bin/zsh"])
+def test_launch_command_starts_the_worker_under_a_real_shell(shell, tmp_path):
+    """The token read must stay in the foreground: POSIX shells give a background list /dev/null."""
+    import time
+    from pathlib import Path
+
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} not installed")
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "strata-worker"
+    stub.write_text('#!/bin/sh\necho "started token=$STRATA_WORKER_TOKEN"\nexec sleep 60\n')
+    stub.chmod(0o755)
+    env = {"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"}
+    remote = RemoteWorker("gpu", LocalShellRunner(shell, env))
+
+    launched = remote.launch(port=9000, token="tok123", adopt=False)
+    try:
+        assert remote.is_running() == RunningWorker(pid=launched.pid, port=9000)
+        log = home / ".strata" / "worker-gpu.log"
+        deadline = time.monotonic() + 10
+        while "started" not in (log.read_text() if log.exists() else ""):
+            assert time.monotonic() < deadline, "stub worker never wrote its log"
+            time.sleep(0.05)
+        assert log.read_text().strip() == "started token=tok123"
+    finally:
+        remote.stop()
+
+
 def test_timeout_error_never_contains_stdin_data(monkeypatch):
     """The message reaches HTTP 400 bodies and logs, so the stdin-fed token must not appear."""
     import subprocess

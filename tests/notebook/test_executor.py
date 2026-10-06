@@ -1407,6 +1407,81 @@ class Person:
         assert metadata["cell_provenance_hash"] != artifact.provenance_hash
 
     @pytest.mark.asyncio
+    async def test_the_env_reaches_the_worker_but_no_stored_row(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """Secrets ride only in the manifest; the artifact and build rows, which
+        ``GET /v1/artifacts/{id}/v/{n}`` returns, name the keys and digest the values."""
+        import json
+
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        seen = self._capture_manifest_metadata(monkeypatch)
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        source = 'import os\nprint(os.environ["MY_API_KEY"])\nx = 1'
+        cell1.source = source
+        cell1.env = {"MY_API_KEY": "sk-signed-secret"}
+        sample_notebook.re_analyze_cell("cell1")
+
+        result = await CellExecutor(sample_notebook).execute_cell("cell1", source)
+
+        assert result.success, result.error
+        assert "sk-signed-secret" in result.stdout
+        (metadata,) = seen
+        assert metadata["params"]["env"] == {"MY_API_KEY": "sk-signed-secret"}
+        build = notebook_build_server["build_store"].get_build(result.remote_build_id)
+        artifact = notebook_build_server["artifact_store"].get_artifact(
+            build.artifact_id, build.version
+        )
+        assert build.params["env"]["names"] == ["MY_API_KEY"]
+        assert "sk-signed-secret" not in json.dumps(build.params)
+        assert json.loads(artifact.transform_spec)["params"]["env"]["names"] == ["MY_API_KEY"]
+        assert "sk-signed-secret" not in artifact.transform_spec
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("cell_timeout", "floor", "expected"),
+        [(3600.0, 600.0, 3600.0 + 600.0 + 300.0), (30.0, 7200.0, 7200.0)],
+        ids=["outlives-a-long-cell", "setting-is-a-floor"],
+    )
+    async def test_signed_urls_outlive_provisioning_and_the_cell_timeout(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+        cell_timeout,
+        floor,
+        expected,
+    ):
+        """A cell that runs past signed_url_expiry_seconds must still upload and finalize."""
+        import strata.server as server_module
+
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        config = notebook_build_server["config"]
+        monkeypatch.setattr(config, "signed_url_expiry_seconds", floor)
+        monkeypatch.setattr(config, "worker_provisioning_timeout_seconds", 600.0)
+        signer = server_module._state.url_signer
+        real = signer.generate_build_manifest
+        expiries: list[float] = []
+
+        def _capturing(*args, **kwargs):
+            expiries.append(kwargs["url_expiry_seconds"])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(signer, "generate_build_manifest", _capturing)
+
+        result = await CellExecutor(sample_notebook).execute_cell(
+            "cell1", "x = 1", timeout_seconds=cell_timeout
+        )
+
+        assert result.success, result.error
+        assert expiries == [expected]
+
+    @pytest.mark.asyncio
     async def test_the_signed_manifest_is_built_off_the_event_loop(
         self,
         sample_notebook,

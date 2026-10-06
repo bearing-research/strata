@@ -222,6 +222,15 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
     return stdout, stderr
 
 
+class _PendingRun:
+    """An admitted execution whose harness has not started; a cancel only flags it."""
+
+    __slots__ = ("cancelled",)
+
+    def __init__(self) -> None:
+        self.cancelled = False
+
+
 async def _run_harness(
     harness_path: Path,
     manifest_path: Path,
@@ -256,7 +265,11 @@ async def _run_harness(
         **subprocess_kwargs_for_new_group(),
     )
     if in_flight is not None and build_id:
+        admitted = in_flight.get(build_id)
         in_flight[build_id] = proc
+        if isinstance(admitted, _PendingRun) and admitted.cancelled:
+            # Cancelled while the process was starting.
+            await terminate_subprocess_tree(proc)
     try:
         _stdout, stderr = await asyncio.wait_for(
             _drain(proc, log_url),
@@ -470,8 +483,8 @@ def create_notebook_executor_app(
             free_gpus.append(gpu)
             free_gpus.sort()
 
-    # build_id -> harness process, for cancel. Per app so two workers in one
-    # test process can't cancel each other's runs.
+    # build_id -> harness process (or a _PendingRun before it spawns), for cancel.
+    # Per app so two workers in one test process can't cancel each other's runs.
     in_flight: dict[str, Any] = {}
 
     # ---- Bearer-token gate ----
@@ -556,6 +569,9 @@ def create_notebook_executor_app(
 
         # Before any download, so a refused request costs nothing; held until the harness exits.
         gpu = _admit()
+        # Registered now, so a cancel during input download or env build stops the run.
+        if build_id:
+            in_flight[build_id] = _PendingRun()
         try:
             # Parented to the dispatcher's span (the server's, or a pool's) when it sent context.
             with trace_span_from(
@@ -582,6 +598,8 @@ def create_notebook_executor_app(
                 )
         finally:
             _release(gpu)
+            if build_id and isinstance(in_flight.get(build_id), _PendingRun):
+                in_flight.pop(build_id, None)
 
     async def _stage_and_run(
         *,
@@ -727,6 +745,13 @@ def create_notebook_executor_app(
                     )
                 interpreter = prepared.python
                 prepared_env = {"key": prepared.key, "installed": prepared.installed}
+            pending = in_flight.get(build_id) if build_id else None
+            if isinstance(pending, _PendingRun) and pending.cancelled:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return JSONResponse(
+                    status_code=409,
+                    content={"success": False, "error": "execution was cancelled"},
+                )
             try:
                 result = await _run_harness(
                     harness_path,
@@ -887,6 +912,9 @@ def create_notebook_executor_app(
         proc = in_flight.get(build_id)
         if proc is None:
             return {"build_id": build_id, "cancelled": False}
+        if isinstance(proc, _PendingRun):
+            proc.cancelled = True
+            return {"build_id": build_id, "cancelled": True}
 
         from strata.notebook.process_tree import terminate_subprocess_tree
 

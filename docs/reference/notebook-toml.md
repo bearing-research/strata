@@ -72,7 +72,7 @@ Routing-only config for an external secret manager. Infisical is the only suppor
 
 Allowed keys: `provider`, `project_id`, `environment`, `path`, `base_url`. Unknown keys are dropped on save.
 
-On a server in service mode, `base_url` must be the operator's `INFISICAL_HOST` (or the public default when unset); any other host is refused, since the server would log in there with its own credentials.
+In every mode, `base_url` must be the server's `INFISICAL_HOST` (or the public default when unset); any other host is refused, since the server would log in there with its own credentials.
 
 ## `[[mounts]]` - Filesystem mounts
 
@@ -197,7 +197,7 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | --- | --- | --- |
 | `<name>` | section header | Connection name - referenced by `# @sql connection=<name>`. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
 | `driver` | string (required) | One of the shipped adapters: `duckdb`, `sqlite`, `postgresql`, `snowflake`, `bigquery`. MotherDuck and MySQL are planned but not yet implemented. |
-| `auth` | table | `${VAR}` indirections only. Resolved from the process environment at execute time; never hashed into provenance. |
+| `auth` | table | `${VAR}` indirections only, resolved at execute time and never hashed into provenance. A personal server reads them from its own process environment. A server in service mode reads them from the notebook's env (`[env]` and its secret manager) and never from its own, so a variable the notebook does not set fails the connection; give a connection a server-held secret with `credential`. |
 | `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become driver auth, underneath this block's own `auth`. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |

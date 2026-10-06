@@ -120,7 +120,19 @@ class TestPinning:
         assert sockets.connects == [(_PUBLIC, 8080)]
         assert rebinding_dns.lookups == ["rebind.test"]
 
-    @pytest.mark.parametrize("address", ["127.0.0.1", "169.254.169.254", "10.0.0.1", "::1"])
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "127.0.0.1",
+            "169.254.169.254",
+            "10.0.0.1",
+            "::1",
+            # Shared address space 100.64.0.0/10, which is_private does not cover.
+            "100.64.0.1",
+            "100.100.100.200",
+            "100.127.255.254",
+        ],
+    )
     def test_a_name_that_resolves_to_a_private_address_is_not_connected(
         self, rebinding_dns, sockets, address
     ):
@@ -130,6 +142,12 @@ class TestPinning:
             _get("http://rebind.test/data")
 
         assert sockets.connects == []
+
+    def test_the_address_after_the_shared_range_is_public(self, rebinding_dns, sockets):
+        rebinding_dns.answers["rebind.test"] = [["100.128.0.1"]]
+
+        assert _get("http://rebind.test/data").status_code == 200
+        assert sockets.connects == [("100.128.0.1", 80)]
 
     async def test_an_async_client_refuses_a_private_address(self, rebinding_dns, sockets):
         rebinding_dns.answers["rebind.test"] = [["169.254.169.254"]]

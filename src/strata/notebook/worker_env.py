@@ -23,6 +23,7 @@ library first on ``R_LIBS`` (``locked_r_environments``).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -32,6 +33,7 @@ import subprocess
 import tarfile
 import tempfile
 import tomllib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -183,13 +185,29 @@ def _fetch(url: str, env_dir: Path) -> bool:
     return True
 
 
+@contextlib.contextmanager
+def _build_lock(path: Path) -> Iterator[None]:
+    """Hold one environment's build lock; a wait that outlasts a build is an environment error."""
+    lock = filelock.FileLock(str(path), timeout=INSTALL_TIMEOUT_SECONDS)
+    try:
+        lock.acquire()
+    except filelock.Timeout as exc:
+        raise WorkerEnvironmentError(
+            f"another cell is still building this environment after {INSTALL_TIMEOUT_SECONDS:g}s"
+        ) from exc
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 def _prepare(spec: dict[str, str]) -> PreparedEnvironment:
     interpreter, build = _interpreter(spec["python"])
     root = env_root()
     root.mkdir(parents=True, exist_ok=True)
     directory_key = hashlib.sha256(f"{spec['key']}\n{build}".encode()).hexdigest()[:32]
     env_dir = root / directory_key
-    lock = filelock.FileLock(str(root / f"{directory_key}.lock"), timeout=INSTALL_TIMEOUT_SECONDS)
+    lock = _build_lock(root / f"{directory_key}.lock")
     python = env_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     with lock:
         installed = False
@@ -342,7 +360,7 @@ def _prepare_r(spec: dict[str, str], rscript: str) -> PreparedRLibrary:
     root.mkdir(parents=True, exist_ok=True)
     directory_key = hashlib.sha256(f"{spec['key']}\n{build}".encode()).hexdigest()[:32]
     library = root / directory_key
-    lock = filelock.FileLock(str(root / f"{directory_key}.lock"), timeout=INSTALL_TIMEOUT_SECONDS)
+    lock = _build_lock(root / f"{directory_key}.lock")
     with lock:
         installed = False
         if not (library / COMPLETE_MARKER).exists():

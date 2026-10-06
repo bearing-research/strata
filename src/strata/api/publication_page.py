@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 from html import escape
 
+from strata.api.provenance_ld import orcid_url
 from strata.url_safety import web_url_or_none
 
 _STYLE = """
@@ -74,7 +75,7 @@ def _byline(publication) -> str:
         name = escape(author["name"])
         orcid = author.get("orcid")
         if orcid:
-            url = f"https://orcid.org/{escape(orcid, quote=True)}"
+            url = escape(orcid_url(orcid), quote=True)
             name = f"<a href='{url}' rel='noopener'>{name}</a>"
         affiliation = author.get("affiliation")
         if affiliation:

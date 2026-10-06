@@ -167,6 +167,27 @@ async def test_a_per_job_timeout_overrides_the_machine_default(make_pool):
     assert seen == [7.0]
 
 
+async def test_a_per_job_timeout_cannot_extend_the_machine_default(make_pool):
+    """Otherwise a caller holds a machine, and a fleet slot, past the operator's limit."""
+    seen: list[float | None] = []
+
+    def record_timeout(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, content=b"ok")
+
+    pool = make_pool(
+        workers=FakeWorkers(record_timeout),
+        machine_types=[MachineType(name="cpu", image="w", job_timeout_seconds=300.0)],
+    )
+
+    job = await pool.submit(
+        tenant_id="acme", machine_type="cpu", payload=b"work", timeout_seconds=1e12
+    )
+    await pool.wait(job.id)
+
+    assert seen == [300.0]
+
+
 async def test_a_finished_job_records_when_it_ran(make_pool):
     pool = make_pool()
 

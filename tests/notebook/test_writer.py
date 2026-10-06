@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import tomli_w
 
 from strata.notebook import writer as writer_module
 from strata.notebook.models import (
@@ -1120,3 +1121,29 @@ def test_a_none_inside_a_display_value_stays_null_in_runtime_json(tmp_path):
     saved = json.loads((nb / ".strata" / "runtime.json").read_text())["cells"]["c1"]
     assert saved["display_outputs"][0]["preview"] == preview
     assert saved["display"]["preview"] == preview
+
+
+def _point_cell_file_at(nb: Path, file: str) -> None:
+    """Hand-edit notebook.toml so the first cell's ``file`` is *file*, as a clone could."""
+    toml_path = nb / "notebook.toml"
+    data = tomllib.loads(toml_path.read_text())
+    data["cells"][0]["file"] = file
+    toml_path.write_text(tomli_w.dumps(data))
+
+
+@pytest.mark.parametrize("hostile", ["absolute", "../../outside.txt", "sub/../../../outside.txt"])
+@pytest.mark.parametrize("op", ["write", "remove"])
+def test_a_cell_file_outside_cells_is_never_written_or_deleted(tmp_path, hostile, op):
+    nb = create_notebook(tmp_path / "nbs", "Hostile", initialize_environment=False)
+    add_cell_to_notebook(nb, "c1")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("SECRET\n")
+    _point_cell_file_at(nb, str(outside) if hostile == "absolute" else hostile)
+
+    with pytest.raises(ValueError, match="'c1' names a source file outside cells/"):
+        if op == "write":
+            write_cell(nb, "c1", "OVERWRITTEN\n")
+        else:
+            remove_cell_from_notebook(nb, "c1")
+
+    assert outside.read_text() == "SECRET\n"

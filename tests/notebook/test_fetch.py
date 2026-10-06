@@ -436,6 +436,13 @@ class TestTheGuard:
 
         assert cache.fingerprint(spec) != cache.fingerprint(spec)
 
+    def test_a_url_never_read_is_not_requested_for_a_fingerprint(self, tmp_path, origin):
+        spec = FetchSpec(name="zones", url=origin.url())
+        cache = _cache(tmp_path)
+
+        assert cache.fingerprint(spec) != cache.fingerprint(spec)
+        assert origin.requests == []
+
 
 class TestInACell:
     def _session(self, tmp_path, source, monkeypatch):
@@ -471,6 +478,9 @@ class TestInACell:
             "print(zones.name)"
         )
         session = self._session(tmp_path, source, monkeypatch)
+        # Opening the notebook and computing staleness request nothing; the run does.
+        assert session.compute_staleness()["c1"].status.value != "ready"
+        assert origin.requests == []
 
         first = await CellExecutor(session).execute_cell("c1", source)
         assert first.success, first.error

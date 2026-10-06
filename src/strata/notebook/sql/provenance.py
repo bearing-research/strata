@@ -4,7 +4,7 @@ The hash captures the query, its binds, and, as strongly as the backend allows,
 the database state the query saw::
 
     provenance_hash = H(
-        query_normalized,         # sqlglot pretty-print, dialect-aware
+        query_normalized,         # the query's tokens, dialect-aware
         bind_params,              # type-tagged tuple of resolved values
         connection_id,            # canonical non-secret connection identity
         upstream_input_hashes,    # variables referenced in :placeholders
@@ -38,6 +38,7 @@ from uuid import UUID
 
 import sqlglot
 from sqlglot.errors import SqlglotError as _SqlglotError
+from sqlglot.tokens import TokenType
 
 from strata.notebook.annotations import CachePolicy
 from strata.notebook.sql.adapter import (
@@ -161,20 +162,33 @@ def resolve_cache_policy(
 def normalize_query(sql: str, dialect: str | None) -> str:
     """Return a canonical, whitespace/comment-insensitive form of ``sql``.
 
-    Uses sqlglot's pretty-printer in the driver's dialect, so cosmetic edits do not
-    churn the cache. On parse failure returns ``sql.strip()``; the executor refuses
-    to run such a cell, so the hash is never compared.
+    The query's own tokens in the driver's dialect, keywords upper-cased, so
+    cosmetic edits do not churn the cache. Not sqlglot's regenerated SQL: that
+    drops what it does not model (``NUMERIC(10,2)`` precision, a type sqlglot
+    maps to another), so a result-changing edit would hit the old entry. On a
+    tokenizer failure returns ``sql.strip()``.
     """
     if not sql.strip():
         return ""
     try:
-        parsed = [s for s in sqlglot.parse(sql, dialect=dialect) if s]
+        tokens = sqlglot.tokenize(sql, read=dialect)
     except _SqlglotError:
         return sql.strip()
-    if not parsed:
-        return sql.strip()
-    # Comments don't affect semantics and shouldn't churn the cache.
-    return ";\n".join(stmt.sql(dialect=dialect, pretty=True, comments=False) for stmt in parsed)
+    keywords = sqlglot.Dialect.get_or_raise(dialect).tokenizer_class.KEYWORDS
+    while tokens and tokens[-1].token_type is TokenType.SEMICOLON:
+        tokens.pop()
+    # The type keeps ``"Foo"`` (an identifier) apart from ``Foo`` and ``'Foo'``.
+    return json.dumps(
+        [
+            [
+                token.token_type.name,
+                token.text.upper()
+                if keywords.get(token.text.upper()) is token.token_type
+                else token.text,
+            ]
+            for token in tokens
+        ]
+    )
 
 
 def serialize_bind_params(params: Sequence[Any]) -> list[list[Any]]:

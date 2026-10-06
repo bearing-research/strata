@@ -49,18 +49,23 @@ class DuckDBSQLTransform(Transform[DuckDBSQLParams]):
 
     def execute(self, inputs: list[pa.Table], params: DuckDBSQLParams) -> pa.Table:
         """Execute the SQL and return the result as an Arrow table; DuckDB errors propagate."""
-        try:
-            import duckdb
-        except ImportError:
-            raise ImportError(
-                "DuckDB is required for duckdb_sql@v1. Install with: pip install duckdb"
-            )
+        import duckdb
 
-        conn = duckdb.connect(":memory:")
+        # Runs in the server process: no files, network or extensions, and the
+        # SQL cannot turn them back on. The registered inputs are all it reads.
+        conn = duckdb.connect(
+            ":memory:",
+            config={
+                "enable_external_access": False,
+                "autoinstall_known_extensions": False,
+                "autoload_known_extensions": False,
+            },
+        )
 
         input_names = self.get_input_names(len(inputs))
         for name, table in zip(input_names, inputs):
             conn.register(name, table)
+        conn.execute("SET lock_configuration = true")
 
         result = conn.execute(params.sql).to_arrow_table()
         return result

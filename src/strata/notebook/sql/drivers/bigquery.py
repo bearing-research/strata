@@ -245,8 +245,9 @@ class BigQueryAdapter:
         return pin_tables(
             sql,
             "bigquery",
-            f"SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '{at}'",
+            f"FOR SYSTEM_TIME AS OF TIMESTAMP '{at}'",
             "version",
+            after_alias=True,
         )
 
     def probe_freshness(

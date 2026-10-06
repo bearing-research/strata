@@ -268,38 +268,36 @@ class TestArtifactBytes:
 
 
 class TestAFailureHalfwayThrough:
-    def test_it_leaves_neither_a_half_notebook_nor_its_staging(self, ran, tmp_path):
+    """A bundle the checks accept can still fail mid-write (a full disk, a killed process)."""
+
+    @staticmethod
+    def _fail_after_the_bytes(monkeypatch):
+        def fail(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("strata.notebook.snapshot_import._write_runtime_state", fail)
+
+    def test_it_leaves_neither_a_half_notebook_nor_its_staging(self, ran, tmp_path, monkeypatch):
         """A failed import leaves no half-written notebook, which discovery would list
         and which would block the retry.
         """
         bundle = _export(ran, tmp_path / "snap.zip")
-        broken = tmp_path / "broken.zip"
-        with zipfile.ZipFile(bundle) as src, zipfile.ZipFile(broken, "w") as dst:
-            members = src.namelist()
-            dropped = next(n for n in members if n.startswith("artifacts/"))
-            for name in members:
-                if name != dropped:
-                    dst.writestr(name, src.read(name))
+        self._fail_after_the_bytes(monkeypatch)
 
         parent = tmp_path / "notebooks"
-        with pytest.raises(KeyError):
-            import_snapshot(broken, parent / "dst")
+        with pytest.raises(OSError, match="disk full"):
+            import_snapshot(bundle, parent / "dst")
 
         assert not (parent / "dst").exists()
         assert [p.name for p in parent.iterdir()] == []
 
-    def test_the_retry_then_succeeds(self, ran, tmp_path):
+    def test_the_retry_then_succeeds(self, ran, tmp_path, monkeypatch):
         bundle = _export(ran, tmp_path / "snap.zip")
-        broken = tmp_path / "broken.zip"
-        with zipfile.ZipFile(bundle) as src, zipfile.ZipFile(broken, "w") as dst:
-            members = src.namelist()
-            dropped = next(n for n in members if n.startswith("artifacts/"))
-            for name in members:
-                if name != dropped:
-                    dst.writestr(name, src.read(name))
         dest = tmp_path / "notebooks" / "dst"
-        with pytest.raises(KeyError):
-            import_snapshot(broken, dest)
+        self._fail_after_the_bytes(monkeypatch)
+        with pytest.raises(OSError, match="disk full"):
+            import_snapshot(bundle, dest)
+        monkeypatch.undo()
 
         imported = import_snapshot(bundle, dest)
 
@@ -435,6 +433,306 @@ class TestABundleWritesOnlyIntoTheNotebook:
         imported = import_snapshot(bundle, tmp_path / "dst")
 
         assert (imported.notebook_dir / "cells").is_dir()
+
+
+def _minimal_bundle(path, *, file: str, members: dict[str, bytes]):
+    """A bundle with one cell whose ``file`` is *file*, built by hand as an attacker would."""
+    from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
+
+    manifest = {
+        "format_version": SNAPSHOT_FORMAT_VERSION,
+        "notebook_id": "nbx",
+        "records": {},
+        "carried": [],
+        "artifacts": {},
+        "cells": {"aaaaaaaa": {}},
+    }
+    defaults = {
+        "notebook.toml": (
+            f'notebook_id = "nbx"\nname = "x"\n[[cells]]\nid = "aaaaaaaa"\n'
+            f'file = "{file}"\nlanguage = "python"\norder = 0\n'
+        ).encode(),
+        "artifacts.json": json.dumps(manifest).encode(),
+    }
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, data in {**defaults, **members}.items():
+            archive.writestr(name, data)
+    return path
+
+
+class TestACellFileOutsideCells:
+    """``cells[].file`` is joined onto cells/; an absolute path or ``..`` must not escape it."""
+
+    @pytest.fixture
+    def outside(self, tmp_path):
+        target = tmp_path / "outside.txt"
+        target.write_text("SECRET\n")
+        return target
+
+    def test_an_absolute_file_is_refused(self, tmp_path, outside):
+        # PurePosixPath collapses ``cells//abs`` to ``cells/abs``, so the member check
+        # alone let this through and notebook.toml named the absolute path.
+        bundle = _minimal_bundle(
+            tmp_path / "evil.zip", file=str(outside), members={f"cells/{outside}": b"x = 1\n"}
+        )
+
+        with pytest.raises(NotASnapshotError, match="outside cells/"):
+            import_snapshot(bundle, tmp_path / "dst")
+
+        assert not (tmp_path / "dst").exists()
+        assert outside.read_text() == "SECRET\n"
+
+    def test_a_file_that_climbs_out_is_refused(self, tmp_path, outside):
+        bundle = _minimal_bundle(
+            tmp_path / "evil.zip",
+            file="../../outside.txt",
+            members={"cells/../../outside.txt": b"x = 1\n"},
+        )
+
+        with pytest.raises(NotASnapshotError, match="outside cells/"):
+            import_snapshot(bundle, tmp_path / "dst")
+
+        assert outside.read_text() == "SECRET\n"
+
+    @pytest.mark.parametrize("member", ["cells//abs/x.py", "cells/./x.py"])
+    def test_a_member_name_that_collapses_is_refused(self, tmp_path, member):
+        bundle = _minimal_bundle(
+            tmp_path / "evil.zip",
+            file="aaaaaaaa.py",
+            members={"cells/aaaaaaaa.py": b"x = 1\n", member: b"x = 2\n"},
+        )
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(bundle, tmp_path / "dst")
+
+    @pytest.mark.parametrize("name", ["notes copy.md", "分析.md", "sub dir/x (1).txt"])
+    def test_a_committed_file_with_an_ordinary_name_imports(self, tmp_path, name):
+        """The export ships every file under cells/; the import must take any it can name."""
+        bundle = _minimal_bundle(
+            tmp_path / "ok.zip",
+            file="aaaaaaaa.py",
+            members={"cells/aaaaaaaa.py": b"x = 1\n", f"cells/{name}": b"kept\n"},
+        )
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert (imported.notebook_dir / "cells" / name).read_bytes() == b"kept\n"
+
+    @pytest.mark.parametrize("member", ["cells/a\\..\\x", "cells/new\nline"])
+    def test_a_member_with_a_separator_or_control_character_is_refused(self, tmp_path, member):
+        bundle = _minimal_bundle(
+            tmp_path / "evil.zip",
+            file="aaaaaaaa.py",
+            members={"cells/aaaaaaaa.py": b"x = 1\n", member: b"x"},
+        )
+
+        with pytest.raises(NotASnapshotError, match="cannot write"):
+            import_snapshot(bundle, tmp_path / "dst")
+
+    def test_a_well_formed_bundle_still_imports(self, tmp_path):
+        bundle = _minimal_bundle(
+            tmp_path / "ok.zip", file="aaaaaaaa.py", members={"cells/aaaaaaaa.py": b"x = 1\n"}
+        )
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert parse_notebook(imported.notebook_dir).cells[0].source == "x = 1\n"
+
+
+def _manifest_without(key: str) -> bytes:
+    from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
+
+    manifest = {
+        "format_version": SNAPSHOT_FORMAT_VERSION,
+        "notebook_id": "nbx",
+        "records": {},
+        "carried": [],
+        "artifacts": {"aaaaaaaa": [{"artifact_id": "a", "version": 1}]},
+    }
+    manifest.pop(key)
+    return json.dumps(manifest).encode()
+
+
+class TestAMalformedBundle:
+    """A hand-edited or truncated bundle is "not a snapshot" (a 400), never a traceback."""
+
+    @pytest.mark.parametrize(
+        ("member", "data", "message"),
+        [
+            ("artifacts.json", b"{not json", "artifacts.json cannot be read"),
+            ("artifacts.json", b"[]", "is not an object"),
+            ("artifacts.json", b'{"format_version": "two"}', "format_version"),
+            ("artifacts.json", _manifest_without("notebook_id"), "no notebook_id"),
+            ("artifacts.json", _manifest_without("carried"), "carried"),
+            ("notebook.toml", b"= broken", "notebook.toml cannot be read"),
+            ("outputs/aaaaaaaa/console.json", b"nope", "console.json cannot be read"),
+            ("fetch/index.json", b"nope", "index.json cannot be read"),
+        ],
+    )
+    def test_it_is_refused_and_leaves_nothing(self, tmp_path, member, data, message):
+        members = {"cells/aaaaaaaa.py": b"x = 1\n", member: data}
+        bundle = _minimal_bundle(tmp_path / "bad.zip", file="aaaaaaaa.py", members=members)
+
+        with pytest.raises(NotASnapshotError, match=message):
+            import_snapshot(bundle, tmp_path / "out" / "dst")
+
+        out = tmp_path / "out"
+        assert not out.exists() or not any(out.iterdir())
+
+    def test_a_record_without_its_bytes_is_refused(self, ran, tmp_path):
+        good = _export(ran, tmp_path / "snap.zip")
+        broken = tmp_path / "broken.zip"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(broken, "w") as dst:
+            for name in src.namelist():
+                if not name.startswith("artifacts/"):
+                    dst.writestr(name, src.read(name))
+
+        with pytest.raises(NotASnapshotError, match="no bytes for the record"):
+            import_snapshot(broken, tmp_path / "dst")
+
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            ("state", "building", "state"),
+            ("state", "failed", "state"),
+            ("version", "1", "version"),
+            ("version", 0, "version"),
+            ("created_at", "yesterday", "created_at"),
+            ("byte_size", "100", "byte_size"),
+            ("row_count", -1, "row_count"),
+            ("schema_json", {"fields": []}, "schema_json"),
+            ("principal", 7, "principal"),
+            ("transform_spec", "{not json", "transform_spec"),
+            ("input_versions", "[]", "input_versions"),
+        ],
+    )
+    def test_a_record_of_the_wrong_shape_is_refused_and_leaves_nothing(
+        self, ran, tmp_path, field, value, message
+    ):
+        """Rows are stored as read, so a field the store would trip over later is refused."""
+        good = _export(ran, tmp_path / "snap.zip")
+        bad = tmp_path / "bad.zip"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(bad, "w") as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "artifacts.json":
+                    manifest = json.loads(data)
+                    records = manifest["records"]
+                    assert records, "the fixture exports at least one record"
+                    for record in records.values():
+                        record[field] = value
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, data)
+
+        with pytest.raises(NotASnapshotError, match=message):
+            import_snapshot(bad, tmp_path / "out" / "dst")
+
+        out = tmp_path / "out"
+        assert not out.exists() or not any(out.iterdir())
+
+
+class TestAMemberReadWholeIsCapped:
+    """A small zip can declare a huge member; one the import reads whole must not be read."""
+
+    @pytest.fixture(autouse=True)
+    def _small_cap(self, monkeypatch):
+        monkeypatch.setattr("strata.notebook.snapshot_import._MAX_MEMBER_BYTES", 1024 * 1024)
+
+    @pytest.mark.parametrize(
+        "member", ["cells/aaaaaaaa.py", "uv.lock", "outputs/aaaaaaaa/console.json"]
+    )
+    def test_an_oversized_member_is_refused_before_it_is_read(self, tmp_path, monkeypatch, member):
+        bomb = tmp_path / "bomb.zip"
+        members = {"cells/aaaaaaaa.py": b"x = 1\n", member: b"#" * (2 * 1024 * 1024)}
+        _minimal_bundle(bomb, file="aaaaaaaa.py", members=members)
+        assert bomb.stat().st_size < 1024 * 1024
+
+        with pytest.raises(NotASnapshotError, match="MiB cap"):
+            import_snapshot(bomb, tmp_path / "dst")
+
+        assert not (tmp_path / "dst").exists()
+
+    def test_a_large_member_the_import_never_reads_whole_is_fine(self, tmp_path):
+        bundle = tmp_path / "big-figure.zip"
+        members = {
+            "cells/aaaaaaaa.py": b"x = 1\n",
+            "outputs/aaaaaaaa/0.png": b"\0" * (2 * 1024 * 1024),
+        }
+        _minimal_bundle(bundle, file="aaaaaaaa.py", members=members)
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert (imported.notebook_dir / "cells" / "aaaaaaaa.py").read_bytes() == b"x = 1\n"
+
+
+class TestACellCachedUnderItsOwnScheme:
+    """A SQL cell caches on its connection too, so a reopen also compares that identity."""
+
+    def test_a_carried_sql_cell_opens_ready(self, tmp_path):
+        import asyncio
+        import sqlite3
+
+        from strata.notebook.executor import CellExecutor
+
+        db = tmp_path / "events.db"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE events (id INTEGER PRIMARY KEY)")
+            conn.executemany("INSERT INTO events VALUES (?)", [(1,), (2,)])
+        nb = create_notebook(tmp_path / "src", "Sql", initialize_environment=False)
+        add_cell_to_notebook(nb, "q", language="sql")
+        source = "# @sql connection=db\n# @cache forever\nSELECT id FROM events\n"
+        write_cell(nb, "q", source)
+        toml_path = nb / "notebook.toml"
+        toml_path.write_text(
+            toml_path.read_text() + f'\n[connections.db]\ndriver = "sqlite"\npath = "{db}"\n'
+        )
+        session = NotebookSession(parse_notebook(nb), nb)
+        assert asyncio.run(CellExecutor(session).execute_cell("q", source)).success
+        assert _statuses(nb)["q"] == "ready"
+
+        imported = import_snapshot(_export(nb, tmp_path / "snap.zip"), tmp_path / "dst")
+
+        assert _statuses(imported.notebook_dir)["q"] == "ready"
+
+
+class TestLoopIterations:
+    """``start_from=<cell>@iter=k`` seeds from a stored step, so the steps travel too."""
+
+    @pytest.fixture
+    def looped(self, tmp_path):
+        nb = create_notebook(tmp_path / "src", "Loops", initialize_environment=False)
+        add_cell_to_notebook(nb, "seed", None)
+        write_cell(nb, "seed", "state = 0\n")
+        add_cell_to_notebook(nb, "hill", "seed")
+        write_cell(nb, "hill", "# @loop max_iter=2 carry=state\nstate = state + 1\n")
+        session = NotebookSession(parse_notebook(nb), nb)
+        manager = session.get_artifact_manager()
+        for iteration in (None, 0, 1):
+            manager.store_cell_output(
+                cell_id="hill",
+                variable_name="state",
+                blob_data=b"1",
+                content_type="json/object",
+                provenance_hash=f"{iteration}" * 64,
+                iteration=iteration,
+            )
+        return nb
+
+    @staticmethod
+    def _iterations(nb) -> list[int]:
+        session = NotebookSession(parse_notebook(nb), nb)
+        return [k for k, _ in session.get_artifact_manager().list_iterations("hill", "state")]
+
+    @pytest.mark.parametrize(
+        ("include", "cells", "expected"),
+        [("all", None, [0, 1]), ("selected", ["hill"], [0, 1]), ("selected", ["seed"], [])],
+    )
+    def test_the_steps_of_a_carried_loop_land(self, looped, tmp_path, include, cells, expected):
+        bundle = _export(looped, tmp_path / "snap.zip", include=include, cells=cells)
+
+        imported = import_snapshot(bundle, tmp_path / "dst")
+
+        assert self._iterations(imported.notebook_dir) == expected
 
 
 class TestWidgetSelections:
