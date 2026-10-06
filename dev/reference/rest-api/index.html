@@ -4960,10 +4960,20 @@ authenticated caller the only possible answer is every tenant's at once.</p>
 <p>A table with no snapshots yet streams zero rows with the table's schema
 (projected by <code>columns</code>). Nothing read from it is reused: each request is a
 miss, as is a transform that takes the table as an input.</p>
+<p>A transform's table inputs take every URI form <code>scan@v1</code> reads (<code>file://</code>,
+<code>s3://</code>, <code>gs://</code>, <code>abfs://</code>, a schemeless <code>/wh#ns.t</code>, a named catalog's
+<code>cat:ns.t</code>, a bare <code>ns.t</code>). An input that does not resolve (denied, missing,
+unreadable, or a plan that failed) answers 4xx with the planner's message;
+the request never becomes a pending build.</p>
 <h3 id="get-stream">Get Stream<a class="headerlink" href="#get-stream" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-90-1" name="__codelineno-90-1" href="#__codelineno-90-1"></a>GET /v1/streams/{stream_id}
 </code></pre></div>
-<p>Returns Arrow IPC stream.</p>
+<p>Returns Arrow IPC stream. With an artifact store, the response carries
+<code>X-Arrow-Row-Count</code> and <code>X-Strata-Artifact-Uri</code>, the canonical
+<code>strata://artifact/{id}@v={n}</code> of the rows it serves. That URI can differ from the
+materialize response's: when two misses for one scan were in flight together,
+one artifact becomes the ready result and the other reads <code>superseded</code> (its own
+URI still serves the same rows). Read the header to keep the canonical one.</p>
 <h3 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-91-1" name="__codelineno-91-1" href="#__codelineno-91-1"></a>GET /health
 </code></pre></div>
