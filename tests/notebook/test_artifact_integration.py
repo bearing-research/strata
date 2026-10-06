@@ -265,6 +265,32 @@ class TestGetArtifactInfo:
         assert manager.get_artifact_info("nonexistent", 1) is None
 
 
+class TestAVersionOvertakenByADuplicate:
+    """A version dedup overtook keeps no bytes and reads its canonical's through the store."""
+
+    def _overtaken(self, manager, artifact_id: str) -> int:
+        from strata.artifact_store import TransformSpec
+
+        store = manager.artifact_store
+        spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
+        first = store.create_artifact("canonical", provenance_hash="prov", transform_spec=spec)
+        store.write_blob("canonical", first, b"the-bytes")
+        store.finalize_artifact("canonical", first, "", 1, 9)
+        version = store.create_artifact(artifact_id, provenance_hash="prov", transform_spec=spec)
+        store.write_blob(artifact_id, version, b"the-bytes")
+        store.finalize_artifact(artifact_id, version, "", 1, 9)
+        assert store.blob_store.read_blob(artifact_id, version) is None
+        return version
+
+    def test_load_artifact_data_reads_the_canonical_bytes(self, manager):
+        version = self._overtaken(manager, "duplicate")
+        assert manager.load_artifact_data("duplicate", version) == b"the-bytes"
+
+    def test_load_iteration_blob_reads_the_canonical_bytes(self, manager):
+        self._overtaken(manager, manager.cell_artifact_id("c1", "state", 0))
+        assert manager.load_iteration_blob("c1", "state", 0) == b"the-bytes"
+
+
 class TestPublishedArtifactsDashboard:
     """``GET /v1/notebooks/{id}/artifacts`` powers the per-cell registry strip.
 
