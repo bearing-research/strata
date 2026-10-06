@@ -268,38 +268,36 @@ class TestArtifactBytes:
 
 
 class TestAFailureHalfwayThrough:
-    def test_it_leaves_neither_a_half_notebook_nor_its_staging(self, ran, tmp_path):
+    """A bundle the checks accept can still fail mid-write (a full disk, a killed process)."""
+
+    @staticmethod
+    def _fail_after_the_bytes(monkeypatch):
+        def fail(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("strata.notebook.snapshot_import._write_runtime_state", fail)
+
+    def test_it_leaves_neither_a_half_notebook_nor_its_staging(self, ran, tmp_path, monkeypatch):
         """A failed import leaves no half-written notebook, which discovery would list
         and which would block the retry.
         """
         bundle = _export(ran, tmp_path / "snap.zip")
-        broken = tmp_path / "broken.zip"
-        with zipfile.ZipFile(bundle) as src, zipfile.ZipFile(broken, "w") as dst:
-            members = src.namelist()
-            dropped = next(n for n in members if n.startswith("artifacts/"))
-            for name in members:
-                if name != dropped:
-                    dst.writestr(name, src.read(name))
+        self._fail_after_the_bytes(monkeypatch)
 
         parent = tmp_path / "notebooks"
-        with pytest.raises(KeyError):
-            import_snapshot(broken, parent / "dst")
+        with pytest.raises(OSError, match="disk full"):
+            import_snapshot(bundle, parent / "dst")
 
         assert not (parent / "dst").exists()
         assert [p.name for p in parent.iterdir()] == []
 
-    def test_the_retry_then_succeeds(self, ran, tmp_path):
+    def test_the_retry_then_succeeds(self, ran, tmp_path, monkeypatch):
         bundle = _export(ran, tmp_path / "snap.zip")
-        broken = tmp_path / "broken.zip"
-        with zipfile.ZipFile(bundle) as src, zipfile.ZipFile(broken, "w") as dst:
-            members = src.namelist()
-            dropped = next(n for n in members if n.startswith("artifacts/"))
-            for name in members:
-                if name != dropped:
-                    dst.writestr(name, src.read(name))
         dest = tmp_path / "notebooks" / "dst"
-        with pytest.raises(KeyError):
-            import_snapshot(broken, dest)
+        self._fail_after_the_bytes(monkeypatch)
+        with pytest.raises(OSError, match="disk full"):
+            import_snapshot(bundle, dest)
+        monkeypatch.undo()
 
         imported = import_snapshot(bundle, dest)
 
