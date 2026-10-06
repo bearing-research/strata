@@ -214,6 +214,41 @@ class TestTheSameBytesEachTime:
         assert "0000-0002-1825-0097" in manifest
 
 
+class TestADeepChain:
+    def test_the_archive_walks_as_far_as_the_page(self, tmp_path):
+        """The page walked 25 steps and the archive 10, so a long chain lost steps in its zip."""
+        import json
+
+        from strata.api.publication_bundle import cached_bundle_zip
+
+        store = ArtifactStore(tmp_path / "artifacts")
+        payload = _arrow_bytes()
+        inputs = None
+        for step in range(12):
+            store.create_artifact(
+                f"step{step}",
+                f"prov-{step}",
+                transform_spec=TransformSpec(executor="duckdb_sql@v1", params={}, inputs=[]),
+                input_versions=inputs,
+            )
+            store.write_blob(f"step{step}", 1, payload)
+            store.finalize_artifact(f"step{step}", 1, "schema", TABLE.num_rows, len(payload))
+            inputs = {f"strata://artifact/step{step}@v=1": f"step{step}@v=1"}
+        publication = store.publish_artifact("step11", 1)
+
+        served, _ = cached_bundle_zip(
+            store, store.get_artifact("step11", 1), publication=publication
+        )
+
+        with zipfile.ZipFile(served) as bundle:
+            nodes = json.loads(bundle.read("manifest.json"))["lineage"]["nodes"]
+        assert len(nodes) == 12
+        # And the CLI by token, with no --max-depth, still writes the same zip.
+        out = tmp_path / "deposit.zip"
+        assert _archive(store.artifact_dir, out, token=publication.token, max_depth=None) == 0
+        assert out.read_bytes() == served.read_bytes()
+
+
 class TestTheCliByToken:
     def test_a_withdrawn_publication_is_not_archived(self, served, tmp_path):
         _, publication, artifact_dir = served

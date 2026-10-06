@@ -680,7 +680,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     :func:`write_bundle` (shared with the HTTP route); this adds the CLI parts: which store to
     open, and whether writing into an occupied directory is a mistake.
     """
-    from strata.api.publication_bundle import bundle_zip, write_bundle
+    from strata.api.publication_bundle import PUBLICATION_MAX_DEPTH, bundle_zip, write_bundle
     from strata.artifact_store import Publication
 
     token = getattr(args, "token", None)
@@ -726,6 +726,11 @@ def cmd_archive(args: argparse.Namespace) -> int:
             content_sha256=store.content_digest(artifact.id, artifact.version),
         )
 
+    max_depth = args.max_depth
+    if max_depth is None:
+        # By token, the depth the route builds its zip with, so the two stay the same bytes.
+        max_depth = PUBLICATION_MAX_DEPTH if token is not None else 10
+
     dest = Path(args.to)
     if dest.suffix == ".zip":
         if dest.exists() and not getattr(args, "force", False):
@@ -739,7 +744,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
                 artifact,
                 partial,
                 publication=publication,
-                max_depth=args.max_depth,
+                max_depth=max_depth,
                 tenant=getattr(args, "tenant", None),
             )
         except ValueError as exc:
@@ -763,7 +768,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
             artifact,
             dest,
             publication=publication,
-            max_depth=args.max_depth,
+            max_depth=max_depth,
             tenant=getattr(args, "tenant", None),
         )
     except ValueError as exc:

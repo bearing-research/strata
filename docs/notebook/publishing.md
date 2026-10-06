@@ -244,7 +244,8 @@ figure3-bundle/
 
 `--force` writes into a non-empty directory (which may leave a stale payload
 beside the new one); `--max-depth` (default 10) bounds how far the chain is
-walked.
+walked. With `--token` it defaults to 25, the depth the hosted page and its
+archive walk.
 
 A tabular artifact's bytes are Arrow IPC (`artifact.arrow`), and the bundle
 also carries `artifact.parquet`, the same rows in a format a data repository
