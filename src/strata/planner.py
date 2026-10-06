@@ -328,11 +328,13 @@ class ReadPlanner:
         snapshot_id: int | None = None,
         columns: list[str] | None = None,
         filters: list[Filter] | None = None,
+        schema_id: int | None = None,
     ) -> ReadPlan:
         """Create a read plan with one task per row group to read.
 
         ``table_uri`` is ``path#namespace.table`` or ``namespace.table``;
         ``snapshot_id`` None reads the current snapshot, ``columns`` None reads all.
+        ``schema_id`` reads under that table schema instead of the current or snapshot's one.
         """
         start_time = time.perf_counter()
         filters = filters or []
@@ -450,7 +452,9 @@ class ReadPlanner:
 
         # Read the current schema, or the named snapshot's (as pyiceberg does). A schema
         # change makes no snapshot, so the cache key and provenance carry the schema too.
-        if snapshot_id is None:
+        if schema_id is not None:
+            snapshot_schema = table.schemas()[schema_id]
+        elif snapshot_id is None:
             snapshot_schema = table.schema()
         else:
             snapshot_schema = table.scan(snapshot_id=resolved_snapshot_id).projection()

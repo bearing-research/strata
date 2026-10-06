@@ -326,6 +326,8 @@ class TestTransformInputAclParity:
         # so leaving it unset would make every "no auth" case look authenticated.
         state.config.principal_auth_enabled = True
         state.config.hide_forbidden_as_not_found = hide_as_404
+        state.config.plan_timeout_seconds = 30.0
+        state._planning_executor = None
         state.config.acl_config = AclConfig(
             default="deny",
             deny_rules=[],
@@ -338,35 +340,35 @@ class TestTransformInputAclParity:
         monkeypatch.setattr(server_module, "_get_artifact_store", lambda **k: MagicMock())
         return server_module
 
-    def test_denied_table_input_is_rejected_403(self, monkeypatch):
+    async def test_denied_table_input_is_rejected_403(self, monkeypatch):
         from fastapi import HTTPException
 
         self._patch_state(monkeypatch, namespace="secret")
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                resolve_input_version("file:///wh#secret.events")
+                await resolve_input_version("file:///wh#secret.events")
             assert exc.value.status_code == 403
         finally:
             set_principal(None)
 
-    def test_denied_table_input_hidden_as_404(self, monkeypatch):
+    async def test_denied_table_input_hidden_as_404(self, monkeypatch):
         from fastapi import HTTPException
 
         self._patch_state(monkeypatch, namespace="secret", hide_as_404=True)
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                resolve_input_version("file:///wh#secret.events")
+                await resolve_input_version("file:///wh#secret.events")
             assert exc.value.status_code == 404
         finally:
             set_principal(None)
 
-    def test_allowed_table_input_resolves(self, monkeypatch):
+    async def test_allowed_table_input_resolves(self, monkeypatch):
         self._patch_state(monkeypatch, namespace="public")
         set_principal(Principal(id="analyst"))
         try:
-            assert resolve_input_version("file:///wh#public.events") == "4242:0"
+            assert await resolve_input_version("file:///wh#public.events") == "4242:0"
         finally:
             set_principal(None)
 
@@ -379,7 +381,9 @@ class TestTransformInputAclParity:
             ("unplannable", False),
         ],
     )
-    def test_a_denied_table_is_denied_before_it_is_planned(self, monkeypatch, failure, hide_as_404):
+    async def test_a_denied_table_is_denied_before_it_is_planned(
+        self, monkeypatch, failure, hide_as_404
+    ):
         """The ACL decides on the URI's identity before any manifest is read, so a denied caller
         sees neither the delete-files 422 nor the unplannable 400.
         """
@@ -399,7 +403,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                resolve_input_version("file:///wh#secret.events")
+                await resolve_input_version("file:///wh#secret.events")
         finally:
             set_principal(None)
 
@@ -407,7 +411,7 @@ class TestTransformInputAclParity:
         assert "secret-bucket" not in str(exc.value.detail)
         server_module._state.planner.plan.assert_not_called()
 
-    def test_an_allowed_table_strata_refuses_is_still_a_422(self, monkeypatch):
+    async def test_an_allowed_table_strata_refuses_is_still_a_422(self, monkeypatch):
         from fastapi import HTTPException
 
         from strata.iceberg_schema import UnsupportedTableFormatError
@@ -419,13 +423,13 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="analyst"))
         try:
             with pytest.raises(HTTPException) as exc:
-                resolve_input_version("file:///wh#public.events")
+                await resolve_input_version("file:///wh#public.events")
         finally:
             set_principal(None)
 
         assert exc.value.status_code == 422
 
-    def test_a_table_uri_the_acl_cannot_name_is_denied(self, monkeypatch):
+    async def test_a_table_uri_the_acl_cannot_name_is_denied(self, monkeypatch):
         """Deny-first: with no identity, no rule allows it; the planner could not name it either."""
         from fastapi import HTTPException
 
@@ -434,14 +438,14 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="analyst"))
         try:
             with pytest.raises(HTTPException) as exc:
-                resolve_input_version("file:///wh#public.events")
+                await resolve_input_version("file:///wh#public.events")
         finally:
             set_principal(None)
 
         assert exc.value.status_code == 403
         server_module._state.planner.plan.assert_not_called()
 
-    def test_scan_and_transform_share_one_gate(self, monkeypatch):
+    async def test_scan_and_transform_share_one_gate(self, monkeypatch):
         # Both the scan path and the transform-input path call this one helper.
         from fastapi import HTTPException
 
@@ -545,6 +549,19 @@ class TestArtifactReadAcl:
         ).to_json()
         art.input_versions = None
         set_principal(Principal(id="intruder"))
+        try:
+            server_module._authorize_artifact_read(art, store)  # no raise
+        finally:
+            set_principal(None)
+
+    @pytest.mark.parametrize(
+        "input_uri", ["strata://name/features.daily", "strata://artifact/a.b@v=1"]
+    )
+    def test_a_dotted_artifact_or_name_input_is_not_a_table(self, monkeypatch, store, input_uri):
+        """A dot in a name or id does not make it a table the ACL could deny."""
+        server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
+        art = self._artifact(input_uri)
+        set_principal(Principal(id="analyst"))
         try:
             server_module._authorize_artifact_read(art, store)  # no raise
         finally:

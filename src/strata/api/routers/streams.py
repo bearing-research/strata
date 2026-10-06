@@ -103,10 +103,15 @@ async def get_stream(stream_id: str, request: Request):
     stream_state.started = True
     stream_state.started_at = time.time()
 
-    # Every exit path below must release the admission token.
+    # Every exit path below must release the admission token, and one that leaves the stream
+    # unserved must re-arm the cleanup cancelled above, or the stream and its plan stay for good.
     try:
         admission = await state.qos.admit(plan, request, scan_id)
+    except asyncio.CancelledError:
+        state.streams.schedule_cleanup(stream_id, scan_id)
+        raise
     except QoSRejected as exc:
+        state.streams.schedule_cleanup(stream_id, scan_id)
         return JSONResponse(
             status_code=429,
             content={"error": exc.error, "tier": exc.tier},
@@ -172,24 +177,20 @@ async def get_stream(stream_id: str, request: Request):
     build_task = stream_state.background_task
 
     # Shielded so a client disconnect never cancels the build. A handler cancel
-    # (e.g. shutdown) frees the slot but leaves the build running.
+    # (e.g. shutdown) frees the slot but leaves the build running. The slot gated the
+    # scan, which is done: release it on every exit here, a store error included, not in
+    # the generator's finally, so a client gone before iteration can't strand it.
     try:
         await asyncio.shield(build_task)
-    except asyncio.CancelledError:
+        artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
+    finally:
         await admission.release()
         stream_state.completed_at = time.time()
+        # serve_blob re-arms it when it ends.
         state.streams.schedule_cleanup(stream_id, scan_id)
-        raise
-
-    # The slot gated the scan, which is done. Release here, not in the
-    # generator's finally, so a client gone before iteration can't strand it.
-    artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
-    await admission.release()
     stream_state.completed = True
-    stream_state.completed_at = time.time()
 
     if artifact is None or artifact.state not in ("ready", "superseded"):
-        state.streams.schedule_cleanup(stream_id, scan_id)
         return JSONResponse(
             status_code=500,
             content={

@@ -406,7 +406,7 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
     changed_inputs: list[InputChangeInfo] = []
     for input_uri, old_version in status.input_versions.items():
         try:
-            current_version = resolve_input_version(input_uri, tenant=tenant_id)
+            current_version = await resolve_input_version(input_uri, tenant=tenant_id)
             if current_version != old_version:
                 changed_inputs.append(
                     InputChangeInfo(
