@@ -1075,6 +1075,14 @@ class ArtifactStore:
             # the migrations below carry it forward.
             current = _BASELINE_SCHEMA_VERSION
             self._stamp_schema_version(conn, current)
+        elif current > _LATEST_SCHEMA_VERSION:
+            # A newer Strata migrated this store; running on it would write rows that
+            # Strata does not expect.
+            raise RuntimeError(
+                f"The artifact store's schema is version {current}, newer than this Strata "
+                f"supports ({_LATEST_SCHEMA_VERSION}). Upgrade Strata, or restore a backup "
+                "taken before the upgrade."
+            )
 
         for migration in _MIGRATIONS:
             if migration.version <= current:
