@@ -1788,7 +1788,13 @@ function inspectActiveCount(): number {
 }
 
 function readInspectLimit(): number {
-  const raw = Number.parseInt(localStorage.getItem('strata.inspect.maxPanels') || '1', 10)
+  let raw: number
+  try {
+    raw = Number.parseInt(localStorage.getItem('strata.inspect.maxPanels') || '1', 10)
+  } catch {
+    // Blocked site data throws on the getter; this runs at module load.
+    return 1
+  }
   if (!Number.isFinite(raw) || raw < 1) return 1
   return Math.min(raw, 8)
 }
@@ -1796,7 +1802,11 @@ const maxInspectPanels = ref(readInspectLimit())
 function setMaxInspectPanels(n: number) {
   const clamped = Math.max(1, Math.min(8, Math.floor(n)))
   maxInspectPanels.value = clamped
-  localStorage.setItem('strata.inspect.maxPanels', String(clamped))
+  try {
+    localStorage.setItem('strata.inspect.maxPanels', String(clamped))
+  } catch {
+    // Persisting is best-effort; the in-memory limit still applies.
+  }
 }
 
 // Single-inspect aliases (first open cell). Remove once nothing reads them.
