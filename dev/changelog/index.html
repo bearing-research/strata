@@ -4077,8 +4077,10 @@ no route serves files from outside the frontend.</p>
   pending and failing in the runner; an input whose plan fails answers the
   planner's 4xx instead of building a snapshot-less result.</li>
 <li>Two in-flight misses for one scan both serve, and the second artifact reads
-  <code>superseded</code> (its own URI still serves the data) instead of <code>failed</code>;
-  <code>/v1/artifacts/usage</code> counts no failure for it.</li>
+  <code>superseded</code> instead of <code>failed</code>; <code>/v1/artifacts/usage</code> counts no failure
+  for it. Its own blob is dropped as soon as it finalizes and its URI serves
+  the canonical artifact's bytes, so the store holds them once instead of
+  until the retention sweep.</li>
 <li>A cell whose only output is printed text reads ready after reopening the
   notebook, and in <code>strata status</code> and <code>cell list</code>; it was shown idle although
   its console was restored and the next run was a cache hit.</li>
@@ -4101,6 +4103,18 @@ no route serves files from outside the frontend.</p>
   1..2^32-1 instead of failing the request task.</li>
 <li>A failed persist of planning metadata to SQLite is logged at debug instead
   of silently dropped.</li>
+<li>The Azure artifact blob store reads <code>STRATA_AZURE_ENDPOINT_URL</code> as the blob
+  host with the account as the first path segment, the way the lake path and
+  the docs do; the documented Azurite form with an account name and key now
+  works for artifacts and presigned URLs.</li>
+<li>A leaf cell that stores no variable and prints nothing (<code>import os</code>, or an
+  assignment nothing reads) reads <code>ready</code> after a reopen, in the web UI and in
+  <code>strata status</code> and <code>cell list</code>, and an unchanged re-run is a cache hit
+  instead of another subprocess; its empty console is kept under the cell's
+  provenance like a printing leaf's.</li>
+<li>Run All keeps a leaf cell's console record too: a leaf run in a batch reads
+  <code>ready</code> on reopen and hits the cache on the next Run All with its stdout
+  replayed; before, every leaf re-ran on every Run All.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three
