@@ -553,8 +553,10 @@ class TestBuildExecution:
         """Duplicate provenance completes against the canonical artifact."""
         provenance_hash = f"duplicate-hash-{uuid.uuid4()}"
 
+        output_bytes = create_arrow_ipc_bytes({"id": [1], "value": ["a"]})
         existing_artifact_id = str(uuid.uuid4())
         existing_version = artifact_store.create_artifact(existing_artifact_id, provenance_hash)
+        artifact_store.write_blob(existing_artifact_id, existing_version, output_bytes)
         artifact_store.finalize_artifact(existing_artifact_id, existing_version, "{}", 1, 1)
 
         duplicate_artifact_id = str(uuid.uuid4())
@@ -579,7 +581,6 @@ class TestBuildExecution:
             principal_id="test-user",
         )
 
-        output_bytes = create_arrow_ipc_bytes({"id": [1], "value": ["a"]})
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
@@ -611,12 +612,14 @@ class TestBuildExecution:
         assert completed_build.artifact_id == existing_artifact_id
         assert completed_build.version == existing_version
 
-        # Overtaken, not failed: the URI materialize handed out still serves its rows.
+        # Overtaken, not failed: the URI materialize handed out still serves its rows, read from
+        # the canonical's blob; the attempt's own bytes are gone.
         duplicate_artifact = artifact_store.get_artifact(duplicate_artifact_id, duplicate_version)
         assert duplicate_artifact is not None
         assert duplicate_artifact.state == "superseded"
         assert duplicate_artifact.row_count == 1
         assert artifact_store.read_blob(duplicate_artifact_id, duplicate_version) == output_bytes
+        assert list(artifact_store.blobs_dir.glob(f"{duplicate_artifact_id}*")) == []
 
     @pytest.mark.asyncio
     async def test_build_max_output_bytes_exceeded(self, build_runner, artifact_store, build_store):

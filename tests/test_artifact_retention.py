@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from strata.artifact_store import _LATEST_SCHEMA_VERSION, ArtifactStore
+from strata.artifact_store import ArtifactStore
 
 
 @pytest.fixture
@@ -198,7 +198,8 @@ class TestMinted:
         named = _ready(store, "nb_abc_cell_def_var_model")
         _set(store, *minted, created_at=time.time() - 40 * DAY)
         conn = sqlite3.connect(store.db_path)
-        conn.execute("UPDATE schema_version SET version = ?", (_LATEST_SCHEMA_VERSION - 1,))
+        # Back to just before the migration that added the two columns.
+        conn.execute("DELETE FROM schema_version WHERE version >= 6")
         conn.execute("ALTER TABLE artifact_versions DROP COLUMN minted")
         conn.execute("ALTER TABLE artifact_versions DROP COLUMN last_used_at")
         conn.commit()
@@ -885,6 +886,42 @@ class TestWhatAKeptResultNeeds:
 
         assert _exists(store, result)
         assert _exists(store, scan)
+
+    @staticmethod
+    def _overtaken(store: ArtifactStore) -> tuple[tuple[str, int], tuple[str, int]]:
+        """Two in-flight misses for one computation: the canonical, and the version dedup
+        pointed at its bytes; both minted, both long idle."""
+        canonical = _ready(store)
+        provenance = store.get_artifact(*canonical).provenance_hash
+        overtaken = (str(uuid.uuid4()), 1)
+        store.create_artifact(overtaken[0], provenance, minted=True)
+        store.write_blob(*overtaken, b"x" * 100)
+        assert store.finalize_artifact(*overtaken, "{}", 1, 100).id == canonical[0]
+        for key in (canonical, overtaken):
+            _last_used(store, key, 40 * DAY)
+        return canonical, overtaken
+
+    def test_a_held_overtaken_version_keeps_the_bytes_it_reads(self, store):
+        """Pinning the version a duplicate build overtook pins the canonical's blob, the only
+        bytes it has."""
+        canonical, overtaken = self._overtaken(store)
+        store.pin_artifact(*overtaken, "review")
+
+        store.garbage_collect(max_idle_days=30)
+
+        assert _exists(store, canonical)
+        assert store.read_blob(*overtaken) == b"x" * 100
+
+    def test_reading_an_overtaken_version_uses_its_canonical(self, store):
+        """Else the sweep could take the canonical, idle by its own clock, from under a version
+        that is read daily."""
+        canonical, overtaken = self._overtaken(store)
+
+        store.read_blob(*overtaken)
+        store.garbage_collect(max_idle_days=30)
+
+        assert _exists(store, canonical)
+        assert _exists(store, overtaken)
 
     def test_an_alias_awaiting_approval_keeps_its_target(self, store):
         """The approver is asked to point the alias at it."""

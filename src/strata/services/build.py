@@ -112,7 +112,7 @@ class BuildService:
             lease_owner=lease_owner,
             lease_expires_at=lease_expires_at,
             blob_store=store.blob_store if presign else None,
-            blob_id=store._blob_id if presign else None,
+            blob_key=store._blob_key if presign else None,
         )
         return manifest.to_dict()
 

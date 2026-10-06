@@ -749,7 +749,9 @@ class TestFinalizeEndpoint:
         self, client, build_store, artifact_store
     ):
         """A duplicate returns the canonical artifact URI and repoints the build."""
+        blob = create_test_arrow_blob()
         existing_version = artifact_store.create_artifact("canonical-output", "shared-hash")
+        artifact_store.write_blob("canonical-output", existing_version, blob)
         artifact_store.finalize_artifact("canonical-output", existing_version, "{}", 3, 100)
 
         duplicate_version = artifact_store.create_artifact("duplicate-output", "shared-hash")
@@ -762,7 +764,6 @@ class TestFinalizeEndpoint:
         )
         build_store.start_build("fin-build-duplicate-001")
 
-        blob = create_test_arrow_blob()
         artifact_store.write_blob("duplicate-output", duplicate_version, blob)
 
         response = client.post("/v1/builds/fin-build-duplicate-001/finalize")
@@ -777,11 +778,13 @@ class TestFinalizeEndpoint:
         assert build.artifact_id == "canonical-output"
         assert build.version == existing_version
 
-        # Overtaken, not failed: the URI materialize handed out still serves its rows.
+        # Overtaken, not failed: the URI materialize handed out still serves its rows, read from
+        # the canonical's blob; its own bytes are gone.
         duplicate_artifact = artifact_store.get_artifact("duplicate-output", duplicate_version)
         assert duplicate_artifact is not None
         assert duplicate_artifact.state == "superseded"
         assert artifact_store.read_blob("duplicate-output", duplicate_version) == blob
+        assert not artifact_store.blob_store.blob_exists("duplicate-output", duplicate_version)
 
     def test_finalize_without_upload_rejected(self, client, build_store, artifact_store):
         version = create_test_artifact(artifact_store, "fin-output2", finalize=False)

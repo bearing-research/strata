@@ -652,7 +652,8 @@ class TestRefreshSupersede:
         """The cross-id duplicate race keeps one ready row; the loser is overtaken, not failed.
 
         It finished, so it keeps its metadata and stays readable by its own id and version,
-        and usage counts no failure.
+        and usage counts no failure. Its own bytes go at once: it reads the canonical's, the
+        store holds them once, and retention collects it without touching them.
         """
         store.create_artifact("art-1", "prov-x")
         store.write_blob("art-1", 1, _ipc_bytes(10))
@@ -667,10 +668,38 @@ class TestRefreshSupersede:
         overtaken = store.get_artifact("art-2", 1)
         assert overtaken.state == "superseded"
         assert (overtaken.row_count, overtaken.byte_size) == (10, 100)
-        assert overtaken.content_sha256 is not None
+        assert overtaken.content_sha256 == store.get_artifact("art-1", 1).content_sha256
         assert store.read_blob("art-2", 1) == _ipc_bytes(10)
+        assert not store.blob_store.blob_exists("art-2", 1)
         assert store.get_usage()["failed_versions"] == 0
+        assert store.get_usage()["total_bytes"] == 100
+        assert store.garbage_collect(dry_run=True)["store_bytes"] == 100
         assert store.verify_artifacts() == []
+
+        store.set_name("canonical", "art-1", 1)
+        collected = store.garbage_collect(max_idle_days=0, collect_latest=True)
+        assert collected["deleted_count"] == 1
+        assert collected["deleted_bytes"] == 0
+        assert store.get_artifact("art-2", 1) is None
+        assert store.read_blob("art-1", 1) == _ipc_bytes(10)
+        assert store.verify_artifacts() == []
+
+    def test_an_overtaken_version_whose_canonical_went_is_reported(self, store):
+        """A deleted canonical leaves the pointer dangling; verify names it rather than
+        reporting an orphan blob."""
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-2", 1, "{}", 10, 100)
+
+        assert store.delete_artifact("art-1", 1)
+
+        assert store.read_blob("art-2", 1) is None
+        [finding] = store.verify_artifacts()
+        assert (finding["artifact_id"], finding["problem"]) == ("art-2", "missing_blob")
+        assert "art-1@v=1" in finding["detail"]
 
     def test_finalize_and_set_name_supersedes(self, store):
         """The atomic finalize+name path supersedes the same way."""
@@ -1698,6 +1727,16 @@ class TestTwoIdsOneComputation:
         assert store.read_blob(self.A, a.version) is not None
         assert store.get_latest_version(self.B) is not None
         assert [v.id for v in store.list_latest_by_id_prefix("nb_A_")] == [self.A]
+
+    def test_the_promoted_id_owns_its_bytes(self, store):
+        """Dedup dropped B's blob for A's; promotion must give B its own copy back, since A
+        is now the superseded one and may be collected."""
+        self._both_finalized(store)
+
+        assert store.blob_store.blob_exists(self.B, 1)
+        assert store.delete_artifact(self.A, 1)
+        assert store.read_blob(self.B, 1) == _ipc_bytes(1)
+        assert store.verify_artifacts() == []
 
     def test_gc_spares_a_superseded_current_value_during_a_rebuild(self, store):
         self._both_finalized(store)
