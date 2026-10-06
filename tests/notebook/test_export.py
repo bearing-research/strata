@@ -331,6 +331,47 @@ def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
     assert "[doc](#)" in rendered
 
 
+def test_markdown_export_escapes_html_outside_markdown_cells() -> None:
+    """Names, chips, notes and table values are data, so they must not become live HTML."""
+    from strata.notebook.export import (
+        ChipsBlock,
+        HeadingBlock,
+        NoteBlock,
+        TableBlock,
+        _emit_markdown,
+    )
+
+    xss = "<img src=x onerror=alert(1)>"
+    rendered = _emit_markdown(
+        [
+            HeadingBlock(f"load {xss}", level=2),
+            ChipsBlock([("worker", xss)]),
+            NoteBlock(f"Pickled output ({xss}), not rendered in export."),
+            TableBlock(
+                columns=[f"col {xss}"],
+                rows=[{f"col {xss}": xss}, {f"col {xss}": [xss]}],
+                title=f"Output {xss}",
+            ),
+            HeadingBlock("[x](javascript:alert(1))", level=2),
+        ]
+    )
+
+    assert "<img" not in rendered
+    assert rendered.count("&lt;img src=x onerror=alert(1)>") == 7
+    assert "javascript:" not in rendered
+
+
+def test_markdown_export_emits_only_an_inline_image_with_quoted_attributes() -> None:
+    from strata.notebook.export import ImageBlock, _emit_markdown
+
+    hostile = _emit_markdown([ImageBlock(data_url='x" onerror="alert(1)', alt="cell output")])
+    quoted = _emit_markdown([ImageBlock(data_url='data:image/png;base64,AA"x', alt='a"b')])
+
+    assert "<img" not in hostile and "onerror" not in hostile
+    assert "not an inline image" in hostile
+    assert quoted.strip() == '<img src="data:image/png;base64,AA&quot;x" alt="a&quot;b">'
+
+
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [
@@ -521,7 +562,8 @@ def test_export_pickle_placeholder_includes_type_hint(tmp_path: Path) -> None:
     )
 
     rendered = export_notebook(nb_dir)
-    assert "<MyThing object>" in rendered
+    # Escaped like any raw HTML, so it renders as the text "<MyThing object>".
+    assert "&lt;MyThing object>" in rendered
     assert "not rendered" in rendered.lower()
 
 

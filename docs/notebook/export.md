@@ -113,7 +113,10 @@ For each cell, the exporter emits in order:
 Markdown (markdown cells, markdown outputs, and the README intro) exports
 the way the UI shows it: raw HTML is escaped to visible text, and
 `javascript:`, `vbscript:` and non-image `data:` link targets become `#`.
-Code spans and fenced code keep their text unchanged.
+Code spans and fenced code keep their text unchanged. The markdown export
+treats the rest of the page the same way: cell and notebook names, widget
+values, notes, table headers and table values are escaped too, and an image is
+written only when its source is an inline `data:image/` URL.
 
 ## Cell-kind specifics
 
