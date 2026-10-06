@@ -264,8 +264,21 @@ def _load_published(store, token: str, *, require_active: bool):
 
 @router.get("/v1/publications/{token}", response_model=None)
 async def read_publication_record(token: str, store: ReadStore):
-    """The machine-readable record behind the page. Unauthenticated."""
+    """The machine-readable record behind the page. Unauthenticated.
+
+    A withdrawn publication answers with only what its page shows: that it was withdrawn, and when.
+    """
     publication, artifact = _load_published(store, token, require_active=False)
+    if not publication.is_active:
+        return {
+            "publication": {
+                "token": publication.token,
+                "url": f"/p/{publication.token}",
+                "title": publication.title,
+                "published_at": publication.published_at,
+                "revoked_at": publication.revoked_at,
+            }
+        }
     lineage = ArtifactService().build_lineage(
         store,
         artifact=artifact,

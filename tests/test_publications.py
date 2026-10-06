@@ -453,6 +453,15 @@ class TestPublicRoutesEndToEnd:
         assert page.status_code == 200
         assert "withdrawn" in page.text.lower()
 
+        # The JSON record says the same as the page, and no more: no chain, no source.
+        record = httpx.get(f"{base_url}/v1/publications/{token}", timeout=10)
+        assert record.status_code == 200
+        body = record.json()
+        assert set(body) == {"publication"}
+        assert body["publication"]["token"] == token
+        assert body["publication"]["title"] == "Figure 3"
+        assert body["publication"]["revoked_at"] is not None
+
     def test_an_unknown_token_is_not_found(self, published_server):
         import httpx
 
