@@ -1055,8 +1055,10 @@ materialize response's: when two misses for one scan were in flight together,
 one artifact becomes the ready result and the other reads `superseded`. The
 superseded one keeps no bytes of its own: its `GET /v1/artifacts/{id}/v/{n}/data`
 serves the canonical artifact's blob, the store counts those bytes once, and
-retention collects the superseded row like any other. Read the header to keep
-the canonical one.
+retention collects the two together (or neither, while the superseded one is
+held). Deleting the canonical artifact first gives a published or pinned
+superseded one its own copy of the bytes. Read the header to keep the canonical
+one.
 
 ### Health
 
