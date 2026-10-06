@@ -1033,7 +1033,8 @@ async def garbage_collect_artifacts(
 ):
     """Collect unneeded artifact versions, least recently used first.
 
-    Personal mode, or service mode with ``admin:*``, scoped to the caller's tenant.
+    Personal mode, or service mode with ``admin:*``. Neither has a tenant filter
+    (``admin:*`` is unscoped), so the sweep covers the whole store, every tenant.
     A version is kept if it has a name, alias, pin or publication, if something
     pinned, published or building depends on it, or if it is the latest value of a
     caller-named id (see ``ArtifactStore.garbage_collect``). Omitted parameters take
