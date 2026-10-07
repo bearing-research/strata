@@ -1537,7 +1537,10 @@ def _require_notebook_worker_admin_access() -> ServerState:
     if state.config.deployment_mode != "service":
         raise HTTPException(
             status_code=409,
-            detail="Server-managed notebook workers are only available in service mode",
+            detail=(
+                "The admin notebook-worker routes are for service mode; a personal "
+                "server reads its workers from [tool.strata.transforms] notebook_workers"
+            ),
         )
 
     if state.config.principal_auth_enabled:
@@ -1584,14 +1587,19 @@ def _get_artifact_store(
     service_write_ok = allow_write and state.config.service_writes_enabled
 
     if not (writes_ok or server_transforms_ok or allow_read or service_write_ok):
+        # Name only the settings that would open this route.
+        remedies = ["set deployment_mode='personal' for local development"]
+        if allow_server_mode:
+            remedies.append("enable server-mode transforms (STRATA_TRANSFORMS_ENABLED=true)")
+        if allow_write:
+            remedies.append("enable service-mode writes (STRATA_SERVICE_WRITES_ENABLED=true)")
         raise HTTPException(
             status_code=403,
             detail={
                 "error": "writes_disabled",
                 "message": (
-                    "Artifact endpoints are disabled in service mode. "
-                    "Set deployment_mode='personal' for local development, "
-                    "or enable server-mode transforms."
+                    "This artifact endpoint is disabled in service mode. "
+                    f"To use it, {' or '.join(remedies)}."
                 ),
             },
         )
