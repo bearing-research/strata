@@ -72,6 +72,15 @@ from outside the frontend.
 - A configured SQL catalog whose warehouse is in object storage now needs a
   `uri` (`STRATA_CATALOG_URI`, or the entry's own): the server refuses to start
   rather than keep the catalog in SQLite on its own disk.
+- Service mode refuses to start without `STRATA_AUTH_MODE`: set
+  `trusted_proxy` (with `STRATA_PROXY_TOKEN`) or `api_key`. Before, such a
+  server started with every route open, cell execution and the admin worker
+  registry included.
+- Behind a trusted proxy, check that the proxy sets `X-Strata-Principal`, the
+  tenant header, `X-Strata-Scopes` and `X-Strata-Proxy-Token` on every request,
+  with an empty value when the user has none: a header the proxy leaves alone
+  reaches Strata from the client. [Service Mode](deployment/service-mode.md#the-trusted-proxy-contract)
+  has an nginx block that does.
 - Personal mode refuses a request whose `Host` is not loopback, an IP
   address, the bind host or a name in the new `STRATA_ALLOWED_HOSTS`: a server
   reached by a LAN hostname or a custom domain needs that name listed. A
@@ -110,6 +119,14 @@ from outside the frontend.
   `STRATA_WORKER_ENV_REGISTRY_URL/<key>/<interpreter>/<platform>` and rebuild
   their local environments once; a registry on the old `<url>/<key>` path must
   move (until then every dispatch builds locally).
+- A `strata-worker` without `STRATA_WORKER_TOKEN` listens on 127.0.0.1 only:
+  set the token (the default bind is then `0.0.0.0`) or pass `--host`.
+- The server-managed worker registry moves from `notebook_workers.json` into
+  the artifact metadata store. The first start imports the file from the
+  artifact directory and renames it `notebook_workers.json.migrated`, without
+  importing it when the store already holds a registry (another node imported
+  first). A fleet manager that wrote the file under a running server must use
+  the `/v1/admin/notebook-workers` routes: the file is no longer read.
 - Shared environments are keyed by what the lock installs, not the raw
   `uv.lock` (which carried the project's name): existing shared environments
   are rebuilt once, and an old one stays on disk until it has been unused for
@@ -148,6 +165,16 @@ from outside the frontend.
   catalog `uri` (`STRATA_CATALOG_URI`); without one, scans, cache warming and
   export to a table answer 400 instead of using a SQLite catalog on the
   server's disk.
+- With `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` set, a cell that needs a
+  credential-named variable under `UV_`, `PYTHON` or `R_`, or anything under
+  `CONDA_`, must name it in the allowlist.
+- `s3://` and `gs://` notebook mounts need the `s3` or `gcs` extra where
+  Strata is installed (for example `uv tool install "strata-notebook[s3]"`),
+  which carry s3fs and gcsfs.
+- Adding a dependency from the Environment panel, REST or the WebSocket takes
+  exactly one requirement: a value that is several packages or starts with `-`
+  is refused, and a bare URL or path needs a package name in front, in
+  PEP 508's name-at-URL form.
 - A notebook's `[ai] base_url` that is not the server's `STRATA_AI_BASE_URL`
   or a provider's default no longer receives the server's `STRATA_AI_API_KEY`,
   in either mode. Put a key in the notebook (any value works for Ollama), or
@@ -202,6 +229,15 @@ from outside the frontend.
 - Publications serve only `image/png`, Arrow, JSON and Markdown inline; any
   other stored type downloads as `application/octet-stream`, and `PATCH
   /v1/publications/{token}` refuses `artifact_id` and `version` with a 400.
+- A publication's token and link are returned only by the publish that mints
+  them: republishing returns `token` and `url` as null, `GET /v1/publications`
+  lists publications by `id`, and `PATCH`/`DELETE /v1/publications/{token}` and
+  `strata artifact unpublish` take the token or the id. Publish, credit and
+  withdraw events carry the id in `value`. Links already handed out keep
+  working.
+- Notebook stores written before this release recorded an unknown output row
+  count as 0, so `strata artifact verify` flags those outputs until their cells
+  run again.
 - `POST /v1/artifacts/import` refuses record fields of the wrong type or shape
   with a 400: counts must be non-negative integers, and `transform_spec` and
   `input_versions` JSON strings. `GET /v1/registry/audit` takes `limit` from 1
@@ -455,8 +491,9 @@ from outside the frontend.
   list`) and an unchanged run is a cache hit with its output replayed. This
   holds in Run All, for loop cells, and after a run with the rerun button,
   Rerun All or `strata run --force`, whose console the next plain run or
-  reopen shows. Before, a silent leaf always ran again, every leaf re-ran on
-  every Run All, and a printing leaf read idle after a reopen.
+  reopen shows. Reverting an edit is a cache hit for a leaf too. Before, a
+  silent leaf always ran again, every leaf re-ran on every Run All, and a
+  printing leaf read idle after a reopen.
 - **`strata run` keeps notebook INFO logs off stderr**; `STRATA_LOG_LEVEL`
   brings them back.
 - **Notebooks share an environment whatever their names.** In shared mode,
@@ -509,6 +546,20 @@ from outside the frontend.
   `PUT /v1/machine-types` refuses wrongly typed or out-of-range fields (a
   `max_workers` below 1, a timeout of zero or less) with a 400 naming the
   field.
+- **The server-managed worker registry lives in the artifact metadata
+  store** (Postgres or the SQLite file) instead of `notebook_workers.json`, so
+  every node sharing the store offers the same workers and a change made on
+  one applies on the others at their next request.
+  `POST /v1/admin/notebook-workers/reload` only refreshes worker health.
+- A service-mode server whose transforms block is enabled but lists no
+  transforms warns at startup; the docs show the `duckdb_sql@v1` entry
+  (`executor_url = "embedded://local"`) the built-in SQL transform needs there.
+- Notebook outputs record an unknown row count as unknown, shown as `-` in
+  `strata artifact list`, instead of 0.
+- `strata artifact verify` prints the metadata store and blob backend it
+  checks; its JSON output adds `metadata` and `blobs`.
+- The REST reference says `POST /v1/notebooks/create` and `/import` return
+  before the new environment is synced, and how to wait before running cells.
 
 ### Security
 
@@ -678,6 +729,30 @@ from outside the frontend.
   path no longer frames the editor.
 - **A worker started through `uv run` warns that its parent still holds the
   token**, and the docs start `strata-worker` directly.
+- **Service mode needs an auth mode.** A service-mode server without
+  `STRATA_AUTH_MODE` started with every route open, cell execution and the
+  admin worker registry included. It now refuses to start.
+- **The proxy sets every identity header.** The trusted-proxy contract says
+  the proxy sets `X-Strata-Principal`, the tenant header, `X-Strata-Scopes`
+  and `X-Strata-Proxy-Token` on every request, empty when the user has none; a
+  proxy that left `X-Strata-Scopes` alone let a client claim `admin:*`.
+- **The server's state is owner-only.** The artifact directory, its database
+  and blobs, the cache directory and a notebook's server-only runtime state
+  are created 0700 or 0600, and existing ones are narrowed; a notebook's
+  `.strata/` and each tenant's storage directory are 0711. One harness user
+  serves every tenant and is not a tenant isolation boundary: the service-mode
+  docs say what separate tenants need.
+- **Publication tokens are stored as their SHA-256**, so a copy of the
+  database holds no working link. Existing tokens are hashed on upgrade and
+  links already handed out keep working.
+- **An env allowlist keeps credentials out of cells.** With
+  `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` set, credential-looking names under
+  `UV_*`, `PYTHON*` and `R_*`, and `UV_PUBLISH_*` and `UV_INDEX_*_USERNAME`,
+  no longer reach cells, and `CONDA_*` is no longer passed; a name listed
+  exactly still passes.
+- **`strata-worker` listens on loopback without a token.** It bound `0.0.0.0`,
+  so a worker started without `STRATA_WORKER_TOKEN` ran whatever anyone who
+  reached the port sent. With no token the default is now 127.0.0.1.
 
 ### Fixed
 
@@ -1007,8 +1082,55 @@ from outside the frontend.
 - A table with no snapshots yet reads as zero rows with its schema (scans,
   transform inputs, cache warm, `@table` inputs) instead of a 500, and nothing
   read from it is reused.
+- A personal server always offers the built-in `duckdb_sql@v1`: a
+  `[tool.strata.transforms]` block without `enabled = true` (one holding only
+  `notebook_workers`, say) turned it off, so it answered 400. An enabled block
+  adds its entries to it.
+- `strata apikey` writes keys to the store the server is configured with
+  (`STRATA_ARTIFACT_DIR`, `[tool.strata]`, the metadata DSN) instead of
+  `~/.strata/artifacts`, so a key minted for a service-mode SQLite store no
+  longer gets a 401.
+- `STRATA_TRANSFORMS_ENABLED` accepts any boolean (`1`, `yes`, `false`) like
+  every other setting.
+- A catalog `uri` written as `postgresql://` (the form the startup message
+  suggested) made every scan a 500 because it needs psycopg2; it now uses
+  psycopg 3 from the `postgres` extra when psycopg2 is not installed, and the
+  docs show `postgresql+psycopg://`.
+- `/health/ready` answers 503 when the artifact store's database does not
+  answer within 5 seconds.
+- `strata_scans_total`, `strata_rows_returned_total`,
+  `strata_row_groups_pruned_total`, the `strata_table_*` series,
+  `/metrics/tables` and `strata_tenant_scans_total` move again: every
+  completed `scan@v1` is counted, cache hits included.
+- The documented MCP URL `http://localhost:8765/mcp` works; before, only
+  `/mcp/` reached the MCP endpoint.
+- Adding a package with a version range, extras or a marker (`pandas>=2.0`,
+  `pandas<3`) works from the Environment panel, REST and the WebSocket as it
+  does from the CLI.
+- `strata artifact verify` no longer reports a notebook's JSON, image or
+  pickled outputs, or its DataFrames, as corrupt; Arrow blobs are still parsed
+  and row-counted, and every blob is still checked against its digest.
+- A server without the `sql` extra answers 400 naming `strata-notebook[sql]`
+  when a notebook with a SQL cell is opened, instead of a bare 500, and refuses
+  a new SQL cell (REST, `strata cell add`, MCP) or connection before writing
+  it, where the written cell made every later open fail.
+- The 403 from a personal-only artifact route and the 409 from the admin
+  notebook-worker routes in personal mode name the setting that applies.
+- A remote cell on a worker that queues its jobs shows its `starting` badge
+  while the job is provisioned, and the badge updates no longer clear the
+  console it has streamed.
+- `strata cell add --run` reports the cell it ran as `ready`, matching
+  `strata status`.
+- `strata worker add`, MCP `add_worker` and `PUT /v1/notebooks/{id}/workers`
+  refuse a worker named `local`: the built-in worker resolves first, so the
+  entry never ran and could not be removed.
+- `strata agent --no-tui` prints the session id straight away when its output
+  goes to a file or pipe, and `SIGTERM` stops the server it started.
+- The starter cell of a new notebook gets an 8-character id like every other
+  cell.
 - A Codespace starts the server again: `.devcontainer/start.sh` was not
-  executable.
+  executable. It installs the `sql`, `sql-duckdb` and `sql-sqlite` extras, so
+  SQL cells work there.
 - The service-mode demo's `gpu-http-signed` worker runs cells: its executor
   now names the `strata` host in `STRATA_WORKER_ALLOWED_HOSTS`.
 - The Docker image's and the compose files' healthchecks follow
