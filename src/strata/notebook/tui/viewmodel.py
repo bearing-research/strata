@@ -160,7 +160,8 @@ class NotebookViewModel:
 
         if msg_type == "cell_status":
             cell.status = str(payload.get("status") or cell.status)
-            if cell.status == "running":
+            # A frame with remote_build_state only moves a remote cell's badge mid-run.
+            if cell.status == "running" and "remote_build_state" not in payload:
                 cell.console_parts = []
         elif msg_type == "cell_console":
             _append_console(cell, payload)

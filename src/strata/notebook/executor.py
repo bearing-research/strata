@@ -3236,12 +3236,13 @@ class CellExecutor:
             from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
             from strata.notebook.ws_payloads import cell_status_payload
 
-            notebook_id = self.session.notebook_state.id
+            # Sockets are keyed by the session id, not the notebook.toml id.
+            session_id = self.session.id
             await _broadcast_message(
-                notebook_id,
+                session_id,
                 _make_message(
                     MessageType.CELL_STATUS,
-                    next_notebook_sequence(notebook_id),
+                    next_notebook_sequence(session_id),
                     cell_status_payload(
                         cell_id,
                         "running",

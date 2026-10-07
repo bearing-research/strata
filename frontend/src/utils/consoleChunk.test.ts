@@ -7,6 +7,7 @@ import {
   type CellConsole,
   replaceConsole,
   startConsoleRun,
+  startsRun,
 } from './consoleChunk.ts'
 
 test("a run's first chunk replaces the last run's console", () => {
@@ -28,7 +29,7 @@ type Frame = [string, Record<string, unknown>]
 
 function apply(cell: CellConsole, frames: Frame[]): void {
   for (const [type, payload] of frames) {
-    if (type === 'cell_status' && payload.status === 'running') startConsoleRun(cell)
+    if (type === 'cell_status' && startsRun(payload)) startConsoleRun(cell)
     else if (type === 'cell_console') appendConsole(cell, payload)
     else if (type === 'cell_output' || type === 'cell_error') replaceConsole(cell, payload)
   }
@@ -65,6 +66,18 @@ test('the result replaces the console streamed during the run', () => {
     ['cell_status', { cell_id: 'a', status: 'running' }],
     ['cell_console', { stream: 'stdout', text: 'epoch 1\n', chunk_seq: 0 }],
     ['cell_output', { cell_id: 'a', stdout: 'epoch 1\nepoch 2\n', stderr: '' }],
+  ])
+  assert.equal(cell.consoleStdout, 'epoch 1\nepoch 2\n')
+})
+
+test("a remote cell's phase frames keep the console streamed so far", () => {
+  const cell: CellConsole = {}
+  apply(cell, [
+    ['cell_status', { cell_id: 'a', status: 'running', remote_worker: 'pool' }],
+    ['cell_status', { cell_id: 'a', status: 'running', remote_build_state: 'starting' }],
+    ['cell_console', { stream: 'stdout', text: 'epoch 1\n', chunk_seq: 0 }],
+    ['cell_status', { cell_id: 'a', status: 'running', remote_build_state: 'running' }],
+    ['cell_console', { stream: 'stdout', text: 'epoch 2\n', chunk_seq: 1 }],
   ])
   assert.equal(cell.consoleStdout, 'epoch 1\nepoch 2\n')
 })

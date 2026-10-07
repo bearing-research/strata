@@ -259,3 +259,46 @@ async def test_cancelling_a_direct_cell_while_polling_cancels_the_job(run_cell):
     )
 
     assert len(facade.cancelled) == 1
+
+
+async def test_the_remote_phase_reaches_the_sessions_sockets(tmp_path):
+    """Sockets are keyed by the session id, which differs from the notebook.toml id."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.models import WorkerBackendType, WorkerSpec
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import create_notebook
+    from strata.notebook.ws import _notebook_connections, forget_notebook_execution_state
+
+    class _Socket:
+        def __init__(self):
+            self.sent: list[dict] = []
+
+        async def send_text(self, text: str) -> None:
+            self.sent.append(json.loads(text))
+
+    nb = create_notebook(tmp_path / "nb", "Phases")
+    session = NotebookSession(parse_notebook(nb), nb)
+    assert session.id != session.notebook_state.id
+    socket = _Socket()
+    _notebook_connections[session.id] = [socket]
+    worker = WorkerSpec(
+        name="pool",
+        backend=WorkerBackendType.EXECUTOR,
+        config={"url": "https://pool.example/v1/execute", "transport": "signed"},
+    )
+    try:
+        await CellExecutor(session)._broadcast_remote_phase("c1", worker, "starting")
+    finally:
+        _notebook_connections.pop(session.id, None)
+        forget_notebook_execution_state(session.id)
+
+    assert [frame["payload"] for frame in socket.sent] == [
+        {
+            "cell_id": "c1",
+            "status": "running",
+            "remote_worker": "pool",
+            "remote_transport": "signed",
+            "remote_build_state": "starting",
+        }
+    ]

@@ -1,5 +1,5 @@
 // The console contract (docs/reference/websocket.md): `cell_status: running`
-// clears it, `cell_console` appends per stream, and `cell_output` /
+// without `remote_build_state` clears it, `cell_console` appends per stream, and `cell_output` /
 // `cell_error` replace it with their `stdout` / `stderr` strings.
 
 export interface CellConsole {
@@ -27,6 +27,12 @@ export function appendConsole(cell: CellConsole, payload: Record<string, unknown
   } else {
     cell.consoleStdout = applyConsoleChunk(cell.consoleStdout, text, payload.chunk_seq)
   }
+}
+
+// Whether a `cell_status` frame starts a run. A `running` frame carrying
+// `remote_build_state` only moves a remote cell's badge mid-run.
+export function startsRun(payload: Record<string, unknown>): boolean {
+  return payload.status === 'running' && payload.remote_build_state === undefined
 }
 
 // `cell_status: running`: the run starts with an empty console.
