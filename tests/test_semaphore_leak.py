@@ -509,6 +509,44 @@ class TestAStreamFetchThatFailsReleasesEverything:
         assert state.qos.active_scans == 0
         assert body["stream_id"] in state.streams._cleanup_tasks
 
+    async def test_a_pass_through_never_read_frees_the_admission_slot(
+        self, in_process, temp_warehouse, monkeypatch
+    ):
+        """Without a store the stream is a generator; a client gone before its first chunk
+        never starts it, so its own cleanup cannot be what frees the slot.
+        """
+        from types import SimpleNamespace
+
+        from starlette.requests import ClientDisconnect
+
+        import strata.artifact_store
+        from strata.api.routers.streams import get_stream
+        from strata.tenant_registry import get_tenant_registry
+
+        client, state = in_process
+        body = client.post(
+            "/v1/materialize", json=build_materialize_request(temp_warehouse["table_uri"])
+        ).json()
+        monkeypatch.setattr(strata.artifact_store, "get_artifact_store", lambda *a, **k: None)
+
+        response = await get_stream(body["stream_id"], request=SimpleNamespace(client=None))
+        assert state.qos.active_scans == 1
+
+        async def receive():
+            return {"type": "http.disconnect"}
+
+        async def gone(message):
+            raise OSError("client went away")
+
+        scope = {"type": "http", "asgi": {"spec_version": "2.4"}}
+        with pytest.raises(ClientDisconnect):
+            await response(scope, receive, gone)
+
+        interactive_in_use, _, bulk_in_use, _ = get_tenant_registry().aggregate_limiter_usage()
+        assert (interactive_in_use, bulk_in_use) == (0, 0)
+        assert state.qos.active_scans == 0
+        assert body["stream_id"] in state.streams._cleanup_tasks
+
     @pytest.mark.parametrize("failing", ["open_store", "start_build"])
     def test_a_failure_before_the_build_frees_the_admission_slot(
         self, in_process, temp_warehouse, monkeypatch, failing
