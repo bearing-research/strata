@@ -13,7 +13,7 @@ class _FakeStore:
         self._aliases = aliases  # list of (name, alias, version)
         self._names = names  # list of (name, artifact_id, version)
         self._tags = tags  # {(artifact_id, version): {k: v}}
-        self._reads = list(reads)  # list of (artifact_id, reference)
+        self._reads = list(reads)  # list of (tenant, artifact_id, reference)
 
     def list_aliases(self, name, *, tenant=None):
         return [
@@ -72,12 +72,12 @@ def test_summary_lists_the_notebook_cells_that_read_each_name():
         tags={},
         reads=[
             # Two outputs of one cell read the same name: one reader.
-            ("nb_nb-1_cell_a1b2c3d4_var_score", "taxi/model@champion"),
-            ("nb_nb-1_cell_a1b2c3d4_var_error", "taxi/model@champion"),
-            ("nb_nb-2_cell_c2_var_x", "taxi/model@v=2"),
-            ("nb_nb-2_cell_c3_var_y", "taxi/features"),
+            (None, "nb_nb-1_cell_a1b2c3d4_var_score", "taxi/model@champion"),
+            (None, "nb_nb-1_cell_a1b2c3d4_var_error", "taxi/model@champion"),
+            (None, "nb_nb-2_cell_c2_var_x", "taxi/model@v=2"),
+            (None, "nb_nb-2_cell_c3_var_y", "taxi/features"),
             # Not a notebook cell's output.
-            ("0f6c-uuid", "taxi/model"),
+            (None, "0f6c-uuid", "taxi/model"),
         ],
     )
 
@@ -124,6 +124,35 @@ class TestTenantScope:
 
         assert [(r["name"], r["aliases"], r["tags"]) for r in rows] == [
             ("team/model", {"champion": 1}, {"stage": "prod"})
+        ]
+
+    def test_the_whole_store_summary_keeps_each_tenants_readers_apart(self, tmp_path):
+        from strata.artifact_store import ArtifactStore, TransformSpec
+
+        store = ArtifactStore(tmp_path / "artifacts")
+        for tenant in ("team-a", "team-b"):
+            model, reader = f"m-{tenant}", f"nb_nb-{tenant}_cell_c1_var_x"
+            store.create_artifact(model, f"p-{tenant}", TransformSpec("e", {}, []), tenant=tenant)
+            store.write_blob(model, 1, b"x")
+            store.finalize_artifact(model, 1, "{}", 1, 1)
+            store.set_name("shared/model", model, 1, tenant=tenant)
+            store.create_artifact(
+                reader,
+                f"r-{tenant}",
+                TransformSpec("e", {}, []),
+                input_versions={"strata://name/shared/model": f"{model}@v=1"},
+                tenant=tenant,
+            )
+            store.write_blob(reader, 1, b"x")
+            store.finalize_artifact(reader, 1, "{}", 1, 1)
+
+        rows = registry_service.summary(store, tenant=None, all_tenants=True)
+
+        assert sorted(
+            (r["tenant"], r["name"], [c["notebook_id"] for c in r["readers"]]) for r in rows
+        ) == [
+            ("team-a", "shared/model", ["nb-team-a"]),
+            ("team-b", "shared/model", ["nb-team-b"]),
         ]
 
     def test_the_default_tenant_sees_none_of_another_tenants_rows(self, tmp_path):

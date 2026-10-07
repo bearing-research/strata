@@ -47,10 +47,13 @@ logger = logging.getLogger(__name__)
 def _admitted_table_version(version: str | None) -> tuple[int | None, int | None]:
     """The ``(snapshot, schema)`` in a table input's recorded ``{snapshot}:{schema}``.
 
-    ``empty:...`` (the table had no snapshot at admission) and no record read the current table.
+    ``empty:{token}:{schema}`` (no snapshot at admission) has no snapshot; no record reads the
+    current table.
     """
-    if version is None or version.startswith("empty:"):
+    if version is None:
         return None, None
+    if version.startswith("empty:"):
+        return None, int(version.rpartition(":")[2])
     snapshot, _, schema = version.partition(":")
     return int(snapshot), int(schema) if schema else None
 
@@ -643,7 +646,9 @@ class BuildRunner:
 
         # Any other URI is a table in a form the planner reads, as admission resolved it.
         snapshot_id, schema_id = _admitted_table_version(admitted_version)
-        return await self._scan_to_file(input_uri, temp_files, snapshot_id, schema_id)
+        # Empty at admission: rows written since are not in this build's provenance.
+        empty = admitted_version is not None and admitted_version.startswith("empty:")
+        return await self._scan_to_file(input_uri, temp_files, snapshot_id, schema_id, empty=empty)
 
     async def _scan_to_file(
         self,
@@ -651,8 +656,12 @@ class BuildRunner:
         temp_files: list[Path],
         snapshot_id: int | None = None,
         schema_id: int | None = None,
+        empty: bool = False,
     ) -> Path:
-        """Scan a table at ``snapshot_id`` and ``schema_id`` (None: current) into a temp file."""
+        """Scan a table at ``snapshot_id`` and ``schema_id`` (None: current) into a temp file.
+
+        ``empty`` writes no rows, only the schema.
+        """
 
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
         os.close(_fd)  # Windows: handle must be closed before rename
@@ -667,6 +676,7 @@ class BuildRunner:
             temp_file,
             snapshot_id,
             schema_id,
+            empty,
         )
 
         return temp_file
@@ -677,6 +687,7 @@ class BuildRunner:
         output_path: Path,
         snapshot_id: int | None = None,
         schema_id: int | None = None,
+        empty: bool = False,
     ) -> None:
         """Synchronous helper to scan a table and write to file."""
         from strata.cache import CachedFetcher
@@ -704,7 +715,7 @@ class BuildRunner:
         with pa.OSFile(str(output_path), "wb") as sink:
             writer = None
             try:
-                for task in plan.tasks:
+                for task in [] if empty else plan.tasks:
                     batch = fetcher.fetch(task)
                     if writer is None:
                         writer = pa.ipc.new_stream(sink, batch.schema)

@@ -1036,6 +1036,60 @@ class TestInputAcquisition:
         built = ipc.open_stream(artifact_store.read_blob(artifact_id, version)).read_all()
         assert built.column_names == ["id", "value", name_column, "timestamp"]
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("after", ["append", "rename"])
+    async def test_a_table_empty_at_admission_is_read_empty(
+        self, build_runner, artifact_store, build_store, temp_warehouse, tmp_path, after
+    ):
+        """A table recorded empty at admission is read empty, under the admitted schema."""
+        from strata.config import StrataConfig
+        from strata.planner import ReadPlanner
+        from strata.services.materialize import table_input_version
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        build_runner.runtime_config = StrataConfig(cache_dir=cache_dir)
+        events = temp_warehouse["table"]
+        table = temp_warehouse["catalog"].create_table("test_db.later", events.schema())
+        table_uri = temp_warehouse["table_uri"].replace("#test_db.events", "#test_db.later")
+
+        admitted = table_input_version(ReadPlanner(build_runner.runtime_config).plan(table_uri))
+        assert admitted.startswith("empty:")
+        artifact_id = str(uuid.uuid4())
+        version = artifact_store.create_artifact(
+            artifact_id=artifact_id,
+            provenance_hash=f"hash-{artifact_id}",
+            transform_spec=TransformSpec(executor="test_sql@v1", params={}, inputs=[table_uri]),
+            input_versions={table_uri: admitted},
+        )
+        build_id = str(uuid.uuid4())
+        build_store.create_build(
+            build_id=build_id,
+            artifact_id=artifact_id,
+            version=version,
+            executor_ref="test_sql@v1",
+            executor_url="http://test-executor:8080",
+        )
+        # The table moves on before the runner picks the build up.
+        if after == "append":
+            table.append(events.scan().to_arrow().slice(0, 50))
+        else:
+            with table.update_schema() as update:
+                update.rename_column("name", "label")
+
+        async def identity_executor(*, input_files, **_kwargs):
+            return input_files[0][1], None
+
+        build_runner._call_executor = identity_executor
+        await build_runner._execute_build(build_store.get_build(build_id))
+
+        artifact = artifact_store.get_artifact(artifact_id, version)
+        assert artifact.state == "ready"
+        assert artifact.row_count == 0
+        built = ipc.open_stream(artifact_store.read_blob(artifact_id, version)).read_all()
+        assert built.num_rows == 0
+        assert built.column_names == ["id", "value", "name", "timestamp"]
+
     def test_scan_to_file_sync_uses_fetch_pipeline_on_cold_cache(self, build_runner, artifact_dir):
         """Table inputs fetch through the planner/fetcher path, not raw cache files."""
         batch = pa.record_batch([pa.array([1, 2, 3])], names=["id"])
