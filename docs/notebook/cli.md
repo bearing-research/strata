@@ -59,7 +59,9 @@ A successful cell also carries `provenance_hash` and `outputs`, one
 on two machines can be diffed digest by digest with no server involved.
 `strata run` stores the variables of leaf cells too (cells nothing downstream
 reads, which the notebook otherwise keeps no artifact for), so the notebook's
-final results have digests to compare; a value that cannot be serialized is
+final results have digests to compare; a leaf that is a cache hit from a run
+outside `strata run` (the UI, `cell run`, MCP) lists only what that run stored,
+so pass `--force` once before comparing; a value that cannot be serialized is
 skipped. Display outputs appear as `__display__N`; a leaf's cached console is
 not listed. An output stored before digests were recorded gets its
 digest computed from its bytes when the report is written. The ZIP export's
@@ -197,6 +199,9 @@ strata cell show <notebook_dir> --var NAME # the cell that DEFINES a variable (e
 strata dag       <notebook_dir>            # dependency edges + topological order
 strata status    <notebook_dir>            # per-cell status + staleness summary
 ```
+
+Every `<cell_id>` here and below is the id from `notebook.toml` or `cell list`,
+not the cell's `# @name`.
 
 Each takes `--format human|json` (JSON is the default - these are agent-first).
 The JSON shapes match the server's REST API (`GET /{id}/cells`, `GET /{id}/dag`),

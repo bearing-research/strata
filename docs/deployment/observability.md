@@ -108,8 +108,12 @@ Logs are structured JSON by default (`STRATA_LOG_FORMAT=json`;
 `level`, `logger`, `message`, `timestamp` (Unix seconds), and the
 request's context fields: `request_id`, `method`, `path`, `tenant_id`,
 and `trace_id` / `span_id` when tracing is on.
-Pipe `docker compose logs strata` through `jq` for readable
-output.
+uvicorn's own startup and access lines stay plain text, so keep only
+the JSON records before reading them with `jq`:
+
+```bash
+docker compose logs --no-log-prefix strata | jq -R 'fromjson? // empty'
+```
 
 ### Web UI: Logs & Artifacts pages
 
@@ -244,7 +248,7 @@ checks:
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Liveness. Returns `{"status":"ok"}` if the server is running. Used by Docker / Fly / k8s. |
-| `GET /health/ready` | Readiness. `503` while draining, when both QoS tiers have been saturated for over 30s, or when the metadata store is unreachable. |
+| `GET /health/ready` | Readiness. `503` while draining, when both QoS tiers have been saturated for over 30s, when the Parquet metadata cache (SQLite under `STRATA_CACHE_DIR`) is unreachable, or when the artifact store's database (SQLite, or Postgres through `STRATA_ARTIFACT_METADATA_DSN`) does not answer a query within 5 seconds. The blob backend is not probed. |
 | `GET /health/dependencies` | Per-check report (disk cache, metadata store, Arrow memory, thread pools, rate limiter, eviction pressure); `503` if any check is unhealthy. |
 | `GET /metrics/prometheus` | Scrape target. Returns Prometheus textfile. |
 

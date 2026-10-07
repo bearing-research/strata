@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import pyarrow as pa
@@ -43,6 +43,22 @@ class CatalogProvider(Protocol):
 
 
 _NAMED = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(?!//)(.+)$")
+
+
+def _with_catalog_uri(properties: Mapping[str, Any]) -> dict[str, Any]:
+    """*properties* with a bare ``postgresql://`` uri pointed at psycopg 3 when psycopg2 is absent.
+
+    SQLAlchemy maps the bare scheme to psycopg2, which no extra installs; the
+    ``postgres`` extra ships psycopg 3, the ``postgresql+psycopg://`` driver.
+    """
+    props = dict(properties)
+    uri = props.get("uri", "")
+    if uri.startswith("postgresql://"):
+        try:
+            import psycopg2  # noqa: F401
+        except ImportError:
+            props["uri"] = "postgresql+psycopg://" + uri.removeprefix("postgresql://")
+    return props
 
 
 def named_catalog(table_uri: str, config: StrataConfig) -> tuple[str | None, str]:
@@ -274,10 +290,12 @@ class PyIcebergCatalog:
             # The configured warehouse is the default catalog's; a table this request creates
             # belongs in the warehouse it names.
             props["warehouse"] = warehouse_path
-            return SqlCatalog("strata", **props)
+            return SqlCatalog("strata", **_with_catalog_uri(props))
 
         if self.config.catalog_properties:
-            return load_catalog(self.config.catalog_name, **self.config.catalog_properties)
+            return load_catalog(
+                self.config.catalog_name, **_with_catalog_uri(self.config.catalog_properties)
+            )
         return SqlCatalog(
             self.config.catalog_name,
             uri="sqlite:///:memory:",
@@ -306,7 +324,7 @@ class PyIcebergCatalog:
                     self.config.catalogs[name],
                     CredentialResolver.from_config(self.config, env=self._env),
                 )
-                catalog = load_catalog(name, **properties)
+                catalog = load_catalog(name, **_with_catalog_uri(properties))
                 self._catalogs[key] = catalog
         return catalog
 

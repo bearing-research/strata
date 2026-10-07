@@ -117,7 +117,7 @@ During execution, the UI shows a pulsing "dispatching → df-cluster" badge on t
 Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion cluster on Fly, a beefy EC2 instance, or a local process on a different port. The built-in `remote_executor.py` provides a reference implementation:
 
 ```bash
-python -m strata.notebook.remote_executor --port 9000
+strata-worker --host 127.0.0.1 --port 9000
 ```
 
 If no `@worker` is set, the cell runs locally in the notebook's Python environment.
@@ -190,6 +190,11 @@ scratch / "summary.txt"  # → Path("/tmp/work/summary.txt")
 resolved local path (the cached mirror for remote URIs, the URI's local
 filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
 joining, `.read_text()`, `.iterdir()`, etc.
+
+Strata mirrors a remote mount in its own process, not the notebook's venv, so
+its filesystem library goes where Strata is installed: the `s3` extra for
+`s3://` (`s3fs`), `gcs` for `gs://` (`gcsfs`) and `azure` for `az://`
+(`adlfs`), for example `uv tool install "strata-notebook[s3]"`.
 
 Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).
 

@@ -1,13 +1,16 @@
 """Trusted-proxy authentication and authorization.
 
 Strata does not authenticate: an upstream proxy (NGINX, Envoy, Kong) does, and
-Strata trusts its identity headers. The proxy MUST strip client-supplied
-``X-Strata-*`` headers, set ``X-Strata-Principal`` to the authenticated id, and
-set ``X-Strata-Proxy-Token`` to the shared secret. For example (NGINX)::
+Strata trusts its identity headers. Strata cannot tell a header the proxy set
+from one the client sent, so the proxy MUST set every identity header on every
+request, with an empty value when the user has none (NGINX drops a header set
+to ``""``). For example (NGINX)::
 
     location /strata/ {
-        proxy_set_header X-Strata-Principal $authenticated_user;
         proxy_set_header X-Strata-Proxy-Token "secret-token";
+        proxy_set_header X-Strata-Principal $authenticated_user;
+        proxy_set_header X-Tenant-ID $authenticated_tenant;
+        proxy_set_header X-Strata-Scopes $authenticated_scopes;
         proxy_pass http://strata:8765/;
     }
 """

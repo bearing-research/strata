@@ -13,7 +13,7 @@ import pytest
 import uvicorn
 
 from strata.config import StrataConfig
-from tests.conftest import find_free_port, prepared_venv, wait_for_server
+from tests.conftest import find_free_port, prepared_venv, service_auth, wait_for_server
 
 # R availability: central skip markers, so the skip wording and the arrow
 # package probe live in one place.
@@ -259,6 +259,7 @@ def notebook_build_server(tmp_path: Path):
         artifact_dir=artifact_dir,
         notebook_storage_dir=tmp_path,
         deployment_mode="service",
+        **service_auth(),
         transforms_config={"enabled": True},
     )
 

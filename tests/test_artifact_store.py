@@ -926,6 +926,27 @@ class TestArtifactVerifyCli:
     def test_missing_dir_exits_two(self, tmp_path):
         assert self._run(tmp_path / "nope") == 2
 
+    def test_it_names_the_metadata_and_blobs_it_checks(self, store, artifact_dir, capsys):
+        assert self._run(artifact_dir) == 0
+        out = capsys.readouterr().out
+        assert f"metadata {store.db_path}" in out
+        assert f"blobs {store.blob_store.blobs_dir}" in out
+
+    def test_a_remote_store_is_named_by_its_dsn_and_bucket(self, tmp_path):
+        """The artifact dir is not what a Postgres + S3 store verifies."""
+        from strata.artifact_cli import _store_location
+        from strata.blob_store import S3BlobStore
+        from strata.sql_backend import PostgresDialect
+
+        remote = ArtifactStore.__new__(ArtifactStore)
+        remote._dialect = PostgresDialect("postgresql://strata:s3cret@db:5432/strata")
+        remote.blob_store = S3BlobStore("lake", prefix="artifacts", region="us-east-1")
+
+        metadata, blobs = _store_location(remote)
+
+        assert metadata == "postgresql://strata:***@db:5432/strata"
+        assert blobs == "s3://lake/artifacts"
+
 
 class TestLegacyDefaultTenantNames:
     """Artifacts stamped with legacy '_default' stay nameable."""

@@ -33,6 +33,10 @@ job = await pool.submit(tenant_id="acme", machine_type="cpu-4x", payload=bundle)
 done = await pool.wait(job.id)
 ```
 
+`DockerBackend()` talks to `/var/run/docker.sock`. Docker Desktop on macOS
+puts the socket under your home directory, so pass it:
+`DockerBackend(socket_path=os.path.expanduser("~/.docker/run/docker.sock"))`.
+
 ## Isolation
 
 A machine belongs to **one tenant for its life** and is destroyed rather than
@@ -192,6 +196,17 @@ Both job submit routes take their options as query parameters: `machine_type`
 `wait_seconds` (default 300), which bounds the wait and not the job, and is cut to
 the type's `boot_timeout_seconds` plus `job_timeout_seconds`. Both times must be
 positive and finite; anything else is a 422 and no job is queued.
+
+The `PUT` body is the whole catalogue: a JSON list of machine types, each with
+`MachineType`'s fields (only `name` and `image` are required), the shape `GET`
+returns:
+
+```bash
+curl -X PUT http://pool.internal:8000/v1/machine-types \
+  -H "Authorization: Bearer $STRATA_POOL_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '[{"name": "cpu-4x", "image": "strata-worker:latest", "cpus": 4, "memory_mb": 8192, "max_workers": 5}]'
+```
 
 `PUT /v1/machine-types` checks each field's type and range before storing
 anything: a number sent as a string, an unknown key, a non-finite number, a
@@ -370,10 +385,12 @@ docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
 The image installs a pinned `strata-notebook` from PyPI (the `STRATA_VERSION`
-build arg) and needs **0.7.0 or newer**: `POST /execute`, the path the pool
-dispatches to, ships in that release. Installing from PyPI also means building
-inside a checkout does not pick up local worker changes; build a wheel for
-that.
+build arg), which must be **the same release as the Strata server** that
+dispatches to it: workers and servers upgrade together. The pin moves to each
+new release right after it is published; until then pass
+`--build-arg STRATA_VERSION=<server version>`. Installing from PyPI also means
+building inside a checkout does not pick up local worker changes; build a
+wheel for that.
 
 Layer your cells' dependencies on top (`FROM strata-worker:latest`). The image
 binds 8080 because that is `DockerBackend`'s default `worker_port`; the

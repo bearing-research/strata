@@ -33,8 +33,15 @@ Start by getting a worker running on your own machine. This verifies your instal
 **1. Start the worker:**
 
 ```bash
-strata-worker --port 9000
+strata-worker --host 127.0.0.1 --port 9000
 ```
+
+A worker runs whatever code it is sent, so this one listens on loopback only.
+Without `STRATA_WORKER_TOKEN` that is also the default bind; with the token set
+the default is `0.0.0.0`. Bind wider (`--host 0.0.0.0`) only with a token, as
+in [Authentication](#authentication): a worker on `0.0.0.0` with
+no token lets anyone who reaches the port run code on the machine, and logs a
+warning saying so.
 
 Run the installed `strata-worker` (for example `.venv/bin/strata-worker`), not
 `uv run strata-worker`: `uv run` stays alive as the worker's parent with
@@ -46,7 +53,7 @@ You should see uvicorn start up:
 
 ```
 INFO:     Started server process [12345]
-INFO:     Uvicorn running on http://0.0.0.0:9000
+INFO:     Uvicorn running on http://127.0.0.1:9000
 ```
 
 **2. Verify it's healthy:**
@@ -429,9 +436,12 @@ docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .
 ```
 
 The image installs a released `strata-notebook` from PyPI, pinned by
-`ARG STRATA_VERSION`; pass `--build-arg STRATA_VERSION=<version>` for another
-release (0.7.0 or newer, the first with `POST /execute`). Building it inside a
-checkout does not pick up local worker changes. The container refuses to start
+`ARG STRATA_VERSION`. The worker must be the same release as the server
+(workers and servers upgrade together), so pass
+`--build-arg STRATA_VERSION=<server version>` when the two differ. The pin
+moves to each new release right after it is published; until then a fresh
+image installs the previous release. Building it inside a checkout does not
+pick up local worker changes; build a wheel for that. The container refuses to start
 without `STRATA_WORKER_TOKEN`, since it binds `0.0.0.0`; the pool mints one per
 machine, and you set it yourself to run the image by hand.
 
@@ -499,16 +509,24 @@ A service-mode server keeps its own registry, managed through
 `/v1/admin/notebook-workers*` rather than any notebook's `[[workers]]`. Two
 things are worth knowing about where it lives:
 
-**It is persisted.** Changes made through the admin routes are written to
-`notebook_workers.json` in the server's artifact directory and survive a
-restart.
+**It is persisted in the artifact metadata store.** Changes made through the
+admin routes are written to the same database as the artifact metadata
+(Postgres with `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in
+the artifact directory), so they survive a restart, and every node sharing
+that database sees them on its next request. Without an artifact store (a
+scan-only server) the registry is kept in memory only.
 
-**The file wins over `[tool.strata.transforms] notebook_workers`.** The
-configured table is the bootstrap; once anything has been changed through the
-admin routes, that file is the registry and editing the config table has no
-effect. Delete the file to go back to the configured table. An *empty*
-registry is a decision, not an absence, so removing every worker through the
-API does not fall back.
+**The stored registry wins over `[tool.strata.transforms] notebook_workers`.**
+The configured table is the bootstrap; once anything has been changed through
+the admin routes, the stored registry is in force and editing the config table
+has no effect. An *empty* registry is a decision, not an absence, so removing
+every worker through the API does not fall back.
+
+**Upgrading from a release that kept `notebook_workers.json`.** On its first
+start the server imports that file from the artifact directory into the
+metadata store, renames it `notebook_workers.json.migrated`, and logs it. The
+import is skipped (the file is still renamed) when the store already holds a
+registry, so a second node starting with an old copy does not overwrite it.
 
 **A `signed` worker needs transforms enabled.** It runs as a build on the
 server, so in service mode set `STRATA_TRANSFORMS_ENABLED=true`
@@ -517,9 +535,36 @@ server, so in service mode set `STRATA_TRANSFORMS_ENABLED=true`
 "Signed notebook executor transport requires personal-mode writes or
 server-mode transforms to be enabled". A `direct` worker needs neither.
 
-`POST /v1/admin/notebook-workers/reload` re-reads the file, for a fleet
-manager writing it underneath a running server. A restart would work too, but
-it interrupts every cell currently executing.
+`POST /v1/admin/notebook-workers/reload` refreshes every worker's health and
+drops cached health for workers no longer listed. The registry itself needs no
+reload, since it is read from the store on every request; a fleet manager
+changes it through the admin routes.
+
+An entry has the fields of a notebook's `[[workers]]` plus `enabled`, in the
+same shape whether it comes from the admin routes or from
+`[tool.strata.transforms] notebook_workers`. `POST /v1/admin/notebook-workers`
+adds one, `PUT /v1/admin/notebook-workers/{name}` replaces it, `PATCH` takes
+`{"enabled": false}`, and `PUT /v1/admin/notebook-workers` replaces the whole
+registry with `{"workers": [...]}`. The routes answer only in service mode
+(`409` otherwise) and, under principal auth, need the `admin:notebook-workers`
+scope.
+
+```bash
+curl -X POST https://strata.example.com/v1/admin/notebook-workers \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "gpu-a100", "backend": "executor", "runtime_id": "gpu-a100-v1",
+       "config": {"url": "https://gpu.internal/v1/execute", "transport": "direct",
+                  "token_env": "STRATA_GPU_WORKER_TOKEN"}}'
+```
+
+```toml
+[tool.strata.transforms]
+notebook_workers = [
+  { name = "gpu-a100", backend = "executor", runtime_id = "gpu-a100-v1", config = { url = "https://gpu.internal/v1/execute", transport = "direct", token_env = "STRATA_GPU_WORKER_TOKEN" } },
+]
+```
+
+`token_env` names a variable in the server's environment.
 
 **Personal-mode servers get the registry too.** A personal server started with
 a registry offers those machine types to every notebook it opens, with no

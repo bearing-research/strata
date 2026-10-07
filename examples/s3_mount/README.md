@@ -47,6 +47,10 @@ uv run strata-notebook
 
 Then open `examples/s3_mount` from the Strata home page.
 
+Strata reads the bucket in its own process, so an installed Strata
+needs the `s3` extra (`s3fs`): `uv tool install "strata-notebook[s3]"`.
+The development environment already has it.
+
 ## Swapping in a private bucket
 
 Drop the `options = { anon = true }` line and configure AWS credentials

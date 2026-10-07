@@ -36,8 +36,8 @@ client.set_alias("taxi/tip-model", "candidate", new_id, new_version)
 client.resolve_alias("taxi/tip-model", "champion")
 ```
 
-A name can hold any number of aliases. Aliases may pin a **superseded**
-version (an old champion stays fetchable after a rebuild), and an aliased
+A name can hold any number of aliases. Aliases may pin an **older**
+version (an old champion stays fetchable after the name moves on), and an aliased
 artifact is protected from garbage collection. Setting an alias to the
 version it already points at is a **no-op** - idempotent promote cells
 re-run without spamming history.
@@ -80,7 +80,8 @@ SDK exposes `get_registry_audit(name=..., artifact_id=...)`.
 
 Publishing an artifact, withdrawing a publication and changing its credits
 (authors or identifiers, `PATCH /v1/publications/{token}`) are recorded in the
-same log, as `publish`, `withdraw` and `credit` with the token in `value`.
+same log, as `publish`, `withdraw` and `credit` with the publication's id (the
+SHA-256 of its token, never the token) in `value`.
 
 ### Following the store
 
@@ -162,7 +163,7 @@ challenger → a human approves → and the whole history is reconstructible:
 strata artifact lineage taxi/tip-model@champion
 # model <- features <- scan <- table file://...#nyc.trips @ snapshot 2558063...
 strata artifact audit taxi/tip-model
-strata artifact verify    # store-wide blob/metadata consistency check
+strata artifact verify    # every blob exists and matches its digest; Arrow ones their rows
 strata artifact gc --dry-run   # what the retention sweep would collect
 ```
 

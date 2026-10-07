@@ -121,6 +121,16 @@ def _split_ref(ref: str) -> tuple[str, int]:
     return artifact_id, int(version)
 
 
+def _declared_content_type(transform_spec: str | None) -> str:
+    """The ``content_type`` a version's transform params declare, or ``""`` for none."""
+    try:
+        params = json.loads(transform_spec or "{}").get("params") or {}
+    except (ValueError, AttributeError):
+        return ""
+    content_type = params.get("content_type") if isinstance(params, dict) else None
+    return content_type if isinstance(content_type, str) else ""
+
+
 def _like_literal(text: str) -> str:
     """``text`` escaped for ``LIKE ... ESCAPE '\\'``: its ``_`` and ``%`` match only themselves."""
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -161,7 +171,7 @@ class StagedVersion:
     artifact_id: str
     version: int
     schema_json: str
-    row_count: int
+    row_count: int | None  # None: the writer does not know it
     byte_size: int
     content_sha256: str
 
@@ -190,7 +200,9 @@ class Publication:
     """An opt-in public read grant for one artifact version.
 
     ``token`` is an unguessable secret and the only credential for the
-    unauthenticated reader. The version binding is permanent. ``content_sha256``
+    unauthenticated reader. The store keeps only its SHA-256, ``id``, so
+    ``token`` is set only when the grant is minted or looked up by it, and
+    is empty otherwise. The version binding is permanent. ``content_sha256``
     is the digest of the bytes as published, the basis of the page's integrity
     claim. ``revoked_at`` is set on withdrawal; the row survives so the token is
     never reissued. ``authors`` (ordered ``{"name", "orcid", "affiliation"}``) is
@@ -209,6 +221,7 @@ class Publication:
     revoked_at: float | None = None
     authors: tuple[dict[str, str], ...] = ()
     external_ids: tuple[dict[str, str], ...] = ()
+    id: str = ""
 
     @property
     def is_active(self) -> bool:
@@ -419,6 +432,45 @@ def _add_publication_credits(conn: StoreConnection, dialect: SqlDialect) -> None
             conn.execute(f"ALTER TABLE artifact_publications ADD COLUMN {column} TEXT")
 
 
+_PUBLICATION_ID = re.compile(r"^[0-9a-f]{64}$")
+
+
+def publication_id(token: str) -> str:
+    """What the store keeps for a publication token: its SHA-256 hex digest.
+
+    A copy of the database, a backup or a read of the file then holds no working link.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def publication_key(token_or_id: str) -> str:
+    """The stored key for a raw token, or for a publication id given as is.
+
+    A raw token (43 base64url characters) is never 64 hex digits, so the two cannot
+    be confused. Only routes behind authentication may take an id: on a public route
+    the id would work as the link.
+    """
+    return token_or_id if _PUBLICATION_ID.match(token_or_id) else publication_id(token_or_id)
+
+
+def _hash_publication_tokens(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Replace every stored publication token, and its audit entries, with its SHA-256.
+
+    Links already handed out keep working: a lookup hashes the token it is given.
+    """
+    del dialect
+    rows = conn.execute("SELECT token FROM artifact_publications").fetchall()
+    for token in [row["token"] for row in rows]:
+        if _PUBLICATION_ID.match(token):
+            continue
+        hashed = publication_id(token)
+        conn.execute("UPDATE artifact_publications SET token = ? WHERE token = ?", (hashed, token))
+        conn.execute(
+            "UPDATE registry_audit SET value = ? WHERE key = 'token' AND value = ?",
+            (hashed, token),
+        )
+
+
 def _add_pins(conn: StoreConnection, dialect: SqlDialect) -> None:
     """Add pins, so a platform can hold a chain the store has no other reason to keep."""
     conn.execute(
@@ -521,6 +573,11 @@ def _add_superseded_by(conn: StoreConnection, dialect: SqlDialect) -> None:
         conn.execute("ALTER TABLE artifact_versions ADD COLUMN superseded_by TEXT")
 
 
+def _add_notebook_workers(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Move the server-managed notebook worker registry into the store, from a per-node file."""
+    conn.executescript(dialect.adapt_ddl(_NOTEBOOK_WORKERS_SCHEMA_SQL))
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
@@ -529,6 +586,8 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(5, "import_staging", _add_import_staging),
     _Migration(6, "artifact_versions.last_used_at + minted", _add_use_and_minted),
     _Migration(7, "artifact_versions.superseded_by", _add_superseded_by),
+    _Migration(8, "artifact_publications.token hashed", _hash_publication_tokens),
+    _Migration(9, "notebook_workers", _add_notebook_workers),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -662,7 +721,7 @@ CREATE TABLE IF NOT EXISTS registry_pending (
 # closed, never resolve to something else.
 _PUBLICATION_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artifact_publications (
-    token TEXT PRIMARY KEY,
+    token TEXT PRIMARY KEY,  -- SHA-256 hex of the link's token (migration 8), never the token
     artifact_id TEXT NOT NULL,
     version INTEGER NOT NULL,
     tenant TEXT NOT NULL DEFAULT '',
@@ -704,6 +763,23 @@ CREATE TABLE IF NOT EXISTS import_staging (
     byte_size INTEGER NOT NULL,
     staged_at REAL NOT NULL,
     PRIMARY KEY (tenant, content_sha256)
+);
+"""
+
+# The server-managed notebook worker registry, shared by every node on this database: one row per
+# worker, in catalogue order. The single registry row records that it has been set, after which the
+# configured ``notebook_workers`` table no longer applies, so an emptied registry stays empty.
+_NOTEBOOK_WORKERS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS notebook_workers (
+    name TEXT PRIMARY KEY,
+    ordinal INTEGER NOT NULL,
+    spec TEXT NOT NULL,  -- JSON: the WorkerSpec plus "enabled"
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS notebook_worker_registry (
+    id INTEGER PRIMARY KEY,  -- always 1
+    updated_at REAL NOT NULL
 );
 """
 
@@ -750,14 +826,17 @@ class ArtifactStore:
         ``PostgresDialect`` the blob store should be remote too, or the store is only
         coherent on one machine.
         """
+        from strata.file_modes import narrow, private_dir, private_file
+
         self.artifact_dir = artifact_dir
         self.db_path = artifact_dir / "artifacts.sqlite"
+        # Every tenant's metadata, names and blobs: no other account on the host reads them.
+        private_dir(artifact_dir)
 
         if blob_store is None:
             from strata.blob_store import LocalBlobStore
 
             self.blobs_dir = artifact_dir / "blobs"
-            self.blobs_dir.mkdir(parents=True, exist_ok=True)
             self.blob_store: BlobStore = LocalBlobStore(self.blobs_dir)
         else:
             self.blob_store = blob_store
@@ -769,7 +848,12 @@ class ArtifactStore:
             else:
                 self.blobs_dir = artifact_dir / "blobs"  # May not exist for remote stores
 
-        self.artifact_dir.mkdir(parents=True, exist_ok=True)
+        if dialect is None:
+            private_file(self.db_path)
+            for journal in ("-wal", "-shm"):
+                sibling = self.db_path.with_name(self.db_path.name + journal)
+                if sibling.exists():
+                    narrow(sibling, 0o600)
 
         # Every query goes through _get_connection, so the dialect is the one place a second backend
         # has to be taught about; see strata/sql_backend.py for what differs.
@@ -795,6 +879,14 @@ class ArtifactStore:
         Needed for Postgres, whose pool runs worker threads that outlive the store.
         """
         self._dialect.close()
+
+    def ping(self) -> None:
+        """Run a trivial query; raises when the metadata database is unreachable."""
+        conn = self._get_connection()
+        try:
+            conn.execute("SELECT 1").fetchone()
+        finally:
+            conn.close()
 
     def _init_schema(self) -> None:
         """Create the schema, or migrate an existing database to the latest version."""
@@ -822,6 +914,7 @@ class ArtifactStore:
                 conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_PUBLICATION_SCHEMA_SQL))
+                conn.executescript(self._dialect.adapt_ddl(_NOTEBOOK_WORKERS_SCHEMA_SQL))
                 # Created from the constants, which are the latest shape, so it
                 # is already current and must not replay migrations that would
                 # add what it was born with.
@@ -932,6 +1025,7 @@ class ArtifactStore:
             # Registry and publication tables: idempotent, for fresh and existing databases alike.
             conn.executescript(_REGISTRY_SCHEMA_SQL)
             conn.executescript(_PUBLICATION_SCHEMA_SQL)
+            conn.executescript(_NOTEBOOK_WORKERS_SCHEMA_SQL)
             cursor = conn.execute("PRAGMA table_info(registry_audit)")
             audit_columns = {row["name"] for row in cursor.fetchall()}
             if "from_artifact_id" not in audit_columns:
@@ -1323,7 +1417,7 @@ class ArtifactStore:
         artifact_id: str,
         version: int,
         schema_json: str,
-        row_count: int,
+        row_count: int | None,
         byte_size: int,
         content_sha256: str | None = None,
         *,
@@ -1585,7 +1679,7 @@ class ArtifactStore:
                     artifact_id=artifact_id,
                     version=new_version,
                     schema_json=source.schema_json or "",
-                    row_count=source.row_count or 0,
+                    row_count=source.row_count,
                     byte_size=copied,
                     content_sha256=hasher.hexdigest(),
                 )
@@ -1948,7 +2042,7 @@ class ArtifactStore:
         artifact_id: str,
         version: int,
         schema_json: str,
-        row_count: int,
+        row_count: int | None,
         existing: ArtifactVersion,
         blob_attempt: str | None,
     ) -> tuple[str, int]:
@@ -2513,9 +2607,11 @@ class ArtifactStore:
     # --- Publications (opt-in public read grants), then registry: aliases, tags, audit ---
 
     @staticmethod
-    def _publication_from_row(row) -> Publication:
+    def _publication_from_row(row, token: str = "") -> Publication:
+        """``token`` is the raw token when the caller has it; the row holds only its hash."""
         return Publication(
-            token=row["token"],
+            token=token,
+            id=row["token"],
             artifact_id=row["artifact_id"],
             version=row["version"],
             tenant=row["tenant"] or "",
@@ -2617,13 +2713,15 @@ class ArtifactStore:
             if existing is not None:
                 return self._publication_from_row(existing)
 
+            token = secrets.token_urlsafe(32)
             publication = Publication(
                 # The version's own digest, not a second computation: a publication disagreeing with
                 # its artifact would be the more alarming answer. Read from the row in hand rather
                 # than via ``content_digest``, which would open and write through a second
                 # connection while this one holds the publication.
                 content_sha256=row["content_sha256"] or self.blob_digest(artifact_id, version),
-                token=secrets.token_urlsafe(32),
+                token=token,
+                id=publication_id(token),
                 artifact_id=artifact_id,
                 version=version,
                 tenant=effective_tenant,
@@ -2639,7 +2737,7 @@ class ArtifactStore:
                 "published_by, content_sha256, authors, external_ids) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    publication.token,
+                    publication.id,
                     publication.artifact_id,
                     publication.version,
                     publication.tenant,
@@ -2660,7 +2758,7 @@ class ArtifactStore:
                 artifact_id=artifact_id,
                 to_version=version,
                 key="token",
-                value=publication.token,
+                value=publication.id,
                 actor=published_by,
                 tenant=effective_tenant,
             )
@@ -2670,16 +2768,17 @@ class ArtifactStore:
             conn.close()
 
     def get_publication(self, token: str) -> Publication | None:
-        """Look up a publication by token, revoked ones included.
+        """Look up a publication by its raw token, revoked ones included.
 
-        So the caller can answer "withdrawn" rather than "no such page".
+        So the caller can answer "withdrawn" rather than "no such page". Never by
+        id: this is what the public routes call, and an id is not a credential.
         """
         conn = self._get_connection()
         try:
             row = conn.execute(
-                "SELECT * FROM artifact_publications WHERE token = ?", (token,)
+                "SELECT * FROM artifact_publications WHERE token = ?", (publication_id(token),)
             ).fetchone()
-            return self._publication_from_row(row) if row is not None else None
+            return self._publication_from_row(row, token) if row is not None else None
         finally:
             conn.close()
 
@@ -2695,10 +2794,12 @@ class ArtifactStore:
         """Set a publication's authors and external ids after the fact (audited as ``credit``).
 
         Never touches the artifact binding. ``None`` leaves a column alone; an empty
-        list clears it. Returns the updated publication, or ``None`` if the token is
-        unknown in this tenant.
+        list clears it. ``token`` is the raw token or the publication's id. Returns the
+        updated publication, or ``None`` if it is unknown in this tenant.
         """
         effective_tenant = tenant if tenant is not None else ""
+        key = publication_key(token)
+        raw = "" if key == token else token
         assignments: list[str] = []
         params: list[Any] = []
         if authors is not None:
@@ -2714,7 +2815,7 @@ class ArtifactStore:
                 cursor = conn.execute(
                     f"UPDATE artifact_publications SET {', '.join(assignments)} "
                     "WHERE token = ? AND tenant = ?",
-                    (*params, token, effective_tenant),
+                    (*params, key, effective_tenant),
                 )
                 if cursor.rowcount == 0:
                     conn.commit()
@@ -2722,7 +2823,7 @@ class ArtifactStore:
                 bound = conn.execute(
                     "SELECT artifact_id, version FROM artifact_publications "
                     "WHERE token = ? AND tenant = ?",
-                    (token, effective_tenant),
+                    (key, effective_tenant),
                 ).fetchone()
                 self._audit_in_connection(
                     conn,
@@ -2730,35 +2831,39 @@ class ArtifactStore:
                     artifact_id=bound["artifact_id"],
                     to_version=bound["version"],
                     key="token",
-                    value=token,
+                    value=key,
                     actor=actor,
                     tenant=effective_tenant,
                 )
                 conn.commit()
             row = conn.execute(
                 "SELECT * FROM artifact_publications WHERE token = ? AND tenant = ?",
-                (token, effective_tenant),
+                (key, effective_tenant),
             ).fetchone()
-            return self._publication_from_row(row) if row is not None else None
+            return self._publication_from_row(row, raw) if row is not None else None
         finally:
             conn.close()
 
     def revoke_publication(
         self, token: str, tenant: str | None = None, actor: str | None = None
     ) -> bool:
-        """Withdraw a grant (audited). Returns False if it was unknown or already gone."""
+        """Withdraw a grant (audited), named by raw token or id.
+
+        Returns False if it was unknown or already gone.
+        """
         effective_tenant = tenant if tenant is not None else ""
+        key = publication_key(token)
         conn = self._get_connection()
         try:
             row = conn.execute(
                 "SELECT artifact_id, version FROM artifact_publications "
                 "WHERE token = ? AND tenant = ?",
-                (token, effective_tenant),
+                (key, effective_tenant),
             ).fetchone()
             cursor = conn.execute(
                 "UPDATE artifact_publications SET revoked_at = ? "
                 "WHERE token = ? AND tenant = ? AND revoked_at IS NULL",
-                (time.time(), token, effective_tenant),
+                (time.time(), key, effective_tenant),
             )
             # Only the call that actually withdrew it records it: a second
             # revoke of the same token changes nothing and is not an event.
@@ -2771,7 +2876,7 @@ class ArtifactStore:
                 artifact_id=row["artifact_id"],
                 to_version=row["version"],
                 key="token",
-                value=token,
+                value=key,
                 actor=actor,
                 tenant=effective_tenant,
             )
@@ -3842,8 +3947,8 @@ class ArtifactStore:
             ).fetchone()
             if published is not None:
                 raise ValueError(
-                    f"{artifact_id}@v={version} is published as {published['token']}; "
-                    "revoke the publication before deleting it"
+                    f"{artifact_id}@v={version} is published (publication id "
+                    f"{published['token']}); revoke the publication before deleting it"
                 )
             # A published or pinned version reading these bytes through superseded_by gets
             # its own copy first: deleting this version must not empty a link somebody holds.
@@ -4108,6 +4213,77 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
+    def notebook_worker_entries(self) -> list[dict[str, Any]] | None:
+        """The server-managed notebook worker registry in order, or ``None`` if never set.
+
+        ``None`` means the configured table applies; ``[]`` means every worker was removed.
+        """
+        conn = self._get_connection()
+        try:
+            return self._notebook_worker_entries(conn)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _notebook_worker_entries(conn: StoreConnection) -> list[dict[str, Any]] | None:
+        if conn.execute("SELECT 1 FROM notebook_worker_registry WHERE id = 1").fetchone() is None:
+            return None
+        rows = conn.execute("SELECT spec FROM notebook_workers ORDER BY ordinal").fetchall()
+        return [json.loads(row["spec"]) for row in rows]
+
+    def update_notebook_workers(
+        self,
+        change: Callable[[list[dict[str, Any]] | None], list[dict[str, Any]] | None],
+    ) -> list[dict[str, Any]] | None:
+        """Rewrite the notebook worker registry as ``change(current)`` returns it, atomically.
+
+        ``change`` gets the current entries (``None`` if never set) and returns the new
+        list in order, or ``None`` to leave it alone; anything it raises rolls back. Held
+        under a write lock so two nodes editing at once cannot lose either change. Rows
+        are keyed by ``name``, and an unchanged one keeps its ``updated_at``.
+        """
+        conn = self._get_connection()
+        try:
+            self._dialect.begin_write(conn, "__notebook_workers__")
+            stored = {
+                row["name"]: (row["ordinal"], row["spec"])
+                for row in conn.execute("SELECT name, ordinal, spec FROM notebook_workers")
+            }
+            entries = change(self._notebook_worker_entries(conn))
+            if entries is None:
+                conn.rollback()
+                return None
+            now = time.time()
+            for name in stored.keys() - {entry["name"] for entry in entries}:
+                conn.execute("DELETE FROM notebook_workers WHERE name = ?", (name,))
+            for ordinal, entry in enumerate(entries):
+                spec = json.dumps(entry, sort_keys=True)
+                previous = stored.get(entry["name"])
+                if previous is None:
+                    conn.execute(
+                        "INSERT INTO notebook_workers "
+                        "(name, ordinal, spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                        (entry["name"], ordinal, spec, now, now),
+                    )
+                elif previous != (ordinal, spec):
+                    conn.execute(
+                        "UPDATE notebook_workers SET ordinal = ?, spec = ?, updated_at = ? "
+                        "WHERE name = ?",
+                        (ordinal, spec, now, entry["name"]),
+                    )
+            conn.execute(
+                "INSERT INTO notebook_worker_registry (id, updated_at) VALUES (1, ?) "
+                "ON CONFLICT (id) DO UPDATE SET updated_at = excluded.updated_at",
+                (now,),
+            )
+            conn.commit()
+            return entries
+        except BaseException:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -4553,9 +4729,11 @@ class ArtifactStore:
     def verify_artifacts(self, tenant: str | None = None) -> list[dict]:
         """Check every ready or superseded artifact's blob against its metadata.
 
-        The blob must exist, parse as one Arrow IPC stream, and match ``row_count``.
-        Returns one ``{"artifact_id", "version", "state", "problem", "detail"}`` dict
-        per problem; empty means consistent.
+        The blob must exist and match its recorded digest. An Arrow blob (a declared
+        ``arrow/ipc`` content type, or none, as core transforms write) must also parse as
+        one IPC stream and match ``row_count`` when one was recorded; a notebook's JSON,
+        image or pickled outputs are not Arrow. Returns one ``{"artifact_id", "version",
+        "state", "problem", "detail"}`` dict per problem; empty means consistent.
         """
         import pyarrow as pa
 
@@ -4564,7 +4742,8 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             query = """
-                SELECT id, version, state, row_count, content_sha256, blob_attempt, superseded_by
+                SELECT id, version, state, row_count, content_sha256, blob_attempt, superseded_by,
+                       transform_spec
                 FROM artifact_versions
                 WHERE state IN ('ready', 'superseded')
             """
@@ -4602,30 +4781,33 @@ class ArtifactStore:
                 )
                 continue
 
-            try:
-                readable_rows = validate_ipc_stream(data)
-            except (ValueError, pa.ArrowInvalid) as e:
-                findings.append(
-                    {
-                        "artifact_id": artifact_id,
-                        "version": version,
-                        "state": row["state"],
-                        "problem": "invalid_stream",
-                        "detail": str(e),
-                    }
-                )
-                continue
+            if _declared_content_type(row["transform_spec"]) in ("", "arrow/ipc"):
+                try:
+                    readable_rows = validate_ipc_stream(data)
+                except (ValueError, pa.ArrowInvalid) as e:
+                    findings.append(
+                        {
+                            "artifact_id": artifact_id,
+                            "version": version,
+                            "state": row["state"],
+                            "problem": "invalid_stream",
+                            "detail": str(e),
+                        }
+                    )
+                    continue
 
-            if row["row_count"] is not None and readable_rows != row["row_count"]:
-                findings.append(
-                    {
-                        "artifact_id": artifact_id,
-                        "version": version,
-                        "state": row["state"],
-                        "problem": "row_count_mismatch",
-                        "detail": f"metadata says {row['row_count']}, blob yields {readable_rows}",
-                    }
-                )
+                if row["row_count"] is not None and readable_rows != row["row_count"]:
+                    findings.append(
+                        {
+                            "artifact_id": artifact_id,
+                            "version": version,
+                            "state": row["state"],
+                            "problem": "row_count_mismatch",
+                            "detail": (
+                                f"metadata says {row['row_count']}, blob yields {readable_rows}"
+                            ),
+                        }
+                    )
 
             # The checks above catch bytes that stopped being valid Arrow or stopped holding their
             # claimed rows. A digest catches an in-place value change that keeps both true. Rows

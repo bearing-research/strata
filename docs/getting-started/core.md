@@ -17,6 +17,19 @@ This gives you:
 
 Reading from an Iceberg table is itself a `materialize` call with the built-in `scan@v1` transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, and a snapshot never changes, so a scan result never goes stale and there's no invalidation problem. A table with no snapshots yet (created, never written) reads as zero rows with its schema, and with no snapshot to key it on that result is never reused, so the first read after the first write sees the data. An unnamed result is still a cache entry: the store keeps it while it is used and may collect it later (see [Core behaviors](#core-behaviors)).
 
+## Install the client
+
+The Python examples on this page use `strata_client`, a package separate from
+the server. Add it to your own project with the extras step 5 uses:
+
+```bash
+uv add "strata-client[pandas,polars,duckdb]"
+```
+
+The `all` extra adds DataFusion too. Step 2's demo is `examples/hello_world.py`
+from a checkout of the [Strata repo](https://github.com/bearing-research/strata),
+where `uv run` already has the client.
+
 ## 1. Start the server
 
 ```bash

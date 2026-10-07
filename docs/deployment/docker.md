@@ -106,6 +106,12 @@ environment:
   - STRATA_CACHE_DIR=/home/strata/.strata/cache
 ```
 
+To serve on another host port, change the host side of `ports:`
+(`"9000:8765"`) and leave `STRATA_PORT` alone. Changing `STRATA_PORT`
+moves the port inside the container: the healthcheck follows it, but the
+container side of `ports:` (and, in the service-mode demo, the nginx
+upstream) must change with it.
+
 Browsing to `localhost` or the machine's IP address works as is. To
 reach the container by a host name (`devbox.lan`), add that name:
 personal mode answers only to the names it expects, so a DNS-rebinding

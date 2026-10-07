@@ -21,6 +21,7 @@ import filelock
 import tomli_w
 from packaging.requirements import Requirement
 
+from strata.file_modes import private_dir
 from strata.notebook.dependencies import rscript_env, uv_env
 from strata.notebook.harness_user import (
     HarnessUser,
@@ -1368,7 +1369,7 @@ def update_cell_console_output(
     """
     max_len = 10_000
     console_dir = Path(notebook_dir) / ".strata" / "console"
-    console_dir.mkdir(parents=True, exist_ok=True)
+    private_dir(console_dir)
 
     console_file = console_dir / f"{cell_id}.json"
     if stdout or stderr:

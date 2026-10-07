@@ -14,8 +14,8 @@ export default defineConfig({
           // here overrides the split a dynamic import would otherwise
           // produce, so forcing lang-markdown in would pull its 490 kB back
           // into the initial download that ``useCodemirror`` defers it out
-          // of. Rollup chunks them itself — statically imported grammars
-          // land with the app, the dynamic one gets its own async chunk.
+          // of. Rollup chunks them itself: statically imported grammars
+          // land with the app, and the dynamic one gets its own async chunk.
           if (
             id.includes('/node_modules/@codemirror/lang-') ||
             id.includes('/node_modules/@lezer/')

@@ -12,7 +12,7 @@ A Strata deployment has three persistent locations:
 | --- | --- | --- | --- |
 | **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/*.py`, `pyproject.toml`, `uv.lock`, `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
 | **Iceberg row-group cache** | `~/.strata/cache/` | Arrow-IPC files keyed by Parquet row-group, and the Parquet/Iceberg metadata cache in `metadata.sqlite` inside it (a cache clear keeps it) | Optional - purely a perf cache, safe to delete |
-| **Server-side artifact store** | `~/.strata/artifacts/` (or `STRATA_ARTIFACT_DIR`) | The Core SDK's artifact blobs + metadata SQLite (the metadata moves to Postgres with `STRATA_ARTIFACT_METADATA_DSN`, and `strata migrate` copies an existing SQLite store across). **Distinct from the per-notebook `.strata/artifacts/`** below. | If you use `StrataClient.materialize`, named artifact pointers, publications or pins you care about, or API keys (they live in the same database) |
+| **Server-side artifact store** | `~/.strata/artifacts/` (or `STRATA_ARTIFACT_DIR`) | The Core SDK's artifact blobs + metadata SQLite (the metadata moves to Postgres with `STRATA_ARTIFACT_METADATA_DSN`, and `strata migrate` copies an existing SQLite store across). **Distinct from the per-notebook `.strata/artifacts/`** below. | If you use `StrataClient.materialize`, named artifact pointers, publications or pins you care about, API keys, or the service-mode worker registry (they live in the same database) |
 
 A personal server that reads an object-store warehouse with no catalog `uri` keeps
 that warehouse's Iceberg catalog in SQLite at `~/.strata/meta.sqlite` (or
@@ -58,6 +58,16 @@ curl -X POST 'http://localhost:8765/v1/notebooks/<session_id>/release'
 ```
 
 Quiesce waits for running cells (cancelling any still running after `timeout_seconds`, default 30), then refuses runs and edits with a 409 until release or `max_hold_seconds` (default 600). `POST /v1/projects/{path}/quiesce` and `.../release` do the same for every notebook under a directory, open or not. Under principal auth both need the `admin:notebooks` scope.
+
+## Backing up a server
+
+Back up a server before every upgrade: a new release migrates the artifact store's metadata on its first start, one way, and the backup is the only way back. Stop every server that shares the store first, so the metadata and the blobs agree.
+
+- **SQLite store (the default):** copy the whole artifact directory (`STRATA_ARTIFACT_DIR`, `~/.strata/artifacts` by default). It holds `artifacts.sqlite` and the blobs.
+- **Postgres and an object store:** `pg_dump` the database `STRATA_ARTIFACT_METADATA_DSN` names, and copy the blob bucket (`aws s3 sync s3://<bucket> <backup-dir>`, or your provider's equivalent).
+- **Either way:** archive the notebook storage directory without `.venv` (as in [Backup](#backup)). The workers registered through `/v1/admin/notebook-workers` are in the metadata store, so the steps above cover them; a server from before 0.9.0 kept them in `notebook_workers.json` in the artifact directory, so copy that file too when backing one up before the upgrade.
+
+To go back, restore all of it and start the release that wrote it.
 
 ## Moving between machines
 

@@ -449,7 +449,7 @@ ORDER BY total DESC
 2  bright_solar   6033.10
 ```
 
-The cell above pulls `min_amount` from an upstream Python cell, sends a parameterized query through the `warehouse` connection, and stores the resulting rows as an Arrow Table that any downstream cell can consume as a pandas DataFrame.
+The cell above pulls `min_amount` from an upstream Python cell, sends a parameterized query through the `warehouse` connection, and stores the resulting rows as an Arrow Table, which downstream cells receive as a `pyarrow.Table` (`.to_pandas()` for a DataFrame).
 
 ### Connections
 
@@ -623,7 +623,7 @@ A query runs off the server's event loop, so a cancel lands at once: the run is 
 
 ### `# @name` and downstream consumption
 
-A SQL cell's output variable name defaults to `result`; override with `# @name <identifier>`. Downstream cells access the result as a pandas DataFrame (Arrow IPC artifacts deserialize through the standard notebook serializer):
+A SQL cell's output variable name defaults to `result`; override with `# @name <identifier>`. Downstream cells receive the result as a `pyarrow.Table` (Arrow IPC artifacts deserialize through the standard notebook serializer); call `.to_pandas()` for a pandas DataFrame:
 
 ```sql
 # @sql connection=warehouse
@@ -635,7 +635,7 @@ FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 ```python
 # downstream Python cell
 print(top_customers.shape)  # (5, 2)
-print(top_customers["total"].sum())  # ndarray sum, etc
+print(top_customers.to_pandas()["total"].sum())
 ```
 
 ### `# @after` for setup-then-query pipelines

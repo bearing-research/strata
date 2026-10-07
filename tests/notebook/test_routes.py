@@ -17,6 +17,7 @@ from strata.notebook.writer import (
     create_notebook,
     write_cell,
 )
+from tests.conftest import SERVICE_PROXY_TOKEN, service_auth
 
 # Fixtures + helpers
 
@@ -282,15 +283,24 @@ def test_open_notebook_rehydrates_cached_status(client, tmp_path):
 
 
 def test_list_cells_includes_remote_execution_metadata(
-    client,
     tmp_path,
     notebook_executor_server,
     notebook_build_server,
 ):
     from strata.notebook.executor import CellExecutor
     from strata.notebook.models import WorkerBackendType, WorkerSpec
+    from strata.server import app as server_app
 
     notebook_build_server["config"].notebook_storage_dir = tmp_path
+    # A service-mode server: the caller comes through the proxy and its auth middleware.
+    client = TestClient(
+        server_app,
+        headers={
+            "X-Strata-Proxy-Token": SERVICE_PROXY_TOKEN,
+            "X-Strata-Principal": "admin",
+            "X-Strata-Scopes": "admin:*",
+        },
+    )
     notebook_dir = create_notebook(tmp_path, "Remote Metadata Test")
     add_cell_to_notebook(notebook_dir, "cell-1")
     write_cell(notebook_dir, "cell-1", "x = 1")
@@ -528,6 +538,8 @@ def test_create_notebook_endpoint_with_starter_cell(client, tmp_path):
     assert len(data["cells"]) == 1
     assert data["cells"][0]["source"] == ""
     assert data["cells"][0]["language"] == "python"
+    # Every cell id the server mints is an 8-character prefix.
+    assert len(data["cells"][0]["id"]) == 8
 
 
 def test_create_notebook_endpoint_rejects_unsupported_python_version(client, monkeypatch, tmp_path):
@@ -1243,6 +1255,27 @@ def test_update_notebook_workers_refuses_an_unknown_transport(client, tmp_path):
 
     assert response.status_code == 400
     assert "unknown worker transport 'http'" in response.json()["detail"]
+    assert parse_notebook(notebook_dir).workers == []
+
+
+def test_update_notebook_workers_refuses_the_reserved_name_local(client, tmp_path):
+    """The CLI and MCP refuse it too: the built-in resolves first, so the entry never runs."""
+    from strata.notebook.parser import parse_notebook
+
+    notebook_dir = create_notebook(tmp_path, "Worker Reserved Name Test")
+    session_id = open_session_id(client, notebook_dir)
+
+    response = client.put(
+        f"/v1/notebooks/{session_id}/workers",
+        json={
+            "workers": [
+                {"name": "local", "backend": "executor", "config": {"url": "https://x.internal"}}
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert "reserved" in response.json()["detail"]
     assert parse_notebook(notebook_dir).workers == []
 
 
@@ -2088,6 +2121,7 @@ def _service_mode_sessions(monkeypatch, tmp_path):
         cache_dir=tmp_path / "state" / "cache",
         artifact_dir=store.parent,
         deployment_mode="service",
+        **service_auth(),
     )
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
     return store
@@ -2175,7 +2209,7 @@ def test_connection_auth_vars_read_the_notebook_env_in_service_mode(
     from strata.notebook.session import NotebookSession
     from strata.notebook.sql.drivers.postgresql import PostgresAdapter
 
-    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode)
+    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode))
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
     monkeypatch.setenv("SERVER_ONLY_TOKEN", "server-secret")
     dialed: list[str] = []

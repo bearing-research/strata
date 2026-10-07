@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from strata.config import StrataConfig
 from strata.iceberg import CatalogUriRequired, PyIcebergCatalog
+from tests.conftest import SERVICE_CALLER, service_auth
 
 OBJECT_STORE = ["s3://lake/wh", "gs://lake/wh", "az://lake/wh", "abfs://c@acct/wh"]
 
@@ -21,6 +22,7 @@ OBJECT_STORE = ["s3://lake/wh", "gs://lake/wh", "az://lake/wh", "abfs://c@acct/w
 def _config(tmp_path, mode: str, **overrides) -> StrataConfig:
     return StrataConfig(
         deployment_mode=mode,
+        **service_auth(mode),
         cache_dir=tmp_path / "cache",
         metadata_db=tmp_path / "meta.sqlite",
         **overrides,
@@ -224,7 +226,7 @@ def service_client(tmp_path, monkeypatch):
     from strata.server import ServerState, app
 
     monkeypatch.setattr(server_module, "_state", ServerState(_config(tmp_path, "service")))
-    return TestClient(app)
+    return TestClient(app, headers=SERVICE_CALLER)
 
 
 def _scan(table_uri: str) -> dict:
@@ -313,3 +315,53 @@ class TestARestOrHiveCatalogRefusesARequestWarehouse:
 
         with pytest.raises(CatalogUriRequired, match="not a SQL catalog"):
             catalogs._build_catalog("s3://lake/wh")
+
+
+class TestBarePostgresqlCatalogUri:
+    """SQLAlchemy reads a bare ``postgresql://`` as psycopg2, which no extra installs."""
+
+    URI = "postgresql://u:p@db:5432/iceberg"
+
+    def _built_uris(self, tmp_path, monkeypatch) -> list[str]:
+        built: list[str] = []
+        monkeypatch.setattr(
+            "strata.iceberg.SqlCatalog", lambda name, **props: built.append(props["uri"])
+        )
+        monkeypatch.setattr(
+            "strata.iceberg.load_catalog", lambda name, **props: built.append(props["uri"])
+        )
+        config = _config(
+            tmp_path,
+            "personal",
+            catalog_properties={"type": "sql", "uri": self.URI},
+            catalogs={"lake": {"type": "sql", "uri": self.URI}},
+        )
+        catalogs = PyIcebergCatalog(config)
+        catalogs._build_catalog("s3://lake/wh")
+        catalogs._build_catalog(None)
+        catalogs._get_named_catalog("lake")
+        return built
+
+    def test_without_psycopg2_every_catalog_uses_psycopg_3(self, tmp_path, monkeypatch):
+        monkeypatch.setitem(sys.modules, "psycopg2", None)
+
+        assert (
+            self._built_uris(tmp_path, monkeypatch)
+            == ["postgresql+psycopg://u:p@db:5432/iceberg"] * 3
+        )
+
+    def test_with_psycopg2_the_uri_is_kept(self, tmp_path, monkeypatch):
+        import types
+
+        monkeypatch.setitem(sys.modules, "psycopg2", types.ModuleType("psycopg2"))
+
+        assert self._built_uris(tmp_path, monkeypatch) == [self.URI] * 3
+
+    def test_the_rewritten_uri_loads_without_psycopg2(self, monkeypatch):
+        from sqlalchemy import create_engine
+
+        monkeypatch.setitem(sys.modules, "psycopg2", None)
+
+        with pytest.raises(ImportError):
+            create_engine(self.URI)
+        create_engine("postgresql+psycopg://u:p@db:5432/iceberg").dispose()

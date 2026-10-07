@@ -17,10 +17,15 @@ What you'll learn:
     - How filters enable two-tier pruning
 """
 
+import sys
+from pathlib import Path
+
 from strata_client import StrataClient
 
 client = StrataClient(base_url="http://127.0.0.1:8765")
-table_uri = "file:///path/to/warehouse#my_db.events"
+# The table examples/setup_demo.py creates; pass another table URI as the first argument.
+DEMO_WAREHOUSE = Path(__file__).resolve().parent.parent / "demo-warehouse"
+table_uri = sys.argv[1] if len(sys.argv) > 1 else f"file://{DEMO_WAREHOUSE}#analytics.events"
 
 
 # Helper to build filter specs for the transform params
@@ -61,11 +66,11 @@ artifact = client.materialize(
     inputs=[table_uri],
     transform={
         "executor": "scan@v1",
-        "params": {"filters": [make_filter("category", "=", "electronics")]},
+        "params": {"filters": [make_filter("category", "=", "cat_7")]},
     },
 )
 table = client.fetch(artifact.uri)
-print(f"Rows in electronics category: {table.num_rows}")
+print(f"Rows in category cat_7: {table.num_rows}")
 
 # Combine multiple filters (AND logic)
 # All conditions must be true for a row to be included
@@ -78,7 +83,7 @@ artifact = client.materialize(
             "filters": [
                 make_filter("value", ">=", 10.0),
                 make_filter("value", "<=", 100.0),
-                make_filter("category", "=", "electronics"),
+                make_filter("category", "=", "cat_7"),
             ],
         },
     },

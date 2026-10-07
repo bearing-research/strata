@@ -1422,6 +1422,23 @@ class CellExecutor:
                         if refreshed is not None:
                             cached_artifact = refreshed
 
+            # A leaf's record is its console and displays; a revert finds them under an older
+            # version, promoted like a consumed variable's above.
+            if (
+                use_cache
+                and cell is not None
+                and not consumed_vars
+                and cached_console is None
+                and not cached_display_outputs
+                and self._promote_reverted_leaf(
+                    cell_id, provenance_hash, len(current_display_outputs)
+                )
+            ):
+                cached_display_outputs = self.session._resolve_cached_display_outputs(
+                    cell_id, provenance_hash, current_display_outputs
+                )
+                cached_console = self.session._resolve_cached_console(cell_id, provenance_hash)
+
             logger.info(
                 "execute_cell %s: consumed_vars=%s use_cache=%s cache_hit=%s",
                 cell_id,
@@ -1737,6 +1754,41 @@ class CellExecutor:
             return None
         described = stored_display(artifact)
         return described[1] if described is not None else None
+
+    def _promote_reverted_leaf(
+        self, cell_id: str, provenance_hash: str, current_display_count: int
+    ) -> bool:
+        """Make a leaf's console and displays from an earlier run under ``provenance_hash``
+        latest again. All or none is checked before writing; True when promoted.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        store = artifact_mgr.artifact_store
+        display_count = self._recorded_display_count(cell_id, provenance_hash, None)
+        if display_count is None:
+            display_count = current_display_count
+        labels = ["__console__", *(f"__display__{index}" for index in range(display_count))]
+        to_promote: list[tuple[str, int]] = []
+        for label in labels:
+            artifact_id = artifact_mgr.cell_artifact_id(cell_id, label)
+            expected = derive_subkey(provenance_hash, label)
+            latest = store.get_latest_version(artifact_id)
+            if latest is not None and latest.provenance_hash == expected:
+                continue
+            older = store.find_version_by_provenance(artifact_id, expected)
+            if older is None or not store.blob_exists(artifact_id, older.version):
+                return False
+            to_promote.append((artifact_id, older.version))
+        for artifact_id, version in to_promote:
+            if store.promote_version(artifact_id, version) is None:
+                # The blob vanished since the check (likely a GC pass); run the cell.
+                return False
+            logger.info(
+                "Cell %s reverted to a known provenance: promoted %s@v=%d.",
+                cell_id,
+                artifact_id,
+                version,
+            )
+        return bool(to_promote)
 
     def _fanout_info(self, cell_id: str) -> tuple[str, tuple[str, ...]] | None:
         """``(group, variant_names)`` if ``cell_id`` is a ``@per_variant`` fan-out cell, else None.
@@ -3236,12 +3288,13 @@ class CellExecutor:
             from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
             from strata.notebook.ws_payloads import cell_status_payload
 
-            notebook_id = self.session.notebook_state.id
+            # Sockets are keyed by the session id, not the notebook.toml id.
+            session_id = self.session.id
             await _broadcast_message(
-                notebook_id,
+                session_id,
                 _make_message(
                     MessageType.CELL_STATUS,
-                    next_notebook_sequence(notebook_id),
+                    next_notebook_sequence(session_id),
                     cell_status_payload(
                         cell_id,
                         "running",
@@ -3327,7 +3380,7 @@ class CellExecutor:
                 artifact_id,
                 version,
                 schema_json=json.dumps({"content_type": content_type}),
-                row_count=0,
+                row_count=None,
                 byte_size=len(blob_data),
                 content_sha256=hashlib.sha256(blob_data).hexdigest(),
             )

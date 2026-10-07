@@ -17,8 +17,10 @@ from strata.api.dependencies import (
     runtime_build_store,
 )
 from strata.artifact_store import reset_artifact_store
+from strata.auth import principal_context
 from strata.config import StrataConfig
 from strata.server import ServerState
+from strata.types import Principal
 
 
 def _set_state(**overrides) -> None:
@@ -41,16 +43,53 @@ def test_read_dependency_cannot_reach_write_gate_in_service_mode(tmp_path):
     """Same service-mode config: ``ReadStore`` resolves, the registry write gate 403s without
     ``service_writes_enabled``.
     """
-    _set_state(deployment_mode="service", artifact_dir=str(tmp_path / "artifacts"))
+    _set_state(
+        deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
+        artifact_dir=str(tmp_path / "artifacts"),
+    )
 
     # Read gate opens.
     assert read_store() is not None
 
-    # Write path is refused under the very same config.
-    with pytest.raises(HTTPException) as exc:
+    # Write path is refused under the very same config, even for an approver.
+    approver = Principal(id="admin", scopes=frozenset({"admin:*"}))
+    with principal_context(approver), pytest.raises(HTTPException) as exc:
         registry_decision()
     assert exc.value.status_code == 403
     assert exc.value.detail["error"] == "writes_disabled"
+
+
+def test_a_refused_artifact_route_names_only_settings_that_would_open_it(tmp_path):
+    """With transforms on, a personal-only route must not still say "enable transforms"."""
+    _set_state(
+        deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
+        artifact_dir=str(tmp_path / "artifacts"),
+        transforms_config={"enabled": True},
+    )
+
+    with pytest.raises(HTTPException) as personal_only:
+        server._get_artifact_store()
+    with pytest.raises(HTTPException) as write_route:
+        server._get_artifact_store(allow_write=True)
+
+    assert "transforms" not in personal_only.value.detail["message"]
+    assert "deployment_mode='personal'" in personal_only.value.detail["message"]
+    assert "STRATA_SERVICE_WRITES_ENABLED" in write_route.value.detail["message"]
+
+
+def test_the_admin_worker_routes_in_personal_mode_point_at_the_config(tmp_path):
+    """Personal mode has server-managed workers too; they come from the config table."""
+    _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
+
+    with pytest.raises(HTTPException) as exc:
+        server._require_notebook_worker_admin_access()
+
+    assert exc.value.status_code == 409
+    assert "[tool.strata.transforms] notebook_workers" in exc.value.detail
 
 
 def test_personal_mode_opens_both_gates(tmp_path):
@@ -79,7 +118,12 @@ def test_build_transport_gate_404s_in_service_mode(tmp_path):
     """Service mode without server transforms cannot honor signed build URLs, so the dependency
     404s.
     """
-    _set_state(deployment_mode="service", artifact_dir=str(tmp_path / "artifacts"))
+    _set_state(
+        deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
+        artifact_dir=str(tmp_path / "artifacts"),
+    )
 
     assert build_transport_available() is False
     with pytest.raises(HTTPException) as exc:

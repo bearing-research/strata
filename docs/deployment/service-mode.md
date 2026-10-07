@@ -40,19 +40,59 @@ proxy that:
 
 1. **Terminates auth**: JWT, OIDC, mTLS, Cloudflare Access, SAML,
    whatever. Strata doesn't care which.
-2. **Injects identity headers** on every request:
+2. **Sets every identity header on every request**, replacing whatever
+   the client sent:
 
-   | Header | Value | Required |
-   |---|---|---|
-   | `X-Strata-Principal` | Stable user identifier (email, sub claim, etc.) | Yes |
-   | `X-Tenant-ID` | Tenant the user belongs to, when multi-tenant is on. Header name is configurable via `tenant_header`. | When `multi_tenant_enabled=true` |
-   | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`) | For scope-gated endpoints |
-   | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN` | Yes, proves the request came from the proxy, not a direct connection |
+   | Header | Value |
+   |---|---|
+   | `X-Strata-Principal` | Stable user identifier (email, sub claim, etc.) |
+   | `X-Tenant-ID` | Tenant the user belongs to. Header name is configurable via `tenant_header`. Empty when multi-tenancy is off. |
+   | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`). Empty for a user with no scopes. |
+   | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN`; proves the request came through the proxy |
 
-Machine callers that do not sit behind the proxy (a CI job, an ETL
-service) authenticate with an API key instead: `strata apikey create`
-issues one, and the key carries its own principal, tenant and scopes.
-See [Configuration → API keys](../reference/configuration.md#api-key-authentication).
+   Strata cannot tell a header the proxy set from one the client sent
+   and the proxy passed along. A header the proxy leaves alone reaches
+   Strata from the client: a proxy that sets no `X-Strata-Scopes` for a
+   user lets that user send `X-Strata-Scopes: admin:*` and become an
+   admin. So the proxy sets all four on every request, and sets an
+   empty value when the user has none (nginx drops a header set to
+   `""`, which is what you want). A minimal nginx block:
+
+   ```nginx
+   map $http_upgrade $connection_upgrade {  # in the http {} block
+       default upgrade;
+       ''      close;
+   }
+
+   location / {
+       proxy_pass http://strata:8765;
+       proxy_http_version 1.1;
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection $connection_upgrade;
+       proxy_set_header Host $http_host;
+
+       # Every identity header, on every request, from the auth layer only.
+       proxy_set_header X-Strata-Proxy-Token "<shared-secret>";
+       proxy_set_header X-Strata-Principal   $authenticated_user;
+       proxy_set_header X-Tenant-ID          $authenticated_tenant;  # "" if multi-tenancy is off
+       proxy_set_header X-Strata-Scopes      $authenticated_scopes;  # "" for no scopes
+   }
+   ```
+
+   `$authenticated_*` stand for whatever your auth layer provides (for
+   example `auth_request_set` from an `auth_request` subrequest). If you
+   renamed a header with `STRATA_PRINCIPAL_HEADER`, `STRATA_TENANT_HEADER`
+   or `STRATA_SCOPES_HEADER`, set the renamed one. Check it from outside
+   the proxy: a request carrying `X-Strata-Scopes: admin:*` for an
+   ordinary user must still get 403 from `GET /v1/logs`. The demo
+   stack's `.docker/service-mode/nginx.conf` sets all four.
+
+API keys are a separate auth mode (`STRATA_AUTH_MODE=api_key`) for a
+server no proxy fronts: `strata apikey create` issues one, and the key
+carries its own principal, tenant and scopes. A trusted-proxy server
+ignores them, so machine callers (a CI job, an ETL service) of a proxied
+server go through the proxy like everyone else. See
+[Configuration → API keys](../reference/configuration.md#api-key-authentication).
 
 3. **Is the only path to Strata.** Strata is on a private network /
    VPC / Kubernetes namespace; the proxy is the only ingress.
@@ -159,7 +199,8 @@ startup for the same reason: shared metadata pointing at blobs only one
 node can read is worse than either alone. See
 [Configuration → artifact metadata](../reference/configuration.md#sharing-one-artifact-store-across-nodes)
 for the settings and `strata migrate` for moving an existing store
-across.
+across, and [Running more than one replica](#running-more-than-one-replica)
+for what else the nodes must share.
 
 ## Minimum service-mode env vars
 
@@ -169,6 +210,8 @@ STRATA_DEPLOYMENT_MODE=service
 STRATA_AUTH_MODE=trusted_proxy
 STRATA_PROXY_TOKEN=<shared-secret-with-proxy>
 STRATA_ARTIFACT_DIR=/path/to/dir  # required with any artifact store, blob backend or not
+STRATA_HOST=0.0.0.0               # default 127.0.0.1; bind wider when the proxy runs on another host
+STRATA_TRANSFORM_SIGNING_SECRET=<stable-secret>  # unset: a random one per process, so signed URLs die on restart and differ across replicas
 
 # Multi-tenancy (optional but recommended for >1 team)
 STRATA_MULTI_TENANT_ENABLED=true
@@ -179,23 +222,39 @@ STRATA_TENANT_HEADER=X-Tenant-ID  # match what your proxy injects
 Run the server normally:
 
 ```bash
-uv run python -m strata
-# or
-uv run strata-notebook
+strata-notebook   # or `uv run strata-notebook` in a checkout
 ```
+
+### Rotating the proxy token and the signing secret
+
+`STRATA_PROXY_TOKEN` holds one value, with no overlap window: change it on
+the proxy and the server together, and requests that arrive between the two
+changes get a `401`. Changing `STRATA_TRANSFORM_SIGNING_SECRET` invalidates
+every signed URL already issued, so a build in flight on a `signed` worker
+fails; rotate it between runs and give every replica the same value.
 
 ## What service mode changes
 
 Compared to personal mode:
 
 - **No default artifact dir.** The artifact store exists only when
-  `STRATA_ARTIFACT_DIR` is set, including when
-  `STRATA_ARTIFACT_METADATA_DSN` and a blob backend such as
-  `STRATA_ARTIFACT_BLOB_BACKEND=s3` hold everything durable; the
-  directory then keeps nothing that needs a backup. Service mode refuses
-  to start with a DSN, a non-local blob backend or
-  `STRATA_SERVICE_WRITES_ENABLED` and no `STRATA_ARTIFACT_DIR`. Without
-  any of those it runs scan-only, with no artifact store.
+  `STRATA_ARTIFACT_DIR` is set, even when its metadata and blobs live
+  elsewhere. Service mode refuses to start with a DSN, a non-local blob
+  backend or `STRATA_SERVICE_WRITES_ENABLED` and no
+  `STRATA_ARTIFACT_DIR`. Without any of those it runs scan-only, with no
+  artifact store.
+- **What is durable, and where.** The *metadata store* (Postgres with
+  `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in the
+  artifact directory) holds artifact metadata, names, aliases,
+  publications, pins, API keys and the server-managed
+  [worker registry](../notebook/workers.md#server-managed-workers-service-mode).
+  The *blob store* holds artifact bytes: the configured bucket, or
+  `blobs/` in the artifact directory with the local backend. Notebooks
+  live in `STRATA_NOTEBOOK_STORAGE_DIR`. Back up those three. The
+  artifact directory itself is node-local working space, and the SQLite
+  file and local blobs are the only durable things in it, so with a DSN
+  and a bucket it holds nothing that needs a backup. The row-group cache
+  (`STRATA_CACHE_DIR`) is a cache and can always be thrown away.
 - **Reads work; direct writes are off by default.** Clients can read
   results - scan/stream a table, fetch an artifact's data
   (`GET /v1/artifacts/{id}/v/{n}/data`), and resolve a dataset by name
@@ -219,6 +278,47 @@ Compared to personal mode:
   gets its own QoS limiter pool, its own metric labels, and its own
   cache keying, bulk queries from tenant A can't starve tenant B's
   dashboards.
+
+## Running more than one replica
+
+Several service-mode nodes can sit behind one proxy when they share
+everything durable:
+
+- **One metadata store and one blob store.** Every node sets the same
+  `STRATA_ARTIFACT_METADATA_DSN` and the same bucket (see
+  [above](#production-reference-architecture)). The worker registry
+  lives in the metadata store, so a worker added through
+  `/v1/admin/notebook-workers` on one node is offered by every node from
+  its next request.
+- **One notebook storage.** Every node mounts the same
+  `STRATA_NOTEBOOK_STORAGE_DIR` (NFS, EFS, Filestore or similar), so any
+  node can open any notebook. A notebook's environment is built inside
+  its directory (or in `STRATA_NOTEBOOK_SHARED_ENV_DIR`, which then has
+  to be shared too), so run the same image on every node.
+- **The same secrets.** `STRATA_PROXY_TOKEN` and
+  `STRATA_TRANSFORM_SIGNING_SECRET` must match on every node, or a URL
+  signed on one node fails on another. Set `STRATA_NODE_ADVERTISED_URL`
+  per node to its own address, so stream fetches and a remote cell's
+  console reach the right node (see
+  [Running several nodes](../reference/configuration.md#running-several-nodes-behind-one-address)).
+- **Session-affine routing.** A notebook session, which
+  `POST /v1/notebooks/open` or `/create` returns, lives in the memory of
+  the node that opened it, together with its WebSocket and running
+  cells. Every later request for it must reach that node; any other node
+  answers `404`. Route each user to one node, with a sticky cookie or a
+  hash of the principal header, so the open and everything after it land
+  together.
+
+Not supported:
+
+- **Moving a live session.** When a node goes away its sessions go with
+  it. Opening the notebook again on another node starts a new session;
+  cells whose inputs did not change are cache hits when they run again.
+- **One notebook open on two nodes at once.** Each node keeps its own
+  session and writes the same files, with nothing coordinating them.
+- **Cluster-wide views of per-node state.** Cache warm jobs
+  (`/v1/cache/warm/jobs*`), QoS limits, rate limits and metrics are per
+  node; sum the metrics in your dashboards.
 
 ## Multi-tenancy
 
@@ -647,7 +747,7 @@ say how that is safe. There are two answers:
    different host is isolation that needs nothing arranged on this one.
 2. **Run cells as a separate OS user.** Set `STRATA_NOTEBOOK_HARNESS_USER` to a
    user that exists on the server host. Cells then cannot read the server's
-   environment through `/proc`, its config, or other notebooks' files.
+   environment through `/proc`, nor state the server keeps owner-only (below).
 
 Without either, a cell that would run on the server host fails with a message
 naming both. Cache hits are still served, since a hit starts no cell code.
@@ -661,7 +761,7 @@ inspect REPL, cell tests and the R package restore. It is POSIX only. What the h
 
 | Path | Access |
 | --- | --- |
-| notebook directories | read |
+| notebook directories (and, with multi-tenancy, each tenant's directory above them) | read, or traverse for the tenant directory |
 | each notebook's `.venv` | read and execute |
 | the Python interpreter behind the venvs | read and execute |
 | each notebook's `.strata/` | traverse |
@@ -680,6 +780,33 @@ and cell tests load their inputs in the test process.
 A cell run this way still shares the host's kernel and sees what any local user
 can. A notebook that needs more isolation than that wants a worker on another
 machine.
+
+**One harness user serves every tenant, so it is not a tenant isolation
+boundary.** It keeps cells away from the server; it does not keep one tenant's
+cells away from another's. Every cell runs as the same user, and that user has
+to read every notebook directory, so a cell can read any tenant's notebook
+source and data files, and the bytes another notebook fetched (`.strata/fetch`)
+or mounted (`.strata/mount_cache`), given the path. Tenants that must not see
+each other need separate servers (or containers, each with its own storage),
+or every cell on workers that serve one tenant each.
+
+What Strata keeps from the harness user, and from any other account on the
+host, is its own state. It creates these owner-only, and narrows any an earlier
+release left wider when it next opens them:
+
+| State | Mode |
+| --- | --- |
+| `STRATA_ARTIFACT_DIR`, its `artifacts.sqlite` (with `-wal` / `-shm`) and `blobs/` | directories `0700`, files `0600` |
+| `STRATA_CACHE_DIR` | `0700` |
+| each notebook's `.strata/` | `0711`: the harness user passes through to its per-run directories and inputs, but cannot list it |
+| in it, `artifacts/`, `console/`, `runtime.json` and `environment_jobs.json` | `0700` / `0600` |
+| each tenant's notebook directory under the storage root | `0711` |
+
+Strata only removes permission bits, so a stricter umask stands. Publication
+tokens are stored as their SHA-256, so even a copy of `artifacts.sqlite` holds no
+working link. Not covered, and yours to make owner-only: the server's config file
+(a `pyproject.toml` holding `proxy_token`), the server's home, and
+`STRATA_METADATA_DB`.
 
 SQL cells are different: their queries run inside the server process, not as
 the harness user, so the server checks which database file a SQLite or DuckDB
@@ -767,10 +894,17 @@ STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST=AWS_*,HF_TOKEN
 ```
 
 Entries are exact names or a prefix with a trailing `*`. The essentials a
-subprocess cannot start without are always included, and `STRATA_*` is dropped
+subprocess cannot start without are always included: `PATH`, `HOME`, the temp
+and locale variables, and `UV_*`, `PYTHON*`, `VIRTUAL_ENV`, `R_*` and
+`RSTUDIO_*`, except names that look like credentials (containing `KEY`,
+`SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`), `UV_PUBLISH_*` and
+`UV_INDEX_*_USERNAME`. So a private index's login, which the server's `uv sync`
+needs, does not reach cells; keep index credentials in those variables or a
+netrc rather than inside `UV_INDEX_URL`, which passes. `STRATA_*` is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
-accident is the failure the setting exists to prevent. It applies to every
-process that runs cell code, the same list as above.
+accident is the failure the setting exists to prevent. A name you list exactly
+always passes. It applies to every process that runs cell code, the same list
+as above.
 
 The list stays short because a cell's own configuration does not come through
 the process environment. `[env]` in `notebook.toml` and mount credentials
@@ -830,9 +964,22 @@ If you've been running personal mode and want to grow into service:
    `X-Tenant-ID` from the proxy.
 
 5. **(Optional) Add server-side transforms.** Configure the
-   `transforms_config` block in `pyproject.toml` to expose the
+   `[tool.strata.transforms]` block in `pyproject.toml` to expose the
    computations you want the platform to run on the client's
-   behalf. The notebook executor in the demo stack is one example.
+   behalf. The block is an allowlist: `enabled = true` (or
+   `STRATA_TRANSFORMS_ENABLED=true`) alone refuses every transform, so
+   list each one. The built-in SQL transform runs in the server process:
+
+   ```toml
+   [tool.strata.transforms]
+   enabled = true
+
+   [[tool.strata.transforms.registry]]
+   ref = "duckdb_sql@v1"
+   executor_url = "embedded://local"
+   ```
+
+   The notebook executor in the demo stack is another example.
 
 The demo compose stack is a working starting point you can fork:
 swap `nginx.conf` for your real auth proxy config, move the

@@ -98,10 +98,14 @@ class TransformRegistry:
         return cls(enabled=True, definitions=definitions)
 
     @classmethod
-    def from_config(cls, config: dict, embedded_mode: bool = True) -> TransformRegistry:
+    def from_config(
+        cls, config: dict, embedded_mode: bool = True, *, personal: bool = False
+    ) -> TransformRegistry:
         """Create a registry from the ``[tool.strata.transforms]`` dict (``enabled``, ``registry``).
 
         An empty config gives the embedded registry when ``embedded_mode``, else a disabled one.
+        A ``personal`` server always has the embedded transforms, which an enabled block adds to;
+        otherwise the block is the whole allowlist.
         """
         if not config:
             if embedded_mode:
@@ -123,9 +127,25 @@ class TransformRegistry:
             definitions.append(defn)
             logger.debug(f"Registered transform: {defn.ref} -> {defn.executor_url}")
 
+        if personal:
+            listed = definitions if enabled else []
+            builtins = [
+                d
+                for d in cls.create_embedded_registry().definitions
+                if not any(entry.matches(d.ref) for entry in listed)
+            ]
+            return cls(enabled=True, definitions=[*listed, *builtins])
+
         logger.info(
             f"Transform registry initialized: enabled={enabled}, definitions={len(definitions)}"
         )
+        if enabled and not definitions:
+            # The block is an allowlist: enabling it without entries refuses every transform.
+            logger.warning(
+                "Transforms are enabled but [tool.strata.transforms] lists no registry "
+                "entries, so every transform is refused. For the built-in SQL transform add "
+                'ref = "duckdb_sql@v1", executor_url = "embedded://local".'
+            )
 
         return cls(enabled=enabled, definitions=definitions)
 

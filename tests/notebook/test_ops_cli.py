@@ -423,6 +423,20 @@ def test_cli_cell_add_run_includes_post_run_outputs(chain_nb, monkeypatch, capsy
     assert d["run"]["status"] == "ok"
 
 
+def test_cli_cell_add_run_reports_the_cell_it_ran_as_ready(chain_nb, capsys):
+    """The adding reload counts as the handle's staleness pass; the run must not reuse it."""
+    from tests.notebook.test_cli import _mk_fake_venv
+
+    _mk_fake_venv(chain_nb)
+    rc = main(
+        ["cell", "add", str(chain_nb), "-c", "z = 41", "--run", "--no-sync", "--format", "json"]
+    )
+    assert rc == 0, capsys.readouterr().err
+    d = json.loads(capsys.readouterr().out)
+    assert d["run"]["status"] == "ok"
+    assert d["status"] == "ready"
+
+
 def test_cli_cell_add_inline_c(chain_nb, capsys):
     # `-c` supplies the cell source inline, as an alternative to `--file`.
     assert main(["cell", "add", str(chain_nb), "-c", "w = 7", "--format", "json"]) == 0

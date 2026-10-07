@@ -419,7 +419,9 @@ class TestTheSettings:
         }
 
     def test_service_mode_sweeps_only_when_an_operator_says_so(self, tmp_path):
-        config = self._config(tmp_path, deployment_mode="service")
+        config = self._config(
+            tmp_path, deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
+        )
 
         assert config.artifact_gc_interval_seconds is None
         assert config.artifact_gc_policy()["max_bytes"] is None

@@ -138,7 +138,9 @@ class TestPrincipalAuthEnabled:
         [("none", False), ("trusted_proxy", True), ("api_key", True)],
     )
     def test_truth_table(self, tmp_path, mode, expected):
-        kwargs = {"deployment_mode": "service", "artifact_dir": tmp_path, "auth_mode": mode}
+        # Service mode refuses no auth, so "none" is checked where it is allowed.
+        deployment_mode = "personal" if mode == "none" else "service"
+        kwargs = {"deployment_mode": deployment_mode, "artifact_dir": tmp_path, "auth_mode": mode}
         if mode == "trusted_proxy":
             kwargs["proxy_token"] = "t"
         assert StrataConfig(**kwargs).principal_auth_enabled is expected

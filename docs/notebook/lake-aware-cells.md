@@ -28,8 +28,8 @@ reads the same way, with no `@table` line.
 
 ## Prerequisites
 
-- A running Strata server: `uv run python -m strata` (personal mode, the
-  default) serves the notebook UI on `http://localhost:8765`.
+- A running Strata server: `strata-notebook` (personal mode, the default)
+  serves the notebook UI on `http://localhost:8765`.
 - `pyiceberg` for the two setup scripts below. It is a core Strata dependency,
   so `uv run python` in the Strata project has it. The notebook's own
   environment does not need it: the server resolves the snapshot and runs the
@@ -39,7 +39,9 @@ reads the same way, with no `@table` line.
 
 Any Iceberg catalog works (local, S3, GCS, Azure). For this walkthrough, a
 local SQLite-catalog warehouse with one table. Run this once, outside the
-notebook:
+notebook. The catalog must be named `strata`: a warehouse URI always reads its
+SQL catalog under that name (see
+[Catalog](../reference/configuration.md#catalog)).
 
 ```python
 # setup_warehouse.py
@@ -50,8 +52,9 @@ from pyiceberg.types import LongType, NestedField
 
 WAREHOUSE = "/tmp/strata-demo/warehouse"
 
+# Strata reads a warehouse URI's SQL catalog under the name "strata".
 catalog = SqlCatalog(
-    "demo",
+    "strata",
     uri=f"sqlite:///{WAREHOUSE}/catalog.db",
     warehouse=WAREHOUSE,
 )
@@ -136,7 +139,7 @@ import pyarrow as pa
 from pyiceberg.catalog.sql import SqlCatalog
 
 catalog = SqlCatalog(
-    "demo",
+    "strata",
     uri="sqlite:////tmp/strata-demo/warehouse/catalog.db",
     warehouse="/tmp/strata-demo/warehouse",
 )

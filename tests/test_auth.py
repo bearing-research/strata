@@ -1000,7 +1000,14 @@ class TestADenyOnOneAddressCoversTheTable:
             set_principal(None)
 
         # One table behind every name the deny now covers.
-        catalogs = PyIcebergCatalog(StrataConfig(deployment_mode="service", **overrides))
+        catalogs = PyIcebergCatalog(
+            StrataConfig(
+                deployment_mode="service",
+                auth_mode="trusted_proxy",
+                proxy_token="test-token",
+                **overrides,
+            )
+        )
         uris = (self.S3, *self.ALIASES)
         assert len({catalogs.load_table(uri).metadata_location for uri in uris}) == 1
 

@@ -49,7 +49,7 @@ def store(postgres_dsn, tmp_path):
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
-            "schema_version CASCADE;"
+            "notebook_workers, notebook_worker_registry, schema_version CASCADE;"
         )
         conn.commit()
     finally:
@@ -65,6 +65,13 @@ def store(postgres_dsn, tmp_path):
 
 def _spec() -> TransformSpec:
     return TransformSpec(executor="duckdb_sql_v1", params={"sql": "SELECT 1"}, inputs=[])
+
+
+class TestPing:
+    """The readiness probe's query runs on Postgres."""
+
+    def test_ping_answers_on_a_live_server(self, store):
+        store.ping()
 
 
 class TestSchemaInitialization:
@@ -173,8 +180,8 @@ class TestRoundTrip:
         store.update_publication_credits(publication.token, authors=[{"name": "F. Li"}])
 
         assert [(e["action"], e["value"]) for e in store.read_events()] == [
-            ("publish", publication.token),
-            ("credit", publication.token),
+            ("publish", publication.id),
+            ("credit", publication.id),
         ]
 
 
@@ -1175,6 +1182,81 @@ class TestWriterSerialization:
         assert found is not None
 
 
+def _worker_entry(name: str, enabled: bool = True) -> dict:
+    return {
+        "name": name,
+        "backend": "executor",
+        "config": {"url": "http://x:1"},
+        "enabled": enabled,
+    }
+
+
+class TestTheNotebookWorkerRegistry:
+    """The service-mode worker registry, shared by every node on the database."""
+
+    def test_unset_then_written_then_emptied(self, store):
+        assert store.notebook_worker_entries() is None
+
+        store.update_notebook_workers(lambda current: [_worker_entry("a"), _worker_entry("b")])
+        assert [e["name"] for e in store.notebook_worker_entries()] == ["a", "b"]
+
+        store.update_notebook_workers(lambda current: [_worker_entry("b", False)])
+        assert store.notebook_worker_entries() == [_worker_entry("b", False)]
+
+        store.update_notebook_workers(lambda current: [])
+        assert store.notebook_worker_entries() == []
+
+    def test_an_unchanged_row_keeps_its_timestamps(self, store):
+        store.update_notebook_workers(lambda current: [_worker_entry("a"), _worker_entry("b")])
+        conn = store._get_connection()
+        try:
+            before = {
+                row["name"]: row["updated_at"]
+                for row in conn.execute("SELECT name, updated_at FROM notebook_workers")
+            }
+        finally:
+            conn.close()
+
+        store.update_notebook_workers(
+            lambda current: [_worker_entry("a"), _worker_entry("b", False)]
+        )
+
+        conn = store._get_connection()
+        try:
+            after = {
+                row["name"]: row["updated_at"]
+                for row in conn.execute("SELECT name, updated_at FROM notebook_workers")
+            }
+        finally:
+            conn.close()
+        assert after["a"] == before["a"]
+        assert after["b"] > before["b"]
+
+    def test_a_raising_change_rolls_back(self, store):
+        store.update_notebook_workers(lambda current: [_worker_entry("a")])
+
+        def refuse(current):
+            raise KeyError("missing")
+
+        with pytest.raises(KeyError):
+            store.update_notebook_workers(refuse)
+
+        assert store.notebook_worker_entries() == [_worker_entry("a")]
+
+    def test_two_nodes_on_one_database_see_each_others_writes(self, postgres_dsn, tmp_path, store):
+        other_dialect = PostgresDialect(postgres_dsn)
+        try:
+            other_node = ArtifactStore(tmp_path / "node2", dialect=other_dialect)
+
+            store.update_notebook_workers(lambda current: [_worker_entry("box")])
+            assert other_node.notebook_worker_entries() == [_worker_entry("box")]
+
+            other_node.update_notebook_workers(lambda current: [*current, _worker_entry("gpu")])
+            assert [e["name"] for e in store.notebook_worker_entries()] == ["box", "gpu"]
+        finally:
+            other_dialect.close()
+
+
 class TestSchemaMigrations:
     """Evolving a Postgres store that already holds data.
 
@@ -1233,6 +1315,83 @@ class TestSchemaMigrations:
             assert has_column is not None, "the migration never reached an existing database"
             assert stamped == _LATEST_SCHEMA_VERSION
             assert reopened.get_artifact("keeper", version) is not None, "rows must survive"
+        finally:
+            dialect.close()
+
+    def test_existing_publication_tokens_are_hashed_and_still_resolve(
+        self, postgres_dsn, tmp_path, store
+    ):
+        from strata.artifact_store import publication_id
+        from strata.sql_backend import PostgresDialect
+
+        version = store.create_artifact("fig", "prov-fig", _spec())
+        with store.open_blob_writer("fig", version) as writer:
+            writer.write(b"figure bytes")
+        store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
+        publication = store.publish_artifact("fig", version, title="Figure")
+
+        # Back to a store from before the hashing migration: raw tokens in the row and audit.
+        conn = store._get_connection()
+        try:
+            conn.execute(
+                "UPDATE artifact_publications SET token = ? WHERE token = ?",
+                (publication.token, publication.id),
+            )
+            conn.execute(
+                "UPDATE registry_audit SET value = ? WHERE value = ?",
+                (publication.token, publication.id),
+            )
+            conn.execute("DELETE FROM schema_version WHERE version >= 8")
+            conn.commit()
+        finally:
+            conn.close()
+        assert store.get_publication(publication.token) is None
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+
+            found = reopened.get_publication(publication.token)
+            assert found is not None and found.id == publication_id(publication.token)
+            assert [e["value"] for e in reopened.read_events() if e["key"] == "token"] == [
+                publication.id
+            ]
+            conn = reopened._get_connection()
+            try:
+                stored = [
+                    row["token"]
+                    for row in conn.execute("SELECT token FROM artifact_publications").fetchall()
+                ]
+            finally:
+                conn.close()
+            assert stored == [publication.id]
+        finally:
+            dialect.close()
+
+    def test_an_existing_database_gains_the_worker_registry(self, postgres_dsn, tmp_path, store):
+        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+
+        conn = store._get_connection()
+        try:
+            conn.execute("DROP TABLE notebook_workers")
+            conn.execute("DROP TABLE notebook_worker_registry")
+            conn.execute("DELETE FROM schema_version WHERE version >= 9")
+            conn.commit()
+        finally:
+            conn.close()
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+            reopened.update_notebook_workers(lambda current: [_worker_entry("box")])
+
+            assert reopened.notebook_worker_entries() == [_worker_entry("box")]
+            conn = reopened._get_connection()
+            try:
+                stamped = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
+            finally:
+                conn.close()
+            assert stamped["v"] == _LATEST_SCHEMA_VERSION
         finally:
             dialect.close()
 

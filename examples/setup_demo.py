@@ -5,8 +5,8 @@ Setup script for Strata demo.
 Creates a demo Iceberg warehouse with sample data that can be used
 with docker-compose or the hello_world.py script.
 
-Usage:
-  python examples/setup_demo.py
+Usage (from a Strata checkout):
+  uv run python examples/setup_demo.py
 """
 
 import sys
@@ -19,8 +19,8 @@ try:
     from pyiceberg.schema import Schema
     from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 except ImportError:
-    print("Missing dependencies. Install with:")
-    print("  pip install pyiceberg[sql-sqlite] pyarrow")
+    print("Missing dependencies. Run it from a Strata checkout with:")
+    print("  uv run python examples/setup_demo.py")
     sys.exit(1)
 
 
@@ -82,7 +82,10 @@ def main():
         }
     )
 
-    table.append(data)
+    # Two appends, so the table has two snapshots for examples/04_time_travel.py.
+    half = num_rows // 2
+    table.append(data.slice(0, half))
+    table.append(data.slice(half))
 
     table_uri = f"file://{warehouse_path}#analytics.events"
 
@@ -94,7 +97,7 @@ def main():
     print(f"  {table_uri}")
     print("\nNext steps:")
     print("  1. Start the server: strata-notebook")
-    print("  2. Run the demo:     python examples/hello_world.py")
+    print("  2. Run a script:     uv run python examples/01_basic_usage.py")
 
 
 if __name__ == "__main__":

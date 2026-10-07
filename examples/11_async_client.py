@@ -10,13 +10,19 @@ operations. The async client is ideal for:
 
 What you'll learn:
     - How to use AsyncStrataClient
-    - Concurrent fetching of multiple tables
+    - Concurrent fetches
     - Async context managers
 """
 
 import asyncio
+import sys
+from pathlib import Path
 
 from strata_client import AsyncStrataClient
+
+# The table examples/setup_demo.py creates; pass another table URI as the first argument.
+DEMO_WAREHOUSE = Path(__file__).resolve().parent.parent / "demo-warehouse"
+table_uri = sys.argv[1] if len(sys.argv) > 1 else f"file://{DEMO_WAREHOUSE}#analytics.events"
 
 
 # Helper to build filter specs for the transform params
@@ -31,9 +37,6 @@ async def basic_async_fetch():
         # Check server health
         health = await client.health()
         print(f"Server status: {health['status']}")
-
-        # Materialize and fetch a table asynchronously
-        table_uri = "file:///path/to/warehouse#analytics.events"
 
         # Materialize with filters
         artifact = await client.materialize(
@@ -57,13 +60,13 @@ async def basic_async_fetch():
 
 
 async def concurrent_fetches():
-    """Fetch multiple tables concurrently."""
+    """Fetch several projections of the table concurrently."""
     async with AsyncStrataClient() as client:
-        # Define tables to fetch
+        # Define the projections to fetch
         tables = [
-            ("file:///warehouse#db.events", ["id", "value"]),
-            ("file:///warehouse#db.users", ["id", "name"]),
-            ("file:///warehouse#db.products", ["id", "price"]),
+            (table_uri, ["id", "value"]),
+            (table_uri, ["id", "category"]),
+            (table_uri, ["id", "timestamp"]),
         ]
 
         # Create fetch tasks
@@ -83,18 +86,16 @@ async def concurrent_fetches():
             return_exceptions=True,
         )
 
-        for (uri, _), result in zip(tables, results):
+        for (_, cols), result in zip(tables, results):
             if isinstance(result, Exception):
-                print(f"{uri}: Error - {result}")
+                print(f"{cols}: Error - {result}")
             else:
-                print(f"{uri}: {result.num_rows} rows")
+                print(f"{cols}: {result.num_rows} rows")
 
 
 async def async_with_timeout():
     """Async fetch with custom timeout."""
     async with AsyncStrataClient() as client:
-        table_uri = "file:///warehouse#db.large_table"
-
         try:
             # Set timeout on the materialize call
             artifact = await asyncio.wait_for(
@@ -113,8 +114,6 @@ async def async_with_timeout():
 async def process_artifact_data():
     """Process artifact data asynchronously."""
     async with AsyncStrataClient() as client:
-        table_uri = "file:///warehouse#db.events"
-
         # Materialize and fetch
         artifact = await client.materialize(
             inputs=[table_uri],

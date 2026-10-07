@@ -3981,6 +3981,7 @@ azure = [
     { name = "azure-storage-blob" },
 ]
 gcs = [
+    { name = "gcsfs" },
     { name = "google-cloud-storage" },
 ]
 mcp = [
@@ -4006,6 +4007,7 @@ postgres = [
 ]
 s3 = [
     { name = "botocore" },
+    { name = "s3fs" },
 ]
 sql = [
     { name = "adbc-driver-manager" },
@@ -4086,6 +4088,7 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "filelock", specifier = ">=3.16.0" },
+    { name = "gcsfs", marker = "extra == 'gcs'", specifier = ">=2026.0.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
     { name = "grandalf", marker = "extra == 'tui'", specifier = ">=0.8" },
     { name = "httpx", specifier = ">=0.28.0" },
@@ -4111,6 +4114,7 @@ requires-dist = [
     { name = "pyiceberg", extras = ["sql-sqlite", "sql-postgres"], specifier = ">=0.12.0" },
     { name = "python-multipart", specifier = ">=0.0.31" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "s3fs", marker = "extra == 's3'", specifier = ">=2026.3.0" },
     { name = "sqlglot", marker = "extra == 'sql'", specifier = ">=30.13.0" },
     { name = "starlette", specifier = ">=1.3.1" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.80.0" },

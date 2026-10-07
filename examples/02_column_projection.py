@@ -9,10 +9,15 @@ What you'll learn:
     - Why projection improves performance
 """
 
+import sys
+from pathlib import Path
+
 from strata_client import StrataClient
 
 client = StrataClient(base_url="http://127.0.0.1:8765")
-table_uri = "file:///path/to/warehouse#my_db.my_table"
+# The table examples/setup_demo.py creates; pass another table URI as the first argument.
+DEMO_WAREHOUSE = Path(__file__).resolve().parent.parent / "demo-warehouse"
+table_uri = sys.argv[1] if len(sys.argv) > 1 else f"file://{DEMO_WAREHOUSE}#analytics.events"
 
 # Read only specific columns using the scan transform params
 # This reduces network transfer and memory usage
@@ -20,7 +25,7 @@ artifact = client.materialize(
     inputs=[table_uri],
     transform={
         "executor": "scan@v1",
-        "params": {"columns": ["user_id", "event_type", "timestamp"]},
+        "params": {"columns": ["id", "category", "timestamp"]},
     },
 )
 
@@ -29,6 +34,6 @@ table = client.fetch(artifact.uri)
 
 # Verify we only got the requested columns
 print(f"Columns returned: {table.schema.names}")
-# Output: ['user_id', 'event_type', 'timestamp']
+# Output: ['id', 'category', 'timestamp']
 
 client.close()

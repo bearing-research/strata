@@ -13,7 +13,7 @@ import pyarrow as pa
 import pytest
 
 from strata.artifact_store import ArtifactStore
-from tests.conftest import run_server_with_context, table_to_ipc_bytes
+from tests.conftest import run_server_with_context, service_auth, table_to_ipc_bytes
 
 PROXY_TOKEN = "usage-token"
 
@@ -128,10 +128,29 @@ def test_an_admin_can_name_a_tenant(team_server):
     assert response.json()["total_rows"] == 7
 
 
-def test_a_service_store_without_auth_does_not_answer_for_everyone(tmp_path):
+def test_a_service_store_without_auth_does_not_answer_for_everyone(tmp_path, monkeypatch):
     """With no authenticated caller there is no tenant, and the unscoped answer is everyone's."""
-    with run_server_with_context(tmp_path / "cache", tmp_path / "artifacts", "service") as ctx:
-        response = httpx.get(f"{ctx.base_url}/v1/artifacts/usage")
+    from fastapi.testclient import TestClient
+
+    import strata.server as server_module
+    from strata.artifact_store import reset_artifact_store
+    from strata.config import StrataConfig
+    from strata.server import ServerState, app
+
+    config = StrataConfig(
+        deployment_mode="service",
+        **service_auth(),
+        cache_dir=tmp_path / "cache",
+        artifact_dir=tmp_path / "artifacts",
+    )
+    # Startup refuses this config; the route gate is the second line of defence.
+    config = config.model_copy(update={"auth_mode": "none"})
+    monkeypatch.setattr(server_module, "_state", ServerState(config))
+    reset_artifact_store()
+    try:
+        response = TestClient(app).get("/v1/artifacts/usage")
+    finally:
+        reset_artifact_store()
 
     assert response.status_code == 403
 

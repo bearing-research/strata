@@ -593,6 +593,12 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
 
     store = get_artifact_store(config.artifact_dir, blob_store=blob_store, dialect=dialect)
 
+    # Earlier releases kept the worker registry in a file here, one copy per node.
+    if store is not None and config.artifact_dir is not None:
+        from strata.notebook.workers import import_worker_registry_file
+
+        import_worker_registry_file(config.artifact_dir, store)
+
     # API keys share the artifact database and backend. Created here so the
     # per-request auth middleware never creates the schema.
     if config.auth_mode == "api_key" and config.artifact_dir is not None:
@@ -702,7 +708,9 @@ async def lifespan(app: FastAPI):
 
     from strata.transforms.registry import TransformRegistry, set_transform_registry
 
-    transform_registry = TransformRegistry.from_config(config.transforms_config)
+    transform_registry = TransformRegistry.from_config(
+        config.transforms_config, personal=config.deployment_mode == "personal"
+    )
     set_transform_registry(transform_registry)
 
     if _should_warn_unset_signing_secret(config):
@@ -859,6 +867,17 @@ async def lifespan(app: FastAPI):
                     logger.warning("zombie_builds_swept", count=zombie_count)
         except Exception:
             pass  # Don't fail startup if sweep fails
+
+    if config.artifact_dir is not None:
+        from strata.api.publication_bundle import remove_token_named_archives
+
+        try:
+            removed = remove_token_named_archives(config.artifact_dir)
+        except OSError as exc:
+            logger.warning("publication_archive_cleanup_failed", error=str(exc))
+        else:
+            if removed:
+                logger.info("token_named_publication_archives_removed", count=removed)
 
     # One pass covers the whole store: garbage_collect treats every tenant's
     # roots as roots.
@@ -1497,9 +1516,34 @@ def _mount_mcp_if_enabled() -> None:
         )
         return
 
-    app.mount("/mcp", mcp_app)
+    _mount_mcp(app, mcp_app)
     _mcp_app = mcp_app
     logger.info("mcp_endpoint_mounted", path="/mcp")
+
+
+class _AsSlashedPath:
+    """ASGI app that serves a request for ``/x`` as ``/x/`` through *application*'s router."""
+
+    def __init__(self, application: FastAPI) -> None:
+        self.application = application
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope = {**scope, "path": scope["path"] + "/"}
+        if "raw_path" in scope:
+            scope["raw_path"] = scope["raw_path"] + b"/"
+        await self.application.router(scope, receive, send)
+
+
+def _mount_mcp(application: FastAPI, mcp_app: Starlette) -> None:
+    """Serve *mcp_app* at ``/mcp/`` and at the documented ``/mcp``.
+
+    The mount matches only ``/mcp/...``, so ``/mcp`` alone would reach the SPA catch-all
+    (HTML on GET, 405 on POST); an ASGI route takes it instead, for every method.
+    """
+    from starlette.routing import Route
+
+    application.mount("/mcp", mcp_app)
+    application.router.routes.append(Route("/mcp", _AsSlashedPath(application)))
 
 
 _mount_mcp_if_enabled()
@@ -1512,7 +1556,10 @@ def _require_notebook_worker_admin_access() -> ServerState:
     if state.config.deployment_mode != "service":
         raise HTTPException(
             status_code=409,
-            detail="Server-managed notebook workers are only available in service mode",
+            detail=(
+                "The admin notebook-worker routes are for service mode; a personal "
+                "server reads its workers from [tool.strata.transforms] notebook_workers"
+            ),
         )
 
     if state.config.principal_auth_enabled:
@@ -1559,14 +1606,19 @@ def _get_artifact_store(
     service_write_ok = allow_write and state.config.service_writes_enabled
 
     if not (writes_ok or server_transforms_ok or allow_read or service_write_ok):
+        # Name only the settings that would open this route.
+        remedies = ["set deployment_mode='personal' for local development"]
+        if allow_server_mode:
+            remedies.append("enable server-mode transforms (STRATA_TRANSFORMS_ENABLED=true)")
+        if allow_write:
+            remedies.append("enable service-mode writes (STRATA_SERVICE_WRITES_ENABLED=true)")
         raise HTTPException(
             status_code=403,
             detail={
                 "error": "writes_disabled",
                 "message": (
-                    "Artifact endpoints are disabled in service mode. "
-                    "Set deployment_mode='personal' for local development, "
-                    "or enable server-mode transforms."
+                    "This artifact endpoint is disabled in service mode. "
+                    f"To use it, {' or '.join(remedies)}."
                 ),
             },
         )

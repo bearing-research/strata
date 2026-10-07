@@ -168,7 +168,7 @@ PARQUET_COMPANION_MAX_BYTES = 128 * 1024 * 1024
 # the archive never shows fewer steps than the page.
 PUBLICATION_MAX_DEPTH = 25
 
-# Under the store's directory: each publication's built archive, in a directory per token.
+# Under the store's directory: each publication's built archive, in a directory per id.
 ARCHIVE_CACHE_DIRNAME = "publication-archives"
 
 # Every zip member gets this timestamp and these permissions, so two archives of
@@ -232,7 +232,7 @@ def cached_bundle_zip(
     """
     record = {k: v for k, v in dataclasses.asdict(publication).items() if k != "revoked_at"}
     key = hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode()).hexdigest()
-    cache_dir = _archive_cache_dir(store, publication.token)
+    cache_dir = _archive_cache_dir(store, publication.id)
     prefix = f"{key[:32]}-"
     cached = next(cache_dir.glob(f"{prefix}*.zip"), None)
     if cached is not None:
@@ -257,14 +257,34 @@ def cached_bundle_zip(
 
 
 def drop_cached_bundles(store: ArtifactStore, token: str) -> None:
-    """Remove every cached archive of the publication *token*."""
-    cache_dir = _archive_cache_dir(store, token)
+    """Remove every cached archive of the publication *token* (raw, or its id)."""
+    from strata.artifact_store import publication_key
+
+    cache_dir = _archive_cache_dir(store, publication_key(token))
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
 
 
-def _archive_cache_dir(store: ArtifactStore, token: str) -> Path:
-    return store.artifact_dir / ARCHIVE_CACHE_DIRNAME / token
+def remove_token_named_archives(artifact_dir: Path) -> int:
+    """Remove the archive cache directories named by a raw token, and return how many.
+
+    Earlier releases named them so. Nothing looks them up now (the cache is keyed by
+    publication id and rebuilds on request), and a listing is no place for working links.
+    """
+    from strata.artifact_store import publication_key
+
+    root = artifact_dir / ARCHIVE_CACHE_DIRNAME
+    if not root.is_dir():
+        return 0
+    stale = [d for d in root.iterdir() if d.is_dir() and publication_key(d.name) != d.name]
+    for directory in stale:
+        shutil.rmtree(directory)
+    return len(stale)
+
+
+def _archive_cache_dir(store: ArtifactStore, publication_id: str) -> Path:
+    # Named by id, never by token: a directory listing is not a place for working links.
+    return store.artifact_dir / ARCHIVE_CACHE_DIRNAME / publication_id
 
 
 def _write_parquet_companion(

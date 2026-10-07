@@ -28,7 +28,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.conftest import MINIO_IMAGE, start_container_or_skip
+from tests.conftest import MINIO_IMAGE, service_auth, start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -194,7 +194,10 @@ def test_the_query_reads_the_snapshot_its_provenance_names(
 # (tests/notebook/test_sql_duckdb_confine.py); the mount must stay readable.
 @pytest.mark.parametrize("mode", ["personal", "service"])
 async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path, monkeypatch, mode):
-    _configure(monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode))
+    _configure(
+        monkeypatch,
+        StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode)),
+    )
     with MinioContainer(MINIO_IMAGE) as minio:
         minio_config = minio.get_config()
         client = minio.get_client()
@@ -290,7 +293,10 @@ async def test_a_gcs_or_azure_mount_is_a_view_read_with_its_storage_options(
     tmp_path, monkeypatch, request, store, mode
 ):
     uri, options = request.getfixturevalue(store)
-    _configure(monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode))
+    _configure(
+        monkeypatch,
+        StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode)),
+    )
     nb_dir = _notebook(
         tmp_path,
         "# @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
@@ -377,7 +383,10 @@ async def test_a_confined_cell_reads_its_catalog_and_nothing_outside_it(
     _configure(
         monkeypatch,
         StrataConfig(
-            cache_dir=tmp_path / "cache", catalogs={"lake": properties}, deployment_mode="service"
+            cache_dir=tmp_path / "cache",
+            catalogs={"lake": properties},
+            deployment_mode="service",
+            **service_auth(),
         ),
     )
     connection = 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'

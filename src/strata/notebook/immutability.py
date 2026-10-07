@@ -461,8 +461,8 @@ def detect_shared_mutable_outputs(outputs: dict[str, Any]) -> list[MutationWarni
                         ),
                         suggestion=(
                             "If they must stay linked (e.g. an optimizer over a "
-                            f"model's parameters), keep '{prev}' and '{var_name}' "
-                            "in the same cell."
+                            "model's parameters), output only one and derive the "
+                            "other from it in the cell that uses both."
                         ),
                     )
                 )

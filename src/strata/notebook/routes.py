@@ -21,6 +21,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from strata.file_modes import PASS_THROUGH_DIR, private_dir
 from strata.notebook.authorship import MAX_AUTHOR_LENGTH, resolve_author
 from strata.notebook.dependencies import (
     export_requirements_text,
@@ -30,6 +31,7 @@ from strata.notebook.dependencies import (
     preview_requirements_text,
 )
 from strata.notebook.executor import CellExecutor
+from strata.notebook.languages.analyzer import require_sql_extra
 from strata.notebook.models import (
     CellLanguage,
     CellStatus,
@@ -256,7 +258,8 @@ def _get_caller_storage_root(request: Request | None) -> Path | None:
     tenant_dir = _caller_tenant_dir()
     if tenant_dir is not None:
         tenant_root = base / tenant_dir
-        tenant_root.mkdir(parents=True, exist_ok=True)
+        # The harness user must reach the notebooks inside, but not list them.
+        private_dir(tenant_root, PASS_THROUGH_DIR)
         return tenant_root
     return base
 
@@ -300,12 +303,21 @@ def _timed_json_response(
 
 
 def validate_package_name(package: str) -> str:
-    """Validate and sanitize a package specifier; rejects shell metacharacters."""
+    """Validate one PEP 508 requirement (``pandas>=2.0``, ``x[extra]; python_version<"4"``).
+
+    It reaches uv as a single argv element, never a shell, so the risk is a value uv
+    would read as an option or as several packages; a requirement is neither.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+
     if len(package) > 200:
         raise ValueError("Package specifier too long")
-    if any(c in package for c in ";&|`$(){}!<>\"'\n\r\t"):
-        raise ValueError("Package specifier contains invalid characters")
-    return package.strip()
+    package = package.strip()
+    try:
+        Requirement(package)
+    except InvalidRequirement as exc:
+        raise ValueError(f"Not a single package requirement: {exc}") from exc
+    return package
 
 
 def _validate_notebook_path(
@@ -742,8 +754,8 @@ class EnvironmentJobRequest(BaseModel):
     @field_validator("package")
     @classmethod
     def validate_package_field(cls, value: str | None) -> str | None:
-        # Rejects shell metacharacters for any action; the R name-shape check runs
-        # again in ``submit_environment_job`` before Rscript sees it.
+        # One requirement for any action; the R name-shape check runs again in
+        # ``submit_environment_job`` before Rscript sees it.
         if value is None:
             return None
         return validate_package_name(value)
@@ -900,7 +912,7 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
             )
         if req.starter_cell:
             with timing.phase("create_starter_cell"):
-                add_cell_to_notebook(notebook_dir, str(uuid.uuid4()))
+                add_cell_to_notebook(notebook_dir, str(uuid.uuid4())[:8])
         _, opened_by = _reuse_open_session_by_path()
         with timing.phase("session_open"):
             session = _session_manager.open_notebook(
@@ -2175,6 +2187,10 @@ async def update_notebook_connections_endpoint(
     literals are scrubbed on write, and the response reflects disk, so the UI sees
     the blanked secrets.
     """
+    try:
+        require_sql_extra()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     from strata.notebook.sql.cell_executor import database_problem
 
     seen: set[str] = set()
@@ -2320,6 +2336,10 @@ async def update_notebook_workers_endpoint(
             status_code=403,
             detail="Notebook worker definitions are managed by the server in service mode",
         )
+
+    # Resolution returns the built-in first, so a "local" entry would never run.
+    if any(worker.name == "local" for worker in req.workers):
+        raise HTTPException(status_code=400, detail="'local' is reserved for the built-in worker")
 
     try:
         for worker in req.workers:
@@ -2801,6 +2821,8 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         )
 
     try:
+        if req.language == CellLanguage.SQL:
+            require_sql_extra()
         cell_id = str(uuid.uuid4())[:8]
 
         add_cell_to_notebook(

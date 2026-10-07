@@ -6,6 +6,13 @@ Server spawn and TUI attach need a live process and are not covered here.
 from __future__ import annotations
 
 import json
+import os
+import queue
+import signal
+import subprocess
+import sys
+import threading
+from pathlib import Path
 
 import pytest
 
@@ -185,3 +192,82 @@ def test_ready_message_matches_whether_a_viewer_is_attached(tmp_path, capsys):
     without = capsys.readouterr().out
     assert "TUI" not in without
     assert "web UI at http://127.0.0.1:8765" in without
+
+
+# Runs `strata agent --no-tui` with the server, its probes and the session open
+# replaced; the stand-in server is a child process that waits to be stopped.
+_SCRIPTED_LAUNCHER = """
+import subprocess
+import sys
+
+from strata.cli import main
+from strata.notebook import agent_launch
+
+pid_file, notebook = sys.argv[1], sys.argv[2]
+
+
+def _spawn(host, port, notebook_dir):
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    with open(pid_file, "w") as f:
+        f.write(str(proc.pid))
+    return proc
+
+
+agent_launch._server_alive = lambda url: False
+agent_launch._spawn_server = _spawn
+agent_launch._await_health = lambda url, proc: True
+agent_launch._mcp_mounted = lambda url: True
+agent_launch._open_session = lambda url, notebook_dir: "sid-from-the-pipe"
+agent_launch._write_agent_config = lambda *args: None
+sys.exit(main(["agent", notebook, "--no-tui", "--server", "http://127.0.0.1:9"]))
+"""
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_a_scripted_launcher_shows_the_session_and_sigterm_stops_its_server(tmp_path):
+    """Piped stdout is block-buffered, and SIGTERM used to skip the cleanup."""
+    from strata.notebook.writer import create_notebook
+
+    notebook = create_notebook(tmp_path, "nb", initialize_environment=False)
+    script = tmp_path / "launcher.py"
+    script.write_text(_SCRIPTED_LAUNCHER)
+    pid_file = tmp_path / "server.pid"
+    src = Path(agent_launch.__file__).resolve().parents[2]
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([str(src), os.environ.get("PYTHONPATH", "")]),
+    }
+    launcher = subprocess.Popen(
+        [sys.executable, str(script), str(pid_file), str(notebook)],
+        stdout=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(
+        target=lambda: [lines.put(line) for line in launcher.stdout], daemon=True
+    ).start()
+    server_pid: int | None = None
+    try:
+        line = ""
+        while "sid-from-the-pipe" not in line:
+            line = lines.get(timeout=60)
+        server_pid = int(pid_file.read_text())
+        assert _alive(server_pid)
+
+        launcher.send_signal(signal.SIGTERM)
+        launcher.wait(timeout=60)
+
+        assert not _alive(server_pid)
+    finally:
+        if launcher.poll() is None:
+            launcher.kill()
+        if server_pid is not None and _alive(server_pid):
+            os.kill(server_pid, signal.SIGKILL)

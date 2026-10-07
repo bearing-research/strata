@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -793,7 +794,7 @@ class StrataConfig(BaseSettings):
                     "catalog uri, so its tables would live in a SQLite catalog on "
                     "this server's disk. Set the catalog database's uri (for "
                     "catalog_properties, STRATA_CATALOG_URI), e.g. "
-                    "postgresql://user:pass@host/iceberg_catalog."
+                    "postgresql+psycopg://user:pass@host/iceberg_catalog."
                 )
         return self
 
@@ -848,6 +849,16 @@ class StrataConfig(BaseSettings):
         # inert.
         if self.deployment_mode == "service":
             conflicts: list[str] = []
+
+            # Service mode serves a network: with no auth every route, notebook
+            # execution and the admin worker registry included, is open to anyone.
+            if not self.principal_auth_enabled:
+                conflicts.append(
+                    "auth_mode='none' (every route, including cell execution and "
+                    "the admin worker registry, would be open to anyone who "
+                    "reaches the server; set STRATA_AUTH_MODE to 'trusted_proxy' "
+                    "or 'api_key')"
+                )
 
             # Multi-tenancy is an access-control boundary: without auth the tenant header is
             # spoofable and direct artifact reads aren't tenant-filtered.
@@ -1349,15 +1360,16 @@ def _get_env_overrides() -> dict[str, Any]:
         overrides["gcs_credentials_json"] = gcs_credentials
 
     # Catalog URI (for PostgreSQL or other SQL backends)
-    # Example: postgresql://user:pass@localhost:5432/iceberg_catalog
+    # Example: postgresql+psycopg://user:pass@localhost:5432/iceberg_catalog
     if catalog_uri := os.environ.get("STRATA_CATALOG_URI"):
         if "catalog_properties" not in overrides:
             overrides["catalog_properties"] = {}
         overrides["catalog_properties"]["uri"] = catalog_uri
 
-    if os.environ.get("STRATA_TRANSFORMS_ENABLED", "").lower() == "true":
-        if "transforms_config" not in overrides:
-            overrides["transforms_config"] = {}
-        overrides["transforms_config"]["enabled"] = True
+    if (transforms_enabled := os.environ.get("STRATA_TRANSFORMS_ENABLED")) is not None:
+        # Parsed like every other boolean setting, so `1`/`yes` enable and `false` disables.
+        overrides["transforms_config"] = {
+            "enabled": TypeAdapter(bool).validate_python(transforms_enabled)
+        }
 
     return overrides

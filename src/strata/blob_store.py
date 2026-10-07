@@ -199,8 +199,10 @@ class LocalBlobStore(BlobStore):
 
     def __init__(self, blobs_dir: Path):
         """Initialize the store over ``blobs_dir``."""
+        from strata.file_modes import private_dir
+
         self.blobs_dir = blobs_dir
-        self.blobs_dir.mkdir(parents=True, exist_ok=True)
+        private_dir(self.blobs_dir)
 
     def _blob_path(self, artifact_id: str, version: int) -> Path:
         """Get filesystem path for a blob."""

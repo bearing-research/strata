@@ -2,7 +2,7 @@
 
 import requests
 
-from tests.conftest import run_server_with_context
+from tests.conftest import SERVICE_CALLER, run_server_with_context, service_auth
 
 
 def _artifact_mode_scan(table_uri: str) -> dict:
@@ -20,10 +20,11 @@ def test_artifact_mode_without_store_is_rejected(temp_warehouse, tmp_path):
     """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
-    with run_server_with_context(cache_dir, None, "service") as ctx:
+    with run_server_with_context(cache_dir, None, "service", **service_auth()) as ctx:
         resp = requests.post(
             f"{ctx.base_url}/v1/materialize",
             json=_artifact_mode_scan(temp_warehouse["table_uri"]),
+            headers=SERVICE_CALLER,
         )
         assert resp.status_code == 400
         assert "artifact" in resp.json()["detail"].lower()
@@ -35,10 +36,11 @@ def test_artifact_mode_with_store_succeeds(temp_warehouse, tmp_path):
     cache_dir.mkdir()
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
-    with run_server_with_context(cache_dir, artifact_dir, "service") as ctx:
+    with run_server_with_context(cache_dir, artifact_dir, "service", **service_auth()) as ctx:
         resp = requests.post(
             f"{ctx.base_url}/v1/materialize",
             json=_artifact_mode_scan(temp_warehouse["table_uri"]),
+            headers=SERVICE_CALLER,
         )
         assert resp.status_code == 200
         data = resp.json()

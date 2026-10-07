@@ -236,7 +236,7 @@ the notebook runs `strata agent` to get their own.
 | `--server URL` | Server base URL; reused if already running there, else started. Default `http://localhost:8765` (or `$STRATA_TUI_SERVER`). |
 | `--python X.Y` | Python `major.minor` for a newly created notebook's venv. |
 | `--no-env` | When creating a notebook, skip building its venv now. |
-| `--no-tui` | Set up and open the session but don't attach the TUI (useful when you keep a browser tab open instead, or drive the launcher from a script). |
+| `--no-tui` | Set up and open the session but don't attach the TUI (useful when you keep a browser tab open instead, or drive the launcher from a script). The session id is printed as soon as the session opens, and `SIGTERM` or Ctrl-C stops the server the launcher started. |
 | `--worker-ssh user@host` | Provision a remote worker over SSH and route cells to it (see below). |
 
 ## Running cells on a remote machine

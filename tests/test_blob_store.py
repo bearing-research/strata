@@ -1012,6 +1012,8 @@ class TestCreateBlobStore:
 
         config = StrataConfig(
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             artifact_dir=None,
         )
 

@@ -35,9 +35,10 @@ The minimum sequence to render a notebook view:
    returns; sockets already connected to a reopened session see its
    `environment_job_*` frames.
 
-   Alternatively, if you already have a `session_id` from a previous open
-   (page refresh case), `GET /v1/notebooks/sessions/{session_id}` returns
-   the same payload shape.
+   Alternatively, on a personal server, if you already have a `session_id`
+   from a previous open (page refresh case),
+   `GET /v1/notebooks/sessions/{session_id}` returns the same payload shape;
+   in service mode open the path again, which returns your own session.
 2. **Connect the WebSocket.** `ws://.../v1/notebooks/ws/{session_id}`. The
    handler verifies the session exists and is visible to the caller's tenant,
    and refuses the upgrade otherwise. A browser upgrade whose `Origin` is
@@ -49,15 +50,18 @@ The minimum sequence to render a notebook view:
    only frame sent on accept is `presence` (see
    [Presence and soft locks](#presence-and-soft-locks)).
 3. **Send `notebook_sync`** as the first client → server message. The server
-   answers with a `notebook_state` frame containing the same fields as the
-   open response. This is your sole resync primitive on reconnects - there's
+   answers with a `notebook_state` frame holding the same notebook state as
+   the open response, without `session_id` and the runtime config, and with a
+   `dag` of `edges`, `roots`, `leaves` and `topological_order` only. This is your sole resync primitive on reconnects - there's
    no `resume_after_seq`.
 4. **Listen.** Execution events (cell status, output, console, errors,
    cascade prompts, DAG updates, environment-job lifecycle, agent notes) all
-   arrive over the WS. Subsequent structural edits - adding / removing /
-   reordering cells, updating env / mounts / workers, dependency mutations
-   - go via REST; the backend re-broadcasts the affected state through the
-   WS automatically.
+   arrive over the WS. Structural edits go via REST. Adding, removing,
+   reordering or editing a cell, or saving a cell's tests, re-broadcasts the
+   notebook as a `notebook_state` frame to every connection, and a dependency
+   change arrives as `environment_job_*` frames. Saving env, mounts, workers,
+   the notebook worker, the timeout or connections answers only the caller:
+   another client sees the change on its next `notebook_sync`.
 
 That is the entire bootstrap. The remaining sections of this page explain the
 gotchas in that flow.
@@ -126,11 +130,11 @@ further calls are required before showing a useful UI. The shape is
 | --- | --- |
 | `session_id` | The route parameter for every subsequent call. |
 | `path` | Absolute notebook directory path. |
-| `dag` | Formatted upstream/downstream/staleness map. |
+| `dag` | `edges`, `topological_order`, `roots`, `leaves` and `variable_producer` (which cell defines each variable); `error` instead when the DAG cannot be built. |
 | Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`. |
-| `id`, `name`, `worker`, `timeout`, `env`, `ai` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](rest-api.md#update-notebook-default-env)) |
+| `id`, `name`, `worker`, `timeout`, `env`, `created_at`, `updated_at` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](rest-api.md#update-notebook-default-env)) |
 | `env_sources`, `env_fetch_error`, `env_fetched_at` | Secret-manager fetch status |
-| `workers`, `mounts`, `connections`, `malformed_connections`, `secret_manager_config`, `variant_groups` | `notebook.toml` |
+| `workers`, `mounts`, `connections`, `malformed_connections`, `catalogs`, `r`, `secret_manager_config`, `variant_groups`, `variant_active_selections`, `variant_modes` | `notebook.toml` |
 | `cells` (full) | Source, status, display outputs, console stdout/stderr, provenance hashes, causality chains, DAG shadow warnings, per-cell overrides. |
 | `environment` | Live: Python version, lockfile hash, package counts, last-synced timestamp, sync status. |
 | `environment_job` / `environment_job_history` | Currently-running env mutation + recent past jobs. |

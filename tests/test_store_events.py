@@ -45,12 +45,13 @@ class TestTheSequence:
         assert [e["seq"] for e in events] == sorted(e["seq"] for e in events)
         publish, withdraw = events[1], events[3]
         assert (publish["artifact_id"], publish["to_version"]) == ("fig", 1)
+        # The id, never the token: the feed is read by followers, not only by the owner.
         assert (publish["key"], publish["value"], publish["actor"]) == (
             "token",
-            publication.token,
+            publication.id,
             "ana",
         )
-        assert (withdraw["value"], withdraw["actor"]) == (publication.token, "ben")
+        assert (withdraw["value"], withdraw["actor"]) == (publication.id, "ben")
 
     def test_a_credit_change_is_an_event(self, store):
         """A DOI or author list arriving later is news to a follower mirroring the page."""
@@ -66,7 +67,7 @@ class TestTheSequence:
         assert (credit["artifact_id"], credit["to_version"]) == ("fig", 1)
         assert (credit["key"], credit["value"], credit["actor"]) == (
             "token",
-            publication.token,
+            publication.id,
             "ana",
         )
 
@@ -79,7 +80,7 @@ class TestTheSequence:
         _ready(store, "fig")
         first = store.publish_artifact("fig", 1)
         again = store.publish_artifact("fig", 1)
-        assert again.token == first.token
+        assert again.id == first.id
         assert store.revoke_publication(first.token)
         assert not store.revoke_publication(first.token)
         assert not store.revoke_publication("no-such-token")

@@ -402,9 +402,9 @@ class LocalNotebookOps:
 
         A session starts every cell IDLE (status is not persisted). The server's
         ``SessionManager`` computes staleness on open; an offline handle must do the
-        same or every cell reads back ``idle`` with no outputs. Once is enough: one
-        handle is one command, and the computation can reach ``@fetch`` URLs and
-        ``@table`` catalogs.
+        same or every cell reads back ``idle`` with no outputs. Once is enough until a
+        run changes what is ready: one handle is one command, and the computation can
+        reach ``@fetch`` URLs and ``@table`` catalogs.
         """
         if self._staleness_computed:
             return
@@ -489,6 +489,8 @@ class LocalNotebookOps:
             result = await executor.execute_cell_force(cell_id, cell.source)
         else:
             raise NotebookOpsError(f"unknown run mode {mode!r} (normal|rerun|force)")
+        # The run changed what is ready; the next read recomputes, as a fresh `status` would.
+        self._staleness_computed = False
         return RunResult(
             cell_id=result.cell_id,
             status="ok" if result.success else "error",
@@ -562,6 +564,7 @@ class LocalNotebookOps:
         """Add a new cell (see :meth:`NotebookOps.add_cell`)."""
         import uuid
 
+        from strata.notebook.languages.analyzer import require_sql_extra
         from strata.notebook.writer import add_cell_to_notebook, write_cell
 
         if language not in self._LANGUAGES:
@@ -570,6 +573,11 @@ class LocalNotebookOps:
             )
         if after is not None and self._session.notebook_state.get_cell(after) is None:
             raise NotebookOpsError(f"no cell with id {after!r} to insert after")
+        if language == "sql":
+            try:
+                require_sql_extra()
+            except ValueError as exc:
+                raise NotebookOpsError(str(exc)) from exc
         cell_id = str(uuid.uuid4())[:8]
         add_cell_to_notebook(
             self.notebook_dir, cell_id, after, language=language, author=self.author
@@ -669,8 +677,9 @@ class LocalNotebookOps:
         Raises
         ------
         NotebookOpsError
-            If worker definitions aren't editable (service mode), the backend,
-            transport or fields are invalid, or an ``executor`` worker is missing ``url``.
+            If worker definitions aren't editable (service mode), ``name`` is the
+            reserved ``local``, the backend, transport or fields are invalid, or an
+            ``executor`` worker is missing ``url``.
         """
         from pydantic import ValidationError
 
@@ -684,6 +693,9 @@ class LocalNotebookOps:
         state = self._session.notebook_state
         if not notebook_worker_definitions_editable(state):
             raise NotebookOpsError("worker definitions are managed by the server in service mode")
+        # Resolution returns the built-in first, so a "local" entry would never run.
+        if name == "local":
+            raise NotebookOpsError("'local' is reserved for the built-in worker")
         if backend == WorkerBackendType.EXECUTOR.value and not (url or "").strip():
             raise NotebookOpsError(f"executor worker {name!r} requires a url")
         try:

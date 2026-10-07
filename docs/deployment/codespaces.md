@@ -14,7 +14,7 @@ The `.devcontainer/` configuration provides:
 
 1. **`postCreateCommand`** (`setup.sh`) runs once on container creation:
     - Installs `uv`
-    - `uv tool install strata-notebook` - the prebuilt wheel, so it finishes in under a minute (no Rust compilation)
+    - `uv tool install 'strata-notebook[sql,sql-duckdb,sql-sqlite]'` - the prebuilt wheel, so it finishes in under a minute (no Rust compilation), with the extras SQL cells on SQLite and DuckDB need
 
 2. **`postStartCommand`** (`start.sh`) runs on every container start:
     - Starts the Strata server in the background and waits for the health check to pass

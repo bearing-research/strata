@@ -598,7 +598,14 @@ def cmd_publish(args: argparse.Namespace) -> int:
             f"(which mints a new token)."
         )
 
-    print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+    if publication.token:
+        print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+    else:
+        # The store keeps only the token's hash, so an existing grant's link cannot be shown.
+        print(
+            f"{artifact.id}@v={artifact.version} was already published (id {publication.id}). "
+            "Its link was shown when it was minted; unpublish and publish again for a new one."
+        )
     # Always, not only after a copy: a caller never told where the grant lives cannot tell a working
     # link from one their own server will never resolve.
     print(f"Published into {destination}.")
@@ -621,7 +628,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
         if getattr(args, "tenant", None):
             command += ["--tenant", args.tenant]
         print()
-        print(f"Withdraw it with: {shlex.join([*command, publication.token])}")
+        print(f"Withdraw it with: {shlex.join([*command, publication.token or publication.id])}")
     return 0
 
 
@@ -817,20 +824,50 @@ def cmd_pull(args: argparse.Namespace) -> int:
 # --- verify ---
 
 
+def _store_location(store: ArtifactStore) -> tuple[str, str]:
+    """Where *store* keeps its metadata and its blobs, printable (no password)."""
+    from strata.blob_store import AzureBlobStore, GCSBlobStore, LocalBlobStore, S3BlobStore
+    from strata.migrate_cli import _redact
+    from strata.sql_backend import PostgresDialect
+
+    dialect = store.dialect
+    metadata = _redact(dialect.dsn) if isinstance(dialect, PostgresDialect) else str(store.db_path)
+    blob_store = store.blob_store
+    if isinstance(blob_store, S3BlobStore):
+        blobs = f"s3://{blob_store.bucket}/{blob_store.prefix}"
+    elif isinstance(blob_store, GCSBlobStore):
+        blobs = f"gs://{blob_store.bucket}/{blob_store.prefix}"
+    elif isinstance(blob_store, AzureBlobStore):
+        blobs = f"azure://{blob_store.account_name}/{blob_store.container_name}/{blob_store.prefix}"
+    elif isinstance(blob_store, LocalBlobStore):
+        blobs = str(blob_store.blobs_dir)
+    else:
+        blobs = type(blob_store).__name__
+    return metadata, blobs
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
 
     findings = store.verify_artifacts()
+    metadata, blobs = _store_location(store)
 
     if args.format == "json":
-        artifact_dir = (
-            args.artifact_dir if args.artifact_dir else str(Path.home() / ".strata" / "artifacts")
+        print(
+            json.dumps(
+                {
+                    "artifact_dir": str(store.artifact_dir),
+                    "metadata": metadata,
+                    "blobs": blobs,
+                    "findings": findings,
+                },
+                indent=2,
+            )
         )
-        print(json.dumps({"artifact_dir": artifact_dir, "findings": findings}, indent=2))
     else:
-        print(f"verifying: {store.artifact_dir}")
+        print(f"verifying: metadata {metadata}, blobs {blobs}")
         if not findings:
             print("\n✓ store is consistent")
         else:

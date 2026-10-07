@@ -518,3 +518,74 @@ def test_genuine_sqlglot_parse_errors_become_parse_error_field():
     result = analyze_sql_cell(src, dialect="postgres")
     assert result.parse_error is not None
     assert result.tables == []
+
+
+def test_opening_a_sql_notebook_without_the_sql_extra_names_the_extra(tmp_path, monkeypatch):
+    """Without sqlglot the open was a bare 500; the message must say what to install."""
+    import sys
+
+    from fastapi.testclient import TestClient
+
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+    from tests.notebook.e2e_fixtures import create_test_app
+
+    notebook = create_notebook(tmp_path, "sql_nb", initialize_environment=False)
+    add_cell_to_notebook(notebook, "s1", None, language="sql")
+    write_cell(notebook, "s1", "# @sql connection=db\nSELECT 1\n")
+    for name in [n for n in sys.modules if n.split(".")[0] == "sqlglot"]:
+        monkeypatch.delitem(sys.modules, name)
+    for name in [n for n in sys.modules if n.startswith("strata.notebook.sql")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "sqlglot", None)
+
+    client = TestClient(create_test_app(), raise_server_exceptions=False)
+    response = client.post("/v1/notebooks/open", json={"path": str(notebook)})
+
+    assert response.status_code == 400, response.text
+    assert "strata-notebook[sql]" in response.json()["detail"]
+
+
+def _without_sqlglot(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sqlglot", None)
+
+
+def test_adding_sql_without_the_sql_extra_is_refused_before_writing(tmp_path, monkeypatch):
+    """Written first, the SQL cell or connection would make every later open of it fail."""
+    from fastapi.testclient import TestClient
+
+    from strata.notebook.writer import create_notebook
+    from tests.notebook.e2e_fixtures import create_test_app
+
+    notebook = create_notebook(tmp_path, "no_sql_extra", initialize_environment=False)
+    client = TestClient(create_test_app(), raise_server_exceptions=False)
+    opened = client.post("/v1/notebooks/open", json={"path": str(notebook)})
+    session_id = opened.json()["session_id"]
+    before = (notebook / "notebook.toml").read_bytes()
+    _without_sqlglot(monkeypatch)
+
+    added = client.post(f"/v1/notebooks/{session_id}/cells", json={"language": "sql"})
+    connected = client.put(
+        f"/v1/notebooks/{session_id}/connections",
+        json={"connections": [{"name": "db", "driver": "sqlite", "path": "db.sqlite"}]},
+    )
+
+    for response in (added, connected):
+        assert response.status_code == 400, response.text
+        assert "strata-notebook[sql]" in response.json()["detail"]
+    assert (notebook / "notebook.toml").read_bytes() == before
+
+
+def test_strata_cell_add_refuses_sql_without_the_sql_extra(tmp_path, monkeypatch):
+    from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
+    from strata.notebook.writer import create_notebook
+
+    notebook = create_notebook(tmp_path, "no_sql_extra", initialize_environment=False)
+    ops = LocalNotebookOps(notebook)
+    before = (notebook / "notebook.toml").read_bytes()
+    _without_sqlglot(monkeypatch)
+
+    with pytest.raises(NotebookOpsError, match=r"strata-notebook\[sql\]"):
+        ops.add_cell("SELECT 1", language="sql")
+    assert (notebook / "notebook.toml").read_bytes() == before

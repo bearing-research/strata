@@ -36,14 +36,20 @@ class TestServiceModeScanStream:
         """Scan to bounded stream pass-through, with no persistence."""
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
-        with run_server_with_context(cache_dir, None, "service") as ctx:
+        with run_server_with_context(
+            cache_dir, None, "service", auth_mode="trusted_proxy", proxy_token="test-token"
+        ) as ctx:
             table_uri = temp_warehouse["table_uri"]
-            resp = requests.post(f"{ctx.base_url}/v1/materialize", json=_scan(table_uri))
+            resp = requests.post(
+                f"{ctx.base_url}/v1/materialize", json=_scan(table_uri), headers=_auth("alice")
+            )
             assert resp.status_code == 200
             data = resp.json()
             assert data["stream_url"].startswith("/v1/streams/")
 
-            stream = requests.get(f"{ctx.base_url}{data['stream_url']}", headers=ARROW)
+            stream = requests.get(
+                f"{ctx.base_url}{data['stream_url']}", headers={**ARROW, **_auth("alice")}
+            )
             assert stream.status_code == 200
             table = ipc.open_stream(stream.content).read_all()
             assert table.num_rows == 500
@@ -55,23 +61,33 @@ class TestServiceModeScanStream:
         cache_dir.mkdir()
         artifact_dir = tmp_path / "artifacts"
         artifact_dir.mkdir()
-        with run_server_with_context(cache_dir, artifact_dir, "service") as ctx:
+        with run_server_with_context(
+            cache_dir, artifact_dir, "service", auth_mode="trusted_proxy", proxy_token="test-token"
+        ) as ctx:
             table_uri = temp_warehouse["table_uri"]
 
             # Miss: stream (and persist the artifact via the wait-then-serve build).
-            miss = requests.post(f"{ctx.base_url}/v1/materialize", json=_scan(table_uri)).json()
+            miss = requests.post(
+                f"{ctx.base_url}/v1/materialize", json=_scan(table_uri), headers=_auth("alice")
+            ).json()
             assert miss["hit"] is False
             assert miss["stream_url"].startswith("/v1/streams/")
-            s1 = requests.get(f"{ctx.base_url}{miss['stream_url']}", headers=ARROW)
+            s1 = requests.get(
+                f"{ctx.base_url}{miss['stream_url']}", headers={**ARROW, **_auth("alice")}
+            )
             assert s1.status_code == 200
 
             # Hit: the response points at /data...
-            hit = requests.post(f"{ctx.base_url}/v1/materialize", json=_scan(table_uri)).json()
+            hit = requests.post(
+                f"{ctx.base_url}/v1/materialize", json=_scan(table_uri), headers=_auth("alice")
+            ).json()
             assert hit["hit"] is True
             assert "/data" in hit["stream_url"]
 
             # ...and the read-back works.
-            s2 = requests.get(f"{ctx.base_url}{hit['stream_url']}", headers=ARROW)
+            s2 = requests.get(
+                f"{ctx.base_url}{hit['stream_url']}", headers={**ARROW, **_auth("alice")}
+            )
             assert s2.status_code == 200
             table = ipc.open_stream(s2.content).read_all()
             assert table.num_rows == 500

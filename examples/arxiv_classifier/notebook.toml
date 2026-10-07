@@ -22,6 +22,7 @@ runtime_id = "df-cluster"
 [workers.config]
 url = "https://strata-df-cluster.fly.dev/v1/execute"
 transport = "direct"
+token_env = "STRATA_DF_CLUSTER_TOKEN"
 
 [[workers]]
 name = "gpu-fly"

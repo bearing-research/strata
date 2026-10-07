@@ -108,8 +108,15 @@ def service_mode_server(tmp_path):
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
-    with run_server_with_context(cache_dir, deployment_mode="service") as ctx:
-        yield {"config": ctx.config, "port": ctx.port, "base_url": ctx.base_url}
+    with run_server_with_context(
+        cache_dir, deployment_mode="service", auth_mode="trusted_proxy", proxy_token="test-token"
+    ) as ctx:
+        yield {
+            "config": ctx.config,
+            "port": ctx.port,
+            "base_url": ctx.base_url,
+            "headers": {"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"},
+        }
 
 
 class TestArtifactEndpoints:
@@ -247,6 +254,7 @@ class TestServiceModeBlocking:
         response = httpx.post(
             f"{service_mode_server['base_url']}/v1/artifacts/materialize",
             json={"inputs": [], "transform": {"executor": "test", "params": {}}},
+            headers=service_mode_server["headers"],
         )
         assert response.status_code == 403
         assert "writes_disabled" in response.json()["detail"]["error"]
@@ -256,19 +264,63 @@ class TestServiceModeBlocking:
         gateway has no artifact_dir.
         """
         base_url = service_mode_server["base_url"]
+        headers = service_mode_server["headers"]
 
         # Writing a name stays blocked (403).
         assert (
             httpx.post(
                 f"{base_url}/v1/names",
                 json={"name": "test", "artifact_id": "x", "version": 1},
+                headers=headers,
             ).status_code
             == 403
         )
         # Listing and resolving names are reads, so not mode-gated; 404 here only because
         # this gateway has no store.
-        assert httpx.get(f"{base_url}/v1/names").status_code == 404
-        assert httpx.get(f"{base_url}/v1/names/test").status_code == 404
+        assert httpx.get(f"{base_url}/v1/names", headers=headers).status_code == 404
+        assert httpx.get(f"{base_url}/v1/names/test", headers=headers).status_code == 404
+
+
+class TestTheTransformsBlock:
+    """Personal mode always runs the built-in SQL transform; service mode needs it listed."""
+
+    _SQL = {"executor": "local://duckdb_sql@v1", "params": {"sql": "SELECT 1 AS x"}}
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"notebook_workers": []},
+            {"enabled": True, "registry": [{"ref": "other@v1", "executor_url": "http://x"}]},
+        ],
+        ids=["no-enabled-key", "enabled-with-other-entries"],
+    )
+    def test_personal_mode_keeps_the_built_in_sql_transform(self, tmp_path, block):
+        with run_server_with_context(
+            tmp_path / "cache", tmp_path / "artifacts", "personal", transforms_config=block
+        ) as ctx:
+            response = httpx.post(
+                f"{ctx.base_url}/v1/artifacts/materialize",
+                json={"inputs": [], "transform": self._SQL},
+            )
+            assert response.status_code == 200, response.text
+            wait_for_build(ctx.base_url, response.json()["artifact_uri"])
+
+    def test_service_mode_refuses_it_unless_listed(self, tmp_path):
+        with run_server_with_context(
+            tmp_path / "cache",
+            tmp_path / "artifacts",
+            "service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            transforms_config={"enabled": True},
+        ) as ctx:
+            response = httpx.post(
+                f"{ctx.base_url}/v1/artifacts/materialize",
+                json={"inputs": [], "transform": self._SQL},
+                headers={"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"},
+            )
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "transform_not_allowed"
 
 
 class TestArtifactContract:

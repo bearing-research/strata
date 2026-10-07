@@ -77,7 +77,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     export_parser = subparsers.add_parser(
         "export",
-        help="Render a notebook to markdown or HTML",
+        help="Render a notebook to markdown or HTML, or write a snapshot zip",
         description=(
             "Render a Strata notebook directory to a single shareable file. "
             "Source cells, cached display outputs, and console snapshots are "
@@ -89,7 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     import_parser = subparsers.add_parser(
         "import",
-        help="Convert a Jupyter .ipynb file into a Strata notebook directory",
+        help="Convert a Jupyter .ipynb, or unpack a snapshot zip, into a notebook directory",
         description=(
             "Parse a Jupyter notebook and produce an equivalent Strata "
             "notebook directory. Cells are converted in source order; "
@@ -199,8 +199,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "--dsn",
             default=None,
             help=(
-                "Postgres DSN for the metadata backend. Defaults to "
-                "STRATA_ARTIFACT_METADATA_DSN, then SQLite under --artifact-dir."
+                "Postgres DSN for the metadata backend. Defaults to the "
+                "configured one (STRATA_ARTIFACT_METADATA_DSN) unless "
+                "--artifact-dir is given."
             ),
         )
 
@@ -286,7 +287,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description="List artifacts: id, version, state, rows, size, names.",
     )
     _add_store_args(list_parser)
-    list_parser.add_argument("--state", default=None, help="Filter by state (ready/failed/…)")
+    list_parser.add_argument(
+        "--state", default=None, help="Filter by state (ready, superseded, building, failed)"
+    )
     list_parser.add_argument("--limit", type=int, default=50, help="Max rows (default 50)")
     list_parser.set_defaults(func=_dispatch_artifact("cmd_list"))
 
@@ -485,7 +488,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "starting to resolve to something else."
         ),
     )
-    unpublish_parser.add_argument("token", help="The publication token")
+    unpublish_parser.add_argument("token", help="The publication token, or its id")
     _add_artifact_dir_arg(unpublish_parser)
     _add_tenant_arg(unpublish_parser)
     unpublish_parser.set_defaults(func=_dispatch_artifact("cmd_unpublish"))
@@ -671,11 +674,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     worker_parser = subparsers.add_parser(
         "worker",
-        help="Manage notebook workers: ls, add, rm, default",
+        help="Manage notebook workers: ls, add, rm, default, add-ssh, rm-ssh",
         description=(
             "Register notebook-scoped workers (e.g. a remote executor endpoint) "
             "and set the default. Writes notebook.toml; a running server picks "
-            "the change up on its next session reload."
+            "the change up on its next session reload. add-ssh / rm-ssh drive a "
+            "running server instead."
         ),
     )
     add_worker_arguments(worker_parser)

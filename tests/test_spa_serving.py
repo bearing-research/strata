@@ -104,3 +104,30 @@ def test_index_is_revalidated(spa, path):
 
     assert response.text == INDEX
     assert response.headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "DELETE"])
+def test_mcp_without_the_trailing_slash_reaches_the_mcp_app(spa, method):
+    """The documented URL is ``/mcp``; the mount alone answers only ``/mcp/``."""
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    from strata.server import _mount_mcp
+
+    async def endpoint(request):
+        return PlainTextResponse(f"mcp {request.method} {request.url.path}")
+
+    fake_mcp = Starlette(routes=[Route("/", endpoint, methods=["GET", "POST", "DELETE"])])
+    client, _ = spa
+    # Production order: the MCP routes are added at import, before the SPA catch-all.
+    routes = app.router.routes
+    spa_route = next(r for r in routes if getattr(r, "name", None) == "spa_fallback")
+    routes.remove(spa_route)
+    _mount_mcp(app, fake_mcp)
+    routes.append(spa_route)
+
+    for path in ("/mcp", "/mcp/"):
+        response = client.request(method, path, follow_redirects=False)
+        assert response.status_code == 200, (path, response.status_code)
+        assert response.text == f"mcp {method} /mcp/"

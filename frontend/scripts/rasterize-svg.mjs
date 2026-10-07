@@ -4,7 +4,7 @@
  * The TUI screenshots Textual produces are SVG, and assembling an animation
  * needs raster frames. Nothing in the Python environment renders SVG (no
  * cairosvg, no rsvg-convert, no ImageMagick), but Playwright is already here
- * for the web captures and renders SVG exactly as a browser would — which is
+ * for the web captures and renders SVG exactly as a browser would, which is
  * also how a reader will eventually see it.
  *
  *   node scripts/rasterize-svg.mjs --in <dir> [--scale 1]
@@ -38,7 +38,7 @@ try {
   for (const name of svgs) {
     const svg = readFileSync(join(dir, name), 'utf8')
     // Inline rather than file://, so the page has no chance to resolve
-    // anything external — these frames must render identically offline.
+    // anything external: these frames must render identically offline.
     await page.setContent(
       `<!doctype html><style>html,body{margin:0;padding:0;background:transparent}
        svg{display:block}</style>${svg}`,

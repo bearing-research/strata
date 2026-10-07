@@ -246,7 +246,9 @@ options = { anon = true }
 
 Inside the cell, `taxi_zones` is a `pathlib.Path`. Strata mirrors the
 remote prefix to a local cache before the cell runs, and reuses that copy
-while the remote fingerprint is unchanged.
+while the remote fingerprint is unchanged. The mirror runs in Strata's own
+environment, so install the extra for the scheme there: `s3`, `gcs` or
+`azure` (for example `uv tool install "strata-notebook[s3]"`).
 
 ## Examples
 

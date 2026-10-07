@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,21 +18,30 @@ _SECONDS_PER_DAY = 86400.0
 
 
 def _open_store(args: argparse.Namespace) -> ApiKeyStore:
-    """Open the key store with the server's DSN precedence.
+    """Open the key store the server reads.
 
-    ``--dsn``, then the environment, then SQLite under the artifact directory (as
-    ``StrataConfig`` does), so the CLI never mints keys into a file the server ignores.
+    ``--artifact-dir`` names one local SQLite store. Without it, the server's configured
+    store (``[tool.strata]``, then ``STRATA_*``): its ``artifact_dir`` and metadata DSN, so
+    keys never land in a file the server ignores. ``--dsn`` overrides either.
     """
-    artifact_dir = Path(args.artifact_dir or Path.home() / ".strata" / "artifacts")
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    if args.artifact_dir:
+        artifact_dir = Path(args.artifact_dir)
+        dialect = None
+    else:
+        from strata.config import StrataConfig
 
-    dsn = args.dsn or os.environ.get("STRATA_ARTIFACT_METADATA_DSN")
-    dialect = None
-    if dsn:
+        try:
+            config = StrataConfig.load()
+            dialect = None if args.dsn else config.create_metadata_dialect()
+        except ValueError as exc:
+            raise SystemExit(f"invalid configuration: {exc}") from exc
+        artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
+    if args.dsn:
         from strata.sql_backend import PostgresDialect
 
-        dialect = PostgresDialect(dsn)
+        dialect = PostgresDialect(args.dsn)
 
+    artifact_dir.mkdir(parents=True, exist_ok=True)
     return ApiKeyStore(artifact_dir / "artifacts.sqlite", dialect=dialect)
 
 
