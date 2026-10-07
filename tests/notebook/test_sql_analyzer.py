@@ -518,3 +518,28 @@ def test_genuine_sqlglot_parse_errors_become_parse_error_field():
     result = analyze_sql_cell(src, dialect="postgres")
     assert result.parse_error is not None
     assert result.tables == []
+
+
+def test_opening_a_sql_notebook_without_the_sql_extra_names_the_extra(tmp_path, monkeypatch):
+    """Without sqlglot the open was a bare 500; the message must say what to install."""
+    import sys
+
+    from fastapi.testclient import TestClient
+
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+    from tests.notebook.e2e_fixtures import create_test_app
+
+    notebook = create_notebook(tmp_path, "sql_nb", initialize_environment=False)
+    add_cell_to_notebook(notebook, "s1", None, language="sql")
+    write_cell(notebook, "s1", "# @sql connection=db\nSELECT 1\n")
+    for name in [n for n in sys.modules if n.split(".")[0] == "sqlglot"]:
+        monkeypatch.delitem(sys.modules, name)
+    for name in [n for n in sys.modules if n.startswith("strata.notebook.sql")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "sqlglot", None)
+
+    client = TestClient(create_test_app(), raise_server_exceptions=False)
+    response = client.post("/v1/notebooks/open", json={"path": str(notebook)})
+
+    assert response.status_code == 400, response.text
+    assert "strata-notebook[sql]" in response.json()["detail"]
