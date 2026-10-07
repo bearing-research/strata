@@ -707,6 +707,19 @@ def cmd_archive(args: argparse.Namespace) -> int:
         # the hosted page shows, and matches GET /p/{token}/archive.zip.
         publication = store.get_publication(token)
         if publication is None:
+            # The raw token is shown only at mint, so an owner may have kept just the id.
+            # Not on a public route: there the id would work as the link.
+            publication = next(
+                (
+                    listed
+                    for listed in store.list_publications(
+                        tenant=getattr(args, "tenant", None), include_revoked=True
+                    )
+                    if listed.id == token
+                ),
+                None,
+            )
+        if publication is None:
             print(f"No such publication: {token}")
             return 1
         if not publication.is_active:

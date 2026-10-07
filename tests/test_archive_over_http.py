@@ -250,6 +250,14 @@ class TestADeepChain:
 
 
 class TestTheCliByToken:
+    def test_the_publication_id_archives_the_same_zip(self, served, tmp_path):
+        # The raw token is shown only at mint; the id is what the list routes return.
+        base_url, publication, artifact_dir = served
+        out = tmp_path / "by-id.zip"
+
+        assert _archive(artifact_dir, out, token=publication.id) == 0
+        assert out.read_bytes() == _fetch(base_url, publication.token).content
+
     def test_a_withdrawn_publication_is_not_archived(self, served, tmp_path):
         _, publication, artifact_dir = served
         ArtifactStore(artifact_dir).revoke_publication(publication.token)

@@ -308,6 +308,9 @@ writes the file the route serves, byte for byte:
 strata artifact archive --token <token> --to ./figure3.zip
 ```
 
+`--token` also takes the publication's id, which `GET /v1/publications` lists,
+since the raw token is shown only when the link is minted.
+
 A withdrawn publication refuses here as it does for the bytes: the page still resolves and says "withdrawn", since a
 reader chasing a footnote deserves that answer, but handing over the archive
 anyway would undo the withdrawal.
