@@ -565,7 +565,10 @@ class TestEndToEnd:
             port=find_free_port(),
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
         )
+        headers = {"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"}
         with run_server(config) as base:
             response = requests.post(
                 f"{base}/v1/materialize",
@@ -574,11 +577,12 @@ class TestEndToEnd:
                     "transform": {"executor": "scan@v1", "params": {}},
                     "mode": "stream",
                 },
+                headers=headers,
             )
             assert response.status_code == 200, response.text
-            stream = requests.get(f"{base}{response.json()['stream_url']}")
+            stream = requests.get(f"{base}{response.json()['stream_url']}", headers=headers)
             rows = pa.ipc.open_stream(stream.content).read_all().num_rows
-            text = requests.get(f"{base}/metrics/prometheus").text
+            text = requests.get(f"{base}/metrics/prometheus", headers=headers).text
 
         assert rows > 0
         assert re.search(r"^strata_scans_total 1$", text, re.M)

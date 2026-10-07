@@ -65,6 +65,8 @@ def test_a_refused_artifact_route_names_only_settings_that_would_open_it(tmp_pat
     """With transforms on, a personal-only route must not still say "enable transforms"."""
     _set_state(
         deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
         artifact_dir=str(tmp_path / "artifacts"),
         transforms_config={"enabled": True},
     )

@@ -419,10 +419,10 @@ def test_service_finalize_rejects_incomplete_notebook_bundle(notebook_build_serv
 
     artifact_store.write_blob(artifact_id, version, bundle_bytes.getvalue())
 
+    # Signed, as an executor's finalize is: the build belongs to no caller of this server.
+    finalize = get_state().url_signer.generate_finalize_url(base_url, build_id)
     response = httpx.post(
-        f"{base_url}/v1/builds/{build_id}/finalize",
-        json={"output_format": "notebook-output-bundle@v1"},
-        timeout=10.0,
+        finalize.url, json={"output_format": "notebook-output-bundle@v1"}, timeout=10.0
     )
 
     assert response.status_code == 400
