@@ -61,6 +61,29 @@ def test_with_the_setting_it_does_not(tmp_path, capsys, monkeypatch):
     assert "HF: hf_x" in stdout
 
 
+def test_index_credentials_do_not_reach_a_cell(tmp_path, capsys, monkeypatch):
+    """uv settings pass without being listed; a private index's login must not."""
+    monkeypatch.setenv("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST", "HF_TOKEN")
+    monkeypatch.setenv("UV_INDEX_X_PASSWORD", "index-pass")
+    monkeypatch.setenv("UV_PUBLISH_TOKEN", "pypi-tok")
+    monkeypatch.setenv("UV_NO_PROGRESS", "1")
+    nb = _notebook(tmp_path)
+    write_cell(
+        nb,
+        "peek",
+        "import os\n"
+        "for name in ('UV_INDEX_X_PASSWORD', 'UV_PUBLISH_TOKEN', 'UV_NO_PROGRESS', 'HF_TOKEN'):\n"
+        "    print(name, os.environ.get(name, '<absent>'))\n",
+    )
+
+    stdout = _run(nb, capsys)
+
+    assert "UV_INDEX_X_PASSWORD <absent>" in stdout
+    assert "UV_PUBLISH_TOKEN <absent>" in stdout
+    assert "UV_NO_PROGRESS 1" in stdout
+    assert "HF_TOKEN hf_x" in stdout
+
+
 _HARNESS_USER = os.environ.get("STRATA_TEST_HARNESS_USER")
 
 

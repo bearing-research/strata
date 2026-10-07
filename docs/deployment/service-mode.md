@@ -805,10 +805,17 @@ STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST=AWS_*,HF_TOKEN
 ```
 
 Entries are exact names or a prefix with a trailing `*`. The essentials a
-subprocess cannot start without are always included, and `STRATA_*` is dropped
+subprocess cannot start without are always included: `PATH`, `HOME`, the temp
+and locale variables, and `UV_*`, `PYTHON*`, `VIRTUAL_ENV`, `R_*` and
+`RSTUDIO_*`, except names that look like credentials (containing `KEY`,
+`SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`), `UV_PUBLISH_*` and
+`UV_INDEX_*_USERNAME`. So a private index's login, which the server's `uv sync`
+needs, does not reach cells; keep index credentials in those variables or a
+netrc rather than inside `UV_INDEX_URL`, which passes. `STRATA_*` is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
-accident is the failure the setting exists to prevent. It applies to every
-process that runs cell code, the same list as above.
+accident is the failure the setting exists to prevent. A name you list exactly
+always passes. It applies to every process that runs cell code, the same list
+as above.
 
 The list stays short because a cell's own configuration does not come through
 the process environment. `[env]` in `notebook.toml` and mount credentials
