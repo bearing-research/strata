@@ -291,7 +291,7 @@ class TestUpstreamInvalidation:
         assert (await executor.execute_cell("c1", "x = 2")).success
 
         staleness = session.compute_staleness()
-        assert staleness["c2"].status == "idle"
+        assert staleness["c2"].status == "stale"
         assert session.causality_map["c2"].reason == "upstream"
         assert any(detail.type == "input_changed" for detail in session.causality_map["c2"].details)
 
