@@ -105,10 +105,13 @@ STRATA_DEPLOYMENT_MODE=service \
   uv run strata-notebook
 ```
 
-Short version: an upstream proxy authenticates the caller, injects
+Short version: an upstream proxy authenticates the caller, sets the
 identity headers (`X-Strata-Principal`, tenant header,
-`X-Strata-Scopes`, `X-Strata-Proxy-Token`), and is the only ingress
-path. Strata trusts the proxy rather than authenticating users itself;
+`X-Strata-Scopes`, `X-Strata-Proxy-Token`) on every request, replacing
+any the client sent (empty when the user has none), and is the only
+ingress path. A header the proxy does not set reaches Strata from the
+client, so a proxy that never sets `X-Strata-Scopes` lets a user claim
+`admin:*`. Strata trusts the proxy rather than authenticating users itself;
 machine callers outside the proxy can use an API key instead
 (`STRATA_AUTH_MODE=api_key`).
 

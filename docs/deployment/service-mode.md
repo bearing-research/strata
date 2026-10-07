@@ -40,14 +40,52 @@ proxy that:
 
 1. **Terminates auth**: JWT, OIDC, mTLS, Cloudflare Access, SAML,
    whatever. Strata doesn't care which.
-2. **Injects identity headers** on every request:
+2. **Sets every identity header on every request**, replacing whatever
+   the client sent:
 
-   | Header | Value | Required |
-   |---|---|---|
-   | `X-Strata-Principal` | Stable user identifier (email, sub claim, etc.) | Yes |
-   | `X-Tenant-ID` | Tenant the user belongs to, when multi-tenant is on. Header name is configurable via `tenant_header`. | When `multi_tenant_enabled=true` |
-   | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`) | For scope-gated endpoints |
-   | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN` | Yes, proves the request came from the proxy, not a direct connection |
+   | Header | Value |
+   |---|---|
+   | `X-Strata-Principal` | Stable user identifier (email, sub claim, etc.) |
+   | `X-Tenant-ID` | Tenant the user belongs to. Header name is configurable via `tenant_header`. Empty when multi-tenancy is off. |
+   | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`). Empty for a user with no scopes. |
+   | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN`; proves the request came through the proxy |
+
+   Strata cannot tell a header the proxy set from one the client sent
+   and the proxy passed along. A header the proxy leaves alone reaches
+   Strata from the client: a proxy that sets no `X-Strata-Scopes` for a
+   user lets that user send `X-Strata-Scopes: admin:*` and become an
+   admin. So the proxy sets all four on every request, and sets an
+   empty value when the user has none (nginx drops a header set to
+   `""`, which is what you want). A minimal nginx block:
+
+   ```nginx
+   map $http_upgrade $connection_upgrade {  # in the http {} block
+       default upgrade;
+       ''      close;
+   }
+
+   location / {
+       proxy_pass http://strata:8765;
+       proxy_http_version 1.1;
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection $connection_upgrade;
+       proxy_set_header Host $http_host;
+
+       # Every identity header, on every request, from the auth layer only.
+       proxy_set_header X-Strata-Proxy-Token "<shared-secret>";
+       proxy_set_header X-Strata-Principal   $authenticated_user;
+       proxy_set_header X-Tenant-ID          $authenticated_tenant;  # "" if multi-tenancy is off
+       proxy_set_header X-Strata-Scopes      $authenticated_scopes;  # "" for no scopes
+   }
+   ```
+
+   `$authenticated_*` stand for whatever your auth layer provides (for
+   example `auth_request_set` from an `auth_request` subrequest). If you
+   renamed a header with `STRATA_PRINCIPAL_HEADER`, `STRATA_TENANT_HEADER`
+   or `STRATA_SCOPES_HEADER`, set the renamed one. Check it from outside
+   the proxy: a request carrying `X-Strata-Scopes: admin:*` for an
+   ordinary user must still get 403 from `GET /v1/logs`. The demo
+   stack's `.docker/service-mode/nginx.conf` sets all four.
 
 Machine callers that do not sit behind the proxy (a CI job, an ETL
 service) authenticate with an API key instead: `strata apikey create`
