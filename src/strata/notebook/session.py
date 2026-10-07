@@ -2825,7 +2825,22 @@ class NotebookSession:
             return self.compute_staleness()
         return {}
 
-    async def on_dependencies_changed(self) -> None:
+    def _record_dependency_install(self, duration_ms: int | None) -> None:
+        """Attest the lockfile a dependency mutation just installed and stamp the sync.
+
+        ``uv add`` / ``uv remove`` / an import install into the venv, so the lockfile is
+        realized; without this every dependency change disables team-store publishing
+        until the next full sync. Must run after ``refresh_environment_runtime``, which
+        copies the previous sync time.
+        """
+        persist_environment_synced_lockfile_hash(self.path, compute_lockfile_hash(self.path))
+        self.environment_last_synced_at = int(_time.time() * 1000)
+        if duration_ms is not None:
+            self.environment_last_sync_duration_ms = duration_ms
+
+    async def on_dependencies_changed(
+        self, *, operation_log: EnvironmentOperationLog | None = None
+    ) -> None:
         """React to a lockfile update after ``uv add`` / ``uv remove``.
 
         Refreshes runtime metadata, invalidates the warm pool, and recomputes the
@@ -2833,13 +2848,9 @@ class NotebookSession:
         """
         # 1. Dependency mutation already synced .venv; reuse it instead of a second sync.
         await asyncio.to_thread(self.refresh_environment_runtime)
-        # ``uv add`` / ``uv remove`` installed into the venv, so this realized the
-        # lockfile; without attesting, every dependency change would disable publishing
-        # until the next full sync.
         await asyncio.to_thread(
-            persist_environment_synced_lockfile_hash,
-            self.path,
-            compute_lockfile_hash(self.path),
+            self._record_dependency_install,
+            operation_log.duration_ms if operation_log is not None else None,
         )
         await self._invalidate_warm_pool_for_environment_change()
 
@@ -2868,7 +2879,7 @@ class NotebookSession:
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
-            await self.on_dependencies_changed()
+            await self.on_dependencies_changed(operation_log=result.operation_log)
             staleness_map = self.compute_staleness()
 
         return DependencyMutationOutcome(
@@ -2886,7 +2897,7 @@ class NotebookSession:
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
-            await self.on_dependencies_changed()
+            await self.on_dependencies_changed(operation_log=result.operation_log)
             staleness_map = self.compute_staleness()
 
         return RequirementsImportOutcome(
@@ -2906,7 +2917,7 @@ class NotebookSession:
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
-            await self.on_dependencies_changed()
+            await self.on_dependencies_changed(operation_log=result.operation_log)
             staleness_map = self.compute_staleness()
 
         return RequirementsImportOutcome(
@@ -3234,7 +3245,9 @@ class NotebookSession:
             raise RuntimeError(result.error or f"{display_name} failed")
 
         job.lockfile_changed = compute_lockfile_hash(self.path) != old_lockfile_hash
-        return await self._finalize_environment_job(job, lockfile_changed=job.lockfile_changed)
+        return await self._finalize_environment_job(
+            job, lockfile_changed=job.lockfile_changed, installed=True
+        )
 
     async def _run_import_environment_job(
         self,
@@ -3278,6 +3291,7 @@ class NotebookSession:
         stale_cell_ids = await self._finalize_environment_job(
             job,
             lockfile_changed=result.lockfile_changed,
+            installed=True,
         )
         return stale_cell_ids, result
 
@@ -3341,6 +3355,7 @@ class NotebookSession:
         return await self._finalize_environment_job(
             job,
             lockfile_changed=True,
+            installed=True,
         )
 
     async def _run_sync_environment_job(
@@ -3385,12 +3400,18 @@ class NotebookSession:
         *,
         lockfile_changed: bool,
         refresh_runtime: bool = True,
+        installed: bool = False,
     ) -> list[str]:
-        """Refresh runtime metadata and staleness after a successful env mutation."""
+        """Refresh runtime metadata and staleness after a successful env mutation.
+
+        ``installed`` means the job installed the current lockfile into the venv.
+        """
         if refresh_runtime:
             job.phase = "refreshing_runtime"
             await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
             await asyncio.to_thread(self.refresh_environment_runtime)
+        if installed:
+            await asyncio.to_thread(self._record_dependency_install, job.duration_ms)
 
         job.phase = "invalidating_warm_pool"
         await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
