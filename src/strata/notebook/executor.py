@@ -3327,7 +3327,7 @@ class CellExecutor:
                 artifact_id,
                 version,
                 schema_json=json.dumps({"content_type": content_type}),
-                row_count=0,
+                row_count=None,
                 byte_size=len(blob_data),
                 content_sha256=hashlib.sha256(blob_data).hexdigest(),
             )

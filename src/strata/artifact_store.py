@@ -121,6 +121,16 @@ def _split_ref(ref: str) -> tuple[str, int]:
     return artifact_id, int(version)
 
 
+def _declared_content_type(transform_spec: str | None) -> str:
+    """The ``content_type`` a version's transform params declare, or ``""`` for none."""
+    try:
+        params = json.loads(transform_spec or "{}").get("params") or {}
+    except (ValueError, AttributeError):
+        return ""
+    content_type = params.get("content_type") if isinstance(params, dict) else None
+    return content_type if isinstance(content_type, str) else ""
+
+
 def _like_literal(text: str) -> str:
     """``text`` escaped for ``LIKE ... ESCAPE '\\'``: its ``_`` and ``%`` match only themselves."""
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -161,7 +171,7 @@ class StagedVersion:
     artifact_id: str
     version: int
     schema_json: str
-    row_count: int
+    row_count: int | None  # None: the writer does not know it
     byte_size: int
     content_sha256: str
 
@@ -1331,7 +1341,7 @@ class ArtifactStore:
         artifact_id: str,
         version: int,
         schema_json: str,
-        row_count: int,
+        row_count: int | None,
         byte_size: int,
         content_sha256: str | None = None,
         *,
@@ -1593,7 +1603,7 @@ class ArtifactStore:
                     artifact_id=artifact_id,
                     version=new_version,
                     schema_json=source.schema_json or "",
-                    row_count=source.row_count or 0,
+                    row_count=source.row_count,
                     byte_size=copied,
                     content_sha256=hasher.hexdigest(),
                 )
@@ -1956,7 +1966,7 @@ class ArtifactStore:
         artifact_id: str,
         version: int,
         schema_json: str,
-        row_count: int,
+        row_count: int | None,
         existing: ArtifactVersion,
         blob_attempt: str | None,
     ) -> tuple[str, int]:
@@ -4561,9 +4571,11 @@ class ArtifactStore:
     def verify_artifacts(self, tenant: str | None = None) -> list[dict]:
         """Check every ready or superseded artifact's blob against its metadata.
 
-        The blob must exist, parse as one Arrow IPC stream, and match ``row_count``.
-        Returns one ``{"artifact_id", "version", "state", "problem", "detail"}`` dict
-        per problem; empty means consistent.
+        The blob must exist and match its recorded digest. An Arrow blob (a declared
+        ``arrow/ipc`` content type, or none, as core transforms write) must also parse as
+        one IPC stream and match ``row_count`` when one was recorded; a notebook's JSON,
+        image or pickled outputs are not Arrow. Returns one ``{"artifact_id", "version",
+        "state", "problem", "detail"}`` dict per problem; empty means consistent.
         """
         import pyarrow as pa
 
@@ -4572,7 +4584,8 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             query = """
-                SELECT id, version, state, row_count, content_sha256, blob_attempt, superseded_by
+                SELECT id, version, state, row_count, content_sha256, blob_attempt, superseded_by,
+                       transform_spec
                 FROM artifact_versions
                 WHERE state IN ('ready', 'superseded')
             """
@@ -4610,30 +4623,33 @@ class ArtifactStore:
                 )
                 continue
 
-            try:
-                readable_rows = validate_ipc_stream(data)
-            except (ValueError, pa.ArrowInvalid) as e:
-                findings.append(
-                    {
-                        "artifact_id": artifact_id,
-                        "version": version,
-                        "state": row["state"],
-                        "problem": "invalid_stream",
-                        "detail": str(e),
-                    }
-                )
-                continue
+            if _declared_content_type(row["transform_spec"]) in ("", "arrow/ipc"):
+                try:
+                    readable_rows = validate_ipc_stream(data)
+                except (ValueError, pa.ArrowInvalid) as e:
+                    findings.append(
+                        {
+                            "artifact_id": artifact_id,
+                            "version": version,
+                            "state": row["state"],
+                            "problem": "invalid_stream",
+                            "detail": str(e),
+                        }
+                    )
+                    continue
 
-            if row["row_count"] is not None and readable_rows != row["row_count"]:
-                findings.append(
-                    {
-                        "artifact_id": artifact_id,
-                        "version": version,
-                        "state": row["state"],
-                        "problem": "row_count_mismatch",
-                        "detail": f"metadata says {row['row_count']}, blob yields {readable_rows}",
-                    }
-                )
+                if row["row_count"] is not None and readable_rows != row["row_count"]:
+                    findings.append(
+                        {
+                            "artifact_id": artifact_id,
+                            "version": version,
+                            "state": row["state"],
+                            "problem": "row_count_mismatch",
+                            "detail": (
+                                f"metadata says {row['row_count']}, blob yields {readable_rows}"
+                            ),
+                        }
+                    )
 
             # The checks above catch bytes that stopped being valid Arrow or stopped holding their
             # claimed rows. A digest catches an in-place value change that keeps both true. Rows
