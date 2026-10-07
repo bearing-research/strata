@@ -530,3 +530,20 @@ class TestGcsMountFilesystem:
 
         expected = type(fsspec.filesystem("gcs", token="anon", **options))
         assert self._class(options, monkeypatch) is expected
+
+
+@pytest.mark.parametrize(("scheme", "extra"), [("s3", "s3"), ("gs", "gcs"), ("az", "azure")])
+def test_each_remote_mount_scheme_has_an_extra_with_its_filesystem(scheme, extra):
+    """Mounts resolve in Strata's own process, so an install extra must carry the library."""
+    import re
+    import tomllib
+
+    from fsspec.registry import known_implementations
+
+    from strata.notebook.mounts import _scheme_to_fsspec_protocol
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    extras = tomllib.loads(pyproject.read_text())["project"]["optional-dependencies"]
+    declared = {re.split(r"[<>=\[ ;]", req, maxsplit=1)[0] for req in extras[extra]}
+    implementation = known_implementations[_scheme_to_fsspec_protocol(scheme)]["class"]
+    assert implementation.split(".")[0] in declared
