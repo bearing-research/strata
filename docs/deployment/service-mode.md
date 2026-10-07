@@ -685,7 +685,7 @@ say how that is safe. There are two answers:
    different host is isolation that needs nothing arranged on this one.
 2. **Run cells as a separate OS user.** Set `STRATA_NOTEBOOK_HARNESS_USER` to a
    user that exists on the server host. Cells then cannot read the server's
-   environment through `/proc`, its config, or other notebooks' files.
+   environment through `/proc`, nor state the server keeps owner-only (below).
 
 Without either, a cell that would run on the server host fails with a message
 naming both. Cache hits are still served, since a hit starts no cell code.
@@ -699,7 +699,7 @@ inspect REPL, cell tests and the R package restore. It is POSIX only. What the h
 
 | Path | Access |
 | --- | --- |
-| notebook directories | read |
+| notebook directories (and, with multi-tenancy, each tenant's directory above them) | read, or traverse for the tenant directory |
 | each notebook's `.venv` | read and execute |
 | the Python interpreter behind the venvs | read and execute |
 | each notebook's `.strata/` | traverse |
@@ -718,6 +718,33 @@ and cell tests load their inputs in the test process.
 A cell run this way still shares the host's kernel and sees what any local user
 can. A notebook that needs more isolation than that wants a worker on another
 machine.
+
+**One harness user serves every tenant, so it is not a tenant isolation
+boundary.** It keeps cells away from the server; it does not keep one tenant's
+cells away from another's. Every cell runs as the same user, and that user has
+to read every notebook directory, so a cell can read any tenant's notebook
+source and data files, and the bytes another notebook fetched (`.strata/fetch`)
+or mounted (`.strata/mount_cache`), given the path. Tenants that must not see
+each other need separate servers (or containers, each with its own storage),
+or every cell on workers that serve one tenant each.
+
+What Strata keeps from the harness user, and from any other account on the
+host, is its own state. It creates these owner-only, and narrows any an earlier
+release left wider when it next opens them:
+
+| State | Mode |
+| --- | --- |
+| `STRATA_ARTIFACT_DIR`, its `artifacts.sqlite` (with `-wal` / `-shm`) and `blobs/` | directories `0700`, files `0600` |
+| `STRATA_CACHE_DIR` | `0700` |
+| each notebook's `.strata/` | `0711`: the harness user passes through to its per-run directories and inputs, but cannot list it |
+| in it, `artifacts/`, `console/`, `runtime.json` and `environment_jobs.json` | `0700` / `0600` |
+| each tenant's notebook directory under the storage root | `0711` |
+
+Strata only removes permission bits, so a stricter umask stands. Publication
+tokens are stored as their SHA-256, so even a copy of `artifacts.sqlite` holds no
+working link. Not covered, and yours to make owner-only: the server's config file
+(a `pyproject.toml` holding `proxy_token`), the server's home, and
+`STRATA_METADATA_DB`.
 
 SQL cells are different: their queries run inside the server process, not as
 the harness user, so the server checks which database file a SQLite or DuckDB

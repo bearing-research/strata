@@ -390,8 +390,8 @@ class TestTheRoute:
         events = httpx.get(f"{base_url}/v1/events", timeout=10).json()["events"]
 
         assert [(e["action"], e["value"]) for e in events] == [
-            ("publish", published["token"]),
-            ("credit", published["token"]),
+            ("publish", published["id"]),
+            ("credit", published["id"]),
         ]
 
     def test_patching_an_unknown_token_is_a_404(self, served):

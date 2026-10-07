@@ -21,6 +21,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from strata.file_modes import PASS_THROUGH_DIR, private_dir
 from strata.notebook.authorship import MAX_AUTHOR_LENGTH, resolve_author
 from strata.notebook.dependencies import (
     export_requirements_text,
@@ -256,7 +257,8 @@ def _get_caller_storage_root(request: Request | None) -> Path | None:
     tenant_dir = _caller_tenant_dir()
     if tenant_dir is not None:
         tenant_root = base / tenant_dir
-        tenant_root.mkdir(parents=True, exist_ok=True)
+        # The harness user must reach the notebooks inside, but not list them.
+        private_dir(tenant_root, PASS_THROUGH_DIR)
         return tenant_root
     return base
 

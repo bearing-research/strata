@@ -598,7 +598,14 @@ def cmd_publish(args: argparse.Namespace) -> int:
             f"(which mints a new token)."
         )
 
-    print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+    if publication.token:
+        print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+    else:
+        # The store keeps only the token's hash, so an existing grant's link cannot be shown.
+        print(
+            f"{artifact.id}@v={artifact.version} was already published (id {publication.id}). "
+            "Its link was shown when it was minted; unpublish and publish again for a new one."
+        )
     # Always, not only after a copy: a caller never told where the grant lives cannot tell a working
     # link from one their own server will never resolve.
     print(f"Published into {destination}.")
@@ -621,7 +628,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
         if getattr(args, "tenant", None):
             command += ["--tenant", args.tenant]
         print()
-        print(f"Withdraw it with: {shlex.join([*command, publication.token])}")
+        print(f"Withdraw it with: {shlex.join([*command, publication.token or publication.id])}")
     return 0
 
 

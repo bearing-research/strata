@@ -430,7 +430,7 @@ class TestPublish:
                 here=False,
             )
         )
-        token = chain_store["store"].list_publications()[0].token
+        token = chain_store["store"].list_publications()[0].id
 
         assert cmd_unpublish(_args(token=token, artifact_dir=chain_store["dir"])) == 0
         assert "Withdrawn" in capsys.readouterr().out
