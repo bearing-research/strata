@@ -464,9 +464,10 @@ strata apikey revoke <key_id>
 
 The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
 shown again, by you or by us, and a database disclosure yields no usable
-credentials. Pass `--dsn` (or set `STRATA_ARTIFACT_METADATA_DSN`) when the
-metadata lives on Postgres, so the CLI writes where the server reads;
-`--artifact-dir` reads one local SQLite store instead. `create
+credentials. The command opens the store the server is configured with
+(`[tool.strata]` and `STRATA_*`: its `artifact_dir` and metadata DSN), so it
+writes where the server reads; `--artifact-dir` opens one local SQLite store
+instead, and `--dsn` names a Postgres metadata store directly. `create
 --expires-in-days N` sets an expiry (none by default); `list --principal`
 filters to one principal and `--format json` prints JSON.
 

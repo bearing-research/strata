@@ -199,8 +199,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "--dsn",
             default=None,
             help=(
-                "Postgres DSN for the metadata backend. Defaults to "
-                "STRATA_ARTIFACT_METADATA_DSN, then SQLite under --artifact-dir."
+                "Postgres DSN for the metadata backend. Defaults to the "
+                "configured one (STRATA_ARTIFACT_METADATA_DSN) unless "
+                "--artifact-dir is given."
             ),
         )
 
