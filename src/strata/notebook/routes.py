@@ -900,7 +900,7 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
             )
         if req.starter_cell:
             with timing.phase("create_starter_cell"):
-                add_cell_to_notebook(notebook_dir, str(uuid.uuid4()))
+                add_cell_to_notebook(notebook_dir, str(uuid.uuid4())[:8])
         _, opened_by = _reuse_open_session_by_path()
         with timing.phase("session_open"):
             session = _session_manager.open_notebook(
