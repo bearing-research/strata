@@ -196,6 +196,8 @@ def test_the_persisted_manifest_keeps_the_deletes(tmp_path, table, attach):
     """After a restart the planner resolves the snapshot from SQLite, not pyiceberg."""
     attach(_delete_file(tmp_path / "d.parquet", {table["data_file"]: [1, 5, 8]}))
     config = _config(tmp_path)
+    # Loading a config creates no directories; the server makes them at startup.
+    config.cache_dir.mkdir(parents=True)
     store = MetadataStore(config.cache_dir / "metadata.sqlite")
     ReadPlanner(config, manifest_cache=ManifestCache(store=store)).plan(table["uri"])
 

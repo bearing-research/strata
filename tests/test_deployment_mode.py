@@ -34,15 +34,21 @@ class TestDeploymentModeConfig:
         error_str = str(exc_info.value)
         assert "'service'" in error_str or "'personal'" in error_str
 
-    def test_personal_mode_creates_artifact_dir(self, tmp_path):
-        # A custom artifact_dir keeps the test out of the home directory.
+    def test_personal_mode_creates_artifact_dir_at_startup_only(self, tmp_path):
+        # Custom dirs keep the test out of the home directory.
         artifact_dir = tmp_path / "artifacts"
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
+            metadata_db=tmp_path / "meta" / "meta.sqlite",
+            notebook_storage_dir=tmp_path / "notebooks",
             deployment_mode="personal",
             artifact_dir=artifact_dir,
         )
         assert config.artifact_dir == artifact_dir
+        assert not artifact_dir.exists()
+
+        config.create_directories()
+
         assert artifact_dir.exists()
 
     def test_service_mode_no_artifact_dir(self, tmp_path):
