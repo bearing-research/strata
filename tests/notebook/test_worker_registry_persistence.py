@@ -280,11 +280,12 @@ class TestImportFromTheFile:
 
 
 class TestHealthCachePruning:
-    def test_entries_for_removed_workers_are_dropped(self, server):
+    def test_entries_for_removed_workers_are_dropped(self, server, monkeypatch):
         from strata.notebook import workers as workers_mod
 
-        # The cache is module-global and other tests populate it, so this
-        # asserts on the two keys it owns rather than on a total.
+        # The live key survives pruning, so a sentinel left in the real cache
+        # would be read as a health record by a later test.
+        monkeypatch.setattr(workers_mod, "_worker_health_cache", {})
         replace_server_managed_worker_records([ManagedWorkerRecord(_worker("gpu-a100"), True)])
         live_url = workers_mod._health_url_for_worker(_worker("gpu-a100"))
         retired_url = "http://retired.internal:9000/health"

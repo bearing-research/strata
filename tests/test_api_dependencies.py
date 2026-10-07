@@ -224,12 +224,23 @@ class TestArtifactListPaginationIsBounded:
         """Callers are handed superseded versions, so they can list them."""
         from fastapi.testclient import TestClient
 
+        from strata.artifact_store import ArtifactStore
         from strata.server import app
 
         _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
+        store = ArtifactStore(tmp_path / "artifacts")
+        for _ in range(2):
+            version = store.create_artifact("refreshed", "same-prov")
+            store.finalize_artifact("refreshed", version, "{}", 1, 10)
         client = TestClient(app)
 
-        assert client.get("/v1/artifacts", params={"state": "superseded"}).status_code == 200
+        def listed(state: str) -> list[tuple[int, str]]:
+            response = client.get("/v1/artifacts", params={"state": state})
+            assert response.status_code == 200
+            return [(a["version"], a["state"]) for a in response.json()["artifacts"]]
+
+        assert listed("superseded") == [(1, "superseded")]
+        assert listed("ready") == [(2, "ready")]
         assert client.get("/v1/artifacts", params={"state": "bogus"}).status_code == 400
 
     def test_stats_and_usage_count_superseded_versions(self, tmp_path):

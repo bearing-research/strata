@@ -5,7 +5,7 @@ They spawn the real harness subprocess against a real notebook venv.
 
 from __future__ import annotations
 
-import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -288,19 +288,35 @@ async def test_the_parents_own_work_is_not_charged_to_a_cell(tmp_path: Path, mon
     session = _make_session_with_cells(tmp_path, [("c1", "x = 1\n")])
     specs = _populate_consumed_vars([_cell_spec("c1", "x = 1\n")], session)
 
+    import strata.notebook.executor as executor_module
+
+    class _Clock:
+        """The executor's ``time`` with a wall clock the test can move forward."""
+
+        offset = 0.0
+
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+        def time(self) -> float:
+            return time.time() + self.offset
+
+    clock = _Clock()
+    monkeypatch.setattr(executor_module, "time", clock)
+
     executor = CellExecutor(session)
     real_cache_check = executor._batch_service_cache_check
 
     async def slow_cache_check(*args, **kwargs):
-        # Past the cell timeout below. The timeout itself is generous: what
-        # still counts is the harness's own work (starting Python, running
-        # the cell, serializing), which a loaded machine can stretch past 2s.
-        await asyncio.sleep(10.0)
+        # An hour of the parent's time passes, far past the cell timeout, with
+        # no real waiting; the timeout is wide enough that the harness's own
+        # work never reaches it on a loaded machine.
+        clock.offset += 3600.0
         return await real_cache_check(*args, **kwargs)
 
     monkeypatch.setattr(executor, "_batch_service_cache_check", slow_cache_check)
 
-    result = await executor.execute_batch(specs, cell_timeout_seconds=8.0)
+    result = await executor.execute_batch(specs, cell_timeout_seconds=600.0)
 
     assert result.completed, (result.end_reason, result.failed_cell_id)
     assert {r.cell_id: r.status for r in result.cell_results} == {"c1": "ok"}

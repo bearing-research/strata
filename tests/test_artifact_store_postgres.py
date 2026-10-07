@@ -1076,14 +1076,14 @@ class TestWriterSerialization:
             try:
                 store._audit_in_connection(conn, action="name_set", name="slow")
                 inserted.set()
-                release.wait()
+                assert release.wait(30)
                 conn.commit()
             finally:
                 conn.close()
 
         slow = threading.Thread(target=slow_writer)
         slow.start()
-        inserted.wait()
+        assert inserted.wait(30)
         tagging = threading.Thread(target=store.set_tag, args=("m1", version, "k", "v"))
         tagging.start()
         probe = store._get_connection()
@@ -1127,7 +1127,7 @@ class TestWriterSerialization:
             try:
                 store._serialize_audit(conn)
                 locked.set()
-                release.wait()
+                assert release.wait(30)
                 conn.execute("DELETE FROM artifact_names WHERE name = ?", ("current",))
                 store._audit_in_connection(conn, action="name_delete", name="current")
                 conn.commit()
@@ -1144,7 +1144,7 @@ class TestWriterSerialization:
 
         names = threading.Thread(target=name_deleter)
         names.start()
-        locked.wait()
+        assert locked.wait(30)
         deleting = threading.Thread(target=artifact_deleter)
         deleting.start()
         probe = store._get_connection()
