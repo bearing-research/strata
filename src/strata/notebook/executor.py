@@ -5301,6 +5301,11 @@ class CellExecutor:
         if use_cache:
             cached = self._cached_loop_result(cell_id, loop, cell_provenance, start_time)
             if cached is not None:
+                from strata.notebook.runtime_state import persist_cell_loop_run
+
+                # A hit serves an earlier run, not the one last started; let the steps on
+                # disk speak for themselves again.
+                persist_cell_loop_run(self.session.path, cell_id, None)
                 return cached
 
         try:
@@ -5334,6 +5339,9 @@ class CellExecutor:
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
         loop_run = uuid.uuid4().hex
+        from strata.notebook.runtime_state import persist_cell_loop_run
+
+        persist_cell_loop_run(self.session.path, cell_id, loop_run)
         combined_stdout: list[str] = []
         combined_stderr: list[str] = []
         all_mutation_warnings: list[MutationWarning] = []
@@ -5684,9 +5692,18 @@ class CellExecutor:
                     f"Run that cell through iteration {loop.start_from_iter} first."
                 )
             # Every run rewrites @iter=0, so a step whose run token differs from it is
-            # left over from an older, longer run.
+            # left over from an older, longer run. A run that failed at iteration 0
+            # rewrote nothing; the token recorded at its start catches that.
+            from strata.notebook.runtime_state import load_runtime_state
+
             first = artifact_mgr.get_iteration_artifact(loop.start_from_cell, loop.carry, 0)
-            if first is None or _loop_run_token(first) != _loop_run_token(artifact):
+            started = load_runtime_state(self.session.path).cells.get(loop.start_from_cell)
+            latest_run = started.loop_run if started is not None else None
+            if (
+                first is None
+                or _loop_run_token(first) != _loop_run_token(artifact)
+                or (latest_run is not None and latest_run != _loop_run_token(artifact))
+            ):
                 raise ValueError(
                     f"Loop seed start_from={loop.start_from_cell}@iter={loop.start_from_iter} "
                     f"is left over from an older run of cell {loop.start_from_cell}: its "

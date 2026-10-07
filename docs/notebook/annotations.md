@@ -526,8 +526,8 @@ Key/value parameters:
   `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids). The fork
   depends on that cell: when its result changes, the fork runs again.
   Iteration `k` must come from that cell's latest run: if the latest run
-  stopped before `k` (a lower `max_iter`, an earlier `@loop_until` exit),
-  the fork fails rather than seed from a step an older run left behind.
+  stopped before `k` (a lower `max_iter`, an earlier `@loop_until` exit, a
+  failure), the fork fails rather than seed from a step an older run left behind.
 - `until=<expr>`, (optional) the same early exit as `@loop_until`, inline.
   Parameters are split on whitespace, so the expression cannot contain a
   space (`until=acc["loss"]<0.05`); use `@loop_until` for anything longer.
