@@ -179,6 +179,8 @@ class TestWarehouseWithNoCatalogOnAService:
 
         config = StrataConfig(
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             transforms_config={"enabled": True},
             cache_dir=tmp_path / "cache",
             artifact_dir=tmp_path / "artifacts",
@@ -186,7 +188,11 @@ class TestWarehouseWithNoCatalogOnAService:
         )
         monkeypatch.setattr(server_module, "_state", ServerState(config))
         reset_artifact_store()
-        client = TestClient(app, raise_server_exceptions=False)
+        client = TestClient(
+            app,
+            raise_server_exceptions=False,
+            headers={"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"},
+        )
         try:
             response = client.post("/v1/materialize", json=_transform("s3://lake/wh#ns.events"))
         finally:

@@ -14,6 +14,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from tests.conftest import service_auth
+
 pytest.importorskip("duckdb")
 
 from strata.config import StrataConfig  # noqa: E402
@@ -680,7 +682,9 @@ class TestNotebookCatalogs:
     def test_service_mode_refuses_one_naming_notebook_toml(self, tmp_path, monkeypatch):
         from strata.notebook.sql.lake import LakeError
 
-        session, _ = self._session(tmp_path, monkeypatch, StrataConfig(deployment_mode="service"))
+        session, _ = self._session(
+            tmp_path, monkeypatch, StrataConfig(deployment_mode="service", **service_auth())
+        )
 
         with pytest.raises(LakeError, match="defined in notebook.toml"):
             self._resolve(session)

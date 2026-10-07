@@ -27,6 +27,8 @@ def server_mode_config(tmp_path):
         host="127.0.0.1",
         port=8765,
         deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
         cache_dir=tmp_path / "cache",
         artifact_dir=artifact_dir,
         notebook_storage_dir=tmp_path,
@@ -131,7 +133,7 @@ def server_mode_app(server_mode_config):
     original_state = server_module._state
     server_module._state = mock_state
 
-    yield TestClient(app)
+    yield TestClient(app, headers=_auth_headers(scopes="admin:*"))
 
     server_module._state = original_state
     reset_artifact_store()
@@ -803,7 +805,7 @@ class TestTransformValidation:
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "local://duckdb_sql@v1",
                     "params": {"sql": "SELECT * FROM input"},
@@ -824,7 +826,7 @@ class TestTransformValidation:
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "local://unknown_executor@v1",
                     "params": {},
@@ -842,7 +844,7 @@ class TestTransformValidation:
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "local://allowed_transform@v99",
                     "params": {},
@@ -862,7 +864,7 @@ class TestTransformValidation:
         response = personal_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "local://any_executor@v1",
                     "params": {"sql": "SELECT 1"},
@@ -892,7 +894,7 @@ class TestTransformValidation:
         response = server_mode_auth_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "local://restricted_transform@v1",
                     "params": {},
@@ -934,7 +936,8 @@ class TestTransformValidation:
 
         import strata.server as server_module
         from strata.api.routers.materialize import materialize_artifact
-        from strata.types import MaterializeRequest
+        from strata.auth import principal_context
+        from strata.types import MaterializeRequest, Principal
 
         reset_artifact_store()
         reset_transform_registry()
@@ -986,17 +989,18 @@ class TestTransformValidation:
         monkeypatch.setattr("strata.transforms.build_qos.get_build_qos", lambda: qos)
 
         try:
-            response = await materialize_artifact(
-                MaterializeRequest.model_validate(
-                    {
-                        "inputs": ["file:///fake/table"],
-                        "transform": {
-                            "executor": "local://duckdb_sql@v1",
-                            "params": {"sql": "SELECT * FROM input"},
-                        },
-                    }
+            with principal_context(Principal(id="user-1", scopes=frozenset({"admin:*"}))):
+                response = await materialize_artifact(
+                    MaterializeRequest.model_validate(
+                        {
+                            "inputs": ["file:///fake/wh#db.events"],
+                            "transform": {
+                                "executor": "local://duckdb_sql@v1",
+                                "params": {"sql": "SELECT * FROM input"},
+                            },
+                        }
+                    )
                 )
-            )
 
             assert response.status_code == 429
             assert response.body
@@ -1021,7 +1025,7 @@ class TestAsyncBuildFlow:
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "duckdb_sql@v1",
                     "params": {"sql": "SELECT * FROM t"},
@@ -1041,7 +1045,7 @@ class TestAsyncBuildFlow:
         create_resp = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "duckdb_sql@v1",
                     "params": {},
@@ -1082,7 +1086,7 @@ class TestProvenanceDeduplication:
         resp1 = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "duckdb_sql@v1",
                     "params": {"sql": "SELECT * FROM t"},
@@ -1111,7 +1115,7 @@ class TestProvenanceDeduplication:
         resp2 = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///fake/table"],
+                "inputs": ["file:///fake/wh#db.events"],
                 "transform": {
                     "executor": "duckdb_sql@v1",
                     "params": {"sql": "SELECT * FROM t"},
@@ -1199,13 +1203,17 @@ class TestServerModeConfig:
         """server_transforms_enabled is True with the right config."""
         config = StrataConfig(
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             artifact_dir=tmp_path / "artifacts",  # transforms persist; store required
             transforms_config={"enabled": True},
         )
         assert config.server_transforms_enabled is True
 
     def test_server_transforms_disabled_by_default(self):
-        config = StrataConfig(deployment_mode="service")
+        config = StrataConfig(
+            deployment_mode="service", auth_mode="trusted_proxy", proxy_token="test-token"
+        )
         assert config.server_transforms_enabled is False
 
     def test_server_transforms_disabled_in_personal_mode(self):
@@ -1257,6 +1265,8 @@ class TestMixedModeScenarios:
 
         config = StrataConfig(
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             cache_dir=tmp_path / "cache",
             artifact_dir=tmp_path / "artifacts",
         )
@@ -1269,13 +1279,13 @@ class TestMixedModeScenarios:
         original_state = server_module._state
         server_module._state = mock_state
 
-        client = TestClient(app)
+        client = TestClient(app, headers=_auth_headers(scopes="admin:*"))
 
         try:
             response = client.post(
                 "/v1/artifacts/materialize",
                 json={
-                    "inputs": ["file:///fake/table"],
+                    "inputs": ["file:///fake/wh#db.events"],
                     "transform": {"executor": "duckdb_sql@v1", "params": {}},
                 },
             )
@@ -1393,7 +1403,9 @@ class TestServiceModeReviewFindings:
 
         try:
             async with AsyncClient(
-                transport=ASGITransport(app=server_module.app), base_url="http://test"
+                transport=ASGITransport(app=server_module.app),
+                base_url="http://test",
+                headers=_auth_headers(scopes="admin:*"),
             ) as client:
                 materialize = asyncio.create_task(
                     client.post(
@@ -1440,7 +1452,9 @@ class TestServiceModeReviewFindings:
 
         try:
             async with AsyncClient(
-                transport=ASGITransport(app=server_module.app), base_url="http://test"
+                transport=ASGITransport(app=server_module.app),
+                base_url="http://test",
+                headers=_auth_headers(scopes="admin:*"),
             ) as client:
                 response = await client.post(
                     "/v1/artifacts/materialize",

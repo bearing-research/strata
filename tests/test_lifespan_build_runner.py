@@ -53,7 +53,11 @@ def test_a_lifespan_that_started_no_runner_does_not_stop_someone_elses(boot):
     foreign = _ForeignRunner()
     set_build_runner(foreign)
 
-    boot(STRATA_DEPLOYMENT_MODE="service")
+    boot(
+        STRATA_DEPLOYMENT_MODE="service",
+        STRATA_AUTH_MODE="trusted_proxy",
+        STRATA_PROXY_TOKEN="test-token",
+    )
 
     assert foreign.stop_calls == 0
     # Still cleared: leaving it registered is how the next lifespan would inherit it.
@@ -70,6 +74,10 @@ def test_a_lifespan_stops_the_runner_it_started(boot):
 
 def test_two_lifespans_in_one_process_leave_nothing_registered(boot):
     boot(STRATA_DEPLOYMENT_MODE="personal")
-    boot(STRATA_DEPLOYMENT_MODE="service")
+    boot(
+        STRATA_DEPLOYMENT_MODE="service",
+        STRATA_AUTH_MODE="trusted_proxy",
+        STRATA_PROXY_TOKEN="test-token",
+    )
 
     assert get_build_runner() is None

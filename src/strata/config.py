@@ -849,6 +849,16 @@ class StrataConfig(BaseSettings):
         if self.deployment_mode == "service":
             conflicts: list[str] = []
 
+            # Service mode serves a network: with no auth every route, notebook
+            # execution and the admin worker registry included, is open to anyone.
+            if not self.principal_auth_enabled:
+                conflicts.append(
+                    "auth_mode='none' (every route, including cell execution and "
+                    "the admin worker registry, would be open to anyone who "
+                    "reaches the server; set STRATA_AUTH_MODE to 'trusted_proxy' "
+                    "or 'api_key')"
+                )
+
             # Multi-tenancy is an access-control boundary: without auth the tenant header is
             # spoofable and direct artifact reads aren't tenant-filtered.
             if self.multi_tenant_enabled and not self.principal_auth_enabled:

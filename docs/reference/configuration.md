@@ -345,7 +345,7 @@ writing build rows directly.
 
 | Variable                             | Default              | Description                          |
 | ------------------------------------ | -------------------- | ------------------------------------ |
-| `STRATA_AUTH_MODE`                   | `none`               | `none`, `trusted_proxy`, or `api_key` |
+| `STRATA_AUTH_MODE`                   | `none`               | `none`, `trusted_proxy`, or `api_key`; service mode refuses to start with `none` |
 | `STRATA_PROXY_TOKEN`                 | `None`               | Shared secret for proxy verification |
 | `STRATA_PROXY_TOKEN_HEADER`          | `X-Strata-Proxy-Token` | Header carrying the proxy token     |
 | `STRATA_PRINCIPAL_HEADER`            | `X-Strata-Principal` | Header for user identity             |
