@@ -38,6 +38,7 @@ from strata.notebook.models import (
     MountSpec,
     WorkerSpec,
 )
+from strata.notebook.languages.analyzer import require_sql_extra
 from strata.notebook.python_versions import (
     current_python_minor,
     normalize_python_minor,
@@ -2186,6 +2187,10 @@ async def update_notebook_connections_endpoint(
     literals are scrubbed on write, and the response reflects disk, so the UI sees
     the blanked secrets.
     """
+    try:
+        require_sql_extra()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     from strata.notebook.sql.cell_executor import database_problem
 
     seen: set[str] = set()
@@ -2816,6 +2821,8 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         )
 
     try:
+        if req.language == CellLanguage.SQL:
+            require_sql_extra()
         cell_id = str(uuid.uuid4())[:8]
 
         add_cell_to_notebook(

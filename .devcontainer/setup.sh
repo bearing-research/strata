@@ -12,4 +12,5 @@ set -euo pipefail
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
-uv tool install strata-notebook
+# The sql extras let the Codespace add SQL cells against SQLite and DuckDB.
+uv tool install 'strata-notebook[sql,sql-duckdb,sql-sqlite]'

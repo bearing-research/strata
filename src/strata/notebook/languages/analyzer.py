@@ -6,6 +6,7 @@ session dispatches every cell's defines/references extraction through it.
 
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -103,6 +104,23 @@ class _PromptAnalyzer:
         )
 
 
+_SQL_EXTRA_MISSING = (
+    "SQL cells need the sql extra, which this server does not have: install "
+    "strata-notebook[sql] plus a driver extra for each database (for example sql-duckdb, "
+    "sql-sqlite)."
+)
+
+
+def require_sql_extra() -> None:
+    """Raise ``ValueError`` naming the sql extra when this server does not have it.
+
+    Checked before a SQL cell or connection is written: once one is in notebook.toml,
+    every open of the notebook fails.
+    """
+    if importlib.util.find_spec("sqlglot") is None:
+        raise ValueError(_SQL_EXTRA_MISSING)
+
+
 class _SqlAnalyzer:
     """Adapter over ``strata.notebook.sql.analyzer.analyze_sql_cell``.
 
@@ -118,11 +136,7 @@ class _SqlAnalyzer:
         except ModuleNotFoundError as exc:
             if exc.name != "sqlglot":
                 raise
-            raise ValueError(
-                f"Cell {cell.id} is a SQL cell, and SQL cells need the sql extra, which "
-                "this server does not have: install strata-notebook[sql] plus a driver "
-                "extra for each database (for example sql-duckdb, sql-sqlite)."
-            ) from exc
+            raise ValueError(f"Cell {cell.id} is a SQL cell, and {_SQL_EXTRA_MISSING}") from exc
 
         result = analyze_sql_cell(cell.source)
         return AnalyzedCell(

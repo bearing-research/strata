@@ -564,6 +564,7 @@ class LocalNotebookOps:
         """Add a new cell (see :meth:`NotebookOps.add_cell`)."""
         import uuid
 
+        from strata.notebook.languages.analyzer import require_sql_extra
         from strata.notebook.writer import add_cell_to_notebook, write_cell
 
         if language not in self._LANGUAGES:
@@ -572,6 +573,11 @@ class LocalNotebookOps:
             )
         if after is not None and self._session.notebook_state.get_cell(after) is None:
             raise NotebookOpsError(f"no cell with id {after!r} to insert after")
+        if language == "sql":
+            try:
+                require_sql_extra()
+            except ValueError as exc:
+                raise NotebookOpsError(str(exc)) from exc
         cell_id = str(uuid.uuid4())[:8]
         add_cell_to_notebook(
             self.notebook_dir, cell_id, after, language=language, author=self.author
