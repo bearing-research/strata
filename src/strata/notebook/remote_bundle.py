@@ -7,7 +7,7 @@ import json
 import os
 import tarfile
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 from strata.notebook.harness_user import open_run_file, write_run_file
 
@@ -29,7 +29,7 @@ def _max_bundle_member_bytes() -> int:
     return parsed if parsed > 0 else _DEFAULT_MAX_BUNDLE_MEMBER_BYTES
 
 
-def _open_tar(bundle: Path | BinaryIO, mode: str) -> tarfile.TarFile:
+def _open_tar(bundle: Path | BinaryIO, mode: Literal["r", "w"]) -> tarfile.TarFile:
     if isinstance(bundle, Path):
         return tarfile.open(bundle, mode)
     return tarfile.open(fileobj=bundle, mode=mode)
