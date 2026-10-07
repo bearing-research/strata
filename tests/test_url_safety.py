@@ -131,6 +131,11 @@ class TestPinning:
             "100.64.0.1",
             "100.100.100.200",
             "100.127.255.254",
+            # NAT64 prefixes embedding 169.254.169.254 and 127.0.0.1: inside ::/8, so
+            # reserved, though Python calls 64:ff9b::/96 global.
+            "64:ff9b::a9fe:a9fe",
+            "64:ff9b::7f00:1",
+            "64:ff9b:1::a9fe:a9fe",
         ],
     )
     def test_a_name_that_resolves_to_a_private_address_is_not_connected(
