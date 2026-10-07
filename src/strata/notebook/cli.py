@@ -1382,7 +1382,8 @@ def cell_add_main(args: argparse.Namespace) -> int:
     if args.run:
         import asyncio
 
-        return asyncio.run(_cell_add_run_async(args, source))
+        with _quiet_notebook_logs():
+            return asyncio.run(_cell_add_run_async(args, source))
 
     with _read_ops(args) as ops:
         if ops is None:
@@ -1892,7 +1893,8 @@ async def _prepare_env_for_ops(ops: object, args: argparse.Namespace) -> int:
 def cell_run_main(args: argparse.Namespace) -> int:
     import asyncio
 
-    return asyncio.run(_cell_run_async(args))
+    with _quiet_notebook_logs():
+        return asyncio.run(_cell_run_async(args))
 
 
 async def _cell_run_async(args: argparse.Namespace) -> int:
