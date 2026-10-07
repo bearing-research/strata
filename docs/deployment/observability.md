@@ -108,8 +108,12 @@ Logs are structured JSON by default (`STRATA_LOG_FORMAT=json`;
 `level`, `logger`, `message`, `timestamp` (Unix seconds), and the
 request's context fields: `request_id`, `method`, `path`, `tenant_id`,
 and `trace_id` / `span_id` when tracing is on.
-Pipe `docker compose logs strata` through `jq` for readable
-output.
+uvicorn's own startup and access lines stay plain text, so keep only
+the JSON records before reading them with `jq`:
+
+```bash
+docker compose logs --no-log-prefix strata | jq -R 'fromjson? // empty'
+```
 
 ### Web UI: Logs & Artifacts pages
 

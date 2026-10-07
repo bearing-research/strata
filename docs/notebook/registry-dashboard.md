@@ -35,7 +35,7 @@ the registry with full audit + lineage - without leaving the notebook.
 Start the server and open it in a browser:
 
 ```bash
-python -m strata          # serves the bundled UI on http://localhost:8765
+strata-notebook           # serves the bundled UI on http://localhost:8765
 ```
 
 Open **http://localhost:8765** and open (or create) a notebook.
@@ -143,7 +143,7 @@ To require a human for sensitive promotions, mark aliases protected when you
 start the server:
 
 ```bash
-STRATA_REGISTRY_PROTECTED_ALIASES=champion,production python -m strata
+STRATA_REGISTRY_PROTECTED_ALIASES=champion,production strata-notebook
 ```
 
 Now a promote to `champion` (step 4) returns **`⏳ pending`** instead of applying.

@@ -310,7 +310,7 @@ existing SQLite metadata is not carried over automatically. To move one:
 
 ```bash
 # 1. Boot once against the target so the stores create their schema.
-STRATA_ARTIFACT_METADATA_DSN='postgresql://...' python -m strata   # then stop it
+STRATA_ARTIFACT_METADATA_DSN='postgresql://...' strata-notebook   # then stop it
 
 # 2. See what would move.
 strata migrate --to-dsn 'postgresql://...' --dry-run
