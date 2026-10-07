@@ -919,7 +919,6 @@ async def lifespan(app: FastAPI):
         artifact_store = get_artifact_store(artifact_dir)
         # Build rows live in the artifact database, so on Postgres they must
         # land there too, not in a node-local SQLite file.
-        artifact_store = get_artifact_store(artifact_dir)
         build_store = get_build_store(
             artifact_dir / "artifacts.sqlite",
             dialect=artifact_store.dialect if artifact_store else None,
