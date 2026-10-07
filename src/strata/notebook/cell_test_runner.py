@@ -53,6 +53,7 @@ def run_cell_tests_in_dir(
     inputs: dict[str, Any],
     input_dir: Path,
     mounts: dict[str, str] | None = None,
+    tables: dict[str, dict[str, Any]] | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     env: dict[str, str] | None = None,
     run_as: HarnessUser | None = None,
@@ -61,7 +62,8 @@ def run_cell_tests_in_dir(
 
     ``inputs`` maps each upstream variable to its ``{content_type, file}`` spec, the
     file in *input_dir*. The test process deserializes them: the server never does.
-    ``mounts`` maps each mount and ``@fetch`` name to the local path bound to it.
+    ``mounts`` maps each mount and ``@fetch`` name to the local path bound to it, and
+    ``tables`` each ``@table`` name to its ``{uri, snapshot_id}``.
 
     The dict has totals (``passed``/``failed``/``errored``/``skipped``) plus a
     ``tests`` list of ``{name, nodeid, outcome, message}``. ``env`` and ``run_as``
@@ -81,6 +83,7 @@ def run_cell_tests_in_dir(
         "input_dir": str(input_dir),
         "inputs": inputs,
         "mounts": mounts or {},
+        "tables": tables or {},
     }
     (rundir / "inputs.json").write_text(json.dumps(manifest), encoding="utf-8")
     test_file = rundir / "test_cell.py"

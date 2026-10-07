@@ -3,8 +3,9 @@
 Named ``cell_test_conftest`` so the project's own pytest run does not load it;
 the cell-test runner copies it to ``<rundir>/conftest.py``. The run dir also
 holds ``inputs.json`` (the serializer's path, the input dir, a
-``{var_name: {content_type, file}}`` map and a ``{name: local_path}`` map of
-mounts and fetches), ``cell_source.py``, the
+``{var_name: {content_type, file}}`` map, a ``{name: local_path}`` map of
+mounts and fetches and a ``{name: {uri, snapshot_id}}`` map of tables),
+``cell_source.py``, the
 user's tests staged as ``test_<cell>.py`` (so pytest rewrites their asserts),
 and the ``results.json`` this plugin writes on session finish.
 """
@@ -43,6 +44,10 @@ def _load_inputs() -> dict[str, object]:
     # Mounts and fetches are bound as ``Path`` objects, as in a run.
     for name, local_path in manifest.get("mounts", {}).items():
         inputs[name] = Path(local_path)
+    # ``@table`` binds the URI and its snapshot id, as the harness does.
+    for name, table in manifest.get("tables", {}).items():
+        inputs[name] = table["uri"]
+        inputs[f"{name}_snapshot"] = table["snapshot_id"]
     return inputs
 
 

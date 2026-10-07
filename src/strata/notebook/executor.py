@@ -600,18 +600,24 @@ class CellExecutor:
         source = cell.source
         await self._materialize_upstreams(cell_id)
 
-        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
-            cell_id, source, test_source
-        )
-        # The same fetch, mount and env inputs a run of the cell gets.
+        # The same fetch, mount, dataset, table and env inputs a run of the cell gets.
         annotations = parse_annotations(source)
         mount_specs = self._resolve_cell_mount_specs(cell_id, source)
-        _, fetched, _, _, _, _ = await self._resolve_fetches(annotations.fetches)
+        prov = await self._compute_cell_provenance(
+            cell_id, source, annotations=annotations, mount_specs=mount_specs
+        )
+        problem = prov.fetch_error or prov.dataset_error
+        tables: dict[str, dict[str, Any]] = {}
+        if problem is None:
+            try:
+                tables = self._manifest_tables(annotations.tables, prov.table_snapshots)
+            except RuntimeError as exc:
+                problem = str(exc)
         mount_specs = [
             *mount_specs,
             *(
                 MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
-                for name, path in fetched.items()
+                for name, path in prov.fetched.items()
             ),
         ]
         resolved_mounts = await self._prepare_mounts(mount_specs)
@@ -624,13 +630,15 @@ class CellExecutor:
         try:
             harness_user = resolve_harness_user()
         except LocalExecutionRefused as exc:
+            problem = str(exc)
+        if problem is not None:
             refused = {
                 "passed": 0,
                 "failed": 0,
                 "errored": 1,
                 "skipped": 0,
                 "tests": [
-                    {"name": "<refused>", "nodeid": "", "outcome": "error", "message": str(exc)}
+                    {"name": "<refused>", "nodeid": "", "outcome": "error", "message": problem}
                 ],
             }
 
@@ -640,6 +648,7 @@ class CellExecutor:
             blob_dir = Path(tmp) / "inputs"
             blob_dir.mkdir()
             input_specs = self._load_input_blobs(cell_id, blob_dir)
+            self._add_dataset_inputs(input_specs, prov.datasets, blob_dir)
 
             # The run directory is created inside this server-private one; a harness user must
             # reach it.
@@ -654,6 +663,7 @@ class CellExecutor:
                     inputs=input_specs,
                     input_dir=blob_dir,
                     mounts={name: str(rm.local_path) for name, rm in resolved_mounts.items()},
+                    tables=tables,
                     env=identity_env(self._harness_env(runtime_env), harness_user),
                     run_as=harness_user,
                 )
@@ -691,6 +701,10 @@ class CellExecutor:
                     pytest_unavailable = True
                     raw = empty_raw
 
+        # After the run: a pytest auto-install can change the lockfile, which is an input.
+        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
+            cell_id, source, test_source
+        )
         result = CellTestResult(
             passed=raw["passed"],
             failed=raw["failed"],

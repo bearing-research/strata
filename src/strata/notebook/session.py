@@ -1321,12 +1321,32 @@ class NotebookSession:
     def cell_test_fingerprint(
         self, cell_id: str, source: str, test_source: str
     ) -> tuple[str, str, str]:
-        """``(cell source, test source, inputs)`` hashes a cell-test result is keyed by."""
-        input_hashes = self._collect_input_hashes(cell_id)
+        """``(cell source, test source, inputs)`` hashes a cell-test result is keyed by.
+
+        The inputs are what a run of the cell reads, as staleness fingerprints them:
+        upstreams, mounts, tables, fetches, datasets and the environment.
+        """
+        cell = self.notebook_state.get_cell(cell_id)
+        if cell is None:
+            raise FileNotFoundError(f"Cell {cell_id} not found")
+        outside = self._outside_world_for(cell)
+        env_hash = compute_execution_env_hash(
+            self.path,
+            self._collect_runtime_env(cell),
+            runtime_identity=self._effective_worker_runtime_identity(cell),
+        )
+        inputs = [
+            *sorted(self._collect_input_hashes(cell_id)),
+            *outside.mount_fingerprints,
+            *outside.table_fingerprints,
+            *outside.fetch_fingerprints,
+            *outside.dataset_fingerprints,
+            env_hash,
+        ]
         return (
             compute_source_hash(source),
             hashlib.sha256(test_source.encode("utf-8")).hexdigest(),
-            hashlib.sha256("|".join(sorted(input_hashes)).encode("utf-8")).hexdigest(),
+            hashlib.sha256("|".join(inputs).encode("utf-8")).hexdigest(),
         )
 
     def persist_display_outputs(

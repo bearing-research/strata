@@ -157,6 +157,90 @@ async def test_run_cell_tests_gets_fetch_mount_and_env_inputs(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_run_cell_tests_gets_dataset_inputs(notebook_personal_server):
+    """A ``@dataset`` name is bound in the test as in a run of the cell."""
+    from tests.notebook.test_dataset import _json_version
+
+    registry = notebook_personal_server["artifact_store"]
+    registry.set_name("taxi/model", "taxi-model", _json_version(registry, {"t": 3}))
+    source = "# @dataset model taxi/model\ndef score():\n    return model['t']\n"
+    session = _session_with([("cell1", source, None)])
+
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1", "def test_score(cell):\n    assert cell.score() == 3\n"
+    )
+
+    assert (result.passed, result.failed, result.errored) == (1, 0, 0), result.tests
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg local paths on Windows")
+async def test_run_cell_tests_gets_table_inputs(tmp_path):
+    """A ``@table`` binds its URI and snapshot id in the test as in a run of the cell."""
+    import pyarrow as pa
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField
+
+    warehouse = tmp_path / "warehouse"
+    warehouse.mkdir()
+    catalog = SqlCatalog(
+        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
+    )
+    catalog.create_namespace("db")
+    table = catalog.create_table(
+        "db.events", Schema(NestedField(1, "id", LongType(), required=False))
+    )
+    table.append(pa.table({"id": pa.array([1, 2], type=pa.int64())}))
+    snapshot_id = table.current_snapshot().snapshot_id
+    uri = f"file://{warehouse}#db.events"
+    session = _session_with(
+        [("cell1", f"# @table events {uri}\ndef read():\n    return events_snapshot\n", None)]
+    )
+
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1",
+        f"def test_read(cell):\n    assert cell.read() == {snapshot_id}\n"
+        f"    assert cell.events == {uri!r}\n",
+    )
+
+    assert (result.passed, result.failed, result.errored) == (1, 0, 0), result.tests
+
+
+@pytest.mark.asyncio
+async def test_a_changed_mount_or_env_marks_the_test_stale(tmp_path):
+    """The stale flag covers the mount and env inputs a test reads, not only upstreams."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "rows.txt").write_text("a\n")
+    source = (
+        f"# @mount data {data_dir.as_uri()} ro\n"
+        "import os\n"
+        "def summary():\n"
+        "    return ((data / 'rows.txt').read_text(), os.environ['TOKEN'])\n"
+    )
+    session = _session_with([("cell1", source, None)])
+    cell = session.notebook_state.get_cell("cell1")
+    cell.env = {"TOKEN": "t0"}
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1", "def test_summary(cell):\n    assert cell.summary() == ('a\\n', 't0')\n"
+    )
+    assert result.passed == 1, result.tests
+
+    def stale() -> bool:
+        return session.serialize_cell(cell)["test_result"]["stale"]
+
+    assert stale() is False
+    cell.env = {"TOKEN": "t1"}
+    assert stale() is True
+    cell.env = {"TOKEN": "t0"}
+    assert stale() is False
+    # Local mounts fingerprint sizes and mtimes.
+    (data_dir / "rows.txt").write_text("a\nb\n")
+    assert stale() is True
+
+
+@pytest.mark.asyncio
 async def test_the_stale_flag_is_computed_on_reopen():
     """Editing the cell, its tests or an upstream outside the editor shows stale after reopen."""
     session = _session_with(
