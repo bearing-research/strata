@@ -118,7 +118,10 @@ class TestDraining:
         polls = iter([True, True, False])
 
         def _running(self):
-            busy = next(polls, False)
+            # Only the drain's polls: a session sweep may also call this, after the hold.
+            busy = next(polls, None) if self.id == session_id else None
+            if busy is None:
+                return False
             # A write during the drain, as a finishing cell would make.
             observed.append(_writable(notebook_dir))
             return busy
@@ -128,7 +131,7 @@ class TestDraining:
         held = client.post(f"/v1/notebooks/{session_id}/quiesce", json={"timeout_seconds": 5})
 
         assert held.json()["cancelled_cells"] == {}
-        assert observed and all(observed)
+        assert observed == [True, True, True]
         assert not _writable(notebook_dir)
 
     def test_work_outliving_the_timeout_is_cancelled_and_named(self, client, tmp_path, monkeypatch):
