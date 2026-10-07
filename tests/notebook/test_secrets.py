@@ -413,8 +413,7 @@ def _install_fake_provider(
                 fetched_at="2026-04-22T00:00:00Z",
             )
 
-    registry._cache["infisical"] = _Fake()
-    monkeypatch.setattr(registry, "_cache", registry._cache)
+    monkeypatch.setitem(registry._cache, "infisical", _Fake())
 
 
 # --- Route surface ---
