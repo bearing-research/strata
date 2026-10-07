@@ -86,12 +86,29 @@ class TestTheArtifactStore:
 
 
 class TestTheCache:
-    def test_the_cache_dir_is_owner_only(self, tmp_path):
+    def test_building_a_config_leaves_the_cache_dir_mode_alone(self, tmp_path):
+        """Tests and tools build configs all the time; only a running cache narrows the dir."""
         from strata.config import StrataConfig
 
-        StrataConfig(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "a")
+        cache = tmp_path / "cache"
+        cache.mkdir(mode=0o755)
 
-        assert _mode(tmp_path / "cache") == 0o700
+        StrataConfig(cache_dir=cache, artifact_dir=tmp_path / "a")
+
+        assert _mode(cache) == 0o755
+
+    def test_server_startup_makes_the_cache_dir_owner_only(self, tmp_path):
+        from strata.config import StrataConfig
+        from strata.server import ServerState
+
+        cache = tmp_path / "cache"
+        cache.mkdir(mode=0o755)
+        state = ServerState(StrataConfig(cache_dir=cache, artifact_dir=tmp_path / "a"))
+        try:
+            assert _mode(cache) == 0o700
+        finally:
+            state._planning_executor.shutdown()
+            state._fetch_executor.shutdown()
 
 
 class TestANotebooksRuntimeState:

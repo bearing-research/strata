@@ -689,9 +689,7 @@ class StrataConfig(BaseSettings):
     @model_validator(mode="after")
     def setup_paths_and_defaults(self) -> StrataConfig:
         """Set up paths and defaults after model creation."""
-        from strata.file_modes import private_dir
-
-        private_dir(self.cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         if self.metadata_db is None:
             self.metadata_db = Path.home() / ".strata" / "meta.sqlite"
