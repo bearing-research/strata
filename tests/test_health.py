@@ -1,5 +1,6 @@
 """Tests for health check functionality."""
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -365,7 +366,9 @@ class TestReadinessProbesTheArtifactStore:
 
         assert status == 503
         assert body["checks"]["artifact_store"] is False
-        assert "connection refused" in body["checks"]["artifact_store_error"]
+        # The unauthenticated probe names the failure but never echoes its message.
+        assert body["checks"]["artifact_store_error"] == "ConnectionError"
+        assert "connection refused" not in json.dumps(body)
 
     @pytest.mark.asyncio
     async def test_a_store_that_never_answers_is_not_ready(self, ready, monkeypatch):

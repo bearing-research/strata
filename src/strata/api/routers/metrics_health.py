@@ -14,9 +14,12 @@ from strata.api.dependencies import require_scope
 from strata.cache_metrics import get_eviction_tracker
 from strata.gc_tracker import get_gc_stats
 from strata.health import HealthStatus, run_health_checks
+from strata.logging import get_logger
 from strata.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import get_rate_limiter
 from strata.tenant_registry import get_tenant_registry
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["metrics"])
 
@@ -98,12 +101,12 @@ async def health_ready():
         store.stats()  # Quick sanity check
         checks["metadata_store"] = True
     except Exception as e:
+        # The probe is unauthenticated: name the failure, keep the message in the log.
+        logger.warning("readiness: metadata store check failed: %s", e)
         checks["metadata_store"] = False
-        checks["metadata_store_error"] = str(e)
+        checks["metadata_store_error"] = type(e).__name__
         is_ready = False
-        if "issues" not in checks:
-            checks["issues"] = []
-        checks["issues"].append(f"metadata store error: {e}")
+        checks.setdefault("issues", []).append("metadata store unavailable")
 
     artifact_store = get_artifact_store()
     if artifact_store is not None:
@@ -114,11 +117,11 @@ async def health_ready():
             )
             checks["artifact_store"] = True
         except Exception as e:
-            error = str(e) or type(e).__name__  # a timeout has no message
+            logger.warning("readiness: artifact store check failed: %s", e or type(e).__name__)
             checks["artifact_store"] = False
-            checks["artifact_store_error"] = error
+            checks["artifact_store_error"] = type(e).__name__
             is_ready = False
-            checks.setdefault("issues", []).append(f"artifact store error: {error}")
+            checks.setdefault("issues", []).append("artifact store unavailable")
 
     qos = _get_qos_metrics(state)
     checks["interactive_available"] = qos["interactive_available"]
