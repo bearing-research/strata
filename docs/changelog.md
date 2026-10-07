@@ -65,10 +65,14 @@ from outside the frontend.
   steps.
 - Stop every node before the first start of this release, and do not run 0.8.0
   and this release against one store, as a rolling upgrade over a shared
-  Postgres would. 0.8.0 runs on a migrated store without a warning, and the
-  latest version of each result it writes is never collected. From this
-  release on, an older Strata refuses to open a store a newer one migrated,
-  naming both versions.
+  Postgres would. 0.8.0 runs on a migrated store without a warning, and there
+  every `/p/` link handed out before the upgrade answers 404, each publication
+  answers at its id (the SHA-256 the store now keeps, which
+  `GET /v1/publications` lists), so the id works as a public link, links 0.8.0
+  mints answer 404 once this release serves the store again, and the latest
+  version of each result it writes is never collected. To go back, restore the
+  backup into an empty database or directory. From this release on, an older
+  Strata refuses to open a store a newer one migrated, naming both versions.
 - A configured SQL catalog whose warehouse is in object storage now needs a
   `uri` (`STRATA_CATALOG_URI`, or the entry's own): the server refuses to start
   rather than keep the catalog in SQLite on its own disk.
@@ -83,13 +87,27 @@ from outside the frontend.
   has an nginx block that does.
 - Personal mode refuses a request whose `Host` is not loopback, an IP
   address, the bind host or a name in the new `STRATA_ALLOWED_HOSTS`: a server
-  reached by a LAN hostname or a custom domain needs that name listed. A
-  browser WebSocket from another origin needs `STRATA_CORS_ALLOW_ORIGINS`.
+  reached by a LAN hostname or a custom domain needs that name listed (the
+  400 names the setting). A browser WebSocket from another origin needs
+  `STRATA_CORS_ALLOW_ORIGINS`.
 - `STRATA_PERSONAL_MODE_USER_HEADER` is gone and ignored if set: a personal
   server has one user, and every caller reaches every notebook. Before
   upgrading a server that used it, give each member a personal server or
   switch to service mode. A notebook's `owner` key is ignored and dropped on
   the next structural edit. The TUI's `--user-header`/`--user` flags are gone.
+- Removed settings are ignored without a warning, so look for them before the
+  first start: `STRATA_PERSONAL_MODE_USER_HEADER` (`personal_mode_user_header`
+  in `[tool.strata]`), `STRATA_ARTIFACT_GC_MAX_AGE_DAYS`
+  (`artifact_gc_max_age_days`), and the TUI's `STRATA_TUI_USER_HEADER_NAME`
+  and `STRATA_TUI_USER`. A server that relied on the user header to keep
+  members apart opens every notebook to every caller, with nothing in the log.
+- The first start narrows the server's state to its own account: the artifact
+  directory, its database and blobs, and the cache directory become 0700 or
+  0600. A notebook's `.strata/` becomes 0711 (its server-only parts 0700 and
+  0600) when the notebook is next opened, and a tenant's notebook folder 0711
+  when the tenant next calls. Nothing is logged, and every start narrows them
+  again. A sidecar, backup agent or group that reads them as another account
+  loses access: run it as the server's account.
 - New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
   `[mcp]`; textual-image 0.14 and Pillow 12.1 with `[tui]`; pydantic 2.13.5
   with `strata-pool[server]`.
@@ -123,10 +141,12 @@ from outside the frontend.
   set the token (the default bind is then `0.0.0.0`) or pass `--host`.
 - The server-managed worker registry moves from `notebook_workers.json` into
   the artifact metadata store. The first start imports the file from the
-  artifact directory and renames it `notebook_workers.json.migrated`, without
-  importing it when the store already holds a registry (another node imported
-  first). A fleet manager that wrote the file under a running server must use
-  the `/v1/admin/notebook-workers` routes: the file is no longer read.
+  artifact directory and renames it `notebook_workers.json.migrated` (or
+  `.migrated.1` and so on, never over an earlier copy), without importing it
+  when the store already holds a registry (another node imported first). A
+  worker the file names twice is imported once, from its last entry. A fleet
+  manager that wrote the file under a running server must use the
+  `/v1/admin/notebook-workers` routes: the file is no longer read.
 - Shared environments are keyed by what the lock installs, not the raw
   `uv.lock` (which carried the project's name): existing shared environments
   are rebuilt once, and an old one stays on disk until it has been unused for
@@ -160,7 +180,8 @@ from outside the frontend.
   or imported it; with `multi_tenant_enabled`, each tenant's notebooks live
   under `<notebook_storage_dir>/<tenant>/`, so notebooks at the top of the
   storage root are no longer listed or openable by non-admin callers until
-  they are moved into their tenant's folder.
+  they are moved into their tenant's folder. Opening one answers 400, "must be
+  inside your tenant's own folder in the notebook storage".
 - Service mode: a table URI whose warehouse is in object storage needs a
   catalog `uri` (`STRATA_CATALOG_URI`); without one, scans, cache warming and
   export to a table answer 400 instead of using a SQLite catalog on the
@@ -188,15 +209,17 @@ from outside the frontend.
   mode an `@fetch` of a tailnet host needs it in
   `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. Personal-mode `@fetch` already allows
   private addresses.
-- Some notebook cells run once more after upgrading, then cache as before:
-  every SQL cell (its cache key is now its own query text); a cell that reads
-  a name more than one upstream cell defines, which then reads it from the
-  cell the DAG wires; every loop and `# @per_variant` cell, since their cache
-  keys now cover the `@loop` and `@loop_until` parameters and the sweep group,
-  and the cells that read them; prompt cells that read an upstream scalar;
-  cells whose `[env]` held a blanked secret, since that empty value no longer
-  reaches them; and cells in a notebook whose `uv.lock` has no dev group, since
-  provenance no longer includes the notebook's own project name.
+- In most notebooks every cell runs once more after upgrading, then caches as
+  before: provenance no longer includes the notebook's own project name, which
+  changes the cache key of every cell in a notebook whose `uv.lock` has no dev
+  group, and every notebook 0.8.0's `strata new` or `/create` made has none.
+  In other notebooks these cells run once more: every SQL cell (its cache key
+  is now its own query text); a cell that reads a name more than one upstream
+  cell defines, which then reads it from the cell the DAG wires; every loop
+  and `# @per_variant` cell, since their cache keys now cover the `@loop` and
+  `@loop_until` parameters and the sweep group, and the cells that read them;
+  prompt cells that read an upstream scalar; and cells whose `[env]` held a
+  blanked secret, since that empty value no longer reaches them.
 - Leaf cells, ones nothing else reads, are now cache hits on an unchanged run,
   in Run All too. A leaf kept only for its side effect (writing a file, sending
   a message) runs once until its source or inputs change; mark it `# @nocache`
@@ -236,8 +259,12 @@ from outside the frontend.
   withdraw events carry the id in `value`. Links already handed out keep
   working.
 - Notebook stores written before this release recorded an unknown output row
-  count as 0, so `strata artifact verify` flags those outputs until their cells
-  run again.
+  count as 0, and so did results a notebook published to a team or service
+  store, so `strata artifact verify` flags those Arrow outputs. Running a cell
+  again does not clear it: the old version is kept as one of the cell's three
+  superseded versions, so the flag goes once three newer runs have replaced it
+  and the server has pruned it on opening the notebook. A team store's flagged
+  results stay flagged.
 - `POST /v1/artifacts/import` refuses record fields of the wrong type or shape
   with a 400: counts must be non-negative integers, and `transform_spec` and
   `input_versions` JSON strings. `GET /v1/registry/audit` takes `limit` from 1
@@ -743,8 +770,10 @@ from outside the frontend.
   serves every tenant and is not a tenant isolation boundary: the service-mode
   docs say what separate tenants need.
 - **Publication tokens are stored as their SHA-256**, so a copy of the
-  database holds no working link. Existing tokens are hashed on upgrade and
-  links already handed out keep working.
+  database holds no link this release serves. Existing tokens are hashed on
+  upgrade and links already handed out keep working. 0.8.0 does not hash the
+  token it is given, so run on a migrated store it serves each publication at
+  the stored hash (see Upgrading).
 - **An env allowlist keeps credentials out of cells.** With
   `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` set, credential-looking names under
   `UV_*`, `PYTHON*` and `R_*`, and `UV_PUBLISH_*` and `UV_INDEX_*_USERNAME`,
@@ -1139,6 +1168,30 @@ from outside the frontend.
   non-root user and refuses to start without `STRATA_WORKER_TOKEN`.
 - The SDK example scripts run against the table `examples/setup_demo.py`
   builds, instead of placeholder URIs.
+- `strata migrate` copies publications, pins and the notebook worker registry
+  to Postgres. Before, every `/p/` link answered 404 after the move, pins were
+  lost and the workers registered through the admin routes disappeared.
+  Running `strata migrate --allow-nonempty-target` again from the SQLite store,
+  if it is still there, copies what an earlier move left behind and skips the
+  rows the target already has.
+- A result published to a team store records an unknown row count as unknown
+  rather than 0, so `strata artifact verify` no longer flags it. A row count
+  that is not a non-negative integer is refused with a 400.
+- A worker registry that names a worker twice (a 0.8.0 `notebook_workers.json`
+  or a configured table) no longer stops the server starting, and the first
+  admin change to such a configured table no longer answers 500.
+- The admin worker registry refuses a worker named `local`, as the notebook's
+  own list does: the built-in worker resolves first, so the entry never ran.
+- `strata artifact archive --token` takes the publication's id as well as its
+  token, as `unpublish` does.
+- Upgrading a store with many publications no longer scans the registry audit
+  once per publication.
+- The readiness probe's log line names the reason when the artifact store
+  check times out.
+- `strata apikey` creates a new store owner-only, as the server does.
+- `strata env gc` removes a collected environment's lock file.
+- A tenant opening a notebook outside its folder is told the notebook must be
+  in its own folder, not "inside configured notebook storage".
 
 ## 0.8.0 - 2026-09-27
 
