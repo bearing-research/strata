@@ -1325,7 +1325,14 @@ def main(argv: list[str] | None = None) -> int:
             "dependencies (pandas, torch, datafusion, ...) before launching."
         ),
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    parser.add_argument(
+        "--host",
+        default=None,
+        help=(
+            "Bind host (default: 0.0.0.0 when STRATA_WORKER_TOKEN is set, else 127.0.0.1, "
+            "since a worker runs code for anyone who reaches it)"
+        ),
+    )
     parser.add_argument("--port", type=int, default=9000, help="Bind port (default: 9000)")
     parser.add_argument(
         "--connect",
@@ -1404,23 +1411,30 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
+    has_token = bool(worker_secret("STRATA_WORKER_TOKEN").strip())
+    host = args.host or ("0.0.0.0" if has_token else "127.0.0.1")
+    if args.host is None and not has_token:
+        # Warning, not info: nothing has configured logging yet, and a remote
+        # server that cannot connect needs this line to say why.
+        logger.warning(
+            "strata-worker is listening on 127.0.0.1 only, since no STRATA_WORKER_TOKEN is "
+            "set. To accept other machines, set the token (the default bind is then "
+            "0.0.0.0) or pass --host."
+        )
     # Cells run arbitrary code, so a non-loopback bind without a token lets
     # anyone who reaches the port run code as this user. Make that loud.
-    if (
-        args.host not in ("127.0.0.1", "localhost", "::1")
-        and not worker_secret("STRATA_WORKER_TOKEN").strip()
-    ):
+    if host not in ("127.0.0.1", "localhost", "::1") and not has_token:
         logger.warning(
             "strata-worker is binding %s WITHOUT authentication - anyone who can "
             "reach port %d can execute code on this machine. Set "
             "STRATA_WORKER_TOKEN (see docs/notebook/workers.md) or bind "
             "--host 127.0.0.1.",
-            args.host,
+            host,
             args.port,
         )
 
     app = create_notebook_executor_app(max_concurrent=args.max_concurrent, gpu_slots=args.gpu_slots)
-    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
+    uvicorn.run(app, host=host, port=args.port, log_level=args.log_level)
     return 0
 
 
