@@ -216,10 +216,10 @@ async def refresh_admin_notebook_worker(worker_name: str):
     dependencies=[Depends(require_notebook_worker_admin)],
 )
 async def reload_admin_notebook_workers():
-    """Re-read the persisted worker registry from disk without a restart.
+    """Refresh every worker's health and drop cached health for workers no longer listed.
 
-    Health is refreshed too, and cached health for workers no longer listed is
-    dropped so it does not accumulate for the life of the process.
+    The registry itself is read from the metadata store on every request, so a change
+    made through another node needs no reload.
     """
     from strata.notebook.workers import prune_worker_health_cache
 
