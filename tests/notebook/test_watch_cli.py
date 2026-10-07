@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from strata.cli import main
+from strata.notebook.tui.cli import main as tui_main
 
 
 @pytest.fixture
@@ -42,3 +43,30 @@ def test_watch_by_session(captured):
 def test_watch_dir_and_session_are_mutually_exclusive():
     with pytest.raises(SystemExit):
         main(["watch", "/tmp/nb", "--session", "sess-123"])
+
+
+@pytest.fixture
+def without_pillow(monkeypatch):
+    """Simulate an install without the [tui] extra: PIL cannot be imported."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    monkeypatch.delitem(sys.modules, "strata.notebook.tui.app", raising=False)
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        lambda: main(["watch", "--session", "sess-123"]),
+        lambda: tui_main(["--session", "sess-123"]),
+    ],
+    ids=["strata watch", "strata-notebook-tui"],
+)
+def test_missing_tui_extra_names_the_extra(without_pillow, run):
+    with pytest.raises(SystemExit) as exc_info:
+        run()
+    message = str(exc_info.value.code)
+    assert "[tui] extra" in message
+    assert "'PIL'" in message
+    assert "uv tool install 'strata-notebook[tui]'" in message
+    assert "\n" not in message
