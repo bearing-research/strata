@@ -2922,7 +2922,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Strata \u2014 Iceberg Serving + Observability",
+  "title": "Strata - Iceberg Serving + Observability",
   "uid": "strata-metrics",
   "version": 2,
   "weekStart": ""

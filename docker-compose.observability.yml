@@ -39,7 +39,7 @@ services:
       - STRATA_ALLOWED_HOSTS=strata
     # Stdlib only, like every other healthcheck in the repo.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health').read()"]
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://localhost:%s/health' % os.environ.get('STRATA_PORT', '8765')).read()"]
       interval: 10s
       timeout: 5s
       retries: 3
