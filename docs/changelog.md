@@ -1007,6 +1007,16 @@ from outside the frontend.
 - A table with no snapshots yet reads as zero rows with its schema (scans,
   transform inputs, cache warm, `@table` inputs) instead of a 500, and nothing
   read from it is reused.
+- A Codespace starts the server again: `.devcontainer/start.sh` was not
+  executable.
+- The service-mode demo's `gpu-http-signed` worker runs cells: its executor
+  now names the `strata` host in `STRATA_WORKER_ALLOWED_HOSTS`.
+- The Docker image's and the compose files' healthchecks follow
+  `STRATA_PORT`.
+- The arXiv example's `df-cluster` worker image builds again, runs as a
+  non-root user and refuses to start without `STRATA_WORKER_TOKEN`.
+- The SDK example scripts run against the table `examples/setup_demo.py`
+  builds, instead of placeholder URIs.
 
 ## 0.8.0 - 2026-09-27
 
