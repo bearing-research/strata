@@ -169,6 +169,23 @@ class TestTokensAreHashedAtRest:
             conn.close()
         assert stamped == _LATEST_SCHEMA_VERSION
 
+    def test_the_migration_hashes_every_publications_audit_entries(self, tmp_path):
+        store = ArtifactStore(tmp_path / "old")
+        first = store.publish_artifact("a", _ready_artifact(store, "a", b"x"))
+        second = store.publish_artifact("b", _ready_artifact(store, "b", b"y"))
+        store.revoke_publication(first.token)
+        _rewind_to_raw_tokens(store, first.token)
+        _rewind_to_raw_tokens(store, second.token)
+
+        reopened = ArtifactStore(tmp_path / "old")
+
+        assert [(e["action"], e["value"]) for e in reopened.read_events()] == [
+            ("publish", first.id),
+            ("publish", second.id),
+            ("withdraw", first.id),
+        ]
+        assert reopened.get_publication(second.token).id == second.id
+
     def test_an_old_link_still_opens_the_page_after_the_upgrade(self, tmp_path):
         from fastapi.testclient import TestClient
 
