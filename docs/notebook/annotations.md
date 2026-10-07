@@ -811,6 +811,8 @@ cell fans out over **one** group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: `per_variant_no_sweep_source`
 (nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
 `per_variant_on_variant_member` (a cell can't both be a variant and fan out).
+The named group is part of the cell's cache key, so switching it runs the
+instances again.
 
 ### Defines contract
 

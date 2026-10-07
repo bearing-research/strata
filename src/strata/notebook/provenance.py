@@ -34,17 +34,23 @@ def _annotation_fingerprint(source: str) -> str:
 
     Empty for a cell without them, so its hash is the source hash alone.
     """
-    loop = parse_annotations(source).loop
-    if loop is None:
+    annotations = parse_annotations(source)
+    fingerprint: dict[str, object] = {}
+    if annotations.loop is not None:
+        fingerprint["loop"] = dataclasses.asdict(annotations.loop)
+    if annotations.per_variant:
+        # The group decides which upstream binds a scalar; variant keys alone can coincide.
+        fingerprint["per_variant"] = annotations.per_variant_group
+    if not fingerprint:
         return ""
-    return json.dumps({"loop": dataclasses.asdict(loop)}, sort_keys=True, separators=(",", ":"))
+    return json.dumps(fingerprint, sort_keys=True, separators=(",", ":"))
 
 
 def compute_source_hash(source: str) -> str:
     """SHA-256 hex digest of the normalized cell source.
 
     Whitespace and comments do not change it; anything that changes the AST does,
-    and so do the ``@loop`` / ``@loop_until`` parameters.
+    and so do the ``@loop`` / ``@loop_until`` parameters and the ``@per_variant`` group.
     """
     normalized = _normalize_source_for_hash(source)
     fingerprint = _annotation_fingerprint(source)
