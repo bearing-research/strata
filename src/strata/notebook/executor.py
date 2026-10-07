@@ -229,6 +229,12 @@ def _artifact_content_type(artifact: Any) -> str:
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
 
 
+def _loop_run_token(artifact: Any) -> str:
+    """The token of the loop run that stored an ``@iter=k`` artifact."""
+    spec = json.loads(artifact.transform_spec or "{}")
+    return str(spec.get("params", {}).get("loop_run", ""))
+
+
 def _add_harness_params(
     params: dict[str, Any],
     mutation_defines: list[str] | None,
@@ -5237,6 +5243,7 @@ class CellExecutor:
 
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
+        loop_run = uuid.uuid4().hex
         combined_stdout: list[str] = []
         combined_stderr: list[str] = []
         all_mutation_warnings: list[MutationWarning] = []
@@ -5403,6 +5410,7 @@ class CellExecutor:
                     source_hash=source_hash,
                     source=source,
                     iteration=k,
+                    extra_params={"loop_run": loop_run},
                 )
                 final_artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
@@ -5584,6 +5592,16 @@ class CellExecutor:
                     f"Loop seed artifact not found for "
                     f"start_from={loop.start_from_cell}@iter={loop.start_from_iter}. "
                     f"Run that cell through iteration {loop.start_from_iter} first."
+                )
+            # Every run rewrites @iter=0, so a step whose run token differs from it is
+            # left over from an older, longer run.
+            first = artifact_mgr.get_iteration_artifact(loop.start_from_cell, loop.carry, 0)
+            if first is None or _loop_run_token(first) != _loop_run_token(artifact):
+                raise ValueError(
+                    f"Loop seed start_from={loop.start_from_cell}@iter={loop.start_from_iter} "
+                    f"is left over from an older run of cell {loop.start_from_cell}: its "
+                    f"latest run did not reach iteration {loop.start_from_iter}. Run that "
+                    f"cell through iteration {loop.start_from_iter} first."
                 )
             blob = artifact_mgr.artifact_store.read_blob(artifact_id, artifact.version)
             if blob is None:
