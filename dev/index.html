@@ -2162,10 +2162,14 @@ producing artifacts that flow through an auto-built DAG.</p>
 <li><strong>every input recorded:</strong> <code># @fetch</code> makes bytes from a URL an input and <code># @dataset</code> makes a registry name one, both content-addressed like everything else</li>
 <li><strong>lake-aware SQL:</strong> read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records</li>
 <li><strong>the same environment, elsewhere:</strong> a remote cell runs in the notebook's own locked environment rather than whatever the worker image happens to hold</li>
+<li><strong>workers behind NAT:</strong> <code>strata-worker --connect</code> dials out to a relay, so a machine with no open port serves cells</li>
+<li><strong>Iceberg as other engines write it:</strong> scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly</li>
 <li><strong>a figure gets a URL:</strong> publish an artifact and anyone with the link sees the plot, the code behind it, and the environment of every step - no account, no install</li>
 <li><strong>promote to the team:</strong> copy a result and its whole chain into a shared store, from the notebook, the CLI or inside a cell - and a teammate's earlier run can serve your cell</li>
 <li><strong>a notebook travels:</strong> export the whole state as one bundle, artifacts included, and import it back elsewhere</li>
 <li><strong>share a session:</strong> presence, cell focus and soft locks, with every cell recording who wrote it</li>
+<li><strong>host it for many people:</strong> in service mode every notebook route stays within the caller's tenant, the server runs under a path behind your proxy, and the editor can be framed inside your own product</li>
+<li><strong>a store that stays bounded:</strong> results nobody has used for a while are collected least recently used first, never anything named, pinned, published or still needed</li>
 <li><strong>worker pool</strong> (a separate package, <code>pip install strata-pool</code>)<strong>:</strong> machines start on demand - Fly, Docker or RunPod - are held for a tenant, hand out GPUs per cell, and stop when the work does</li>
 </ul>
 <h3 id="three-ways-to-drive-it">Three ways to drive it<a class="headerlink" href="#three-ways-to-drive-it" title="Permanent link">&para;</a></h3>
