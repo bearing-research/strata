@@ -671,8 +671,9 @@ class LocalNotebookOps:
         Raises
         ------
         NotebookOpsError
-            If worker definitions aren't editable (service mode), the backend,
-            transport or fields are invalid, or an ``executor`` worker is missing ``url``.
+            If worker definitions aren't editable (service mode), ``name`` is the
+            reserved ``local``, the backend, transport or fields are invalid, or an
+            ``executor`` worker is missing ``url``.
         """
         from pydantic import ValidationError
 
@@ -686,6 +687,9 @@ class LocalNotebookOps:
         state = self._session.notebook_state
         if not notebook_worker_definitions_editable(state):
             raise NotebookOpsError("worker definitions are managed by the server in service mode")
+        # Resolution returns the built-in first, so a "local" entry would never run.
+        if name == "local":
+            raise NotebookOpsError("'local' is reserved for the built-in worker")
         if backend == WorkerBackendType.EXECUTOR.value and not (url or "").strip():
             raise NotebookOpsError(f"executor worker {name!r} requires a url")
         try:
