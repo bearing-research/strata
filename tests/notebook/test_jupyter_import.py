@@ -141,6 +141,55 @@ def test_import_passes_through_non_suppressed_last_expression(tmp_path: Path) ->
     assert nb.cells[0].source.rstrip().endswith("x + 1")
 
 
+@pytest.mark.parametrize(
+    "source",
+    ["df = 1\ndf\n# shown;\n", "df = 1\ndf  # shown;\n", 'df = 1\ndf\ns = """a;"""\n'],
+    ids=["comment line", "inline comment", "string"],
+)
+def test_import_ignores_a_semicolon_that_does_not_end_the_last_statement(
+    tmp_path: Path, source: str
+) -> None:
+    """IPython only suppresses on a ``;`` token ending the cell, not one inside a comment."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell(source)])
+
+    result = import_notebook(ipynb)
+
+    assert result.suppressed_outputs == 0
+    assert parse_notebook(result.notebook_dir).cells[0].source == source
+
+
+def _write_r_ipynb(tmp_path: Path, cells: list[dict]) -> Path:
+    nb = {
+        "cells": cells,
+        "metadata": {
+            "kernelspec": {"name": "ir", "display_name": "R", "language": "R"},
+            "language_info": {"name": "R"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    path = tmp_path / "analysis.ipynb"
+    path.write_text(json.dumps(nb), encoding="utf-8")
+    return path
+
+
+def test_import_r_kernel_notebook_as_r_cells(tmp_path: Path) -> None:
+    """IRkernel code is R: no IPython magic or shell translation, no Python deps."""
+    r_source = "library(dplyr)\ndf <- data.frame(a = c(1, NA))\n!is.na(df$a);\n"
+    ipynb = _write_r_ipynb(tmp_path, [_md_cell("# Notes\n"), _code_cell(r_source)])
+
+    result = import_notebook(ipynb)
+
+    nb = parse_notebook(result.notebook_dir)
+    assert [c.language for c in nb.cells] == ["markdown", "r"]
+    assert nb.cells[1].source == r_source
+    assert result.code_cells == 1
+    assert result.dropped_shells == []
+    assert result.suppressed_outputs == 0
+    assert result.captured_deps == []
+    assert any("R kernel" in w for w in result.warnings)
+
+
 def test_import_strips_envelope_whitespace_around_source(tmp_path: Path) -> None:
     """Hand-edited .ipynb files can store source with a leading space, which the module-level
     parser rejects, so the converter strips envelope whitespace.
