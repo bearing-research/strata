@@ -208,7 +208,21 @@ def test_a_displayed_table_that_is_also_a_stored_variable_is_one_table():
         display_outputs=[_table_output()],
         outputs=[{"name": "df", **_table_output()}],
     )
-    assert _single_table(cell) is not None
+    assert _single_table(cell) == (["id", "name"], [[1, "alice"], [2, "bob"]], 100)
+
+
+def test_a_displayed_table_that_is_also_a_stored_variable_pages_its_artifact():
+    shown = {**_table_output(), "artifact_uri": "strata://artifact/display@v=1"}
+    stored = {"name": "df", **_table_output(), "artifact_uri": "strata://artifact/df@v=1"}
+    cell = CellView(id="a", display_outputs=[shown], outputs=[stored])
+    assert _single_table_uri(cell) == "strata://artifact/display@v=1"
+
+
+def test_a_displayed_image_that_is_also_a_stored_variable_renders_inline():
+    url = _png_data_url()
+    image = {"content_type": "image/png", "inline_data_url": url}
+    cell = CellView(id="a", display_outputs=[image], outputs=[{"name": "fig", **image}])
+    assert _single_image(cell) == url
 
 
 def test_single_table_uri_returns_backing_artifact():
