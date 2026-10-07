@@ -7,7 +7,9 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -153,6 +155,33 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
         effective_workers=effective_workers,
         server_workers=server_workers,
     )
+
+
+# Inside ``one_policy_read()`` the policy is read once per notebook: a staleness pass asks
+# for every worker-annotated cell, and the registry lives in the metadata store.
+_policy_memo: ContextVar[dict[int, WorkerPolicy] | None] = ContextVar(
+    "worker_policy_memo", default=None
+)
+
+
+@contextmanager
+def one_policy_read() -> Iterator[None]:
+    """Read the worker policy at most once per notebook inside the block (one pass)."""
+    token = _policy_memo.set({})
+    try:
+        yield
+    finally:
+        _policy_memo.reset(token)
+
+
+def _policy(notebook_state: NotebookState) -> WorkerPolicy:
+    memo = _policy_memo.get()
+    if memo is None:
+        return _load_worker_policy(notebook_state)
+    key = id(notebook_state)
+    if key not in memo:
+        memo[key] = _load_worker_policy(notebook_state)
+    return memo[key]
 
 
 def notebook_worker_definitions_editable(notebook_state: NotebookState) -> bool:
@@ -405,7 +434,7 @@ def validate_worker_assignment(
     if not normalized_name or normalized_name == "local":
         return None
 
-    policy = _load_worker_policy(notebook_state)
+    policy = _policy(notebook_state)
     if not policy.service_mode:
         return None
 
@@ -450,7 +479,7 @@ def resolve_worker_spec(
     if not normalized_name or normalized_name == "local":
         return get_builtin_local_worker()
 
-    return _load_worker_policy(notebook_state).effective_workers.get(normalized_name)
+    return _policy(notebook_state).effective_workers.get(normalized_name)
 
 
 def worker_runtime_identity(

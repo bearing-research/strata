@@ -81,6 +81,7 @@ from strata.notebook.tables import without_empty_table_nonce
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
     build_worker_catalog,
+    one_policy_read,
     resolve_worker_spec,
     worker_runtime_identity,
     worker_supports_notebook_execution,
@@ -832,9 +833,10 @@ class NotebookSession:
         # Outside reads (an ``@fetch`` gets 60s) happen before the lock: they mutate
         # nothing, and holding the lock across them would block the broadcast path,
         # which takes it on the event loop and would freeze every socket.
-        prefetched = self._outside_world_fingerprints()
-        with self._staleness_lock:
-            return self._compute_staleness_locked(prefetched, executing)
+        with one_policy_read():
+            prefetched = self._outside_world_fingerprints()
+            with self._staleness_lock:
+                return self._compute_staleness_locked(prefetched, executing)
 
     def _outside_world_fingerprints(self) -> dict[str, _OutsideWorld]:
         """Fingerprint what each cell reads from outside, before the lock.
