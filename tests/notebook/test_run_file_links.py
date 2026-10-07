@@ -286,3 +286,32 @@ x = 1
             asyncio.run(CellExecutor(session).execute_cell("a", source))
 
         assert list(victim.iterdir()) == []
+
+    def test_cell_tests_are_staged_where_no_left_running_process_can_plant_a_link(
+        self, tmp_path, monkeypatch
+    ):
+        """A process an earlier cell left running can plant links in whatever is handed over.
+
+        So the server must stage the test run's files before handing their directory over.
+        """
+        from strata.notebook import executor as executor_module
+        from strata.notebook.executor import CellExecutor
+
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        real_hand_over = executor_module.hand_over
+
+        def _hand_over_and_plant(path: Path, user) -> None:
+            real_hand_over(path, user)
+            (path / "run").symlink_to(victim, target_is_directory=True)
+
+        monkeypatch.setattr(executor_module, "hand_over", _hand_over_and_plant)
+        session = _session(tmp_path, [("a", "def f():\n    return 1\n")])
+        session.venv_python = Path(sys.executable)
+
+        result = asyncio.run(
+            CellExecutor(session).run_cell_tests("a", "def test_f(cell):\n    assert cell.f() == 1\n")
+        )
+
+        assert list(victim.iterdir()) == []
+        assert result.passed == 1

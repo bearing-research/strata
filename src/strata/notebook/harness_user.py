@@ -139,6 +139,18 @@ def hand_over(path: Path, user: HarnessUser | None) -> None:
             os.chown(os.path.join(root, name), user.uid, user.gid, follow_symlinks=False)
 
 
+def let_through(path: Path, user: HarnessUser | None) -> None:
+    """Let the harness user reach entries of *path* by name without owning it.
+
+    Owning it would let a process an earlier cell left running plant a link where the
+    server is about to write.
+    """
+    if user is None or user.uid == os.geteuid():
+        return
+    os.chown(path, -1, user.gid)
+    os.chmod(path, 0o710)
+
+
 class UnsafeRunFile(RuntimeError):
     """A run-directory entry is not a plain file, so the server will not touch it."""
 

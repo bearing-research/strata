@@ -50,6 +50,7 @@ from strata.notebook.harness_user import (
     UnsafeRunFile,
     hand_over,
     identity_env,
+    let_through,
     read_run_file,
     resolve_harness_user,
     spawn_kwargs,
@@ -653,9 +654,10 @@ class CellExecutor:
             input_specs = self._load_input_blobs(cell_id, blob_dir)
             self._add_dataset_inputs(input_specs, prov.datasets, blob_dir)
 
-            # The run directory is created inside this server-private one; a harness user must
-            # reach it.
-            hand_over(Path(tmp), harness_user)
+            # The harness user gets the inputs and, once staged, the run directory, never tmp
+            # itself: a process an earlier cell left running could plant links in it.
+            let_through(Path(tmp), harness_user)
+            hand_over(blob_dir, harness_user)
 
             def _run(rundir_name: str) -> dict[str, Any]:
                 return run_cell_tests_in_dir(

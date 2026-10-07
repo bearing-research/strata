@@ -778,8 +778,10 @@ unpickles what a cell stored: prompt and SQL cells do not load a pickled value,
 and cell tests load their inputs in the test process.
 
 A cell run this way still shares the host's kernel and sees what any local user
-can. A notebook that needs more isolation than that wants a worker on another
-machine.
+can. A process a cell starts in the background is not stopped when the cell
+finishes: it keeps running as the harness user, so the server never writes by
+path into a directory it has handed over. A notebook that needs more isolation
+than that wants a worker on another machine.
 
 **One harness user serves every tenant, so it is not a tenant isolation
 boundary.** It keeps cells away from the server; it does not keep one tenant's
