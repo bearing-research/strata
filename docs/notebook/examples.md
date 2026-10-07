@@ -48,6 +48,10 @@ the directory you want under your existing storage root instead:
 
 ## SQL cells
 
+The server needs the `sql` and `sql-sqlite` extras for this one
+(`uv tool install "strata-notebook[sql,sql-sqlite]"`); the Docker image
+carries both.
+
 | Notebook | What you'll see |
 | --- | --- |
 | [`sql_orders_report`](../examples/sql_orders_report.md) | Named connections, bind parameters from Python upstream, schema-aware caching. |

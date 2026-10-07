@@ -185,7 +185,7 @@ def _establish_ssh_worker(server_url: str, session_id: str, ssh_target: str) -> 
         )
         return
     name = (response.json().get("worker") or {}).get("name", ssh_target)
-    print(_dim(f"ssh worker '{name}' ready — cells run on {ssh_target} by default"))
+    print(_dim(f"ssh worker '{name}' ready; cells run on {ssh_target} by default"))
 
 
 def _terminate(proc: subprocess.Popen) -> None:
@@ -203,24 +203,24 @@ def _agent_guidance(session_id: str) -> str:
     """The working-agreement body written into the notebook's CLAUDE.md."""
     return f"""# Driving this Strata notebook
 
-This directory is a **Strata notebook** — a persistent, cached, inspectable
+This directory is a **Strata notebook**: a persistent, cached, inspectable
 scratchpad. Operate on it through the connected **`strata-notebook` MCP server**
 (auto-configured in `.mcp.json`).
 
 **Decision rule:** any Python you'd run to check or compute something → a
 notebook cell, **not** `Bash: python …` / `uv run …` / a REPL / a temp `.py`
 script. Scratch scripts are invisible, uncached, and thrown away; a cell
-persists, appears live in the human's terminal viewer, and caches — so you build
+persists, appears live in the human's terminal viewer, and caches, so you build
 on your own prior work instead of recomputing it.
 
 **How to work:**
 
 1. Call `list_notebooks` to get the open `session_id` (it is `{session_id}` for
-   this launch, but confirm — a new id is minted each time).
+   this launch, but confirm: a new id is minted each time).
 2. **Look before you compute:** `status` / `get_notebook` / `dag` show the
    current cells and their variables. If a variable you need already exists,
    reference it in a new cell rather than recomputing it.
-3. Run a snippet in one call with **`run_snippet(session_id, source)`** — it adds
+3. Run a snippet in one call with **`run_snippet(session_id, source)`**. It adds
    a cell and runs it, returning the run outcome (`status`, `cache_hit`,
    `stdout`) under `run`. (Use `add_cell` without a run only to stage a cell.)
 4. Use `note` to narrate what you're about to do so the watcher can follow along.
@@ -228,26 +228,26 @@ on your own prior work instead of recomputing it.
    `image/png` with no preview. `save_cell_output(session_id, cell_id)` writes
    it to a file and returns the `path`; open that file to see what you drew.
 
-**The caching payoff — how to get it:**
+**The caching payoff, and how to get it:**
 
 - Put an **expensive step in its own cell whose result a later cell consumes**.
   It's cached by provenance across the session: iterate on the downstream cell
   and the expensive upstream stays a cache hit, never re-executing.
-- **To change a result, `edit_cell` its cell and `run_cell`** — only that cell
+- **To change a result, `edit_cell` its cell and `run_cell`**: only that cell
   and what's downstream recompute; upstream stays cached.
 - **Prefer editing an existing cell over re-adding an identical one.** A leaf
   cell that only prints replays its cached output on an unchanged *same-cell*
   re-run; re-adding the same snippet runs cold. Leave finished diagnostic cells
-  in place — an unchanged re-run is instant.
+  in place; an unchanged re-run is instant.
 
-**The one exception — side effects and fresh values:** a cell whose point is a
+**The one exception, side effects and fresh values:** a cell whose point is a
 side effect (writing a file, calling an API, mutating external state) or a fresh
 value (the clock, `random`, a live endpoint) must not replay a cached result.
 Put `# @nocache` on the first line of such a cell so it always re-executes.
 
 **Running cells on a remote machine:** if the human gives you an SSH target for
-compute — a GPU box, a bigger machine, one closer to the data (e.g. `ssh
-user@gpu-box`) — call **`connect_ssh_worker(session_id, "user@gpu-box")`**. It
+compute (a GPU box, a bigger machine, one closer to the data, e.g. `ssh
+user@gpu-box`), call **`connect_ssh_worker(session_id, "user@gpu-box")`**. It
 installs the worker on the box if needed, opens a secure tunnel, and makes that
 box the default, so subsequent cells run there, still cached by provenance.
 A remote cell runs on the **box's** filesystem, so its file paths and mounts are
@@ -294,7 +294,7 @@ def _print_ready(notebook_dir: Path, server_url: str, session_id: str, *, tui: b
     print(f"{check} server    {server_url}  ({_dim('MCP at ' + server_url + '/mcp')})")
     print(f"{check} session   {session_id}")
     print()
-    print("Point your coding agent at it — in another terminal:")
+    print("Point your coding agent at it, in another terminal:")
     print()
     print(f"    cd {notebook_dir} && claude")
     print()

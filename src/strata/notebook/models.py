@@ -26,7 +26,7 @@ class MountSpec(BaseModel):
 
     name: str = Field(
         ...,
-        description="Mount name — injected as a Path variable in the cell namespace",
+        description="Mount name, injected as a Path variable in the cell namespace",
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
     uri: str = Field(
@@ -39,7 +39,7 @@ class MountSpec(BaseModel):
     )
     pin: str | None = Field(
         default=None,
-        description="Pinned version/etag — disables fingerprinting when set",
+        description="Pinned version/etag; disables fingerprinting when set",
     )
     options: dict[str, Any] = Field(
         default_factory=dict,
@@ -68,7 +68,7 @@ class TableSpec(BaseModel):
 
     name: str = Field(
         ...,
-        description="Variable name — injected as the table URI string; "
+        description="Variable name, injected as the table URI string; "
         "<name>_snapshot carries the resolved snapshot id",
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
@@ -78,7 +78,7 @@ class TableSpec(BaseModel):
     )
     snapshot_pin: int | None = Field(
         default=None,
-        description="Pinned snapshot id — the cell never goes stale on new data when set",
+        description="Pinned snapshot id; when set, the cell never goes stale on new data",
     )
 
 
@@ -152,7 +152,7 @@ class ConnectionSpec(BaseModel):
 
     name: str = Field(
         ...,
-        description=("Connection name — referenced by SQL cells via ``# @sql connection=<name>``."),
+        description=("Connection name, referenced by SQL cells via ``# @sql connection=<name>``."),
         pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
     )
     driver: str = Field(
@@ -351,7 +351,7 @@ class VariantGroupConfig(BaseModel):
         ...,
         description=(
             "Active variant name within the group (ignored in sweep mode). "
-            "Empty means 'first variant in source order' — the same fallback "
+            "Empty means 'first variant in source order', the same fallback "
             "used when a group has no toml entry."
         ),
         pattern=r"^([a-zA-Z_][a-zA-Z0-9_]*)?$",
@@ -698,7 +698,7 @@ class CellState(BaseModel):
         default=True,
         description=(
             "True for cells that aren't grouped or for the active member "
-            "of a group. False for inactive variants — these are excluded "
+            "of a group. False for inactive variants, which are excluded "
             "from the producer map and consumed_variables."
         ),
     )
@@ -937,7 +937,7 @@ class NotebookState(BaseModel):
     secret_manager_config: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Parsed [secret_manager] block from notebook.toml — provider / "
+            "Parsed [secret_manager] block from notebook.toml: provider / "
             "project_id / environment / path routing. Non-sensitive; the "
             "token that authenticates to the manager lives in the process "
             "environment, never here."

@@ -140,7 +140,7 @@ def strip_leading_annotations(source: str) -> str:
 
 
 def _leading_block_end(lines: list[str]) -> int:
-    """Index of the first cell-body line — end of the leading comment block."""
+    """Index of the first cell-body line: the end of the leading comment block."""
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):

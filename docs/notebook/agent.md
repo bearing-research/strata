@@ -202,7 +202,9 @@ store:
   is edited or run again.
 - A **leaf** cell, one nothing else reads, reports `ready` after it has run
   like any other cell. It stores no variable artifact; its console, even an
-  empty one, is the record of the run.
+  empty one, is the record of the run. A `# @nocache` leaf, or one with a
+  read-write mount, stores no such record, so it reads `idle` even after it
+  ran.
 
 For "what is it doing right now", attach one of the live views above.
 

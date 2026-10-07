@@ -9,7 +9,7 @@ batch = signals_batch or {}
 rows = batch.get("signals", []) if isinstance(batch, dict) else []
 
 # Only persist rows whose ticker is in the whitelist. The schema enum
-# doesn't constrain ticker strings — the LLM could return anything —
+# doesn't constrain ticker strings (the LLM could return anything),
 # so this is the last layer of defense before the DB has a row that
 # place_orders would try to trade.
 allowed = set(Config.TICKER_WHITELIST)
@@ -45,7 +45,7 @@ for row in rows:
         )
         persisted += 1
     except Exception:
-        # Primary-key conflict on re-run — signal already persisted.
+        # Primary-key conflict on re-run: signal already persisted.
         pass
 
 # LLM cost accounting. The prompt cell doesn't expose tokens to

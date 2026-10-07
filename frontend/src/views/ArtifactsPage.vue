@@ -19,7 +19,7 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 const strata = useStrata()
 
 const PAGE_SIZE = 100
-const STATES = ['', 'ready', 'building', 'failed'] as const
+const STATES = ['', 'ready', 'building', 'superseded', 'failed'] as const
 type SortKey = NonNullable<ArtifactQuery['sort']>
 
 const stats = ref<ArtifactStats | null>(null)
@@ -34,7 +34,7 @@ const order = ref<'asc' | 'desc'>('desc')
 const offset = ref(0)
 
 function formatBytes(bytes: number | null): string {
-  if (bytes === null || bytes === undefined) return '—'
+  if (bytes === null || bytes === undefined) return 'n/a'
   if (bytes < 1024) return `${bytes} B`
   const units = ['KB', 'MB', 'GB', 'TB']
   let value = bytes / 1024
@@ -47,12 +47,12 @@ function formatBytes(bytes: number | null): string {
 }
 
 function formatRows(count: number | null): string {
-  if (count === null || count === undefined) return '—'
+  if (count === null || count === undefined) return 'n/a'
   return count.toLocaleString()
 }
 
 function formatTime(ts: number | null): string {
-  if (ts === null || ts === undefined) return '—'
+  if (ts === null || ts === undefined) return 'n/a'
   // created_at is epoch seconds.
   return new Date(ts * 1000).toLocaleString()
 }
@@ -171,6 +171,10 @@ onMounted(() => {
       <div class="stat-card">
         <span class="stat-value building">{{ stats.building_versions.toLocaleString() }}</span>
         <span class="stat-label">building</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">{{ stats.superseded_versions.toLocaleString() }}</span>
+        <span class="stat-label">superseded</span>
       </div>
       <div class="stat-card">
         <span class="stat-value failed">{{ stats.failed_versions.toLocaleString() }}</span>
@@ -529,6 +533,12 @@ onMounted(() => {
 .state-failed {
   background: var(--tint-danger);
   color: var(--accent-danger);
+}
+
+/* A duplicate build that reads another version's bytes: usable, not notable. */
+.state-superseded {
+  background: var(--bg-input);
+  color: var(--text-muted);
 }
 
 .pager {

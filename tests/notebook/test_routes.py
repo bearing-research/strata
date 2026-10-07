@@ -2128,6 +2128,43 @@ def test_service_mode_schema_route_refuses_a_server_file(client, tmp_path, monke
     assert "artifact_publications" not in resp.text
 
 
+def test_service_mode_refuses_a_bigquery_connection_without_a_key_file(
+    client, tmp_path, monkeypatch
+):
+    """Without a key file the server's own Google credentials would answer."""
+    from strata.notebook.sql.drivers.bigquery import BigQueryAdapter
+
+    _service_mode_sessions(monkeypatch, tmp_path)
+    dialed: list[dict] = []
+
+    def record(self, kwargs):
+        dialed.append(kwargs)
+        raise RuntimeError("not dialing")
+
+    monkeypatch.setattr(BigQueryAdapter, "_invoke_connect", record)
+    notebook_dir = create_notebook(tmp_path / "notebooks", "BQ Ambient")
+    (notebook_dir / "sa.json").write_text("{}")
+    toml = notebook_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "bigquery"\nproject_id = "p"\n'
+    )
+    nb_id = open_session_id(client, notebook_dir)
+
+    schema = client.get(f"/v1/notebooks/{nb_id}/connections/db/schema")
+    saved = client.put(
+        f"/v1/notebooks/{nb_id}/connections",
+        json={"connections": [{"name": "db", "driver": "bigquery", "project_id": "p"}]},
+    )
+
+    assert schema.status_code == saved.status_code == 400
+    assert "server's own Google credentials" in schema.json()["detail"]
+    assert "server's own Google credentials" in saved.json()["detail"]
+    assert dialed == []
+    keyed = {"name": "db", "driver": "bigquery", "project_id": "p", "credentials_path": "sa.json"}
+    resp = client.put(f"/v1/notebooks/{nb_id}/connections", json={"connections": [keyed]})
+    assert resp.status_code == 200, resp.text
+
+
 @pytest.mark.parametrize("mode", ["personal", "service"])
 def test_connection_auth_vars_read_the_notebook_env_in_service_mode(
     client, tmp_path, monkeypatch, mode

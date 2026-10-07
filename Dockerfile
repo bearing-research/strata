@@ -64,6 +64,9 @@ COPY packages ./packages
 #   --extra postgres: lets a deployment point STRATA_ARTIFACT_METADATA_DSN at
 #     Postgres (several servers sharing one store) without rebuilding the
 #     image. SQLite stays the default.
+#   --extra sql, --extra sql-sqlite: SQL cells (DuckDB is a core dependency).
+#     Without sql a notebook holding a SQL cell does not open; the SQLite driver
+#     is what the shipped SQL example connects with.
 RUN mkdir -p dist && \
     uv export \
       --frozen \
@@ -74,6 +77,8 @@ RUN mkdir -p dist && \
       --no-annotate \
       --extra otel \
       --extra postgres \
+      --extra sql \
+      --extra sql-sqlite \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 

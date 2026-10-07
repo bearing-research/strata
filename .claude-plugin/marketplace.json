@@ -5,7 +5,7 @@
     "url": "https://github.com/bearing-research/strata"
   },
   "metadata": {
-    "description": "Claude Code plugins for Strata — the materialization and notebook layer.",
+    "description": "Claude Code plugins for Strata, the materialization and notebook layer.",
     "version": "0.1.0"
   },
   "plugins": [

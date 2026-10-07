@@ -2,7 +2,7 @@
 #
 # 240 rows, four features (sqft, bedrooms, age, location), one target
 # (price). Generated with a known linear-with-noise structure so both
-# R and sklearn should recover similar coefficients — the demo is
+# R and sklearn should recover similar coefficients; the demo is
 # about *how* each toolkit expresses the fit, not which is more
 # accurate.
 #
@@ -50,7 +50,7 @@ housing = pd.DataFrame(
     }
 )
 
-# Hold out the last 40 rows as a test set. Deterministic split — no
+# Hold out the last 40 rows as a test set. Deterministic split: no
 # need to re-shuffle since the rows are already in random order.
 housing_train = housing.iloc[:200].reset_index(drop=True)
 housing_test = housing.iloc[200:].reset_index(drop=True)

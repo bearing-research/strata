@@ -1,15 +1,15 @@
 # strata-scratchpad (Claude Code plugin)
 
 Makes a coding agent reach for a **persistent, cached [Strata](https://github.com/bearing-research/strata)
-notebook** as its scratchpad — quick computations, data exploration, sanity
-checks — instead of throwaway `python -c` / temp scripts. Work persists, is
+notebook** as its scratchpad (quick computations, data exploration, sanity
+checks) instead of throwaway `python -c` / temp scripts. Work persists, is
 watchable in a live terminal viewer, and unchanged runs are instant.
 
 ## What's in it
 
-- **`strata-scratchpad` skill** — model-invoked: when the agent is about to run
+- **`strata-scratchpad` skill**, model-invoked: when the agent is about to run
   ad-hoc Python, it uses a notebook cell (`strata cell add … --run`) instead.
-- **`/strata-scratchpad:scratch` command** — human-invoked: explicitly set up a
+- **`/strata-scratchpad:scratch` command**, human-invoked: explicitly set up a
   scratchpad in the current project and switch the agent to it.
 
 ## Prerequisites

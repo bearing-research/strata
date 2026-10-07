@@ -72,7 +72,7 @@ def fetch_configured_secrets(
     if not provider_name:
         return SecretFetchResult.failure(
             "",
-            "[secret_manager] block is present but 'provider' is not set — "
+            "[secret_manager] block is present but 'provider' is not set; "
             'add provider = "infisical".',
         )
     try:

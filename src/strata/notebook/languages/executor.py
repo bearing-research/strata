@@ -29,7 +29,7 @@ class LanguageExecutor(Protocol):
 
     skips_execution_provenance: bool
     """``True`` when the language has no inputs, no subprocess, and no
-    provenance chain — i.e. cells of this language are always READY.
+    provenance chain, i.e. cells of this language are always READY.
     Markdown is the only ``True`` today."""
 
     has_alternate_cache_scheme: bool

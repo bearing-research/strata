@@ -96,7 +96,7 @@ function handleKeydown(e: KeyboardEvent) {
 
     <div class="tests-results">
       <div v-if="result?.pytestUnavailable" class="tests-callout">
-        Cell tests need <code>pytest</code> in this notebook's environment — add it from the
+        Cell tests need <code>pytest</code> in this notebook's environment. Add it from the
         dependencies panel, then run again.
       </div>
 

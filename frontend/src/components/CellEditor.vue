@@ -150,7 +150,7 @@ const testBadge = computed<TestBadge | null>(() => {
     text: `${r.passed}/${total}${suffix}`,
     cls,
     title: r.stale
-      ? 'Tests are stale — the cell or its tests changed since the last run'
+      ? 'Tests are stale: the cell or its tests changed since the last run'
       : `${r.passed} passed, ${r.failed} failed, ${r.errored} errored`,
   }
 })
@@ -328,9 +328,9 @@ const loopProgressTitle = computed(() => {
   if (!progress) return ''
   const completed = progress.iteration + 1
   const status = progress.untilReached
-    ? 'loop_until fired — loop complete'
+    ? 'loop_until fired; loop complete'
     : completed >= progress.maxIter
-      ? 'reached max_iter — loop complete'
+      ? 'reached max_iter; loop complete'
       : props.cell.status === 'running'
         ? 'loop running'
         : 'loop paused'
@@ -566,10 +566,10 @@ const annotationDiagnosticsTitle = computed(() =>
 const moduleExportsTitle = computed(() => {
   const exports = props.cell.moduleExports
   if (!exports?.length) {
-    return 'Module cell — definitions here can be referenced from downstream cells.'
+    return 'Module cell: downstream cells can reference its definitions.'
   }
   const lines = exports.map((e) => `  ${e.kind} ${e.name}`).join('\n')
-  return `Module cell — downstream cells can reference:\n${lines}`
+  return `Module cell. Downstream cells can reference:\n${lines}`
 })
 
 function normalizePackageName(pkg: string | null | undefined): string {
@@ -716,7 +716,7 @@ function outputKey(output: CellOutput, index: number): string {
         </button>
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
-          title="Rerun — force re-execute, bypass cache (Cmd+Shift+Enter)"
+          title="Rerun: force re-execute, bypass cache (Cmd+Shift+Enter)"
           data-testid="cell-rerun-button"
           :disabled="!connected || environmentMutationActive"
           @click="emit('rerun', cell.id)"
@@ -821,7 +821,7 @@ function outputKey(output: CellOutput, index: number): string {
         </template>
       </div>
       <div class="cell-meta">
-        <!-- Line 1: identity — name, defines, reads -->
+        <!-- Line 1: identity (name, defines, reads) -->
         <div class="cell-meta-row">
           <div class="cell-meta-main">
             <span class="cell-lang">{{ cell.language }}</span>
@@ -864,7 +864,7 @@ function outputKey(output: CellOutput, index: number): string {
             </button>
           </div>
         </div>
-        <!-- Line 2: runtime — worker, mounts, timeout, env, annotations, cache -->
+        <!-- Line 2: runtime (worker, mounts, timeout, env, annotations, cache) -->
         <div class="cell-meta-row cell-meta-runtime">
           <span class="worker-badge" :title="`Worker: ${effectiveWorkerLabel}`">
             worker: {{ effectiveWorkerLabel }}
@@ -1114,7 +1114,7 @@ function outputKey(output: CellOutput, index: number): string {
         data-testid="cell-stream"
       >
         <span v-if="(cell.streamAttempt ?? 1) > 1" class="stream-retry-badge">
-          &#x21BB; attempt {{ cell.streamAttempt }} — previous response failed schema validation
+          &#x21BB; attempt {{ cell.streamAttempt }}: previous response failed schema validation
         </span>
         <template v-if="streamIsStructured">
           <span class="stream-ticker" data-testid="stream-ticker">
@@ -1219,9 +1219,9 @@ function outputKey(output: CellOutput, index: number): string {
             class="suggest-install suggest-install-readonly"
           >
             <span
-              >Missing R package <code>{{ cell.suggestInstall }}</code> — open the Environment panel
-              and click <strong>Initialize renv</strong> to set up package management, then
-              re-run.</span
+              >Missing R package <code>{{ cell.suggestInstall }}</code
+              >. Open the Environment panel and click <strong>Initialize renv</strong> to set up
+              package management, then re-run.</span
             >
           </div>
         </div>

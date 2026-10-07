@@ -5,7 +5,7 @@ description = "Pure-R notebook: mtcars regression with inline ggplot2 + base-gra
 requires-python = "==3.12.*"
 # Pure-R notebook: the cells run via Rscript against the packages in
 # renv.lock, not this venv. These are just the notebook harness baseline
-# that every Strata notebook's uv-managed env carries — Python isn't used
+# that every Strata notebook's uv-managed env carries; Python isn't used
 # to execute any cell here.
 dependencies = [
     "pyarrow>=18.0.0",

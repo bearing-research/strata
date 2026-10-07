@@ -123,14 +123,14 @@ def _json_guidance_message(
         return {
             "role": "system",
             "content": (
-                "Respond with ONLY a valid JSON object — no prose, no code "
+                "Respond with ONLY a valid JSON object, no prose and no code "
                 "fences. The object must conform to this JSON Schema:\n" + json.dumps(output_schema)
             ),
         }
     if output_type == "json":
         return {
             "role": "system",
-            "content": "Respond with ONLY a valid JSON object — no prose, no code fences.",
+            "content": "Respond with ONLY a valid JSON object, no prose and no code fences.",
         }
     return None
 

@@ -29,7 +29,7 @@ lines += [
 ]
 for _, row in category_summary.iterrows():
     revenue = row["total_revenue"]
-    revenue_str = f"${revenue:.2f}" if revenue is not None else "—"
+    revenue_str = f"${revenue:.2f}" if revenue is not None else "n/a"
     lines.append(
         f"| {row['category']} | {int(row['sku_count'])} | "
         f"{int(row['order_count'])} | {revenue_str} |"

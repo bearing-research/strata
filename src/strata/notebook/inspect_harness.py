@@ -121,10 +121,10 @@ def _evaluate(expr, namespace):
         sys.stdout = capture_out
         sys.stderr = io.StringIO()
         try:
-            result = eval(expr, namespace)  # noqa: S307 — user-driven inspect REPL
+            result = eval(expr, namespace)  # noqa: S307 (user-driven inspect REPL)
         except SyntaxError:
             # Not an expression: run it as a statement.
-            exec(expr, namespace)  # noqa: S102 — user-driven inspect REPL
+            exec(expr, namespace)  # noqa: S102 (user-driven inspect REPL)
             sys.stdout, sys.stderr = old_stdout, old_stderr
             stdout_text = capture_out.getvalue()
             return {

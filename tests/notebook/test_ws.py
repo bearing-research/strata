@@ -1593,6 +1593,40 @@ async def test_cell_source_update(notebook_session):
 
 
 @pytest.mark.asyncio
+async def test_cell_source_update_carries_the_text_to_other_tabs(notebook_session):
+    """A second tab on the session gets the edited text; the editing tab does not.
+
+    Without it the second tab keeps the old text and its next edit overwrites the first
+    tab's. Echoing it to the sender could revert keystrokes typed since the flush.
+    """
+    from strata.notebook.ws import _handle_cell_source_update
+
+    _, session = notebook_session
+    cell_id = session.notebook_state.cells[0].id
+    editor, execution_state = _make_fake_ws(session)
+    other, _ = _make_fake_ws(session)
+
+    await _handle_cell_source_update(
+        cast(WebSocket, editor),
+        session,
+        {"cell_id": cell_id, "source": "x = 2  # tab 1"},
+        execution_state,
+        session.id,
+    )
+
+    [own] = editor.frames_of("dag_update")
+    [theirs] = other.frames_of("dag_update")
+    assert own["seq"] == theirs["seq"]
+
+    def sources(frame):
+        return {c["id"]: c.get("source") for c in frame["payload"]["cells"]}
+
+    assert sources(theirs)[cell_id] == "x = 2  # tab 1"
+    assert all(src is None for cid, src in sources(theirs).items() if cid != cell_id)
+    assert all(src is None for src in sources(own).values())
+
+
+@pytest.mark.asyncio
 async def test_cell_cancel(notebook_session):
     """cell_cancel with no running execution marks the cell idle."""
     from strata.notebook.ws import _handle_cell_cancel
@@ -2353,6 +2387,37 @@ async def test_reservation_released_when_plan_raises(notebook_session, monkeypat
     # The reservation is free again: a fresh reserve succeeds.
     assert await _reserve_execution_request(execution_state, "middle") is None
     await _release_execution_request(execution_state, "middle")
+
+
+@pytest.mark.asyncio
+async def test_busy_run_refusal_names_the_refused_cell(notebook_session):
+    """A run refused because another holds the notebook says so with a code and the cell.
+
+    The browser shows the cell running as soon as Run is clicked; without these it cannot
+    tell which cell to roll back, and the cell spins until a reload.
+    """
+    from strata.notebook.ws import (
+        _handle_cell_execute,
+        _release_execution_request,
+        _reserve_execution_request,
+    )
+
+    _, session = notebook_session
+    fake, execution_state = _make_fake_ws(session)
+    assert await _reserve_execution_request(execution_state, "root") is None
+    try:
+        await _handle_cell_execute(
+            cast(WebSocket, fake), session, {"cell_id": "middle"}, execution_state, session.id
+        )
+    finally:
+        await _release_execution_request(execution_state, "root")
+
+    [error] = fake.frames_of("error")
+    assert error["payload"] == {
+        "error": "Notebook is already executing cell root",
+        "code": "notebook_busy",
+        "cell_id": "middle",
+    }
 
 
 @pytest.mark.asyncio

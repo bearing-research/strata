@@ -595,7 +595,7 @@ SQL cells are **read-only by default**, but the enforcement mechanism depends on
 
 For SQLite, DuckDB and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into `write=true`,” and the statement check above refuses anything but a read before the driver sees it.
 
-In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: its database file must be in the notebook's directory or outside the server's state (a SQLite `uri` is refused), a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. See [Service mode](../deployment/service-mode.md).
+In service mode a DuckDB or SQLite cell, which runs inside the server process, is also confined: its database file must be in the notebook's directory or outside the server's state (a SQLite `uri` is refused), a DuckDB connection reaches only its own database and the mounts and catalog tables it reads, and a SQLite write cell cannot `ATTACH`, `DETACH` or `VACUUM`. A BigQuery connection there must name a `credentials_path` key file in the notebook's directory, so it never runs as the server's own Google credentials. See [Service mode](../deployment/service-mode.md).
 
 ### Write cells
 
@@ -771,8 +771,8 @@ copy a ready-to-paste snippet, or build it yourself:
   addEventListener('message', (e) => {
     if (e.origin === 'http://localhost:8765' &&
         e.data && e.data.type === 'strata:embed:resize')
-      document.querySelector('iframe[title="Strata notebook"]').style.height =
-        e.data.height + 'px'
+      for (const f of document.querySelectorAll('iframe[title="Strata notebook"]'))
+        if (f.contentWindow === e.source) f.style.height = e.data.height + 'px'
   })
 </script>
 ```
@@ -782,7 +782,8 @@ view blends into the host page, and the embedded app posts its content height to
 the parent frame (`{ type: 'strata:embed:resize', height }`) so the optional
 listener above sizes the iframe with no inner scrollbar. The listener accepts
 heights only from the Strata server's origin, so another frame on the page
-cannot resize it. Widgets stay live inside
+cannot resize it, and sizes only the iframe that sent the height, so several
+embeds on one page each get their own. Widgets stay live inside
 the frame, so with **⚡ Live** on it's a fully interactive embedded panel.
 
 **Cross-origin embedding is opt-in.** By default a notebook is framable only from

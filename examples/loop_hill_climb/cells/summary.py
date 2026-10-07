@@ -1,6 +1,6 @@
 # @name Convergence Summary
 # Read the loop cell's final state and render a compact convergence
-# table. This is a regular downstream cell — it sees the *final*
+# table. This is a regular downstream cell: it sees the *final*
 # iteration's carry artifact via the normal DAG input path, identical
 # to how any downstream cell reads any upstream variable.
 accepted = [h for h in state["history"] if h.get("accepted")]

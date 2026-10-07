@@ -38,7 +38,7 @@ suppressPackageStartupMessages({
   library(jsonlite)
 })
 
-# Loaded lazily — only when a data.frame is actually serialized so a
+# Loaded lazily, only when a data.frame is actually serialized so a
 # notebook with no tabular outputs doesn't pay the arrow import cost.
 ARROW_LOADED <- FALSE
 ensure_arrow <- function() {
@@ -76,7 +76,7 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 # Write a structured `success:false` envelope and stop. Used when input
 # deserialization fails (e.g. a Python-only artifact an R cell can't read) so
 # the parent surfaces a clean error instead of scraping stderr for a missing
-# manifest — symmetric with the Python harness's StrataRArtifactError path for
+# manifest, symmetric with the Python harness's StrataRArtifactError path for
 # the reverse (R-only RDS consumed from Python) direction. Field shape matches
 # the exec-error envelope written at the bottom of this file.
 emit_failure_result <- function(message) {
@@ -122,7 +122,7 @@ input_warnings <- character(0)
 #   pickle/object          → unreadable from R, raise with a clear message
 #                             so the user knows to re-export from Python as
 #                             a DataFrame for Arrow handoff
-#   *                      → unknown — raise
+#   *                      → unknown: raise
 
 deserialize_input <- function(name, spec, output_dir) {
   ct <- spec$content_type
@@ -138,7 +138,7 @@ deserialize_input <- function(name, spec, output_dir) {
     # Python stamps `strata.arrow.shape` ∈ table|tensor|scalar in the schema
     # metadata; only `table` round-trips faithfully into R. A numpy ndarray
     # (`tensor`) flattens to a 1-column data.frame and a typed scalar arrives
-    # as a 1×1 frame — both silent without this. Best-effort: a metadata read
+    # as a 1×1 frame, both silent without this. Best-effort: a metadata read
     # failure must never break an otherwise-valid handoff.
     shape <- tryCatch(tbl$schema$metadata[["strata.arrow.shape"]],
                       error = function(e) NULL)
@@ -202,7 +202,7 @@ if (!is.null(manifest$inputs)) {
     error = function(e) e
   )
   if (!is.null(input_error)) {
-    # A Python-only artifact (or otherwise unreadable input) — emit a
+    # A Python-only artifact (or otherwise unreadable input): emit a
     # structured failure and stop before opening the plot device / sinks,
     # so the parent reads a clean `success:false` result rather than
     # falling back to scraping stderr for a missing manifest.
@@ -225,7 +225,7 @@ if (!is.null(manifest$mounts)) {
 
 # Env overrides via Sys.setenv. Note: this leaks process-wide because
 # Rscript doesn't isolate env. That's the same behaviour as the
-# Python harness (it leaks too — both run in a one-shot subprocess
+# Python harness (it leaks too; both run in a one-shot subprocess
 # so the leak doesn't outlive the cell run).
 if (!is.null(manifest$env)) {
   env_args <- list()
@@ -245,7 +245,7 @@ if (!is.null(manifest$env)) {
 # ---------------------------------------------------------------------------
 #
 # Capture stdout/stderr via `sink()` into temp files. Native code that
-# writes directly to the C-level stderr bypasses R's sink — accept
+# writes directly to the C-level stderr bypasses R's sink. Accept
 # that limitation for Phase 1; the Python harness has the same issue
 # (PR-b3 in #26 mitigated it for batching but single-cell still has
 # the gap).
@@ -270,7 +270,7 @@ for (name in pre_names) {
 
 # Variables the analyzer marked as in-place mutations
 # (``df$new_col <- ...``). These are always serialized as outputs
-# even when ``identical()`` would still hold — the analyzer caught
+# even when ``identical()`` would still hold: the analyzer caught
 # the mutation that R's value comparison can't.
 mutation_set <- character(0)
 if (!is.null(manifest$mutation_defines)) {
@@ -288,7 +288,7 @@ exec_error <- NULL
 # print methods draw via grid), and low-level grid drawing (grid.draw(),
 # grid.rect(), …). `%03d` makes the device write one file per page. A device
 # on which nothing is drawn writes no file at all, so emptiness needs no
-# special handling — the display step below picks up whatever files exist.
+# special handling: the display step below picks up whatever files exist.
 # Device-open is best-effort: if no usable graphics device is available the
 # cell still runs, just without capture.
 plot_capture_enabled <- FALSE
@@ -314,8 +314,8 @@ tryCatch(
 # mirroring the R console / a notebook REPL: a bare trailing `summary(df)`
 # or `df` prints to stdout, and a bare ggplot / lattice object prints
 # through a method that draws to the capture device (rendered as a PNG
-# below). Invisible results — assignments, and `print(x)` / `plot(x)` which
-# return invisibly — are not re-printed, so explicit plotting isn't
+# below). Invisible results (assignments, and `print(x)` / `plot(x)` which
+# return invisibly) are not re-printed, so explicit plotting isn't
 # double-drawn. Equivalent to `source(..., print.eval = TRUE)`.
 tryCatch(
   {
@@ -335,7 +335,7 @@ tryCatch(
 # Flush + close the capture device. Closing by device number leaves any
 # device the cell opened itself untouched.
 if (plot_capture_enabled) {
-  # `invisible()` — `dev.off()` returns a visible value and this `if` is a
+  # `invisible()`: `dev.off()` returns a visible value and this `if` is a
   # top-level expression, so without it Rscript auto-prints "null device 1"
   # into the captured stdout.
   invisible(tryCatch(grDevices::dev.off(plot_device), error = function(e) NULL))
@@ -457,7 +457,7 @@ serialize_value <- function(value, output_dir, var_name) {
 # `inline_data_url`, `width` / `height`, `preview` NULL. A device with
 # nothing drawn writes no file, so iterating the files that actually exist
 # (with the per-file non-empty guard below) is all the emptiness handling
-# needed — no page counting required.
+# needed; no page counting required.
 plot_displays <- list()
 if (plot_capture_enabled) {
   plot_files <- sort(list.files(
@@ -488,8 +488,8 @@ if (plot_capture_enabled) {
   }
 }
 
-# Drop any stragglers — e.g. the trailing blank page an unused device writes
-# on close — so they don't clutter output_dir.
+# Drop any stragglers (e.g. the trailing blank page an unused device writes
+# on close) so they don't clutter output_dir.
 invisible(unlink(list.files(
   output_dir,
   pattern = "^__rplot__[0-9]+\\.png$",
@@ -513,11 +513,11 @@ if (is.null(exec_error)) {
   #   1. Name didn't exist before the cell ran (new binding).
   #   2. Name existed before, but the post-execution value is not
   #      ``identical()`` to the pre-execution value (rebind /
-  #      replacement — covers ``df <- transform(df, ...)`` where R
+  #      replacement; covers ``df <- transform(df, ...)`` where R
   #      hands back a new data.frame, which our previous
   #      ``setdiff(post, pre)`` silently dropped).
   #   3. Name was flagged by the analyzer as an in-place mutation
-  #      (``df$col <- ...``) — ``identical()`` still holds because
+  #      (``df$col <- ...``): ``identical()`` still holds because
   #      R copy-on-modify happens inside the same binding, but the
   #      DAG marked it as a write.
   post_names <- ls(envir = cell_env)
@@ -538,7 +538,7 @@ if (is.null(exec_error)) {
 
   for (var_name in emit_names) {
     value <- get(var_name, envir = cell_env)
-    # Skip functions — the Python side relies on `cloudpickle` for
+    # Skip functions: the Python side relies on `cloudpickle` for
     # cell-defined classes/functions and there's no clean R equivalent
     # for cross-language consumption. For Phase 1, functions don't
     # serialize out of an R cell.
@@ -556,8 +556,8 @@ if (is.null(exec_error)) {
 } else {
   result$error <- conditionMessage(exec_error)
   # R doesn't have a native "format the traceback as a string" the way
-  # Python's `traceback.format_exc()` does. Best-effort via `sys.calls`
-  # — gives the call stack at the time the error was thrown, not the
+  # Python's `traceback.format_exc()` does. Best-effort via `sys.calls`,
+  # which gives the call stack at the time the error was thrown, not the
   # line-numbered Python-style traceback. Better than nothing.
   result$traceback <- paste(
     vapply(sys.calls(), function(call) paste(deparse(call), collapse = " "), character(1)),
@@ -568,7 +568,7 @@ if (is.null(exec_error)) {
 # jsonlite serializes an empty R `list()` as a JSON array `[]`, but the
 # parent's `_parse_result` does `variables.items()` and needs a JSON object
 # `{}`. A named empty list serializes as `{}`. Without this a cell that
-# binds no variables — e.g. a plot-only cell — crashes the parse with
+# binds no variables (e.g. a plot-only cell) crashes the parse with
 # "'list' object has no attribute 'items'". (`displays` /
 # `mutation_warnings` are genuinely arrays, so they stay `[]`.)
 if (length(result$variables) == 0L) {

@@ -232,7 +232,7 @@ class NotebookTUI(App[None]):
     }
     #cells:focus, .scroll-panel:focus { background: $boost; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
-    /* Interactive data viewer — hidden until a pageable table output is shown. */
+    /* Interactive data viewer, hidden until a pageable table output is shown. */
     #output-table { display: none; height: 1fr; border: solid $primary; }
     #output-table:focus { border: solid $accent; }
     """
@@ -460,7 +460,7 @@ class NotebookTUI(App[None]):
         """Focus the cell list so up/down move the selection."""
         try:
             self.query_one("#cells", DataTable).focus()
-        except Exception:  # noqa: BLE001 — not mounted yet
+        except Exception:  # noqa: BLE001 (not mounted yet)
             return
 
     def action_show_tab(self, tab_id: str) -> None:
@@ -469,7 +469,7 @@ class NotebookTUI(App[None]):
             group_id, scroll_id = self._TAB_INFO[tab_id]
             self.query_one(group_id, TabbedContent).active = tab_id
             self.query_one(scroll_id, VerticalScroll).focus()
-        except Exception:  # noqa: BLE001 — not mounted yet
+        except Exception:  # noqa: BLE001 (not mounted yet)
             return
 
     # -- WS loop -------------------------------------------------------------
@@ -492,7 +492,7 @@ class NotebookTUI(App[None]):
                         self._dispatch(raw)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 — any drop → reconnect with backoff
+            except Exception as exc:  # noqa: BLE001 (any drop → reconnect with backoff)
                 self._ws = None
                 if self._session_closed is not None:
                     break
@@ -588,7 +588,7 @@ class NotebookTUI(App[None]):
         table = self.query_one("#cells", DataTable)
         try:
             table.move_cursor(row=self.vm.cell_order.index(cid), animate=False)
-        except Exception:  # noqa: BLE001 — row not materialized yet
+        except Exception:  # noqa: BLE001 (row not materialized yet)
             return
 
     def _render_agent(self) -> None:
@@ -597,7 +597,7 @@ class NotebookTUI(App[None]):
         label = f"Agent · {self.vm.agent_status}" if self.vm.agent_status else "Agent"
         try:
             self.query_one("#detail", TabbedContent).get_tab("tab-agent").label = label
-        except Exception:  # noqa: BLE001 — tab not mounted yet
+        except Exception:  # noqa: BLE001 (tab not mounted yet)
             pass
         self.query_one("#agent-scroll", VerticalScroll).scroll_end(animate=False)
 
@@ -634,7 +634,7 @@ class NotebookTUI(App[None]):
             # clear() reset the cursor to row 0.
             try:
                 table.move_cursor(row=self.vm.cell_order.index(self._selected), animate=False)
-            except Exception:  # noqa: BLE001 — row not materialized yet
+            except Exception:  # noqa: BLE001 (row not materialized yet)
                 pass
             self._show_detail(self._selected)
 
@@ -662,7 +662,7 @@ class NotebookTUI(App[None]):
             table.update_cell(cid, status_col, _glyph(cell.status), update_width=True)
             table.update_cell(cid, cell_col, _literal(self._cell_label(cell)), update_width=True)
             table.update_cell(cid, time_col, _time_str(cell), update_width=True)
-        except Exception:  # noqa: BLE001 — row may not exist yet (pre-snapshot frame)
+        except Exception:  # noqa: BLE001 (row may not exist yet, pre-snapshot frame)
             return
         if cid == self._selected:
             self._show_detail(cid)
@@ -835,7 +835,7 @@ def _test_source_renderable(cell: CellView):
         return "(no tests for this cell)"
     try:
         return Syntax(cell.test_source, "python", theme="one-dark", word_wrap=True)
-    except Exception:  # noqa: BLE001 — pygments hiccup → raw source
+    except Exception:  # noqa: BLE001 (pygments hiccup → raw source)
         return cell.test_source
 
 
@@ -901,7 +901,7 @@ def _source_renderable(cell: CellView):
     try:
         # Matches the web UI's theme; Textual downsamples on non-truecolor terminals.
         return Syntax(cell.source, lexer, theme="one-dark", word_wrap=True)
-    except Exception:  # noqa: BLE001 — unknown lexer / pygments hiccup → raw source
+    except Exception:  # noqa: BLE001 (unknown lexer or pygments hiccup → raw source)
         return cell.source
 
 
@@ -1078,7 +1078,7 @@ def _render_outputs(cell: CellView) -> str:
         if content_type == "text/markdown" and isinstance(output.get("markdown_text"), str):
             parts.append(output["markdown_text"])
         elif content_type == "image/png":
-            parts.append("[image/png — open in the web UI to view]")
+            parts.append("[image/png: open in the web UI to view]")
         elif output.get("preview") is not None:
             parts.append(str(output["preview"]))
         elif content_type:

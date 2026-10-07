@@ -25,7 +25,7 @@ class FakeBackend:
         id_prefix: str = "machine",
     ):
         self.id_prefix = id_prefix
-        """Distinguishes the machines of two backends sharing one database —
+        """Distinguishes the machines of two backends sharing one database;
         a real provider never reissues an ID a live machine already holds."""
 
         self.healthy_after_polls = healthy_after_polls

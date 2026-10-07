@@ -2861,7 +2861,7 @@ async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> di
             },
         }
     except HTTPException:
-        raise  # the 404 above is intentional — don't let the catch-all mask it as 500
+        raise  # the 404 above is intentional; the catch-all must not mask it as a 500
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:

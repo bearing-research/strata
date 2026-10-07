@@ -1,4 +1,4 @@
-"""``strata migrate`` — move an existing SQLite store onto Postgres."""
+"""``strata migrate``: move an existing SQLite store onto Postgres."""
 
 from __future__ import annotations
 

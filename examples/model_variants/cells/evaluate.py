@@ -1,5 +1,5 @@
 # @name Evaluate active classifier
-# Test-set classification report — works for any classifier.
+# Test-set classification report; works for any classifier.
 from sklearn.metrics import classification_report
 
 y_pred = model.predict(X_test)

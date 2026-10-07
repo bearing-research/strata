@@ -102,7 +102,7 @@ def discover_installed_python_minors() -> list[str]:
     if uv is None:
         return fallback
     try:
-        completed = subprocess.run(  # noqa: S603 — uv resolved via shutil.which
+        completed = subprocess.run(  # noqa: S603 (uv resolved via shutil.which)
             [uv, "python", "list", "--only-installed", "--output-format", "json"],
             capture_output=True,
             text=True,

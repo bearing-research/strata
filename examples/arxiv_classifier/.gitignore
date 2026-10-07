@@ -1,4 +1,4 @@
-# Runtime state — the artifact store, venv, and uv.lock are machine-local
+# Runtime state: the artifact store, venv, and uv.lock are machine-local
 # and should not be committed. The source of truth is notebook.toml + cells/.
 .strata/
 .venv/

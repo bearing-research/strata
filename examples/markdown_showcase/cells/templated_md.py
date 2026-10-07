@@ -30,7 +30,7 @@ best = ranked.iloc[0]
 worst = ranked.iloc[-1]
 spread = (best["mean"] - worst["mean"]) * 100
 
-# Pretty table — markdown table syntax with right-aligned scores.
+# Pretty table: markdown table syntax with right-aligned scores.
 table_lines = [
     "| Rank | Model | MMLU | GSM8K | HumanEval | Mean |",
     "|:----:|-------|-----:|------:|----------:|-----:|",
@@ -56,7 +56,7 @@ between best and worst: **{spread:.1f} points**.
 
 ---
 
-*Report generated dynamically from `pd.DataFrame` → `Markdown` —
+*Report generated dynamically from `pd.DataFrame` → `Markdown`,
 exactly the pattern you'd use for "summary at end of notebook" cells.*
 """
     )

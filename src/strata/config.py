@@ -828,7 +828,7 @@ class StrataConfig(BaseSettings):
             "STRATA_GCS_DEFAULT_BUCKET_LOCATION"
         ):
             logger.warning(
-                "STRATA_GCS_PROJECT_ID does not set a GCP project — GcsFileSystem "
+                "STRATA_GCS_PROJECT_ID does not set a GCP project: GcsFileSystem "
                 "has no project parameter. Its value is used as the default bucket "
                 "location (a GCS location such as 'US' or 'europe-west1'). Rename "
                 "it to STRATA_GCS_DEFAULT_BUCKET_LOCATION, and check the value is "

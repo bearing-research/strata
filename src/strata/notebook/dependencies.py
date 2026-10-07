@@ -192,8 +192,8 @@ def _format_command_for_ui(command: list[str]) -> str:
 
 UV_NOT_FOUND_MESSAGE = (
     "uv not found on PATH. Install uv "
-    "(https://docs.astral.sh/uv/getting-started/installation/) or add it to PATH "
-    "— the installer puts uv in ~/.local/bin, which a non-login shell "
+    "(https://docs.astral.sh/uv/getting-started/installation/) or add it to PATH. "
+    "The installer puts uv in ~/.local/bin, which a non-login shell "
     "(ssh, cron) often doesn't include."
 )
 
@@ -584,7 +584,7 @@ def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing
     )
 
     try:
-        proc = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+        proc = subprocess.run(  # noqa: S603 (rscript resolved via shutil.which)
             [rscript, "-e", r_snippet],
             cwd=str(notebook_dir),
             capture_output=True,
@@ -691,7 +691,7 @@ def _run_rscript_command(
 
     started = time.perf_counter()
     try:
-        completed = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+        completed = subprocess.run(  # noqa: S603 (rscript resolved via shutil.which)
             [rscript, "-e", snippet],
             cwd=str(notebook_dir),
             timeout=timeout,
@@ -1046,7 +1046,7 @@ async def renv_add(
             package=package,
             error=(
                 f"Invalid R package name: {package!r}. CRAN names match "
-                "[A-Za-z][A-Za-z0-9.]* — no dashes, no shell metacharacters."
+                "[A-Za-z][A-Za-z0-9.]*: no dashes, no shell metacharacters."
             ),
         )
     refusal = _r_install_refusal()

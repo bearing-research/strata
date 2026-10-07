@@ -68,3 +68,24 @@ test('removeRecentNotebookEntries removes only the matching path', () => {
     { name: 'Other', path: '/tmp/other', lastOpened: 5, sessionId: 'session-b' },
   ])
 })
+
+test('blocked site storage leaves recents empty and keeps recording in memory', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get() {
+      throw new DOMException('Access is denied for this document.', 'SecurityError')
+    },
+  })
+  try {
+    // A fresh module instance, so its load() runs under the throwing getter.
+    const mod = await import('./recentNotebooks.ts?blocked-storage')
+    const recents = mod.useRecentNotebooks()
+    assert.deepEqual(recents.entries.value, [])
+    recents.record('nb', '/tmp/nb', 's1')
+    assert.equal(recents.entries.value[0]?.path, '/tmp/nb')
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original)
+    else delete (globalThis as { localStorage?: unknown }).localStorage
+  }
+})

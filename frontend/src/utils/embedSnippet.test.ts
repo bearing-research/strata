@@ -3,19 +3,27 @@ import test from 'node:test'
 
 import { embedSnippet } from './embedSnippet.ts'
 
-// Runs the snippet's listener against a stub page and returns the iframe's height
-// after one message event.
-function heightAfter(snippet: string, event: { origin: string; data: unknown }): string {
+// Runs the snippet's listener against a stub page holding `frames` iframes and
+// returns each iframe's height after one message event from `fromFrame`.
+function heightsAfter(
+  snippet: string,
+  event: { origin: string; data: unknown },
+  frames = 1,
+  fromFrame = 0,
+): string[] {
   const script = snippet.slice(snippet.indexOf('<script>') + 8, snippet.indexOf('</script>'))
-  const frame = { style: { height: '' } }
+  const iframes = Array.from({ length: frames }, () => ({
+    contentWindow: {},
+    style: { height: '' },
+  }))
   let listener: ((e: unknown) => void) | undefined
   new Function('addEventListener', 'document', script)(
     (_type: string, fn: (e: unknown) => void) => (listener = fn),
-    { querySelector: () => frame },
+    { querySelector: () => iframes[0], querySelectorAll: () => iframes },
   )
   assert.ok(listener, 'the snippet registers a message listener')
-  listener(event)
-  return frame.style.height
+  listener({ ...event, source: iframes[fromFrame]!.contentWindow })
+  return iframes.map((f) => f.style.height)
 }
 
 test('the snippet frames the app view of the session', () => {
@@ -33,9 +41,18 @@ test('the resize listener takes heights only from the Strata origin', () => {
   const snippet = embedSnippet('https://strata.example.com', '', 'abc123')
   const resize = { type: 'strata:embed:resize', height: 640 }
 
-  assert.equal(
-    heightAfter(snippet, { origin: 'https://strata.example.com', data: resize }),
+  assert.deepEqual(heightsAfter(snippet, { origin: 'https://strata.example.com', data: resize }), [
     '640px',
+  ])
+  assert.deepEqual(heightsAfter(snippet, { origin: 'https://evil.example', data: resize }), [''])
+})
+
+test('with two embeds on one page the message sizes the frame that sent it', () => {
+  const snippet = embedSnippet('https://strata.example.com', '', 'abc123')
+  const resize = { type: 'strata:embed:resize', height: 640 }
+
+  assert.deepEqual(
+    heightsAfter(snippet, { origin: 'https://strata.example.com', data: resize }, 2, 1),
+    ['', '640px'],
   )
-  assert.equal(heightAfter(snippet, { origin: 'https://evil.example', data: resize }), '')
 })

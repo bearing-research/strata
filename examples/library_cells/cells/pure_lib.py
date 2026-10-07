@@ -2,7 +2,7 @@
 #
 # This is the classic shape: imports, a literal constant, and a couple
 # of helpers. No runtime work at module scope. The cell is exported
-# verbatim — no slicing — so comments and formatting survive.
+# verbatim (no slicing), so comments and formatting survive.
 
 import math
 

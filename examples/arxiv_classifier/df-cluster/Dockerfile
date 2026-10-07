@@ -1,6 +1,6 @@
 # Template: Strata worker image for Fly.io (CPU).
 #
-# Builds an image that runs `strata-worker` — an HTTP endpoint that
+# Builds an image that runs `strata-worker`, an HTTP endpoint that
 # accepts cell execution requests. Cells run in this container's Python
 # environment, so pip-install whatever your cells import (pandas,
 # datafusion, scikit-learn, ...).
@@ -9,14 +9,14 @@
 #   flyctl apps create strata-df-cluster   # first time only
 #   flyctl deploy --remote-only
 #
-# Fly prints the URL — paste it into notebook.toml as a [[workers]]
+# Fly prints the URL; paste it into notebook.toml as a [[workers]]
 # entry with transport = "direct" and url = "<fly-url>/v1/execute".
 
 # Digest-pinned for reproducible builds (Scorecard Pinned-Dependencies).
 # Bump tag + digest together via `docker buildx imagetools inspect`.
 FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS builder
 
-# Rust toolchain — required to build Strata's native extension.
+# Rust toolchain, required to build Strata's native extension.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl build-essential git ca-certificates && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && \
@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir \
     "pandas>=2" \
     "pyarrow>=18"
 
-# Slim runtime — copy the installed packages from the builder stage.
+# Slim runtime: copy the installed packages from the builder stage.
 FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

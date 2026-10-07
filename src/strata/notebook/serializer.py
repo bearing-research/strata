@@ -1427,7 +1427,7 @@ def _filter_search_sort(
     sort_by: str | None,
     sort_dir: str,
 ) -> Any:
-    """Apply filters, then global search, then a global sort — in that order."""
+    """Apply filters, then global search, then a global sort, in that order."""
     table = _apply_filters(table, filters)
     table = _apply_search(table, search)
     if sort_by and sort_by in table.column_names:
@@ -1567,7 +1567,7 @@ def _deserialize_arrow(file_path: Path) -> Any:
     if shape == _SHAPE_SCALAR:
         return _extract_scalar_from_table(table)
 
-    # Default / table shape — pandas DataFrame or pa.Table.
+    # Default / table shape: pandas DataFrame or pa.Table.
     return _table_to_pandas_or_arrow(table)
 
 

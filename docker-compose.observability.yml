@@ -34,6 +34,9 @@ services:
       - OTEL_SERVICE_NAME=strata
       - STRATA_LOG_FORMAT=json
       - STRATA_LOG_LEVEL=INFO
+      # The name Prometheus scrapes the server on; personal mode refuses any
+      # other host name as a possible DNS-rebinding page.
+      - STRATA_ALLOWED_HOSTS=strata
     # Stdlib only, like every other healthcheck in the repo.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health').read()"]

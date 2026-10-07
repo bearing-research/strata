@@ -9,22 +9,22 @@
 # ``location`` character vector (factor) so the model picks
 # ``rural`` / ``suburb`` indicator coefficients with ``downtown`` as
 # the baseline level. No design-matrix construction, no
-# OneHotEncoder, no ColumnTransformer — just the formula.
+# OneHotEncoder, no ColumnTransformer: just the formula.
 #
 # Returns three data.frames so downstream Python cells consume them
 # over Arrow IPC unchanged:
 #
-#   lm_coefs        — one row per coefficient (term, estimate, std
+#   lm_coefs        one row per coefficient (term, estimate, std
 #                      error, t value, p value).
-#   lm_model_stats  — single-row summary (r², adj r², F, df,
+#   lm_model_stats  single-row summary (r², adj r², F, df,
 #                      residual std err).
-#   lm_predictions  — test-set predictions per row.
+#   lm_predictions  test-set predictions per row.
 #
 # All three are bare data.frames, so harness.R's serializer takes
 # the Arrow tier (not the JSON or RDS fallback).
 
 # ``housing_train`` and ``housing_test`` arrive as ``data.frame``s
-# already — that's what the Arrow IPC reader hands us when an
+# already; that's what the Arrow IPC reader hands us when an
 # upstream Python cell stored a ``pandas.DataFrame``. The character
 # column ``location`` is what R needs to fit dummy-coded effects;
 # converting once here lets ``lm()`` treat it as a categorical.
@@ -39,7 +39,7 @@ fit_summary <- summary(model)
 
 # Hand-build a tidy coefficients data.frame. ``broom::tidy`` would
 # give the same shape in one line but adds a dependency outside the
-# harness's ``arrow`` + ``jsonlite`` baseline — base R is enough.
+# harness's ``arrow`` + ``jsonlite`` baseline. Base R is enough.
 coef_matrix <- fit_summary$coefficients
 lm_coefs <- data.frame(
   term = rownames(coef_matrix),
@@ -50,7 +50,7 @@ lm_coefs <- data.frame(
   row.names = NULL
 )
 
-# Single-row "glance" data.frame — the model-level fit stats that
+# Single-row "glance" data.frame: the model-level fit stats that
 # you'd typically print at the top of summary().
 lm_model_stats <- data.frame(
   r_squared = fit_summary$r.squared,

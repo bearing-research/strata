@@ -11,7 +11,7 @@
  *
  * Alpha tints for pill backgrounds and focus rings come as explicit
  * semantic tokens (--tint-*, --ring-focus) with hand-picked values per
- * theme — color-mix() would be tidier but is a wider browser baseline
+ * theme. color-mix() would be tidier but needs a newer browser baseline,
  * and doesn't save enough LOC to justify the swap yet.
  */
 
@@ -46,7 +46,7 @@
   /* Typography */
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-  /* Semantic — backgrounds */
+  /* Semantic: backgrounds */
   --bg-base: var(--cat-crust);
   --bg-surface: var(--cat-mantle);
   --bg-elevated: var(--cat-base);
@@ -54,18 +54,18 @@
   --bg-hover: var(--cat-surface0);
   --bg-pressed: var(--cat-surface1);
 
-  /* Semantic — text */
+  /* Semantic: text */
   --text-primary: var(--cat-text);
   --text-secondary: var(--cat-subtext0);
   --text-muted: var(--cat-overlay0);
   --text-on-accent: var(--cat-base);
 
-  /* Semantic — borders */
+  /* Semantic: borders */
   --border-subtle: #2a2a3c;
   --border: var(--cat-surface0);
   --border-strong: var(--cat-surface1);
 
-  /* Semantic — accents */
+  /* Semantic: accents */
   --accent-primary: var(--cat-blue);
   --accent-primary-hover: var(--cat-sapphire);
   --accent-success: var(--cat-green);
@@ -77,7 +77,7 @@
   --accent-peach: var(--cat-peach);
   --accent-lavender: var(--cat-lavender);
 
-  /* Tints — soft, translucent-feeling pill backgrounds */
+  /* Tints: soft, translucent-feeling pill backgrounds */
   --tint-primary: #89b4fa22;
   --tint-primary-strong: #89b4fa33;
   --tint-success: #a6e3a120;
@@ -122,7 +122,7 @@
   --cat-pink: #ea76cb;
   --cat-rosewater: #dc8a78;
 
-  /* Backgrounds invert — base becomes the lightest; surface/elevated
+  /* Backgrounds invert: base becomes the lightest; surface/elevated
    * step up in darkness so elevated UI reads as "ahead of" surface. */
   --bg-base: var(--cat-base);
   --bg-surface: var(--cat-mantle);

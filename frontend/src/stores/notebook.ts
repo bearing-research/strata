@@ -1,4 +1,4 @@
-import { reactive, computed, ref } from 'vue'
+import { reactive, computed, ref, watch } from 'vue'
 import type {
   Cell,
   CellId,
@@ -51,7 +51,8 @@ import type {
 } from '../types/ws-payloads.generated'
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import type { DatasetReader } from '../utils/datasetReaders'
-import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
+import { DirtySources, shouldAdoptRemoteSource } from '../utils/cellSourceSync'
+import { OptimisticRuns } from '../utils/optimisticRun'
 import { appendConsole, replaceConsole, startConsoleRun } from '../utils/consoleChunk'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
@@ -240,7 +241,11 @@ function removeCell(id: CellId) {
 // Edits are local; dirty cells sync over WS and the backend answers with
 // dag_update + cell_status. The editor never waits on a round-trip.
 
-const dirtyCells = new Set<CellId>()
+const dirtyCells = new DirtySources((cellId) => {
+  const cell = cellMap.value.get(cellId)
+  // A deleted cell has nothing left to send.
+  return cell ? updateSourceWebSocket(cellId, cell.source) : true
+})
 let idleFlushTimer: ReturnType<typeof setTimeout> | null = null
 const IDLE_FLUSH_MS = 2000
 
@@ -256,7 +261,7 @@ function updateSource(id: CellId, source: string) {
 
   // No local define/reference extraction: mid-typing partial words would
   // produce bogus references. The backend sends them after the flush.
-  dirtyCells.add(id)
+  dirtyCells.mark(id)
   scheduleIdleFlush()
 
   notebook.updatedAt = Date.now()
@@ -275,21 +280,11 @@ function flushDirtyCells() {
     clearTimeout(idleFlushTimer)
     idleFlushTimer = null
   }
-  if (dirtyCells.size === 0) return
-  for (const cellId of dirtyCells) {
-    const cell = cellMap.value.get(cellId)
-    if (!cell) continue
-    updateSourceWebSocket(cellId, cell.source)
-  }
-  dirtyCells.clear()
+  dirtyCells.flushAll()
 }
 
 function flushCellSource(cellId: CellId) {
-  if (!dirtyCells.has(cellId)) return
-  const cell = cellMap.value.get(cellId)
-  if (!cell) return
-  updateSourceWebSocket(cellId, cell.source)
-  dirtyCells.delete(cellId)
+  dirtyCells.flush(cellId)
 }
 
 function setCellStatus(id: CellId, status: CellStatus) {
@@ -1788,7 +1783,13 @@ function inspectActiveCount(): number {
 }
 
 function readInspectLimit(): number {
-  const raw = Number.parseInt(localStorage.getItem('strata.inspect.maxPanels') || '1', 10)
+  let raw: number
+  try {
+    raw = Number.parseInt(localStorage.getItem('strata.inspect.maxPanels') || '1', 10)
+  } catch {
+    // Blocked site data throws on the getter; this runs at module load.
+    return 1
+  }
   if (!Number.isFinite(raw) || raw < 1) return 1
   return Math.min(raw, 8)
 }
@@ -1796,7 +1797,11 @@ const maxInspectPanels = ref(readInspectLimit())
 function setMaxInspectPanels(n: number) {
   const clamped = Math.max(1, Math.min(8, Math.floor(n)))
   maxInspectPanels.value = clamped
-  localStorage.setItem('strata.inspect.maxPanels', String(clamped))
+  try {
+    localStorage.setItem('strata.inspect.maxPanels', String(clamped))
+  } catch {
+    // Persisting is best-effort; the in-memory limit still applies.
+  }
 }
 
 // Single-inspect aliases (first open cell). Remove once nothing reads them.
@@ -1876,6 +1881,15 @@ function parseBackendTestResult(raw: any): CellTestResult {
 }
 
 let wsInstance: ReturnType<typeof useWebSocket> | null = null
+let stopConnectedWatch: (() => void) | null = null
+const optimisticRuns = new OptimisticRuns<CellStatus>()
+
+// Shows `running` on a Run click, before the server answers.
+function showRunStarted(cellId: CellId) {
+  const cell = cellMap.value.get(cellId)
+  if (cell) optimisticRuns.start(cellId, cell.status)
+  setCellStatus(cellId, 'running')
+}
 
 // App view: the WS connects with `?role=viewer` so the server rejects
 // mutations. Set before opening the session.
@@ -1892,11 +1906,22 @@ function initializeWebSocket() {
 
     wsInstance = useWebSocket(notebookId, { role: viewerMode.value ? 'viewer' : undefined })
 
+    // The header and the run buttons follow the socket through drops and reconnects.
+    stopConnectedWatch = watch(wsInstance.state, (state) => {
+      connected.value = state === 'connected'
+      if (state === 'connected') connectError.value = null
+    })
+    // Edits typed while the socket was down go out before the sync, which would
+    // otherwise bring back the server's older text.
+    wsInstance.onOpen(flushDirtyCells)
+
     wsInstance.onMessage('cell_status', (msg: WsMessage) => {
       const p = msg.payload as Record<string, any>
       const cellId = p.cell_id as CellId
       const status = p.status as CellStatus
       setCellStatus(cellId, status)
+      optimisticRuns.settle(cellId)
+      dirtyCells.statusChanged(cellId, status)
 
       const cell = cellMap.value.get(cellId)
 
@@ -2134,6 +2159,16 @@ function initializeWebSocket() {
         for (const sc of dagData.cells) {
           const cell = cellMap.value.get(sc.id as CellId)
           if (!cell) continue
+          // Another tab's edit carries its text; unflushed typing here still wins.
+          if (typeof sc.source === 'string' && sc.source !== cell.source) {
+            if (dirtyCells.has(cell.id)) {
+              const notice =
+                'Another tab changed a cell you are editing; your edit here will replace that change.'
+              if (!toasts.value.some((t) => t.message === notice)) pushToast(notice, 'info', 6000)
+            } else {
+              adoptBackendSource(cell, sc.source)
+            }
+          }
           if (Array.isArray(sc.defines)) cell.defines = sc.defines
           if (Array.isArray(sc.references)) cell.references = sc.references
           if (Array.isArray(sc.upstream_ids)) cell.upstreamIds = sc.upstream_ids
@@ -2215,8 +2250,13 @@ function initializeWebSocket() {
         const cellsRemoved = notebook.cells.some((c) => !serverIds.has(c.id))
 
         if (cellsAdded || cellsRemoved) {
-          // Cells were added or removed (e.g. by an agent).
+          // Cells were added or removed (e.g. by an agent). Unflushed typing survives.
+          const localSource = new Map(notebook.cells.map((c) => [c.id, c.source]))
           notebook.cells = state.cells.map(parseBackendCellPayload)
+          for (const cell of notebook.cells) {
+            const source = localSource.get(cell.id)
+            if (source !== undefined && dirtyCells.has(cell.id)) cell.source = source
+          }
           notebook.cells.sort((a, b) => a.order - b.order)
         } else {
           syncCellsFromBackend(state.cells)
@@ -2426,8 +2466,15 @@ function initializeWebSocket() {
       if (p.code === 'cell_locked' && typeof p.cell_id === 'string') {
         cellLocks.value[p.cell_id] = typeof p.held_by === 'string' ? p.held_by : 'someone'
       }
+      if (p.code === 'cell_busy' && typeof p.cell_id === 'string') {
+        dirtyCells.refusedWhileRunning(p.cell_id)
+      }
+      const refusedRun = optimisticRuns.refused(p)
+      if (refusedRun) setCellStatus(refusedRun.cellId, refusedRun.status)
       // A refused run or edit says why, once, rather than doing nothing.
-      const refused = refusalNotice(p)
+      const refused =
+        refusalNotice(p) ??
+        (p.code === 'notebook_busy' && typeof p.error === 'string' ? p.error : null)
       if (refused && !toasts.value.some((t) => t.message === refused)) {
         pushToast(refused, 'error', 6000)
       }
@@ -2459,6 +2506,8 @@ async function waitForWebSocket(timeoutMs: number = 5000): Promise<void> {
 
 function cleanupWebSocket() {
   sessionClosed.value = null
+  stopConnectedWatch?.()
+  stopConnectedWatch = null
   if (wsInstance) {
     wsInstance.cleanup()
     wsInstance = null
@@ -2533,7 +2582,7 @@ async function executeCellWebSocket(cellId: CellId) {
     cell.streamAttempt = undefined
   }
 
-  setCellStatus(cellId, 'running')
+  showRunStarted(cellId)
   wsInstance.executeCell(cellId)
 }
 
@@ -2588,7 +2637,7 @@ async function executeForceWebSocket(cellId: CellId) {
   }
   // "Run this only" uses upstream artifacts as they are; don't flush upstreams.
   flushCellSource(cellId)
-  setCellStatus(cellId, 'running')
+  showRunStarted(cellId)
   wsInstance.executeForce(cellId)
 }
 
@@ -2621,7 +2670,7 @@ async function executeRerunWebSocket(cellId: CellId) {
     cell.streamBuffer = undefined
     cell.streamAttempt = undefined
   }
-  setCellStatus(cellId, 'running')
+  showRunStarted(cellId)
   wsInstance.executeRerun(cellId)
 }
 
@@ -3348,10 +3397,8 @@ async function updateNotebookSecretManagerConfigAction(
   return data
 }
 
-function updateSourceWebSocket(cellId: CellId, source: string) {
-  if (wsInstance && wsInstance.connected()) {
-    wsInstance.updateCellSource(cellId, source)
-  }
+function updateSourceWebSocket(cellId: CellId, source: string): boolean {
+  return wsInstance ? wsInstance.updateCellSource(cellId, source) : false
 }
 
 /** Overwrite a cell someone else changed moments ago with this tab's source. */

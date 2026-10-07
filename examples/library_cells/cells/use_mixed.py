@@ -1,7 +1,7 @@
 # @name Use the mixed-cell helpers
 #
 # This cell consumes both the library code (``clamp``, ``CLAMP_MIN``)
-# *and* a runtime variable (``raw_max``) from the producing cell —
+# *and* a runtime variable (``raw_max``) from the producing cell;
 # the slicer routes each through the right path automatically.
 
 clamped_examples = {

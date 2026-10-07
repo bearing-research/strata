@@ -4,8 +4,8 @@
 # ``positions``, and books the slippage delta (realized - expected)
 # to the cost ledger.
 #
-# Depends on ``submitted`` to force DAG ordering after ``place_orders``
-# — even when there are zero new submissions we still want to
+# Depends on ``submitted`` to force DAG ordering after ``place_orders``.
+# Even when there are zero new submissions we still want to
 # reconcile any open orders from prior runs.
 import datetime as dt
 import uuid
@@ -13,7 +13,7 @@ import uuid
 from alpaca.trading.requests import GetOrdersRequest
 
 # Reference submitted so the DAG runs us after place_orders. The
-# variable itself is unused — reconcile pulls authoritative state
+# variable itself is unused: reconcile pulls authoritative state
 # from Alpaca regardless of what we submitted this run.
 _upstream_gate = submitted  # noqa: F841
 

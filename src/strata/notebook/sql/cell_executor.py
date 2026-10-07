@@ -401,7 +401,7 @@ async def _execute_write_cell(
     cache_annotation = annotations.cache or CachePolicy(kind="session")
     if cache_annotation.kind in {"fingerprint", "snapshot"}:
         return _error_result(
-            f"@cache {cache_annotation.kind} isn't valid on a write cell — "
+            f"@cache {cache_annotation.kind} isn't valid on a write cell: "
             "writes mutate state, so probe-based invalidation has no anchor. "
             "Use `# @cache session` (run once per session) or `# @cache forever` "
             "(idempotent setup; cache by source).",
@@ -846,8 +846,8 @@ def database_problem(spec: ConnectionSpec, notebook_dir: Any, config: Any) -> st
 
     The file is opened by the server process, so it must be one the notebook
     may read: see ``local_database_problem``. A SQLite ``uri`` is refused, since
-    its parameters can name any file. A BigQuery key file must be in the
-    notebook's directory.
+    its parameters can name any file. A BigQuery connection must name a key
+    file, in the notebook's directory.
     """
     from pathlib import Path
 
@@ -874,6 +874,13 @@ def _key_file_problem(spec: ConnectionSpec, notebook_dir: Any) -> str | None:
 
     own = Path(os.path.realpath(str(notebook_dir)))
     extras = spec.model_extra or {}
+    # Without a key file the driver falls back to the server's own Google credentials.
+    if not extras.get("credentials_path", getattr(spec, "credentials_path", None)):
+        return (
+            "a BigQuery connection on this server needs `credentials_path`, a "
+            "service-account key file in this notebook's directory; without one it "
+            "would use the server's own Google credentials"
+        )
     for key in ("credentials_path", "write_credentials_path"):
         value = extras.get(key, getattr(spec, key, None))
         if not isinstance(value, str) or not value:
@@ -1283,9 +1290,9 @@ def _table_display(table: Any, *, max_rows: int = 5) -> dict[str, Any]:
 
 
 def _format_cell(value: Any) -> str:
-    """Render a value for the markdown preview; ``None`` shows as a dash, not ``None``."""
+    """Render a value for the markdown preview; ``None`` shows as SQL ``NULL``."""
     if value is None:
-        return "—"
+        return "NULL"
     return str(value)
 
 

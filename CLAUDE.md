@@ -14,12 +14,12 @@ These bias toward caution over speed; for trivial tasks, use judgment.
    silently; if a simpler approach exists, say so and push back when
    warranted.
 2. **Simplicity first.** Minimum code that solves the problem, nothing
-   speculative — no unrequested features, abstractions for single-use
+   speculative: no unrequested features, abstractions for single-use
    code, configurability, or error handling for impossible scenarios. If
    200 lines could be 50, rewrite it.
 3. **Surgical changes.** Touch only what you must; match existing style
    even if you'd do it differently; don't refactor what isn't broken.
-   Remove only the imports/variables your own changes orphaned — mention
+   Remove only the imports/variables your own changes orphaned; mention
    pre-existing dead code, don't delete it. Every changed line should
    trace directly to the request.
 4. **Goal-driven execution.** Turn tasks into verifiable goals ("fix the
@@ -37,7 +37,7 @@ materialize(inputs, transform, environment) → artifact
 
 Results are immutable + versioned, identical computations are deduplicated via a
 provenance hash, and lineage is explicit. Strata sits **below orchestration** and
-**outside execution** — it is not a workflow engine, scheduler, or query engine.
+**outside execution**: it is not a workflow engine, scheduler, or query engine.
 
 ```
 Orchestration → decides what to run
@@ -65,7 +65,7 @@ uv run python -m strata                   # start server
 
 Full inventory of installed binaries (`strata-notebook`, `strata`,
 `strata-worker`, `python -m strata`, package vs CLI name) lives at
-`docs/getting-started/installation.md#commands-reference` — the
+`docs/getting-started/installation.md#commands-reference`, the
 canonical list other pages should link to instead of re-introducing
 each command from scratch.
 
@@ -118,7 +118,7 @@ Multi-tenant: `X-Tenant-ID` header (validated 1–64 alphanumeric+`_-`); tenant
 hashed into cache keys + dirs; per-tenant QoS limiters and metrics; tenant
 registry is LRU-bounded. See `tenant.py`, `tenant_registry.py`.
 
-Auth: trusted-proxy model — Strata does not authenticate, only the proxy can
+Auth: trusted-proxy model. Strata does not authenticate, only the proxy can
 reach it (network-layer enforced). Proxy injects `X-Strata-Principal`,
 `X-Tenant-ID` (the configurable `tenant_header`), `X-Strata-Scopes`,
 `X-Strata-Proxy-Token`. ACL evaluation
@@ -127,7 +127,7 @@ is **deny-first** (deny rules → allow rules → default). Enforcement points:
 ownership), `POST /v1/cache/clear` (`admin:cache` scope). Table ACL lives in
 `auth.py` (`AclEvaluator`); tenant scoping of a concrete record is the
 `CurrentTenant` dependency plus `_ensure_artifact_access` in `server.py`.
-**Cache stays shared across principals** — ACL gates request admission and
+**Cache stays shared across principals**: ACL gates request admission and
 result retrieval, not cache contents.
 
 ### Artifact store & transforms
@@ -143,7 +143,7 @@ Two executor protocols:
   executor returns Arrow IPC.
 - **v2 pull**: Strata sends a `BuildManifest` of signed URLs; executor fetches
   inputs, uploads result, POSTs to `finalize_url`. Avoids bandwidth bottleneck
-  at Strata. Not gated by a flag — the routes are live wherever signed URLs can
+  at Strata. Not gated by a flag: the routes are live wherever signed URLs can
   be issued (`build_transport_available` in `api/dependencies.py`). See
   `transforms/signed_urls.py`.
 
@@ -165,7 +165,7 @@ Observability: `tracing.py`, `logging.py`, `health.py`, `circuit_breaker.py`,
 ## Configuration
 
 `StrataConfig` loads from `pyproject.toml` `[tool.strata]` or `STRATA_*` env
-vars. See `config.py` for the full surface — host/port, cache dir+size,
+vars. See `config.py` for the full surface: host/port, cache dir+size,
 S3/GCS/Azure credentials, QoS slots/limits, tracing, logging, timeouts, rate
 limiting, multi-tenancy, auth.
 
@@ -184,7 +184,7 @@ limiting, multi-tenancy, auth.
    (`_normalize_s3_path` in `planner.py`).
 7. **ACL is deny-first**: explicit denies cannot be bypassed by allows.
 8. **Cache is shared across principals**: ACL gates request access, not cache
-   contents — preserves the main perf win.
+   contents, which preserves the main perf win.
 
 ## Testing
 
@@ -258,27 +258,27 @@ There are three single-cell "run" modes (`executor.py::execute_cell{,_force,_rer
 | Mode    | Target cache | Materialize upstreams | UI                                 |
 | ------- | ------------ | --------------------- | ---------------------------------- |
 | normal  | on           | on (cascade if stale) | `▶` button, Shift+Enter            |
-| force   | off          | **off** (stale ok)    | "Run this only" — no surfaced UI   |
+| force   | off          | **off** (stale ok)    | "Run this only"; no surfaced UI   |
 | rerun   | off          | on (cascade if stale) | `↻` button, Cmd+Shift+Enter        |
 
 `notebook_run_all` runs every cell in `execute_cell` (normal) mode;
 `notebook_rerun_all` runs every cell in `execute_cell_rerun` mode.
 When rerun on a single cell finds stale upstreams, it dispatches through
 `_execute_cascade(target_force=True)` so per-step status/output frames still
-broadcast — silent in-executor upstream rebuilds would skip those frames.
+broadcast; silent in-executor upstream rebuilds would skip those frames.
 
 ### Materialize: Core SDK vs notebook
 
 The word "materialize" names *two* distinct pipelines in this codebase. They
-deliberately do not share the entry point — only the artifact-store substrate.
+deliberately do not share the entry point, only the artifact-store substrate.
 
 | Axis              | Core SDK `client.materialize`          | Notebook `CellExecutor._materialize_cell` |
 | ----------------- | -------------------------------------- | ----------------------------------------- |
 | Entry point       | HTTP `POST /v1/materialize`            | In-process method call                    |
 | Unit of work      | One *transform* (e.g. `scan@v1`)       | One *cell* (ad-hoc Python source)         |
-| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.to_json() + sorted input hashes` for others — and `transform_spec` itself carries the inputs **in order**, so input order is significant (positional `input0`/`input1` transforms don't dedup under reordering) | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
+| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.to_json() + sorted input hashes` for others; `transform_spec` itself carries the inputs **in order**, so input order is significant (positional `input0`/`input1` transforms don't dedup under reordering) | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
 | Inputs            | List of table / artifact URIs          | Upstream cell variables (resolved via DAG) |
-| Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out — one artifact per consumed variable via `derive_subkey` |
+| Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out, one artifact per consumed variable via `derive_subkey` |
 | Execution         | Server dispatches to registered HTTP executors (v1-push / v2-pull) or built-in scan planner | Local subprocess harness in notebook venv, or HTTP executor |
 | Shared substrate  | `artifact_store.find_by_provenance` / `put` / `set_name`; `notebook.provenance.derive_subkey` (used by both for sub-artifact keys) |
 
@@ -292,7 +292,7 @@ one level down at the artifact store.
 Content type is selected by value type and stored in
 `transform_spec.params.content_type`:
 
-- `arrow/ipc` — Arrow-representable values (pyarrow Table/RecordBatch, pandas
+- `arrow/ipc`: Arrow-representable values (pyarrow Table/RecordBatch, pandas
   + polars frames/series, numpy ndarrays + scalars, torch/jax tensors,
   datetime/Decimal/UUID/bytes/complex). Shape encoded in schema metadata
   `strata.arrow.shape` ∈ `table|tensor|scalar`; the originating library is
@@ -302,11 +302,11 @@ Content type is selected by value type and stored in
   (`_ARROW_TYPE_RULES` in `serializer.py`): a new arrow-routable type is one
   rule entry. torch/jax are detected via `sys.modules` (a tensor implies its
   library is imported), so they cost nothing in notebooks that never use them.
-- `json/object` — dicts, lists, primitive scalars
-- `pickle/object` — everything else (cloudpickle by default;
+- `json/object`: dicts, lists, primitive scalars
+- `pickle/object`: everything else (cloudpickle by default;
   `STRATA_NOTEBOOK_OBJECT_CODEC` to override; falls back to stdlib pickle)
-- `image/png`, `text/markdown` — display-only
-- `module/import|cell|cell-instance` — module objects and cell-defined classes
+- `image/png`, `text/markdown`: display-only
+- `module/import|cell|cell-instance`: module objects and cell-defined classes
 
 All preview / TOML writes go through `serializer.to_serialization_safe`
 (coerces None / datetime / Decimal / numpy scalars to JSON+TOML-safe primitives).
@@ -314,18 +314,18 @@ All preview / TOML writes go through `serializer.to_serialization_safe`
 ### DAG & variable analysis
 
 Each cell yields `defines` (top-level assignments) and `references` (free
-variables anywhere — module scope, decorators, defaults, class bases, type
+variables anywhere: module scope, decorators, defaults, class bases, type
 annotations except under `from __future__ import annotations`, function bodies
 via `symtable`). The DAG builder connects references to last-definer producers,
 computes a topological order (Kahn), detects cycles, and tracks
-`consumed_variables[cell_id]` — the variables this cell produces that
+`consumed_variables[cell_id]`, the variables this cell produces that
 downstream cells reference. Only consumed variables are stored as artifacts.
 DAG rebuilds on every source change.
 
 ### Source annotations
 
 `#` comments at the top of a cell, parsed by `annotations.py`. **Annotations
-always win over persisted config** — they are the single per-cell
+always win over persisted config**: they are the single per-cell
 configuration surface.
 
 Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
@@ -340,7 +340,7 @@ Mounts inject `pathlib.Path` variables (schemes: `file|s3|gs|az`); options
 carry fsspec storage settings. See `mounts.py::MountResolver`.
 
 Validation (`annotation_validation.py`) runs on open / worker-catalog reload /
-WS source flush — **never on keystrokes**. Diagnostics surface as a header
+WS source flush, **never on keystrokes**. Diagnostics surface as a header
 pill but never block execution.
 
 ### Cascade execution
@@ -361,7 +361,7 @@ REST `/v1/notebooks`: `POST /create`, `POST /open`, `GET /{id}/cells`,
 WebSocket `/v1/notebooks/ws/{notebook_id}`. Frame-type strings are owned by the `MessageType` StrEnum in
 `src/strata/notebook/protocol.py`. The full client-author reference
 (bootstrap, auth model, reconnect grace, cold-start payload, every
-message type) is `docs/reference/notebook-protocol.md` — keep that doc
+message type) is `docs/reference/notebook-protocol.md`; keep that doc
 in sync when adding routes / frames.
 
 ### Frontend (`frontend/`)
@@ -369,7 +369,7 @@ in sync when adding routes / frames.
 Vue 3 + TS + Vite, talks to `http://localhost:8765` (override with
 `VITE_STRATA_URL`).
 
-Source updates are **local-only on keystroke** — `updateSource()` updates the
+Source updates are **local-only on keystroke**: `updateSource()` updates the
 buffer and marks the cell dirty. Dirty cells flush via WS `cell_source_update`
 after 2s idle, on editor blur, or immediately before Shift+Enter execution.
 The backend re-analyzes async and broadcasts `dag_update` + `cell_status`.
@@ -385,7 +385,7 @@ cd frontend && npm run dev   # hot reload
 ### Notebook invariants
 
 1. **Artifact store is the sole source of truth** for inter-cell variables
-   in **single-cell** execution — no in-memory cache, every read goes through
+   in **single-cell** execution: no in-memory cache, every read goes through
    the store. The run-all batching path (`CellExecutor.execute_batch`,
    issue #26) is the deliberate exception: cells in a batch share a live
    Python namespace within one harness subprocess, and the store is the

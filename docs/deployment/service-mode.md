@@ -64,6 +64,13 @@ the network-level isolation is. If an attacker can reach Strata's
 IP directly, they can read the token from any leaked config and
 forge headers. Treat the token as defense-in-depth.
 
+The proxy must pass the browser's `Host` header through unchanged,
+port included (nginx: `proxy_set_header Host $http_host;`, not
+`$host`, which drops the port). Strata accepts a browser write or a
+notebook WebSocket only when its `Origin` matches that `Host`; a proxy
+that rewrites `Host` has to list the public origin in
+`STRATA_CORS_ALLOW_ORIGINS` instead.
+
 ## Running the demo stack
 
 The repo ships a complete service-mode demo: Strata + a notebook
@@ -320,15 +327,15 @@ auth (`admin:*` satisfies any of them):
 |---|---|
 | `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` |
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
-| `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload) |
+| `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload); service mode only, `409` in personal mode |
 | `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
-| `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, still limited to the caller's tenant), reading another tenant's `GET /v1/artifacts/usage` / `stats`, the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`), per-table metrics (`GET /metrics/tables*`), and the process diagnostics under `/v1/debug/*` (latency, GC pauses, pools, connections, memory, rate limits) |
+| `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, which sweeps the whole store), reading another tenant's `GET /v1/artifacts/usage` / `stats`, the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`), per-table metrics (`GET /metrics/tables*`), and the process diagnostics under `/v1/debug/*` (latency, GC pauses, pools, connections, memory, rate limits) |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
 | `artifacts:pin` | Pinning and unpinning a version against garbage collection (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) |
 | `artifacts:publish` | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) |
 | `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags, and `name` on `POST /v1/materialize`) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
 | `notebook:read` | Every notebook `GET` over REST, and observing a notebook over its WebSocket (sync, previews, profiling) |
-| `notebook:write` | Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike. |
+| `notebook:write` | Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants; also opening, creating, importing, closing and deleting notebooks, a cell's test source, promote, and recents validation. REST and WebSocket alike. |
 | `notebook:execute` | Running code or changing its environment: executing a cell or its tests, run-all, dependency changes and environment sync, requirements imports, the Python version, SSH workers, the inspect REPL and widget updates. REST and WebSocket alike. |
 
 The notebook scopes are checked against one table for both transports
@@ -710,7 +717,10 @@ Postgres, Snowflake and BigQuery cells send the query to their database server.
 The server reads a BigQuery connection's `credentials_path` and
 `write_credentials_path` key files itself, so each must be a file in the
 notebook's own directory, after following links; one elsewhere fails the cell,
-the schema listing and saving the connection.
+the schema listing and saving the connection. A BigQuery connection must name
+`credentials_path`: without a key file the driver would use the server's own
+Google credentials (its application default credentials), so one with none is
+refused in the same three places.
 A `${VAR}` in a connection's `auth` reads the notebook's env, never the server's
 environment, which would otherwise go to whatever host the notebook names; a
 secret the server holds reaches a connection only as a named `credential`.

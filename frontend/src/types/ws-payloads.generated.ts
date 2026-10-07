@@ -41,6 +41,7 @@ export interface CellAnalysisModel {
   module_exports?: ModuleExportModel[] | null
   created_by?: string | null
   updated_by?: string | null
+  source?: string | null
 }
 
 export interface CellConsolePayload {
@@ -175,7 +176,13 @@ export interface EnvironmentJobModel {
 export interface ErrorPayload {
   error: string
   code?:
-    'ENVIRONMENT_BUSY' | 'cell_busy' | 'cell_locked' | 'read_only' | 'insufficient_scope' | null
+    | 'ENVIRONMENT_BUSY'
+    | 'notebook_busy'
+    | 'cell_busy'
+    | 'cell_locked'
+    | 'read_only'
+    | 'insufficient_scope'
+    | null
   cell_id?: string | null
   held_by?: string | null
 }

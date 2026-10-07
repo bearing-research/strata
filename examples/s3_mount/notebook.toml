@@ -4,7 +4,7 @@ created_at = 2026-04-14T00:00:00Z
 updated_at = 2026-04-14T00:00:00Z
 
 # Mount the 2024 weather file for a NYC-area airport (NOAA GSOD) from an
-# anonymous-readable S3 bucket (AWS Open Data). No AWS credentials needed —
+# anonymous-readable S3 bucket (AWS Open Data). No AWS credentials needed:
 # the options table below tells fsspec to use anonymous access.
 #
 # To use a private bucket instead: drop `options` and run `aws configure`.

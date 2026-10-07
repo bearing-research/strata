@@ -65,11 +65,13 @@ export function removeRecentNotebookEntries(
 
 const entries = ref<RecentNotebookEntry[]>(load())
 
+// `typeof localStorage` stays inside the try: with site data blocked the
+// getter itself throws.
 function load(): RecentNotebookEntry[] {
-  if (typeof localStorage === 'undefined') {
-    return []
-  }
   try {
+    if (typeof localStorage === 'undefined') {
+      return []
+    }
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     return normalizeRecentNotebookEntries(JSON.parse(raw))
@@ -79,10 +81,10 @@ function load(): RecentNotebookEntry[] {
 }
 
 function save() {
-  if (typeof localStorage === 'undefined') {
-    return
-  }
   try {
+    if (typeof localStorage === 'undefined') {
+      return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.value))
   } catch {
     // localStorage full or disabled: keep the in-memory list.

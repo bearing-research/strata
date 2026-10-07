@@ -9,13 +9,13 @@
 # search naturally sharpens as it approaches a minimum.
 #
 # Every iteration stores the full `state` as its own artifact with an
-# ``@iter=k`` suffix — the inspect panel's iteration picker lets you
+# ``@iter=k`` suffix. The inspect panel's iteration picker lets you
 # open any of them, and the returned URI can be pasted into a new
 # loop cell's ``# @loop start_from=<cell>@iter=<k>`` to fork a
 # different search strategy from a promising mid-iter state.
 #
-# `random` and `himmelblau` come from the seed cell via the DAG — no
-# need to re-import or redefine here.
+# `random` and `himmelblau` come from the seed cell via the DAG, so
+# there is no need to re-import or redefine them here.
 next_iter = state["iter"] + 1
 # Deterministic per-iteration RNG so the whole notebook is reproducible.
 # random.Random only accepts int/str/bytes seeds on Python 3.11+, so we

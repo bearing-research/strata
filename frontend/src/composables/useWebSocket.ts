@@ -2,7 +2,7 @@
 
 import { ref, shallowRef } from 'vue'
 import type { WsMessage, WsClientMessageType, WsServerMessageType } from '../types/notebook'
-import { BASE_PATH, strataHttpBase, strataWsBase } from '../utils/strataBase'
+import { BASE_PATH, strataHttpBase, strataWsBase } from '../utils/strataBase.ts'
 
 const STRATA_WS_URL = strataWsBase(
   strataHttpBase(
@@ -25,9 +25,11 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
   const error = ref<string | null>(null)
   const clientSeq = ref(0)
   const messageHandlers = new Map<WsServerMessageType, MessageHandler[]>()
+  const openHandlers: Array<() => void> = []
   const reconnectAttempts = ref(0)
-  const maxReconnectAttempts = 10
-  const reconnectDelay = ref(1000) // Start at 1s, backoff to 30s max
+  // Only disconnect() stops reconnecting. Not read from `state`: a failed
+  // attempt fires onerror (state 'error') before onclose.
+  let closedByUser = false
 
   let _connectResolve: (() => void) | null = null
   let _connectReject: ((err: Error) => void) | null = null
@@ -37,6 +39,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
       return
     }
 
+    closedByUser = false
     state.value = 'connecting'
     error.value = null
 
@@ -53,8 +56,9 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
         state.value = 'connected'
         error.value = null
         reconnectAttempts.value = 0
-        reconnectDelay.value = 1000
         connection.value = ws
+        // Before the sync, so the state it brings back already has them.
+        openHandlers.forEach((handler) => handler())
         requestSync()
         if (_connectResolve) {
           _connectResolve()
@@ -85,12 +89,12 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
 
       ws.onclose = () => {
         console.log('[WebSocket] Disconnected')
-        connection.value = null
+        if (connection.value === ws) connection.value = null
 
-        if (state.value === 'connected' || state.value === 'connecting') {
-          scheduleReconnect()
-        } else {
+        if (closedByUser) {
           state.value = 'disconnected'
+        } else {
+          scheduleReconnect()
         }
       }
 
@@ -104,29 +108,21 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
   }
 
   function scheduleReconnect(): void {
-    if (reconnectAttempts.value >= maxReconnectAttempts) {
-      state.value = 'error'
-      error.value = 'Failed to reconnect after max attempts'
-      return
-    }
-
     state.value = 'reconnecting'
     reconnectAttempts.value++
 
-    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
-    const delay = Math.min(reconnectDelay.value * 2 ** (reconnectAttempts.value - 1), 30000)
-    reconnectDelay.value = delay
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, then every 30s until disconnect().
+    const delay = Math.min(1000 * 2 ** (reconnectAttempts.value - 1), 30000)
 
-    console.log(
-      `[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.value}/${maxReconnectAttempts})`,
-    )
+    console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.value})`)
 
     setTimeout(() => {
-      connect()
+      if (!closedByUser) connect()
     }, delay)
   }
 
   function disconnect(): void {
+    closedByUser = true
     if (connection.value) {
       connection.value.close()
       connection.value = null
@@ -134,10 +130,11 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     state.value = 'disconnected'
   }
 
-  function send(type: WsClientMessageType, payload: Record<string, any> = {}): void {
+  /** Send one frame; false when it could not go out (not connected). */
+  function send(type: WsClientMessageType, payload: Record<string, any> = {}): boolean {
     if (state.value !== 'connected' || !connection.value) {
       console.warn('[WebSocket] Not connected, dropping message:', type)
-      return
+      return false
     }
 
     clientSeq.value++
@@ -150,9 +147,16 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
 
     try {
       connection.value.send(JSON.stringify(msg))
+      return true
     } catch (e) {
       console.error('[WebSocket] Failed to send message:', e)
+      return false
     }
+  }
+
+  /** Run `handler` each time the socket opens, reconnects included. */
+  function onOpen(handler: () => void): void {
+    openHandlers.push(handler)
   }
 
   /** Register a handler for a message type; a type can have several. */
@@ -216,8 +220,8 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     send('cell_cancel', { cell_id: cellId })
   }
 
-  function updateCellSource(cellId: string, source: string, force = false): void {
-    send(
+  function updateCellSource(cellId: string, source: string, force = false): boolean {
+    return send(
       'cell_source_update',
       force ? { cell_id: cellId, source, force } : { cell_id: cellId, source },
     )
@@ -322,6 +326,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     // Messaging
     send,
     onMessage,
+    onOpen,
 
     // High-level actions
     requestSync,

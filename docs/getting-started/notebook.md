@@ -33,7 +33,11 @@ The pipeline below is the one in that screenshot.
     ```
 
     The `mcp` and `tui` extras are for `strata agent` and `strata watch`
-    (see [What's next](#whats-next)); the web UI needs neither.
+    (see [What's next](#whats-next)); the web UI needs neither. SQL
+    cells need the `sql` extra plus a driver extra for each database,
+    for example
+    `uv tool install "strata-notebook[mcp,tui,sql,sql-duckdb,sql-sqlite]"`;
+    without it a notebook that holds a SQL cell does not open.
     Personal mode is the default (single-user, writes enabled); no
     config needed for a local run. Re-run `strata-notebook` to start it
     again on later sessions. Requires [uv](https://docs.astral.sh/uv/);
@@ -109,7 +113,7 @@ re-add it with the kind you want.
 | Kind | What it's for |
 | --- | --- |
 | **Python** | Regular Python code. Most cells. |
-| **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. |
+| **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. Needs the `sql` extra and a driver extra (see [Installation](installation.md)). |
 | **R** | R code - stats and tidyverse. See [Cell Types](../notebook/cells.md). |
 | **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **Widget** | A declarative control panel - one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
@@ -324,8 +328,11 @@ strata-notebook --notebook-dir ./examples
 # equivalently: STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook
 ```
 
-(For Docker, edit `docker-compose.yml` to mount `./examples:/data/notebooks`
-and set the env var to that path.)
+(For Docker, in `docker-compose.yml` replace the
+`strata-notebooks:/tmp/strata-notebooks` volume with
+`./examples:/tmp/strata-notebooks` and add `UV_PYTHON_DOWNLOADS=automatic`
+under `environment:`. The image ships Python 3.13 only and the examples
+pin 3.12 or 3.14, so uv has to fetch those.)
 
 Every example is also rendered into the docs site so you can read
 the cells before deciding which to open. See the

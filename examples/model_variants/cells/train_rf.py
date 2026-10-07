@@ -1,6 +1,6 @@
 # @variant classifier rf
 # @name Random forest
-# Random forest — more capacity, slower to train.
+# Random forest: more capacity, slower to train.
 from sklearn.ensemble import RandomForestClassifier
 
 model = RandomForestClassifier(n_estimators=200, random_state=42)

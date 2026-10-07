@@ -146,7 +146,7 @@ def validate_cell_annotations(
                     code="table_shadows_define",
                     message=(
                         f"`@table {table.name}` injects a variable that this "
-                        "cell also defines — the definition wins and the "
+                        "cell also defines; the definition wins and the "
                         "table URI is shadowed."
                     ),
                     line=line,
@@ -162,7 +162,7 @@ def validate_cell_annotations(
                 severity=DiagnosticSeverity.ERROR,
                 code="table_duplicate_name",
                 message=(
-                    f"`@table {dup}` is declared more than once — each @table must "
+                    f"`@table {dup}` is declared more than once; each @table must "
                     "have a unique name; the cell will fail to run."
                 ),
                 line=_find_annotation_line(cell.source, "table", dup),
@@ -750,7 +750,7 @@ def _validate_loop_annotation(
                     severity=DiagnosticSeverity.ERROR,
                     code="loop_start_from_unknown",
                     message=(
-                        "`@loop start_from` must reference a different cell — "
+                        "`@loop start_from` must reference a different cell: "
                         "a loop cell cannot seed itself from its own iterations."
                     ),
                     line=loop_line,
@@ -856,7 +856,7 @@ def _validate_variant_annotation(
                     code="variant_active_redundant",
                     message=(
                         f'Group `{group_id}` is in sweep mode, so `active = "{active}"` '
-                        "is ignored — every variant runs and downstream consumes a "
+                        "is ignored: every variant runs and downstream consumes a "
                         "{variant: value} dict."
                     ),
                     line=variant_line,

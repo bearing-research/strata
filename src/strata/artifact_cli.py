@@ -593,7 +593,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
         # Say so rather than print success for an author that never reached the page.
         print(
             f"Note: already published, and the page credits "
-            f"{publication.published_by or 'nobody'} — republishing does not "
+            f"{publication.published_by or 'nobody'}; republishing does not "
             f"change that. Unpublish and publish again to set an author "
             f"(which mints a new token)."
         )
@@ -666,7 +666,7 @@ def cmd_unpublish(args: argparse.Namespace) -> int:
     drop_cached_bundles(store, args.token)
 
     print("Withdrawn. The link now reports that it was withdrawn rather than")
-    print("resolving to anything — it is never reissued for other content.")
+    print("resolving to anything; it is never reissued for other content.")
     return 0
 
 

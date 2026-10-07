@@ -282,7 +282,7 @@ const rPackagesEmptyMessage = computed(() => {
     case 'ok':
       return 'No R packages installed in the project library.'
     case 'rscript_missing':
-      return 'Rscript not available — install R to list packages.'
+      return 'Rscript not available. Install R to list packages.'
     case 'renv_not_active':
       return 'renv has not been initialised in this notebook yet.'
     case 'unknown':
@@ -871,7 +871,7 @@ function downloadRequirements() {
             <code>{{ environmentOperation.command }}</code>
           </div>
           <p v-if="rOperationIsInit" class="env-r-live-hint">
-            First run compiles the <code>arrow</code> R package from source — typically 5–10 minutes
+            First run compiles the <code>arrow</code> R package from source, typically 5–10 minutes
             on macOS. Subsequent installs reuse the cached binary.
           </p>
           <pre v-if="rOperationTail" class="env-r-live-tail">{{ rOperationTail }}</pre>
@@ -885,7 +885,7 @@ function downloadRequirements() {
           </div>
           <p class="env-r-bootstrap-explainer">
             R cells are running against your system R library. For reproducible builds, initialize a
-            project-scoped <code>renv</code> — this records <code>renv.lock</code> and installs
+            project-scoped <code>renv</code>, which records <code>renv.lock</code> and installs
             <code>jsonlite</code> + <code>arrow</code> into the notebook's library. First run can
             take 5–10 min while <code>arrow</code> compiles from source; subsequent installs reuse
             the binary.

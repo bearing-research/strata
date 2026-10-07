@@ -128,7 +128,7 @@ class ChipsBlock(Block):
 
 @dataclass
 class NoteBlock(Block):
-    """Single italicized sentence — context the reader needs."""
+    """Single italicized sentence: context the reader needs."""
 
     text: str
 
@@ -531,7 +531,7 @@ def _render_display_output(
                     total_rows=output.rows,
                 )
             ]
-        # No columns — fall through to scalar/repr below.
+        # No columns: fall through to scalar/repr below.
 
     if ctype == "json/object":
         body = _truncate_text(_format_json_preview(output.preview), max_bytes)
@@ -584,7 +584,7 @@ def _normalize_table_preview(
                 padded.append(None)
             out.append(dict(zip(columns, padded)))
         # Anything else (a stray scalar that snuck into the preview
-        # list) is silently dropped — better to render a small table
+        # list) is silently dropped; better to render a small table
         # than to error during export.
     return out
 

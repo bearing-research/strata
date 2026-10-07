@@ -28,7 +28,7 @@ const nextLabel = computed(() => {
   <button
     type="button"
     class="theme-toggle"
-    :title="`${label} — ${nextLabel}`"
+    :title="`${label}. ${nextLabel}`"
     :aria-label="nextLabel"
     @click="cycleMode"
   >

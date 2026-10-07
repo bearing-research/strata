@@ -1,8 +1,8 @@
 # @name Train Classifier
 # @worker local
 # Train a logistic regression classifier: embeddings → topic label.
-# Runs locally — logistic regression on 3K × 384 takes <1s on CPU,
-# no reason to ship the data to a GPU worker and back.
+# Runs locally. Logistic regression on 3K × 384 takes <1s on CPU, so
+# there is no reason to ship the data to a GPU worker and back.
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 

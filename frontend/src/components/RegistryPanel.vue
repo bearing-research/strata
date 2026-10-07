@@ -136,7 +136,7 @@ function tagList(tags: Record<string, string>): string {
     <section class="names">
       <div v-if="registryLoading && !registryNames.length" class="empty">Loading…</div>
       <div v-else-if="!registryNames.length" class="empty">
-        No published artifacts yet — call <code>strata.put(…, name=…)</code> in a cell.
+        No published artifacts yet. Call <code>strata.put(…, name=…)</code> in a cell.
       </div>
       <table v-else class="names-table">
         <thead>
@@ -160,10 +160,10 @@ function tagList(tags: Record<string, string>): string {
                 :class="{ champ: alias === 'champion' }"
                 >{{ alias === 'champion' ? '★' : '' }}{{ alias }}=v{{ ver }}</span
               >
-              <span v-if="!Object.keys(n.aliases).length" class="muted">—</span>
+              <span v-if="!Object.keys(n.aliases).length" class="muted">none</span>
             </td>
             <td class="latest">v{{ n.version }}</td>
-            <td class="tags">{{ tagList(n.tags) || '—' }}</td>
+            <td class="tags">{{ tagList(n.tags) || 'none' }}</td>
             <td class="readers">
               <span
                 v-for="r in readersOf(n)"

@@ -41,7 +41,7 @@ class InfisicalProvider:
         if not project_id:
             return SecretFetchResult.failure(
                 self.name,
-                "project_id missing — set it in notebook.toml [secret_manager] "
+                "project_id missing; set it in notebook.toml [secret_manager] "
                 "or via INFISICAL_PROJECT_ID.",
             )
 
@@ -73,7 +73,7 @@ class InfisicalProvider:
                 self.name,
                 "No Infisical credentials in the process environment. Set either "
                 "INFISICAL_CLIENT_ID + INFISICAL_CLIENT_SECRET (Machine Identity / "
-                "Universal Auth — recommended) or INFISICAL_TOKEN (service token, "
+                "Universal Auth, recommended) or INFISICAL_TOKEN (service token, "
                 "legacy) in the shell that launched Strata.",
             )
 

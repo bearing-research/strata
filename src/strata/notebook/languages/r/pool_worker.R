@@ -1,11 +1,11 @@
-# Warm R pool worker — pre-pays Rscript startup so cells don't.
+# Warm R pool worker: pre-pays Rscript startup so cells don't.
 #
 # Lifecycle (single-shot, mirroring pool_worker.py):
 #   1. R interpreter startup + .Rprofile (renv activation via cwd) has
-#      already happened by the time this script runs — that's the ~1-2s
+#      already happened by the time this script runs; that's the ~1-2s
 #      being amortized.
 #   2. Warm the libraries the harness needs (jsonlite, arrow).
-#   3. Print "ready" — the parent pool counts this worker as available.
+#   3. Print "ready"; the parent pool counts this worker as available.
 #   4. Block on stdin for one manifest path.
 #   5. Execute it by sourcing harness.R with the manifest pre-set in the
 #      global env, stdout sunk to stderr so nothing pollutes the frame
@@ -56,7 +56,7 @@ result <- tryCatch(
     assign(".strata_pool_manifest", manifest_path, envir = globalenv())
 
     # Anything the harness (or top-level cell escape) writes to stdout
-    # must not corrupt the protocol — sink it to stderr. The harness's
+    # must not corrupt the protocol, so sink it to stderr. The harness's
     # own capture sink nests on top of this and pops back here.
     sink(stderr(), type = "output")
     source_error <- tryCatch(

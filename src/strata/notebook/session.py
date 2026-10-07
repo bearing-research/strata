@@ -2585,7 +2585,7 @@ class NotebookSession:
         if rscript is None:
             return None
         try:
-            proc = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+            proc = subprocess.run(  # noqa: S603 (rscript resolved via shutil.which)
                 [rscript, "-e", "cat(R.version$major, R.version$minor, sep='.')"],
                 capture_output=True,
                 text=True,
@@ -3142,7 +3142,7 @@ class NotebookSession:
         elif job.action == "r_add":
             assert job.package is not None
             result = await renv_add(self.path, job.package, on_update=on_update)
-        else:  # pragma: no cover — guarded by submit_environment_job
+        else:  # pragma: no cover (submit_environment_job guards this)
             raise RuntimeError(f"Unsupported R job action: {job.action!r}")
 
         if result.operation_log is not None:

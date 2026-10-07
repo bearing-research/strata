@@ -103,7 +103,8 @@ every endpoint. This is the local-dev default.
   Another tenant's session looks missing: every `/{session_id}` REST route
   answers `404` and the WS upgrade is refused with HTTP `403`, as
   for an unknown id (MCP applies the same rule). `admin:*` reaches every
-  session, and a session opened without a tenant is open to all. With
+  session, and a session opened by a caller with no tenant belongs to
+  the default tenant (`_default`). With
   `multi_tenant_enabled`, `/discover`, `/open`, `/create` and the imports
   are confined to the tenant's own `<notebook_storage_dir>/<tenant>/`
   (`admin:*` keeps the whole root).
@@ -282,7 +283,7 @@ so a client has to handle it on every message it sends:
 | --------- | -------------- | --------------------------------------------------- |
 | `error`   | yes            | Human-readable message. Not a stable identifier      |
 | `code`    | no             | Machine-readable class, when the error has one       |
-| `cell_id` | no             | The cell concerned, on `cell_busy` and `cell_locked` |
+| `cell_id` | no             | The cell concerned, on `notebook_busy`, `cell_busy` and `cell_locked` |
 | `held_by` | no             | Who changed the cell, on `cell_locked`               |
 
 Branch on `code`, never on the text of `error`. The codes:
@@ -290,6 +291,7 @@ Branch on `code`, never on the text of `error`. The codes:
 | Code                 | Meaning                                                       |
 | -------------------- | ------------------------------------------------------------- |
 | `ENVIRONMENT_BUSY`   | An environment job holds the notebook; retry when it finishes  |
+| `notebook_busy`      | Another run holds the notebook, so this run was refused; `cell_id` is the refused cell (absent for run-all). Retry when the run finishes |
 | `cell_busy`          | The cell is executing and its source cannot be edited yet      |
 | `cell_locked`        | `held_by` changed the cell moments ago; resend with `force` to take it over |
 | `read_only`          | The message is not allowed in app view                         |

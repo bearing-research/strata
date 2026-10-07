@@ -1,6 +1,6 @@
 """Template: deploy a Strata worker on Modal with GPU.
 
-The Strata worker is the `strata-worker` console script — it runs an
+The Strata worker is the `strata-worker` console script. It runs an
 HTTP endpoint that accepts cell execution requests. Cells run in this
 Modal container's Python environment, so install whatever your cells
 need (torch, sentence-transformers, datafusion, ...).
@@ -13,7 +13,7 @@ Adapt to your workload:
 Deploy:
     modal deploy examples/arxiv_classifier/modal_gpu_worker.py
 
-Modal prints the URL — paste it into notebook.toml as a `[[workers]]`
+Modal prints the URL; paste it into notebook.toml as a `[[workers]]`
 entry with `transport = "direct"` and `url = "<modal-url>/v1/execute"`.
 """
 
@@ -30,7 +30,7 @@ import modal
 PROJECT_GIT_URL = "strata-notebook[notebook] @ git+https://github.com/bearing-research/strata.git@bef5d94"
 
 # Dependencies needed by cells that run on this worker. Keep this list
-# tight — the image rebuilds when it changes.
+# tight: the image rebuilds when it changes.
 WORKLOAD_DEPS: list[str] = [
     "torch>=2.3",
     "sentence-transformers>=3.0",
@@ -47,13 +47,13 @@ MAX_CONTAINERS = 1  # cell execution is exclusive; don't pipeline
 
 
 # ---------------------------------------------------------------------------
-# Boilerplate — usually no need to edit below
+# Boilerplate: usually no need to edit below
 # ---------------------------------------------------------------------------
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("curl", "build-essential", "git", "ca-certificates")
-    # Rust toolchain — required to build Strata's native extension
+    # Rust toolchain, required to build Strata's native extension
     .run_commands(
         "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs "
         "| sh -s -- -y --profile minimal",

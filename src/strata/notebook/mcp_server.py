@@ -170,8 +170,8 @@ async def _set_variant(
     groups = sorted({c.variant_group for c in cells if c.variant_group})
     if group not in groups:
         raise ValueError(
-            f"no variant group {group!r}. Declared: {', '.join(groups) or 'none'} — "
-            "a group exists once a cell carries `# @variant <group> <name>`."
+            f"no variant group {group!r}. Declared: {', '.join(groups) or 'none'}. "
+            "A group exists once a cell carries `# @variant <group> <name>`."
         )
     if active is not None:
         names = sorted(
@@ -961,7 +961,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
 
     @mcp.tool()
     def get_variable(session_id: str, name: str) -> dict[str, Any]:
-        """Look up the cell that defines a variable — "do I already have `name`?"
+        """Look up the cell that defines a variable: "do I already have `name`?"
 
         Use this before recomputing something: if `name` already exists, reference
         it in a new cell instead of rebuilding it. Returns the defining cell
@@ -975,7 +975,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         """Return the notebook's dependency graph.
 
         Includes variable-level ``edges``, a ``topological_order``, and the
-        ``roots`` / ``leaves`` — how cell outputs feed downstream cells.
+        ``roots`` / ``leaves``, which show how cell outputs feed downstream cells.
         """
         return _dag(session_manager, session_id)
 
@@ -994,7 +994,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
 
         ``mode`` is one of: ``normal`` (use the cache, re-run stale upstreams
         first), ``rerun`` (bypass this cell's cache, still refresh upstreams), or
-        ``force`` ("run this only" — run against whatever upstream artifacts
+        ``force`` ("run this only": run against whatever upstream artifacts
         already exist). The run is broadcast live, so a browser or terminal
         viewer attached to the session watches it happen. Returns status
         (ok / error), cache hit, duration, and captured stdout / stderr; call
@@ -1040,7 +1040,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         cell appears live in any attached viewer.
 
         ``author`` names you on the cell, so a person opening the notebook can
-        tell which cells an agent wrote. Send the same value on every call —
+        tell which cells an agent wrote. Send the same value on every call:
         your own name or id. On a server that authenticates its callers the
         authenticated identity is used instead and this is ignored.
         """
@@ -1054,17 +1054,17 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         language: str = "python",
         author: str | None = None,
     ) -> dict[str, Any]:
-        """Add a cell and run it in one call — the scratchpad primitive.
+        """Add a cell and run it in one call: the scratchpad primitive.
 
         Prefer this over add_cell + run_cell for quick exploration: it mints a
-        cell, executes it (normal mode — a cache hit if the source + inputs are
+        cell, executes it (normal mode: a cache hit if the source + inputs are
         unchanged), and returns the new cell view with the run outcome (status,
         cache_hit, stdout, stderr) nested under ``run``. The run appears live in
         any attached viewer. Use ``add_cell`` without a run only when you want to
         stage a cell without executing it.
 
         ``author`` names you on the cell, so a person opening the notebook can
-        tell which cells an agent wrote. Send the same value on every call —
+        tell which cells an agent wrote. Send the same value on every call:
         your own name or id. On a server that authenticates its callers the
         authenticated identity is used instead and this is ignored.
         """
@@ -1080,7 +1080,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         run_cell to re-materialize them.
 
         ``author`` names you on the cell, so a person opening the notebook can
-        tell which cells an agent wrote. Send the same value on every call —
+        tell which cells an agent wrote. Send the same value on every call:
         your own name or id. On a server that authenticates its callers the
         authenticated identity is used instead and this is ignored.
         """
@@ -1194,7 +1194,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         When the user hands you an SSH target for compute (e.g. a GPU box),
         call this: it connects to ``ssh_target`` (``user@host`` or an
         ~/.ssh/config alias), installs strata-worker there if missing, launches
-        it, opens a secure tunnel, and registers it as a worker — so cells then
+        it, opens a secure tunnel, and registers it as a worker, so cells then
         run on that box, cached by provenance like everything else. With
         ``set_default`` (the default) every cell runs there; give a specific cell
         ``# @worker local`` to keep it on this machine. A remote cell runs on the
@@ -1244,7 +1244,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         Copies the artifact and everything behind it into the team's store.
         The chain travels because that store's cache is keyed by provenance, so
         each ancestor that arrives saves the next person the same computation.
-        This mints no public link — use ``publish`` for that.
+        This mints no public link; use ``publish`` for that.
 
         ``alias`` (e.g. champion) is moved to this version; a protected alias
         comes back as ``pending`` for someone else to approve. Needs a team

@@ -4,7 +4,7 @@
 # breakdown and a running daily total.
 #
 # Depends on ``positions_snapshot`` so the DAG orders us after
-# reconcile — otherwise costs posted during reconciliation
+# reconcile; otherwise costs posted during reconciliation
 # (slippage deltas) would miss this aggregation.
 _upstream_gate = positions_snapshot  # noqa: F841
 

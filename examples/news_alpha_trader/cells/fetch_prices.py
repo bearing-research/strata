@@ -1,7 +1,7 @@
 # @name Fetch latest prices
 # Pulls daily bars for the watchlist up to "now" and upserts into
 # ``prices``. We need a recent close to size positions; the 15-min
-# REST delay is fine here — daily rebalancing doesn't need sub-minute
+# REST delay is fine here, since daily rebalancing doesn't need sub-minute
 # precision.
 import datetime as dt
 
@@ -52,7 +52,7 @@ record_cost(
     detail={"bars_fetched": len(frame), "inserted": inserted},
 )
 
-# Latest close per ticker — what risk_check uses for sizing.
+# Latest close per ticker, which risk_check uses for sizing.
 latest_prices = conn.execute(
     """
     SELECT ticker, close, ts AS as_of

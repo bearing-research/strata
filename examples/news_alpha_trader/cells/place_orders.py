@@ -1,10 +1,10 @@
 # @name Place orders
 # Takes the trade_plan from risk_check and either DRY-RUNs it or
-# submits each row to Alpaca. Re-running is idempotent — if a
+# submits each row to Alpaca. Re-running is idempotent: if a
 # signal_id is already in ``orders``, we skip it.
 #
 # The live-mode gate is intentionally verbose. Flipping from paper
-# to live takes two separate edits in helpers.py — this cell enforces
+# to live takes two separate edits in helpers.py, and this cell enforces
 # the second one at runtime.
 import uuid
 
@@ -17,7 +17,7 @@ conn = open_db()
 # mid-run.
 mode = Config.MODE
 
-# Hard gate — refuses to trade live without the second key.
+# Hard gate: refuses to trade live without the second key.
 if mode == "live" and not Config.I_UNDERSTAND_THIS_IS_REAL_MONEY:
     raise RuntimeError(
         "Config.MODE is 'live' but Config.I_UNDERSTAND_THIS_IS_REAL_MONEY is False. "
