@@ -98,7 +98,13 @@ def _parse_managed_worker_records(raw_specs: Any) -> list[ManagedWorkerRecord]:
             )
         except Exception:
             continue
-    return parsed
+    # The store keys rows by name. Dispatch always took the last entry for a repeated
+    # name, so keep that one, where it stands.
+    by_name: dict[str, ManagedWorkerRecord] = {}
+    for record in parsed:
+        by_name.pop(record.worker.name, None)
+        by_name[record.worker.name] = record
+    return list(by_name.values())
 
 
 def _serialize_managed_worker_records(
@@ -309,7 +315,8 @@ def import_worker_registry_file(artifact_dir: Path, store: ArtifactStore) -> Non
 
     Imported only while the store holds no registry, so a node starting with a stale
     copy cannot overwrite one another node set. The file is then renamed
-    ``notebook_workers.json.migrated`` either way, so this runs once per file.
+    ``notebook_workers.json.migrated`` (or ``.migrated.N``) either way, so this runs once
+    per file.
     """
     path = artifact_dir / "notebook_workers.json"
     if not path.exists():
@@ -325,8 +332,25 @@ def import_worker_registry_file(artifact_dir: Path, store: ArtifactStore) -> Non
         )
         return
     entries = _serialize_managed_worker_records(_parse_managed_worker_records(raw))
+    names = (
+        [spec.get("name") for spec in raw if isinstance(spec, dict)]
+        if isinstance(raw, list)
+        else []
+    )
+    repeated = sorted({str(name) for name in names if names.count(name) > 1})
+    if repeated:
+        logger.warning(
+            "%s lists notebook worker(s) %s more than once; kept the last entry of each.",
+            path,
+            ", ".join(repeated),
+        )
     imported = store.update_notebook_workers(lambda current: entries if current is None else None)
+    # Never replace an earlier copy: it may be the only record of what was imported.
     migrated = path.with_name(path.name + ".migrated")
+    suffix = 1
+    while migrated.exists():
+        migrated = path.with_name(f"{path.name}.migrated.{suffix}")
+        suffix += 1
     try:
         path.replace(migrated)
     except OSError as exc:
