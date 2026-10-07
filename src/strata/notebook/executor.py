@@ -2484,16 +2484,13 @@ class CellExecutor:
         )
         result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
 
-        # The cell may have left anything in output_dir: pack and unpack inside a directory
-        # made fresh, so neither writes through a link it planted.
-        work_dir = output_dir / "_executor_result"
-        work_dir.mkdir()
-        bundle_path = work_dir / "notebook-output-bundle.tar"
-        pack_notebook_output_bundle(bundle_path, result, output_dir)
-
-        unpacked_dir = work_dir / "out"
-        unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
-        return unpacked_result, unpacked_dir, "executor", resolved_mounts
+        # A process the cell left running still owns output_dir and can swap any path under
+        # it for a link: tar into an unnamed file, unpack through the run-file helpers.
+        with tempfile.TemporaryFile() as bundle:
+            pack_notebook_output_bundle(bundle, result, output_dir)
+            bundle.seek(0)
+            unpacked_result = unpack_notebook_output_bundle(bundle, output_dir)
+        return unpacked_result, output_dir, "executor", resolved_mounts
 
     async def _locked_environment(
         self, worker_spec: Any, language: str = "python"

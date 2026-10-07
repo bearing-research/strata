@@ -7,9 +7,9 @@ import json
 import os
 import tarfile
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
-from strata.notebook.harness_user import open_run_file
+from strata.notebook.harness_user import open_run_file, write_run_file
 
 SCHEMA_VERSION = "notebook-output-bundle@v1"
 
@@ -27,6 +27,12 @@ def _max_bundle_member_bytes() -> int:
     except ValueError:
         return _DEFAULT_MAX_BUNDLE_MEMBER_BYTES
     return parsed if parsed > 0 else _DEFAULT_MAX_BUNDLE_MEMBER_BYTES
+
+
+def _open_tar(bundle: Path | BinaryIO, mode: str) -> tarfile.TarFile:
+    if isinstance(bundle, Path):
+        return tarfile.open(bundle, mode)
+    return tarfile.open(fileobj=bundle, mode=mode)
 
 
 def _add_bytes(tar: tarfile.TarFile, arcname: str, content: bytes) -> None:
@@ -54,7 +60,7 @@ def _read_member(tar: tarfile.TarFile, name: str) -> bytes:
 
 
 def pack_notebook_output_bundle(
-    bundle_path: Path,
+    bundle_path: Path | BinaryIO,
     result_manifest: dict[str, Any],
     output_dir: Path,
 ) -> None:
@@ -118,7 +124,7 @@ def pack_notebook_output_bundle(
             bundle_display["file"] = f"files/{src.name}"
         bundle_manifest["displays"].append(bundle_display)
 
-    with tarfile.open(bundle_path, "w") as tar:
+    with _open_tar(bundle_path, "w") as tar:
         _add_bytes(
             tar,
             "manifest.json",
@@ -149,13 +155,13 @@ def pack_notebook_output_bundle(
 
 
 def unpack_notebook_output_bundle(
-    bundle_path: Path,
+    bundle_path: Path | BinaryIO,
     output_dir: Path,
 ) -> dict[str, Any]:
     """Unpack a transport bundle into a harness-style output directory."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with tarfile.open(bundle_path, "r") as tar:
+    with _open_tar(bundle_path, "r") as tar:
         manifest_data = json.loads(_read_member(tar, "manifest.json").decode("utf-8"))
 
         if manifest_data.get("schema_version") != SCHEMA_VERSION:
@@ -201,9 +207,7 @@ def unpack_notebook_output_bundle(
                 raise ValueError(f"Invalid bundle file path for {var_name}: {bundle_file}")
 
             file_name = Path(bundle_file).name
-            dest = output_dir / file_name
-            with open(dest, "wb") as dst:
-                dst.write(_read_member(tar, bundle_file))
+            write_run_file(output_dir, file_name, _read_member(tar, bundle_file))
 
             var_meta = dict(meta)
             var_meta["file"] = file_name
@@ -222,17 +226,16 @@ def unpack_notebook_output_bundle(
                 if not isinstance(bundle_file, str) or not bundle_file.startswith("files/"):
                     raise ValueError(f"Invalid bundle file path for a display: {bundle_file}")
                 file_name = Path(bundle_file).name
-                dest = output_dir / file_name
-                if not dest.exists():
-                    with open(dest, "wb") as dst:
-                        dst.write(_read_member(tar, bundle_file))
+                if not (output_dir / file_name).exists():
+                    write_run_file(output_dir, file_name, _read_member(tar, bundle_file))
                 unpacked["file"] = file_name
             result["displays"].append(unpacked)
 
     # Same name as the local harness, so readers find the output either way.
     # Hyphenated so it can't collide with a user variable named ``result``.
-    with open(output_dir / "harness-result.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    write_run_file(
+        output_dir, "harness-result.json", json.dumps(result, indent=2).encode("utf-8")
+    )
 
     return result
 

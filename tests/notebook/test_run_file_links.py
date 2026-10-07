@@ -9,6 +9,7 @@ so following the link would hand the cell a file only the server may read, such 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
 import threading
@@ -234,3 +235,54 @@ atexit.register(lambda: os.symlink({str(secret)!r}, os.path.join(_out, "f.cell_m
         assert result.success is False
         assert result.error is not None and "Refusing cell output 'x." in result.error
         assert not any(SECRET.strip() in blob for blob in _stored_bytes(session))
+
+    def test_an_embedded_worker_writes_nothing_through_a_swapped_run_directory(
+        self, tmp_path, monkeypatch
+    ):
+        """A process the cell leaves running still owns the run directory after the harness.
+
+        It can move the directory away and leave a link to anywhere in its place, so the
+        bundle the embedded worker packs and unpacks must not be written by path under it.
+        """
+        from types import SimpleNamespace
+
+        from strata.notebook.executor import CellExecutor
+
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    deployment_mode="personal",
+                    notebook_harness_user=None,
+                    transforms_config={
+                        "notebook_workers": [
+                            {
+                                "name": "embedded",
+                                "backend": "executor",
+                                "config": {"url": "embedded://local"},
+                            }
+                        ]
+                    },
+                )
+            ),
+        )
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        moved = tmp_path / "moved"
+        source = f"""
+import atexit, json, os, sys
+_out = json.load(open(sys.argv[1]))["output_dir"]
+def _swap():
+    os.rename(_out, {str(moved)!r})
+    os.symlink({str(victim)!r}, _out)
+atexit.register(_swap)
+x = 1
+"""
+        session = _session(tmp_path, [("a", source), ("b", "y = x\n")])
+        session.notebook_state.worker = "embedded"
+
+        with contextlib.suppress(OSError):
+            # Removing the run directory meets the link the cell left; not what is tested.
+            asyncio.run(CellExecutor(session).execute_cell("a", source))
+
+        assert list(victim.iterdir()) == []
