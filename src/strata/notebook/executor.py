@@ -701,8 +701,17 @@ class CellExecutor:
                     pytest_unavailable = True
                     raw = empty_raw
 
-        # After the run: a pytest auto-install can change the lockfile, which is an input.
-        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
+        # The env hash after the run: a pytest auto-install can change the lockfile.
+        input_fingerprint = self.session.record_cell_test_inputs(
+            cell_id,
+            prov.input_hashes
+            + prov.mount_fingerprints
+            + prov.table_fingerprints
+            + prov.fetch_fingerprints
+            + prov.dataset_fingerprints,
+            self.session.cell_env_hash(cell),
+        )
+        source_hash, test_source_hash, _ = self.session.cell_test_fingerprint(
             cell_id, source, test_source
         )
         result = CellTestResult(

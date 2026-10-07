@@ -77,6 +77,7 @@ from strata.notebook.runtime_state import (
     persist_environment_synced_lockfile_hash,
     save_runtime_state,
 )
+from strata.notebook.tables import without_empty_table_nonce
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
     build_worker_catalog,
@@ -163,6 +164,12 @@ def _value_outlives_provenance(cell: CellState) -> bool:
         return True
     mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
     return any(mount.mode == MountMode.READ_WRITE for mount in mounts)
+
+
+def cell_test_input_fingerprint(inputs: list[str], env_hash: str) -> str:
+    """Fingerprint of a cell's provenance inputs, for its test result's stale flag."""
+    stable = [without_empty_table_nonce(fingerprint) for fingerprint in inputs]
+    return compute_provenance_hash(stable, "", env_hash)
 
 
 @dataclass(frozen=True)
@@ -307,6 +314,9 @@ class NotebookSession:
         # Keyed by (variable, reference), with when: staleness re-asks the registry at
         # most every ``datasets.STALE_CHECK_SECONDS``.
         self._dataset_checks: dict[tuple[str, str], tuple[float, str]] = {}
+        # Cell id -> input fingerprint a test result is compared to, set by each
+        # staleness pass so serializing a cell never reads the outside world.
+        self._cell_test_inputs: dict[str, str] = {}
 
         self.environment_sync_state: str = "unknown"
         self.environment_sync_error: str | None = None
@@ -861,11 +871,13 @@ class NotebookSession:
     ) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
         stale_cells: set[str] = set()  # for propagation
+        test_inputs: dict[str, str] = {}
         if self.dag is None:
             for cell in self.notebook_state.cells:
                 staleness_map[cell.id] = CellStaleness(status=CellStatus.IDLE)
             self._apply_staleness_map(staleness_map, executing)
             self.causality_map = {}
+            self._cell_test_inputs = test_inputs
             return staleness_map
 
         for cell_id in self.dag.topological_order:
@@ -907,12 +919,7 @@ class NotebookSession:
                 continue
 
             source_hash = compute_source_hash(cell.source)
-            runtime_env = self._collect_runtime_env(cell)
-            env_hash = compute_execution_env_hash(
-                self.path,
-                runtime_env,
-                runtime_identity=self._effective_worker_runtime_identity(cell),
-            )
+            env_hash = self.cell_env_hash(cell)
 
             # Same per-variable artifact selection as execution.
             input_hashes = self._collect_input_hashes(cell_id)
@@ -922,20 +929,21 @@ class NotebookSession:
             if outside is None:
                 outside = self._outside_world_for(cell)
 
+            inputs = (
+                input_hashes
+                + outside.mount_fingerprints
+                + outside.table_fingerprints
+                + outside.fetch_fingerprints
+                + outside.dataset_fingerprints
+            )
+            test_inputs[cell_id] = cell_test_input_fingerprint(inputs, env_hash)
+
             if outside.has_rw_mount:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
                 continue
 
-            provenance_hash = compute_provenance_hash(
-                input_hashes
-                + outside.mount_fingerprints
-                + outside.table_fingerprints
-                + outside.fetch_fingerprints
-                + outside.dataset_fingerprints,
-                source_hash,
-                env_hash,
-            )
+            provenance_hash = compute_provenance_hash(inputs, source_hash, env_hash)
 
             # Per-variable hashes: sha256(f"{provenance_hash}:{var_name}").
             cached_outputs = self._resolve_cached_outputs(cell_id, provenance_hash)
@@ -1015,6 +1023,7 @@ class NotebookSession:
                 cell.display_output = cached_display_outputs[-1] if cached_display_outputs else None
 
         self._apply_staleness_map(staleness_map, executing)
+        self._cell_test_inputs = test_inputs
 
         self.causality_map = compute_causality_on_staleness(self)
 
@@ -1330,34 +1339,24 @@ class NotebookSession:
 
     def cell_test_fingerprint(
         self, cell_id: str, source: str, test_source: str
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str | None]:
         """``(cell source, test source, inputs)`` hashes a cell-test result is keyed by.
 
-        The inputs are what a run of the cell reads, as staleness fingerprints them:
-        upstreams, mounts, tables, fetches, datasets and the environment.
+        The inputs are what the last staleness pass (or test run) fingerprinted: upstreams,
+        mounts, tables, fetches, datasets and the environment. ``None`` when that pass did
+        not reach the cell (a stale upstream), so the result reads stale.
         """
-        cell = self.notebook_state.get_cell(cell_id)
-        if cell is None:
-            raise FileNotFoundError(f"Cell {cell_id} not found")
-        outside = self._outside_world_for(cell)
-        env_hash = compute_execution_env_hash(
-            self.path,
-            self._collect_runtime_env(cell),
-            runtime_identity=self._effective_worker_runtime_identity(cell),
-        )
-        inputs = [
-            *sorted(self._collect_input_hashes(cell_id)),
-            *outside.mount_fingerprints,
-            *outside.table_fingerprints,
-            *outside.fetch_fingerprints,
-            *outside.dataset_fingerprints,
-            env_hash,
-        ]
         return (
             compute_source_hash(source),
             hashlib.sha256(test_source.encode("utf-8")).hexdigest(),
-            hashlib.sha256("|".join(inputs).encode("utf-8")).hexdigest(),
+            self._cell_test_inputs.get(cell_id),
         )
+
+    def record_cell_test_inputs(self, cell_id: str, inputs: list[str], env_hash: str) -> str:
+        """Fingerprint the inputs a test run just read, as the staleness pass would."""
+        fingerprint = cell_test_input_fingerprint(inputs, env_hash)
+        self._cell_test_inputs[cell_id] = fingerprint
+        return fingerprint
 
     def persist_display_outputs(
         self, cell_id: str, display_outputs: list[dict[str, Any]] | None
@@ -2241,6 +2240,14 @@ class NotebookSession:
         if cell.worker:
             return cell.worker
         return self.notebook_state.worker
+
+    def cell_env_hash(self, cell: Any) -> str:
+        """The environment hash staleness folds into ``cell``'s provenance."""
+        return compute_execution_env_hash(
+            self.path,
+            self._collect_runtime_env(cell),
+            runtime_identity=self._effective_worker_runtime_identity(cell),
+        )
 
     def _effective_worker_runtime_identity(self, cell: Any) -> str | None:
         """Return the worker runtime identity used in provenance."""

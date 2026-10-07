@@ -94,6 +94,18 @@ def fingerprint_tables(
     return fingerprints, snapshots
 
 
+def without_empty_table_nonce(fingerprint: str) -> str:
+    """``fingerprint`` with an empty table's random part dropped.
+
+    For asking whether a cell's inputs changed (its test result), not whether a cached
+    value may be reused: an empty table is the same input until it gets a snapshot.
+    """
+    name, sep, rest = fingerprint.partition(":")
+    if sep and rest.startswith("table:empty:"):
+        return f"{name}:table:empty"
+    return fingerprint
+
+
 def random_fingerprint() -> str:
     """A fingerprint no other run shares, for a table whose state cannot be keyed."""
     return hashlib.sha256(os.urandom(32)).hexdigest()
