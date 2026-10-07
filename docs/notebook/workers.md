@@ -173,7 +173,7 @@ strata worker rm-ssh gpu-box --server http://localhost:8765 --session <session-i
 **What to know:**
 
 - **Key-based SSH only.** Strata runs `ssh` in batch mode and never handles passwords, so the target must authenticate non-interactively (an agent/key that works when you run `ssh user@gpu-box` yourself). A `user@host`, a bare `host`, or an `~/.ssh/config` alias all work.
-- **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); reconnects adopt the already-running worker.
+- **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); a reconnect skips the install, but it starts a fresh worker rather than adopting one already running.
 - **Security.** The worker binds the box's `127.0.0.1` (never a public port) and is reachable only through the authenticated SSH tunnel. A per-worker bearer token is generated for defense-in-depth; it's held in the notebook server's memory and **never written to `notebook.toml`**. Each launch also hands the worker a one-off `launch_id` (over stdin, like the token), and Strata connects only when `/health` through the tunnel reports it, so another process already listening on the box's port never receives the token.
 - **A remote cell runs on the box's filesystem.** Absolute paths in the cell resolve there, not on your machine, and a `file://` mount is refused on any remote worker, and cloud mounts use the box's own credentials. Results are cached under the remote environment's identity, so they don't collide with local runs.
 
