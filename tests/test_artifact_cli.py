@@ -374,6 +374,36 @@ class TestPublish:
         for step in ("model-1@v=1", "feat-1@v=1", "scan-1@v=1"):
             assert step in out, f"{step} is exposed by the link but was not disclosed"
 
+    @pytest.mark.parametrize(
+        ("env", "prefix"),
+        [
+            ({}, "/p/"),
+            ({"STRATA_PUBLIC_BASE_PATH": "/strata"}, "/strata/p/"),
+            (
+                {
+                    "STRATA_PUBLIC_BASE_URL": "https://lab.example/",
+                    "STRATA_PUBLIC_BASE_PATH": "/strata",
+                },
+                "https://lab.example/strata/p/",
+            ),
+        ],
+    )
+    def test_the_printed_link_carries_the_servers_base(
+        self, chain_store, capsys, monkeypatch, env, prefix
+    ):
+        """The link must resolve where the server is reached, as the page's own links do."""
+        from strata.artifact_cli import cmd_publish
+
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        rc = cmd_publish(
+            _args(ref="demo/model", artifact_dir=chain_store["dir"], title=None, max_depth=10)
+        )
+
+        assert rc == 0
+        line = next(x for x in capsys.readouterr().out.splitlines() if "is public at" in x)
+        assert line.split(" is public at ")[1].startswith(prefix), line
+
     def test_a_shared_upstream_is_disclosed_once(self, chain_store, capsys):
         """A diamond's shared step is listed once.
 

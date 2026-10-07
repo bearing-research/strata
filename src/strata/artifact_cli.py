@@ -410,6 +410,17 @@ def _publication_target(
     return server_store, f"{server_store.artifact_dir} (the store your server serves)"
 
 
+def _publication_base(args: argparse.Namespace) -> str:
+    """Where the minted link is served: the remote store, else the configured server's base."""
+    to_url = getattr(args, "to_url", None)
+    if to_url:
+        return str(to_url).rstrip("/")
+    from strata.config import StrataConfig
+
+    config = StrataConfig.load()
+    return (config.public_base_url or "").rstrip("/") + config.public_base_path
+
+
 def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
     """Auth for the remote store, from ``--header`` or the environment.
 
@@ -599,7 +610,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
         )
 
     if publication.token:
-        print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+        link = f"{_publication_base(args)}/p/{publication.token}"
+        print(f"{artifact.id}@v={artifact.version} is public at {link}")
     else:
         # The store keeps only the token's hash, so an existing grant's link cannot be shown.
         print(
