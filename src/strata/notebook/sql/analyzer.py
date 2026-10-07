@@ -228,8 +228,9 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 def _blank_strings_and_comments(sql: str) -> str:
     """Replace string literals and comments with spaces, preserving length.
 
-    Recognizes ``'...'`` (``''`` escapes), ``-- ...``, ``/* ... */`` and Postgres
-    ``$tag$ ... $tag$`` / ``$$ ... $$``; ``$1`` is not a dollar quote. Double-quoted
+    Recognizes ``'...'`` (``''`` escapes), Postgres ``E'...'`` (backslash escapes
+    too), ``-- ...``, ``/* ... */`` and Postgres ``$tag$ ... $tag$`` / ``$$ ... $$``;
+    ``$1`` is not a dollar quote. Double-quoted
     and backtick identifiers are not handled; a false placeholder there is rejected
     by the executor as an unknown upstream variable.
     """
@@ -267,9 +268,20 @@ def _blank_strings_and_comments(sql: str) -> str:
 
         # ``'string'``
         if c == "'":
+            # ``E'...'`` and ``e'...'``, but not the tail of an identifier like ``name'``.
+            escape_string = (
+                i > 0
+                and sql[i - 1] in "eE"
+                and (i < 2 or not (sql[i - 2].isalnum() or sql[i - 2] in "_$"))
+            )
             out.append(" ")
             i += 1
             while i < n:
+                if escape_string and sql[i] == "\\" and i + 1 < n:
+                    out.append(" ")
+                    out.append(" ")
+                    i += 2
+                    continue
                 if sql[i] == "'":
                     if i + 1 < n and sql[i + 1] == "'":
                         out.append(" ")
