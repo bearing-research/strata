@@ -59,6 +59,16 @@ curl -X POST 'http://localhost:8765/v1/notebooks/<session_id>/release'
 
 Quiesce waits for running cells (cancelling any still running after `timeout_seconds`, default 30), then refuses runs and edits with a 409 until release or `max_hold_seconds` (default 600). `POST /v1/projects/{path}/quiesce` and `.../release` do the same for every notebook under a directory, open or not. Under principal auth both need the `admin:notebooks` scope.
 
+## Backing up a server
+
+Back up a server before every upgrade: a new release migrates the artifact store's metadata on its first start, one way, and the backup is the only way back. Stop every server that shares the store first, so the metadata and the blobs agree.
+
+- **SQLite store (the default):** copy the whole artifact directory (`STRATA_ARTIFACT_DIR`, `~/.strata/artifacts` by default). It holds `artifacts.sqlite` and the blobs.
+- **Postgres and an object store:** `pg_dump` the database `STRATA_ARTIFACT_METADATA_DSN` names, and copy the blob bucket (`aws s3 sync s3://<bucket> <backup-dir>`, or your provider's equivalent).
+- **Either way:** archive the notebook storage directory without `.venv` (as in [Backup](#backup)), and copy `notebook_workers.json` from the artifact directory, where a service-mode server keeps the workers registered through `/v1/admin/notebook-workers`.
+
+To go back, restore all of it and start the release that wrote it.
+
 ## Moving between machines
 
 Same idea: copy the notebook directory minus `.venv/`. Optionally minus `.strata/` if you want a clean cache.
