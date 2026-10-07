@@ -300,25 +300,6 @@ class TestConnectionLimits:
 
 
 class TestCanonicalPromotion:
-    def test_promotion_returns_the_canonical_id_never_a_foreign_one(self, store):
-        # The only caller reaches force_finalize_canonical *because* finalize
-        # landed under a different id, so returning that foreign id back would
-        # leave the canonical row 'superseded' and the caller unaware.
-        first = store.create_artifact("a1", "shared-prov", _spec())
-        store.write_blob("a1", first, b"")
-        store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
-
-        second = store.create_artifact("a2", "shared-prov", _spec())
-        deduped = store.finalize_artifact("a2", second, "{}", row_count=0, byte_size=0)
-        assert deduped is not None and deduped.id == "a1"  # dedup put us on a1
-
-        promoted = store.force_finalize_canonical(
-            artifact_id="a2", version=second, schema_json="{}", row_count=0, byte_size=0
-        )
-        assert promoted is not None
-        assert promoted.id == "a2"
-        assert promoted.state == "ready"
-
     def test_a_runs_outputs_finalize_together_or_not_at_all(self, store):
         from strata.artifact_store import StagedVersion
 

@@ -161,17 +161,19 @@ class TestUse:
         assert store.garbage_collect(max_bytes=50, min_idle_seconds=3600)["deleted_count"] == 0
 
     def test_a_canonical_promotion_is_a_use(self, store):
-        """A notebook output deduped against another id and promoted back is as fresh."""
+        """A notebook output made canonical over another id's equal result is as fresh."""
+        from strata.artifact_store import StagedVersion
+
         store.create_artifact("nb_a_cell_c_var_x", "prov-shared")
         store.write_blob("nb_a_cell_c_var_x", 1, b"x")
         store.finalize_artifact("nb_a_cell_c_var_x", 1, "{}", 1, 1)
         store.create_artifact("nb_b_cell_c_var_x", "prov-shared")
         _set(store, "nb_b_cell_c_var_x", 1, created_at=0.0)
         store.write_blob("nb_b_cell_c_var_x", 1, b"x")
-        deduped = store.finalize_artifact("nb_b_cell_c_var_x", 1, "{}", 1, 1)
-        assert deduped.id == "nb_a_cell_c_var_x"
 
-        store.force_finalize_canonical("nb_b_cell_c_var_x", 1, "{}", 1, 1)
+        store.finalize_canonical_together(
+            [StagedVersion("nb_b_cell_c_var_x", 1, "{}", 1, 1, "digest")]
+        )
 
         assert _row(store, "nb_b_cell_c_var_x", 1)["last_used_at"] == pytest.approx(
             time.time(), abs=60

@@ -717,7 +717,7 @@ _MIGRATION_SQL = """
 """
 
 
-# Bound on force_finalize_canonical's retry. A conflict means a competing
+# Bound on finalize_canonical_together's retry. A conflict means a competing
 # writer committed a ready row with our provenance; one retry supersedes it
 # and wins. More than two rounds means sustained contention on a single
 # provenance, where failing loudly beats spinning.
@@ -1593,83 +1593,10 @@ class ArtifactStore:
         )
         return finalized
 
-    def force_finalize_canonical(
-        self,
-        artifact_id: str,
-        version: int,
-        schema_json: str,
-        row_count: int,
-        byte_size: int,
-    ) -> ArtifactVersion | None:
-        """Promote a version dedup superseded to ready under its canonical id.
-
-        ``finalize_artifact`` supersedes a version whose provenance is already ready
-        under another id. Notebook cells resolve inputs by their own canonical id, so this
-        supersedes the other ready row (still fetchable by id and version) and makes
-        this one the single ready row. Returns the promoted version, or ``None`` if it
-        cannot be found afterwards.
-        """
-        # Retried, because a conflict here means the work is still to be done. A keyed advisory lock
-        # only serializes writers sharing an artifact id, so a competing writer under another id can
-        # commit a ready row with our provenance between our supersede and our promote, and the
-        # uniqueness index rejects us.
-        #
-        # Returning the winner would be wrong: the only caller (`notebook/artifact_integration.py`)
-        # is here because finalize landed under a foreign id. The next pass supersedes the winner's
-        # now-committed row and promotes ours.
-        self._reclaim_blob(artifact_id, version)
-        for attempt in range(_CANONICAL_PROMOTE_ATTEMPTS):
-            conn = self._get_connection()
-            try:
-                self._dialect.begin_write(conn, artifact_id)
-                row = conn.execute(
-                    "SELECT provenance_hash, tenant FROM artifact_versions "
-                    "WHERE id = ? AND version = ?",
-                    (artifact_id, version),
-                ).fetchone()
-                if row is not None:
-                    # Supersede any other ready row with the same provenance in
-                    # the same tenant so the canonical row can be promoted
-                    # without violating the uniqueness index.
-                    conn.execute(
-                        """
-                        UPDATE artifact_versions SET state = 'superseded'
-                        WHERE provenance_hash = ? AND state = 'ready'
-                          AND COALESCE(tenant, '') = COALESCE(?, '')
-                          AND NOT (id = ? AND version = ?)
-                        """,
-                        (row["provenance_hash"], row["tenant"], artifact_id, version),
-                    )
-                conn.execute(
-                    """
-                    UPDATE artifact_versions
-                    SET state = 'ready',
-                        schema_json = ?,
-                        row_count = ?,
-                        byte_size = ?,
-                        superseded_by = NULL,
-                        last_used_at = ?
-                    WHERE id = ? AND version = ? AND state = 'superseded'
-                    """,
-                    (schema_json, row_count, byte_size, time.time(), artifact_id, version),
-                )
-                conn.commit()
-                break
-            except self._dialect.integrity_error:
-                conn.rollback()
-                # Out of attempts: let it surface rather than report a
-                # promotion that did not happen.
-                if attempt == _CANONICAL_PROMOTE_ATTEMPTS - 1:
-                    raise
-            finally:
-                conn.close()
-        return self.get_artifact(artifact_id, version)
-
     def _reclaim_blob(self, artifact_id: str, version: int) -> None:
         """Give a version dedup pointed at another's bytes a copy of its own.
 
-        A ready row must own its blob: the canonical it read through becomes
-        superseded on promotion and retention may collect it.
+        For a held version whose canonical is being deleted: it must keep its bytes.
 
         Raises:
             ValueError: If the canonical's blob is gone, so there is nothing to copy.
@@ -1703,14 +1630,16 @@ class ArtifactStore:
         For the outputs of one notebook cell run: finalized one at a time, a crash in
         between would leave values from two runs current together. Each becomes the
         single ready row for its ``(tenant, provenance_hash)`` under its own id,
-        superseding any other, as :meth:`force_finalize_canonical` does.
+        superseding any other.
 
         Raises:
             ValueError: If a version is not found or not in "building" state.
         """
         if not staged:
             return []
-        # Retried for the same race force_finalize_canonical retries.
+        # Retried: a keyed advisory lock only serializes writers sharing an artifact id, so a
+        # writer under another id can commit a ready row with our provenance between our
+        # supersede and our promote, and the uniqueness index rejects us.
         for attempt in range(_CANONICAL_PROMOTE_ATTEMPTS):
             conn = self._get_connection()
             try:
