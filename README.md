@@ -96,7 +96,9 @@ whether an un-primed session uses the notebook at all. See
 - **worker pool** (separate package, `pip install strata-pool`)**:** machines (Fly, Docker or RunPod) start on demand, are held for a tenant, hand out GPUs per cell, and stop when the work does
 - **the same environment, elsewhere:** a remote cell runs in the notebook's own locked environment rather than whatever the worker image holds
 - **remote cells over SSH:** hand an agent an SSH target and it provisions a worker there, tunnels to it, and routes heavy cells over, cached like everything else
+- **workers behind NAT:** `strata-worker --connect` dials out to a relay, so a machine with no open port serves cells
 - **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
+- **Iceberg as other engines write it:** scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly, from SQL, REST, Glue, GCS and Azure catalogs
 - **every input recorded:** `# @fetch` makes bytes from a URL an input, `# @dataset` makes a registry name one, both content-addressed
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3, GCS or Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
@@ -110,6 +112,8 @@ whether an un-primed session uses the notebook at all. See
 - **a notebook travels:** export the whole state as one bundle and import it back, artifacts included
 - **share a session:** presence, cell focus and soft locks, with every cell recording who wrote it
 - **safe to share** (in service mode)**:** cells run as their own OS user once you name one, notebook scopes are enforced on every notebook route under principal auth, and an MCP tool call runs as its caller
+- **host it for many people:** in service mode every notebook route, the WebSocket and MCP stay within the caller's tenant, the server runs under a path behind your proxy, and the editor can be framed inside your own product
+- **a store that stays bounded:** results nobody has used for a while are collected least recently used first, never anything named, pinned, published or still needed
 
 **Surfaces**
 

@@ -5,7 +5,7 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## Unreleased
+## 0.9.0 - 2026-10-07
 
 Strata becomes something a platform can host for many people. Notebook routes
 know their tenant, the server runs under a path behind a proxy, workers reach it

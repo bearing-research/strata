@@ -50,10 +50,14 @@ producing artifacts that flow through an auto-built DAG.
 - **every input recorded:** `# @fetch` makes bytes from a URL an input and `# @dataset` makes a registry name one, both content-addressed like everything else
 - **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
 - **the same environment, elsewhere:** a remote cell runs in the notebook's own locked environment rather than whatever the worker image happens to hold
+- **workers behind NAT:** `strata-worker --connect` dials out to a relay, so a machine with no open port serves cells
+- **Iceberg as other engines write it:** scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly
 - **a figure gets a URL:** publish an artifact and anyone with the link sees the plot, the code behind it, and the environment of every step - no account, no install
 - **promote to the team:** copy a result and its whole chain into a shared store, from the notebook, the CLI or inside a cell - and a teammate's earlier run can serve your cell
 - **a notebook travels:** export the whole state as one bundle, artifacts included, and import it back elsewhere
 - **share a session:** presence, cell focus and soft locks, with every cell recording who wrote it
+- **host it for many people:** in service mode every notebook route stays within the caller's tenant, the server runs under a path behind your proxy, and the editor can be framed inside your own product
+- **a store that stays bounded:** results nobody has used for a while are collected least recently used first, never anything named, pinned, published or still needed
 - **worker pool** (a separate package, `pip install strata-pool`)**:** machines start on demand - Fly, Docker or RunPod - are held for a tenant, hand out GPUs per cell, and stop when the work does
 
 ### Three ways to drive it
