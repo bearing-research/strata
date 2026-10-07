@@ -31,6 +31,7 @@ from strata.notebook.dependencies import (
     preview_requirements_text,
 )
 from strata.notebook.executor import CellExecutor
+from strata.notebook.languages.analyzer import require_sql_extra
 from strata.notebook.models import (
     CellLanguage,
     CellStatus,
@@ -38,7 +39,6 @@ from strata.notebook.models import (
     MountSpec,
     WorkerSpec,
 )
-from strata.notebook.languages.analyzer import require_sql_extra
 from strata.notebook.python_versions import (
     current_python_minor,
     normalize_python_minor,

@@ -225,7 +225,6 @@ class TestTokensAreHashedAtRest:
         assert (again["id"], again["token"], again["url"]) == (minted["id"], None, None)
         assert [(p["id"], p["token"]) for p in listed] == [(minted["id"], None)]
 
-
     def test_the_archive_holds_no_token(self, store):
         """``/p/{token}/archive.zip`` builds from the record its token looked up."""
         import zipfile
