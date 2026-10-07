@@ -233,9 +233,7 @@ def unpack_notebook_output_bundle(
 
     # Same name as the local harness, so readers find the output either way.
     # Hyphenated so it can't collide with a user variable named ``result``.
-    write_run_file(
-        output_dir, "harness-result.json", json.dumps(result, indent=2).encode("utf-8")
-    )
+    write_run_file(output_dir, "harness-result.json", json.dumps(result, indent=2).encode("utf-8"))
 
     return result
 

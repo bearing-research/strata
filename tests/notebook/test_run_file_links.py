@@ -310,7 +310,9 @@ x = 1
         session.venv_python = Path(sys.executable)
 
         result = asyncio.run(
-            CellExecutor(session).run_cell_tests("a", "def test_f(cell):\n    assert cell.f() == 1\n")
+            CellExecutor(session).run_cell_tests(
+                "a", "def test_f(cell):\n    assert cell.f() == 1\n"
+            )
         )
 
         assert list(victim.iterdir()) == []
