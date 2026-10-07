@@ -1671,6 +1671,8 @@ async function refreshRegistryAction() {
   } finally {
     registryLoading.value = false
   }
+  // Every put, alias, tag or approval adds an audit entry.
+  await fetchRegistryAuditAction()
 }
 
 // Debounced so a finishing cell doesn't refresh per output. No-op when the
