@@ -233,8 +233,9 @@ class TestConcurrentSchemaInitialization:
         barrier = threading.Barrier(8)
 
         def boot(i: int) -> None:
-            barrier.wait()
             try:
+                # Bounded: a thread that never starts breaks the barrier into errors.
+                barrier.wait(timeout=30)
                 booted.append(
                     ArtifactStore(tmp_path / f"node{i}", dialect=PostgresDialect(postgres_dsn))
                 )
@@ -588,8 +589,8 @@ class TestConnectionPool:
             barrier = threading.Barrier(8)
 
             def work(i: int) -> None:
-                barrier.wait()
                 try:
+                    barrier.wait(timeout=30)
                     for round_ in range(3):
                         aid = f"a{i}-{round_}"
                         version = store.create_artifact(aid, f"prov-{i}-{round_}", _spec())
@@ -1043,8 +1044,8 @@ class TestWriterSerialization:
         barrier = threading.Barrier(8)
 
         def create(i: int) -> None:
-            barrier.wait()
             try:
+                barrier.wait(timeout=30)
                 versions.append(store.create_artifact("contended", f"prov-{i}", _spec()))
             except Exception as exc:
                 errors.append(exc)
