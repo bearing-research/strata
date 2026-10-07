@@ -588,6 +588,44 @@ async def test_a_service_mode_bigquery_key_file_is_the_notebooks_own(
         assert "`credentials_path`" in (result.error or "")
 
 
+@pytest.mark.parametrize(
+    ("mode", "key_file", "reads"),
+    [
+        ("service", "server", False),
+        ("service", "own", True),
+        ("personal", "server", True),
+    ],
+)
+def test_reopen_identity_reads_only_a_key_file_the_cell_may_use(
+    tmp_path, monkeypatch, outside, mode, key_file, reads
+):
+    """Staleness on reopen opens the key file for its ``client_email``; a refused one stays shut."""
+    from strata.notebook.sql import cell_executor
+    from strata.notebook.sql.drivers import bigquery
+
+    config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode)
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+    read: list[str] = []
+    monkeypatch.setattr(bigquery, "_credentials_principal", lambda path: read.append(path))
+    nb_dir = create_notebook(tmp_path, "bq_reopen")
+    (nb_dir / "sa.json").write_text("{}")
+    path = {"server": str(outside), "own": "sa.json"}
+    add_cell_to_notebook(nb_dir, "c1", language="sql")
+    write_cell(nb_dir, "c1", "# @sql connection=db\n# @cache forever\nSELECT 1\n")
+    toml = nb_dir / "notebook.toml"
+    toml.write_text(
+        toml.read_text() + '\n[connections.db]\ndriver = "bigquery"\nproject_id = "p"\n'
+        f'credentials_path = "{path[key_file]}"\n'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    (cell,) = session.notebook_state.cells
+
+    identity = cell_executor.sql_reopen_identity(cell, session)
+
+    assert bool(read) is reads
+    assert (identity is not None) is reads
+
+
 @pytest.mark.parametrize("mode", ["personal", "service"])
 @pytest.mark.parametrize("write", [False, True], ids=["read", "write"])
 @pytest.mark.asyncio

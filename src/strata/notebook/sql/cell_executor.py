@@ -780,6 +780,9 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
         adapter = get_adapter(spec.driver)
     except KeyError:
         return None
+    # The identity reads a BigQuery key file, so a refused one is never opened.
+    if database_problem(spec, session.path, session._lake_config()) is not None:
+        return None
     analysis = analyze_sql_cell(cell.source, dialect=adapter.sqlglot_dialect)
     try:
         policy = resolve_cache_policy(
