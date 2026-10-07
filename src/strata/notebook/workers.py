@@ -116,20 +116,22 @@ def _serialize_managed_worker_records(
 
 def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
     """Load the effective notebook worker policy for the current deployment."""
-    try:
-        from strata.server import get_state
+    from strata.server import get_state
 
-        state = get_state()
-        config = state.config
-        service_mode = config.deployment_mode == "service"
-        # Same accessor the admin routes use, so the catalogue and dispatch cannot disagree
-        # (transforms_config would diverge from the persisted registry after a restart).
-        server_workers = {
-            record.worker.name: record for record in get_server_managed_worker_records()
-        }
-    except Exception:
-        service_mode = False
-        server_workers = {}
+    try:
+        config = get_state().config
+    except RuntimeError:
+        # No server (a CLI run): the notebook's own workers, nothing to restrict.
+        config = None
+    service_mode = config is not None and config.deployment_mode == "service"
+    # Same accessor the admin routes use, so the catalogue and dispatch cannot disagree
+    # (transforms_config would diverge from the persisted registry after a restart). A store
+    # error propagates: falling back to personal rules would let a notebook's own workers run.
+    server_workers = (
+        {record.worker.name: record for record in get_server_managed_worker_records()}
+        if config is not None
+        else {}
+    )
 
     builtin = get_builtin_local_worker()
     if service_mode:

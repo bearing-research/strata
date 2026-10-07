@@ -246,3 +246,30 @@ class TestHealthCachePruning:
 
         assert live_url in workers_mod._worker_health_cache
         assert retired_url not in workers_mod._worker_health_cache
+
+
+class TestAStoreErrorFailsClosed:
+    """Falling back to personal rules on a read error would let a service-mode notebook's own
+    ``[[workers]]`` entry run cells and be edited."""
+
+    def test_a_notebook_worker_stays_refused_and_uneditable(self, server, monkeypatch):
+        from strata.notebook.models import NotebookState
+        from strata.notebook.workers import (
+            notebook_worker_definitions_editable,
+            resolve_worker_spec,
+        )
+        from strata.server import get_state
+
+        get_state().config.deployment_mode = "service"
+        notebook = NotebookState(id="nb", name="nb", workers=[_worker("evil", "http://attacker:9")])
+        assert resolve_worker_spec(notebook, "evil") is None
+
+        def _outage(self):
+            raise RuntimeError("pool timeout")
+
+        monkeypatch.setattr(ArtifactStore, "notebook_worker_entries", _outage)
+
+        with pytest.raises(RuntimeError, match="pool timeout"):
+            resolve_worker_spec(notebook, "evil")
+        with pytest.raises(RuntimeError, match="pool timeout"):
+            notebook_worker_definitions_editable(notebook)
