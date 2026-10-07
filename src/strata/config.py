@@ -794,7 +794,7 @@ class StrataConfig(BaseSettings):
                     "catalog uri, so its tables would live in a SQLite catalog on "
                     "this server's disk. Set the catalog database's uri (for "
                     "catalog_properties, STRATA_CATALOG_URI), e.g. "
-                    "postgresql://user:pass@host/iceberg_catalog."
+                    "postgresql+psycopg://user:pass@host/iceberg_catalog."
                 )
         return self
 
@@ -1350,7 +1350,7 @@ def _get_env_overrides() -> dict[str, Any]:
         overrides["gcs_credentials_json"] = gcs_credentials
 
     # Catalog URI (for PostgreSQL or other SQL backends)
-    # Example: postgresql://user:pass@localhost:5432/iceberg_catalog
+    # Example: postgresql+psycopg://user:pass@localhost:5432/iceberg_catalog
     if catalog_uri := os.environ.get("STRATA_CATALOG_URI"):
         if "catalog_properties" not in overrides:
             overrides["catalog_properties"] = {}
