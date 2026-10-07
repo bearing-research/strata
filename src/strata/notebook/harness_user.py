@@ -11,10 +11,13 @@ chosen per cell; a cache hit starts nothing and is never refused.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 REFUSAL = (
     "This server runs in service mode, where a cell run on the server's own host "
@@ -134,3 +137,99 @@ def hand_over(path: Path, user: HarnessUser | None) -> None:
     for root, dirs, files in os.walk(path):
         for name in (*dirs, *files):
             os.chown(os.path.join(root, name), user.uid, user.gid, follow_symlinks=False)
+
+
+class UnsafeRunFile(RuntimeError):
+    """A run-directory entry is not a plain file, so the server will not touch it."""
+
+
+# ELOOP is a symlink under O_NOFOLLOW (EMLINK on FreeBSD); ENOTDIR a non-directory.
+_LINK_ERRNOS = frozenset({errno.ELOOP, errno.EMLINK, errno.ENOTDIR})
+
+
+def _refuse(name: str) -> UnsafeRunFile:
+    return UnsafeRunFile(
+        f"Refusing cell output {name!r}: it is a symlink or not a regular file in the "
+        "cell's run directory."
+    )
+
+
+def _check_name(name: str) -> None:
+    if not name or name in (".", "..") or any(c in name for c in "/\\\x00"):
+        raise UnsafeRunFile(f"Refusing cell output {name!r}: not a plain file name.")
+
+
+def _open_dir(directory: Path, name: str) -> int:
+    try:
+        return os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        if exc.errno in _LINK_ERRNOS:
+            raise _refuse(name) from exc
+        raise
+
+
+def _lstat_checked(path: Path, name: str, want: int) -> None:
+    """The no-O_NOFOLLOW (Windows) fallback: refuse a link or the wrong kind of entry."""
+    st = os.lstat(path)
+    if stat.S_IFMT(st.st_mode) != want:
+        raise _refuse(name)
+
+
+def open_run_file(directory: Path, name: str) -> BinaryIO:
+    """Open *name* in a handed-over run directory for reading, following no link.
+
+    The harness user owns that directory, so it can swap a file (or the directory)
+    for a symlink or hard link to something only the server may read.
+    """
+    _check_name(name)
+    if not hasattr(os, "O_NOFOLLOW"):
+        _lstat_checked(directory, name, stat.S_IFDIR)
+        _lstat_checked(directory / name, name, stat.S_IFREG)
+        return open(directory / name, "rb")
+    dir_fd = _open_dir(directory, name)
+    try:
+        # O_NONBLOCK so a planted FIFO cannot hang the open.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except OSError as exc:
+        if exc.errno in _LINK_ERRNOS:
+            raise _refuse(name) from exc
+        raise
+    finally:
+        os.close(dir_fd)
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        os.close(fd)
+        raise _refuse(name)
+    return os.fdopen(fd, "rb")
+
+
+def read_run_file(directory: Path, name: str) -> bytes:
+    """The bytes of *name* in a handed-over run directory (see ``open_run_file``)."""
+    with open_run_file(directory, name) as f:
+        return f.read()
+
+
+def write_run_file(directory: Path, name: str, data: bytes) -> None:
+    """Write *name* into a run directory the harness user can also write to.
+
+    Whatever is there is unlinked and the file created exclusively, so a planted
+    link is replaced, never written through.
+    """
+    _check_name(name)
+    if not hasattr(os, "O_NOFOLLOW"):
+        _lstat_checked(directory, name, stat.S_IFDIR)
+        (directory / name).unlink(missing_ok=True)
+        with open(directory / name, "xb") as f:
+            f.write(data)
+        return
+    dir_fd = _open_dir(directory, name)
+    try:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(name, dir_fd=dir_fd)
+        fd = os.open(
+            name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=dir_fd
+        )
+    finally:
+        os.close(dir_fd)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)

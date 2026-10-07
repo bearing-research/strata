@@ -47,10 +47,13 @@ from strata.notebook.env import compute_execution_env_hash, narrow_env_for_prove
 from strata.notebook.harness_user import (
     HarnessUser,
     LocalExecutionRefused,
+    UnsafeRunFile,
     hand_over,
     identity_env,
+    read_run_file,
     resolve_harness_user,
     spawn_kwargs,
+    write_run_file,
 )
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
@@ -2463,10 +2466,14 @@ class CellExecutor:
         )
         result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
 
-        bundle_path = output_dir / "notebook-output-bundle.tar"
+        # The cell may have left anything in output_dir: pack and unpack inside a directory
+        # made fresh, so neither writes through a link it planted.
+        work_dir = output_dir / "_executor_result"
+        work_dir.mkdir()
+        bundle_path = work_dir / "notebook-output-bundle.tar"
         pack_notebook_output_bundle(bundle_path, result, output_dir)
 
-        unpacked_dir = output_dir / "_executor_result"
+        unpacked_dir = work_dir / "out"
         unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
         return unpacked_result, unpacked_dir, "executor", resolved_mounts
 
@@ -4542,8 +4549,7 @@ class CellExecutor:
                 break
 
             try:
-                with open(output_file, "rb") as f:
-                    blob_data = f.read()
+                blob_data = read_run_file(output_dir, output_file.name)
 
                 content_type = content_type_map.get(ext, "pickle/object")
                 var_provenance = derive_subkey(provenance_hash, var_name)
@@ -4567,6 +4573,9 @@ class CellExecutor:
                     )
                 )
                 staged_names.append((var_name, content_type))
+            except UnsafeRunFile:
+                artifact_mgr.discard_cell_outputs(staged)
+                raise
             except Exception:
                 logger.exception(
                     "Failed to store output %s for cell %s",
@@ -4733,7 +4742,7 @@ class CellExecutor:
             if not output_file.exists():
                 continue
 
-            blob_data = output_file.read_bytes()
+            blob_data = read_run_file(output_dir, file_name)
             row_count = display_output.get("rows")
             display_provenance = derive_subkey(provenance_hash, f"__display__{index}")
             artifact_version = artifact_mgr.store_cell_output(
@@ -4862,14 +4871,14 @@ class CellExecutor:
                 "provenance_hash": derive_subkey(provenance_hash, var_name),
                 "injected": injected_refs,
             }
-            output_file = output_dir / f"{safe_filename_stem(var_name)}.cell_module.json"
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(descriptor, f)
+            file_name = f"{safe_filename_stem(var_name)}.cell_module.json"
+            data = json.dumps(descriptor).encode("utf-8")
+            write_run_file(output_dir, file_name, data)
 
             outputs[var_name] = {
                 "content_type": "module/cell",
-                "file": output_file.name,
-                "bytes": output_file.stat().st_size,
+                "file": file_name,
+                "bytes": len(data),
                 "type": symbol.kind,
                 "preview": f"<{symbol.kind} {var_name}>",
             }
@@ -4900,7 +4909,7 @@ class CellExecutor:
         artifact_version = artifact_mgr.store_cell_output(
             cell_id=cell_id,
             variable_name=var_name,
-            blob_data=blob_path.read_bytes(),
+            blob_data=read_run_file(output_dir, str(spec["file"])),
             content_type=spec.get("content_type", "pickle/object"),
             provenance_hash=derive_subkey(provenance_hash, var_name),
             source_hash=compute_source_hash(source),
@@ -5024,8 +5033,7 @@ class CellExecutor:
                 "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
                 "variables": {},
             }
-        with open(result_path) as f:
-            return json.load(f)
+        return json.loads(read_run_file(result_path.parent, result_path.name))
 
     async def _run_r_harness(
         self,
@@ -5106,8 +5114,7 @@ class CellExecutor:
                 "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
                 "variables": {},
             }
-        with open(result_path) as f:
-            return json.load(f)
+        return json.loads(read_run_file(result_path.parent, result_path.name))
 
     # ------------------------------------------------------------------
     # Loop cell execution (sequential, fresh subprocess per iteration)
@@ -5442,7 +5449,7 @@ class CellExecutor:
                     raise RuntimeError(
                         f"Loop cell iter {k} carry file not produced by harness: {new_carry_path}"
                     )
-                new_carry_blob = new_carry_path.read_bytes()
+                new_carry_blob = read_run_file(output_dir, new_carry_file)
 
                 # Capture while the iteration tmpdir is still alive.
                 for extra_var in extra_consumed:
@@ -5458,7 +5465,7 @@ class CellExecutor:
                     extra_path = output_dir / extra_file
                     if extra_path.exists():
                         extra_blobs[extra_var] = (
-                            extra_path.read_bytes(),
+                            read_run_file(output_dir, extra_file),
                             str(extra_meta.get("content_type", "pickle/object")),
                         )
 
@@ -6279,7 +6286,7 @@ class CellExecutor:
             content_type = _artifact_content_type(canonical_art)
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
             file_name = f"{safe_filename_stem(var_name)}{ext}"
-            (cell_output_dir / file_name).write_bytes(blob)
+            write_run_file(cell_output_dir, file_name, blob)
             cached_outputs[var_name] = {
                 "content_type": content_type,
                 "file": file_name,
@@ -6354,7 +6361,7 @@ class CellExecutor:
             content_type = _artifact_content_type(display_art)
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
             file_name = f"__display__{index}{ext}"
-            (cell_output_dir / file_name).write_bytes(blob)
+            write_run_file(cell_output_dir, file_name, blob)
             meta = cached.model_dump()
             meta["file"] = file_name
             cached_displays.append(meta)
@@ -6456,15 +6463,18 @@ class CellExecutor:
         if module_export_error:
             return {"ok": False, "error": f"module export rejected: {module_export_error}"}
 
-        stored_ok = self._store_outputs(
-            cell_id,
-            cell_output_dir,
-            provenance_hash,
-            input_hashes,
-            source_hash=source_hash,
-            source=executed_source,
-            env_hash=env_hash,
-        )
+        try:
+            stored_ok = self._store_outputs(
+                cell_id,
+                cell_output_dir,
+                provenance_hash,
+                input_hashes,
+                source_hash=source_hash,
+                source=executed_source,
+                env_hash=env_hash,
+            )
+        except UnsafeRunFile as exc:
+            return {"ok": False, "error": str(exc)}
 
         # Carry the post-persist metadata (with artifact_uri) in the ack so the dispatcher
         # broadcasts the URI-bearing version, as single-cell does.
