@@ -143,7 +143,8 @@ the browser while the agent is still going.
 
 When you quit the viewer, the server `strata agent` started is shut down with
 it. If you pointed it at a server you started yourself, that one is left
-running.
+running. A server the launcher started writes its logs to
+`.strata/server.log` in the notebook directory, not to your terminal.
 
 ??? info "What `strata agent` does under the hood"
 
