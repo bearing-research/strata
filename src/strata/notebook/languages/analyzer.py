@@ -108,17 +108,35 @@ class _SqlAnalyzer:
 
     The DAG needs only the output name and ``:name`` placeholders, so no
     dialect is passed and sqlglot never parses the body: a query sqlglot
-    cannot read must not keep the notebook from opening.
+    cannot read must not keep the notebook from opening. The placeholder scan
+    does take the connection's dialect, which decides where a string ends.
     """
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
-        from strata.notebook.sql.analyzer import analyze_sql_cell
+        from strata.notebook.sql.analyzer import _extract_placeholders, analyze_sql_cell
 
         result = analyze_sql_cell(cell.source)
         return AnalyzedCell(
             defines=list(result.defines),
-            references=list(result.references),
+            references=_extract_placeholders(
+                result.sql_body, _connection_dialect(result.connection, session)
+            ),
         )
+
+
+def _connection_dialect(connection: str | None, session: NotebookSession) -> str | None:
+    """The sqlglot dialect of the notebook connection named *connection*, if known."""
+    from strata.notebook.sql.registry import get_adapter
+
+    if connection is None:
+        return None
+    spec = next((c for c in session.notebook_state.connections if c.name == connection), None)
+    if spec is None:
+        return None
+    try:
+        return get_adapter(spec.driver).sqlglot_dialect
+    except KeyError:
+        return None
 
 
 class _MarkdownAnalyzer:

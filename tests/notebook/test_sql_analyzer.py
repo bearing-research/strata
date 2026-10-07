@@ -127,6 +127,52 @@ def test_placeholders_backslash_is_literal_in_plain_strings():
     assert _extract_placeholder_positions(sql) == ["w"]
 
 
+@pytest.mark.parametrize("dialect", ["snowflake", "bigquery", "mysql"])
+def test_placeholders_honour_backslash_escapes_where_the_dialect_does(dialect):
+    """There ``'it\\'s :z'`` is one string, so ``:z`` stays inside and ``:w`` is the bind."""
+    sql = r"SELECT 'it\'s :z', 'a\\', :w FROM t"
+    assert _extract_placeholder_positions(sql, dialect) == ["w"]
+    assert len(_blank_strings_and_comments(sql, dialect)) == len(sql)
+    body = "# @sql connection=wh\n" + sql
+    assert analyze_sql_cell(body, dialect=dialect).placeholder_positions == ["w"]
+
+
+@pytest.mark.parametrize("dialect", [None, "postgres", "duckdb", "sqlite"])
+def test_backslash_stays_literal_in_standard_strings(dialect):
+    """Elsewhere ``'a\\'`` ends at its quote, as the SQL standard says."""
+    sql = r"SELECT 'a\', :w FROM t"
+    assert _extract_placeholder_positions(sql, dialect) == ["w"]
+
+
+def test_the_dag_scans_binds_in_the_connections_dialect(tmp_path):
+    """The DAG wires the bind the executor will run, not one a backslash hid in a string."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    nb_dir = create_notebook(tmp_path, "dialect_dag")
+    cells = [
+        ("defz", "python", "z = 1\n"),
+        ("defw", "python", "w = 2\n"),
+        ("q", "sql", "# @sql connection=wh\nSELECT 'it\\'s :z', :w\n"),
+    ]
+    previous = None
+    for cell_id, language, source in cells:
+        add_cell_to_notebook(nb_dir, cell_id, previous, language=language)
+        write_cell(nb_dir, cell_id, source)
+        previous = cell_id
+    toml_path = nb_dir / "notebook.toml"
+    toml_path.write_text(
+        toml_path.read_text()
+        + '\n[connections.wh]\ndriver = "snowflake"\naccount = "acme"\nuser = "reader"\n'
+    )
+
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    cell = session.notebook_state.get_cell("q")
+    assert cell.references == ["w"]
+    assert cell.upstream_ids == ["defw"]
+
+
 def test_placeholders_skip_line_comments():
     sql = "SELECT 1 -- :ignored\nWHERE x = :real"
     assert _extract_placeholders(sql) == ["real"]

@@ -19,6 +19,8 @@ from strata.notebook.sql.adapter import QualifiedTable
 
 # ``(?<![:\w])`` rules out ``::cast`` and tokens like ``schema:foo``.
 _BIND_PLACEHOLDER_RE = re.compile(r"(?<![:\w]):([a-zA-Z_]\w*)")
+# Dialects whose ordinary ``'...'`` strings take backslash escapes (``'it\'s'``).
+_BACKSLASH_STRING_DIALECTS = frozenset({"bigquery", "mysql", "snowflake"})
 
 
 @dataclass
@@ -59,7 +61,7 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
     if not output_name.isidentifier():
         output_name = "result"
 
-    positions = _extract_placeholder_positions(sql_body)
+    positions = _extract_placeholder_positions(sql_body, dialect)
     references = _dedupe_preserve_order(positions)
 
     cache_policy = annotations.cache or CachePolicy(kind="fingerprint")
@@ -200,19 +202,19 @@ def confined_write_violation(sql: str, dialect: str | None) -> str | None:
     return None
 
 
-def _extract_placeholder_positions(sql: str) -> list[str]:
+def _extract_placeholder_positions(sql: str, dialect: str | None = None) -> list[str]:
     """Return ``:name`` placeholders in source order, duplicates kept.
 
     Strings and comments are blanked first. Duplicates stay because the executor
     rewrites each occurrence to a positional bind in this order.
     """
-    cleaned = _blank_strings_and_comments(sql)
+    cleaned = _blank_strings_and_comments(sql, dialect)
     return [m.group(1) for m in _BIND_PLACEHOLDER_RE.finditer(cleaned)]
 
 
-def _extract_placeholders(sql: str) -> list[str]:
+def _extract_placeholders(sql: str, dialect: str | None = None) -> list[str]:
     """Return ``:name`` placeholders in source order, deduplicated, for the DAG."""
-    return _dedupe_preserve_order(_extract_placeholder_positions(sql))
+    return _dedupe_preserve_order(_extract_placeholder_positions(sql, dialect))
 
 
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -225,14 +227,14 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
     return out
 
 
-def _blank_strings_and_comments(sql: str) -> str:
+def _blank_strings_and_comments(sql: str, dialect: str | None = None) -> str:
     """Replace string literals and comments with spaces, preserving length.
 
-    Recognizes ``'...'`` (``''`` escapes), Postgres ``E'...'`` (backslash escapes
-    too), ``-- ...``, ``/* ... */`` and Postgres ``$tag$ ... $tag$`` / ``$$ ... $$``;
-    ``$1`` is not a dollar quote. Double-quoted
-    and backtick identifiers are not handled; a false placeholder there is rejected
-    by the executor as an unknown upstream variable.
+    Recognizes ``'...'`` (``''`` escapes, and backslash escapes in BigQuery,
+    MySQL and Snowflake), Postgres ``E'...'`` (backslash escapes too), ``-- ...``,
+    ``/* ... */`` and Postgres ``$tag$ ... $tag$`` / ``$$ ... $$``; ``$1`` is not a
+    dollar quote. Double-quoted and backtick identifiers are not handled; a false
+    placeholder there is rejected by the executor as an unknown upstream variable.
     """
     out: list[str] = []
     i = 0
@@ -269,7 +271,7 @@ def _blank_strings_and_comments(sql: str) -> str:
         # ``'string'``
         if c == "'":
             # ``E'...'`` and ``e'...'``, but not the tail of an identifier like ``name'``.
-            escape_string = (
+            escape_string = dialect in _BACKSLASH_STRING_DIALECTS or (
                 i > 0
                 and sql[i - 1] in "eE"
                 and (i < 2 or not (sql[i - 2].isalnum() or sql[i - 2] in "_$"))
@@ -338,7 +340,7 @@ def rewrite_named_to_positional(sql: str, dialect: str | None) -> str:
         def emit(i: int) -> str:
             return "?"
 
-    cleaned = _blank_strings_and_comments(sql)
+    cleaned = _blank_strings_and_comments(sql, dialect)
     out: list[str] = []
     last = 0
     for i, match in enumerate(_BIND_PLACEHOLDER_RE.finditer(cleaned)):

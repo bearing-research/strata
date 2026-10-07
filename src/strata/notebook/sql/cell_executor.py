@@ -628,7 +628,7 @@ def _execute_write_statements(
     conn = adapter.open(spec, read_only=False)
     try:
         for stmt_text, stmt_kind in prepared:
-            placeholders = _extract_placeholder_positions(stmt_text)
+            placeholders = _extract_placeholder_positions(stmt_text, adapter.sqlglot_dialect)
             if placeholders:
                 stmt_params = resolve_bind_params(placeholders, namespace)
                 stmt_to_execute = rewrite_named_to_positional(stmt_text, adapter.sqlglot_dialect)

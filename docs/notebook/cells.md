@@ -505,7 +505,7 @@ The **Schema panel** in the sidebar shows the tables and columns visible through
 
 ### Bind parameters
 
-`:name` placeholders resolve against upstream cell variables. Strata coerces a strict allowlist of Python types (`int`, `float`, `str`, `bytes`, `bool`, `None`, `Decimal`, `UUID`, `datetime`/`date`/`time`) into ADBC bind values; anything else (a list, a table, a custom object) is rejected with a clear error. An upstream numpy scalar is stored as the Python number it holds, so it binds as that number. A value stored as a Python pickle is rejected without being loaded: the server never unpickles a cell's output. **No string substitution ever**: values flow through ADBC's prepared-statement layer, so adversarial strings (`'; DROP TABLE …`) round-trip as data, not SQL.
+`:name` placeholders resolve against upstream cell variables. One inside a string literal or a comment is not a placeholder, and strings end where the connection's dialect ends them (on Snowflake and BigQuery, `\'` does not). Strata coerces a strict allowlist of Python types (`int`, `float`, `str`, `bytes`, `bool`, `None`, `Decimal`, `UUID`, `datetime`/`date`/`time`) into ADBC bind values; anything else (a list, a table, a custom object) is rejected with a clear error. An upstream numpy scalar is stored as the Python number it holds, so it binds as that number. A value stored as a Python pickle is rejected without being loaded: the server never unpickles a cell's output. **No string substitution ever**: values flow through ADBC's prepared-statement layer, so adversarial strings (`'; DROP TABLE …`) round-trip as data, not SQL.
 
 ```python
 # upstream Python cell
