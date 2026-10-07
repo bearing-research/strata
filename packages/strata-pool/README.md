@@ -370,10 +370,12 @@ docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
 The image installs a pinned `strata-notebook` from PyPI (the `STRATA_VERSION`
-build arg) and needs **0.7.0 or newer**: `POST /execute`, the path the pool
-dispatches to, ships in that release. Installing from PyPI also means building
-inside a checkout does not pick up local worker changes; build a wheel for
-that.
+build arg), which must be **the same release as the Strata server** that
+dispatches to it: workers and servers upgrade together. The pin moves to each
+new release right after it is published; until then pass
+`--build-arg STRATA_VERSION=<server version>`. Installing from PyPI also means
+building inside a checkout does not pick up local worker changes; build a
+wheel for that.
 
 Layer your cells' dependencies on top (`FROM strata-worker:latest`). The image
 binds 8080 because that is `DockerBackend`'s default `worker_port`; the
