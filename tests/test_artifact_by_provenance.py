@@ -230,6 +230,37 @@ def test_a_caller_computed_key_round_trips_with_opaque_bytes(personal_server):
     assert data.content == blob
 
 
+def test_an_arrow_result_published_without_a_row_count_verifies_clean(personal_server):
+    """Neither the notebook nor the client sends a row count; recording 0 made verify flag
+    every Arrow result a team store holds."""
+    base_url = personal_server["base_url"]
+    blob = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
+    stored = _publish_by_provenance(base_url, "4" * 64, blob, content_type="arrow/ipc")
+    assert stored.status_code == 200, stored.text
+
+    store = ArtifactStore(personal_server["artifact_dir"])
+    artifact_id, version = _ref(stored.json()["artifact_uri"])
+    assert store.get_artifact(artifact_id, version).row_count is None
+    assert store.verify_artifacts() == []
+
+
+def test_a_malformed_row_count_is_refused(personal_server):
+    response = httpx.put(
+        f"{personal_server['base_url']}/v1/artifacts/by-provenance/{'3' * 64}",
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps({"content_type": "arrow/ipc", "row_count": "3"}),
+                "application/json",
+            ),
+            "data": ("data.bin", b"bytes", "application/octet-stream"),
+        },
+        timeout=30.0,
+    )
+    assert response.status_code == 400
+    assert "row_count" in response.text
+
+
 def test_the_first_writer_of_a_key_wins(personal_server):
     """A shared cache key is not reassignable by whoever writes last.
 
