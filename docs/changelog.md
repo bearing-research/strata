@@ -7,7 +7,7 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## Unreleased
+## 0.9.0 - 2026-10-07
 
 Strata becomes something a platform can host for many people. Notebook routes
 know their tenant, the server runs under a path behind a proxy, workers reach it
