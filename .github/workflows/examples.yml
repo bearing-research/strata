@@ -29,6 +29,11 @@ on:
       - 'uv.lock'
       - '.github/workflows/examples.yml'
 
+# A new push to a PR supersedes its running checks; runs on main all finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -39,6 +44,7 @@ jobs:
   examples:
     name: example · ${{ matrix.example }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       # A flaky public S3 read must not hide a real failure elsewhere.
       fail-fast: false
@@ -97,6 +103,7 @@ jobs:
   r-examples:
     name: example · ${{ matrix.example }} (R)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
