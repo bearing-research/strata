@@ -281,6 +281,48 @@ class TestServiceModeBlocking:
         assert httpx.get(f"{base_url}/v1/names/test", headers=headers).status_code == 404
 
 
+class TestTheTransformsBlock:
+    """Personal mode always runs the built-in SQL transform; service mode needs it listed."""
+
+    _SQL = {"executor": "local://duckdb_sql@v1", "params": {"sql": "SELECT 1 AS x"}}
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {"notebook_workers": []},
+            {"enabled": True, "registry": [{"ref": "other@v1", "executor_url": "http://x"}]},
+        ],
+        ids=["no-enabled-key", "enabled-with-other-entries"],
+    )
+    def test_personal_mode_keeps_the_built_in_sql_transform(self, tmp_path, block):
+        with run_server_with_context(
+            tmp_path / "cache", tmp_path / "artifacts", "personal", transforms_config=block
+        ) as ctx:
+            response = httpx.post(
+                f"{ctx.base_url}/v1/artifacts/materialize",
+                json={"inputs": [], "transform": self._SQL},
+            )
+            assert response.status_code == 200, response.text
+            wait_for_build(ctx.base_url, response.json()["artifact_uri"])
+
+    def test_service_mode_refuses_it_unless_listed(self, tmp_path):
+        with run_server_with_context(
+            tmp_path / "cache",
+            tmp_path / "artifacts",
+            "service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            transforms_config={"enabled": True},
+        ) as ctx:
+            response = httpx.post(
+                f"{ctx.base_url}/v1/artifacts/materialize",
+                json={"inputs": [], "transform": self._SQL},
+                headers={"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"},
+            )
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "transform_not_allowed"
+
+
 class TestArtifactContract:
     """Contract tests for the full artifact loop: miss, local DuckDB execution, hit, access by
     artifact and name URI, and persistence across restart.

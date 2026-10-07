@@ -532,10 +532,11 @@ artifact build pipeline). Transforms are also configured via the
 `[tool.strata.transforms]` block in `pyproject.toml`; `STRATA_TRANSFORMS_ENABLED`
 sets `enabled` there.
 
-With no block, the registry holds the built-in `duckdb_sql@v1`. A block is an
-allowlist: it holds only its `registry` entries, so `enabled = true` alone
+A personal-mode server always offers the built-in `duckdb_sql@v1`, and an
+enabled block adds its `registry` entries to it. In service mode the block is
+an allowlist: it holds only its `registry` entries, so `enabled = true` alone
 refuses every transform (`403 transform_not_allowed`). To offer the built-in
-SQL transform, list it:
+SQL transform there, list it:
 
 ```toml
 [tool.strata.transforms]

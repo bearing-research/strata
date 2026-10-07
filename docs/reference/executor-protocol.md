@@ -522,10 +522,11 @@ requires_scope = "transforms:pandas"
 | `max_input_bytes` | integer | Cap on the total size of the inputs; the build fails before the call when they exceed it. Default `0` (no cap). |
 | `requires_scope` | string | Scope a principal needs to materialize this transform, checked under principal auth. |
 
-With no `[tool.strata.transforms]` block, the registry holds only the
-in-process `duckdb_sql@v1`. With one, it holds only the listed entries, and
-only when `enabled = true`; list `ref = "duckdb_sql@v1"` with
-`executor_url = "embedded://local"` to keep the built-in. A ref no entry matches is refused at
+A personal-mode server always holds the in-process `duckdb_sql@v1`, plus the
+listed entries when `[tool.strata.transforms]` has `enabled = true`. In service
+mode the registry holds only the listed entries, and only when
+`enabled = true`; list `ref = "duckdb_sql@v1"` with
+`executor_url = "embedded://local"` to offer the built-in. A ref no entry matches is refused at
 `POST /v1/materialize` (`403` in service mode, `400` in personal mode).
 
 The in-process `duckdb_sql@v1` runs in the server process, so its DuckDB reads

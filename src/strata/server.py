@@ -708,7 +708,9 @@ async def lifespan(app: FastAPI):
 
     from strata.transforms.registry import TransformRegistry, set_transform_registry
 
-    transform_registry = TransformRegistry.from_config(config.transforms_config)
+    transform_registry = TransformRegistry.from_config(
+        config.transforms_config, personal=config.deployment_mode == "personal"
+    )
     set_transform_registry(transform_registry)
 
     if _should_warn_unset_signing_secret(config):

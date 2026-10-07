@@ -100,6 +100,19 @@ class TestTransformRegistry:
         assert not registry.is_allowed("duckdb_sql@v1")
         assert "embedded://local" in caplog.text
 
+    def test_a_personal_registry_always_has_the_built_in(self):
+        """Personal mode: the block adds to the embedded transforms and a listed one wins."""
+        assert TransformRegistry.from_config({"notebook_workers": []}, personal=True).is_allowed(
+            "duckdb_sql@v1"
+        )
+        remote = {"ref": "duckdb_sql@v1", "executor_url": "http://executor:8080/execute"}
+        registry = TransformRegistry.from_config(
+            {"enabled": True, "registry": [remote]}, personal=True
+        )
+        defn = registry.get("duckdb_sql@v1")
+        assert defn is not None and defn.executor_url == "http://executor:8080/execute"
+        assert len(registry.definitions) == 1
+
     def test_from_config_enabled(self):
         """from_config parses a full configuration."""
         config = {
