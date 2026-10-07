@@ -152,7 +152,7 @@ corresponding panel:
 | `GET /{sid}/dependencies` | Environment panel open | Resolved deps from `uv.lock`; expensive on large lockfiles. The snapshot already has `environment.resolved_package_count`. |
 | `GET /{sid}/environment` | Environment panel re-fetch | Refreshes after a mutation; snapshot has the version current at open. |
 | `GET /{sid}/connections/{name}/schema` | Connection detail open | Adapter call per connection. |
-| WS `profiling_request` (answered with `profiling_summary`) | Profiling panel open | Computed on demand. |
+| WS `profiling_request` (answered with `profiling_summary`) | Profiling panel open, then after each burst of `cell_output` frames | Computed on demand. |
 
 ## Reconnection and the cancel-on-disconnect grace window
 

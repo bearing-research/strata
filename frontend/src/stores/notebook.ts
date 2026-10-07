@@ -1990,6 +1990,7 @@ function initializeWebSocket() {
       const outputs = p.outputs as Record<string, any> | undefined
       // A finished cell may have published to the registry.
       scheduleRegistryRefresh()
+      scheduleProfilingRefresh()
 
       const displayOutputs =
         parseDisplayOutputPayloads(
@@ -3454,6 +3455,18 @@ function requestProfilingSummary() {
   if (wsInstance && wsInstance.connected()) {
     wsInstance.send('profiling_request', {})
   }
+}
+
+// The server sends the summary only on request: refresh it after runs, once per
+// burst of outputs, and only once the panel has asked for it.
+let profilingRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleProfilingRefresh() {
+  if (profilingSummary.value === null) return
+  if (profilingRefreshTimer) clearTimeout(profilingRefreshTimer)
+  profilingRefreshTimer = setTimeout(() => {
+    profilingRefreshTimer = null
+    requestProfilingSummary()
+  }, 500)
 }
 
 function openInspect(cellId: CellId) {
