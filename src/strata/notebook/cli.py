@@ -1147,7 +1147,7 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     add_p.add_argument("--after", help="Insert after this cell id (default: at the end)")
     add_p.add_argument(
         "--language",
-        choices=["python", "markdown", "sql", "r", "prompt"],
+        choices=["python", "markdown", "sql", "r", "prompt", "widget"],
         default="python",
     )
     add_p.add_argument(

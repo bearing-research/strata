@@ -444,6 +444,18 @@ def test_cli_cell_add_inline_c(chain_nb, capsys):
     assert new["source"] == "w = 7"
 
 
+def test_cli_cell_add_can_add_a_widget_cell(chain_nb, capsys):
+    """The UI's add-cell menu offers widget cells; the CLI adds the same kind."""
+    source = "alpha = slider(0, 1, step=0.01, default=0.5)\n"
+    argv = ["cell", "add", str(chain_nb), "-c", source, "--language", "widget"]
+
+    assert main([*argv, "--format", "json"]) == 0
+
+    new = json.loads(capsys.readouterr().out)
+    assert new["language"] == "widget"
+    assert (chain_nb / "cells" / f"{new['id']}.widget").read_text() == source
+
+
 def test_cli_cell_add_c_and_file_are_mutually_exclusive(chain_nb, tmp_path):
     src = tmp_path / "s.py"
     src.write_text("w = 5")
