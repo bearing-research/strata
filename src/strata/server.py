@@ -866,6 +866,17 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass  # Don't fail startup if sweep fails
 
+    if config.artifact_dir is not None:
+        from strata.api.publication_bundle import remove_token_named_archives
+
+        try:
+            removed = remove_token_named_archives(config.artifact_dir)
+        except OSError as exc:
+            logger.warning("publication_archive_cleanup_failed", error=str(exc))
+        else:
+            if removed:
+                logger.info("token_named_publication_archives_removed", count=removed)
+
     # One pass covers the whole store: garbage_collect treats every tenant's
     # roots as roots.
     gc_task: asyncio.Task | None = None

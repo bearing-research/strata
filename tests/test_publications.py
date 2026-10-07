@@ -226,6 +226,50 @@ class TestTokensAreHashedAtRest:
         assert [(p["id"], p["token"]) for p in listed] == [(minted["id"], None)]
 
 
+    def test_the_archive_holds_no_token(self, store):
+        """``/p/{token}/archive.zip`` builds from the record its token looked up."""
+        import zipfile
+
+        from strata.api.publication_bundle import cached_bundle_zip
+
+        publication = store.publish_artifact("fig", _ready_artifact(store, "fig", b"x"))
+        looked_up = store.get_publication(publication.token)
+        assert looked_up is not None and looked_up.token == publication.token
+
+        built, _ = cached_bundle_zip(
+            store, store.get_artifact("fig", publication.version), publication=looked_up
+        )
+
+        assert publication.token not in str(built)
+        with zipfile.ZipFile(built) as bundle:
+            members = {name: bundle.read(name) for name in bundle.namelist()}
+        assert "manifest.json" in members
+        assert [n for n, data in members.items() if publication.token.encode() in data] == []
+
+    def test_startup_removes_archive_caches_named_by_token(self, tmp_path, monkeypatch):
+        """Earlier releases named each cache directory by the raw token."""
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.api.publication_bundle import ARCHIVE_CACHE_DIRNAME
+
+        artifact_dir = tmp_path / "artifacts"
+        store = ArtifactStore(artifact_dir)
+        publication = store.publish_artifact("fig", _ready_artifact(store, "fig", b"x"))
+        archives = artifact_dir / ARCHIVE_CACHE_DIRNAME
+        for name in (publication.token, publication.id):
+            (archives / name).mkdir(parents=True)
+            (archives / name / "built.zip").write_bytes(b"zip")
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(artifact_dir))
+        monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
+
+        with TestClient(server_module.app):
+            pass
+
+        assert sorted(p.name for p in archives.iterdir()) == [publication.id]
+        assert (archives / publication.id / "built.zip").exists()
+
+
 class TestAuthExemption:
     """Which routes the auth and tenant middleware let through unauthenticated.
 
