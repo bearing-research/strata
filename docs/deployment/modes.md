@@ -10,7 +10,7 @@ own identity.
 | --- | --- | --- |
 | **Best for** | One person: a laptop, or a server of your own | A team or customer-facing deployment |
 | **Writes** | Enabled | Off by default (server-side transforms); opt-in client write-back via `service_writes_enabled` |
-| **Auth** | None | `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy, or an API key |
+| **Auth** | None | Required, one of two modes: `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy (`trusted_proxy`), or API keys (`api_key`) |
 | **Identity scoping** | None (one user) | Per-tenant cache keys, cache dirs, QoS pools; artifacts filtered by tenant |
 | **Multi-tenancy** | n/a | Optional (`multi_tenant_enabled=true`) |
 | **ACLs** | Not evaluated | Deny-first (`acl_config`) |
@@ -111,9 +111,10 @@ identity headers (`X-Strata-Principal`, tenant header,
 any the client sent (empty when the user has none), and is the only
 ingress path. A header the proxy does not set reaches Strata from the
 client, so a proxy that never sets `X-Strata-Scopes` lets a user claim
-`admin:*`. Strata trusts the proxy rather than authenticating users itself;
-machine callers outside the proxy can use an API key instead
-(`STRATA_AUTH_MODE=api_key`).
+`admin:*`. Strata trusts the proxy rather than authenticating users itself, so
+machine callers of a proxied server go through the proxy too. API keys
+(`STRATA_AUTH_MODE=api_key`) are a separate auth mode, for a server no
+proxy fronts; a trusted-proxy server ignores them.
 
 See [Service Mode](service-mode.md) for the full story:
 

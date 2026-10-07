@@ -65,7 +65,7 @@ Back up a server before every upgrade: a new release migrates the artifact store
 
 - **SQLite store (the default):** copy the whole artifact directory (`STRATA_ARTIFACT_DIR`, `~/.strata/artifacts` by default). It holds `artifacts.sqlite` and the blobs.
 - **Postgres and an object store:** `pg_dump` the database `STRATA_ARTIFACT_METADATA_DSN` names, and copy the blob bucket (`aws s3 sync s3://<bucket> <backup-dir>`, or your provider's equivalent).
-- **Either way:** archive the notebook storage directory without `.venv` (as in [Backup](#backup)), and copy `notebook_workers.json` from the artifact directory, where a service-mode server keeps the workers registered through `/v1/admin/notebook-workers`.
+- **Either way:** archive the notebook storage directory without `.venv` (as in [Backup](#backup)). The workers registered through `/v1/admin/notebook-workers` are in the metadata store, so the steps above cover them; a server from before 0.9.0 kept them in `notebook_workers.json` in the artifact directory, so copy that file too when backing one up before the upgrade.
 
 To go back, restore all of it and start the release that wrote it.
 
