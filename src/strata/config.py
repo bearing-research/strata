@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -1355,9 +1356,10 @@ def _get_env_overrides() -> dict[str, Any]:
             overrides["catalog_properties"] = {}
         overrides["catalog_properties"]["uri"] = catalog_uri
 
-    if os.environ.get("STRATA_TRANSFORMS_ENABLED", "").lower() == "true":
-        if "transforms_config" not in overrides:
-            overrides["transforms_config"] = {}
-        overrides["transforms_config"]["enabled"] = True
+    if (transforms_enabled := os.environ.get("STRATA_TRANSFORMS_ENABLED")) is not None:
+        # Parsed like every other boolean setting, so `1`/`yes` enable and `false` disables.
+        overrides["transforms_config"] = {
+            "enabled": TypeAdapter(bool).validate_python(transforms_enabled)
+        }
 
     return overrides

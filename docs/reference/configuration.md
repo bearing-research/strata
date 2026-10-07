@@ -525,7 +525,24 @@ poll; there the console goes straight from the log route to the sockets.
 Server-side transform execution and the async build runner (service mode / the
 artifact build pipeline). Transforms are also configured via the
 `[tool.strata.transforms]` block in `pyproject.toml`; `STRATA_TRANSFORMS_ENABLED`
-toggles `enabled` there.
+sets `enabled` there.
+
+With no block, the registry holds the built-in `duckdb_sql@v1`. A block is an
+allowlist: it holds only its `registry` entries, so `enabled = true` alone
+refuses every transform (`403 transform_not_allowed`). To offer the built-in
+SQL transform, list it:
+
+```toml
+[tool.strata.transforms]
+enabled = true
+
+[[tool.strata.transforms.registry]]
+ref = "duckdb_sql@v1"
+executor_url = "embedded://local"
+```
+
+The [executor protocol](executor-protocol.md#core-transform-executors) describes the
+other registry keys.
 
 The v2-pull signed-URL routes (build manifest, signed download / upload, and
 `finalize`) have no on/off switch. They are served whenever the deployment can
@@ -539,6 +556,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | Variable                                | Default | Description                                                                                     |
 | --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `STRATA_TRANSFORM_MODE`                 | `embedded` | Accepted but **not currently wired up**: the registry is always built in embedded mode, so setting `registry` has no effect. Configure transforms through `transforms_config` instead. |
+| `STRATA_TRANSFORMS_ENABLED`             | _(unset)_ | Sets `enabled` in the transforms block (any boolean: `true`, `1`, `yes`, `false`, ...), overriding `pyproject.toml`. In service mode it turns on server-side transforms and the signed build routes a `signed` notebook worker needs. Environment only. |
 | `STRATA_TRANSFORMS_CONFIG`              | `{}`    | The whole transforms block as a JSON object (`enabled`, `registry`, …). Normally written as `[tool.strata.transforms]` instead; `STRATA_TRANSFORMS_ENABLED` merges into it rather than replacing it. |
 | `STRATA_SIGNED_URL_EXPIRY_SECONDS`      | `600`   | Validity window for pull-model signed build URLs. For a notebook cell on a `signed` worker it is a floor: the URLs last at least the cell's timeout plus `STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` plus 5 minutes, so a long cell can still upload its result. |
 | `STRATA_ARTIFACT_PRESIGNED_URLS` | `false` | Put presigned object-store URLs in build manifests where the blob store can sign them, so a worker's inputs and output bypass the server: S3 with an access key pair or a role (the `s3` extra), GCS with a service-account key or workload identity (the `gcs` extra), Azure with the account key or a managed identity. The output becomes a form upload (`output.fields`) or, on Azure, a `PUT` (`output.method`), which older workers don't send, so enable it once the workers are upgraded. The [executor protocol](executor-protocol.md) says what each store signs with. |

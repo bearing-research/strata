@@ -830,9 +830,22 @@ If you've been running personal mode and want to grow into service:
    `X-Tenant-ID` from the proxy.
 
 5. **(Optional) Add server-side transforms.** Configure the
-   `transforms_config` block in `pyproject.toml` to expose the
+   `[tool.strata.transforms]` block in `pyproject.toml` to expose the
    computations you want the platform to run on the client's
-   behalf. The notebook executor in the demo stack is one example.
+   behalf. The block is an allowlist: `enabled = true` (or
+   `STRATA_TRANSFORMS_ENABLED=true`) alone refuses every transform, so
+   list each one. The built-in SQL transform runs in the server process:
+
+   ```toml
+   [tool.strata.transforms]
+   enabled = true
+
+   [[tool.strata.transforms.registry]]
+   ref = "duckdb_sql@v1"
+   executor_url = "embedded://local"
+   ```
+
+   The notebook executor in the demo stack is another example.
 
 The demo compose stack is a working starting point you can fork:
 swap `nginx.conf` for your real auth proxy config, move the

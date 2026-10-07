@@ -183,6 +183,27 @@ class TestNestedConfigMerge:
         assert config.server_transforms_enabled is True  # env toggle preserved
         assert config.transforms_config["registry"][0]["ref"] == "duckdb_sql@v1"  # block kept
 
+    @pytest.mark.parametrize(("value", "expected"), [("1", True), ("yes", True), ("TRUE", True)])
+    def test_transforms_env_toggle_parses_like_any_boolean(
+        self, monkeypatch, tmp_path, value, expected
+    ):
+        _pyproject(monkeypatch, {})
+        monkeypatch.setenv("STRATA_TRANSFORMS_ENABLED", value)
+        config = StrataConfig.load(cache_dir=tmp_path / "c")
+        assert config.transforms_config["enabled"] is expected
+
+    def test_transforms_env_false_turns_off_a_pyproject_enable(self, monkeypatch, tmp_path):
+        _pyproject(monkeypatch, {"transforms": {"enabled": True}})
+        monkeypatch.setenv("STRATA_TRANSFORMS_ENABLED", "false")
+        config = StrataConfig.load(cache_dir=tmp_path / "c")
+        assert config.transforms_config["enabled"] is False
+
+    def test_transforms_env_toggle_refuses_a_non_boolean(self, monkeypatch, tmp_path):
+        _pyproject(monkeypatch, {})
+        monkeypatch.setenv("STRATA_TRANSFORMS_ENABLED", "maybe")
+        with pytest.raises(ValueError):
+            StrataConfig.load(cache_dir=tmp_path / "c")
+
     def test_catalog_uri_deep_merges_into_properties(self, monkeypatch, tmp_path):
         _pyproject(monkeypatch, {"catalog_properties": {"type": "sql", "warehouse": "/wh"}})
         monkeypatch.setenv("STRATA_CATALOG_URI", "postgresql://host/db")

@@ -92,6 +92,14 @@ class TestTransformRegistry:
         assert not registry.enabled
         assert len(registry.definitions) == 0
 
+    def test_enabled_block_without_entries_warns_that_it_refuses_everything(self, caplog):
+        """The block is an allowlist, so `enabled = true` alone admits nothing; say so."""
+        with caplog.at_level("WARNING", logger="strata.transforms.registry"):
+            registry = TransformRegistry.from_config({"enabled": True})
+
+        assert not registry.is_allowed("duckdb_sql@v1")
+        assert "embedded://local" in caplog.text
+
     def test_from_config_enabled(self):
         """from_config parses a full configuration."""
         config = {

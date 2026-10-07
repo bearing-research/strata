@@ -522,7 +522,8 @@ requires_scope = "transforms:pandas"
 
 With no `[tool.strata.transforms]` block, the registry holds only the
 in-process `duckdb_sql@v1`. With one, it holds only the listed entries, and
-only when `enabled = true`. A ref no entry matches is refused at
+only when `enabled = true`; list `ref = "duckdb_sql@v1"` with
+`executor_url = "embedded://local"` to keep the built-in. A ref no entry matches is refused at
 `POST /v1/materialize` (`403` in service mode, `400` in personal mode).
 
 The in-process `duckdb_sql@v1` runs in the server process, so its DuckDB reads
