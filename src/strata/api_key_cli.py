@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from strata.api_keys import ApiKeyStore
+from strata.file_modes import private_dir, private_file
 
 _SECONDS_PER_DAY = 86400.0
 
@@ -41,7 +42,10 @@ def _open_store(args: argparse.Namespace) -> ApiKeyStore:
 
         dialect = PostgresDialect(args.dsn)
 
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    # Often run before the first server start, so this may create the store the server opens.
+    private_dir(artifact_dir)
+    if dialect is None:
+        private_file(artifact_dir / "artifacts.sqlite")
     return ApiKeyStore(artifact_dir / "artifacts.sqlite", dialect=dialect)
 
 

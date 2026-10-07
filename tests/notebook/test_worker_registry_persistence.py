@@ -93,6 +93,14 @@ class TestPersistence:
 
         assert _names() == ["from-config", "gpu-a100"]
 
+    def test_a_configured_table_naming_a_worker_twice_still_takes_a_change(self, server):
+        # The store keys rows by name, so writing both entries failed the change with a 500.
+        _configure("gpu", "cpu", "gpu")
+
+        create_server_managed_worker_record(ManagedWorkerRecord(_worker("gpu-a100"), True))
+
+        assert _names() == ["cpu", "gpu", "gpu-a100"]
+
 
 class TestRowOperations:
     def test_create_update_enable_and_delete(self, server):
@@ -205,6 +213,47 @@ class TestImportFromTheFile:
         assert entries is not None and [e["name"] for e in entries] == ["current"]
         assert path.with_name("notebook_workers.json.migrated").exists()
         assert "already holds a notebook worker registry" in caplog.text
+
+    def test_a_file_naming_a_worker_twice_imports_its_last_entry(self, tmp_path, caplog):
+        # A 0.8.0 admin change could write such a file, and the import then failed startup.
+        store = ArtifactStore(tmp_path / "artifacts")
+        path = tmp_path / "artifacts" / "notebook_workers.json"
+        path.write_text(
+            json.dumps(
+                [
+                    _worker("gpu", "http://old:1").model_dump(mode="json"),
+                    _worker("cpu").model_dump(mode="json"),
+                    _worker("gpu", "http://new:1").model_dump(mode="json"),
+                ]
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, logger="strata.notebook.workers"):
+            import_worker_registry_file(tmp_path / "artifacts", store)
+
+        entries = store.notebook_worker_entries()
+        assert entries is not None
+        assert [(e["name"], e["config"]["url"]) for e in entries] == [
+            ("cpu", "http://gpu.internal:9000"),
+            ("gpu", "http://new:1"),
+        ]
+        assert "worker(s) gpu more than once" in caplog.text
+
+    def test_an_earlier_migrated_copy_is_never_replaced(self, tmp_path):
+        store = ArtifactStore(tmp_path / "artifacts")
+        artifact_dir = tmp_path / "artifacts"
+        self._write(artifact_dir, "imported")
+        import_worker_registry_file(artifact_dir, store)
+        first = (artifact_dir / "notebook_workers.json.migrated").read_text()
+
+        self._write(artifact_dir, "second")
+        import_worker_registry_file(artifact_dir, store)
+        self._write(artifact_dir, "third")
+        import_worker_registry_file(artifact_dir, store)
+
+        assert (artifact_dir / "notebook_workers.json.migrated").read_text() == first
+        assert "second" in (artifact_dir / "notebook_workers.json.migrated.1").read_text()
+        assert "third" in (artifact_dir / "notebook_workers.json.migrated.2").read_text()
 
     def test_an_unreadable_file_is_left_in_place(self, tmp_path, caplog):
         store = ArtifactStore(tmp_path / "artifacts")

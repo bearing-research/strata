@@ -331,6 +331,18 @@ class TestTheSweepOnlyTakesWhatItBuilt:
         assert collect(shared, ttl_days=1).removed == []
         assert half.exists()
 
+    @pytest.mark.skipif(os.name == "nt", reason="an open lock file cannot be removed there")
+    def test_a_removed_environment_takes_its_lock_file_with_it(self, tmp_path, shared):
+        env = shared / ("b" * 32)
+        env.mkdir(parents=True)
+        (env / COMPLETE_MARKER).touch()
+        old = time.time() - 30 * 86400
+        os.utime(env / COMPLETE_MARKER, (old, old))
+        (shared / f"{env.name}.lock").touch()
+
+        assert collect(shared, ttl_days=1).removed == [env.name]
+        assert not (shared / f"{env.name}.lock").exists()
+
     def test_a_notebook_whose_volume_is_away_keeps_its_environment(self, tmp_path, shared):
         env = shared / ("a" * 32)
         env.mkdir(parents=True)

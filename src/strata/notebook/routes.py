@@ -347,10 +347,13 @@ def _validate_notebook_path(
     # Confine to the tenant root, or the base root on a single-tenant server.
     boundary = caller_root if caller_root is not None else base_root
     if boundary is not None and resolved != boundary and boundary not in resolved.parents:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid {label}: must be inside configured notebook storage",
+        # A notebook at the top of the storage root is inside the storage, so say which folder.
+        where = (
+            "your tenant's own folder in the notebook storage"
+            if boundary != base_root
+            else "configured notebook storage"
         )
+        raise HTTPException(status_code=400, detail=f"Invalid {label}: must be inside {where}")
 
     return resolved
 

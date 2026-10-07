@@ -79,6 +79,13 @@ class TestARebindingPageIsRefused:
         assert resp.status_code == 400
         assert "not allowed" in resp.text
 
+    def test_the_refusal_names_the_setting_that_admits_a_host(self, state):
+        # An operator reaching a personal server by a LAN name meets this first.
+        state()
+        resp = _client(EVIL).get("/health")
+        assert resp.status_code == 400
+        assert "STRATA_ALLOWED_HOSTS" in resp.text
+
     def test_a_safe_read_is_refused_too(self, state):
         """A rebound page can read same-origin responses, so GETs leak state."""
         state()

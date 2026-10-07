@@ -1403,9 +1403,18 @@ class HostAllowlistMiddleware:
         if scope["type"] in ("http", "websocket"):
             host = Headers(scope=scope).get("host")
             if not _host_is_allowed(host, get_state().config):
-                logger.warning("host_refused", host=host, path=scope.get("path"))
+                logger.warning(
+                    "host_refused",
+                    host=host,
+                    path=scope.get("path"),
+                    setting="STRATA_ALLOWED_HOSTS",
+                )
                 if scope["type"] == "http":
-                    refusal = PlainTextResponse(f"Host {host!r} is not allowed.", status_code=400)
+                    refusal = PlainTextResponse(
+                        f"Host {host!r} is not allowed. Add its name to STRATA_ALLOWED_HOSTS "
+                        "to serve it.",
+                        status_code=400,
+                    )
                     await refusal(scope, receive, send)
                 else:
                     await WebSocketClose(code=1008)(scope, receive, send)

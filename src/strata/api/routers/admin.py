@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from strata.api.dependencies import require_notebook_worker_admin, require_scope
 from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
@@ -36,6 +36,14 @@ class AdminNotebookWorkerEntryRequest(BaseModel):
     runtime_id: str | None = Field(default=None)
     config: WorkerConfig = Field(default_factory=WorkerConfig)
     enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _not_local(cls, name: str) -> str:
+        # Resolution returns the built-in first, so a "local" entry would never run.
+        if name == "local":
+            raise ValueError("'local' is reserved for the built-in worker")
+        return name
 
     def to_worker_spec(self) -> WorkerSpec:
         return WorkerSpec(

@@ -508,7 +508,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     archive_parser.add_argument("ref", nargs="?", help="Name, id@v=N, or artifact id")
     archive_parser.add_argument(
-        "--token", default=None, help="Archive this publication, as its record stands"
+        "--token",
+        default=None,
+        help="Archive this publication (its token, or its id), as its record stands",
     )
     archive_parser.add_argument(
         "--to", required=True, help="Directory to write, or a path ending in .zip"

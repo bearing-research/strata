@@ -465,10 +465,15 @@ def _hash_publication_tokens(conn: StoreConnection, dialect: SqlDialect) -> None
             continue
         hashed = publication_id(token)
         conn.execute("UPDATE artifact_publications SET token = ? WHERE token = ?", (hashed, token))
-        conn.execute(
-            "UPDATE registry_audit SET value = ? WHERE key = 'token' AND value = ?",
-            (hashed, token),
-        )
+    # One pass by seq: (key, value) has no index, so a lookup per publication scans the audit
+    # table each time, under the schema lock at startup.
+    audit = conn.execute("SELECT seq, value FROM registry_audit WHERE key = 'token'").fetchall()
+    for row in audit:
+        if row["value"] and not _PUBLICATION_ID.match(row["value"]):
+            conn.execute(
+                "UPDATE registry_audit SET value = ? WHERE seq = ?",
+                (publication_id(row["value"]), row["seq"]),
+            )
 
 
 def _add_pins(conn: StoreConnection, dialect: SqlDialect) -> None:

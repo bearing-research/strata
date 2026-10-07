@@ -350,6 +350,19 @@ class TestNotebookWorkerAdminApi:
         assert duplicate.status_code == 409
         assert "already exists" in duplicate.json()["detail"]
 
+    def test_the_built_in_worker_name_is_refused(self, server_mode_app):
+        # Resolution returns the built-in first, so a registered "local" would never run.
+        entry = {"name": "local", "backend": "executor", "config": {"url": "https://x.internal"}}
+        refused = [
+            server_mode_app.post("/v1/admin/notebook-workers", json=entry),
+            server_mode_app.put("/v1/admin/notebook-workers", json={"workers": [entry]}),
+        ]
+        for response in refused:
+            assert response.status_code == 422
+            assert "reserved for the built-in worker" in response.text
+        listed = server_mode_app.get("/v1/admin/notebook-workers").json()
+        assert listed["configured_workers"] == []
+
     def test_patch_notebook_worker_enabled_state(self, server_mode_app):
         """One worker can be disabled and re-enabled."""
         seeded = server_mode_app.put(

@@ -371,7 +371,8 @@ class TestReadinessProbesTheArtifactStore:
         assert "connection refused" not in json.dumps(body)
 
     @pytest.mark.asyncio
-    async def test_a_store_that_never_answers_is_not_ready(self, ready, monkeypatch):
+    async def test_a_store_that_never_answers_is_not_ready(self, ready, monkeypatch, caplog):
+        import logging
         import threading
 
         from strata.api.routers import metrics_health
@@ -382,12 +383,15 @@ class TestReadinessProbesTheArtifactStore:
         monkeypatch.setattr(metrics_health, "ARTIFACT_STORE_PROBE_TIMEOUT_SECONDS", 0.01)
 
         try:
-            status, body = await probe()
+            with caplog.at_level(logging.WARNING, logger="strata.api.routers.metrics_health"):
+                status, body = await probe()
         finally:
             release.set()
 
         assert status == 503
         assert body["checks"]["artifact_store"] is False
+        # The log line names the reason, which for a timeout is only its type.
+        assert "artifact store check failed: TimeoutError" in caplog.text
 
 
 class TestReportedVersionIsTheInstalledOne:
