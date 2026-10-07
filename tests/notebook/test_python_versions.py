@@ -111,6 +111,35 @@ class TestReadVenvRuntimePythonVersion:
 
 
 class TestDiscoverInstalledPythonMinors:
+    @pytest.fixture(autouse=True)
+    def _fresh_probe(self):
+        pv._probe_installed_python_minors.cache_clear()
+        yield
+        pv._probe_installed_python_minors.cache_clear()
+
+    def test_uv_is_probed_once_across_config_loads(self, monkeypatch, tmp_path):
+        from strata.config import StrataConfig
+
+        monkeypatch.setattr(pv.shutil, "which", lambda _: "/usr/bin/uv")
+        calls: list[tuple] = []
+
+        def run(*a, **k):
+            calls.append(a)
+            return _Completed('[{"version": "3.13.0"}]')
+
+        monkeypatch.setattr(pv.subprocess, "run", run)
+        monkeypatch.delenv("STRATA_NOTEBOOK_PYTHON_VERSIONS", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        first = StrataConfig.load(cache_dir=tmp_path / "c")
+        second = StrataConfig.load(cache_dir=tmp_path / "c")
+        assert "3.13" in first.notebook_python_versions
+        assert second.notebook_python_versions == first.notebook_python_versions
+        assert len(calls) == 1
+        # Each caller gets its own list, so a mutation cannot reach the cached probe.
+        first.notebook_python_versions.append("9.9")
+        assert "9.9" not in pv.discover_installed_python_minors()
+
     def test_falls_back_when_uv_missing(self, monkeypatch):
         monkeypatch.setattr(pv.shutil, "which", lambda _: None)
         assert pv.discover_installed_python_minors() == [pv.current_python_minor()]

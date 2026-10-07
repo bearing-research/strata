@@ -11,10 +11,12 @@ Design doc: ``docs/internal/design-jupyter-import.md``.
 from __future__ import annotations
 
 import ast
+import io
 import json
 import re
 import shlex
 import sys
+import tokenize
 import tomllib
 import uuid
 from dataclasses import dataclass, field
@@ -33,8 +35,17 @@ from strata.notebook.writer import (
 
 _SUPPRESSED_COMMENT = "# strata: trailing ';' from Jupyter preserved as display-suppression"
 
-# A trailing ';' may be followed by an inline comment or whitespace.
-_SUPPRESSION_TAIL_RE = re.compile(r";[ \t]*(?:#[^\n]*)?\s*\Z")
+# Tokens IPython skips when it looks for the ';' that ends the last statement.
+_TRAILING_TRIVIA = frozenset(
+    {
+        tokenize.ENDMARKER,
+        tokenize.NEWLINE,
+        tokenize.NL,
+        tokenize.COMMENT,
+        tokenize.INDENT,
+        tokenize.DEDENT,
+    }
+)
 
 _LINE_MAGIC_RE = re.compile(r"^(\s*)%([a-zA-Z_]\w*)([^\n]*)$")
 _CELL_MAGIC_RE = re.compile(r"\A[ \t]*%%([a-zA-Z_]\w*)([^\n]*)\n?")
@@ -134,6 +145,12 @@ def import_notebook(
 
     sibling_deps = _capture_sibling_deps(ipynb_path.parent)
     local_modules = _local_module_names(ipynb_path.parent)
+    is_r = _kernel_language(nb) == "r"
+    if is_r:
+        result.warnings.append(
+            "R kernel: code cells imported as R cells, as written; R packages are not "
+            "captured, so install them in system R or with renv"
+        )
 
     prev_cell_id: str | None = None
     cell_deps: list[str] = []
@@ -152,6 +169,15 @@ def import_notebook(
             )
             write_cell(notebook_dir, cell_id, _ensure_final_newline(source))
             result.markdown_cells += 1
+            prev_cell_id = cell_id
+        elif cell_type == "code" and is_r:
+            # IPython magics, `!` lines and `;` suppression are Python-kernel syntax.
+            cell_id = _new_cell_id("cell")
+            add_cell_to_notebook(
+                notebook_dir, cell_id, after_cell_id=prev_cell_id, language=CellLanguage.R
+            )
+            write_cell(notebook_dir, cell_id, _ensure_final_newline(source))
+            result.code_cells += 1
             prev_cell_id = cell_id
         elif cell_type == "code":
             cell_id = _new_cell_id("cell")
@@ -291,6 +317,18 @@ def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
 
 
 # --- Structural validation ---
+
+
+def _kernel_language(nb: dict[str, Any]) -> str:
+    """Lowercased kernel language from the notebook metadata; ``""`` when absent."""
+    metadata = nb.get("metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    for key, field_name in (("kernelspec", "language"), ("language_info", "name")):
+        section = metadata.get(key)
+        if isinstance(section, dict) and isinstance(section.get(field_name), str):
+            return section[field_name].strip().lower()
+    return ""
 
 
 def _validate_nbformat_structure(nb: object) -> None:
@@ -549,17 +587,34 @@ def _statement_starts(lines: list[str]) -> list[bool]:
     return starts
 
 
+def _suppression_offset(source: str) -> int | None:
+    """Offset of the ``;`` that ends the last statement, as IPython finds it.
+
+    Comments and blank lines after it do not count, so ``df;  # quiet`` is
+    suppressed and ``df`` followed by a ``# done;`` comment line is not.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return None
+    last = next((tok for tok in reversed(tokens) if tok.type not in _TRAILING_TRIVIA), None)
+    if last is None or last.type != tokenize.OP or last.string != ";":
+        return None
+    row, col = last.start
+    return sum(len(line) for line in source.splitlines(keepends=True)[: row - 1]) + col
+
+
 def _ends_with_display_suppression(source: str) -> bool:
     """True if the source ends in Jupyter's ``;`` suppression (``df;`` or ``df;  # quiet``)."""
-    return _SUPPRESSION_TAIL_RE.search(source) is not None
+    return _suppression_offset(source) is not None
 
 
 def _suppress_last_expression(source: str) -> str:
     """Append ``pass`` so the harness does not auto-display a ``;``-suppressed last expression."""
-    match = _SUPPRESSION_TAIL_RE.search(source)
-    if match is None:
+    offset = _suppression_offset(source)
+    if offset is None:
         return source
-    body = source[: match.start()].rstrip()
+    body = source[:offset].rstrip()
     if not body:
         return source
 

@@ -62,8 +62,10 @@ rewriting).
 
 Before the run, any stale upstream cell is materialized, exactly as a normal
 run of the cell would (an unchanged upstream is a cache hit), so `cell.sales`
-is current. The cell's `@fetch` files, `@mount` paths and notebook and `@env`
-variables are bound as they are in a run.
+is current. The cell's `@fetch` files, `@mount` paths, `@dataset` values,
+`@table` names (and their `_snapshot` ids) and notebook and `@env` variables
+are bound as they are in a run. A fetch, dataset or table that cannot be
+resolved fails the run with one errored result naming it.
 
 ![A Python cell with its results table above an open Tests panel: the test
 source, a green "2 passed" summary, and a tick beside each test name. The flask
@@ -79,16 +81,19 @@ badge.](../assets/cell-tests-dark.png#only-dark)
 The flask toggle doubles as a status badge, so a cell's test health is visible
 without opening the panel:
 
-| Badge        | Meaning                                              |
-| ------------ | --------------------------------------------------- |
-| `✓ 4/4`      | all tests passed                                    |
-| red          | one or more **failed**                              |
-| amber        | **errored** - the cell source or test setup blew up |
-| `· stale`    | the cell or its tests changed since the last run    |
+| Badge        | Meaning                                                      |
+| ------------ | ------------------------------------------------------------ |
+| `✓ 4/4`      | all tests passed                                             |
+| red          | one or more **failed**                                       |
+| amber        | **errored** - the cell source or test setup blew up          |
+| `· stale`    | the cell, its tests or its inputs changed since the last run |
 
-Stale is computed from a fingerprint of `(cell source, test source, input
-versions)`. Edit the cell, edit the tests, or change an upstream - the badge
-goes stale, telling you the last green result no longer reflects the code.
+Stale is computed from a fingerprint of `(cell source, test source, inputs)`,
+where the inputs are everything a run of the cell reads: upstream versions,
+`@fetch`, `@mount`, `@dataset` and `@table` fingerprints, and the environment
+(env variables the cell reads and the locked dependencies). Edit the cell, edit
+the tests, change an upstream, a mounted file or an env value - the badge goes
+stale, telling you the last green result no longer reflects the code.
 
 ## What persists
 

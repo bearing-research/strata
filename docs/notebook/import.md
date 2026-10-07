@@ -130,11 +130,17 @@ clean `400` or `409` with `detail` set. An upload over the cap is a
 
 ### Cell-by-cell, in source order
 
-| Jupyter cell | Strata cell                                                  |
-| ------------ | ------------------------------------------------------------ |
-| Markdown     | Markdown cell with the source verbatim                       |
-| Code         | Python cell (after magic translation, see below)             |
-| Raw          | Skipped; counted in the report                               |
+| Jupyter cell    | Strata cell                                                  |
+| --------------- | ------------------------------------------------------------ |
+| Markdown        | Markdown cell with the source verbatim                       |
+| Code            | Python cell (after magic translation, see below)             |
+| Code (R kernel) | R cell with the source verbatim                              |
+| Raw             | Skipped; counted in the report                               |
+
+A notebook whose kernel language is R (IRkernel) imports its code
+cells as [R cells](cells.md) as written: no magic, shell or `;`
+translation and no dependency capture. Install the packages it loads
+in system R or with renv.
 
 Variable rebinding (`df = df.dropna()`, `df = df[df.col > 0]`, …)
 is a first-class pattern. Strata's DAG analyser handles read-before-
@@ -148,7 +154,8 @@ cells see the post-mutation view.
 value. Strata's harness auto-displays the last bare expression too,
 so the converter detects the trailing `;` (with or without an
 adjacent comment) and appends a `pass` so the harness skips display.
-The cell still runs.
+The cell still runs. As in IPython, only a `;` that ends the last
+statement counts: one inside a comment or a string does not.
 
 ### Magic translation table
 

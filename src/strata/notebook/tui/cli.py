@@ -6,6 +6,9 @@ import argparse
 import os
 from pathlib import Path
 
+# Top-level modules the [tui] extra installs.
+_TUI_EXTRA_MODULES = frozenset({"textual", "textual_image", "PIL", "grandalf"})
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -44,7 +47,16 @@ def run_spectator(
     the caller's only running session or shows a picker.
     """
     # Lazy import so ``--help`` doesn't pay the Textual import cost.
-    from strata.notebook.tui.app import NotebookTUI
+    try:
+        from strata.notebook.tui.app import NotebookTUI
+    except ModuleNotFoundError as exc:
+        if (exc.name or "").partition(".")[0] not in _TUI_EXTRA_MODULES:
+            raise
+        raise SystemExit(
+            f"error: the terminal viewer needs the [tui] extra (no module {exc.name!r}); "
+            "in a checkout, `uv sync --extra tui`; for an installed tool, "
+            "`uv tool install 'strata-notebook[tui]'`"
+        ) from exc
     from strata.notebook.tui.client import TuiClient
 
     client = TuiClient(server_url=server)

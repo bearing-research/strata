@@ -229,6 +229,12 @@ def _artifact_content_type(artifact: Any) -> str:
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
 
 
+def _loop_run_token(artifact: Any) -> str:
+    """The token of the loop run that stored an ``@iter=k`` artifact."""
+    spec = json.loads(artifact.transform_spec or "{}")
+    return str(spec.get("params", {}).get("loop_run", ""))
+
+
 def _add_harness_params(
     params: dict[str, Any],
     mutation_defines: list[str] | None,
@@ -594,18 +600,24 @@ class CellExecutor:
         source = cell.source
         await self._materialize_upstreams(cell_id)
 
-        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
-            cell_id, source, test_source
-        )
-        # The same fetch, mount and env inputs a run of the cell gets.
+        # The same fetch, mount, dataset, table and env inputs a run of the cell gets.
         annotations = parse_annotations(source)
         mount_specs = self._resolve_cell_mount_specs(cell_id, source)
-        _, fetched, _, _, _, _ = await self._resolve_fetches(annotations.fetches)
+        prov = await self._compute_cell_provenance(
+            cell_id, source, annotations=annotations, mount_specs=mount_specs
+        )
+        problem = prov.fetch_error or prov.dataset_error
+        tables: dict[str, dict[str, Any]] = {}
+        if problem is None:
+            try:
+                tables = self._manifest_tables(annotations.tables, prov.table_snapshots)
+            except RuntimeError as exc:
+                problem = str(exc)
         mount_specs = [
             *mount_specs,
             *(
                 MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
-                for name, path in fetched.items()
+                for name, path in prov.fetched.items()
             ),
         ]
         resolved_mounts = await self._prepare_mounts(mount_specs)
@@ -618,13 +630,15 @@ class CellExecutor:
         try:
             harness_user = resolve_harness_user()
         except LocalExecutionRefused as exc:
+            problem = str(exc)
+        if problem is not None:
             refused = {
                 "passed": 0,
                 "failed": 0,
                 "errored": 1,
                 "skipped": 0,
                 "tests": [
-                    {"name": "<refused>", "nodeid": "", "outcome": "error", "message": str(exc)}
+                    {"name": "<refused>", "nodeid": "", "outcome": "error", "message": problem}
                 ],
             }
 
@@ -634,6 +648,7 @@ class CellExecutor:
             blob_dir = Path(tmp) / "inputs"
             blob_dir.mkdir()
             input_specs = self._load_input_blobs(cell_id, blob_dir)
+            self._add_dataset_inputs(input_specs, prov.datasets, blob_dir)
 
             # The run directory is created inside this server-private one; a harness user must
             # reach it.
@@ -648,6 +663,7 @@ class CellExecutor:
                     inputs=input_specs,
                     input_dir=blob_dir,
                     mounts={name: str(rm.local_path) for name, rm in resolved_mounts.items()},
+                    tables=tables,
                     env=identity_env(self._harness_env(runtime_env), harness_user),
                     run_as=harness_user,
                 )
@@ -685,6 +701,10 @@ class CellExecutor:
                     pytest_unavailable = True
                     raw = empty_raw
 
+        # After the run: a pytest auto-install can change the lockfile, which is an input.
+        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
+            cell_id, source, test_source
+        )
         result = CellTestResult(
             passed=raw["passed"],
             failed=raw["failed"],
@@ -5237,6 +5257,7 @@ class CellExecutor:
 
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
+        loop_run = uuid.uuid4().hex
         combined_stdout: list[str] = []
         combined_stderr: list[str] = []
         all_mutation_warnings: list[MutationWarning] = []
@@ -5403,6 +5424,7 @@ class CellExecutor:
                     source_hash=source_hash,
                     source=source,
                     iteration=k,
+                    extra_params={"loop_run": loop_run},
                 )
                 final_artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
@@ -5584,6 +5606,16 @@ class CellExecutor:
                     f"Loop seed artifact not found for "
                     f"start_from={loop.start_from_cell}@iter={loop.start_from_iter}. "
                     f"Run that cell through iteration {loop.start_from_iter} first."
+                )
+            # Every run rewrites @iter=0, so a step whose run token differs from it is
+            # left over from an older, longer run.
+            first = artifact_mgr.get_iteration_artifact(loop.start_from_cell, loop.carry, 0)
+            if first is None or _loop_run_token(first) != _loop_run_token(artifact):
+                raise ValueError(
+                    f"Loop seed start_from={loop.start_from_cell}@iter={loop.start_from_iter} "
+                    f"is left over from an older run of cell {loop.start_from_cell}: its "
+                    f"latest run did not reach iteration {loop.start_from_iter}. Run that "
+                    f"cell through iteration {loop.start_from_iter} first."
                 )
             blob = artifact_mgr.artifact_store.read_blob(artifact_id, artifact.version)
             if blob is None:
