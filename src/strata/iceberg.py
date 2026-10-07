@@ -203,6 +203,10 @@ class PyIcebergCatalog:
             return self.config.catalog_properties["uri"]
 
         if warehouse_path and "://" in warehouse_path:
+            # Loading the config creates no directories; a notebook run reaches here without
+            # a server having made this one.
+            if self.config.metadata_db is not None:
+                self.config.metadata_db.parent.mkdir(parents=True, exist_ok=True)
             return f"sqlite:///{self.config.metadata_db}"
         elif warehouse_path:
             return f"sqlite:///{Path(warehouse_path) / 'catalog.db'}"

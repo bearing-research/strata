@@ -61,8 +61,8 @@ def _open_store_or_raise(artifact_dir_arg: str | None, *, read_only: bool) -> Ar
         print(f"invalid configuration: {exc}", file=sys.stderr)
         return None
     artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
-    # Loading the config creates a personal-mode artifact_dir, so an empty
-    # directory proves nothing: a store on SQLite is its database file.
+    # A server start creates a personal-mode artifact_dir, so an empty directory
+    # proves nothing: a store on SQLite is its database file.
     if not config.artifact_metadata_dsn and not (artifact_dir / "artifacts.sqlite").exists():
         print(f"no artifact store in {artifact_dir}", file=sys.stderr)
         return None
@@ -425,6 +425,17 @@ def _publication_target(
     return server_store, f"{server_store.artifact_dir} (the store your server serves)"
 
 
+def _publication_base(args: argparse.Namespace) -> str:
+    """Where the minted link is served: the remote store, else the configured server's base."""
+    to_url = getattr(args, "to_url", None)
+    if to_url:
+        return str(to_url).rstrip("/")
+    from strata.config import StrataConfig
+
+    config = StrataConfig.load()
+    return (config.public_base_url or "").rstrip("/") + config.public_base_path
+
+
 def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
     """Auth for the remote store, from ``--header`` or the environment.
 
@@ -614,7 +625,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
         )
 
     if publication.token:
-        print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+        link = f"{_publication_base(args)}/p/{publication.token}"
+        print(f"{artifact.id}@v={artifact.version} is public at {link}")
     else:
         # The store keeps only the token's hash, so an existing grant's link cannot be shown.
         print(

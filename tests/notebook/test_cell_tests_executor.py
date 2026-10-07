@@ -228,6 +228,8 @@ async def test_a_changed_mount_or_env_marks_the_test_stale(tmp_path):
     assert result.passed == 1, result.tests
 
     def stale() -> bool:
+        # The inputs are read by the staleness pass every edit triggers, not by serializing.
+        session.compute_staleness()
         return session.serialize_cell(cell)["test_result"]["stale"]
 
     assert stale() is False
@@ -238,6 +240,50 @@ async def test_a_changed_mount_or_env_marks_the_test_stale(tmp_path):
     # Local mounts fingerprint sizes and mtimes.
     (data_dir / "rows.txt").write_text("a\nb\n")
     assert stale() is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg local paths on Windows")
+async def test_a_passing_test_over_an_empty_table_stays_fresh(tmp_path, monkeypatch):
+    """An empty table is keyed at random for caching; the test flag must not inherit that.
+
+    Serializing the cell (every ``GET /cells``, from async routes) must not reach the catalog.
+    """
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField
+
+    from strata.notebook import tables
+
+    warehouse = tmp_path / "warehouse"
+    warehouse.mkdir()
+    catalog = SqlCatalog(
+        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
+    )
+    catalog.create_namespace("db")
+    catalog.create_table("db.events", Schema(NestedField(1, "id", LongType(), required=False)))
+    uri = f"file://{warehouse}#db.events"
+    session = _session_with(
+        [("cell1", f"# @table events {uri}\ndef read():\n    return events_snapshot\n", None)]
+    )
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1", "def test_read(cell):\n    assert cell.read() is None\n"
+    )
+    assert result.passed == 1, result.tests
+
+    resolves: list[object] = []
+    resolve = tables.resolve_table_snapshot
+    monkeypatch.setattr(
+        tables, "resolve_table_snapshot", lambda *a, **k: resolves.append(a) or resolve(*a, **k)
+    )
+    cell = session.notebook_state.get_cell("cell1")
+    assert session.serialize_cell(cell)["test_result"]["stale"] is False
+    session.serialize_cells()
+    assert resolves == [], "serializing a cell read the catalog"
+
+    session.compute_staleness()
+    assert resolves, "the staleness pass is what reads the catalog"
+    assert session.serialize_cell(cell)["test_result"]["stale"] is False
 
 
 @pytest.mark.asyncio

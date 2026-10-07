@@ -919,6 +919,67 @@ def test_reopening_a_session_does_not_launder_a_failed_sync(tmp_path, monkeypatc
     )
 
 
+def _fake_install(notebook_dir, package: str):
+    """What a successful ``uv add`` leaves behind: a new lockfile, already installed."""
+    from strata.notebook.dependencies import EnvironmentOperationLog
+
+    (notebook_dir / "uv.lock").write_text(f'version = 1\n[[package]]\nname = "{package}"\n')
+    return EnvironmentOperationLog(command=f"uv add {package}", duration_ms=4321)
+
+
+def _assert_install_recorded(session, before_ms: int) -> None:
+    assert session.environment_attestation_error() is None, (
+        "a dependency install left the environment unattested, so publishing is off"
+    )
+    state = session.serialize_environment_state()
+    assert state["last_synced_at"] >= before_ms, "the panel's Last sync kept the old time"
+    assert state["last_sync_duration_ms"] == 4321
+
+
+async def test_an_environment_panel_add_attests_the_installed_lockfile(tmp_path, monkeypatch):
+    """The UI's Environment panel goes through ``submit_environment_job``, not the REST route."""
+    import time
+    from types import SimpleNamespace
+
+    session = _synced_notebook(tmp_path, "panel")
+
+    async def fake_uv(notebook_dir, args, *, timeout, display_name, on_update=None, env=None):
+        del timeout, display_name, on_update, env
+        return SimpleNamespace(
+            success=True, error=None, operation_log=_fake_install(notebook_dir, args[-1])
+        )
+
+    monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", fake_uv)
+    before_ms = int(time.time() * 1000)
+    await session.submit_environment_job(action="add", package="six")
+    await session.wait_for_environment_job()
+
+    assert session.serialize_environment_job_state()["status"] == "completed"
+    _assert_install_recorded(session, before_ms)
+
+
+async def test_a_rest_dependency_add_attests_the_installed_lockfile(tmp_path, monkeypatch):
+    """The REST / CLI / MCP path records the install the same way as the panel's job."""
+    import time
+
+    from strata.notebook.dependencies import DependencyChangeResult
+
+    session = _synced_notebook(tmp_path, "rest")
+
+    def fake_add(notebook_dir, package):
+        log = _fake_install(notebook_dir, package)
+        return DependencyChangeResult(
+            success=True, package=package, action="add", lockfile_changed=True, operation_log=log
+        )
+
+    monkeypatch.setattr("strata.notebook.dependencies.add_dependency", fake_add)
+    before_ms = int(time.time() * 1000)
+    outcome = await session.mutate_dependency("six", action="add")
+
+    assert outcome.result.success
+    _assert_install_recorded(session, before_ms)
+
+
 def test_a_directly_constructed_session_can_still_publish(tmp_path):
     """CLI, MCP and scratchpad sessions never sync, leaving ``interpreter_source`` ``unknown``.
 

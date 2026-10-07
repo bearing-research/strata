@@ -722,7 +722,8 @@ class NotebookTUI(App[None]):
         table = self.query_one("#output-table", DataTable)
         table.clear(columns=True)
         table.border_title = "loading…"
-        table.border_subtitle = "[n]ext [p]rev  [s]ort col  [e]xport csv"
+        # Text, not str: a str is markup, where ``[n]`` is a style tag and vanishes.
+        table.border_subtitle = Text("[n]ext [p]rev  [s]ort col  [e]xport csv")
         self.run_worker(self._load_table_page(), group="table", exclusive=True)
 
     async def _load_table_page(self) -> None:

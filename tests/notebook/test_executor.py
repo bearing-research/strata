@@ -2884,6 +2884,35 @@ class TestLoopCellExecution:
         assert "older run of cell hill" in (second.error or "")
 
     @pytest.mark.asyncio
+    async def test_a_start_from_seed_is_refused_after_its_cell_failed_at_iteration_0(
+        self, tmp_path
+    ):
+        """A run failing at iteration 0 stores no step, so ``@iter=0`` and ``@iter=1`` still agree;
+        they are still the older run's. Force mode does not surface the start cell's failure.
+        """
+        hill = "# @loop max_iter=3 carry=state\nstate = state + 1\n"
+        fork = "# @loop max_iter=2 carry=state start_from=hill@iter=1\nstate = state + 10\n"
+        session = self._cells_session(
+            tmp_path, [("seed", "state = 0\n"), ("hill", hill), ("fork", fork)]
+        )
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("fork", fork)).success
+
+        broken = "# @loop max_iter=3 carry=state\nstate = state + 1000\nraise ValueError('x')\n"
+        self._edit(session, "hill", broken)
+        assert not (await executor.execute_cell_rerun("hill", broken)).success
+
+        again = await executor.execute_cell_force("fork", fork)
+        assert not again.success
+        assert "older run of cell hill" in (again.error or "")
+
+        # Reverting the start cell is a cache hit on the run whose steps are on disk.
+        self._edit(session, "hill", hill)
+        assert (await executor.execute_cell("hill", hill)).cache_hit is True
+        reverted = await executor.execute_cell_force("fork", fork)
+        assert reverted.success, reverted.error
+
+    @pytest.mark.asyncio
     async def test_a_start_from_seed_survives_a_rerun_of_its_cell(self, tmp_path):
         """A rerun rewrites every step, so the fork still seeds from the new run's step."""
         hill = "# @loop max_iter=3 carry=state\nstate = state + 1\n"

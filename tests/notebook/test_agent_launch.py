@@ -271,3 +271,24 @@ def test_a_scripted_launcher_shows_the_session_and_sigterm_stops_its_server(tmp_
             launcher.kill()
         if server_pid is not None and _alive(server_pid):
             os.kill(server_pid, signal.SIGKILL)
+
+
+def test_a_spawned_servers_output_goes_to_a_log_not_the_terminal(tmp_path, monkeypatch):
+    """On the launcher's terminal it interleaves with its own lines and draws over the TUI."""
+    started: dict = {}
+
+    def _popen(argv, **kwargs):
+        started.update(kwargs, stdout_name=kwargs["stdout"].name)
+        return "proc"
+
+    monkeypatch.setattr(agent_launch.subprocess, "Popen", _popen)
+    notebook = tmp_path / "nb"
+    notebook.mkdir()
+
+    assert agent_launch._spawn_server("127.0.0.1", 8765, notebook) == "proc"
+
+    log = notebook / ".strata" / "server.log"
+    assert started["stdout_name"] == str(log)
+    assert started["stderr"] is subprocess.STDOUT
+    if os.name != "nt":
+        assert log.stat().st_mode & 0o077 == 0

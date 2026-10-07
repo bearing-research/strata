@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from strata.file_modes import private_file
+
 # ANSI helpers, tty-gated (mirrors strata.notebook.cli).
 _USE_COLOR = sys.stdout.isatty()
 
@@ -96,12 +98,19 @@ def _resolve_notebook_dir(
     )
 
 
+def _server_log_path(notebook_dir: Path) -> Path:
+    """Where a spawned server's output goes: the notebook's gitignored runtime dir."""
+    return notebook_dir / ".strata" / "server.log"
+
+
 def _spawn_server(host: str, port: int, notebook_dir: Path) -> subprocess.Popen:
     """Start a notebook server with MCP enabled in personal mode.
 
     MCP and the mode go in the child's environment because the ``/mcp`` mount is
     decided at import time. The storage root is *notebook_dir*'s parent, since
-    ``POST /open`` rejects notebooks outside the server's storage root.
+    ``POST /open`` rejects notebooks outside the server's storage root. Its output
+    goes to a log file: on this terminal it would interleave with the launcher's own
+    lines and draw over the TUI.
     """
     env = dict(os.environ)
     env["STRATA_MCP_ENABLED"] = "true"
@@ -109,7 +118,16 @@ def _spawn_server(host: str, port: int, notebook_dir: Path) -> subprocess.Popen:
     env["STRATA_HOST"] = host
     env["STRATA_PORT"] = str(port)
     env["STRATA_NOTEBOOK_STORAGE_DIR"] = str(notebook_dir.parent)
-    return subprocess.Popen([sys.executable, "-m", "strata"], env=env)
+    log_path = _server_log_path(notebook_dir)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    private_file(log_path)
+    with open(log_path, "wb") as log:
+        return subprocess.Popen(
+            [sys.executable, "-m", "strata"],
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
 
 
 def _await_health(server_url: str, proc: subprocess.Popen, timeout: float = 30.0) -> bool:
@@ -349,10 +367,17 @@ def agent_main(args: argparse.Namespace) -> int:
             print(_dim(f"reusing server at {server_url}"))
         else:
             host, port = _server_endpoints(server_url)
-            print(_dim(f"starting server on {host}:{port} (MCP enabled)…"))
+            log_path = _server_log_path(notebook_dir)
+            print(
+                _dim(f"starting server on {host}:{port} (MCP enabled), logging to {log_path}…"),
+                flush=True,
+            )
             spawned = _spawn_server(host, port, notebook_dir)
             if not _await_health(server_url, spawned):
-                print(f"error: server failed to start at {server_url}", file=sys.stderr)
+                print(
+                    f"error: server failed to start at {server_url}; see {log_path}",
+                    file=sys.stderr,
+                )
                 return 2
             if not _mcp_mounted(server_url):
                 print(

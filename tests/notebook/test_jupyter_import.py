@@ -1295,3 +1295,23 @@ def test_an_env_magic_below_code_becomes_an_annotation_that_applies(tmp_path: Pa
     source = parse_notebook(result.notebook_dir).cells[0].source
     assert parse_annotations(source).env == {"MODE": "fast"}
     assert "%env" not in source
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        'sep = "a\u2028b"\n',  # U+2028 inside a string
+        'sep = "a\x0cb"\n',  # form feed inside a string
+        "sep = 1\r",  # a bare carriage return ending a statement
+    ],
+)
+def test_suppression_keeps_code_around_a_non_newline_line_break(head: str) -> None:
+    """``str.splitlines`` also breaks on these; the tokenizer does not, so offsets must agree."""
+    from strata.notebook.jupyter_import import _suppress_last_expression
+
+    converted = _suppress_last_expression(f"{head}total = 41 + 1\ntotal;")
+
+    assert converted.startswith(f"{head}total = 41 + 1\ntotal\n"), converted
+    namespace: dict[str, object] = {}
+    exec(converted, namespace)
+    assert namespace["total"] == 42

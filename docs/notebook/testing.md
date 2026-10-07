@@ -93,7 +93,11 @@ where the inputs are everything a run of the cell reads: upstream versions,
 `@fetch`, `@mount`, `@dataset` and `@table` fingerprints, and the environment
 (env variables the cell reads and the locked dependencies). Edit the cell, edit
 the tests, change an upstream, a mounted file or an env value - the badge goes
-stale, telling you the last green result no longer reflects the code.
+stale, telling you the last green result no longer reflects the code. Inputs
+outside the notebook (tables, mounts, fetches, datasets) are re-read when the
+notebook recomputes staleness, as it does after every edit, not each time the
+badge is drawn. A table with no snapshots yet counts as the same input until it
+gets one; a cell whose upstream is stale shows its tests stale too.
 
 ## What persists
 

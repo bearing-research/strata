@@ -704,8 +704,17 @@ class CellExecutor:
                     pytest_unavailable = True
                     raw = empty_raw
 
-        # After the run: a pytest auto-install can change the lockfile, which is an input.
-        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
+        # The env hash after the run: a pytest auto-install can change the lockfile.
+        input_fingerprint = self.session.record_cell_test_inputs(
+            cell_id,
+            prov.input_hashes
+            + prov.mount_fingerprints
+            + prov.table_fingerprints
+            + prov.fetch_fingerprints
+            + prov.dataset_fingerprints,
+            self.session.cell_env_hash(cell),
+        )
+        source_hash, test_source_hash, _ = self.session.cell_test_fingerprint(
             cell_id, source, test_source
         )
         result = CellTestResult(
@@ -1665,6 +1674,7 @@ class CellExecutor:
                                 source_hash=source_hash,
                                 source=source,
                                 env_hash=env_hash,
+                                display_count=len(exec_result.display_outputs),
                             )
 
                     # ⑥ Sync back read-write mounts.
@@ -1768,7 +1778,15 @@ class CellExecutor:
         store = artifact_mgr.artifact_store
         display_count = self._recorded_display_count(cell_id, provenance_hash, None)
         if display_count is None:
-            display_count = current_display_count
+            # A run without displays leaves no display artifact; its console says so.
+            console = store.find_version_by_provenance(
+                artifact_mgr.cell_artifact_id(cell_id, "__console__"),
+                derive_subkey(provenance_hash, "__console__"),
+            )
+            spec = console.transform_spec if console is not None else None
+            params = json.loads(spec).get("params", {}) if spec else {}
+            recorded = params.get("display_count")
+            display_count = int(recorded) if recorded is not None else current_display_count
         labels = ["__console__", *(f"__display__{index}" for index in range(display_count))]
         to_promote: list[tuple[str, int]] = []
         for label in labels:
@@ -4627,16 +4645,22 @@ class CellExecutor:
         source_hash: str = "",
         source: str = "",
         env_hash: str = "",
+        display_count: int | None = None,
     ) -> None:
         """Persist a leaf cell's console output as a provenance-keyed artifact.
 
         So a cell that only prints can still cache-hit and replay its output. Stored
         even when both streams are empty: a leaf has no other artifact, so the console
         is the record that it ran under this provenance (cache hit, ready on reopen).
+        ``display_count`` records how many displays the run made, which a run with
+        none leaves no display artifact to say.
         """
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
+        params = self._fetch_params(cell_id)
+        if display_count is not None:
+            params["display_count"] = str(display_count)
         artifact_mgr.store_cell_output(
             cell_id=cell_id,
             variable_name="__console__",
@@ -4647,7 +4671,7 @@ class CellExecutor:
             source_hash=source_hash,
             source=source,
             env_hash=env_hash,
-            extra_params=self._fetch_params(cell_id),
+            extra_params=params,
         )
 
     def _store_inline_display_outputs(
@@ -5284,6 +5308,11 @@ class CellExecutor:
         if use_cache:
             cached = self._cached_loop_result(cell_id, loop, cell_provenance, start_time)
             if cached is not None:
+                from strata.notebook.runtime_state import persist_cell_loop_run
+
+                # A hit serves an earlier run, not the one last started; let the steps on
+                # disk speak for themselves again.
+                persist_cell_loop_run(self.session.path, cell_id, None)
                 return cached
 
         try:
@@ -5317,6 +5346,9 @@ class CellExecutor:
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
         loop_run = uuid.uuid4().hex
+        from strata.notebook.runtime_state import persist_cell_loop_run
+
+        persist_cell_loop_run(self.session.path, cell_id, loop_run)
         combined_stdout: list[str] = []
         combined_stderr: list[str] = []
         all_mutation_warnings: list[MutationWarning] = []
@@ -5667,9 +5699,18 @@ class CellExecutor:
                     f"Run that cell through iteration {loop.start_from_iter} first."
                 )
             # Every run rewrites @iter=0, so a step whose run token differs from it is
-            # left over from an older, longer run.
+            # left over from an older, longer run. A run that failed at iteration 0
+            # rewrote nothing; the token recorded at its start catches that.
+            from strata.notebook.runtime_state import load_runtime_state
+
             first = artifact_mgr.get_iteration_artifact(loop.start_from_cell, loop.carry, 0)
-            if first is None or _loop_run_token(first) != _loop_run_token(artifact):
+            started = load_runtime_state(self.session.path).cells.get(loop.start_from_cell)
+            latest_run = started.loop_run if started is not None else None
+            if (
+                first is None
+                or _loop_run_token(first) != _loop_run_token(artifact)
+                or (latest_run is not None and latest_run != _loop_run_token(artifact))
+            ):
                 raise ValueError(
                     f"Loop seed start_from={loop.start_from_cell}@iter={loop.start_from_iter} "
                     f"is left over from an older run of cell {loop.start_from_cell}: its "
@@ -6515,6 +6556,7 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=executed_source,
                 env_hash=env_hash,
+                display_count=len(persisted_displays),
             )
 
         # Offer it to the team, as a single run does. Inert unless configured, and it

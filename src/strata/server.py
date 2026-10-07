@@ -712,6 +712,7 @@ async def lifespan(app: FastAPI):
 
     # Keeps personal-mode write endpoints off the network.
     config.validate_personal_mode_binding()
+    config.create_directories()
 
     from strata.transforms.registry import TransformRegistry, set_transform_registry
 

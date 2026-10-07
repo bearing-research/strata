@@ -1177,7 +1177,10 @@ async def import_snapshot_bundle(
     file: UploadFile = File(..., description="A snapshot .zip exported with fmt=snapshot."),
     name: str | None = Form(
         default=None,
-        description="Target notebook name. Defaults to the uploaded file's stem.",
+        description=(
+            "Target notebook name, and its directory's. Defaults to the bundle's name, "
+            "in a directory named after the uploaded file's stem."
+        ),
     ),
     parent_path: str | None = Form(
         default=None,
@@ -1247,6 +1250,7 @@ async def import_snapshot_bundle(
                     bundle_path,
                     candidate_dir,
                     taken_ids=taken,
+                    name=name,
                 )
             except zipfile.BadZipFile:
                 raise HTTPException(status_code=400, detail="Upload is not a zip file")
