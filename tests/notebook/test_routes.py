@@ -1258,6 +1258,27 @@ def test_update_notebook_workers_refuses_an_unknown_transport(client, tmp_path):
     assert parse_notebook(notebook_dir).workers == []
 
 
+def test_update_notebook_workers_refuses_the_reserved_name_local(client, tmp_path):
+    """The CLI and MCP refuse it too: the built-in resolves first, so the entry never runs."""
+    from strata.notebook.parser import parse_notebook
+
+    notebook_dir = create_notebook(tmp_path, "Worker Reserved Name Test")
+    session_id = open_session_id(client, notebook_dir)
+
+    response = client.put(
+        f"/v1/notebooks/{session_id}/workers",
+        json={
+            "workers": [
+                {"name": "local", "backend": "executor", "config": {"url": "https://x.internal"}}
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert "reserved" in response.json()["detail"]
+    assert parse_notebook(notebook_dir).workers == []
+
+
 def test_update_notebook_workers_forbidden_in_service_mode(
     client, service_mode_worker_state, tmp_path
 ):

@@ -2332,6 +2332,10 @@ async def update_notebook_workers_endpoint(
             detail="Notebook worker definitions are managed by the server in service mode",
         )
 
+    # Resolution returns the built-in first, so a "local" entry would never run.
+    if any(worker.name == "local" for worker in req.workers):
+        raise HTTPException(status_code=400, detail="'local' is reserved for the built-in worker")
+
     try:
         for worker in req.workers:
             check_worker_transport(worker.config.transport)

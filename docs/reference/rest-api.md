@@ -726,6 +726,9 @@ PUT /v1/notebooks/{session_id}/worker
 PUT /v1/notebooks/{session_id}/workers
 ```
 
+Replaces the notebook's `[[workers]]`. A worker named `local` is refused with
+`400`: the name is reserved for the built-in worker.
+
 ### SSH Workers
 
 ```
