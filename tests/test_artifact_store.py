@@ -789,6 +789,35 @@ class TestRefreshSupersede:
         assert store.blob_store.blob_exists("art-2", 1)
         assert store.verify_artifacts() == []
 
+    @pytest.mark.parametrize("hold", ["publish", "pin"])
+    def test_deleting_a_canonical_whose_blob_is_gone_under_a_held_reader_refuses(self, store, hold):
+        """With no bytes to hand over, the delete would leave the held link empty: it stops."""
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-2", 1, "{}", 10, 100)
+        if hold == "publish":
+            store.publish_artifact("art-2", 1)
+        else:
+            store.pin_artifact("art-2", 1, "review")
+        store.blob_store.delete_blob("art-1", 1)
+
+        with pytest.raises(ValueError, match="whose blob is gone"):
+            store.delete_artifact("art-1", 1)
+
+        assert store.get_artifact("art-1", 1) is not None
+        conn = store._get_connection()
+        try:
+            held = conn.execute(
+                "SELECT state, superseded_by FROM artifact_versions WHERE id = ? AND version = 1",
+                ("art-2",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert (held["state"], held["superseded_by"]) == ("superseded", "art-1@v=1")
+
     def test_finalize_and_set_name_supersedes(self, store):
         """The atomic finalize+name path supersedes the same way."""
         store.create_artifact("art-1", "prov-x")

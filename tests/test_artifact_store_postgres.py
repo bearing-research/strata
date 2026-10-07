@@ -438,6 +438,32 @@ class TestGarbageCollection:
         assert store.read_blob("a2", 1) == b"bytes"
         assert store.blob_store.blob_exists("a2", 1)
 
+    @pytest.mark.parametrize("hold", ["publish", "pin"])
+    def test_deleting_a_canonical_whose_blob_is_gone_under_a_held_reader_refuses(self, store, hold):
+        for artifact_id in ("a1", "a2"):
+            version = store.create_artifact(artifact_id, "prov-dup", _spec())
+            store.write_blob(artifact_id, version, b"bytes")
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=5)
+        if hold == "publish":
+            store.publish_artifact("a2", 1)
+        else:
+            store.pin_artifact("a2", 1, "review")
+        store.blob_store.delete_blob("a1", 1)
+
+        with pytest.raises(ValueError, match="whose blob is gone"):
+            store.delete_artifact("a1", 1)
+
+        assert store.get_artifact("a1", 1) is not None
+        conn = store._get_connection()
+        try:
+            held = conn.execute(
+                "SELECT state, superseded_by FROM artifact_versions WHERE id = ? AND version = 1",
+                ("a2",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert (held["state"], held["superseded_by"]) == ("superseded", "a1@v=1")
+
     @pytest.mark.parametrize("raced", [1, 2])
     def test_a_name_landing_mid_sweep_skips_only_that_version(self, store, raced):
         """A failed DELETE aborts a Postgres transaction; without a savepoint the closing commit
