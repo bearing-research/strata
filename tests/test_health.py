@@ -316,6 +316,77 @@ class TestHealthEndpointIntegration:
             server_module._state = None
 
 
+class TestReadinessProbesTheArtifactStore:
+    """Every artifact, name and notebook route needs the artifact store's database."""
+
+    @pytest.fixture
+    def ready(self, tmp_path, monkeypatch):
+        import strata.artifact_store as artifact_store_module
+        import strata.server as server_module
+        from strata.api.routers import metrics_health
+        from strata.artifact_store import ArtifactStore
+        from strata.config import StrataConfig
+        from strata.server import ServerState
+
+        state = ServerState(StrataConfig(cache_dir=tmp_path / "cache"))
+        monkeypatch.setattr(server_module, "_state", state)
+        store = ArtifactStore(tmp_path / "artifacts")
+        monkeypatch.setattr(artifact_store_module, "_artifact_store", store)
+
+        async def probe():
+            import json
+
+            response = await metrics_health.health_ready()
+            return response.status_code, json.loads(response.body)
+
+        yield store, probe
+        state._planning_executor.shutdown(wait=False)
+        state._fetch_executor.shutdown(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_a_reachable_store_is_ready(self, ready):
+        _store, probe = ready
+
+        status, body = await probe()
+
+        assert status == 200
+        assert body["checks"]["artifact_store"] is True
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_store_is_not_ready(self, ready, monkeypatch):
+        store, probe = ready
+
+        def refuse():
+            raise ConnectionError("connection refused")
+
+        monkeypatch.setattr(store._dialect, "connect", refuse)
+
+        status, body = await probe()
+
+        assert status == 503
+        assert body["checks"]["artifact_store"] is False
+        assert "connection refused" in body["checks"]["artifact_store_error"]
+
+    @pytest.mark.asyncio
+    async def test_a_store_that_never_answers_is_not_ready(self, ready, monkeypatch):
+        import threading
+
+        from strata.api.routers import metrics_health
+
+        store, probe = ready
+        release = threading.Event()
+        monkeypatch.setattr(store, "ping", release.wait)
+        monkeypatch.setattr(metrics_health, "ARTIFACT_STORE_PROBE_TIMEOUT_SECONDS", 0.01)
+
+        try:
+            status, body = await probe()
+        finally:
+            release.set()
+
+        assert status == 503
+        assert body["checks"]["artifact_store"] is False
+
+
 class TestReportedVersionIsTheInstalledOne:
     """``/health`` reports the installed version so an operator can confirm a rollout.
 

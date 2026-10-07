@@ -796,6 +796,14 @@ class ArtifactStore:
         """
         self._dialect.close()
 
+    def ping(self) -> None:
+        """Run a trivial query; raises when the metadata database is unreachable."""
+        conn = self._get_connection()
+        try:
+            conn.execute("SELECT 1").fetchone()
+        finally:
+            conn.close()
+
     def _init_schema(self) -> None:
         """Create the schema, or migrate an existing database to the latest version."""
         conn = self._get_connection()

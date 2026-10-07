@@ -20,6 +20,8 @@ from strata.tenant_registry import get_tenant_registry
 
 router = APIRouter(tags=["metrics"])
 
+ARTIFACT_STORE_PROBE_TIMEOUT_SECONDS = 5.0
+
 
 def _prom_label(value: object) -> str:
     """Escape a Prometheus label value per the exposition format.
@@ -70,10 +72,12 @@ async def health_ready():
     """Readiness probe; 503 when the server cannot take requests.
 
     Not ready when draining, when both QoS tiers stay saturated past the threshold, or
-    when the metadata store is unreachable.
+    when the Parquet metadata store or the artifact store's database is unreachable.
     """
+    import asyncio
     import json
 
+    from strata.artifact_store import get_artifact_store
     from strata.metadata_cache import get_metadata_store
     from strata.server import _check_readiness, _get_active_scan_count, _get_qos_metrics, get_state
 
@@ -100,6 +104,21 @@ async def health_ready():
         if "issues" not in checks:
             checks["issues"] = []
         checks["issues"].append(f"metadata store error: {e}")
+
+    artifact_store = get_artifact_store()
+    if artifact_store is not None:
+        try:
+            # A Postgres pool waits up to its timeout for a connection: off the loop, and bounded.
+            await asyncio.wait_for(
+                asyncio.to_thread(artifact_store.ping), ARTIFACT_STORE_PROBE_TIMEOUT_SECONDS
+            )
+            checks["artifact_store"] = True
+        except Exception as e:
+            error = str(e) or type(e).__name__  # a timeout has no message
+            checks["artifact_store"] = False
+            checks["artifact_store_error"] = error
+            is_ready = False
+            checks.setdefault("issues", []).append(f"artifact store error: {error}")
 
     qos = _get_qos_metrics(state)
     checks["interactive_available"] = qos["interactive_available"]
