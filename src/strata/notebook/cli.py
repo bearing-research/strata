@@ -403,7 +403,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
             if args.format == "human" and not args.quiet:
                 _print_cell_line(entry)
                 for w in result.mutation_warnings:
-                    tail = f" {w['suggestion']}" if w.get("suggestion") else ""
+                    tail = f". {w['suggestion']}" if w.get("suggestion") else ""
                     print(f"      {_yellow('⚠')} {w['message']}{tail}")
 
     total_ms = int((time.monotonic() - start) * 1000)

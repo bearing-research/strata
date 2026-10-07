@@ -81,8 +81,8 @@ Notes:
   records the tenant of the caller who opened it and looks missing to
   other tenants, and a multi-tenant server gives each tenant its own
   subdirectory of the storage root. Within a tenant there are no
-  per-notebook ACLs: if Alice's notebook ID leaks to Bob in her tenant
-  and Bob holds `notebook:read`, he can open it.
+  per-notebook ACLs: anyone in Alice's tenant with `notebook:read` sees
+  her notebooks listed by `/v1/notebooks/discover` and can open them.
 - **Notebook deletion is personal-mode only.** Service mode refuses
   `DELETE /v1/notebooks/{id}` and `delete-by-path`.
 

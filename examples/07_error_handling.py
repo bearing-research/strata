@@ -10,9 +10,16 @@ What you'll learn:
     - How to handle materialize/fetch errors
 """
 
+import sys
+from pathlib import Path
+
 import httpx
 
 from strata_client import StrataClient
+
+# The table examples/setup_demo.py creates; pass another table URI as the first argument.
+DEMO_WAREHOUSE = Path(__file__).resolve().parent.parent / "demo-warehouse"
+table_uri = sys.argv[1] if len(sys.argv) > 1 else f"file://{DEMO_WAREHOUSE}#analytics.events"
 
 # Example 1: Handle connection errors
 try:
@@ -45,7 +52,7 @@ except Exception as e:
 # Large scans may exceed the server's scan_timeout_seconds
 try:
     artifact = client.materialize(
-        inputs=["file:///warehouse#db.huge_table"],
+        inputs=[table_uri],
         transform={"executor": "scan@v1", "params": {}},
     )
     table = client.fetch(artifact.uri)
@@ -59,7 +66,7 @@ except Exception as e:
 # Scans exceeding max_response_bytes will fail
 try:
     artifact = client.materialize(
-        inputs=["file:///warehouse#db.huge_table"],
+        inputs=[table_uri],
         transform={"executor": "scan@v1", "params": {}},
     )
     table = client.fetch(artifact.uri)
@@ -72,7 +79,7 @@ except Exception as e:
 # Example 6: Handle server at capacity (503)
 try:
     artifact = client.materialize(
-        inputs=["file:///warehouse#db.table"],
+        inputs=[table_uri],
         transform={"executor": "scan@v1", "params": {}},
     )
     table = client.fetch(artifact.uri)

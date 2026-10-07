@@ -177,6 +177,11 @@ a 400, and the table is addressed as `<namespace>.<table>` in that catalog.
 
 ## S3 Storage
 
+Credentials for the S3 blob backend (`STRATA_ARTIFACT_BLOB_BACKEND=s3`). The
+same settings read lake tables on S3: a table named by an `s3://` warehouse
+URI has its catalog and data files read with this region, endpoint and key, so
+a MinIO lake needs only `STRATA_S3_ENDPOINT_URL` and its keys here.
+
 | Variable                 | Default | Description                                      |
 | ------------------------ | ------- | ------------------------------------------------ |
 | `STRATA_S3_REGION`       | `None`  | AWS region (falls back to AWS_REGION)            |
@@ -305,7 +310,7 @@ existing SQLite metadata is not carried over automatically. To move one:
 
 ```bash
 # 1. Boot once against the target so the stores create their schema.
-STRATA_ARTIFACT_METADATA_DSN='postgresql://...' python -m strata   # then stop it
+STRATA_ARTIFACT_METADATA_DSN='postgresql://...' strata-notebook   # then stop it
 
 # 2. See what would move.
 strata migrate --to-dsn 'postgresql://...' --dry-run

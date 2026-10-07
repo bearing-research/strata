@@ -14,7 +14,10 @@
 # CI builds this and checks that it refuses to start without a token, does not
 # run as root, serves /health on 8080, and requires the token on /execute.
 
-FROM python:3.14-slim
+# Pinned by digest for supply-chain safety (Scorecard Pinned-Dependencies).
+# Bump tag and digest together; get the digest with
+# `docker buildx imagetools inspect <image:tag>`.
+FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2
 
 # Plain pip, not a uv venv: the uv-runtime guard (src/strata/_uv_runtime.py)
 # gates ``strata-notebook`` but not the worker entry point, so this runs on a
@@ -24,12 +27,14 @@ FROM python:3.14-slim
 # pandas / numpy to serialize results. Without it the worker boots and answers
 # /health, then fails every job.
 #
-# Needs 0.7.0+ (``POST /execute``). Pinned so the worker cannot drift from the
-# server that issued its manifest. It installs from PyPI, so a build in a
-# checkout does NOT pick up local worker changes; for unreleased code, install
-# a ``uv build`` wheel instead. Bump the pin only *after* a release: CI builds
-# this file, and a version PyPI lacks fails the build. Until then a fresh image
-# runs a worker one version behind the server.
+# The worker must be the same release as the server that dispatches to it:
+# workers and servers upgrade together (0.9.0 changed the environment key, so
+# a 0.8.0 worker refuses every locked notebook from a 0.9.0 server). It
+# installs from PyPI, so a build in a checkout does NOT pick up local worker
+# changes; for unreleased code, install a ``uv build`` wheel instead. Move the
+# pin to a new release right after it is published: CI builds this file, and
+# a version PyPI lacks fails the build. Until then, pass
+# ``--build-arg STRATA_VERSION=<server version>`` or install a wheel.
 #
 # ``uv`` is required too: a notebook with a uv.lock (every ``strata new``
 # notebook) runs in a locked environment built by ``uv sync --frozen``
@@ -37,7 +42,7 @@ FROM python:3.14-slim
 # ``locked_environments: false`` and cells run in this image, ignoring the
 # notebook's pins.
 ARG STRATA_VERSION=0.8.0
-RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" uv
+RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" "uv==0.12.23"
 
 # R cells, with --build-arg WITH_R=true:
 #

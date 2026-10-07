@@ -336,6 +336,9 @@ class TestSharedMutableOutputs:
         assert len(warnings) == 1
         assert "'a'" in warnings[0]["message"]
         assert "'b'" in warnings[0]["message"]
+        # Both outputs come from one cell already, so "keep them in one cell" is no advice.
+        assert "same cell" not in warnings[0]["suggestion"]
+        assert "derive the other" in warnings[0]["suggestion"]
 
     def test_independent_outputs_not_flagged(self):
         # Equal but not identical: no shared identity, no decoupling risk.

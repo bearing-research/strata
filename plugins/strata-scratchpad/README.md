@@ -25,7 +25,9 @@ installs it with what `strata agent` needs.
 /plugin install strata-scratchpad@strata
 ```
 
-Once installed the skill is auto-discovered in any project; a human can watch the
-agent's scratchpad live with `strata watch ./scratch`.
+Once installed the skill is auto-discovered in any project. A human can watch the
+agent's scratchpad live with `strata agent ./scratch`, which starts a server
+scoped to the project; plain `strata watch ./scratch` only works against a server
+whose `STRATA_NOTEBOOK_STORAGE_DIR` covers the project.
 
 See [Driving a notebook with a coding agent](https://bearing-research.github.io/strata/latest/notebook/agent/).

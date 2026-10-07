@@ -436,9 +436,12 @@ docker build -f worker.Dockerfile --build-arg WITH_R=true -t strata-worker:r .
 ```
 
 The image installs a released `strata-notebook` from PyPI, pinned by
-`ARG STRATA_VERSION`; pass `--build-arg STRATA_VERSION=<version>` for another
-release (0.7.0 or newer, the first with `POST /execute`). Building it inside a
-checkout does not pick up local worker changes. The container refuses to start
+`ARG STRATA_VERSION`. The worker must be the same release as the server
+(workers and servers upgrade together), so pass
+`--build-arg STRATA_VERSION=<server version>` when the two differ. The pin
+moves to each new release right after it is published; until then a fresh
+image installs the previous release. Building it inside a checkout does not
+pick up local worker changes; build a wheel for that. The container refuses to start
 without `STRATA_WORKER_TOKEN`, since it binds `0.0.0.0`; the pool mints one per
 machine, and you set it yourself to run the image by hand.
 
@@ -536,6 +539,32 @@ server-mode transforms to be enabled". A `direct` worker needs neither.
 drops cached health for workers no longer listed. The registry itself needs no
 reload, since it is read from the store on every request; a fleet manager
 changes it through the admin routes.
+
+An entry has the fields of a notebook's `[[workers]]` plus `enabled`, in the
+same shape whether it comes from the admin routes or from
+`[tool.strata.transforms] notebook_workers`. `POST /v1/admin/notebook-workers`
+adds one, `PUT /v1/admin/notebook-workers/{name}` replaces it, `PATCH` takes
+`{"enabled": false}`, and `PUT /v1/admin/notebook-workers` replaces the whole
+registry with `{"workers": [...]}`. The routes answer only in service mode
+(`409` otherwise) and, under principal auth, need the `admin:notebook-workers`
+scope.
+
+```bash
+curl -X POST https://strata.example.com/v1/admin/notebook-workers \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "gpu-a100", "backend": "executor", "runtime_id": "gpu-a100-v1",
+       "config": {"url": "https://gpu.internal/v1/execute", "transport": "direct",
+                  "token_env": "STRATA_GPU_WORKER_TOKEN"}}'
+```
+
+```toml
+[tool.strata.transforms]
+notebook_workers = [
+  { name = "gpu-a100", backend = "executor", runtime_id = "gpu-a100-v1", config = { url = "https://gpu.internal/v1/execute", transport = "direct", token_env = "STRATA_GPU_WORKER_TOKEN" } },
+]
+```
+
+`token_env` names a variable in the server's environment.
 
 **Personal-mode servers get the registry too.** A personal server started with
 a registry offers those machine types to every notebook it opens, with no

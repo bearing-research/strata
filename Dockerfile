@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Strata: Snapshot-aware serving layer for Iceberg tables
 #
 # Build: DOCKER_BUILDKIT=1 docker build -t strata .
@@ -11,8 +12,6 @@
 # Volumes:
 #   /home/strata/.strata  - State directory (cache + metadata + uv cache)
 #   /data                 - Mount your Iceberg warehouse here
-#
-# syntax=docker/dockerfile:1
 
 # Pinned by digest for supply-chain safety (Scorecard Pinned-Dependencies).
 # Bump tag and digest together; get the digest with
@@ -139,7 +138,7 @@ ENV STRATA_METADATA_DB=/home/strata/.strata/meta.sqlite
 
 # Stdlib only, so no extra dependency.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8765/health').read()"
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://localhost:%s/health' % os.environ.get('STRATA_PORT', '8765')).read()"
 
 EXPOSE 8765
 

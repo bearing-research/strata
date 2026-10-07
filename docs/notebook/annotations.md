@@ -117,7 +117,7 @@ During execution, the UI shows a pulsing "dispatching → df-cluster" badge on t
 Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion cluster on Fly, a beefy EC2 instance, or a local process on a different port. The built-in `remote_executor.py` provides a reference implementation:
 
 ```bash
-python -m strata.notebook.remote_executor --port 9000
+strata-worker --host 127.0.0.1 --port 9000
 ```
 
 If no `@worker` is set, the cell runs locally in the notebook's Python environment.

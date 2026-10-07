@@ -55,6 +55,7 @@ Liveness + capabilities probe. No auth.
   },
   "version": "1.0.0",
   "uptime_seconds": 42.5,
+  "launch_id": null,
   "active_executions": 0,
   "max_concurrent": 2,
   "gpu_slots": 2,
@@ -68,7 +69,7 @@ Liveness + capabilities probe. No auth.
 }
 ```
 
-`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. `hardware` is what the machine reports about itself: `cpus` (those this process may use) and `memory_mb` from the OS, and `accelerators` and `cuda` from `nvidia-smi` when it is on the worker's `PATH`. It lets a caller check a provider's machine against the class it was sold as without submitting a job. A field that could not be read is omitted, so a missing `accelerators` means unknown, not "no GPU". The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned (`null` without `gpu_slots`), so a caller can plan rather than discover the limit by being refused. `launch_id` is `STRATA_WORKER_LAUNCH_ID`, set only on a worker Strata launched over SSH, which checks it to tell its worker from another process on the port; otherwise `null`. `hardware` is what the machine reports about itself: `cpus` (those this process may use) and `memory_mb` from the OS, and `accelerators` and `cuda` from `nvidia-smi` when it is on the worker's `PATH`. It lets a caller check a provider's machine against the class it was sold as without submitting a job. A field that could not be read is omitted, so a missing `accelerators` means unknown, not "no GPU". The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
 
 `locked_environments: true` says the worker runs a cell in the notebook's own locked environment when the request carries one (below). Strata sends that block only to a worker that advertises it; any other gets requests exactly as before. Answer it honestly: building that environment is a `uv sync --frozen`, so the reference worker reports it by probing for `uv` on its own `PATH` rather than claiming it unconditionally. A worker that claims it without `uv` is sent work it will refuse, and every notebook has a lockfile.
 
@@ -233,6 +234,7 @@ A worker that answers `200` directly needs no change.
 | `400` | Missing/invalid `metadata`, unsupported `protocol_version`, unsupported `transform.ref`, malformed input descriptor, unknown cell `language` |
 | `401` | Token gate failed |
 | `408` | Cell execution exceeded `timeout_seconds` |
+| `409` | The execution was cancelled (`/v1/executions/{build_id}/cancel`) before its harness started |
 | `413` | Pull model only: an input exceeds `STRATA_WORKER_MAX_INPUT_BYTES` (default 2 GiB) |
 | `500` | The harness could not run: the locked environment failed to build, `Rscript` is missing for an R cell, or the subprocess crashed |
 | `502` | Pull model only: downloading an input, uploading the bundle, or finalizing failed |
@@ -475,7 +477,7 @@ Protocol and transport failures (`400`, `401`, `413`, `502`, `503`) use FastAPI'
 {"detail": "<human-readable error message>"}
 ```
 
-A failure to run the cell at all (`408`, `500`, and `400` for an unknown language) answers:
+A failure to run the cell at all (`408`, `409`, `500`, and `400` for an unknown language) answers:
 
 ```json
 {"success": false, "error": "<human-readable error message>"}

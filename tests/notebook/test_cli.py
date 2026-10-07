@@ -207,6 +207,23 @@ class TestExecutionFlow:
             run_main([str(notebook_with_chain), "--no-sync"])
         assert "mutated in place" in capsys.readouterr().out
 
+    def test_mutation_warning_suggestion_is_its_own_sentence(self, notebook_with_chain, capsys):
+        from strata.notebook.executor import CellExecutionResult
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=300.0):
+            warns = (
+                [{"var_name": "a", "message": "outputs share an object", "suggestion": "Do X."}]
+                if cell_id == "c2"
+                else []
+            )
+            return CellExecutionResult(
+                cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
+            )
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            run_main([str(notebook_with_chain), "--no-sync"])
+        assert "outputs share an object. Do X." in capsys.readouterr().out
+
     def test_cell_failure_returns_1_and_skips_downstream(self, notebook_with_chain, capsys):
         async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
             if cell_id == "c1":
