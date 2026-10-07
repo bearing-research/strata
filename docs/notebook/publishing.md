@@ -6,7 +6,8 @@ it, and the code and environment of every step behind it. No account, no
 install, no notebook.
 
 ```bash
-strata artifact publish nb_paper_cell_c2_var___display__0 --title "Figure 3"
+strata artifact publish nb_paper_cell_c2_var___display__0 --title "Figure 3" \
+  --artifact-dir ./paper/.strata/artifacts
 ```
 
 ```
@@ -34,7 +35,10 @@ A notebook writes its cell outputs to its own `.strata/artifacts`; the server
 serves whatever `artifact_dir` it was started with, `~/.strata/artifacts` by
 default. Publishing therefore copies the artifact, and every step behind it
 since the page shows their code, into the store the server serves, and mints
-the token there. The command says how many it moved:
+the token there. Point `--artifact-dir` at the notebook's `.strata/artifacts`,
+as above; without it the command reads the server's store, which does not hold
+the notebook's outputs until something copies them there. The command says how
+many it moved:
 
 ```
 Copied 4 artifacts across so the link resolves.
@@ -236,6 +240,7 @@ paper outlives most servers, so there is a second form:
 
 ```bash
 strata artifact archive nb_paper_cell_c2_var___display__0 \
+  --artifact-dir ./paper/.strata/artifacts \
   --to ./figure3-bundle --title "Figure 3" --author "F. Li"
 ```
 

@@ -19,7 +19,10 @@ scripts.
    their variables; reference an existing variable in a new cell rather than
    recomputing it. Put an expensive step in its own cell whose result a later cell
    consumes; it stays cached while you iterate downstream.
-4. A human can watch live at any time with `strata watch ./scratch`.
+4. A human can watch live at any time with `strata agent ./scratch` (it starts a
+   server scoped to the project; plain `strata watch ./scratch` cannot open a
+   notebook outside a server's storage root). Once someone is watching, run cells
+   through MCP or with `--server`/`--session` so they reach the viewer.
 
 Then proceed with whatever the user asked. Follow the `strata-scratchpad` skill's
 guidance for details (caching, `# @nocache` for side effects, edit-and-rerun).

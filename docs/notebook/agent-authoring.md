@@ -139,7 +139,9 @@ Practical consequences for generated code:
 - Put producers before consumers in `order`. A reference with no earlier
   definer isn't an error at validate time (it could be an import or a
   builtin), but it will `NameError` at run time.
-- Only variables that downstream cells reference are persisted.
+- Variables that downstream cells reference are stored as artifacts. The
+  server's interactive runs store nothing else; `strata run` also stores leaf
+  cells' variables, best-effort, so the final results have digests.
 - Re-running with unchanged source + inputs + environment is a cache hit;
   cells re-execute only when something upstream changed.
 - Values cross cells by serialization (Arrow for tabular/numpy, JSON for
@@ -218,8 +220,8 @@ machine-managed runtime state with no stability guarantees.
 ## Comparing two runs
 
 A successful cell also reports its `provenance_hash` and its `outputs` - one
-entry per variable a downstream cell reads, each with `artifact_id`, `version`
-and `content_sha256`:
+entry per stored variable, each with `artifact_id`, `version` and
+`content_sha256`:
 
 ```bash
 strata run my_analysis --format json | jq '.cells[] | {id, provenance_hash, outputs}'
@@ -232,9 +234,10 @@ reports, and a cell whose output moved is named.
 
 Both are read back from the artifact store rather than from the run, so a cache
 hit reports them too - which is the run most worth comparing. `content_sha256`
-is `null` for artifacts written before digests were recorded; a cell whose
-variables nothing downstream reads has no `outputs` key, because nothing was
-stored.
+is `null` for artifacts written before digests were recorded. A leaf cell's
+variables are listed too, since `strata run` stores them; a leaf that is a
+cache hit from a run outside `strata run` (the UI, `cell run`, MCP) lists only
+what that run stored, so pass `--force` once before comparing.
 
 ## Don'ts
 
