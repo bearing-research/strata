@@ -85,6 +85,30 @@ class TestTheArtifactStore:
         assert _mode(db) == 0o600
 
 
+class TestTheApiKeyCli:
+    def test_a_key_minted_before_the_first_start_leaves_the_store_owner_only(
+        self, tmp_path, capsys
+    ):
+        import argparse
+
+        from strata.api_key_cli import cmd_create
+
+        args = argparse.Namespace(
+            principal="svc",
+            tenant=None,
+            scopes=None,
+            description=None,
+            expires_in_days=None,
+            artifact_dir=str(tmp_path / "artifacts"),
+            dsn=None,
+        )
+        assert cmd_create(args) == 0
+        capsys.readouterr()
+
+        assert _mode(tmp_path / "artifacts") == 0o700
+        assert _mode(tmp_path / "artifacts" / "artifacts.sqlite") == 0o600
+
+
 class TestTheCache:
     def test_building_a_config_leaves_the_cache_dir_mode_alone(self, tmp_path):
         """Tests and tools build configs all the time; only a running cache narrows the dir."""
