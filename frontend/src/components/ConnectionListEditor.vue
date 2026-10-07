@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ConnectionSpec } from '../types/notebook'
+import { connectionExtras } from '../utils/connectionExtras'
 
 const props = withDefaults(
   defineProps<{
@@ -65,6 +66,7 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
 ])
 
 const DRIVER_OPTIONS = [
+  { value: 'duckdb', label: 'DuckDB' },
   { value: 'sqlite', label: 'SQLite' },
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'snowflake', label: 'Snowflake' },
@@ -82,13 +84,7 @@ const validationErrors = ref<Record<string, string>>({})
 function toDraft(spec?: ConnectionSpec): DraftConnection {
   const auth = (spec?.auth ?? {}) as Record<string, string>
   const { user: authUser = '', password: authPassword = '', ...extraAuth } = auth
-  const extras: Record<string, unknown> = {}
-  if (spec) {
-    for (const [key, value] of Object.entries(spec)) {
-      if (KNOWN_TOP_LEVEL_KEYS.has(key)) continue
-      extras[key] = value
-    }
-  }
+  const extras = spec ? connectionExtras(spec, KNOWN_TOP_LEVEL_KEYS) : {}
   const specAny = (spec ?? {}) as Record<string, unknown>
   return {
     _key: `conn-${nextKey++}`,
@@ -163,6 +159,10 @@ function validate(): boolean {
       if (!d.path.trim() && !d.uri.trim()) {
         errors[d._key] = 'SQLite needs either a path or a URI'
       }
+    } else if (d.driver === 'duckdb') {
+      if (!d.path.trim()) {
+        errors[d._key] = 'DuckDB needs a path (a database file, or :memory:)'
+      }
     } else if (d.driver === 'postgresql') {
       if (!d.uri.trim()) {
         errors[d._key] = 'PostgreSQL needs a connection URI'
@@ -193,6 +193,9 @@ function toSpec(d: DraftConnection): ConnectionSpec {
     else delete spec.path
     if (d.uri.trim()) spec.uri = d.uri.trim()
     else delete spec.uri
+  } else if (d.driver === 'duckdb') {
+    if (d.path.trim()) spec.path = d.path.trim()
+    else delete spec.path
   } else if (d.driver === 'postgresql') {
     if (d.uri.trim()) spec.uri = d.uri.trim()
     else delete spec.uri
@@ -351,6 +354,17 @@ function preservedExtraSummary(d: DraftConnection): string {
               v-model="conn.path"
               type="text"
               placeholder="analytics.db (relative to notebook dir)"
+              :disabled="readOnly"
+            />
+          </label>
+        </template>
+        <template v-else-if="conn.driver === 'duckdb'">
+          <label class="conn-field">
+            <span class="field-label">Path</span>
+            <input
+              v-model="conn.path"
+              type="text"
+              placeholder="analytics.duckdb (relative to notebook dir), or :memory:"
               :disabled="readOnly"
             />
           </label>
