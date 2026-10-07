@@ -6,14 +6,14 @@
  * same-origin host page that embeds the app view in an <iframe> with
  * `?embed=1` and assert the embed contract:
  *
- *   1. chromeless    — the standalone header (title + Edit link) is gone
- *   2. content lives — the widget control panel renders inside the frame
- *   3. auto-resize   — the embed posts `strata:embed:resize` to the parent,
- *                      which grows the iframe past its seed height
+ *   1. chromeless:    the standalone header (title + Edit link) is gone
+ *   2. content lives: the widget control panel renders inside the frame
+ *   3. auto-resize:   the embed posts `strata:embed:resize` to the parent,
+ *                     which grows the iframe past its seed height
  *
  * The host page is served same-origin (via Playwright request routing), so
- * it works under the default `frame-ancestors 'self'` — no special server
- * config needed. Exits non-zero on any failed assertion.
+ * it works under the default `frame-ancestors 'self'`, with no special server
+ * config. Exits non-zero on any failed assertion.
  *
  *   node scripts/embed-smoke.mjs --base-url http://127.0.0.1:8770
  */
@@ -53,7 +53,7 @@ async function main() {
   const parentPath = argFor('--parent-path', '/tmp')
   const stamp = argFor('--stamp', String(Date.now()))
 
-  // 1. Create a notebook with a widget cell — all over the real REST API.
+  // 1. Create a notebook with a widget cell, all over the real REST API.
   const created = await postJson(`${baseUrl}/v1/notebooks/create`, {
     parent_path: parentPath,
     name: `embed_smoke_${stamp}`,

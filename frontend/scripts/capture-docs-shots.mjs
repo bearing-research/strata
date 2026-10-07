@@ -51,14 +51,14 @@ async function loadNotebook(browser, baseUrl, sessionId, theme) {
     try {
       localStorage.setItem('strata.theme', value)
     } catch {
-      // Storage disabled — the page falls back to the system preference.
+      // Storage disabled: the page falls back to the system preference.
     }
   }, theme)
   const page = await context.newPage()
 
   // The header's deployment-mode badge fails closed: if GET
-  // /v1/notebooks/{id}/workers fails — a 429 from the client rate limiter is
-  // the easy way to get one — the UI labels a personal server "Service mode"
+  // /v1/notebooks/{id}/workers fails (a 429 from the client rate limiter is
+  // the easy way to get one), the UI labels a personal server "Service mode"
   // and never re-syncs. Waiting for the right label is both the settle signal
   // and the guard against photographing that wrong state; a reload is enough
   // to recover, since the next request is not rate limited.
@@ -101,7 +101,7 @@ async function shoot(page, name, outDir, theme, target, maxWidth) {
     // The drawer spans the window but its content hugs the left edge, so an
     // element screenshot would be mostly empty. Clip it instead.
     const box = await locator.boundingBox()
-    if (!box) throw new Error(`${target} has no bounding box — hidden or zero-size?`)
+    if (!box) throw new Error(`${target} has no bounding box: hidden or zero-size?`)
     await page.screenshot({
       path,
       clip: { ...box, width: Math.min(box.width, maxWidth) },
@@ -128,7 +128,7 @@ async function main() {
   // Run the iris cells twice in this session: once with the target's cache
   // bypassed, then normally. Cache savings are priced against the last uncached
   // run *of the same cell in this session*, so without the first pass the
-  // profiling panel reports "~0ms (3 hits)" — technically correct (this session
+  // profiling panel reports "~0ms (3 hits)": technically correct (this session
   // has no evidence of what the work costs) and a poor advertisement.
   for (const mode of ['rerun', 'normal']) {
     for (const cell of iris.cells) {
@@ -138,7 +138,7 @@ async function main() {
   }
 
   // The registry cell publishes through the ambient `strata` client, so it can
-  // only run against a live server — which is why it isn't pre-run on disk.
+  // only run against a live server, which is why it isn't pre-run on disk.
   for (const cell of registry.cells) {
     await api('POST', `${baseUrl}/v1/notebooks/${registry.sessionId}/cells/${cell.id}/execute`, {})
   }
@@ -160,18 +160,18 @@ async function main() {
   const browser = await chromium.launch()
   try {
     for (const theme of THEMES) {
-      // 1 — the quickstart notebook, settled.
+      // 1: the quickstart notebook, settled.
       {
         const { context, page } = await loadNotebook(browser, baseUrl, iris.sessionId, theme)
         await shoot(page, 'notebook-anatomy', outDir, theme)
         await context.close()
       }
 
-      // 2 — the same notebook after its loader is edited: the loader falls back
+      // 2: the same notebook after its loader is edited: the loader falls back
       // to idle and everything downstream goes stale.
       //
       // The edit has to happen before the page loads, not while it is open: an
-      // out-of-band source change (REST, CLI, MCP — anything that isn't this
+      // out-of-band source change (REST, CLI, MCP: anything that isn't this
       // browser tab) updates the DAG and the staleness pills but never reaches
       // the open editor, so a shot taken on a live page shows stale cells above
       // unchanged-looking source.
@@ -190,7 +190,7 @@ async function main() {
         })
       }
 
-      // 2b — the Tests panel, on the cell whose tests the fixture ran.
+      // 2b: the Tests panel, on the cell whose tests the fixture ran.
       // Results persist to runtime.json and rehydrate on open, so the badge is
       // already green here; nothing waits on a live pytest run.
       {
@@ -211,7 +211,7 @@ async function main() {
         await context.close()
       }
 
-      // 3 + 4 + 5 — the registry surfaces.
+      // 3 + 4 + 5: the registry surfaces.
       {
         const { context, page } = await loadNotebook(browser, baseUrl, registry.sessionId, theme)
         // Every cell in the chain publishes a name, so name the one step 3 is
@@ -230,7 +230,7 @@ async function main() {
         await page.waitForTimeout(600)
         await shoot(page, 'registry-tab', outDir, theme, '.dag-drawer', 1040)
 
-        // 5 — the lineage view, opened from the model's row so the chain has
+        // 5: the lineage view, opened from the model's row so the chain has
         // every link the page describes rather than just the scan's root.
         await page
           .locator('tr')
@@ -245,7 +245,7 @@ async function main() {
         await context.close()
       }
 
-      // 7 — the published artifact's page. Server-rendered, so it follows
+      // 7: the published artifact's page. Server-rendered, so it follows
       // `prefers-color-scheme` rather than the app's stored theme: emulate the
       // OS preference instead of seeding localStorage as loadNotebook does.
       if (publicationToken) {
