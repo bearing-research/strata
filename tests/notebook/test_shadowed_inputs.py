@@ -279,3 +279,39 @@ async def test_lineage_records_only_the_wired_producer(tmp_path: Path, other: st
     c0 = session.notebook_state.get_cell("c0").artifact_uris
     c1 = session.notebook_state.get_cell("c1").artifact_uris
     assert recorded == {c0[other], c1["state"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shadowed", [True, False], ids=["shadowed", "plain"])
+@pytest.mark.parametrize("change", ["edit", "nocache"])
+async def test_a_leaf_reads_stale_when_its_upstream_runs_with_a_new_value(
+    tmp_path: Path, shadowed: bool, change: str
+):
+    """A leaf keeps only its console record, which says what it read; a new upstream value
+    makes it stale (it has a result), not idle (never ran), as for a consumed cell.
+    """
+    var = "state" if shadowed else "w"
+    reader = f"out = {var} * 100 + z\nprint(out)\n"
+    middle = f"{var} = state + 1\n"
+    if change == "nocache":
+        middle = f"# @nocache\nimport random\n{var} = state + random.random()\n"
+    session = _session(tmp_path, "z", "python", reader)
+    session.notebook_state.get_cell("c1").source = middle
+    for cell in session.notebook_state.cells:
+        session.re_analyze_cell(cell.id)
+    executor = CellExecutor(session)
+    for cell_id, source in (("c0", "state = 1\nz = 10\n"), ("c1", middle), ("c2", reader)):
+        result = await executor.execute_cell(cell_id, source)
+        assert result.success, result.error
+    session.compute_staleness()
+    assert session.notebook_state.get_cell("c2").status == "ready"
+
+    if change == "edit":
+        middle = f"{var} = state + 5\n"
+        session.notebook_state.get_cell("c1").source = middle
+        for cell in session.notebook_state.cells:
+            session.re_analyze_cell(cell.id)
+    assert (await executor.execute_cell("c1", middle)).success
+    session.compute_staleness()
+    assert session.notebook_state.get_cell("c1").status == "ready"
+    assert session.notebook_state.get_cell("c2").status == "stale"

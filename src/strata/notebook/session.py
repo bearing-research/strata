@@ -1024,19 +1024,25 @@ class NotebookSession:
         upstream that was edited and re-run. Decided only from the last result's
         record: same upstream artifacts at newer versions, and unchanged source and env
         hashes. The last result is the variable artifact, or for a leaf its first
-        display output.
+        display output, else its console record.
         """
+        store = self.artifact_manager.artifact_store
         uri = cell.artifact_uri or next(
             (output.artifact_uri for output in cell.display_outputs if output.artifact_uri),
             None,
         )
-        if not uri:
+        if uri:
+            try:
+                artifact_id, version = self._parse_artifact_uri(uri)
+            except (IndexError, ValueError):
+                return False
+            artifact = store.get_artifact(artifact_id, version)
+        elif cell.is_leaf:
+            artifact = store.get_latest_version(
+                f"nb_{self.notebook_state.id}_cell_{cell.id}_var___console__"
+            )
+        else:
             return False
-        try:
-            artifact_id, version = self._parse_artifact_uri(uri)
-        except (IndexError, ValueError):
-            return False
-        artifact = self.artifact_manager.artifact_store.get_artifact(artifact_id, version)
         if artifact is None or not artifact.transform_spec or not artifact.input_versions:
             return False
 
