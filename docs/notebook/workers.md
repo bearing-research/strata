@@ -499,16 +499,24 @@ A service-mode server keeps its own registry, managed through
 `/v1/admin/notebook-workers*` rather than any notebook's `[[workers]]`. Two
 things are worth knowing about where it lives:
 
-**It is persisted.** Changes made through the admin routes are written to
-`notebook_workers.json` in the server's artifact directory and survive a
-restart.
+**It is persisted in the artifact metadata store.** Changes made through the
+admin routes are written to the same database as the artifact metadata
+(Postgres with `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in
+the artifact directory), so they survive a restart, and every node sharing
+that database sees them on its next request. Without an artifact store (a
+scan-only server) the registry is kept in memory only.
 
-**The file wins over `[tool.strata.transforms] notebook_workers`.** The
-configured table is the bootstrap; once anything has been changed through the
-admin routes, that file is the registry and editing the config table has no
-effect. Delete the file to go back to the configured table. An *empty*
-registry is a decision, not an absence, so removing every worker through the
-API does not fall back.
+**The stored registry wins over `[tool.strata.transforms] notebook_workers`.**
+The configured table is the bootstrap; once anything has been changed through
+the admin routes, the stored registry is in force and editing the config table
+has no effect. An *empty* registry is a decision, not an absence, so removing
+every worker through the API does not fall back.
+
+**Upgrading from a release that kept `notebook_workers.json`.** On its first
+start the server imports that file from the artifact directory into the
+metadata store, renames it `notebook_workers.json.migrated`, and logs it. The
+import is skipped (the file is still renamed) when the store already holds a
+registry, so a second node starting with an old copy does not overwrite it.
 
 **A `signed` worker needs transforms enabled.** It runs as a build on the
 server, so in service mode set `STRATA_TRANSFORMS_ENABLED=true`
@@ -517,9 +525,10 @@ server, so in service mode set `STRATA_TRANSFORMS_ENABLED=true`
 "Signed notebook executor transport requires personal-mode writes or
 server-mode transforms to be enabled". A `direct` worker needs neither.
 
-`POST /v1/admin/notebook-workers/reload` re-reads the file, for a fleet
-manager writing it underneath a running server. A restart would work too, but
-it interrupts every cell currently executing.
+`POST /v1/admin/notebook-workers/reload` refreshes every worker's health and
+drops cached health for workers no longer listed. The registry itself needs no
+reload, since it is read from the store on every request; a fleet manager
+changes it through the admin routes.
 
 **Personal-mode servers get the registry too.** A personal server started with
 a registry offers those machine types to every notebook it opens, with no

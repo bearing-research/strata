@@ -159,7 +159,8 @@ startup for the same reason: shared metadata pointing at blobs only one
 node can read is worse than either alone. See
 [Configuration → artifact metadata](../reference/configuration.md#sharing-one-artifact-store-across-nodes)
 for the settings and `strata migrate` for moving an existing store
-across.
+across, and [Running more than one replica](#running-more-than-one-replica)
+for what else the nodes must share.
 
 ## Minimum service-mode env vars
 
@@ -189,13 +190,23 @@ uv run strata-notebook
 Compared to personal mode:
 
 - **No default artifact dir.** The artifact store exists only when
-  `STRATA_ARTIFACT_DIR` is set, including when
-  `STRATA_ARTIFACT_METADATA_DSN` and a blob backend such as
-  `STRATA_ARTIFACT_BLOB_BACKEND=s3` hold everything durable; the
-  directory then keeps nothing that needs a backup. Service mode refuses
-  to start with a DSN, a non-local blob backend or
-  `STRATA_SERVICE_WRITES_ENABLED` and no `STRATA_ARTIFACT_DIR`. Without
-  any of those it runs scan-only, with no artifact store.
+  `STRATA_ARTIFACT_DIR` is set, even when its metadata and blobs live
+  elsewhere. Service mode refuses to start with a DSN, a non-local blob
+  backend or `STRATA_SERVICE_WRITES_ENABLED` and no
+  `STRATA_ARTIFACT_DIR`. Without any of those it runs scan-only, with no
+  artifact store.
+- **What is durable, and where.** The *metadata store* (Postgres with
+  `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in the
+  artifact directory) holds artifact metadata, names, aliases,
+  publications, pins, API keys and the server-managed
+  [worker registry](../notebook/workers.md#server-managed-workers-service-mode).
+  The *blob store* holds artifact bytes: the configured bucket, or
+  `blobs/` in the artifact directory with the local backend. Notebooks
+  live in `STRATA_NOTEBOOK_STORAGE_DIR`. Back up those three. The
+  artifact directory itself is node-local working space, and the SQLite
+  file and local blobs are the only durable things in it, so with a DSN
+  and a bucket it holds nothing that needs a backup. The row-group cache
+  (`STRATA_CACHE_DIR`) is a cache and can always be thrown away.
 - **Reads work; direct writes are off by default.** Clients can read
   results - scan/stream a table, fetch an artifact's data
   (`GET /v1/artifacts/{id}/v/{n}/data`), and resolve a dataset by name
@@ -219,6 +230,47 @@ Compared to personal mode:
   gets its own QoS limiter pool, its own metric labels, and its own
   cache keying, bulk queries from tenant A can't starve tenant B's
   dashboards.
+
+## Running more than one replica
+
+Several service-mode nodes can sit behind one proxy when they share
+everything durable:
+
+- **One metadata store and one blob store.** Every node sets the same
+  `STRATA_ARTIFACT_METADATA_DSN` and the same bucket (see
+  [above](#production-reference-architecture)). The worker registry
+  lives in the metadata store, so a worker added through
+  `/v1/admin/notebook-workers` on one node is offered by every node from
+  its next request.
+- **One notebook storage.** Every node mounts the same
+  `STRATA_NOTEBOOK_STORAGE_DIR` (NFS, EFS, Filestore or similar), so any
+  node can open any notebook. A notebook's environment is built inside
+  its directory (or in `STRATA_NOTEBOOK_SHARED_ENV_DIR`, which then has
+  to be shared too), so run the same image on every node.
+- **The same secrets.** `STRATA_PROXY_TOKEN` and
+  `STRATA_TRANSFORM_SIGNING_SECRET` must match on every node, or a URL
+  signed on one node fails on another. Set `STRATA_NODE_ADVERTISED_URL`
+  per node to its own address, so stream fetches and a remote cell's
+  console reach the right node (see
+  [Running several nodes](../reference/configuration.md#running-several-nodes-behind-one-address)).
+- **Session-affine routing.** A notebook session, which
+  `POST /v1/notebooks/open` or `/create` returns, lives in the memory of
+  the node that opened it, together with its WebSocket and running
+  cells. Every later request for it must reach that node; any other node
+  answers `404`. Route each user to one node, with a sticky cookie or a
+  hash of the principal header, so the open and everything after it land
+  together.
+
+Not supported:
+
+- **Moving a live session.** When a node goes away its sessions go with
+  it. Opening the notebook again on another node starts a new session;
+  cells whose inputs did not change are cache hits when they run again.
+- **One notebook open on two nodes at once.** Each node keeps its own
+  session and writes the same files, with nothing coordinating them.
+- **Cluster-wide views of per-node state.** Cache warm jobs
+  (`/v1/cache/warm/jobs*`), QoS limits, rate limits and metrics are per
+  node; sum the metrics in your dashboards.
 
 ## Multi-tenancy
 

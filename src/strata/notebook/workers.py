@@ -6,18 +6,20 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
-import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx
 
 from strata.notebook.models import NotebookState, WorkerBackendType, WorkerSpec
 from strata.notebook.remote_executor import NOTEBOOK_EXECUTOR_TRANSFORM_REF
+
+if TYPE_CHECKING:
+    from strata.artifact_store import ArtifactStore
 
 logger = logging.getLogger(__name__)
 
@@ -176,17 +178,8 @@ def prune_worker_health_cache() -> int:
     return len(stale)
 
 
-def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
-    """Return the server-managed notebook worker registry.
-
-    The persisted file wins over the ``[tool.strata.transforms]`` table, so once
-    the admin routes change anything, editing the config and restarting has no
-    effect. ``strata_notebook_workers_source`` on the state says which is in force.
-    """
-    persisted = load_persisted_managed_worker_records()
-    if persisted is not None:
-        return persisted
-
+def _configured_managed_worker_records() -> list[ManagedWorkerRecord]:
+    """The configured ``notebook_workers`` table, in force until the registry is first set."""
     try:
         from strata.server import get_state
 
@@ -195,6 +188,54 @@ def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
         )
     except Exception:
         return []
+
+
+def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
+    """Return the server-managed notebook worker registry.
+
+    Read from the artifact metadata store on every call, so a change made through another
+    node sharing that store shows up here at once. Until the registry is first set, the
+    ``[tool.strata.transforms]`` table applies; after that, editing it has no effect.
+    """
+    from strata.artifact_store import get_artifact_store
+
+    store = get_artifact_store()
+    if store is not None:
+        entries = store.notebook_worker_entries()
+        if entries is not None:
+            return _parse_managed_worker_records(entries)
+    return _configured_managed_worker_records()
+
+
+def _change_server_managed_worker_records(
+    change: Callable[[list[ManagedWorkerRecord]], list[ManagedWorkerRecord]],
+) -> list[ManagedWorkerRecord]:
+    """Apply ``change`` to the registry in one store transaction; return the result.
+
+    Without an artifact store (a scan-only service server) the registry lives in memory.
+    """
+    from strata.artifact_store import get_artifact_store
+
+    store = get_artifact_store()
+    if store is None:
+        from strata.server import get_state
+
+        records = change(get_server_managed_worker_records())
+        get_state().config.transforms_config["notebook_workers"] = (
+            _serialize_managed_worker_records(records)
+        )
+        return get_server_managed_worker_records()
+
+    def apply(current: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        records = (
+            _parse_managed_worker_records(current)
+            if current is not None
+            else _configured_managed_worker_records()
+        )
+        return _serialize_managed_worker_records(change(records))
+
+    store.update_notebook_workers(apply)
+    return get_server_managed_worker_records()
 
 
 def set_server_managed_workers(workers: list[WorkerSpec]) -> list[WorkerSpec]:
@@ -213,10 +254,13 @@ def create_server_managed_worker_record(
     Raises:
         ValueError: If a worker with the same name already exists.
     """
-    records = get_server_managed_worker_records()
-    if any(existing.worker.name == record.worker.name for existing in records):
-        raise ValueError(record.worker.name)
-    return replace_server_managed_worker_records([*records, record])
+
+    def change(records: list[ManagedWorkerRecord]) -> list[ManagedWorkerRecord]:
+        if any(existing.worker.name == record.worker.name for existing in records):
+            raise ValueError(record.worker.name)
+        return [*records, record]
+
+    return _change_server_managed_worker_records(change)
 
 
 def update_server_managed_worker_record(
@@ -229,106 +273,87 @@ def update_server_managed_worker_record(
         KeyError: If the referenced worker does not exist.
         ValueError: If the requested new worker name would collide.
     """
-    records = get_server_managed_worker_records()
-    next_records: list[ManagedWorkerRecord] = []
-    updated = False
 
-    for existing in records:
-        if existing.worker.name == worker_name:
-            updated = True
-            continue
-        next_records.append(existing)
+    def change(records: list[ManagedWorkerRecord]) -> list[ManagedWorkerRecord]:
+        next_records: list[ManagedWorkerRecord] = []
+        updated = False
 
-    if not updated:
-        raise KeyError(worker_name)
+        for existing in records:
+            if existing.worker.name == worker_name:
+                updated = True
+                continue
+            next_records.append(existing)
 
-    if any(existing.worker.name == record.worker.name for existing in next_records):
-        raise ValueError(record.worker.name)
+        if not updated:
+            raise KeyError(worker_name)
 
-    insert_at = next(
-        (index for index, existing in enumerate(records) if existing.worker.name == worker_name),
-        len(next_records),
-    )
-    next_records.insert(insert_at, record)
-    return replace_server_managed_worker_records(next_records)
+        if any(existing.worker.name == record.worker.name for existing in next_records):
+            raise ValueError(record.worker.name)
 
-
-def managed_worker_registry_path() -> Path | None:
-    """Where the server-managed worker registry is persisted.
-
-    Beside the artifact store, the directory a deployment already treats as server
-    state. ``None`` without an artifact directory, rather than an invented location.
-    """
-    try:
-        from strata.server import get_state
-
-        artifact_dir = get_state().config.artifact_dir
-    except Exception:
-        return None
-    return Path(artifact_dir) / "notebook_workers.json" if artifact_dir else None
-
-
-def _persist_managed_worker_records(records: list[ManagedWorkerRecord]) -> None:
-    """Write the registry so an admin change survives a restart.
-
-    Every admin mutation goes through ``replace_server_managed_worker_records``.
-    Written to a sibling and renamed, since a half-written file at boot would start
-    a server with no workers.
-    """
-    path = managed_worker_registry_path()
-    if path is None:
-        return
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(_serialize_managed_worker_records(records), handle, indent=2)
-        os.replace(tmp_name, path)
-    except OSError as exc:
-        # The mutation is already live in memory mid-request; failing now would make the
-        # server and its answer disagree. Log loudly: the change will not survive a restart.
-        logger.error(
-            "Could not persist the notebook worker registry to %s (%s). "
-            "The change is live but will be lost on restart.",
-            path,
-            exc,
+        insert_at = next(
+            (
+                index
+                for index, existing in enumerate(records)
+                if existing.worker.name == worker_name
+            ),
+            len(next_records),
         )
+        next_records.insert(insert_at, record)
+        return next_records
+
+    return _change_server_managed_worker_records(change)
 
 
-def load_persisted_managed_worker_records() -> list[ManagedWorkerRecord] | None:
-    """The registry as last persisted, or ``None`` if there is no file.
+def import_worker_registry_file(artifact_dir: Path, store: ArtifactStore) -> None:
+    """Move the registry earlier releases kept in ``notebook_workers.json`` into the store.
 
-    ``None`` means fall back to the configured table; an empty registry means an
-    operator deleted every worker.
+    Imported only while the store holds no registry, so a node starting with a stale
+    copy cannot overwrite one another node set. The file is then renamed
+    ``notebook_workers.json.migrated`` either way, so this runs once per file.
     """
-    path = managed_worker_registry_path()
-    if path is None or not path.exists():
-        return None
+    path = artifact_dir / "notebook_workers.json"
+    if not path.exists():
+        return
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        # Not fatal (a corrupt file must not stop boot) but not silent, or the admin changes
-        # would look like they were never made.
         logger.error(
-            "Could not read the notebook worker registry at %s (%s); "
-            "falling back to the configured table.",
+            "Could not read the notebook worker registry at %s (%s), so it was not imported "
+            "into the artifact metadata store. Fix or remove the file and restart.",
             path,
             exc,
         )
-        return None
-    return _parse_managed_worker_records(raw)
+        return
+    entries = _serialize_managed_worker_records(_parse_managed_worker_records(raw))
+    imported = store.update_notebook_workers(lambda current: entries if current is None else None)
+    migrated = path.with_name(path.name + ".migrated")
+    try:
+        path.replace(migrated)
+    except OSError as exc:
+        logger.error("Could not rename %s to %s (%s).", path, migrated, exc)
+        return
+    if imported is not None:
+        logger.warning(
+            "Imported %d notebook workers from %s into the artifact metadata store; "
+            "the file is now %s and is no longer read.",
+            len(entries),
+            path,
+            migrated,
+        )
+    else:
+        logger.warning(
+            "Did not import %s: the artifact metadata store already holds a notebook worker "
+            "registry. The file is now %s and is no longer read.",
+            path,
+            migrated,
+        )
 
 
 def replace_server_managed_worker_records(
     records: list[ManagedWorkerRecord],
 ) -> list[ManagedWorkerRecord]:
     """Replace the configured service-mode notebook worker registry."""
-    from strata.server import get_state
-
-    state = get_state()
-    state.config.transforms_config["notebook_workers"] = _serialize_managed_worker_records(records)
-    _persist_managed_worker_records(records)
-    return get_server_managed_worker_records()
+    return _change_server_managed_worker_records(lambda _current: records)
 
 
 def set_server_managed_worker_enabled(
@@ -336,30 +361,35 @@ def set_server_managed_worker_enabled(
     enabled: bool,
 ) -> list[ManagedWorkerRecord]:
     """Enable or disable one service-managed worker by name."""
-    records = get_server_managed_worker_records()
-    updated = False
-    next_records: list[ManagedWorkerRecord] = []
 
-    for record in records:
-        if record.worker.name == worker_name:
-            next_records.append(ManagedWorkerRecord(worker=record.worker, enabled=enabled))
-            updated = True
-        else:
-            next_records.append(record)
+    def change(records: list[ManagedWorkerRecord]) -> list[ManagedWorkerRecord]:
+        updated = False
+        next_records: list[ManagedWorkerRecord] = []
 
-    if not updated:
-        raise KeyError(worker_name)
+        for record in records:
+            if record.worker.name == worker_name:
+                next_records.append(ManagedWorkerRecord(worker=record.worker, enabled=enabled))
+                updated = True
+            else:
+                next_records.append(record)
 
-    return replace_server_managed_worker_records(next_records)
+        if not updated:
+            raise KeyError(worker_name)
+        return next_records
+
+    return _change_server_managed_worker_records(change)
 
 
 def delete_server_managed_worker_record(worker_name: str) -> list[ManagedWorkerRecord]:
     """Delete one service-managed worker by name."""
-    records = get_server_managed_worker_records()
-    next_records = [record for record in records if record.worker.name != worker_name]
-    if len(next_records) == len(records):
-        raise KeyError(worker_name)
-    return replace_server_managed_worker_records(next_records)
+
+    def change(records: list[ManagedWorkerRecord]) -> list[ManagedWorkerRecord]:
+        next_records = [record for record in records if record.worker.name != worker_name]
+        if len(next_records) == len(records):
+            raise KeyError(worker_name)
+        return next_records
+
+    return _change_server_managed_worker_records(change)
 
 
 def validate_worker_assignment(

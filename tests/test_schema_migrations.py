@@ -126,6 +126,24 @@ class TestExistingDatabase:
             ArtifactStore(tmp_path / "s")
 
 
+class TestTheWorkerRegistryMigration:
+    def test_a_database_from_before_it_gains_the_tables(self, tmp_path):
+        db_path = ArtifactStore(tmp_path / "old").db_path
+        conn = sqlite3.connect(db_path)
+        conn.execute("DROP TABLE notebook_workers")
+        conn.execute("DROP TABLE notebook_worker_registry")
+        conn.execute("DELETE FROM schema_version WHERE version >= 8")
+        conn.commit()
+        conn.close()
+
+        reopened = ArtifactStore(tmp_path / "old")
+        entry = {"name": "box", "backend": "executor", "enabled": True}
+        reopened.update_notebook_workers(lambda current: [entry])
+
+        assert reopened.notebook_worker_entries() == [entry]
+        assert _version(db_path) == _LATEST_SCHEMA_VERSION
+
+
 class TestConstantsAndMigrationsAgree:
     def test_a_migrated_database_matches_a_fresh_one(self, tmp_path):
         """A column added to the schema constants without a migration breaks only old stores.

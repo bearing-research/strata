@@ -593,6 +593,12 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
 
     store = get_artifact_store(config.artifact_dir, blob_store=blob_store, dialect=dialect)
 
+    # Earlier releases kept the worker registry in a file here, one copy per node.
+    if store is not None and config.artifact_dir is not None:
+        from strata.notebook.workers import import_worker_registry_file
+
+        import_worker_registry_file(config.artifact_dir, store)
+
     # API keys share the artifact database and backend. Created here so the
     # per-request auth middleware never creates the schema.
     if config.auth_mode == "api_key" and config.artifact_dir is not None:
