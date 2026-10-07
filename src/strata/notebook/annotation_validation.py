@@ -22,10 +22,10 @@ from strata.notebook.models import (
     DiagnosticSeverity,
     NotebookState,
 )
+from strata.notebook.workers import resolve_worker_spec
 
 logger = logging.getLogger(__name__)
 
-_BUILTIN_WORKER_NAMES = frozenset({"local"})
 _SUPPORTED_MOUNT_SCHEMES = frozenset({"file", "s3", "gs", "gcs", "az", "azure"})
 
 
@@ -71,20 +71,20 @@ def validate_cell_annotations(
     annotations = parse_annotations(cell.source)
 
     # --- worker_unknown ---
-    if annotations.worker:
-        known = {w.name for w in notebook_state.workers} | _BUILTIN_WORKER_NAMES
-        if annotations.worker not in known:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="worker_unknown",
-                    message=(
-                        f"`@worker {annotations.worker}` is not declared in this notebook. "
-                        "Execution will fail until the worker is added."
-                    ),
-                    line=_find_annotation_line(cell.source, "worker"),
-                )
+    # The catalog execution resolves against: in service mode the server's registry,
+    # where members cannot declare workers at all.
+    if annotations.worker and resolve_worker_spec(notebook_state, annotations.worker) is None:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="worker_unknown",
+                message=(
+                    f"`@worker {annotations.worker}` is not a worker this notebook can use. "
+                    "Execution will fail until the worker is added."
+                ),
+                line=_find_annotation_line(cell.source, "worker"),
             )
+        )
 
     # --- mount checks ---
     notebook_mount_names = {m.name for m in notebook_state.mounts}

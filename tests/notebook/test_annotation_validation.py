@@ -92,6 +92,47 @@ class TestWorkerUnknown:
         assert "ghost" in diagnostics[0].message
 
 
+class TestWorkerAgainstServerCatalog:
+    """The check uses the catalog execution resolves against, not only notebook.toml."""
+
+    @staticmethod
+    def _server(monkeypatch, mode: str) -> None:
+        from types import SimpleNamespace
+
+        catalog = [
+            {"name": "gpu-http", "backend": "executor", "config": {"url": "http://w:1"}},
+            {
+                "name": "off",
+                "backend": "executor",
+                "config": {"url": "http://w:2"},
+                "enabled": False,
+            },
+        ]
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    deployment_mode=mode, transforms_config={"notebook_workers": catalog}
+                )
+            ),
+        )
+
+    @pytest.mark.parametrize("mode", ["service", "personal"])
+    def test_a_server_catalog_worker_is_known(self, monkeypatch, mode):
+        self._server(monkeypatch, mode)
+        assert _codes(_cell("# @worker gpu-http\nx = 1"), _nb()) == []
+
+    def test_a_disabled_server_worker_is_unknown(self, monkeypatch):
+        self._server(monkeypatch, "service")
+        assert _codes(_cell("# @worker off\nx = 1"), _nb()) == ["worker_unknown"]
+
+    def test_a_notebook_worker_is_unknown_in_service_mode(self, monkeypatch):
+        """Service mode ignores notebook-declared workers, so execution would fail."""
+        self._server(monkeypatch, "service")
+        nb = _nb(workers=[WorkerSpec(name="mine", backend=WorkerBackendType.EXECUTOR)])
+        assert _codes(_cell("# @worker mine\nx = 1"), nb) == ["worker_unknown"]
+
+
 class TestMountUriUnsupported:
     """`@mount` URI scheme not in the supported set."""
 
