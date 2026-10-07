@@ -81,17 +81,19 @@ def new_auth_token() -> str:
 class MachineType:
     """A named capability class the pool can provision; the backend interprets the rest."""
 
+    # Bounds in field metadata are enforced where pydantic validates a catalogue
+    # (`PUT /v1/machine-types`); the library itself stays pydantic-free.
     name: str
     image: str
-    max_workers: int = 10
+    max_workers: int = field(default=10, metadata={"ge": 1})
     """Cap on machines of this type *per tenant*, since a machine belongs to
     one tenant for its life. ``Pool(max_workers_total=...)`` caps the whole
     fleet on top of this."""
 
-    boot_timeout_seconds: float = 120.0
-    job_timeout_seconds: float = 300.0
+    boot_timeout_seconds: float = field(default=120.0, metadata={"gt": 0})
+    job_timeout_seconds: float = field(default=300.0, metadata={"gt": 0})
 
-    cool_down_seconds: float = 300.0
+    cool_down_seconds: float = field(default=300.0, metadata={"ge": 0})
     """Idle time before a machine is stopped.
 
     Lower it for anything expensive. Five idle minutes on a CPU worker is
@@ -99,7 +101,7 @@ class MachineType:
     outlives a forgotten notebook by a weekend is the costliest bug this
     system can produce.
     """
-    health_check_failures: int = 3
+    health_check_failures: int = field(default=3, metadata={"ge": 0})
     """Consecutive failed probes before a warm machine is retired.
 
     Not one: a single missed probe is a slow machine, a restarting agent, or a
@@ -113,12 +115,12 @@ class MachineType:
 
     env: dict[str, str] = field(default_factory=dict)
 
-    cpus: float | None = None
+    cpus: float | None = field(default=None, metadata={"gt": 0})
     """CPU allowance. None means whatever the backend defaults to, which for
     a container is the whole host. Ignored by providers that size a machine
     by its GPU rather than by cores."""
 
-    memory_mb: int | None = None
+    memory_mb: int | None = field(default=None, metadata={"gt": 0})
 
     gpu_type: str | None = None
     """The provider's own name for the accelerator, e.g. "NVIDIA H100 80GB
@@ -127,8 +129,8 @@ class MachineType:
     inventing one would put a lossy translation between the user and the
     hardware they asked for."""
 
-    gpu_count: int = 1
-    disk_gb: int | None = None
+    gpu_count: int = field(default=1, metadata={"ge": 0})
+    disk_gb: int | None = field(default=None, metadata={"gt": 0})
 
     provider_options: dict[str, object] = field(default_factory=dict)
     """Merged into the backend's create request. The escape hatch for the

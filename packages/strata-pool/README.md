@@ -193,8 +193,11 @@ Both job submit routes take their options as query parameters: `machine_type`
 the type's `boot_timeout_seconds` plus `job_timeout_seconds`. Both times must be
 positive and finite; anything else is a 422 and no job is queued.
 
-`PUT /v1/machine-types` checks each field's type before storing anything: a
-number sent as a string, an unknown key or a non-finite number is a 400.
+`PUT /v1/machine-types` checks each field's type and range before storing
+anything: a number sent as a string, an unknown key, a non-finite number, a
+`max_workers` below 1, a timeout, `cpus`, `memory_mb` or `disk_gb` of zero or
+less, or a negative cool-down, `health_check_failures` or `gpu_count` is a 400
+naming the field.
 
 Replacing the catalogue needs the **admin token**. A catalogue entry decides
 which image receives a tenant's jobs, and with them the signed URLs for that
@@ -251,7 +254,9 @@ safe. A job that completed, failed or timed out is a 409, like a result asked
 for too early.
 
 Every route but `/health` requires `Authorization: Bearer <api_token>` (the
-admin token is accepted wherever the API token is), and every job route
+admin token is accepted wherever the API token is). `/health` is
+unauthenticated and lists the machine-type names and the fleet's machine
+counts by state, so anyone who can reach the pool can read them. Every job route
 requires `X-Strata-Tenant`, reads included. So do the worker and usage
 listings, unless the caller presents the admin token. A tenant reads only
 its own jobs: another tenant's job id answers 404, not 403, so the id does not
