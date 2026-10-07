@@ -3728,15 +3728,16 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def list_name_reads(self, tenant: str | None = None) -> list[tuple[str, str]]:
-        """Return ``(artifact_id, reference)`` for each ready artifact that read a name.
+    def list_name_reads(self, tenant: str | None = None) -> list[tuple[str | None, str, str]]:
+        """Return ``(tenant, artifact_id, reference)`` for each ready artifact that read a name.
 
         ``reference`` is what follows ``strata://name/`` in its inputs, e.g.
-        ``taxi/model@champion``. ``tenant`` of ``None`` reads every tenant.
+        ``taxi/model@champion``. The returned tenant is ``None`` for the default tenant.
+        ``tenant`` of ``None`` reads every tenant.
         """
         prefix = "strata://name/"
         query = (
-            "SELECT id, input_versions FROM artifact_versions "
+            "SELECT id, tenant, input_versions FROM artifact_versions "
             "WHERE state = 'ready' AND input_versions LIKE ?"
         )
         params: tuple = (f"%{prefix}%",)
@@ -3748,11 +3749,11 @@ class ArtifactStore:
             rows = conn.execute(query + " ORDER BY id", params).fetchall()
         finally:
             conn.close()
-        reads: list[tuple[str, str]] = []
+        reads: list[tuple[str | None, str, str]] = []
         for row in rows:
             for uri in json.loads(row["input_versions"]):
                 if uri.startswith(prefix):
-                    reads.append((row["id"], uri[len(prefix) :]))
+                    reads.append((row["tenant"] or None, row["id"], uri[len(prefix) :]))
         return reads
 
     def get_name_for_artifact(

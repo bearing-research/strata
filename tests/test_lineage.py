@@ -411,10 +411,10 @@ class TestArtifactStoreLineageMethods:
         reader("theirs", "team-b")
         reader("building", "team-a", finalize=False)
 
-        assert store.list_name_reads(tenant="team-a") == [("ours", "taxi/model@champion")]
+        assert store.list_name_reads(tenant="team-a") == [("team-a", "ours", "taxi/model@champion")]
         assert store.list_name_reads() == [
-            ("ours", "taxi/model@champion"),
-            ("theirs", "taxi/model@champion"),
+            ("team-a", "ours", "taxi/model@champion"),
+            ("team-b", "theirs", "taxi/model@champion"),
         ]
 
     def test_get_name_for_artifact_method(self, tmp_path):

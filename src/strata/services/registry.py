@@ -21,12 +21,13 @@ class RegistryService:
     def summary(
         self, store: ArtifactStore, *, tenant: str | None, all_tenants: bool = False
     ) -> list[dict]:
-        """Rows for the dashboard names table: aliases, current version, tags, URI and readers.
+        """Rows for the dashboard names table: tenant, aliases, current version, tags, URI, readers.
 
         ``tenant`` is the caller's tenant (``None`` is the default tenant); ``all_tenants`` reads
-        every tenant instead. Internal ``nb_*`` tags are hidden.
+        every tenant instead, so one name can appear once per tenant. Internal ``nb_*`` tags are
+        hidden.
         """
-        readers = self.readers(store, tenant=tenant, all_tenants=all_tenants)
+        readers = self._readers_by_tenant(store, scope=None if all_tenants else (tenant or ""))
         if all_tenants:
             names = store.list_all_names()
             aliases = store.list_all_aliases()
@@ -42,6 +43,7 @@ class RegistryService:
             tags = store.get_tags(n.artifact_id, n.version, tenant=n.tenant)
             rows.append(
                 {
+                    "tenant": n.tenant,
                     "name": n.name,
                     "artifact_id": n.artifact_id,
                     "version": n.version,
@@ -49,32 +51,38 @@ class RegistryService:
                     "aliases": aliases_by_name.get((n.tenant, n.name), {}),
                     # Hide internal stamps (nb_cell) from the user-facing table.
                     "tags": {k: v for k, v in tags.items() if not k.startswith("nb_")},
-                    "readers": readers.get(n.name, []),
+                    "readers": readers.get((n.tenant, n.name), []),
                 }
             )
         return rows
 
-    def readers(
-        self, store: ArtifactStore, *, tenant: str | None, all_tenants: bool = False
-    ) -> dict[str, list[dict]]:
-        """Per name, the notebook cells whose stored results read it (``# @dataset``).
+    def readers(self, store: ArtifactStore, *, tenant: str | None) -> dict[str, list[dict]]:
+        """Per name, the cells in ``tenant`` whose stored results read it (``# @dataset``).
 
-        Scoped as :meth:`summary`. A cell with several outputs, or several reads of one name, is
-        listed once.
+        ``None`` is the default tenant. A cell with several outputs, or several reads of one
+        name, is listed once.
         """
-        found: dict[str, dict[tuple[str, str], dict]] = {}
-        # Here None reads every tenant, and the default tenant is stored as ''.
-        scope = None if all_tenants else (tenant or "")
-        for artifact_id, reference in store.list_name_reads(tenant=scope):
+        return {
+            name: cells
+            for (_, name), cells in self._readers_by_tenant(store, scope=tenant or "").items()
+        }
+
+    def _readers_by_tenant(
+        self, store: ArtifactStore, *, scope: str | None
+    ) -> dict[tuple[str | None, str], list[dict]]:
+        # Keyed by tenant too: two tenants may each have a name of the same spelling.
+        # ``scope`` None reads every tenant, and the default tenant is stored as ''.
+        found: dict[tuple[str | None, str], dict[tuple[str, str], dict]] = {}
+        for read_tenant, artifact_id, reference in store.list_name_reads(tenant=scope):
             cell = _CELL_ARTIFACT_ID.match(artifact_id)
             if cell is None:
                 continue
             name = reference.rpartition("@")[0] if "@" in reference else reference
             key = (cell["notebook_id"], cell["cell_id"])
-            found.setdefault(name, {}).setdefault(
+            found.setdefault((read_tenant, name), {}).setdefault(
                 key, {"notebook_id": key[0], "cell_id": key[1], "reference": reference}
             )
-        return {name: list(cells.values()) for name, cells in found.items()}
+        return {key: list(cells.values()) for key, cells in found.items()}
 
     def artifacts_by_tag(
         self, store: ArtifactStore, key: str, value: str | None = None, *, tenant: str | None

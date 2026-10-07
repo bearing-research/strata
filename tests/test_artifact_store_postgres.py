@@ -133,8 +133,11 @@ class TestRoundTrip:
             )
             store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=0)
 
-        assert store.list_name_reads(tenant="team-a") == [("ours", "taxi/model@champion")]
-        assert [read[0] for read in store.list_name_reads()] == ["ours", "theirs"]
+        assert store.list_name_reads(tenant="team-a") == [("team-a", "ours", "taxi/model@champion")]
+        assert [read[:2] for read in store.list_name_reads()] == [
+            ("team-a", "ours"),
+            ("team-b", "theirs"),
+        ]
 
     def test_tags_and_aliases_round_trip(self, store):
         # Exercises _REGISTRY_SCHEMA_SQL, which carries the one AUTOINCREMENT

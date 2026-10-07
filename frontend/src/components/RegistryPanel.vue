@@ -150,7 +150,7 @@ function tagList(tags: Record<string, string>): string {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="n in registryNames" :key="n.name">
+          <tr v-for="n in registryNames" :key="`${n.tenant ?? ''}:${n.name}`">
             <td class="name">{{ n.name }}</td>
             <td class="aliases">
               <span
