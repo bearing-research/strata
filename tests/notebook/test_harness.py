@@ -326,6 +326,20 @@ plt.show()
         assert "_" in result["variables"]
         assert result["variables"]["_"]["content_type"] == "image/png"
 
+    def test_harness_does_not_import_pyplot_for_a_cell_that_does_not(self, harness_script):
+        """Importing it for every cell is slow, and on a fresh install its font-cache notice
+        lands in the stderr of whichever cell ran first."""
+        pytest.importorskip("matplotlib.pyplot")
+        manifest = {
+            "source": "import sys\nprint('matplotlib.pyplot' in sys.modules)\n",
+            "inputs": {},
+        }
+
+        result = run_harness(harness_script, manifest)
+
+        assert result["success"] is True
+        assert result["stdout"].strip() == "False"
+
     def test_harness_captures_multiple_visible_outputs_in_order(self, harness_script):
         """Visible outputs should be emitted in order with the last one preserved as '_'."""
         manifest = {
