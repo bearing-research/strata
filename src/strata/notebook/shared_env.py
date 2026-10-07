@@ -587,4 +587,8 @@ def _collect(
             shutil.rmtree(env_dir)
             if refs.is_dir():
                 shutil.rmtree(refs)
+            # Unlinked while held: filelock 3.24+ drops a lock it took on an unlinked file
+            # and retries on a new one. Windows cannot remove a file held open.
+            if os.name != "nt":
+                (root / f"{key}.lock").unlink(missing_ok=True)
             result.removed.append(prefix + key)
