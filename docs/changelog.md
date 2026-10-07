@@ -70,12 +70,17 @@ from outside the frontend.
 - Some notebook cells run once more after upgrading, then cache as before:
   every SQL cell (its cache key is now its own query text); a cell that reads
   a name more than one upstream cell defines, which then reads it from the
-  cell the DAG wires; cells that read a loop cell's output, `start_from` forks,
-  loops whose `@loop_until` reads an upstream name, and prompt cells that read
-  an upstream scalar; cells whose `[env]` held a blanked secret, since that
-  empty value no longer reaches them; and cells in a notebook whose `uv.lock`
-  has no dev group, since provenance no longer includes the notebook's own
-  project name.
+  cell the DAG wires; every loop and `# @per_variant` cell, since their cache
+  keys now cover the `@loop` and `@loop_until` parameters and the sweep group,
+  and the cells that read them; prompt cells that read an upstream scalar;
+  cells whose `[env]` held a blanked secret, since that empty value no longer
+  reaches them; and cells in a notebook whose `uv.lock` has no dev group, since
+  provenance no longer includes the notebook's own project name.
+- Cell test results recorded by 0.8.0 show stale once: the stale check now
+  covers the cell's mounts, fetches, datasets, tables and environment.
+- An SSH worker needs `strata-worker` from this release: an older one does not
+  report the `launch_id` Strata now checks, and is refused. Let Strata install
+  the new one, or upgrade it on the box.
 - Leaf cells, ones nothing else reads, are now cache hits on an unchanged run,
   in Run All too. A leaf kept only for its side effect (writing a file, sending
   a message) runs once until its source or inputs change; mark it `# @nocache`
@@ -323,7 +328,9 @@ from outside the frontend.
   inputs and the steps behind it (up to 10 deep), so lineage walks past the
   dataset, and the Registry tab shows which notebook cells read each name
   ("Read by"; `readers` on `/v1/registry/summary` and the notebook artifacts
-  route). `GET /v1/artifacts/{id}/v/{n}` returns `input_versions`.
+  route). In the all-tenant summary each row carries its `tenant` and lists
+  only that tenant's readers. `GET /v1/artifacts/{id}/v/{n}` returns
+  `input_versions`.
 - **DuckDB cells reach more lakes.** Connections attach AWS Glue catalogs, read
   `gs://` and `az://` mounts through the mount's own filesystem, and on a
   personal server use catalogs defined in notebook.toml (`[catalogs.<name>]`).
@@ -488,7 +495,9 @@ from outside the frontend.
 - strata-pool submit routes take `timeout_seconds` and `wait_seconds` only as
   positive finite numbers and `priority` as a 64-bit integer (422 otherwise);
   a job's timeout can shorten its machine type's but not extend it;
-  `PUT /v1/machine-types` refuses wrongly typed fields with a 400.
+  `PUT /v1/machine-types` refuses wrongly typed or out-of-range fields (a
+  `max_workers` below 1, a timeout of zero or less) with a 400 naming the
+  field.
 
 ### Security
 
@@ -507,9 +516,11 @@ from outside the frontend.
   resolved path, checked again just before opening. A BigQuery connection must
   name a `credentials_path` key file in the notebook's directory (the
   `write_credentials_path` one too, when set): without one it would run as the
-  server's own Google credentials. `${VAR}` in a connection's `auth` reads the
-  notebook's env, never the server's environment. The cell, the connection's
-  schema listing and saving the connection all refuse what breaks these rules.
+  server's own Google credentials, and reopening a notebook no longer reads a
+  key file the connection may not use. `${VAR}` in a connection's `auth`
+  reads the notebook's env, never the server's environment. The cell, the
+  connection's schema listing and saving the connection all refuse what breaks
+  these rules.
   Personal mode is unchanged.
 - **Service-mode notebooks install wheels only.** Building a package from a
   source distribution runs its build backend as the server's user with the
@@ -517,6 +528,8 @@ from outside the frontend.
   from. Every uv command a notebook runs in service mode (`sync`, `add`,
   `lock`, the `uv run` that starts a cell) now refuses to build, and a
   dependency with no wheel fails to resolve with uv's message saying so.
+  Personal mode still builds, so opening or importing someone else's notebook
+  there runs its package build code; the environment docs now say so.
 - **Outbound fetches connect only to an address the guard checked.** The URL
   guard on `@fetch` and worker manifest URLs resolved a host and checked every
   address, but the request resolved the name again when it connected, so a
@@ -578,9 +591,9 @@ from outside the frontend.
   longer returns a managed worker's literal token, and a cell on a `signed`
   worker no longer stores its env, secrets included, in the server's build and
   artifact rows: only the names and a digest are kept, and the values travel
-  only to the worker. Adding an SSH worker fails if the worker it launched is
-  not the one answering, instead of sending the token to whatever answered on
-  that port.
+  only to the worker. Adding an SSH worker connects only when the worker
+  answering on its port reports the one-off `launch_id` that launch gave it,
+  instead of sending the token to whatever answered on that port.
 - **A withdrawn publication keeps nothing public but its tombstone.**
   `GET /v1/publications/{token}` for a withdrawn publication carries only the
   token, title and the publish and withdraw times, no lineage, sources,
@@ -875,17 +888,26 @@ from outside the frontend.
   result (for example `REAL` to `NUMERIC`) run again; a `# @cache snapshot`
   SQL cell runs its own query; a DuckDB `:name` bind in the select list
   parses.
+- A `:name` inside a string whose quote is escaped with a backslash is no
+  longer read as a bind: Postgres `E'it\'s :z'`, and ordinary `'it\'s :z'` on
+  Snowflake, BigQuery and MySQL.
 - A cell reading a name that more than one upstream cell defines gets it from
   the cell the DAG wires, in single runs, Run All, warm workers, loop seeds,
   SQL binds and prompt templates; before, it could silently read the shadowed
   value. Lineage lists only the cell the name was read from.
 - A cell reading a loop cell's output runs again when the loop's result
   changes, and a `start_from=<cell>@iter=k` loop depends on the cell it starts
-  from.
-- Loop cells: a `@loop_until` that raises fails the cell; names the predicate
-  reads from upstream are inputs; a carry updated in place works; an extra
-  output first read after the loop's last run is stored; a body failure with
-  no message names its exception.
+  from, and fails naming it when that cell's latest run stopped before
+  iteration k, instead of seeding from a step an older run left behind.
+- Loop cells: editing `max_iter`, `carry`, `start_from` or `@loop_until` runs
+  the loop again, where it was a cache hit on the old result; a `@loop_until`
+  that raises fails the cell; names the predicate reads from upstream are
+  inputs; a carry updated in place works; an extra output first read after the
+  loop's last run is stored; a body failure with no message names its
+  exception.
+- Switching a `# @per_variant` cell to another sweep group runs it again,
+  where a group whose variants share names with the old one returned the old
+  group's results.
 - Prompt cells render an upstream datetime, Decimal or numpy scalar as the
   value, and a provider timeout names the error type.
 - The dependency graph handles `import os.path`, a name read before the same
@@ -902,14 +924,25 @@ from outside the frontend.
 - A NaN or infinite widget value is refused, and a notebook that already saved
   one opens again; a `None` inside a displayed value is no longer exported as
   an empty string.
-- Cell tests get the cell's `@fetch` files, `@mount` paths and env, show stale
-  after reopening when something they depend on changed, and are deleted with
-  their cell.
+- Cell tests get the cell's `@fetch` files, `@mount` paths, env, `@dataset`
+  values and `@table` names and snapshot ids (one that cannot be resolved is a
+  single errored test naming it), show stale when anything the cell reads
+  changes, after reopening too, and are deleted with their cell.
+- A leaf cell reads stale, not idle, after a cell it reads is edited and re-run
+  or a `# @nocache` cell it reads runs again.
+- `strata watch` and `strata-notebook-tui` without the `[tui]` extra print one
+  line naming the extra instead of a traceback.
+- Opening a notebook outside the server no longer runs `uv python list` on
+  every config load.
 - Importing a requirements.txt or environment.yaml no longer removes
   `pyarrow`, `orjson` and `cloudpickle`.
 - Jupyter import writes only installable dependencies, leaves `%` and `!`
   inside strings and brackets alone, keeps indented blocks valid, and maps
-  `google.cloud.<x>` imports to `google-cloud-<x>`.
+  `google.cloud.<x>` imports to `google-cloud-<x>`, or to the package that
+  provides one named differently (`google.cloud.sql.connector` to
+  `cloud-sql-python-connector`). Only a `;` ending the last statement hides a
+  cell's value, as in IPython, not a comment line ending in one, and an
+  R-kernel `.ipynb` imports as R cells.
 - MCP edits reload the session once.
 - The notebook page no longer goes blank when the browser blocks site data,
   an embedded app view included.
@@ -936,11 +969,14 @@ from outside the frontend.
 - Registry summary and by-tag reads scope tenants correctly: a tenant sees its
   own notebook stamps, and an `admin:*` summary lists every tenant.
 - A transform build reads its inputs at the versions admission recorded, even
-  after an append or a name move; a pull-model manifest does the same for a
-  `strata://name/` input.
+  after an append or a name move, and a table empty at admission is read
+  empty, with the schema it had then; a pull-model manifest does the same for
+  a `strata://name/` input.
 - A refused, cancelled or failed stream fetch frees its slots and keeps the
   stream expiring, so overload no longer leaks streams or leaves every later
-  fetch answering 429.
+  fetch answering 429. That covers a store that cannot be opened, a build that
+  cannot start, and, with no artifact store, a client gone before the first
+  chunk.
 - A Parquet footer whose statistics cannot be converted is served from memory
   instead of failing the load.
 - `name_prefix` and dependents lookups match underscores literally.

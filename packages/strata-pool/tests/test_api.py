@@ -372,6 +372,44 @@ class TestCatalogueWrites:
         assert api.pool.store.load_machine_types() is None
         assert api.pool.machine_types["cpu"].cool_down_seconds == 300.0
 
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("max_workers", -1),
+            ("max_workers", 0),
+            ("boot_timeout_seconds", 0.0),
+            ("job_timeout_seconds", -5.0),
+            ("cool_down_seconds", -1.0),
+            ("health_check_failures", -1),
+            ("cpus", 0.0),
+            ("memory_mb", -512),
+            ("gpu_count", -1),
+            ("disk_gb", 0),
+        ],
+    )
+    async def test_an_out_of_range_catalogue_is_refused_naming_the_field(self, api, field, value):
+        """A negative cap or a zero timeout type-checks, then breaks every job of that type."""
+        entry = {"name": "cpu", "image": "w", field: value}
+        response = await api.put("/v1/machine-types", json=[entry], headers=ADMIN)
+
+        assert response.status_code == 400
+        assert f"0.{field}: Input should be greater than" in response.json()["detail"]
+        assert api.pool.store.load_machine_types() is None
+
+    async def test_the_lowest_values_in_range_are_accepted(self, api):
+        entry = {
+            "name": "cpu",
+            "image": "w",
+            "max_workers": 1,
+            "cool_down_seconds": 0.0,
+            "health_check_failures": 0,
+            "gpu_count": 0,
+        }
+        response = await api.put("/v1/machine-types", json=[entry], headers=ADMIN)
+
+        assert response.status_code == 200
+        assert api.pool.machine_types["cpu"].max_workers == 1
+
     async def test_a_catalogue_that_is_not_a_list_is_refused(self, api):
         response = await api.put("/v1/machine-types", json={"name": "cpu"}, headers=ADMIN)
 

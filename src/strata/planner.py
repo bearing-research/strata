@@ -358,7 +358,7 @@ class ReadPlanner:
         resolved_snapshot_id = self.catalog.get_snapshot_id(table, snapshot_id)
         if resolved_snapshot_id is None:
             # Created, never written: zero rows with the table's schema, as other engines read it.
-            schema = table.schema()
+            schema = table.schemas()[schema_id] if schema_id is not None else table.schema()
             table_arrow_schema = snapshot_arrow_schema(schema)
             _assert_projection_exists(columns, table_arrow_schema, str(table_identity))
             return ReadPlan(

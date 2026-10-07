@@ -235,7 +235,7 @@ class SqlDialect(Protocol):
         """Open a transaction that serializes writers contending on ``key``.
 
         Used where a read-modify-write must not race: ``create_artifact`` computing
-        ``MAX(version)+1``, and ``force_finalize_canonical``. ``key`` lets a backend
+        ``MAX(version)+1``, and ``finalize_canonical_together``. ``key`` lets a backend
         lock narrowly rather than globally.
         """
         ...
@@ -569,7 +569,7 @@ class PostgresDialect:
 
         Preferred over ``SERIALIZABLE``: no retry loop, released at commit or rollback,
         and keyed so unrelated artifacts do not queue. It is weaker than SQLite's
-        whole-file lock: ``force_finalize_canonical`` can still race writers on other
+        whole-file lock: ``finalize_canonical_together`` can still race writers on other
         ids sharing a provenance hash, which ``idx_tenant_provenance_unique`` rejects and
         the caller resolves by catching :attr:`integrity_error`.
         """

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import pyarrow as pa
@@ -23,11 +24,31 @@ from strata.pool_metrics import get_pool_tracker
 from strata.streaming import QoSRejected
 
 if TYPE_CHECKING:
+    from starlette.types import Receive, Scope, Send
+
     from strata.server import ServerState
 
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["streams"])
+
+
+class _ClosingStreamingResponse(StreamingResponse):
+    """A streaming response that runs ``on_close`` once it is done sending, however it ends.
+
+    A generator's ``finally`` runs only if the body was iterated; a client gone before the
+    first chunk never starts it.
+    """
+
+    def __init__(self, content: Any, *, on_close: Callable[[], Awaitable[None]], **kwargs: Any):
+        super().__init__(content, **kwargs)
+        self._on_close = on_close
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self._on_close()
 
 
 def _resolve_stream_owner(state: ServerState, stream_id: str) -> str | None:
@@ -120,7 +141,12 @@ async def get_stream(stream_id: str, request: Request):
 
     from strata.artifact_store import get_artifact_store
 
-    store = get_artifact_store(state.config.artifact_dir)
+    try:
+        store = get_artifact_store(state.config.artifact_dir)
+    except BaseException:
+        await admission.release()
+        state.streams.schedule_cleanup(stream_id, scan_id)
+        raise
 
     # No artifact store: stream a bounded pass-through from the fetcher. With
     # nothing to finalize, a client disconnect just ends the generator.
@@ -128,60 +154,59 @@ async def get_stream(stream_id: str, request: Request):
 
         async def serve_passthrough():
             start_time = time.perf_counter()
-            try:
-                if not plan.tasks:
-                    if plan.schema is not None:
-                        sink = pa.BufferOutputStream()
-                        writer = ipc.new_stream(sink, plan.schema)
-                        writer.close()
-                        yield sink.getvalue().to_pybytes()
-                else:
-                    merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
-                    for task in plan.tasks:
-                        if time.perf_counter() - start_time > state.config.scan_timeout_seconds:
-                            state.metrics.record_stream_abort_timeout()
-                            raise RuntimeError(
-                                f"Scan timed out after {state.config.scan_timeout_seconds}s"
-                            )
-                        with get_pool_tracker().track("fetch"):
-                            chunk = await asyncio.get_running_loop().run_in_executor(
-                                state._fetch_executor,
-                                state.fetcher.fetch_as_stream_bytes,
-                                task,
-                            )
-                        out = merger.feed(chunk) if merger is not None else chunk
-                        if out:
-                            yield out
-                    if merger is not None:
-                        tail = merger.finish()
-                        if tail:
-                            yield tail
-                stream_state.completed = True
-            finally:
-                await admission.release()
-                stream_state.completed_at = time.time()
-                state.streams.schedule_cleanup(stream_id, scan_id)
+            if not plan.tasks:
+                if plan.schema is not None:
+                    sink = pa.BufferOutputStream()
+                    writer = ipc.new_stream(sink, plan.schema)
+                    writer.close()
+                    yield sink.getvalue().to_pybytes()
+            else:
+                merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
+                for task in plan.tasks:
+                    if time.perf_counter() - start_time > state.config.scan_timeout_seconds:
+                        state.metrics.record_stream_abort_timeout()
+                        raise RuntimeError(
+                            f"Scan timed out after {state.config.scan_timeout_seconds}s"
+                        )
+                    with get_pool_tracker().track("fetch"):
+                        chunk = await asyncio.get_running_loop().run_in_executor(
+                            state._fetch_executor,
+                            state.fetcher.fetch_as_stream_bytes,
+                            task,
+                        )
+                    out = merger.feed(chunk) if merger is not None else chunk
+                    if out:
+                        yield out
+                if merger is not None:
+                    tail = merger.finish()
+                    if tail:
+                        yield tail
+            stream_state.completed = True
 
-        return StreamingResponse(
+        async def close_passthrough() -> None:
+            await admission.release()
+            stream_state.completed_at = time.time()
+            state.streams.schedule_cleanup(stream_id, scan_id)
+
+        return _ClosingStreamingResponse(
             serve_passthrough(),
+            on_close=close_passthrough,
             media_type="application/vnd.apache.arrow.stream",
         )
-
-    # Decouple the build from this client's read so a slow or dropped reader
-    # cannot poison the cache entry: the background build writes row groups
-    # straight to the blob and finalizes on its own, then we serve the blob.
-    if stream_state.background_task is None:
-        stream_state.background_task = asyncio.create_task(
-            state.scan_builds.build_identity_artifact(state, stream_state)
-        )
-    build_task = stream_state.background_task
 
     # Shielded so a client disconnect never cancels the build. A handler cancel
     # (e.g. shutdown) frees the slot but leaves the build running. The slot gated the
     # scan, which is done: release it on every exit here, a store error included, not in
     # the generator's finally, so a client gone before iteration can't strand it.
     try:
-        await asyncio.shield(build_task)
+        # Decouple the build from this client's read so a slow or dropped reader
+        # cannot poison the cache entry: the background build writes row groups
+        # straight to the blob and finalizes on its own, then we serve the blob.
+        if stream_state.background_task is None:
+            stream_state.background_task = asyncio.create_task(
+                state.scan_builds.build_identity_artifact(state, stream_state)
+            )
+        await asyncio.shield(stream_state.background_task)
         artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
     finally:
         await admission.release()

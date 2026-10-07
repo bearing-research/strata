@@ -172,6 +172,8 @@ export interface LineageGraph {
 
 /** One row of the registry names table (GET /v1/registry/summary). */
 export interface RegistryName {
+  /** null is the default tenant; an all-tenant summary can list one name per tenant. */
+  tenant: string | null
   name: string
   artifact_id: string
   version: number

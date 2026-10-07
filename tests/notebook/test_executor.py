@@ -2777,6 +2777,36 @@ class TestLoopCellExecution:
             session.re_analyze_cell(cell.id)
 
     @pytest.mark.asyncio
+    async def test_editing_max_iter_reads_stale_and_reruns(self, tmp_path):
+        """The loop parameters are comments, yet staleness and the cache both see an edit."""
+        three = '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'
+        reader = "print(state)\n"
+        session = self._cells_session(
+            tmp_path, [("seed", 'state = {"i": 0}\n'), ("loop", three), ("out", reader)]
+        )
+        executor = CellExecutor(session)
+        first = await executor.execute_cell("out", reader)
+        assert first.stdout == "{'i': 3}\n"
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("loop").status == "ready"
+        assert session.notebook_state.get_cell("out").status == "ready"
+
+        # As after a body edit: the loop has no result under its new hash, its reader is stale.
+        one = three.replace("max_iter=3", "max_iter=1")
+        self._edit(session, "loop", one)
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("loop").status == "idle"
+        assert session.notebook_state.get_cell("out").status == "stale"
+
+        rerun = await executor.execute_cell("loop", one)
+        assert rerun.success, rerun.error
+        assert rerun.cache_hit is False
+        downstream = await executor.execute_cell("out", reader)
+        assert downstream.stdout == "{'i': 1}\n"
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("loop").status == "ready"
+
+    @pytest.mark.asyncio
     async def test_downstream_reruns_when_the_loops_output_changes(self, tmp_path):
         """A fresh loop run records its output URIs, so a reader's provenance includes them."""
         loop = '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'
@@ -2829,6 +2859,47 @@ class TestLoopCellExecution:
         assert second.stdout == "27\n"
 
     @pytest.mark.asyncio
+    async def test_a_start_from_seed_left_by_an_older_run_is_refused(self, tmp_path):
+        """Cutting the start cell to ``max_iter=1`` leaves ``@iter=1`` from the older run on
+        disk; the fork must not seed from it.
+        """
+        hill = "# @loop max_iter=3 carry=state\nstate = state + 1\n"
+        fork = "# @loop max_iter=2 carry=state start_from=hill@iter=1\nstate = state + 10\n"
+        session = self._cells_session(
+            tmp_path, [("seed", "state = 0\n"), ("hill", hill), ("fork", fork)]
+        )
+        executor = CellExecutor(session)
+        first = await executor.execute_cell("fork", fork)
+        assert first.success, first.error
+
+        short = "# @loop max_iter=1 carry=state\nstate = state + 1\n"
+        self._edit(session, "hill", short)
+        assert (await executor.execute_cell_rerun("hill", short)).success
+        artifact_mgr = session.get_artifact_manager()
+        assert artifact_mgr.get_iteration_artifact("hill", "state", 1) is not None
+
+        second = await executor.execute_cell_rerun("fork", fork)
+        assert not second.success
+        assert "start_from=hill@iter=1" in (second.error or "")
+        assert "older run of cell hill" in (second.error or "")
+
+    @pytest.mark.asyncio
+    async def test_a_start_from_seed_survives_a_rerun_of_its_cell(self, tmp_path):
+        """A rerun rewrites every step, so the fork still seeds from the new run's step."""
+        hill = "# @loop max_iter=3 carry=state\nstate = state + 1\n"
+        fork = "# @loop max_iter=2 carry=state start_from=hill@iter=1\nstate = state + 10\n"
+        session = self._cells_session(
+            tmp_path, [("seed", "state = 0\n"), ("hill", hill), ("fork", fork)]
+        )
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("fork", fork)).success
+        assert (await executor.execute_cell_rerun("hill", hill)).success
+
+        again = await executor.execute_cell_rerun("fork", fork)
+        assert again.success, again.error
+        assert again.cache_hit is False
+
+    @pytest.mark.asyncio
     async def test_a_loop_output_read_since_the_last_run_is_stored(self, tmp_path):
         """A cached loop only hits when every output now read is stored under its provenance;
         otherwise it runs again and stores the new reader's input.
@@ -2858,8 +2929,12 @@ class TestLoopCellExecution:
         _, session = loop_notebook
         artifact_mgr = session.get_artifact_manager()
         store = artifact_mgr.artifact_store
-        spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
-        for artifact_id in ("canonical", artifact_mgr.cell_artifact_id("donor", "state", 1)):
+        spec = TransformSpec(executor="notebook/cell@v1", params={"loop_run": "r"}, inputs=[])
+        for artifact_id in (
+            "canonical",
+            artifact_mgr.cell_artifact_id("donor", "state", 0),
+            artifact_mgr.cell_artifact_id("donor", "state", 1),
+        ):
             version = store.create_artifact(artifact_id, provenance_hash="p", transform_spec=spec)
             store.write_blob(artifact_id, version, b"seed-bytes")
             store.finalize_artifact(artifact_id, version, "", 0, 10)

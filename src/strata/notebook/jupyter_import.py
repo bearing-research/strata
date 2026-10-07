@@ -11,10 +11,12 @@ Design doc: ``docs/internal/design-jupyter-import.md``.
 from __future__ import annotations
 
 import ast
+import io
 import json
 import re
 import shlex
 import sys
+import tokenize
 import tomllib
 import uuid
 from dataclasses import dataclass, field
@@ -33,8 +35,17 @@ from strata.notebook.writer import (
 
 _SUPPRESSED_COMMENT = "# strata: trailing ';' from Jupyter preserved as display-suppression"
 
-# A trailing ';' may be followed by an inline comment or whitespace.
-_SUPPRESSION_TAIL_RE = re.compile(r";[ \t]*(?:#[^\n]*)?\s*\Z")
+# Tokens IPython skips when it looks for the ';' that ends the last statement.
+_TRAILING_TRIVIA = frozenset(
+    {
+        tokenize.ENDMARKER,
+        tokenize.NEWLINE,
+        tokenize.NL,
+        tokenize.COMMENT,
+        tokenize.INDENT,
+        tokenize.DEDENT,
+    }
+)
 
 _LINE_MAGIC_RE = re.compile(r"^(\s*)%([a-zA-Z_]\w*)([^\n]*)$")
 _CELL_MAGIC_RE = re.compile(r"\A[ \t]*%%([a-zA-Z_]\w*)([^\n]*)\n?")
@@ -134,6 +145,12 @@ def import_notebook(
 
     sibling_deps = _capture_sibling_deps(ipynb_path.parent)
     local_modules = _local_module_names(ipynb_path.parent)
+    is_r = _kernel_language(nb) == "r"
+    if is_r:
+        result.warnings.append(
+            "R kernel: code cells imported as R cells, as written; R packages are not "
+            "captured, so install them in system R or with renv"
+        )
 
     prev_cell_id: str | None = None
     cell_deps: list[str] = []
@@ -152,6 +169,15 @@ def import_notebook(
             )
             write_cell(notebook_dir, cell_id, _ensure_final_newline(source))
             result.markdown_cells += 1
+            prev_cell_id = cell_id
+        elif cell_type == "code" and is_r:
+            # IPython magics, `!` lines and `;` suppression are Python-kernel syntax.
+            cell_id = _new_cell_id("cell")
+            add_cell_to_notebook(
+                notebook_dir, cell_id, after_cell_id=prev_cell_id, language=CellLanguage.R
+            )
+            write_cell(notebook_dir, cell_id, _ensure_final_newline(source))
+            result.code_cells += 1
             prev_cell_id = cell_id
         elif cell_type == "code":
             cell_id = _new_cell_id("cell")
@@ -291,6 +317,18 @@ def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
 
 
 # --- Structural validation ---
+
+
+def _kernel_language(nb: dict[str, Any]) -> str:
+    """Lowercased kernel language from the notebook metadata; ``""`` when absent."""
+    metadata = nb.get("metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    for key, field_name in (("kernelspec", "language"), ("language_info", "name")):
+        section = metadata.get(key)
+        if isinstance(section, dict) and isinstance(section.get(field_name), str):
+            return section[field_name].strip().lower()
+    return ""
 
 
 def _validate_nbformat_structure(nb: object) -> None:
@@ -549,17 +587,34 @@ def _statement_starts(lines: list[str]) -> list[bool]:
     return starts
 
 
+def _suppression_offset(source: str) -> int | None:
+    """Offset of the ``;`` that ends the last statement, as IPython finds it.
+
+    Comments and blank lines after it do not count, so ``df;  # quiet`` is
+    suppressed and ``df`` followed by a ``# done;`` comment line is not.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return None
+    last = next((tok for tok in reversed(tokens) if tok.type not in _TRAILING_TRIVIA), None)
+    if last is None or last.type != tokenize.OP or last.string != ";":
+        return None
+    row, col = last.start
+    return sum(len(line) for line in source.splitlines(keepends=True)[: row - 1]) + col
+
+
 def _ends_with_display_suppression(source: str) -> bool:
     """True if the source ends in Jupyter's ``;`` suppression (``df;`` or ``df;  # quiet``)."""
-    return _SUPPRESSION_TAIL_RE.search(source) is not None
+    return _suppression_offset(source) is not None
 
 
 def _suppress_last_expression(source: str) -> str:
     """Append ``pass`` so the harness does not auto-display a ``;``-suppressed last expression."""
-    match = _SUPPRESSION_TAIL_RE.search(source)
-    if match is None:
+    offset = _suppression_offset(source)
+    if offset is None:
         return source
-    body = source[: match.start()].rstrip()
+    body = source[:offset].rstrip()
     if not body:
         return source
 
@@ -954,6 +1009,46 @@ _IMPORT_TO_PIP: dict[str, str] = {
 }
 
 
+# ``google.cloud.<path>`` imports (API version suffix dropped) whose distribution is
+# not ``google-cloud-<path>``: the guess is missing from PyPI, or names another project.
+_GOOGLE_CLOUD_TO_PIP: dict[str, str] = {
+    "accessapproval": "google-cloud-access-approval",
+    "alloydb.connector": "google-cloud-alloydb-connector",
+    "artifactregistry": "google-cloud-artifact-registry",
+    "billing.budgets": "google-cloud-billing-budgets",
+    "bigtable_admin": "google-cloud-bigtable",
+    # ``google-cloud-dataflow`` is the retired Beam-based SDK, not this client.
+    "dataflow": "google-cloud-dataflow-client",
+    "devtools.cloudbuild": "google-cloud-build",
+    "devtools.containeranalysis": "google-cloud-containeranalysis",
+    "dialogflowcx": "google-cloud-dialogflow-cx",
+    "errorreporting": "google-cloud-error-reporting",
+    "firestore_admin": "google-cloud-firestore",
+    "gkehub": "google-cloud-gke-hub",
+    "iam_admin": "google-cloud-iam",
+    "iam_credentials": "google-cloud-iam",
+    "networkconnectivity": "google-cloud-network-connectivity",
+    "orgpolicy": "google-cloud-org-policy",
+    "osconfig": "google-cloud-os-config",
+    "oslogin": "google-cloud-os-login",
+    "recaptchaenterprise": "google-cloud-recaptcha-enterprise",
+    "resourcemanager": "google-cloud-resource-manager",
+    "secretmanager": "google-cloud-secret-manager",
+    "servicedirectory": "google-cloud-service-directory",
+    "servicemanagement": "google-cloud-service-management",
+    "spanner_admin_database": "google-cloud-spanner",
+    "spanner_admin_instance": "google-cloud-spanner",
+    "spanner_dbapi": "google-cloud-spanner",
+    "sql.connector": "cloud-sql-python-connector",
+    "vpcaccess": "google-cloud-vpc-access",
+}
+
+
+def _google_cloud_path(name: str) -> str:
+    """``google.cloud.pubsub_v1`` -> ``pubsub``: one distribution holds every API version."""
+    return re.sub(r"_v\d[a-z0-9]*$", "", name.removeprefix("google.cloud."))
+
+
 def _scan_imports(source: str) -> set[str]:
     """Collect top-level, non-stdlib module names a cell imports.
 
@@ -972,8 +1067,12 @@ def _scan_imports(source: str) -> set[str]:
         elif isinstance(node, ast.ImportFrom):
             # level > 0 is a relative import, never a third-party dependency.
             if node.module and node.level == 0:
-                if node.module == "google.cloud":
-                    names.update(f"google.cloud.{alias.name}" for alias in node.names)
+                if node.module == "google.cloud" or node.module.startswith("google.cloud."):
+                    # ``from google.cloud.devtools import cloudbuild_v1`` names its
+                    # distribution in the imported name.
+                    names.update(
+                        _distribution_key(f"{node.module}.{alias.name}") for alias in node.names
+                    )
                 else:
                     names.add(_distribution_key(node.module))
     return names - sys.stdlib_module_names
@@ -983,10 +1082,14 @@ def _distribution_key(module: str) -> str:
     """The part of a dotted import that names its distribution.
 
     The top-level package, except under the ``google.cloud`` namespace, where
-    each ``google.cloud.<x>`` is its own ``google-cloud-<x>`` distribution.
+    each ``google.cloud.<x>`` is its own ``google-cloud-<x>`` distribution, or
+    ``google.cloud.<x>.<y>`` for a nested one such as ``sql.connector``.
     """
     parts = module.split(".")
     if parts[:2] == ["google", "cloud"] and len(parts) > 2:
+        nested = ".".join(parts[:4])
+        if len(parts) > 3 and _google_cloud_path(nested) in _GOOGLE_CLOUD_TO_PIP:
+            return nested
         return ".".join(parts[:3])
     return parts[0]
 
@@ -1019,9 +1122,10 @@ def _imports_to_deps(imports: set[str], local_modules: set[str]) -> list[str]:
         if name in local_modules:
             continue
         if name.startswith("google.cloud."):
-            # ``pubsub_v1`` and ``speech_v1p1beta1`` are API versions inside one distribution.
-            package = re.sub(r"_v\d[a-z0-9]*$", "", name.removeprefix("google.cloud."))
-            deps.append("google-cloud-" + package.replace("_", "-"))
+            package = _google_cloud_path(name)
+            deps.append(
+                _GOOGLE_CLOUD_TO_PIP.get(package, "google-cloud-" + package.replace("_", "-"))
+            )
         else:
             deps.append(_IMPORT_TO_PIP.get(name, name))
     return deps

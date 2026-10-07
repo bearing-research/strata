@@ -198,6 +198,17 @@ def test_launch_without_token_skips_the_stdin_read():
     assert runner.stdin_writes[-1] is None
 
 
+def test_launch_feeds_the_launch_id_over_stdin_before_the_token():
+    runner = ScriptedSshRunner([("cat ", _ok("")), ("nohup strata-worker", _ok("4321\n"))])
+    RemoteWorker("gpu", runner).launch(port=9000, token="tok", launch_id="lid")
+    launch_cmd = next(c for c in runner.calls if "nohup strata-worker" in c)
+    assert "lid" not in launch_cmd
+    assert launch_cmd.index("read -r STRATA_WORKER_LAUNCH_ID") < launch_cmd.index(
+        "read -r STRATA_WORKER_TOKEN"
+    )
+    assert runner.stdin_writes[-1] == "lid\ntok\n"
+
+
 def test_launch_rejects_token_with_newline():
     runner = ScriptedSshRunner([("cat ", _ok(""))])
     with pytest.raises(SshWorkerError, match="newline"):
@@ -227,9 +238,14 @@ class LocalShellRunner:
         return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
 
+@pytest.mark.parametrize(
+    ("token", "launch_id"),
+    [("tok123", None), ("tok123", "lid9"), (None, "lid9")],
+    ids=["token", "token-and-launch-id", "launch-id"],
+)
 @pytest.mark.parametrize("shell", ["/bin/sh", "/bin/bash", "/bin/dash", "/bin/zsh"])
-def test_launch_command_starts_the_worker_under_a_real_shell(shell, tmp_path):
-    """The token read must stay in the foreground: POSIX shells give a background list /dev/null."""
+def test_launch_command_starts_the_worker_under_a_real_shell(shell, tmp_path, token, launch_id):
+    """The stdin reads stay in the foreground: POSIX shells give a background list /dev/null."""
     import time
     from pathlib import Path
 
@@ -240,12 +256,16 @@ def test_launch_command_starts_the_worker_under_a_real_shell(shell, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stub = bin_dir / "strata-worker"
-    stub.write_text('#!/bin/sh\necho "started token=$STRATA_WORKER_TOKEN"\nexec sleep 60\n')
+    stub.write_text(
+        "#!/bin/sh\n"
+        'echo "started launch=$STRATA_WORKER_LAUNCH_ID token=$STRATA_WORKER_TOKEN"\n'
+        "exec sleep 60\n"
+    )
     stub.chmod(0o755)
     env = {"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"}
     remote = RemoteWorker("gpu", LocalShellRunner(shell, env))
 
-    launched = remote.launch(port=9000, token="tok123", adopt=False)
+    launched = remote.launch(port=9000, token=token, launch_id=launch_id, adopt=False)
     try:
         assert remote.is_running() == RunningWorker(pid=launched.pid, port=9000)
         log = home / ".strata" / "worker-gpu.log"
@@ -253,7 +273,7 @@ def test_launch_command_starts_the_worker_under_a_real_shell(shell, tmp_path):
         while "started" not in (log.read_text() if log.exists() else ""):
             assert time.monotonic() < deadline, "stub worker never wrote its log"
             time.sleep(0.05)
-        assert log.read_text().strip() == "started token=tok123"
+        assert log.read_text().strip() == f"started launch={launch_id or ''} token={token or ''}"
     finally:
         remote.stop()
 
@@ -303,6 +323,20 @@ def test_launch_replaces_an_adopted_worker_when_a_token_must_apply():
     assert worker == RunningWorker(pid=222, port=9000)
     assert any("kill" in c and "kill -0" not in c for c in runner.calls)
     assert "fresh-token\n" in runner.stdin_writes
+
+
+def test_launch_replaces_an_adopted_worker_when_a_launch_id_must_apply():
+    """A launch id is fixed when the worker starts, so a running worker cannot report a new one."""
+    runner = ScriptedSshRunner(
+        [
+            ("kill -0 111", _ok("up")),
+            (lambda c: "kill" in c and "kill -0" not in c, _ok("stopped\n")),
+            ("nohup strata-worker", _ok("222\n")),
+            ("cat ", _ok('{"pid": 111, "port": 9000}')),
+        ]
+    )
+    worker = RemoteWorker("gpu", runner).launch(port=9000, token=None, launch_id="lid")
+    assert worker == RunningWorker(pid=222, port=9000)
 
 
 def test_launch_does_not_adopt_a_different_port():

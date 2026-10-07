@@ -820,7 +820,9 @@ since that is where a cell's `put(name=...)` went. `readers` is read from the
 notebook's own store: per registry name, the cells whose stored results read
 it with `# @dataset`, as `{"notebook_id", "cell_id", "reference"}`. The rows of
 `GET /v1/registry/summary` carry the same `readers` list for the results in
-the registry's store.
+the registry's store, next to the row's `tenant` (`null` for the default
+tenant). A personal server or an `admin:*` caller gets every tenant's names,
+so one name can have a row per tenant, each with that tenant's readers.
 
 ### Promote an Artifact
 

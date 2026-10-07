@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import shutil
 import subprocess
@@ -93,10 +94,17 @@ def read_requested_python_minor(notebook_dir: Path) -> str | None:
 def discover_installed_python_minors() -> list[str]:
     """Return installed ``major.minor`` versions uv reports, within Strata's ``requires-python``.
 
-    Falls back to ``[current_python_minor()]`` on any failure.
+    Falls back to ``[current_python_minor()]`` on any failure. Probed once per process.
     """
+    return list(_probe_installed_python_minors())
+
+
+# StrataConfig.load runs this as a default on every load (each notebook open and
+# staleness pass outside the server), and the uv subprocess costs seconds under load.
+@functools.cache
+def _probe_installed_python_minors() -> tuple[str, ...]:
     current = current_python_minor()
-    fallback = [current]
+    fallback = (current,)
 
     uv = shutil.which("uv")
     if uv is None:
@@ -141,7 +149,7 @@ def discover_installed_python_minors() -> list[str]:
 
     if current not in seen and spec.contains(current):
         minors.insert(0, current)
-    return minors or fallback
+    return tuple(minors) or fallback
 
 
 def read_venv_runtime_python_version(python_executable: Path) -> str | None:

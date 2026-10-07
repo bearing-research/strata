@@ -296,6 +296,59 @@ class TestPerVariantEndToEnd:
         assert "'triple': 18.0" in report["stdout"]
 
 
+class TestPerVariantGroupIsProvenance:
+    """``@per_variant <group>`` is a comment, but it decides which group binds a scalar."""
+
+    def test_switching_the_fanout_group_runs_again(self, tmp_path):
+        import asyncio
+
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "Fanout")
+        # Both groups name their variants x and y, so the per-variant keys coincide.
+        cells = [
+            ("ax", "# @variant A x\na = 1\n"),
+            ("ay", "# @variant A y\na = 2\n"),
+            ("bx", "# @variant B x\nb = 10\n"),
+            ("by", "# @variant B y\nb = 20\n"),
+            ("ev", "# @per_variant A\nscore = repr((a, b))\n"),
+            ("out", "print(score)\n"),
+        ]
+        previous = None
+        for cid, src in cells:
+            add_cell_to_notebook(nb, cid, previous, language="python")
+            write_cell(nb, cid, src)
+            previous = cid
+        set_variant_mode(nb, "A", "sweep")
+        set_variant_mode(nb, "B", "sweep")
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        executor = CellExecutor(session)
+
+        first = asyncio.run(executor.execute_cell("out", "print(score)\n"))
+        assert first.success, first.error
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("out").status == "ready"
+        assert (
+            first.stdout == "{'x': \"(1, {'x': 10, 'y': 20})\", 'y': \"(2, {'x': 10, 'y': 20})\"}\n"
+        )
+
+        by_b = "# @per_variant B\nscore = repr((a, b))\n"
+        session.notebook_state.get_cell("ev").source = by_b
+        for cell in session.notebook_state.cells:
+            session.re_analyze_cell(cell.id)
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("ev").status != "ready"
+        assert session.notebook_state.get_cell("out").status == "stale"
+        second = asyncio.run(executor.execute_cell("out", "print(score)\n"))
+        assert second.success, second.error
+        assert (
+            second.stdout == "{'x': \"({'x': 1, 'y': 2}, 10)\", 'y': \"({'x': 1, 'y': 2}, 20)\"}\n"
+        )
+
+
 class TestPerVariantProgressFrames:
     """The fan-out orchestrator fires on_variant_complete per variant; WS forwards it as
     cell_variant_progress.

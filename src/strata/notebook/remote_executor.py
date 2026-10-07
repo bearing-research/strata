@@ -444,6 +444,8 @@ def create_notebook_executor_app(
     # Before any cell can spawn, whoever hosts the app.
     capture_worker_secrets()
     started_at = time.time()
+    # Set by the SSH supervisor so it can tell this worker from another listener on its port.
+    launch_id = os.environ.get("STRATA_WORKER_LAUNCH_ID") or None
     active_executions = 0
     if max_concurrent is None:
         max_concurrent = _positive_int_env("STRATA_WORKER_MAX_CONCURRENT")
@@ -891,6 +893,7 @@ def create_notebook_executor_app(
             },
             "version": "1.0.0",
             "uptime_seconds": max(0.0, time.time() - started_at),
+            "launch_id": launch_id,
             "active_executions": active_executions,
             # So a caller can plan rather than discover the limit by 503. ``None`` = unlimited.
             "max_concurrent": max_concurrent,

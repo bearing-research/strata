@@ -628,7 +628,7 @@ def _execute_write_statements(
     conn = adapter.open(spec, read_only=False)
     try:
         for stmt_text, stmt_kind in prepared:
-            placeholders = _extract_placeholder_positions(stmt_text)
+            placeholders = _extract_placeholder_positions(stmt_text, adapter.sqlglot_dialect)
             if placeholders:
                 stmt_params = resolve_bind_params(placeholders, namespace)
                 stmt_to_execute = rewrite_named_to_positional(stmt_text, adapter.sqlglot_dialect)
@@ -779,6 +779,9 @@ def sql_reopen_identity(cell: Any, session: Any) -> str | None:
     try:
         adapter = get_adapter(spec.driver)
     except KeyError:
+        return None
+    # The identity reads a BigQuery key file, so a refused one is never opened.
+    if database_problem(spec, session.path, session._lake_config()) is not None:
         return None
     analysis = analyze_sql_cell(cell.source, dialect=adapter.sqlglot_dialect)
     try:

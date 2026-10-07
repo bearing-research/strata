@@ -72,3 +72,13 @@ def test_rewrite_preserves_whitespace_and_punctuation():
     sql = "SELECT\n  :a,\n  :b\nFROM t\nWHERE x = :a"
     out = rewrite_named_to_positional(sql, dialect="postgres")
     assert out == "SELECT\n  $1,\n  $2\nFROM t\nWHERE x = $3"
+
+
+def test_rewrite_leaves_postgres_escape_string_alone():
+    sql = r"SELECT E'it\'s :z', :w FROM t"
+    assert rewrite_named_to_positional(sql, dialect="postgres") == r"SELECT E'it\'s :z', $1 FROM t"
+
+
+def test_rewrite_leaves_a_backslash_escaped_snowflake_string_alone():
+    sql = r"SELECT 'it\'s :z', :w FROM t"
+    assert rewrite_named_to_positional(sql, dialect="snowflake") == r"SELECT 'it\'s :z', ? FROM t"

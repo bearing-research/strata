@@ -133,8 +133,11 @@ class TestRoundTrip:
             )
             store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=0)
 
-        assert store.list_name_reads(tenant="team-a") == [("ours", "taxi/model@champion")]
-        assert [read[0] for read in store.list_name_reads()] == ["ours", "theirs"]
+        assert store.list_name_reads(tenant="team-a") == [("team-a", "ours", "taxi/model@champion")]
+        assert [read[:2] for read in store.list_name_reads()] == [
+            ("team-a", "ours"),
+            ("team-b", "theirs"),
+        ]
 
     def test_tags_and_aliases_round_trip(self, store):
         # Exercises _REGISTRY_SCHEMA_SQL, which carries the one AUTOINCREMENT
@@ -297,25 +300,6 @@ class TestConnectionLimits:
 
 
 class TestCanonicalPromotion:
-    def test_promotion_returns_the_canonical_id_never_a_foreign_one(self, store):
-        # The only caller reaches force_finalize_canonical *because* finalize
-        # landed under a different id, so returning that foreign id back would
-        # leave the canonical row 'superseded' and the caller unaware.
-        first = store.create_artifact("a1", "shared-prov", _spec())
-        store.write_blob("a1", first, b"")
-        store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
-
-        second = store.create_artifact("a2", "shared-prov", _spec())
-        deduped = store.finalize_artifact("a2", second, "{}", row_count=0, byte_size=0)
-        assert deduped is not None and deduped.id == "a1"  # dedup put us on a1
-
-        promoted = store.force_finalize_canonical(
-            artifact_id="a2", version=second, schema_json="{}", row_count=0, byte_size=0
-        )
-        assert promoted is not None
-        assert promoted.id == "a2"
-        assert promoted.state == "ready"
-
     def test_a_runs_outputs_finalize_together_or_not_at_all(self, store):
         from strata.artifact_store import StagedVersion
 
@@ -453,6 +437,32 @@ class TestGarbageCollection:
 
         assert store.read_blob("a2", 1) == b"bytes"
         assert store.blob_store.blob_exists("a2", 1)
+
+    @pytest.mark.parametrize("hold", ["publish", "pin"])
+    def test_deleting_a_canonical_whose_blob_is_gone_under_a_held_reader_refuses(self, store, hold):
+        for artifact_id in ("a1", "a2"):
+            version = store.create_artifact(artifact_id, "prov-dup", _spec())
+            store.write_blob(artifact_id, version, b"bytes")
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=5)
+        if hold == "publish":
+            store.publish_artifact("a2", 1)
+        else:
+            store.pin_artifact("a2", 1, "review")
+        store.blob_store.delete_blob("a1", 1)
+
+        with pytest.raises(ValueError, match="whose blob is gone"):
+            store.delete_artifact("a1", 1)
+
+        assert store.get_artifact("a1", 1) is not None
+        conn = store._get_connection()
+        try:
+            held = conn.execute(
+                "SELECT state, superseded_by FROM artifact_versions WHERE id = ? AND version = 1",
+                ("a2",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert (held["state"], held["superseded_by"]) == ("superseded", "a1@v=1")
 
     @pytest.mark.parametrize("raced", [1, 2])
     def test_a_name_landing_mid_sweep_skips_only_that_version(self, store, raced):

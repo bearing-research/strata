@@ -520,6 +520,9 @@ Key/value parameters:
   variant. `<cell-id>` is the upstream loop cell's `id` in
   `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids). The fork
   depends on that cell: when its result changes, the fork runs again.
+  Iteration `k` must come from that cell's latest run: if the latest run
+  stopped before `k` (a lower `max_iter`, an earlier `@loop_until` exit),
+  the fork fails rather than seed from a step an older run left behind.
 - `until=<expr>`, (optional) the same early exit as `@loop_until`, inline.
   Parameters are split on whitespace, so the expression cannot contain a
   space (`until=acc["loss"]<0.05`); use `@loop_until` for anything longer.
@@ -538,7 +541,9 @@ reference. An expression that raises fails the cell at that iteration.
 
 Each iteration's carry state is stored as `…@iter=k` artifacts; the final
 iteration becomes the cell's canonical artifact. Progress is broadcast over
-WebSocket as `cell_iteration_progress` messages.
+WebSocket as `cell_iteration_progress` messages. The `@loop` and `@loop_until`
+parameters are part of the cell's cache key, so editing one (say `max_iter`)
+runs the loop again rather than returning the old result.
 
 ---
 
@@ -806,6 +811,8 @@ cell fans out over **one** group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: `per_variant_no_sweep_source`
 (nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
 `per_variant_on_variant_member` (a cell can't both be a variant and fan out).
+The named group is part of the cell's cache key, so switching it runs the
+instances again.
 
 ### Defines contract
 

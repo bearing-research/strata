@@ -141,6 +141,55 @@ def test_import_passes_through_non_suppressed_last_expression(tmp_path: Path) ->
     assert nb.cells[0].source.rstrip().endswith("x + 1")
 
 
+@pytest.mark.parametrize(
+    "source",
+    ["df = 1\ndf\n# shown;\n", "df = 1\ndf  # shown;\n", 'df = 1\ndf\ns = """a;"""\n'],
+    ids=["comment line", "inline comment", "string"],
+)
+def test_import_ignores_a_semicolon_that_does_not_end_the_last_statement(
+    tmp_path: Path, source: str
+) -> None:
+    """IPython only suppresses on a ``;`` token ending the cell, not one inside a comment."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell(source)])
+
+    result = import_notebook(ipynb)
+
+    assert result.suppressed_outputs == 0
+    assert parse_notebook(result.notebook_dir).cells[0].source == source
+
+
+def _write_r_ipynb(tmp_path: Path, cells: list[dict]) -> Path:
+    nb = {
+        "cells": cells,
+        "metadata": {
+            "kernelspec": {"name": "ir", "display_name": "R", "language": "R"},
+            "language_info": {"name": "R"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    path = tmp_path / "analysis.ipynb"
+    path.write_text(json.dumps(nb), encoding="utf-8")
+    return path
+
+
+def test_import_r_kernel_notebook_as_r_cells(tmp_path: Path) -> None:
+    """IRkernel code is R: no IPython magic or shell translation, no Python deps."""
+    r_source = "library(dplyr)\ndf <- data.frame(a = c(1, NA))\n!is.na(df$a);\n"
+    ipynb = _write_r_ipynb(tmp_path, [_md_cell("# Notes\n"), _code_cell(r_source)])
+
+    result = import_notebook(ipynb)
+
+    nb = parse_notebook(result.notebook_dir)
+    assert [c.language for c in nb.cells] == ["markdown", "r"]
+    assert nb.cells[1].source == r_source
+    assert result.code_cells == 1
+    assert result.dropped_shells == []
+    assert result.suppressed_outputs == 0
+    assert result.captured_deps == []
+    assert any("R kernel" in w for w in result.warnings)
+
+
 def test_import_strips_envelope_whitespace_around_source(tmp_path: Path) -> None:
     """Hand-edited .ipynb files can store source with a leading space, which the module-level
     parser rejects, so the converter strips envelope whitespace.
@@ -838,6 +887,31 @@ def test_a_google_cloud_import_names_its_own_distribution(tmp_path: Path) -> Non
         "google-cloud-speech",
     } <= deps
     assert "google-api-python-client" not in deps
+
+
+@pytest.mark.parametrize(
+    ("source", "distribution"),
+    [
+        ("from google.cloud.sql.connector import Connector", "cloud-sql-python-connector"),
+        ("import google.cloud.sql.connector", "cloud-sql-python-connector"),
+        ("from google.cloud.alloydb.connector import Connector", "google-cloud-alloydb-connector"),
+        ("from google.cloud import secretmanager", "google-cloud-secret-manager"),
+        ("from google.cloud import resourcemanager_v3", "google-cloud-resource-manager"),
+        ("from google.cloud import dataflow_v1beta3", "google-cloud-dataflow-client"),
+        ("from google.cloud.devtools import cloudbuild_v1", "google-cloud-build"),
+        ("from google.cloud.billing import budgets_v1", "google-cloud-billing-budgets"),
+        ("from google.cloud import dialogflowcx_v3", "google-cloud-dialogflow-cx"),
+        ("from google.cloud import artifactregistry_v1", "google-cloud-artifact-registry"),
+        ("from google.cloud.spanner_dbapi import connect", "google-cloud-spanner"),
+        ("from google.cloud import iam_admin_v1", "google-cloud-iam"),
+    ],
+)
+def test_a_google_cloud_import_whose_distribution_is_named_differently(
+    tmp_path: Path, source: str, distribution: str
+) -> None:
+    """The ``google-cloud-<x>`` guess is missing from PyPI, or another project, for these."""
+    result = import_notebook(_make_ipynb(tmp_path, [_code_cell(source + "\n")]))
+    assert result.captured_deps == [distribution]
 
 
 def test_stdlib_imports_not_captured(tmp_path: Path) -> None:

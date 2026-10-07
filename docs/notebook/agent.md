@@ -201,8 +201,9 @@ store:
 - A cell whose last run failed reports `error`, with its traceback, until it
   is edited or run again.
 - A **leaf** cell, one nothing else reads, reports `ready` after it has run
-  like any other cell. It stores no variable artifact; its console, even an
-  empty one, is the record of the run. A `# @nocache` leaf, or one with a
+  like any other cell, and `stale` once a cell it reads runs with a new value.
+  It stores no variable artifact; its console, even an empty one, is the
+  record of the run. A `# @nocache` leaf, or one with a
   read-write mount, stores no such record, so it reads `idle` even after it
   ran.
 

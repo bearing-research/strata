@@ -226,20 +226,27 @@ class RemoteWorker:
         return RunningWorker(pid=pid, port=port)
 
     def launch(
-        self, *, port: int, token: str | None, host: str = "127.0.0.1", adopt: bool = True
+        self,
+        *,
+        port: int,
+        token: str | None,
+        host: str = "127.0.0.1",
+        adopt: bool = True,
+        launch_id: str | None = None,
     ) -> RunningWorker:
         """Start the worker detached (``nohup``), recording a pidfile; return it.
 
         With ``adopt``, a live recorded worker on the same ``port`` is returned
-        instead, but only when no token applies: the token a worker started with
-        cannot be read back, and ``/health`` is unauthenticated, so a mismatch
-        would surface only as a 401 on first dispatch. Otherwise it is replaced.
-        The worker binds ``host`` (remote-localhost by default).
+        instead, but only when no token or ``launch_id`` applies: the token a
+        worker started with cannot be read back, and ``/health`` is
+        unauthenticated, so a mismatch would surface only as a 401 on first
+        dispatch. Otherwise it is replaced. The worker binds ``host``
+        (remote-localhost by default) and reports ``launch_id`` in ``/health``.
         """
         if adopt:
             existing = self.is_running()
             if existing is not None and existing.port == port:
-                if token is None:
+                if token is None and launch_id is None:
                     return existing
                 self.stop()
         pidfile = self._pidfile()
@@ -248,10 +255,17 @@ class RemoteWorker:
         # echoed in timeout errors that reach HTTP responses and logs.
         if token and "\n" in token:
             raise SshWorkerError("worker token must not contain newlines")
+        if launch_id and "\n" in launch_id:
+            raise SshWorkerError("worker launch id must not contain newlines")
+        # Over stdin too: in ``ps`` another listener could copy it into its own /health.
+        read_launch_id = (
+            "IFS= read -r STRATA_WORKER_LAUNCH_ID && export STRATA_WORKER_LAUNCH_ID && "
+        )
         read_token = "IFS= read -r STRATA_WORKER_TOKEN && export STRATA_WORKER_TOKEN && "
         # Only the worker goes in the background: POSIX shells give an asynchronous
         # list /dev/null as stdin, so a backgrounded `read` would never see the token.
         cmd = (
+            f"{read_launch_id if launch_id else ''}"
             f"{read_token if token else ''}"
             f"mkdir -p {_REMOTE_STATE_DIR} && {{ "
             f"nohup strata-worker --host {shlex.quote(host)} --port {port} "
@@ -260,7 +274,8 @@ class RemoteWorker:
             f'printf \'{{"pid": %s, "port": %s}}\\n\' "$pid" {port} > {pidfile}; '
             "echo $pid; }"
         )
-        res = self.runner.run(cmd, timeout=30, stdin_data=f"{token}\n" if token else None)
+        stdin_data = "".join(f"{value}\n" for value in (launch_id, token) if value)
+        res = self.runner.run(cmd, timeout=30, stdin_data=stdin_data or None)
         if not res.ok:
             raise SshWorkerError(
                 f"failed to launch remote worker: {res.stderr.strip() or f'exit {res.returncode}'}"

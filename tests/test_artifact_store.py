@@ -688,16 +688,6 @@ class TestVersionPromotion:
         assert promoted.byte_size == len(b"mine-bytes")
         assert store.read_blob("art-twin", twin) == b"twin-bytes-differ"
 
-    def test_reclaiming_bytes_whose_canonical_blob_is_gone_raises(self, store):
-        """Promoted with no blob at all, the version would read ready and serve nothing."""
-        self._ready(store, "art-1", "prov-a", b"bytes")
-        self._ready(store, "art-2", "prov-a", b"bytes")
-        store.blob_store.delete_blob("art-1", 1)
-
-        with pytest.raises(ValueError, match="whose blob is gone"):
-            store.force_finalize_canonical("art-2", 1, "{}", 1, 5)
-        assert store.get_artifact("art-2", 1).state == "superseded"
-
 
 class TestRefreshSupersede:
     """Refresh rebuilds become new versions of the same artifact."""
@@ -798,6 +788,35 @@ class TestRefreshSupersede:
         assert store.read_blob("art-2", 1) == _ipc_bytes(10)
         assert store.blob_store.blob_exists("art-2", 1)
         assert store.verify_artifacts() == []
+
+    @pytest.mark.parametrize("hold", ["publish", "pin"])
+    def test_deleting_a_canonical_whose_blob_is_gone_under_a_held_reader_refuses(self, store, hold):
+        """With no bytes to hand over, the delete would leave the held link empty: it stops."""
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-2", 1, "{}", 10, 100)
+        if hold == "publish":
+            store.publish_artifact("art-2", 1)
+        else:
+            store.pin_artifact("art-2", 1, "review")
+        store.blob_store.delete_blob("art-1", 1)
+
+        with pytest.raises(ValueError, match="whose blob is gone"):
+            store.delete_artifact("art-1", 1)
+
+        assert store.get_artifact("art-1", 1) is not None
+        conn = store._get_connection()
+        try:
+            held = conn.execute(
+                "SELECT state, superseded_by FROM artifact_versions WHERE id = ? AND version = 1",
+                ("art-2",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert (held["state"], held["superseded_by"]) == ("superseded", "art-1@v=1")
 
     def test_finalize_and_set_name_supersedes(self, store):
         """The atomic finalize+name path supersedes the same way."""
@@ -1444,21 +1463,28 @@ class TestTenantNormalization:
         resolved = store.resolve_name("my-name")
         assert resolved.id == "none-art"
 
-    def test_force_finalize_canonical_retries_past_a_losing_race(self, store):
+    @staticmethod
+    def _staged_over_a_ready_equal(store, provenance):
+        """``canonical`` staged with the provenance ``equiv`` already holds ready, in team-a."""
+        from strata.artifact_store import StagedVersion
+
+        store.create_artifact("equiv", provenance, tenant="team-a")
+        store.write_blob("equiv", 1, b"x" * 10)
+        store.finalize_artifact("equiv", 1, "{}", 1, 10)
+        store.create_artifact("canonical", provenance, tenant="team-a")
+        store.write_blob("canonical", 1, b"x" * 10)
+        return StagedVersion("canonical", 1, "{}", 1, 10, "digest")
+
+    def test_canonical_finalize_retries_past_a_losing_race(self, store):
         """A competing writer can commit our provenance between our supersede and promote; the retry
         must still promote.
 
-        Returning the winner would leave the canonical row 'failed'. SQLite's BEGIN IMMEDIATE
-        prevents this in production, so the conflict is injected; the retry loop is
-        dialect-agnostic.
+        SQLite's BEGIN IMMEDIATE prevents this in production, so the conflict is injected; the
+        retry loop is dialect-agnostic.
         """
         import sqlite3
 
-        store.create_artifact("equiv", "race-prov", tenant="team-a")
-        store.write_blob("equiv", 1, b"x" * 10)
-        store.finalize_artifact("equiv", 1, "{}", 1, 10)
-        store.create_artifact("canonical", "race-prov", tenant="team-a")
-        store.finalize_artifact("canonical", 1, "{}", 1, 10)
+        staged = self._staged_over_a_ready_equal(store, "race-prov")
 
         real_get_connection = store._get_connection
         # Counting commits, not connections: the trailing get_artifact opens
@@ -1480,7 +1506,7 @@ class TestTenantNormalization:
 
         store._get_connection = lambda: _FailsCommitOnce(real_get_connection())
         try:
-            promoted = store.force_finalize_canonical("canonical", 1, "{}", 1, 10)
+            [promoted] = store.finalize_canonical_together([staged])
         finally:
             store._get_connection = real_get_connection
 
@@ -1489,15 +1515,11 @@ class TestTenantNormalization:
         assert promoted.id == "canonical", "must never hand back the foreign winner"
         assert promoted.state == "ready"
 
-    def test_force_finalize_canonical_surfaces_a_persistent_conflict(self, store):
+    def test_canonical_finalize_surfaces_a_persistent_conflict(self, store):
         """Sustained contention must surface, not report a promotion that did not happen."""
         import sqlite3
 
-        store.create_artifact("equiv", "race-prov", tenant="team-a")
-        store.write_blob("equiv", 1, b"x" * 10)
-        store.finalize_artifact("equiv", 1, "{}", 1, 10)
-        store.create_artifact("canonical", "race-prov", tenant="team-a")
-        store.finalize_artifact("canonical", 1, "{}", 1, 10)
+        staged = self._staged_over_a_ready_equal(store, "race-prov")
 
         real_get_connection = store._get_connection
 
@@ -1514,22 +1536,15 @@ class TestTenantNormalization:
         store._get_connection = lambda: _AlwaysFailsCommit(real_get_connection())
         try:
             with pytest.raises(sqlite3.IntegrityError):
-                store.force_finalize_canonical("canonical", 1, "{}", 1, 10)
+                store.finalize_canonical_together([staged])
         finally:
             store._get_connection = real_get_connection
 
-    def test_force_finalize_canonical_supersedes_conflicting_ready_row(self, store):
-        """Promoting a dedup-failed canonical row supersedes the equivalent ready row, leaving one
-        ready row per (tenant, provenance), for tenant-scoped rows too.
-        """
-        store.create_artifact("equiv", "canon-prov", tenant="team-a")
-        store.write_blob("equiv", 1, b"x" * 10)
-        store.finalize_artifact("equiv", 1, "{}", 1, 10)
-        # Canonical row dedups to 'equiv' and is marked failed.
-        store.create_artifact("canonical", "canon-prov", tenant="team-a")
-        store.finalize_artifact("canonical", 1, "{}", 1, 10)
+    def test_canonical_finalize_supersedes_conflicting_ready_row(self, store):
+        """One ready row per (tenant, provenance) afterwards, for tenant-scoped rows too."""
+        staged = self._staged_over_a_ready_equal(store, "canon-prov")
 
-        promoted = store.force_finalize_canonical("canonical", 1, "{}", 1, 10)
+        [promoted] = store.finalize_canonical_together([staged])
         assert promoted is not None and promoted.state == "ready"
 
         import sqlite3
@@ -1804,20 +1819,25 @@ class TestAnIdTwoComputationsClaim:
 class TestTwoIdsOneComputation:
     """A duplicated notebook yields one provenance under two ids.
 
-    ``force_finalize_canonical`` supersedes the first id's row, which keeps its bytes and stays that
-    id's current value for its downstream cells.
+    Finalizing the second id's run supersedes the first id's row, which keeps its bytes and stays
+    that id's current value for its downstream cells.
     """
 
     A = "nb_A_cell_c1_var_df"
     B = "nb_B_cell_c1_var_df"
 
     def _both_finalized(self, store):
+        import hashlib
+
+        from strata.artifact_store import StagedVersion
+
         _make_ready_artifact(store, self.A, "same-prov")
         vb = store.create_artifact(self.B, "same-prov")
-        store.write_blob(self.B, vb, _ipc_bytes(1))
-        deduped = store.finalize_artifact(self.B, vb, "{}", 1, 10)
-        assert deduped is not None and deduped.id == self.A  # the collision
-        store.force_finalize_canonical(self.B, vb, "{}", 1, 10)  # what store_cell_output does
+        data = _ipc_bytes(1)
+        store.write_blob(self.B, vb, data)
+        digest = hashlib.sha256(data).hexdigest()
+        # What finalize_cell_outputs does with a cell run's outputs.
+        store.finalize_canonical_together([StagedVersion(self.B, vb, "{}", 1, len(data), digest)])
         assert store.get_artifact(self.A, 1).state == "superseded"
 
     def test_promoting_one_id_leaves_the_other_its_value(self, store):
@@ -1830,8 +1850,7 @@ class TestTwoIdsOneComputation:
         assert [v.id for v in store.list_latest_by_id_prefix("nb_A_")] == [self.A]
 
     def test_the_promoted_id_owns_its_bytes(self, store):
-        """Dedup dropped B's blob for A's; promotion must give B its own copy back, since A
-        is now the superseded one and may be collected."""
+        """A is now the superseded one and may be collected; B must not read through it."""
         self._both_finalized(store)
 
         assert store.blob_store.blob_exists(self.B, 1)

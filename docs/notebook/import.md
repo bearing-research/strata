@@ -130,11 +130,17 @@ clean `400` or `409` with `detail` set. An upload over the cap is a
 
 ### Cell-by-cell, in source order
 
-| Jupyter cell | Strata cell                                                  |
-| ------------ | ------------------------------------------------------------ |
-| Markdown     | Markdown cell with the source verbatim                       |
-| Code         | Python cell (after magic translation, see below)             |
-| Raw          | Skipped; counted in the report                               |
+| Jupyter cell    | Strata cell                                                  |
+| --------------- | ------------------------------------------------------------ |
+| Markdown        | Markdown cell with the source verbatim                       |
+| Code            | Python cell (after magic translation, see below)             |
+| Code (R kernel) | R cell with the source verbatim                              |
+| Raw             | Skipped; counted in the report                               |
+
+A notebook whose kernel language is R (IRkernel) imports its code
+cells as [R cells](cells.md) as written: no magic, shell or `;`
+translation and no dependency capture. Install the packages it loads
+in system R or with renv.
 
 Variable rebinding (`df = df.dropna()`, `df = df[df.col > 0]`, …)
 is a first-class pattern. Strata's DAG analyser handles read-before-
@@ -148,7 +154,8 @@ cells see the post-mutation view.
 value. Strata's harness auto-displays the last bare expression too,
 so the converter detects the trailing `;` (with or without an
 adjacent comment) and appends a `pass` so the harness skips display.
-The cell still runs.
+The cell still runs. As in IPython, only a `;` that ends the last
+statement counts: one inside a comment or a string does not.
 
 ### Magic translation table
 
@@ -208,7 +215,11 @@ inferred-from-imports entry:
    `bs4 → beautifulsoup4`, `yaml → PyYAML`, `mpl_toolkits → matplotlib`,
    `pkg_resources → setuptools`, etc. A `google.cloud.<x>` import maps
    to its own `google-cloud-<x>` package (`from google.cloud import
-   bigquery → google-cloud-bigquery`, `pubsub_v1 → google-cloud-pubsub`).
+   bigquery → google-cloud-bigquery`, `pubsub_v1 → google-cloud-pubsub`),
+   except where the distribution is named differently
+   (`google.cloud.sql.connector → cloud-sql-python-connector`,
+   `secretmanager → google-cloud-secret-manager`,
+   `devtools.cloudbuild_v1 → google-cloud-build`, and so on).
    Anything not in the
    dict is assumed to use the same name on PyPI (right ~95% of the
    time).
@@ -225,7 +236,10 @@ The deps are written to the new notebook's `pyproject.toml`. First
 `uv sync` (which runs automatically when you open the notebook in
 the UI, or when you invoke `strata run`) resolves them. The
 importer doesn't call `uv add` itself, that's slow, networked, and
-partial-failure-prone.
+partial-failure-prone. In personal mode that sync builds any dependency
+without a wheel, running its build code as you before any cell runs, so
+read what an untrusted notebook installs first (see
+[Environment Management](environment.md#how-it-works)).
 
 ## The import report
 
