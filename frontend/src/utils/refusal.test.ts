@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { refusalNotice } from './refusal.ts'
+import { apiErrorCode, refusalNotice } from './refusal.ts'
 
 test("a read-only refusal shows the server's sentence", () => {
   const sentence =
@@ -30,4 +30,14 @@ test('other errors are left to their own handlers', () => {
   assert.equal(refusalNotice({ error: 'Unknown message type: x' }), null)
   assert.equal(refusalNotice(null), null)
   assert.equal(refusalNotice('read_only'), null)
+})
+
+test('a refused REST call carries its code in the error payload', () => {
+  const refused = Object.assign(new Error('Write endpoints are disabled in service mode.'), {
+    payload: { detail: { error: 'writes_disabled', message: '...' } },
+  })
+  assert.equal(apiErrorCode(refused), 'writes_disabled')
+  assert.equal(apiErrorCode(Object.assign(new Error('x'), { payload: { detail: 'nope' } })), null)
+  assert.equal(apiErrorCode(new Error('network')), null)
+  assert.equal(apiErrorCode(null), null)
 })
