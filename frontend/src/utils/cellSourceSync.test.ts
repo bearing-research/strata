@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { DirtySources, shouldAdoptRemoteSource } from './cellSourceSync.ts'
+import { DirtySources, keepUnsentSources, shouldAdoptRemoteSource } from './cellSourceSync.ts'
 
 const base = { remote: 'new', local: 'old', isDirty: false }
 
@@ -91,4 +91,34 @@ test('a status change does not flush typing that was never refused', () => {
   dirty.statusChanged('a', 'ready')
   assert.deepEqual(link.sent, [])
   assert.equal(dirty.has('a'), true)
+})
+
+test('pending says whether any typing is still unsent', () => {
+  const { link, dirty } = tracker()
+  assert.equal(dirty.pending, false)
+  link.online = false
+  dirty.mark('a')
+  dirty.flushAll()
+  assert.equal(dirty.pending, true, 'the socket was down')
+  link.online = true
+  dirty.flushAll()
+  assert.equal(dirty.pending, false)
+})
+
+test('typing the old session never got survives the reopen that reloads the cells', () => {
+  const before = [
+    { id: 'a', source: 'x = 1  # typed while the server was down' },
+    { id: 'b', source: 'y = 2' },
+  ]
+  // The new session read the cells from disk, without that typing.
+  const after = [
+    { id: 'a', source: 'x = 1' },
+    { id: 'b', source: 'y = 20' },
+    { id: 'c', source: 'z = 3' },
+  ]
+  keepUnsentSources(before, after, (id) => id === 'a')
+  assert.deepEqual(
+    after.map((c) => c.source),
+    ['x = 1  # typed while the server was down', 'y = 20', 'z = 3'],
+  )
 })

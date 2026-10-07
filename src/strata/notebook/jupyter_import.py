@@ -601,7 +601,9 @@ def _suppression_offset(source: str) -> int | None:
     if last is None or last.type != tokenize.OP or last.string != ";":
         return None
     row, col = last.start
-    return sum(len(line) for line in source.splitlines(keepends=True)[: row - 1]) + col
+    # The tokenizer's own line split: ``splitlines`` also breaks on U+2028, form feed
+    # and a bare ``\r``, which would put the cut mid-statement.
+    return sum(len(line) for line in io.StringIO(source).readlines()[: row - 1]) + col
 
 
 def _ends_with_display_suppression(source: str) -> bool:

@@ -8,11 +8,15 @@ import ipaddress
 import math
 import os
 import re
+import socket
+import sys
 import time
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+import uvicorn
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -28,6 +32,7 @@ from fastapi.responses import (
     Response,
 )
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 from starlette.datastructures import Headers
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -45,7 +50,7 @@ from strata.auth import (
 )
 from strata.cache import CachedFetcher
 from strata.cache_warmer import CacheWarmer
-from strata.config import StrataConfig
+from strata.config import StrataConfig, describe_config_error
 from strata.gc_tracker import install_gc_tracker
 from strata.health import _package_version
 from strata.json_types import JsonValue
@@ -701,10 +706,16 @@ async def lifespan(app: FastAPI):
     if _state is not None:
         config = _state.config
     else:
-        config = StrataConfig.load()
+        try:
+            config = StrataConfig.load()
+        except ValidationError as exc:
+            # uvicorn follows this with the traceback; the reason comes first.
+            logger.error("config_refused", detail=describe_config_error(exc))
+            raise
 
     # Keeps personal-mode write endpoints off the network.
     config.validate_personal_mode_binding()
+    config.create_directories()
 
     from strata.transforms.registry import TransformRegistry, set_transform_registry
 
@@ -1396,9 +1407,18 @@ class HostAllowlistMiddleware:
         if scope["type"] in ("http", "websocket"):
             host = Headers(scope=scope).get("host")
             if not _host_is_allowed(host, get_state().config):
-                logger.warning("host_refused", host=host, path=scope.get("path"))
+                logger.warning(
+                    "host_refused",
+                    host=host,
+                    path=scope.get("path"),
+                    setting="STRATA_ALLOWED_HOSTS",
+                )
                 if scope["type"] == "http":
-                    refusal = PlainTextResponse(f"Host {host!r} is not allowed.", status_code=400)
+                    refusal = PlainTextResponse(
+                        f"Host {host!r} is not allowed. Add its name to STRATA_ALLOWED_HOSTS "
+                        "to serve it.",
+                        status_code=400,
+                    )
                     await refusal(scope, receive, send)
                 else:
                     await WebSocketClose(code=1008)(scope, receive, send)
@@ -1496,7 +1516,12 @@ def _mount_mcp_if_enabled() -> None:
     """
     global _mcp_app
 
-    config = _state.config if _state is not None else StrataConfig.load()
+    try:
+        config = _state.config if _state is not None else StrataConfig.load()
+    except ValidationError:
+        # Refused at startup instead (main or the lifespan), where the reason is printed;
+        # failing here would be a traceback at import.
+        return
     if not config.mcp_enabled:
         return
     if config.deployment_mode != "personal" and not config.principal_auth_enabled:
@@ -1918,9 +1943,23 @@ def _apply_server_cli_overrides(args) -> None:
         )
 
 
+class _ShutdownAnnouncingServer(uvicorn.Server):
+    """A uvicorn server that tells notebook clients it is stopping.
+
+    uvicorn closes every WebSocket with 1012 before the lifespan shutdown runs, so
+    only here can a client still learn that its session is gone.
+    """
+
+    async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
+        from strata.notebook.ws import announce_shutdown
+
+        await announce_shutdown()
+        await super().shutdown(sockets)
+
+
 def main(argv: list[str] | None = None):
     """Run the server."""
-    import uvicorn
+    from uvicorn.config import STARTUP_FAILURE
 
     from strata._uv_runtime import assert_uv_managed_runtime
 
@@ -1930,18 +1969,28 @@ def main(argv: list[str] | None = None):
     assert_uv_managed_runtime()
     _apply_server_cli_overrides(args)
 
-    config = StrataConfig.load()
+    try:
+        config = StrataConfig.load()
+    except ValidationError as exc:
+        sys.exit(f"Strata cannot start: {describe_config_error(exc)}")
     # Users often expect new notebooks in the current directory.
     print(f"Strata: new notebooks are created in {config.notebook_storage_dir}")
-    uvicorn.run(
-        "strata.server:app",
-        host=config.host,
-        port=config.port,
-        log_level="info",
-        # The default legacy ``websockets`` protocol asserts on asyncio internals
-        # that changed in CPython 3.14, killing notebook WebSockets there.
-        ws="websockets-sansio",
+    server = _ShutdownAnnouncingServer(
+        uvicorn.Config(
+            "strata.server:app",
+            host=config.host,
+            port=config.port,
+            log_level="info",
+            # The default legacy ``websockets`` protocol asserts on asyncio internals
+            # that changed in CPython 3.14, killing notebook WebSockets there.
+            ws="websockets-sansio",
+        )
     )
+    # What uvicorn.run does around Server.run.
+    with contextlib.suppress(KeyboardInterrupt):
+        server.run()
+    if not server.started:
+        sys.exit(STARTUP_FAILURE)
 
 
 if __name__ == "__main__":

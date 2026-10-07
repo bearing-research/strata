@@ -152,7 +152,7 @@ corresponding panel:
 | `GET /{sid}/dependencies` | Environment panel open | Resolved deps from `uv.lock`; expensive on large lockfiles. The snapshot already has `environment.resolved_package_count`. |
 | `GET /{sid}/environment` | Environment panel re-fetch | Refreshes after a mutation; snapshot has the version current at open. |
 | `GET /{sid}/connections/{name}/schema` | Connection detail open | Adapter call per connection. |
-| WS `profiling_request` (answered with `profiling_summary`) | Profiling panel open | Computed on demand. |
+| WS `profiling_request` (answered with `profiling_summary`) | Profiling panel open, then after each burst of `cell_output` frames | Computed on demand. |
 
 ## Reconnection and the cancel-on-disconnect grace window
 
@@ -227,12 +227,22 @@ or a [quiesce](rest-api.md) hold. Before the socket closes (code `1000`,
 }}
 ```
 
-`reason` is `idle`, `session_limit`, `memory`, `closed` or `deleted`. Do not
-reconnect to the old `session_id` (the upgrade is refused with HTTP `403`);
-reopen the notebook by path with `POST /v1/notebooks/open`, which
-starts a new session. The browser shows the message with a Reopen button;
+`reason` is `idle`, `session_limit`, `memory`, `closed`, `deleted` or
+`shutdown`. Do not reconnect to the old `session_id` (the upgrade is refused
+with HTTP `403`); reopen the notebook by path with `POST /v1/notebooks/open`,
+which starts a new session. The browser shows the message with a Reopen button;
 the [terminal viewer](../notebook/tui.md#when-the-server-closes-the-session)
 shows it in a notification and reopens on `r`.
+
+Sessions live in memory, so a server restart ends all of them. A graceful stop
+(Ctrl-C, `SIGTERM`, `docker stop`) of a server started with `python -m strata`
+or `strata-notebook` sends `session_closed` with `reason: "shutdown"` first; a
+killed server sends nothing, and the next upgrade is refused. A browser cannot
+read why an upgrade failed, so after a failed reconnect the web UI asks
+`GET /v1/notebooks/{session_id}/dag`: a `404` means the session is gone, and
+it reopens the notebook by path, carrying over any typing the old session never
+received. After a `shutdown` frame it keeps retrying until the server is back,
+then does the same. The terminal viewer reads the `403` directly.
 
 ## Message types
 

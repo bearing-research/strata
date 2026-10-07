@@ -138,6 +138,11 @@ def _reset_process_globals():
     from strata.notebook.remote_executor import _CAPTURED_SECRETS
 
     _CAPTURED_SECRETS.clear()
+    # Health records are cached by URL and test workers reuse URLs, so a record
+    # (or a test's sentinel) would answer for a later test's worker.
+    from strata.notebook.workers import _worker_health_cache
+
+    _worker_health_cache.clear()
 
 
 # Common utility functions

@@ -83,7 +83,8 @@ def target(postgres_dsn, tmp_path):
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_builds, api_keys, stream_owners, "
             "artifact_versions, artifact_names, artifact_aliases, artifact_tags, "
-            "registry_audit, registry_pending CASCADE;"
+            "registry_audit, registry_pending, artifact_publications, artifact_pins, "
+            "notebook_workers, notebook_worker_registry CASCADE;"
         )
         conn.commit()
     finally:
@@ -136,6 +137,31 @@ class TestMigration:
         assert migrated.resolve_name("daily").id == "a1"
         assert migrated.resolve_alias("daily", "champion").id == "a1"
         assert migrated.get_tags("a1", artifact.version)["auc"] == "0.91"
+
+    def test_publications_pins_and_the_worker_registry_arrive(
+        self, populated_sqlite, target, tmp_path
+    ):
+        version = populated_sqlite.get_latest_version("a1").version
+        link = populated_sqlite.publish_artifact("a1", version, title="paper figure")
+        populated_sqlite.pin_artifact("a1", version, "snapshot", pinned_by="ops")
+        gpu = {"name": "gpu", "backend": "executor", "config": {"url": "http://gpu:9"}}
+        populated_sqlite.update_notebook_workers(lambda _current: [{**gpu, "enabled": True}])
+
+        result = migrate(self._source(tmp_path), target)
+        assert result.total_rejected == 0
+
+        migrated = ArtifactStore(tmp_path / "tgt", dialect=target)
+        # The store keeps only the token's hash, so a link handed out before the move
+        # still resolves after it.
+        publication = migrated.get_publication(link.token)
+        assert publication is not None
+        assert (publication.artifact_id, publication.version) == ("a1", version)
+        assert publication.title == "paper figure"
+        assert [(p["artifact_id"], p["reason"]) for p in migrated.list_pins()] == [
+            ("a1", "snapshot")
+        ]
+        # The registry row matters too: without it the configured table applies again.
+        assert migrated.notebook_worker_entries() == [{**gpu, "enabled": True}]
 
     def test_timestamps_survive_the_move(self, populated_sqlite, target, tmp_path):
         original = populated_sqlite.get_latest_version("a1")
@@ -227,7 +253,8 @@ class TestMigration:
             conn.executescript(
                 "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
                 "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
-                "registry_pending CASCADE;"
+                "registry_pending, artifact_publications, artifact_pins, "
+                "notebook_workers, notebook_worker_registry CASCADE;"
             )
             conn.commit()
             conn.close()
@@ -253,7 +280,8 @@ class TestMigration:
             conn.executescript(
                 "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
                 "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
-                "registry_pending CASCADE;"
+                "registry_pending, artifact_publications, artifact_pins, "
+                "notebook_workers, notebook_worker_registry CASCADE;"
             )
             conn.commit()
             conn.close()
@@ -328,6 +356,34 @@ class TestMigration:
         assert result.rejected[0][0] == "artifact_tags"
         # The run still finished the tables after it.
         assert ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1") is not None
+
+    def test_every_table_in_the_store_is_migrated_or_deliberately_skipped(self, tmp_path):
+        # A table added to the store without an entry here is silently left behind.
+        import sqlite3
+
+        from strata.api_keys import ApiKeyStore
+        from strata.streaming.ownership import StreamOwnershipStore
+        from strata.transforms.build_store import BuildStore
+
+        db = tmp_path / "all" / "artifacts.sqlite"
+        ArtifactStore(db.parent)
+        BuildStore(db)
+        ApiKeyStore(db)
+        StreamOwnershipStore(db)
+        conn = sqlite3.connect(str(db))
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+            }
+        finally:
+            conn.close()
+
+        ephemeral = {"stream_owners", "import_staging", "build_console_chunks", "schema_version"}
+        assert tables - ephemeral == {table for table, _ in MIGRATED_TABLES}
 
     def test_stream_owners_is_not_migrated(self):
         # It records which node serves a live stream; none survive the move.

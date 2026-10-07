@@ -194,7 +194,21 @@ class TestTenantStorage:
         assert listed.status_code == 200
         assert listed.json()["notebooks"] == []
         assert opened.status_code == 400
-        assert "must be inside configured notebook storage" in opened.json()["detail"]
+        assert "must be inside your tenant's own folder" in opened.json()["detail"]
+
+    def test_a_notebook_at_the_top_of_the_storage_is_refused_by_its_tenant_folder(self, server):
+        # It is inside the configured storage, so saying only that sent operators looking
+        # for the wrong mistake after the upgrade that introduced tenant folders.
+        top_level = create_notebook(server.notebook_storage_dir, "old_nb")
+
+        opened = _client().post(
+            "/v1/notebooks/open", json={"path": str(top_level)}, headers=_headers("acme")
+        )
+
+        assert opened.status_code == 400
+        assert opened.json()["detail"] == (
+            "Invalid notebook path: must be inside your tenant's own folder in the notebook storage"
+        )
 
     def test_the_tenant_lists_and_opens_its_own_notebook(self, acme_notebook):
         client = _client()

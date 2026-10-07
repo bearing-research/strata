@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -30,6 +31,16 @@ from strata.types import CacheGranularity
 
 
 logger = logging.getLogger(__name__)
+
+
+def describe_config_error(exc: ValidationError) -> str:
+    """Why a configuration was refused, one problem per line, without pydantic's framing."""
+    lines = []
+    for error in exc.errors():
+        message = str(error["msg"]).removeprefix("Value error, ")
+        where = ".".join(str(part) for part in error["loc"])
+        lines.append(f"{where}: {message}" if where else message)
+    return "\n".join(lines)
 
 
 class AclRule(BaseModel):
@@ -154,6 +165,8 @@ class StrataConfig(BaseSettings):
         # A field carrying validation_alias still has to be settable by its own
         # name, because load() passes pyproject keys as init kwargs.
         populate_by_name=True,
+        # A refusal's message would otherwise end with the merged settings, secrets included.
+        hide_input_in_errors=True,
     )
 
     # Server settings
@@ -688,13 +701,9 @@ class StrataConfig(BaseSettings):
 
     @model_validator(mode="after")
     def setup_paths_and_defaults(self) -> StrataConfig:
-        """Set up paths and defaults after model creation."""
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-
+        """Fill in path and size defaults. Creates nothing: see ``create_directories``."""
         if self.metadata_db is None:
             self.metadata_db = Path.home() / ".strata" / "meta.sqlite"
-        if self.metadata_db is not None:
-            self.metadata_db.parent.mkdir(parents=True, exist_ok=True)
 
         if self.artifact_dir is None and self.deployment_mode == "personal":
             self.artifact_dir = Path.home() / ".strata" / "artifacts"
@@ -707,12 +716,20 @@ class StrataConfig(BaseSettings):
             if self.artifact_gc_max_bytes is None:
                 self.artifact_gc_max_bytes = _PERSONAL_GC_MAX_BYTES
 
+        return self
+
+    def create_directories(self) -> None:
+        """Create the local directories a server reads and writes.
+
+        Kept out of loading, which anything importing ``strata.server`` (or a CLI that only
+        reads a setting) does.
+        """
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        if self.metadata_db is not None:
+            self.metadata_db.parent.mkdir(parents=True, exist_ok=True)
         if self.deployment_mode == "personal" and self.artifact_dir is not None:
             self.artifact_dir.mkdir(parents=True, exist_ok=True)
-
         self.notebook_storage_dir.mkdir(parents=True, exist_ok=True)
-
-        return self
 
     @model_validator(mode="after")
     def validate_adaptive_ranges(self) -> StrataConfig:

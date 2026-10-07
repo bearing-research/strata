@@ -233,8 +233,9 @@ class TestConcurrentSchemaInitialization:
         barrier = threading.Barrier(8)
 
         def boot(i: int) -> None:
-            barrier.wait()
             try:
+                # Bounded: a thread that never starts breaks the barrier into errors.
+                barrier.wait(timeout=30)
                 booted.append(
                     ArtifactStore(tmp_path / f"node{i}", dialect=PostgresDialect(postgres_dsn))
                 )
@@ -588,8 +589,8 @@ class TestConnectionPool:
             barrier = threading.Barrier(8)
 
             def work(i: int) -> None:
-                barrier.wait()
                 try:
+                    barrier.wait(timeout=30)
                     for round_ in range(3):
                         aid = f"a{i}-{round_}"
                         version = store.create_artifact(aid, f"prov-{i}-{round_}", _spec())
@@ -1043,8 +1044,8 @@ class TestWriterSerialization:
         barrier = threading.Barrier(8)
 
         def create(i: int) -> None:
-            barrier.wait()
             try:
+                barrier.wait(timeout=30)
                 versions.append(store.create_artifact("contended", f"prov-{i}", _spec()))
             except Exception as exc:
                 errors.append(exc)
@@ -1076,14 +1077,14 @@ class TestWriterSerialization:
             try:
                 store._audit_in_connection(conn, action="name_set", name="slow")
                 inserted.set()
-                release.wait()
+                assert release.wait(30)
                 conn.commit()
             finally:
                 conn.close()
 
         slow = threading.Thread(target=slow_writer)
         slow.start()
-        inserted.wait()
+        assert inserted.wait(30)
         tagging = threading.Thread(target=store.set_tag, args=("m1", version, "k", "v"))
         tagging.start()
         probe = store._get_connection()
@@ -1127,7 +1128,7 @@ class TestWriterSerialization:
             try:
                 store._serialize_audit(conn)
                 locked.set()
-                release.wait()
+                assert release.wait(30)
                 conn.execute("DELETE FROM artifact_names WHERE name = ?", ("current",))
                 store._audit_in_connection(conn, action="name_delete", name="current")
                 conn.commit()
@@ -1144,7 +1145,7 @@ class TestWriterSerialization:
 
         names = threading.Thread(target=name_deleter)
         names.start()
-        locked.wait()
+        assert locked.wait(30)
         deleting = threading.Thread(target=artifact_deleter)
         deleting.start()
         probe = store._get_connection()
@@ -1365,6 +1366,34 @@ class TestSchemaMigrations:
             finally:
                 conn.close()
             assert stored == [publication.id]
+        finally:
+            dialect.close()
+
+    def test_a_read_only_open_leaves_an_older_database_alone(self, postgres_dsn, tmp_path, store):
+        """A shared database older nodes still serve: inspecting it must not migrate it."""
+        from strata.artifact_store import StoreSchemaMismatch
+
+        conn = store._get_connection()
+        try:
+            conn.execute("DROP TABLE notebook_workers")
+            conn.execute("DROP TABLE notebook_worker_registry")
+            conn.execute("UPDATE schema_version SET version = 8")
+            conn.commit()
+        finally:
+            conn.close()
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            with pytest.raises(StoreSchemaMismatch, match="version 8, older"):
+                ArtifactStore(tmp_path / "artifacts", dialect=dialect, read_only=True)
+
+            conn = dialect.connect()
+            try:
+                stamped = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
+                assert stamped["v"] == 8
+                assert not dialect.schema_exists(conn, "notebook_workers")
+            finally:
+                conn.close()
         finally:
             dialect.close()
 

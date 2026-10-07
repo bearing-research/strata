@@ -34,15 +34,21 @@ class TestDeploymentModeConfig:
         error_str = str(exc_info.value)
         assert "'service'" in error_str or "'personal'" in error_str
 
-    def test_personal_mode_creates_artifact_dir(self, tmp_path):
-        # A custom artifact_dir keeps the test out of the home directory.
+    def test_personal_mode_creates_artifact_dir_at_startup_only(self, tmp_path):
+        # Custom dirs keep the test out of the home directory.
         artifact_dir = tmp_path / "artifacts"
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
+            metadata_db=tmp_path / "meta" / "meta.sqlite",
+            notebook_storage_dir=tmp_path / "notebooks",
             deployment_mode="personal",
             artifact_dir=artifact_dir,
         )
         assert config.artifact_dir == artifact_dir
+        assert not artifact_dir.exists()
+
+        config.create_directories()
+
         assert artifact_dir.exists()
 
     def test_service_mode_no_artifact_dir(self, tmp_path):
@@ -320,6 +326,34 @@ class TestModeCoherence:
         monkeypatch.delenv("STRATA_AUTH_MODE", raising=False)
         with pytest.raises(ValueError, match="STRATA_AUTH_MODE"):
             StrataConfig.load(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "art")
+
+    @pytest.mark.parametrize(
+        "env",
+        [
+            {"STRATA_DEPLOYMENT_MODE": "service"},
+            # The catalog-uri refusal, with the secret coming from the AWS fallback.
+            {"STRATA_CATALOG_PROPERTIES": '{"warehouse": "s3://bucket/wh"}'},
+        ],
+        ids=["service-without-auth", "catalog-without-uri"],
+    )
+    def test_a_refusal_does_not_print_the_secret_key(self, tmp_path, monkeypatch, env):
+        """load() passes the S3 keys last, so pydantic's input_value ended with the secret."""
+        secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        monkeypatch.delenv("STRATA_AUTH_MODE", raising=False)
+        monkeypatch.setenv("STRATA_S3_SECRET_KEY", secret)
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", secret)
+        # From the environment, not kwargs, so the secret is the last value as in a real start.
+        monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "art"))
+        monkeypatch.chdir(tmp_path)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig.load()
+
+        assert "uri" in str(exc_info.value) or "STRATA_AUTH_MODE" in str(exc_info.value)
+        assert secret[-8:] not in str(exc_info.value)
 
     def test_service_transforms_without_artifact_dir_rejected(self, tmp_path):
         """Transform builds persist artifacts, so they need a store."""

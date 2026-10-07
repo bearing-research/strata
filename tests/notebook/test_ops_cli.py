@@ -444,6 +444,18 @@ def test_cli_cell_add_inline_c(chain_nb, capsys):
     assert new["source"] == "w = 7"
 
 
+def test_cli_cell_add_can_add_a_widget_cell(chain_nb, capsys):
+    """The UI's add-cell menu offers widget cells; the CLI adds the same kind."""
+    source = "alpha = slider(0, 1, step=0.01, default=0.5)\n"
+    argv = ["cell", "add", str(chain_nb), "-c", source, "--language", "widget"]
+
+    assert main([*argv, "--format", "json"]) == 0
+
+    new = json.loads(capsys.readouterr().out)
+    assert new["language"] == "widget"
+    assert (chain_nb / "cells" / f"{new['id']}.widget").read_text() == source
+
+
 def test_cli_cell_add_c_and_file_are_mutually_exclusive(chain_nb, tmp_path):
     src = tmp_path / "s.py"
     src.write_text("w = 5")
@@ -606,3 +618,56 @@ class TestAFailedDagBuildIsNotReportedAsAnEmptyGraph:
         dag = LocalNotebookOps(notebook_dir).dag()
         assert dag.error is None
         assert dag.edges, "a real dependency should still be reported"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["cell", "run", "{nb}", "a"], ["cell", "add", "{nb}", "-c", "z = 1", "--run"]],
+)
+def test_cli_cell_runs_hold_back_info_logs(chain_nb, monkeypatch, argv):
+    """As in `strata run`, per-cell INFO lines would bury the command's own output."""
+    import logging
+
+    import strata.notebook.cli as cli_mod
+    from strata.notebook.ops import RunResult
+
+    monkeypatch.delenv("STRATA_LOG_LEVEL", raising=False)
+    # As configure_logging leaves it in the CLI process.
+    monkeypatch.setattr(logging.getLogger("strata"), "level", logging.INFO)
+    executor_logger = logging.getLogger("strata.notebook.executor")
+    real = LocalNotebookOps(chain_nb)
+
+    class _LoggingOps:
+        add_cell = real.add_cell
+        get_cell = real.get_cell
+
+        async def run_cell(self, cid, mode="normal"):
+            executor_logger.info("execute_cell %s", cid)
+            executor_logger.warning("a warning about %s", cid)
+            return RunResult(
+                cell_id=cid,
+                status="ok",
+                cache_hit=False,
+                execution_method="subprocess",
+                duration_ms=1.0,
+                stdout="",
+            )
+
+        async def aclose(self):
+            return None
+
+    async def _no_env(ops, args):
+        return 0
+
+    monkeypatch.setattr(cli_mod, "_open_read_ops", lambda args: _LoggingOps())
+    monkeypatch.setattr(cli_mod, "_prepare_env_for_ops", _no_env)
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[method-assign]
+    executor_logger.addHandler(handler)
+    try:
+        assert main([part.format(nb=chain_nb) for part in argv]) == 0
+    finally:
+        executor_logger.removeHandler(handler)
+
+    assert [r.levelno for r in records] == [logging.WARNING]

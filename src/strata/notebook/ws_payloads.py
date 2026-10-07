@@ -364,7 +364,7 @@ class PresencePayload(WsPayload):
     you: str
 
 
-SessionClosedReason = Literal["idle", "session_limit", "memory", "closed", "deleted"]
+SessionClosedReason = Literal["idle", "session_limit", "memory", "closed", "deleted", "shutdown"]
 
 _SESSION_CLOSED_MESSAGES: dict[SessionClosedReason, str] = {
     "idle": "This notebook was closed after a period without activity.",
@@ -374,6 +374,7 @@ _SESSION_CLOSED_MESSAGES: dict[SessionClosedReason, str] = {
     "memory": "This notebook was closed because the server was low on memory.",
     "closed": "This notebook session was closed.",
     "deleted": "This notebook was deleted.",
+    "shutdown": "The server is shutting down.",
 }
 
 
@@ -382,7 +383,8 @@ class SessionClosedPayload(WsPayload):
 
     ``reason`` is ``idle`` (nobody edited, ran or focused for the session timeout),
     ``session_limit``, ``memory`` (available memory fell below the configured floor),
-    ``closed`` (the close route) or ``deleted``. Nothing computed is lost.
+    ``closed`` (the close route), ``deleted`` or ``shutdown`` (the server is stopping,
+    and sessions do not survive a restart). Nothing computed is lost.
     """
 
     reason: SessionClosedReason

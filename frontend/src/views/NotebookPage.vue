@@ -52,6 +52,10 @@ const {
   connected,
   connectError,
   sessionClosed,
+  sessionGone,
+  notebookPath,
+  hasUnsentEdits,
+  flushDirtyCells,
   environmentMutationActive,
   workerDefinitionsEditable,
   workerModeKnown,
@@ -273,8 +277,19 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
+// Leaving with typing the server has not taken (the 2 s flush window, or the
+// server is down) would lose it, so send what can go and ask about the rest.
+function warnUnsentEdits(e: BeforeUnloadEvent) {
+  flushDirtyCells()
+  if (!hasUnsentEdits()) return
+  e.preventDefault()
+  // Browsers before preventDefault() asked for a prompt wanted returnValue set.
+  e.returnValue = true
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('beforeunload', warnUnsentEdits)
   markNotebookPerf('notebook_page_mount')
   measureNotebookPerf('create_route_ms', 'create_route_start', 'notebook_page_mount')
   measureNotebookPerf('open_route_ms', 'open_route_start', 'notebook_page_mount')
@@ -305,6 +320,19 @@ watch(sessionClosed, (closed) => {
     closed.reason === 'deleted'
       ? null
       : routeNotebookPath.value || findBySessionId(props.sessionId)?.path || null
+})
+
+// The server no longer has this session (it restarted): reopen by path as a new
+// session. Typing it never got is carried over and sent once the socket opens.
+watch(sessionGone, (gone) => {
+  if (!gone || deletingNotebook.value) return
+  recoveryPath.value =
+    notebookPath.value || routeNotebookPath.value || findBySessionId(props.sessionId)?.path || null
+  if (recoveryPath.value) {
+    void reopenNotebookFromRecent()
+  } else {
+    reconnectError.value = 'The server no longer has this notebook session.'
+  }
 })
 
 async function connectToSession(sessionId: string) {
@@ -457,6 +485,7 @@ function startSidebarResize(event: PointerEvent) {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('beforeunload', warnUnsentEdits)
   stopSidebarResize()
   stopDagDrawerResize()
   cleanupWebSocket()

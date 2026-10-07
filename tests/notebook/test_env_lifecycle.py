@@ -504,8 +504,9 @@ class TestDependencyChangeRefresh:
             *,
             lockfile_changed: bool,
             refresh_runtime: bool = True,
+            installed: bool = False,
         ) -> list[str]:
-            del refresh_runtime
+            del refresh_runtime, installed
             job.lockfile_changed = lockfile_changed
             job.stale_cell_count = 1
             job.stale_cell_ids = ["cell-1"]

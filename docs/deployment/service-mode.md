@@ -778,8 +778,10 @@ unpickles what a cell stored: prompt and SQL cells do not load a pickled value,
 and cell tests load their inputs in the test process.
 
 A cell run this way still shares the host's kernel and sees what any local user
-can. A notebook that needs more isolation than that wants a worker on another
-machine.
+can. A process a cell starts in the background is not stopped when the cell
+finishes: it keeps running as the harness user, so the server never writes by
+path into a directory it has handed over. A notebook that needs more isolation
+than that wants a worker on another machine.
 
 **One harness user serves every tenant, so it is not a tenant isolation
 boundary.** It keeps cells away from the server; it does not keep one tenant's
@@ -897,10 +899,11 @@ Entries are exact names or a prefix with a trailing `*`. The essentials a
 subprocess cannot start without are always included: `PATH`, `HOME`, the temp
 and locale variables, and `UV_*`, `PYTHON*`, `VIRTUAL_ENV`, `R_*` and
 `RSTUDIO_*`, except names that look like credentials (containing `KEY`,
-`SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`), `UV_PUBLISH_*` and
-`UV_INDEX_*_USERNAME`. So a private index's login, which the server's `uv sync`
-needs, does not reach cells; keep index credentials in those variables or a
-netrc rather than inside `UV_INDEX_URL`, which passes. `STRATA_*` is dropped
+`SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`), `UV_PUBLISH_*`,
+`UV_INDEX_*_USERNAME`, and the index URLs (`UV_INDEX`, `UV_INDEX_URL`,
+`UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`, `UV_INDEX_*_URL`), which can carry a
+login as `https://user:password@host/simple`. So a private index's login, which
+the server's `uv sync` needs, does not reach cells. `STRATA_*` is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
 accident is the failure the setting exists to prevent. A name you list exactly
 always passes. It applies to every process that runs cell code, the same list

@@ -16,3 +16,11 @@ export function refusalNotice(payload: unknown): string | null {
     ? 'This notebook is read-only here: it can be opened and read, not run or changed.'
     : 'You do not have permission to do that in this notebook.'
 }
+
+/** The code of a refused REST call (`{"detail": {"error": "writes_disabled"}}`), or `null`. */
+export function apiErrorCode(err: unknown): string | null {
+  const payload = (err as { payload?: unknown } | null)?.payload
+  const detail = (payload as { detail?: unknown } | null)?.detail
+  const code = (detail as { error?: unknown } | null)?.error
+  return typeof code === 'string' ? code : null
+}

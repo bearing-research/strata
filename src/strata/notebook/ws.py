@@ -234,6 +234,17 @@ def end_session_clients(notebook_id: str, reason: SessionClosedReason) -> asynci
     return loop.create_task(_send_and_close())
 
 
+async def announce_shutdown() -> None:
+    """Tell every connected client that its session ends with the server.
+
+    Sessions live in memory, so a restart loses them all and a reconnect is refused.
+    """
+    notices = [
+        end_session_clients(notebook_id, "shutdown") for notebook_id in _notebook_connections
+    ]
+    await asyncio.gather(*(n for n in notices if n is not None), return_exceptions=True)
+
+
 def next_notebook_sequence(notebook_id: str) -> int:
     """Increment and return the next outbound sequence for a notebook."""
     return _ensure_execution_state(notebook_id).next_sequence()

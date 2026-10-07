@@ -24,6 +24,10 @@ and it is worth knowing before sending the link:
 Withdraw it with: strata artifact unpublish ocxQj-toxGttZYyRl-Zf9...
 ```
 
+The link starts with the server's `STRATA_PUBLIC_BASE_URL` and
+`STRATA_PUBLIC_BASE_PATH` when they are set, or with `--to-url` when publishing
+to another store.
+
 Every cell output is already an artifact, and a plot is no exception: it is
 stored under its own id with a provenance hash binding it to its inputs, its
 source, and the environment it ran in. Publishing does not create any of that.
@@ -307,6 +311,9 @@ writes the file the route serves, byte for byte:
 ```bash
 strata artifact archive --token <token> --to ./figure3.zip
 ```
+
+`--token` also takes the publication's id, which `GET /v1/publications` lists,
+since the raw token is shown only when the link is minted.
 
 A withdrawn publication refuses here as it does for the bytes: the page still resolves and says "withdrawn", since a
 reader chasing a footnote deserves that answer, but handing over the archive

@@ -63,11 +63,38 @@ Quiesce waits for running cells (cancelling any still running after `timeout_sec
 
 Back up a server before every upgrade: a new release migrates the artifact store's metadata on its first start, one way, and the backup is the only way back. Stop every server that shares the store first, so the metadata and the blobs agree.
 
+The commands that only read a store (`strata artifact list`, `show`, `lineage`, `verify`, `audit`, `pending` and `archive`) never migrate it. Run against a store an older release wrote, such as a backup or a database older nodes still serve, they refuse and say so; start the new release's server on it to migrate it. Commands that write to a store (`promote`, `publish`, `pull`, `gc`, `migrate`, …) migrate it the way the server does.
+
 - **SQLite store (the default):** copy the whole artifact directory (`STRATA_ARTIFACT_DIR`, `~/.strata/artifacts` by default). It holds `artifacts.sqlite` and the blobs.
 - **Postgres and an object store:** `pg_dump` the database `STRATA_ARTIFACT_METADATA_DSN` names, and copy the blob bucket (`aws s3 sync s3://<bucket> <backup-dir>`, or your provider's equivalent).
 - **Either way:** archive the notebook storage directory without `.venv` (as in [Backup](#backup)). The workers registered through `/v1/admin/notebook-workers` are in the metadata store, so the steps above cover them; a server from before 0.9.0 kept them in `notebook_workers.json` in the artifact directory, so copy that file too when backing one up before the upgrade.
 
-To go back, restore all of it and start the release that wrote it.
+To go back, stop every server, restore all of it and start the release that
+wrote it. Restore the metadata into an empty database or directory, never over
+the migrated one: a restore merged into it fails on rows and tables the new
+release added and leaves a half-restored store the old release starts on
+without complaint.
+
+```bash
+# SQLite: replace the whole artifact directory
+mv ~/.strata/artifacts ~/.strata/artifacts.after-upgrade
+cp -a /backups/strata-artifacts ~/.strata/artifacts
+
+# Postgres: recreate the database STRATA_ARTIFACT_METADATA_DSN names, then load the dump
+dropdb strata && createdb strata
+psql -d strata -f /backups/strata.sql            # a plain pg_dump
+pg_restore -d strata /backups/strata.dump        # or a pg_dump -Fc archive
+```
+
+`pg_restore --clean` alone is not enough: it drops only the tables the dump
+holds, so the tables a newer release added stay behind.
+
+Do not start the older release on the migrated store instead. 0.8.0 starts on
+a store 0.9.0 migrated without a warning, but every publication link handed out
+before the upgrade answers 404 there, each publication answers at its stored id
+instead (an id `GET /v1/publications` lists), links 0.8.0 mints there answer
+404 once 0.9.0 serves the store again, and the latest version of each result it
+writes is never collected.
 
 ## Moving between machines
 

@@ -600,6 +600,12 @@ async def put_artifact_by_provenance(
             status_code=400,
             detail="Missing 'content_type': a reader cannot decode the blob without it",
         )
+    # Unknown stays None: a recorded 0 makes verify report a mismatch for every Arrow result.
+    row_count = metadata.get("row_count")
+    if row_count is not None and (type(row_count) is not int or row_count < 0):
+        raise HTTPException(
+            status_code=400, detail="Metadata 'row_count' must be a non-negative integer"
+        )
 
     blob = await data_file.read()
     tenant_id = principal.tenant if principal else None
@@ -659,7 +665,7 @@ async def put_artifact_by_provenance(
         artifact_id=artifact_id,
         version=version,
         schema_json=str(metadata.get("schema_json") or ""),
-        row_count=int(metadata.get("row_count") or 0),
+        row_count=row_count,
         byte_size=len(blob),
         content_sha256=hashlib.sha256(blob).hexdigest(),
     )

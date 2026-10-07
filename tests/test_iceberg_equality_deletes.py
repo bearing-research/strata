@@ -512,6 +512,8 @@ def test_a_delete_file_strata_cannot_read_is_refused(people):
 def test_the_persisted_manifest_keeps_the_equality_deletes(people):
     catalog, uri, config = people
     _delete(catalog, id=pa.array([2], pa.int64()))
+    # Loading a config creates no directories; the server makes them at startup.
+    config.cache_dir.mkdir(parents=True, exist_ok=True)
     store = MetadataStore(config.cache_dir / "metadata.sqlite")
     ReadPlanner(config, manifest_cache=ManifestCache(store=store)).plan(uri)
 

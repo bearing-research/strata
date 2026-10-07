@@ -51,7 +51,7 @@ import type {
 } from '../types/ws-payloads.generated'
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import type { DatasetReader } from '../utils/datasetReaders'
-import { DirtySources, shouldAdoptRemoteSource } from '../utils/cellSourceSync'
+import { DirtySources, keepUnsentSources, shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { OptimisticRuns } from '../utils/optimisticRun'
 import { appendConsole, replaceConsole, startConsoleRun, startsRun } from '../utils/consoleChunk'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
@@ -72,6 +72,10 @@ const connected = ref(false)
 const connectError = ref<string | null>(null)
 // Set when the server closes this session (idle, limits, memory); the page offers to reopen.
 const sessionClosed = ref<SessionClosedPayload | null>(null)
+// Set when the server no longer has this session (it restarted); the page reopens by path.
+const sessionGone = ref(false)
+// The open notebook's directory, from the session payload: what a reopen opens.
+const notebookPath = ref<string | null>(null)
 
 // --- Store -----------------------------------------------------------------
 
@@ -1275,6 +1279,7 @@ function parseBackendCellPayload(raw: any): Cell {
 }
 
 function loadNotebookStateFromBackend(data: any) {
+  const previousId = notebook.id
   notebook.id = data.id
   notebook.name = data.name
   notebook.worker = data.worker ?? null
@@ -1293,8 +1298,12 @@ function loadNotebookStateFromBackend(data: any) {
   notebook.createdAt = data.created_at ? new Date(data.created_at).getTime() : Date.now()
   notebook.updatedAt = data.updated_at ? new Date(data.updated_at).getTime() : Date.now()
   ;(notebook as any).sessionId = data.session_id
+  notebookPath.value = typeof data.path === 'string' ? data.path : null
 
+  const previousCells = data.id === previousId ? notebook.cells : []
   notebook.cells = (data.cells || []).map(parseBackendCellPayload)
+  // The same notebook reopened as a new session: typing the old one never got survives.
+  keepUnsentSources(previousCells, notebook.cells, (id) => dirtyCells.has(id))
   notebook.cells.sort((a, b) => a.order - b.order)
   notebook.variantGroups = parseBackendVariantGroups(data.variant_groups)
   if (data.dag) {
@@ -1662,6 +1671,8 @@ async function refreshRegistryAction() {
   } finally {
     registryLoading.value = false
   }
+  // Every put, alias, tag or approval adds an audit entry.
+  await fetchRegistryAuditAction()
 }
 
 // Debounced so a finishing cell doesn't refresh per output. No-op when the
@@ -1979,6 +1990,7 @@ function initializeWebSocket() {
       const outputs = p.outputs as Record<string, any> | undefined
       // A finished cell may have published to the registry.
       scheduleRegistryRefresh()
+      scheduleProfilingRefresh()
 
       const displayOutputs =
         parseDisplayOutputPayloads(
@@ -2251,12 +2263,9 @@ function initializeWebSocket() {
 
         if (cellsAdded || cellsRemoved) {
           // Cells were added or removed (e.g. by an agent). Unflushed typing survives.
-          const localSource = new Map(notebook.cells.map((c) => [c.id, c.source]))
+          const previousCells = notebook.cells
           notebook.cells = state.cells.map(parseBackendCellPayload)
-          for (const cell of notebook.cells) {
-            const source = localSource.get(cell.id)
-            if (source !== undefined && dirtyCells.has(cell.id)) cell.source = source
-          }
+          keepUnsentSources(previousCells, notebook.cells, (id) => dirtyCells.has(id))
           notebook.cells.sort((a, b) => a.order - b.order)
         } else {
           syncCellsFromBackend(state.cells)
@@ -2487,11 +2496,27 @@ function initializeWebSocket() {
     })
 
     wsInstance.onMessage('session_closed', (msg: WsMessage) => {
-      sessionClosed.value = msg.payload as SessionClosedPayload
+      const closed = msg.payload as SessionClosedPayload
       connected.value = false
+      if (closed.reason === 'shutdown') {
+        // Keep retrying: once the server is back the session is found gone and
+        // the page reopens the notebook, unsent typing included.
+        pushToast(`${closed.message} The notebook reopens when it is back.`, 'info', 10000)
+        return
+      }
+      sessionClosed.value = closed
       // The session is gone, so reconnecting would only be refused.
       wsInstance?.disconnect()
     })
+
+    wsInstance.onSessionGone(() => {
+      connected.value = false
+      sessionGone.value = true
+    })
+
+    // Each step's own cell_status already shows a cascade here; this frame is
+    // for viewers without per-cell state (the terminal viewer's banner).
+    wsInstance.onMessage('cascade_progress', () => {})
 
     wsInstance.connect()
   }
@@ -2506,6 +2531,7 @@ async function waitForWebSocket(timeoutMs: number = 5000): Promise<void> {
 
 function cleanupWebSocket() {
   sessionClosed.value = null
+  sessionGone.value = false
   stopConnectedWatch?.()
   stopConnectedWatch = null
   if (wsInstance) {
@@ -3435,6 +3461,18 @@ function requestProfilingSummary() {
   }
 }
 
+// The server sends the summary only on request: refresh it after runs, once per
+// burst of outputs, and only once the panel has asked for it.
+let profilingRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleProfilingRefresh() {
+  if (profilingSummary.value === null) return
+  if (profilingRefreshTimer) clearTimeout(profilingRefreshTimer)
+  profilingRefreshTimer = setTimeout(() => {
+    profilingRefreshTimer = null
+    requestProfilingSummary()
+  }, 500)
+}
+
 function openInspect(cellId: CellId) {
   if (!wsInstance || !wsInstance.connected()) return
   // Toggling closed is CellEditor's job.
@@ -3491,6 +3529,9 @@ export function useNotebook() {
     connected,
     connectError,
     sessionClosed,
+    sessionGone,
+    notebookPath,
+    hasUnsentEdits: () => dirtyCells.pending,
     // Lifecycle
     boot,
     openNotebook,

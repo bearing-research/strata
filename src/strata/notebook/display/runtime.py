@@ -6,8 +6,13 @@ so it must have no relative imports (they would break those loaders silently).
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib.machinery import ModuleSpec
+from types import ModuleType
 from typing import Any
 
 
@@ -60,26 +65,15 @@ class DisplayCapture:
 
     @contextmanager
     def capture_side_effects(self):
-        """Capture common notebook-side display effects like ``plt.show()``."""
-        plt = None
-        figure_cls = None
-        original_show = None
-        original_figure_show = None
+        """Capture ``plt.show()`` and ``Figure.show()`` as display outputs.
 
-        try:
-            import matplotlib.pyplot as plt
-            from matplotlib.figure import Figure as figure_cls
-        except ImportError:
-            plt = None  # type: ignore[assignment]
+        Imports nothing itself: pyplot is patched now if loaded, else when the cell
+        imports it. Importing it for every cell costs time and, on a fresh install,
+        prints matplotlib's font-cache notice into whichever cell ran first.
+        """
+        restore: list[tuple[Any, str, Any]] = []
 
-        if plt is None:
-            yield
-            return
-
-        original_show = getattr(plt, "show", None)
-        original_figure_show = getattr(figure_cls, "show", None) if figure_cls else None
-
-        def _capture_current_figures() -> None:
+        def _capture_current_figures(plt: Any) -> None:
             try:
                 figure_numbers = list(plt.get_fignums())
             except Exception:
@@ -90,25 +84,66 @@ class DisplayCapture:
                 except Exception:
                     continue
 
-        def _patched_show(*_args: Any, **_kwargs: Any) -> None:
-            _capture_current_figures()
-            return None
+        def _patch(plt: Any) -> None:
+            figure_cls = getattr(sys.modules.get("matplotlib.figure"), "Figure", None)
+            original_show = getattr(plt, "show", None)
+            original_figure_show = getattr(figure_cls, "show", None) if figure_cls else None
 
-        def _patched_figure_show(fig_self: Any, *_args: Any, **_kwargs: Any) -> None:
-            self.capture(fig_self)
-            return None
+            def _patched_show(*_args: Any, **_kwargs: Any) -> None:
+                _capture_current_figures(plt)
+                return None
 
-        # ``setattr`` bypasses static typing: the patched callables have looser
-        # signatures than ``plt.show`` / ``Figure.show``.
-        if callable(original_show):
-            setattr(plt, "show", _patched_show)
-        if figure_cls is not None and callable(original_figure_show):
-            setattr(figure_cls, "show", _patched_figure_show)
+            def _patched_figure_show(fig_self: Any, *_args: Any, **_kwargs: Any) -> None:
+                self.capture(fig_self)
+                return None
+
+            # ``setattr`` bypasses static typing: the patched callables have looser
+            # signatures than ``plt.show`` / ``Figure.show``.
+            if callable(original_show):
+                setattr(plt, "show", _patched_show)
+                restore.append((plt, "show", original_show))
+            if figure_cls is not None and callable(original_figure_show):
+                setattr(figure_cls, "show", _patched_figure_show)
+                restore.append((figure_cls, "show", original_figure_show))
+
+        hook: _AfterImport | None = None
+        if "matplotlib.pyplot" in sys.modules:
+            _patch(sys.modules["matplotlib.pyplot"])
+        else:
+            hook = _AfterImport("matplotlib.pyplot", _patch)
+            sys.meta_path.insert(0, hook)
 
         try:
             yield
         finally:
-            if callable(original_show):
-                setattr(plt, "show", original_show)
-            if figure_cls is not None and callable(original_figure_show):
-                setattr(figure_cls, "show", original_figure_show)
+            if hook is not None and hook in sys.meta_path:
+                sys.meta_path.remove(hook)
+            for owner, attr, original in reversed(restore):
+                setattr(owner, attr, original)
+
+
+class _AfterImport:
+    """A one-shot ``sys.meta_path`` finder that runs *callback* on *name* once it is imported."""
+
+    def __init__(self, name: str, callback: Callable[[ModuleType], None]) -> None:
+        self.name = name
+        self.callback = callback
+
+    def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> ModuleSpec | None:
+        if fullname != self.name:
+            return None
+        # Out of the way first, so the real lookup below does not find this finder again.
+        if self in sys.meta_path:
+            sys.meta_path.remove(self)
+        spec = importlib.util.find_spec(fullname)
+        loader = spec.loader if spec is not None else None
+        if loader is None or not hasattr(loader, "exec_module"):
+            return spec
+        exec_module = loader.exec_module
+
+        def _exec_then_callback(module: ModuleType) -> None:
+            exec_module(module)
+            self.callback(module)
+
+        setattr(loader, "exec_module", _exec_then_callback)
+        return spec

@@ -46,6 +46,15 @@ class TestPersonalModeKeepsTheFallback:
         assert catalog.properties["uri"] == f"sqlite:///{tmp_path / 'meta.sqlite'}"
         assert (tmp_path / "meta.sqlite").is_file()
 
+    def test_the_metadata_db_directory_is_created_on_use(self, tmp_path):
+        """Loading the config creates nothing, and a notebook run reaches here without a server."""
+        config = _config(tmp_path / "fresh", "personal")
+        metadata_db = tmp_path / "fresh" / "meta.sqlite"
+
+        PyIcebergCatalog(config)._build_catalog("gs://lake/wh").create_namespace("ns")
+
+        assert metadata_db.is_file()
+
     def test_a_local_warehouse_keeps_its_own_catalog(self, tmp_path):
         catalogs = PyIcebergCatalog(_config(tmp_path, "personal"))
 

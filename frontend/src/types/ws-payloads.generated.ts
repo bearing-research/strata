@@ -224,7 +224,7 @@ export interface ProfilingSummaryPayload {
 }
 
 export interface SessionClosedPayload {
-  reason: 'idle' | 'session_limit' | 'memory' | 'closed' | 'deleted'
+  reason: 'idle' | 'session_limit' | 'memory' | 'closed' | 'deleted' | 'shutdown'
   message: string
 }
 

@@ -15,6 +15,7 @@ import {
   type ArtifactStats,
 } from '../composables/useStrata'
 import ThemeToggle from '../components/ThemeToggle.vue'
+import { apiErrorCode } from '../utils/refusal'
 
 const strata = useStrata()
 
@@ -26,6 +27,8 @@ const stats = ref<ArtifactStats | null>(null)
 const rows = ref<ArtifactRow[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+// Listing versions is personal-mode only; a shared server still reports the stats.
+const listUnavailable = ref(false)
 
 const stateFilter = ref('')
 const namePrefix = ref('')
@@ -80,8 +83,9 @@ async function loadArtifacts() {
     })
     rows.value = data.artifacts
   } catch (e: any) {
-    error.value = e?.message || 'Failed to fetch artifacts'
     rows.value = []
+    if (apiErrorCode(e) === 'writes_disabled') listUnavailable.value = true
+    else error.value = e?.message || 'Failed to fetch artifacts'
   } finally {
     loading.value = false
   }
@@ -190,7 +194,12 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="filter-bar">
+    <div v-if="listUnavailable" class="banner banner-info" data-testid="artifacts-list-unavailable">
+      This server is shared, so it does not list artifact versions one by one. The totals above are
+      your team's.
+    </div>
+
+    <div v-if="!listUnavailable" class="filter-bar">
       <label class="filter">
         State
         <select v-model="stateFilter" class="control" data-testid="artifacts-state">
@@ -214,7 +223,7 @@ onMounted(() => {
 
     <div v-if="error" class="banner banner-error" data-testid="artifacts-error">{{ error }}</div>
 
-    <div class="table-wrap">
+    <div v-if="!listUnavailable" class="table-wrap">
       <table class="artifact-table" data-testid="artifacts-table">
         <thead>
           <tr>
@@ -254,7 +263,7 @@ onMounted(() => {
       </table>
     </div>
 
-    <div class="pager">
+    <div v-if="!listUnavailable" class="pager">
       <button
         class="btn btn-secondary"
         :disabled="!canPrev"
@@ -437,6 +446,12 @@ onMounted(() => {
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 13px;
+}
+
+.banner-info {
+  background: var(--tint-info);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 .banner-error {

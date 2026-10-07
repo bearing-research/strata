@@ -58,6 +58,11 @@ def _utc_iso_z() -> str:
     return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
 
+def _upgrade_refused(exc: Exception) -> bool:
+    """Whether the server refused the WebSocket upgrade: the session id is unknown."""
+    return isinstance(exc, websockets.exceptions.InvalidStatus) and exc.response.status_code == 403
+
+
 def _glyph(status: str) -> str:
     return _STATUS_GLYPHS.get(status, "?")
 
@@ -494,6 +499,14 @@ class NotebookTUI(App[None]):
                 raise
             except Exception as exc:  # noqa: BLE001 (any drop → reconnect with backoff)
                 self._ws = None
+                if self._session_closed is None and _upgrade_refused(exc):
+                    # The server no longer has this session (most often it restarted),
+                    # and every retry would be refused the same way.
+                    self._session_closed = {
+                        "reason": "not found",
+                        "message": "The server no longer has this session; it may have restarted.",
+                    }
+                    self._notify_closed()
                 if self._session_closed is not None:
                     break
                 self._set_connection(f"reconnecting… ({type(exc).__name__})")
@@ -722,7 +735,8 @@ class NotebookTUI(App[None]):
         table = self.query_one("#output-table", DataTable)
         table.clear(columns=True)
         table.border_title = "loading…"
-        table.border_subtitle = "[n]ext [p]rev  [s]ort col  [e]xport csv"
+        # Text, not str: a str is markup, where ``[n]`` is a style tag and vanishes.
+        table.border_subtitle = Text("[n]ext [p]rev  [s]ort col  [e]xport csv")
         self.run_worker(self._load_table_page(), group="table", exclusive=True)
 
     async def _load_table_page(self) -> None:

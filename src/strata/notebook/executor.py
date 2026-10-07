@@ -47,10 +47,14 @@ from strata.notebook.env import compute_execution_env_hash, narrow_env_for_prove
 from strata.notebook.harness_user import (
     HarnessUser,
     LocalExecutionRefused,
+    UnsafeRunFile,
     hand_over,
     identity_env,
+    let_through,
+    read_run_file,
     resolve_harness_user,
     spawn_kwargs,
+    write_run_file,
 )
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
@@ -650,9 +654,10 @@ class CellExecutor:
             input_specs = self._load_input_blobs(cell_id, blob_dir)
             self._add_dataset_inputs(input_specs, prov.datasets, blob_dir)
 
-            # The run directory is created inside this server-private one; a harness user must
-            # reach it.
-            hand_over(Path(tmp), harness_user)
+            # The harness user gets the inputs and, once staged, the run directory, never tmp
+            # itself: a process an earlier cell left running could plant links in it.
+            let_through(Path(tmp), harness_user)
+            hand_over(blob_dir, harness_user)
 
             def _run(rundir_name: str) -> dict[str, Any]:
                 return run_cell_tests_in_dir(
@@ -701,8 +706,17 @@ class CellExecutor:
                     pytest_unavailable = True
                     raw = empty_raw
 
-        # After the run: a pytest auto-install can change the lockfile, which is an input.
-        source_hash, test_source_hash, input_fingerprint = self.session.cell_test_fingerprint(
+        # The env hash after the run: a pytest auto-install can change the lockfile.
+        input_fingerprint = self.session.record_cell_test_inputs(
+            cell_id,
+            prov.input_hashes
+            + prov.mount_fingerprints
+            + prov.table_fingerprints
+            + prov.fetch_fingerprints
+            + prov.dataset_fingerprints,
+            self.session.cell_env_hash(cell),
+        )
+        source_hash, test_source_hash, _ = self.session.cell_test_fingerprint(
             cell_id, source, test_source
         )
         result = CellTestResult(
@@ -1662,6 +1676,7 @@ class CellExecutor:
                                 source_hash=source_hash,
                                 source=source,
                                 env_hash=env_hash,
+                                display_count=len(exec_result.display_outputs),
                             )
 
                     # ⑥ Sync back read-write mounts.
@@ -1765,7 +1780,15 @@ class CellExecutor:
         store = artifact_mgr.artifact_store
         display_count = self._recorded_display_count(cell_id, provenance_hash, None)
         if display_count is None:
-            display_count = current_display_count
+            # A run without displays leaves no display artifact; its console says so.
+            console = store.find_version_by_provenance(
+                artifact_mgr.cell_artifact_id(cell_id, "__console__"),
+                derive_subkey(provenance_hash, "__console__"),
+            )
+            spec = console.transform_spec if console is not None else None
+            params = json.loads(spec).get("params", {}) if spec else {}
+            recorded = params.get("display_count")
+            display_count = int(recorded) if recorded is not None else current_display_count
         labels = ["__console__", *(f"__display__{index}" for index in range(display_count))]
         to_promote: list[tuple[str, int]] = []
         for label in labels:
@@ -2463,12 +2486,13 @@ class CellExecutor:
         )
         result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
 
-        bundle_path = output_dir / "notebook-output-bundle.tar"
-        pack_notebook_output_bundle(bundle_path, result, output_dir)
-
-        unpacked_dir = output_dir / "_executor_result"
-        unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
-        return unpacked_result, unpacked_dir, "executor", resolved_mounts
+        # A process the cell left running still owns output_dir and can swap any path under
+        # it for a link: tar into an unnamed file, unpack through the run-file helpers.
+        with tempfile.TemporaryFile() as bundle:
+            pack_notebook_output_bundle(bundle, result, output_dir)
+            bundle.seek(0)
+            unpacked_result = unpack_notebook_output_bundle(bundle, output_dir)
+        return unpacked_result, output_dir, "executor", resolved_mounts
 
     async def _locked_environment(
         self, worker_spec: Any, language: str = "python"
@@ -4542,8 +4566,7 @@ class CellExecutor:
                 break
 
             try:
-                with open(output_file, "rb") as f:
-                    blob_data = f.read()
+                blob_data = read_run_file(output_dir, output_file.name)
 
                 content_type = content_type_map.get(ext, "pickle/object")
                 var_provenance = derive_subkey(provenance_hash, var_name)
@@ -4567,6 +4590,9 @@ class CellExecutor:
                     )
                 )
                 staged_names.append((var_name, content_type))
+            except UnsafeRunFile:
+                artifact_mgr.discard_cell_outputs(staged)
+                raise
             except Exception:
                 logger.exception(
                     "Failed to store output %s for cell %s",
@@ -4618,16 +4644,22 @@ class CellExecutor:
         source_hash: str = "",
         source: str = "",
         env_hash: str = "",
+        display_count: int | None = None,
     ) -> None:
         """Persist a leaf cell's console output as a provenance-keyed artifact.
 
         So a cell that only prints can still cache-hit and replay its output. Stored
         even when both streams are empty: a leaf has no other artifact, so the console
         is the record that it ran under this provenance (cache hit, ready on reopen).
+        ``display_count`` records how many displays the run made, which a run with
+        none leaves no display artifact to say.
         """
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
+        params = self._fetch_params(cell_id)
+        if display_count is not None:
+            params["display_count"] = str(display_count)
         artifact_mgr.store_cell_output(
             cell_id=cell_id,
             variable_name="__console__",
@@ -4638,7 +4670,7 @@ class CellExecutor:
             source_hash=source_hash,
             source=source,
             env_hash=env_hash,
-            extra_params=self._fetch_params(cell_id),
+            extra_params=params,
         )
 
     def _store_inline_display_outputs(
@@ -4733,7 +4765,7 @@ class CellExecutor:
             if not output_file.exists():
                 continue
 
-            blob_data = output_file.read_bytes()
+            blob_data = read_run_file(output_dir, file_name)
             row_count = display_output.get("rows")
             display_provenance = derive_subkey(provenance_hash, f"__display__{index}")
             artifact_version = artifact_mgr.store_cell_output(
@@ -4862,14 +4894,14 @@ class CellExecutor:
                 "provenance_hash": derive_subkey(provenance_hash, var_name),
                 "injected": injected_refs,
             }
-            output_file = output_dir / f"{safe_filename_stem(var_name)}.cell_module.json"
-            with open(output_file, "w", encoding="utf-8") as f:
-                json.dump(descriptor, f)
+            file_name = f"{safe_filename_stem(var_name)}.cell_module.json"
+            data = json.dumps(descriptor).encode("utf-8")
+            write_run_file(output_dir, file_name, data)
 
             outputs[var_name] = {
                 "content_type": "module/cell",
-                "file": output_file.name,
-                "bytes": output_file.stat().st_size,
+                "file": file_name,
+                "bytes": len(data),
                 "type": symbol.kind,
                 "preview": f"<{symbol.kind} {var_name}>",
             }
@@ -4900,7 +4932,7 @@ class CellExecutor:
         artifact_version = artifact_mgr.store_cell_output(
             cell_id=cell_id,
             variable_name=var_name,
-            blob_data=blob_path.read_bytes(),
+            blob_data=read_run_file(output_dir, str(spec["file"])),
             content_type=spec.get("content_type", "pickle/object"),
             provenance_hash=derive_subkey(provenance_hash, var_name),
             source_hash=compute_source_hash(source),
@@ -5024,8 +5056,7 @@ class CellExecutor:
                 "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
                 "variables": {},
             }
-        with open(result_path) as f:
-            return json.load(f)
+        return json.loads(read_run_file(result_path.parent, result_path.name))
 
     async def _run_r_harness(
         self,
@@ -5106,8 +5137,7 @@ class CellExecutor:
                 "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
                 "variables": {},
             }
-        with open(result_path) as f:
-            return json.load(f)
+        return json.loads(read_run_file(result_path.parent, result_path.name))
 
     # ------------------------------------------------------------------
     # Loop cell execution (sequential, fresh subprocess per iteration)
@@ -5277,6 +5307,11 @@ class CellExecutor:
         if use_cache:
             cached = self._cached_loop_result(cell_id, loop, cell_provenance, start_time)
             if cached is not None:
+                from strata.notebook.runtime_state import persist_cell_loop_run
+
+                # A hit serves an earlier run, not the one last started; let the steps on
+                # disk speak for themselves again.
+                persist_cell_loop_run(self.session.path, cell_id, None)
                 return cached
 
         try:
@@ -5310,6 +5345,9 @@ class CellExecutor:
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
         loop_run = uuid.uuid4().hex
+        from strata.notebook.runtime_state import persist_cell_loop_run
+
+        persist_cell_loop_run(self.session.path, cell_id, loop_run)
         combined_stdout: list[str] = []
         combined_stderr: list[str] = []
         all_mutation_warnings: list[MutationWarning] = []
@@ -5442,7 +5480,7 @@ class CellExecutor:
                     raise RuntimeError(
                         f"Loop cell iter {k} carry file not produced by harness: {new_carry_path}"
                     )
-                new_carry_blob = new_carry_path.read_bytes()
+                new_carry_blob = read_run_file(output_dir, new_carry_file)
 
                 # Capture while the iteration tmpdir is still alive.
                 for extra_var in extra_consumed:
@@ -5458,7 +5496,7 @@ class CellExecutor:
                     extra_path = output_dir / extra_file
                     if extra_path.exists():
                         extra_blobs[extra_var] = (
-                            extra_path.read_bytes(),
+                            read_run_file(output_dir, extra_file),
                             str(extra_meta.get("content_type", "pickle/object")),
                         )
 
@@ -5660,9 +5698,18 @@ class CellExecutor:
                     f"Run that cell through iteration {loop.start_from_iter} first."
                 )
             # Every run rewrites @iter=0, so a step whose run token differs from it is
-            # left over from an older, longer run.
+            # left over from an older, longer run. A run that failed at iteration 0
+            # rewrote nothing; the token recorded at its start catches that.
+            from strata.notebook.runtime_state import load_runtime_state
+
             first = artifact_mgr.get_iteration_artifact(loop.start_from_cell, loop.carry, 0)
-            if first is None or _loop_run_token(first) != _loop_run_token(artifact):
+            started = load_runtime_state(self.session.path).cells.get(loop.start_from_cell)
+            latest_run = started.loop_run if started is not None else None
+            if (
+                first is None
+                or _loop_run_token(first) != _loop_run_token(artifact)
+                or (latest_run is not None and latest_run != _loop_run_token(artifact))
+            ):
                 raise ValueError(
                     f"Loop seed start_from={loop.start_from_cell}@iter={loop.start_from_iter} "
                     f"is left over from an older run of cell {loop.start_from_cell}: its "
@@ -6279,7 +6326,7 @@ class CellExecutor:
             content_type = _artifact_content_type(canonical_art)
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
             file_name = f"{safe_filename_stem(var_name)}{ext}"
-            (cell_output_dir / file_name).write_bytes(blob)
+            write_run_file(cell_output_dir, file_name, blob)
             cached_outputs[var_name] = {
                 "content_type": content_type,
                 "file": file_name,
@@ -6354,7 +6401,7 @@ class CellExecutor:
             content_type = _artifact_content_type(display_art)
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
             file_name = f"__display__{index}{ext}"
-            (cell_output_dir / file_name).write_bytes(blob)
+            write_run_file(cell_output_dir, file_name, blob)
             meta = cached.model_dump()
             meta["file"] = file_name
             cached_displays.append(meta)
@@ -6456,15 +6503,18 @@ class CellExecutor:
         if module_export_error:
             return {"ok": False, "error": f"module export rejected: {module_export_error}"}
 
-        stored_ok = self._store_outputs(
-            cell_id,
-            cell_output_dir,
-            provenance_hash,
-            input_hashes,
-            source_hash=source_hash,
-            source=executed_source,
-            env_hash=env_hash,
-        )
+        try:
+            stored_ok = self._store_outputs(
+                cell_id,
+                cell_output_dir,
+                provenance_hash,
+                input_hashes,
+                source_hash=source_hash,
+                source=executed_source,
+                env_hash=env_hash,
+            )
+        except UnsafeRunFile as exc:
+            return {"ok": False, "error": str(exc)}
 
         # Carry the post-persist metadata (with artifact_uri) in the ack so the dispatcher
         # broadcasts the URI-bearing version, as single-cell does.
@@ -6505,6 +6555,7 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=executed_source,
                 env_hash=env_hash,
+                display_count=len(persisted_displays),
             )
 
         # Offer it to the team, as a single run does. Inert unless configured, and it

@@ -238,3 +238,38 @@ class TestStalenessOffTheEventLoop:
         await asyncio.gather(*(session.compute_staleness_async() for _ in range(4)))
 
         assert not overlapped
+
+
+def test_a_staleness_pass_reads_the_worker_registry_once(tmp_path, monkeypatch):
+    """The registry lives in the metadata store; a read per worker-annotated cell adds up
+    (and some passes run on the event loop)."""
+    from types import SimpleNamespace
+
+    from strata.notebook import workers
+    from strata.notebook.parser import parse_notebook
+    from tests.notebook.test_cli import _build_notebook
+
+    catalog = [{"name": "gpu", "backend": "executor", "config": {"url": "http://w:1"}}]
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(
+                deployment_mode="personal", transforms_config={"notebook_workers": catalog}
+            )
+        ),
+    )
+    cells = [(f"c{i}", f"# @worker gpu\nv{i} = {i}\n", None) for i in range(5)]
+    nb = _build_notebook(tmp_path, cells=cells)
+    session = NotebookSession(parse_notebook(nb), nb)
+    reads: list[object] = []
+    load = workers._load_worker_policy
+    monkeypatch.setattr(
+        workers, "_load_worker_policy", lambda state: reads.append(1) or load(state)
+    )
+
+    session.compute_staleness()
+
+    assert len(reads) == 1
+    # Nothing is held over between passes: the next one reads again.
+    session.compute_staleness()
+    assert len(reads) == 2

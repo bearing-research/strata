@@ -2632,6 +2632,30 @@ def test_import_snapshot_opens_a_session_with_the_artifacts(client, monkeypatch,
     assert data["id"] == source_id
 
 
+def test_import_snapshot_name_renames_the_notebook(client, monkeypatch, tmp_path):
+    """As in the Jupyter import, ``name`` is the notebook's name, not only its directory's."""
+    _import_storage(monkeypatch, tmp_path / "storage")
+    payload, _ = _snapshot_bytes(tmp_path)
+
+    named = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("demo.zip", payload, "application/zip")},
+        data={"name": "Journey Copy"},
+    )
+    unnamed = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("other.zip", payload, "application/zip")},
+    )
+
+    assert named.status_code == 200, named.text
+    assert named.json()["name"] == "Journey Copy"
+    import tomllib
+
+    on_disk = tomllib.loads((Path(named.json()["path"]) / "notebook.toml").read_text())
+    assert on_disk["name"] == "Journey Copy"
+    assert unnamed.json()["name"] == "Snap Source"
+
+
 def test_import_snapshot_replaces_an_id_already_in_the_storage_root(client, monkeypatch, tmp_path):
     """The second copy gets its own id; two copies sharing one collide in a shared store."""
     _import_storage(monkeypatch, tmp_path / "storage")

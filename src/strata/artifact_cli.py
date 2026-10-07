@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.artifact_store import ArtifactStore, ArtifactVersion
+from strata.artifact_store import ArtifactStore, ArtifactVersion, StoreSchemaMismatch
 from strata.artifact_transfer import (
     PublicationTarget,
     RemoteStore,
@@ -28,20 +28,30 @@ if TYPE_CHECKING:
     from strata.config import StrataConfig
 
 
-def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
+def _open_store(artifact_dir_arg: str | None, *, read_only: bool = False) -> ArtifactStore | None:
     """Open the store a command reads.
 
     ``--artifact-dir`` names one local store (SQLite file plus blobs) and nothing else is
     consulted: a DSN or blob backend from the environment would pair this store's rows with
     another store's bytes. Without it, open the store the server is configured with
     (``[tool.strata]``, then ``STRATA_*``): its ``artifact_dir``, metadata DSN and blob backend.
+    ``read_only`` commands never migrate: a backup, or a store older nodes still serve,
+    stays as it was.
     """
+    try:
+        return _open_store_or_raise(artifact_dir_arg, read_only=read_only)
+    except StoreSchemaMismatch as exc:
+        print(exc, file=sys.stderr)
+        return None
+
+
+def _open_store_or_raise(artifact_dir_arg: str | None, *, read_only: bool) -> ArtifactStore | None:
     if artifact_dir_arg:
         artifact_dir = Path(artifact_dir_arg)
         if not (artifact_dir / "artifacts.sqlite").exists():
             print(f"no artifact store in {artifact_dir}", file=sys.stderr)
             return None
-        return ArtifactStore(artifact_dir)
+        return ArtifactStore(artifact_dir, read_only=read_only)
 
     from strata.config import StrataConfig
 
@@ -51,19 +61,24 @@ def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
         print(f"invalid configuration: {exc}", file=sys.stderr)
         return None
     artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
-    # Loading the config creates a personal-mode artifact_dir, so an empty
-    # directory proves nothing: a store on SQLite is its database file.
+    # A server start creates a personal-mode artifact_dir, so an empty directory
+    # proves nothing: a store on SQLite is its database file.
     if not config.artifact_metadata_dsn and not (artifact_dir / "artifacts.sqlite").exists():
         print(f"no artifact store in {artifact_dir}", file=sys.stderr)
         return None
-    return _configured_store(config, artifact_dir)
+    return _configured_store(config, artifact_dir, read_only=read_only)
 
 
-def _configured_store(config: StrataConfig, artifact_dir: Path) -> ArtifactStore:
+def _configured_store(
+    config: StrataConfig, artifact_dir: Path, *, read_only: bool = False
+) -> ArtifactStore:
     """The store *config* describes under *artifact_dir*: its metadata DSN and blob backend."""
     blob_store = config.create_blob_store() if config.artifact_blob_backend != "local" else None
     return ArtifactStore(
-        artifact_dir, blob_store=blob_store, dialect=config.create_metadata_dialect()
+        artifact_dir,
+        blob_store=blob_store,
+        dialect=config.create_metadata_dialect(),
+        read_only=read_only,
     )
 
 
@@ -208,7 +223,7 @@ def _artifact_payload(store: ArtifactStore, artifact: ArtifactVersion) -> dict:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
-    store = _open_store(args.artifact_dir)
+    store = _open_store(args.artifact_dir, read_only=True)
     if store is None:
         return 2
 
@@ -241,7 +256,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    store = _open_store(args.artifact_dir)
+    store = _open_store(args.artifact_dir, read_only=True)
     if store is None:
         return 2
     artifact = _resolve_for_cmd(store, args)
@@ -350,7 +365,7 @@ def _render_lineage(node: dict, prefix: str = "", child_indent: str = "") -> Non
 
 
 def cmd_lineage(args: argparse.Namespace) -> int:
-    store = _open_store(args.artifact_dir)
+    store = _open_store(args.artifact_dir, read_only=True)
     if store is None:
         return 2
     artifact = _resolve_for_cmd(store, args)
@@ -408,6 +423,17 @@ def _publication_target(
         # resolves nowhere.
         return source, f"{source.artifact_dir} (no server store is configured)"
     return server_store, f"{server_store.artifact_dir} (the store your server serves)"
+
+
+def _publication_base(args: argparse.Namespace) -> str:
+    """Where the minted link is served: the remote store, else the configured server's base."""
+    to_url = getattr(args, "to_url", None)
+    if to_url:
+        return str(to_url).rstrip("/")
+    from strata.config import StrataConfig
+
+    config = StrataConfig.load()
+    return (config.public_base_url or "").rstrip("/") + config.public_base_path
 
 
 def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
@@ -599,7 +625,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
         )
 
     if publication.token:
-        print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+        link = f"{_publication_base(args)}/p/{publication.token}"
+        print(f"{artifact.id}@v={artifact.version} is public at {link}")
     else:
         # The store keeps only the token's hash, so an existing grant's link cannot be shown.
         print(
@@ -698,7 +725,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
         print("--title and --author describe a new record; a publication has its own.")
         return 1
 
-    store = _open_store(args.artifact_dir)
+    store = _open_store(args.artifact_dir, read_only=True)
     if store is None:
         return 2
 
@@ -706,6 +733,19 @@ def cmd_archive(args: argparse.Namespace) -> int:
         # The stored record, so the bundle carries the authors and identifiers
         # the hosted page shows, and matches GET /p/{token}/archive.zip.
         publication = store.get_publication(token)
+        if publication is None:
+            # The raw token is shown only at mint, so an owner may have kept just the id.
+            # Not on a public route: there the id would work as the link.
+            publication = next(
+                (
+                    listed
+                    for listed in store.list_publications(
+                        tenant=getattr(args, "tenant", None), include_revoked=True
+                    )
+                    if listed.id == token
+                ),
+                None,
+            )
         if publication is None:
             print(f"No such publication: {token}")
             return 1
@@ -847,7 +887,7 @@ def _store_location(store: ArtifactStore) -> tuple[str, str]:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    store = _open_store(args.artifact_dir)
+    store = _open_store(args.artifact_dir, read_only=True)
     if store is None:
         return 2
 
@@ -945,7 +985,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
 
 def cmd_audit(args: argparse.Namespace) -> int:
     """Render the append-only registry audit, newest first."""
-    store = _open_store(args.artifact_dir)
+    store = _open_store(args.artifact_dir, read_only=True)
     if store is None:
         return 2
 
@@ -984,7 +1024,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 def cmd_pending(args: argparse.Namespace) -> int:
     """List protected-alias changes awaiting approval."""
-    store = _open_store(args.artifact_dir)
+    store = _open_store(args.artifact_dir, read_only=True)
     if store is None:
         return 2
 

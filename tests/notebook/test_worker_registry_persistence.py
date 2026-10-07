@@ -93,6 +93,14 @@ class TestPersistence:
 
         assert _names() == ["from-config", "gpu-a100"]
 
+    def test_a_configured_table_naming_a_worker_twice_still_takes_a_change(self, server):
+        # The store keys rows by name, so writing both entries failed the change with a 500.
+        _configure("gpu", "cpu", "gpu")
+
+        create_server_managed_worker_record(ManagedWorkerRecord(_worker("gpu-a100"), True))
+
+        assert _names() == ["cpu", "gpu", "gpu-a100"]
+
 
 class TestRowOperations:
     def test_create_update_enable_and_delete(self, server):
@@ -206,6 +214,47 @@ class TestImportFromTheFile:
         assert path.with_name("notebook_workers.json.migrated").exists()
         assert "already holds a notebook worker registry" in caplog.text
 
+    def test_a_file_naming_a_worker_twice_imports_its_last_entry(self, tmp_path, caplog):
+        # A 0.8.0 admin change could write such a file, and the import then failed startup.
+        store = ArtifactStore(tmp_path / "artifacts")
+        path = tmp_path / "artifacts" / "notebook_workers.json"
+        path.write_text(
+            json.dumps(
+                [
+                    _worker("gpu", "http://old:1").model_dump(mode="json"),
+                    _worker("cpu").model_dump(mode="json"),
+                    _worker("gpu", "http://new:1").model_dump(mode="json"),
+                ]
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, logger="strata.notebook.workers"):
+            import_worker_registry_file(tmp_path / "artifacts", store)
+
+        entries = store.notebook_worker_entries()
+        assert entries is not None
+        assert [(e["name"], e["config"]["url"]) for e in entries] == [
+            ("cpu", "http://gpu.internal:9000"),
+            ("gpu", "http://new:1"),
+        ]
+        assert "worker(s) gpu more than once" in caplog.text
+
+    def test_an_earlier_migrated_copy_is_never_replaced(self, tmp_path):
+        store = ArtifactStore(tmp_path / "artifacts")
+        artifact_dir = tmp_path / "artifacts"
+        self._write(artifact_dir, "imported")
+        import_worker_registry_file(artifact_dir, store)
+        first = (artifact_dir / "notebook_workers.json.migrated").read_text()
+
+        self._write(artifact_dir, "second")
+        import_worker_registry_file(artifact_dir, store)
+        self._write(artifact_dir, "third")
+        import_worker_registry_file(artifact_dir, store)
+
+        assert (artifact_dir / "notebook_workers.json.migrated").read_text() == first
+        assert "second" in (artifact_dir / "notebook_workers.json.migrated.1").read_text()
+        assert "third" in (artifact_dir / "notebook_workers.json.migrated.2").read_text()
+
     def test_an_unreadable_file_is_left_in_place(self, tmp_path, caplog):
         store = ArtifactStore(tmp_path / "artifacts")
         path = tmp_path / "artifacts" / "notebook_workers.json"
@@ -231,11 +280,12 @@ class TestImportFromTheFile:
 
 
 class TestHealthCachePruning:
-    def test_entries_for_removed_workers_are_dropped(self, server):
+    def test_entries_for_removed_workers_are_dropped(self, server, monkeypatch):
         from strata.notebook import workers as workers_mod
 
-        # The cache is module-global and other tests populate it, so this
-        # asserts on the two keys it owns rather than on a total.
+        # The live key survives pruning, so a sentinel left in the real cache
+        # would be read as a health record by a later test.
+        monkeypatch.setattr(workers_mod, "_worker_health_cache", {})
         replace_server_managed_worker_records([ManagedWorkerRecord(_worker("gpu-a100"), True)])
         live_url = workers_mod._health_url_for_worker(_worker("gpu-a100"))
         retired_url = "http://retired.internal:9000/health"
@@ -246,3 +296,30 @@ class TestHealthCachePruning:
 
         assert live_url in workers_mod._worker_health_cache
         assert retired_url not in workers_mod._worker_health_cache
+
+
+class TestAStoreErrorFailsClosed:
+    """Falling back to personal rules on a read error would let a service-mode notebook's own
+    ``[[workers]]`` entry run cells and be edited."""
+
+    def test_a_notebook_worker_stays_refused_and_uneditable(self, server, monkeypatch):
+        from strata.notebook.models import NotebookState
+        from strata.notebook.workers import (
+            notebook_worker_definitions_editable,
+            resolve_worker_spec,
+        )
+        from strata.server import get_state
+
+        get_state().config.deployment_mode = "service"
+        notebook = NotebookState(id="nb", name="nb", workers=[_worker("evil", "http://attacker:9")])
+        assert resolve_worker_spec(notebook, "evil") is None
+
+        def _outage(self):
+            raise RuntimeError("pool timeout")
+
+        monkeypatch.setattr(ArtifactStore, "notebook_worker_entries", _outage)
+
+        with pytest.raises(RuntimeError, match="pool timeout"):
+            resolve_worker_spec(notebook, "evil")
+        with pytest.raises(RuntimeError, match="pool timeout"):
+            notebook_worker_definitions_editable(notebook)

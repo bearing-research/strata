@@ -79,11 +79,13 @@ def import_snapshot(
     dest: Path | str,
     *,
     taken_ids: set[str] | frozenset[str] = frozenset(),
+    name: str | None = None,
 ) -> ImportedSnapshot:
     """Unpack *bundle* into the new notebook directory *dest*.
 
     ``taken_ids`` are notebook ids already in use where the caller looks for
-    notebooks; the bundle's id is kept unless it is among them.
+    notebooks; the bundle's id is kept unless it is among them. ``name`` renames
+    the notebook; ``None`` keeps the bundle's.
 
     Raises:
         NotASnapshotError: The file is not a snapshot, predates the records a
@@ -120,7 +122,7 @@ def import_snapshot(
             _write_fetched_bytes(archive, staging)
 
             # 2. The committed files.
-            _write_committed_files(archive, staging, notebook_toml, old_id, new_id)
+            _write_committed_files(archive, staging, notebook_toml, old_id, new_id, name)
 
             # 3. Runtime state last: it points at what steps 1 and 2 wrote.
             _write_runtime_state(archive, staging, manifest, landed, rename)
@@ -514,6 +516,7 @@ def _write_committed_files(
     notebook_toml: dict[str, Any],
     old_id: str,
     new_id: str,
+    notebook_name: str | None,
 ) -> None:
     from strata.notebook.layout import write_gitignore
     from strata.notebook.writer import _write_notebook_toml_atomic
@@ -526,8 +529,11 @@ def _write_committed_files(
         elif name in _COMMITTED_ROOT_FILES:
             _copy_member(archive, name, dest / name)
 
-    if new_id != old_id:
+    renamed = notebook_name is not None and notebook_toml.get("name") != notebook_name
+    if new_id != old_id or renamed:
         notebook_toml["notebook_id"] = new_id
+        if notebook_name is not None:
+            notebook_toml["name"] = notebook_name
         _write_notebook_toml_atomic(dest / "notebook.toml", notebook_toml)
     else:
         # Verbatim when unchanged, preserving a hand-edited notebook.toml's comments and layout.

@@ -7,7 +7,9 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -98,7 +100,13 @@ def _parse_managed_worker_records(raw_specs: Any) -> list[ManagedWorkerRecord]:
             )
         except Exception:
             continue
-    return parsed
+    # The store keys rows by name. Dispatch always took the last entry for a repeated
+    # name, so keep that one, where it stands.
+    by_name: dict[str, ManagedWorkerRecord] = {}
+    for record in parsed:
+        by_name.pop(record.worker.name, None)
+        by_name[record.worker.name] = record
+    return list(by_name.values())
 
 
 def _serialize_managed_worker_records(
@@ -116,20 +124,22 @@ def _serialize_managed_worker_records(
 
 def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
     """Load the effective notebook worker policy for the current deployment."""
-    try:
-        from strata.server import get_state
+    from strata.server import get_state
 
-        state = get_state()
-        config = state.config
-        service_mode = config.deployment_mode == "service"
-        # Same accessor the admin routes use, so the catalogue and dispatch cannot disagree
-        # (transforms_config would diverge from the persisted registry after a restart).
-        server_workers = {
-            record.worker.name: record for record in get_server_managed_worker_records()
-        }
-    except Exception:
-        service_mode = False
-        server_workers = {}
+    try:
+        config = get_state().config
+    except RuntimeError:
+        # No server (a CLI run): the notebook's own workers, nothing to restrict.
+        config = None
+    service_mode = config is not None and config.deployment_mode == "service"
+    # Same accessor the admin routes use, so the catalogue and dispatch cannot disagree
+    # (transforms_config would diverge from the persisted registry after a restart). A store
+    # error propagates: falling back to personal rules would let a notebook's own workers run.
+    server_workers = (
+        {record.worker.name: record for record in get_server_managed_worker_records()}
+        if config is not None
+        else {}
+    )
 
     builtin = get_builtin_local_worker()
     if service_mode:
@@ -153,6 +163,33 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
         effective_workers=effective_workers,
         server_workers=server_workers,
     )
+
+
+# Inside ``one_policy_read()`` the policy is read once per notebook: a staleness pass asks
+# for every worker-annotated cell, and the registry lives in the metadata store.
+_policy_memo: ContextVar[dict[int, WorkerPolicy] | None] = ContextVar(
+    "worker_policy_memo", default=None
+)
+
+
+@contextmanager
+def one_policy_read() -> Iterator[None]:
+    """Read the worker policy at most once per notebook inside the block (one pass)."""
+    token = _policy_memo.set({})
+    try:
+        yield
+    finally:
+        _policy_memo.reset(token)
+
+
+def _policy(notebook_state: NotebookState) -> WorkerPolicy:
+    memo = _policy_memo.get()
+    if memo is None:
+        return _load_worker_policy(notebook_state)
+    key = id(notebook_state)
+    if key not in memo:
+        memo[key] = _load_worker_policy(notebook_state)
+    return memo[key]
 
 
 def notebook_worker_definitions_editable(notebook_state: NotebookState) -> bool:
@@ -309,7 +346,8 @@ def import_worker_registry_file(artifact_dir: Path, store: ArtifactStore) -> Non
 
     Imported only while the store holds no registry, so a node starting with a stale
     copy cannot overwrite one another node set. The file is then renamed
-    ``notebook_workers.json.migrated`` either way, so this runs once per file.
+    ``notebook_workers.json.migrated`` (or ``.migrated.N``) either way, so this runs once
+    per file.
     """
     path = artifact_dir / "notebook_workers.json"
     if not path.exists():
@@ -325,8 +363,25 @@ def import_worker_registry_file(artifact_dir: Path, store: ArtifactStore) -> Non
         )
         return
     entries = _serialize_managed_worker_records(_parse_managed_worker_records(raw))
+    names = (
+        [spec.get("name") for spec in raw if isinstance(spec, dict)]
+        if isinstance(raw, list)
+        else []
+    )
+    repeated = sorted({str(name) for name in names if names.count(name) > 1})
+    if repeated:
+        logger.warning(
+            "%s lists notebook worker(s) %s more than once; kept the last entry of each.",
+            path,
+            ", ".join(repeated),
+        )
     imported = store.update_notebook_workers(lambda current: entries if current is None else None)
+    # Never replace an earlier copy: it may be the only record of what was imported.
     migrated = path.with_name(path.name + ".migrated")
+    suffix = 1
+    while migrated.exists():
+        migrated = path.with_name(f"{path.name}.migrated.{suffix}")
+        suffix += 1
     try:
         path.replace(migrated)
     except OSError as exc:
@@ -405,7 +460,7 @@ def validate_worker_assignment(
     if not normalized_name or normalized_name == "local":
         return None
 
-    policy = _load_worker_policy(notebook_state)
+    policy = _policy(notebook_state)
     if not policy.service_mode:
         return None
 
@@ -450,7 +505,7 @@ def resolve_worker_spec(
     if not normalized_name or normalized_name == "local":
         return get_builtin_local_worker()
 
-    return _load_worker_policy(notebook_state).effective_workers.get(normalized_name)
+    return _policy(notebook_state).effective_workers.get(normalized_name)
 
 
 def worker_runtime_identity(

@@ -14,7 +14,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from strata.notebook.harness_user import HarnessUser, hand_over, spawn_kwargs
+from strata.notebook.harness_user import (
+    HarnessUser,
+    UnsafeRunFile,
+    hand_over,
+    read_run_file,
+    spawn_kwargs,
+)
 
 _CONFTEST_TEMPLATE = Path(__file__).parent / "cell_test_conftest.py"
 _SERIALIZER = Path(__file__).parent / "serializer.py"
@@ -116,19 +122,19 @@ def run_cell_tests_in_dir(
         # collection error (syntax error, bad import). Surface the output so the
         # user sees why nothing ran instead of an empty pass.
         detail = (proc.stdout + proc.stderr).strip() or "pytest produced no results"
-        return {
-            "passed": 0,
-            "failed": 0,
-            "errored": 1,
-            "skipped": 0,
-            "tests": [
-                {
-                    "name": "<collection>",
-                    "nodeid": "",
-                    "outcome": "error",
-                    "message": detail,
-                }
-            ],
-        }
+        return _errored("<collection>", detail)
 
-    return json.loads(results_path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(read_run_file(rundir, results_path.name))
+    except UnsafeRunFile as exc:
+        return _errored("<results>", str(exc))
+
+
+def _errored(name: str, message: str) -> dict[str, Any]:
+    return {
+        "passed": 0,
+        "failed": 0,
+        "errored": 1,
+        "skipped": 0,
+        "tests": [{"name": name, "nodeid": "", "outcome": "error", "message": message}],
+    }
