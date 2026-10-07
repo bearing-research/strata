@@ -897,10 +897,11 @@ Entries are exact names or a prefix with a trailing `*`. The essentials a
 subprocess cannot start without are always included: `PATH`, `HOME`, the temp
 and locale variables, and `UV_*`, `PYTHON*`, `VIRTUAL_ENV`, `R_*` and
 `RSTUDIO_*`, except names that look like credentials (containing `KEY`,
-`SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`), `UV_PUBLISH_*` and
-`UV_INDEX_*_USERNAME`. So a private index's login, which the server's `uv sync`
-needs, does not reach cells; keep index credentials in those variables or a
-netrc rather than inside `UV_INDEX_URL`, which passes. `STRATA_*` is dropped
+`SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`), `UV_PUBLISH_*`,
+`UV_INDEX_*_USERNAME`, and the index URLs (`UV_INDEX`, `UV_INDEX_URL`,
+`UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`, `UV_INDEX_*_URL`), which can carry a
+login as `https://user:password@host/simple`. So a private index's login, which
+the server's `uv sync` needs, does not reach cells. `STRATA_*` is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
 accident is the failure the setting exists to prevent. A name you list exactly
 always passes. It applies to every process that runs cell code, the same list
