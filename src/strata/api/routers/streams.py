@@ -18,10 +18,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
-from strata.fast_io import IncrementalIpcMerger
+from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream
 from strata.logging import get_logger
 from strata.pool_metrics import get_pool_tracker
 from strata.streaming import QoSRejected
+from strata.streaming.scan_builds import record_scan_complete
 
 if TYPE_CHECKING:
     from starlette.types import Receive, Scope, Send
@@ -154,6 +155,7 @@ async def get_stream(stream_id: str, request: Request):
 
         async def serve_passthrough():
             start_time = time.perf_counter()
+            rows = 0
             if not plan.tasks:
                 if plan.schema is not None:
                     sink = pa.BufferOutputStream()
@@ -174,6 +176,7 @@ async def get_stream(stream_id: str, request: Request):
                             state.fetcher.fetch_as_stream_bytes,
                             task,
                         )
+                    rows += validate_ipc_stream(chunk)
                     out = merger.feed(chunk) if merger is not None else chunk
                     if out:
                         yield out
@@ -182,6 +185,12 @@ async def get_stream(stream_id: str, request: Request):
                     if tail:
                         yield tail
             stream_state.completed = True
+            record_scan_complete(
+                state,
+                plan,
+                rows_returned=rows,
+                fetch_time_ms=(time.perf_counter() - start_time) * 1000,
+            )
 
         async def close_passthrough() -> None:
             await admission.release()

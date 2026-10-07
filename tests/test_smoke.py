@@ -517,6 +517,73 @@ class TestEndToEnd:
         assert "# HELP strata_cache_hits_total" in content
         assert "# TYPE strata_cache_hits_total counter" in content
 
+    def test_materialized_scans_move_the_scan_series(self, server_with_client):
+        """A built scan and a cache hit each count, per table and per tenant too."""
+        import re
+
+        import requests
+
+        client = server_with_client["client"]
+        config = server_with_client["config"]
+        table_uri = server_with_client["warehouse"]["table_uri"]
+        base = f"http://127.0.0.1:{config.port}"
+
+        rows = 0
+        for _ in range(2):  # a miss that builds, then a hit
+            artifact = client.materialize(
+                inputs=[table_uri], transform={"executor": "scan@v1", "params": {}}
+            )
+            rows = client.fetch(artifact.uri).num_rows
+        assert rows > 0
+
+        text = requests.get(f"{base}/metrics/prometheus").text
+
+        def series(name: str) -> str:
+            match = re.search(rf"^{name} (\S+)$", text, re.MULTILINE)
+            assert match, name
+            return match.group(1)
+
+        assert series("strata_scans_total") == "2"
+        assert series("strata_rows_returned_total") == str(2 * rows)
+        assert re.search(r'^strata_tenant_scans_total\{tenant="_default"\} 2$', text, re.M)
+        assert re.search(r"^strata_table_scans_total\{table=\"[^\"]+\"\} 2$", text, re.M)
+
+        tables = requests.get(f"{base}/metrics/tables").json()["tables"]
+        assert [(t["scan_count"], t["rows_returned"]) for t in tables] == [(2, 2 * rows)]
+        assert tables[0]["cache_hits"] >= 1  # the hit counts its row groups as cached
+
+    def test_a_scan_streamed_without_an_artifact_store_counts(self, temp_warehouse, tmp_path):
+        """Service mode with no artifact_dir streams straight from the fetcher."""
+        import re
+
+        import requests
+
+        from tests.conftest import find_free_port, run_server
+
+        config = StrataConfig(
+            host="127.0.0.1",
+            port=find_free_port(),
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+        )
+        with run_server(config) as base:
+            response = requests.post(
+                f"{base}/v1/materialize",
+                json={
+                    "inputs": [temp_warehouse["table_uri"]],
+                    "transform": {"executor": "scan@v1", "params": {}},
+                    "mode": "stream",
+                },
+            )
+            assert response.status_code == 200, response.text
+            stream = requests.get(f"{base}{response.json()['stream_url']}")
+            rows = pa.ipc.open_stream(stream.content).read_all().num_rows
+            text = requests.get(f"{base}/metrics/prometheus").text
+
+        assert rows > 0
+        assert re.search(r"^strata_scans_total 1$", text, re.M)
+        assert re.search(rf"^strata_rows_returned_total {rows}$", text, re.M)
+
     def test_debug_cache_inspect_endpoint(self, server_with_client):
         """/v1/debug/cache/inspect."""
         import requests
