@@ -86,6 +86,9 @@ def compute_causality_on_staleness(
         cell = session.notebook_state.get_cell(cell_id)
         if cell is None:
             continue
+        # Never ran: there is no earlier result for anything to have changed from.
+        if cell.last_provenance_hash is None:
+            continue
 
         details: list[CausalityDetail] = []
         annotations = parse_annotations(cell.source)

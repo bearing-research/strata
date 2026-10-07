@@ -218,6 +218,23 @@ class TestStoredHashLookup:
         assert any(detail.type == "input_changed" for detail in chain.details)
 
 
+class TestNeverRun:
+    def test_a_cell_that_never_ran_has_nothing_to_explain(self, tmp_path):
+        """A new cell is idle because it never ran, not because its source changed."""
+        nb_dir, _ = _create_notebook_with_cell(tmp_path, "x = 1")
+        add_cell_to_notebook(nb_dir, "c2", after_cell_id="c1")
+        write_cell(nb_dir, "c2", "y = x + 1")
+        session = SessionManager().open_notebook(nb_dir)
+
+        assert compute_causality_on_staleness(session) == {}
+
+        # Once it has a result to compare against, a change is explained.
+        session.notebook_state.get_cell("c1").last_provenance_hash = "an-earlier-run"
+        assert [d.type for d in compute_causality_on_staleness(session)["c1"].details] == [
+            "source_changed"
+        ]
+
+
 class TestEnvironmentMetadata:
     """Environment metadata lives in ``.strata/runtime.json``: it changes on every ``uv sync``
     and does not belong in the committed ``notebook.toml``.
