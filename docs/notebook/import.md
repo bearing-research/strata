@@ -229,7 +229,10 @@ The deps are written to the new notebook's `pyproject.toml`. First
 `uv sync` (which runs automatically when you open the notebook in
 the UI, or when you invoke `strata run`) resolves them. The
 importer doesn't call `uv add` itself, that's slow, networked, and
-partial-failure-prone.
+partial-failure-prone. In personal mode that sync builds any dependency
+without a wheel, running its build code as you before any cell runs, so
+read what an untrusted notebook installs first (see
+[Environment Management](environment.md#how-it-works)).
 
 ## The import report
 
