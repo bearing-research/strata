@@ -134,3 +134,19 @@ async def test_data_viewer_hands_values_over_as_text(monkeypatch):
         value = app.query_one("#output-table", DataTable).get_cell_at(Coordinate(0, 0))
         assert isinstance(value, Text)
         assert "/data[raw]/part-0" in value.plain
+
+
+@pytest.mark.asyncio
+async def test_data_viewer_key_hint_keeps_its_brackets(monkeypatch):
+    async def _no_page(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_load_table_page", _no_page)
+    app = await _app(monkeypatch)
+    async with app.run_test(size=(100, 40)) as pilot:
+        _select(app, CellView(id="c1"))
+        app._start_table_view("c1", "strata://artifact/a@v=1", ["x"])
+        await pilot.pause()
+        subtitle = app.query_one("#output-table", DataTable)._border_subtitle
+        assert subtitle is not None
+        assert subtitle.plain == "[n]ext [p]rev  [s]ort col  [e]xport csv"
