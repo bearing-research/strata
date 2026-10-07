@@ -243,7 +243,8 @@ Content-Type: multipart/form-data
 ```
 
 Form fields as for the Jupyter import (`file`, `name`, `parent_path`), where
-`file` is a bundle from `GET …/export?fmt=snapshot`. The upload is streamed to
+`file` is a bundle from `GET …/export?fmt=snapshot`. Without `name`, the
+notebook keeps the bundle's name. The upload is streamed to
 disk and capped at 2 GiB, since an `include=all` snapshot is as large as the
 notebook's store. A bundle whose files would expand to more than 16 GiB, or
 holding a file the import reads whole (manifest, `notebook.toml`, a cell, a
