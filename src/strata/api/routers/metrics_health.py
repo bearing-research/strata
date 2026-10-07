@@ -117,7 +117,8 @@ async def health_ready():
             )
             checks["artifact_store"] = True
         except Exception as e:
-            logger.warning("readiness: artifact store check failed: %s", e or type(e).__name__)
+            # A timeout's message is empty, so the type is the only reason it carries.
+            logger.warning("readiness: artifact store check failed: %s", str(e) or type(e).__name__)
             checks["artifact_store"] = False
             checks["artifact_store_error"] = type(e).__name__
             is_ready = False
