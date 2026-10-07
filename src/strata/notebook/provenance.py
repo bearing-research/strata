@@ -7,7 +7,11 @@ and its environment hash, so identical computations hash identically.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import hashlib
+import json
+
+from strata.notebook.annotations import parse_annotations
 
 
 def _normalize_source_for_hash(source: str) -> str:
@@ -25,12 +29,27 @@ def _normalize_source_for_hash(source: str) -> str:
         return "\n".join(lines).strip()
 
 
+def _annotation_fingerprint(source: str) -> str:
+    """The annotations that change what a cell computes but live in comments.
+
+    Empty for a cell without them, so its hash is the source hash alone.
+    """
+    loop = parse_annotations(source).loop
+    if loop is None:
+        return ""
+    return json.dumps({"loop": dataclasses.asdict(loop)}, sort_keys=True, separators=(",", ":"))
+
+
 def compute_source_hash(source: str) -> str:
     """SHA-256 hex digest of the normalized cell source.
 
-    Whitespace and comments do not change it; anything that changes the AST does.
+    Whitespace and comments do not change it; anything that changes the AST does,
+    and so do the ``@loop`` / ``@loop_until`` parameters.
     """
     normalized = _normalize_source_for_hash(source)
+    fingerprint = _annotation_fingerprint(source)
+    if fingerprint:
+        normalized += "\x00" + fingerprint
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 

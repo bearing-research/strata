@@ -541,7 +541,9 @@ reference. An expression that raises fails the cell at that iteration.
 
 Each iteration's carry state is stored as `…@iter=k` artifacts; the final
 iteration becomes the cell's canonical artifact. Progress is broadcast over
-WebSocket as `cell_iteration_progress` messages.
+WebSocket as `cell_iteration_progress` messages. The `@loop` and `@loop_until`
+parameters are part of the cell's cache key, so editing one (say `max_iter`)
+runs the loop again rather than returning the old result.
 
 ---
 

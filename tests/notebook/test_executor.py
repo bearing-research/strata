@@ -2777,6 +2777,36 @@ class TestLoopCellExecution:
             session.re_analyze_cell(cell.id)
 
     @pytest.mark.asyncio
+    async def test_editing_max_iter_reads_stale_and_reruns(self, tmp_path):
+        """The loop parameters are comments, yet staleness and the cache both see an edit."""
+        three = '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'
+        reader = "print(state)\n"
+        session = self._cells_session(
+            tmp_path, [("seed", 'state = {"i": 0}\n'), ("loop", three), ("out", reader)]
+        )
+        executor = CellExecutor(session)
+        first = await executor.execute_cell("out", reader)
+        assert first.stdout == "{'i': 3}\n"
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("loop").status == "ready"
+        assert session.notebook_state.get_cell("out").status == "ready"
+
+        # As after a body edit: the loop has no result under its new hash, its reader is stale.
+        one = three.replace("max_iter=3", "max_iter=1")
+        self._edit(session, "loop", one)
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("loop").status == "idle"
+        assert session.notebook_state.get_cell("out").status == "stale"
+
+        rerun = await executor.execute_cell("loop", one)
+        assert rerun.success, rerun.error
+        assert rerun.cache_hit is False
+        downstream = await executor.execute_cell("out", reader)
+        assert downstream.stdout == "{'i': 1}\n"
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("loop").status == "ready"
+
+    @pytest.mark.asyncio
     async def test_downstream_reruns_when_the_loops_output_changes(self, tmp_path):
         """A fresh loop run records its output URIs, so a reader's provenance includes them."""
         loop = '# @loop max_iter=3 carry=state\nstate = {"i": state["i"] + 1}\n'

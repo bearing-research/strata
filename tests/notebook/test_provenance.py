@@ -41,6 +41,38 @@ def test_source_hash_ignores_cosmetic_whitespace():
     assert len(hashes) == 1
 
 
+def test_a_plain_cells_source_hash_is_pinned_to_a_known_value():
+    """Annotations outside the loop fingerprint stay out of the hash, so non-loop cells keep
+    their cached results.
+    """
+    source = "# @name totals\n# @env MODE=fast\nx = 1  # one\n"
+    assert (
+        compute_source_hash(source)
+        == "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26"
+    )
+
+
+def test_loop_parameters_change_the_source_hash():
+    """``@loop`` and ``@loop_until`` live in comments but change what the cell computes."""
+    body = "state = state + 1\n"
+    variants = [
+        "# @loop max_iter=3 carry=state\n",
+        "# @loop max_iter=1 carry=state\n",
+        "# @loop max_iter=3 carry=other\n",
+        "# @loop max_iter=3 carry=state start_from=hill@iter=1\n",
+        "# @loop max_iter=3 carry=state start_from=hill@iter=2\n",
+        "# @loop max_iter=3 carry=state\n# @loop_until state > 2\n",
+        "# @loop max_iter=3 carry=state\n# @loop_until state > 1\n",
+        "",
+    ]
+    hashes = {compute_source_hash(header + body) for header in variants}
+    assert len(hashes) == len(variants)
+    # Only the parsed values count: spacing and order inside the directive do not.
+    assert compute_source_hash("# @loop max_iter=3 carry=state\n" + body) == compute_source_hash(
+        "#  @loop carry=state   max_iter=3\n" + body
+    )
+
+
 def test_provenance_hash_stability():
     input_hashes = ["hash1", "hash2"]
     source_hash = compute_source_hash("x = 1")
