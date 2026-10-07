@@ -840,6 +840,31 @@ def test_a_google_cloud_import_names_its_own_distribution(tmp_path: Path) -> Non
     assert "google-api-python-client" not in deps
 
 
+@pytest.mark.parametrize(
+    ("source", "distribution"),
+    [
+        ("from google.cloud.sql.connector import Connector", "cloud-sql-python-connector"),
+        ("import google.cloud.sql.connector", "cloud-sql-python-connector"),
+        ("from google.cloud.alloydb.connector import Connector", "google-cloud-alloydb-connector"),
+        ("from google.cloud import secretmanager", "google-cloud-secret-manager"),
+        ("from google.cloud import resourcemanager_v3", "google-cloud-resource-manager"),
+        ("from google.cloud import dataflow_v1beta3", "google-cloud-dataflow-client"),
+        ("from google.cloud.devtools import cloudbuild_v1", "google-cloud-build"),
+        ("from google.cloud.billing import budgets_v1", "google-cloud-billing-budgets"),
+        ("from google.cloud import dialogflowcx_v3", "google-cloud-dialogflow-cx"),
+        ("from google.cloud import artifactregistry_v1", "google-cloud-artifact-registry"),
+        ("from google.cloud.spanner_dbapi import connect", "google-cloud-spanner"),
+        ("from google.cloud import iam_admin_v1", "google-cloud-iam"),
+    ],
+)
+def test_a_google_cloud_import_whose_distribution_is_named_differently(
+    tmp_path: Path, source: str, distribution: str
+) -> None:
+    """The ``google-cloud-<x>`` guess is missing from PyPI, or another project, for these."""
+    result = import_notebook(_make_ipynb(tmp_path, [_code_cell(source + "\n")]))
+    assert result.captured_deps == [distribution]
+
+
 def test_stdlib_imports_not_captured(tmp_path: Path) -> None:
     """Standard-library imports are never PyPI deps; ``sys.stdlib_module_names`` covers them."""
     ipynb = _make_ipynb(

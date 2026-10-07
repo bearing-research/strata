@@ -954,6 +954,46 @@ _IMPORT_TO_PIP: dict[str, str] = {
 }
 
 
+# ``google.cloud.<path>`` imports (API version suffix dropped) whose distribution is
+# not ``google-cloud-<path>``: the guess is missing from PyPI, or names another project.
+_GOOGLE_CLOUD_TO_PIP: dict[str, str] = {
+    "accessapproval": "google-cloud-access-approval",
+    "alloydb.connector": "google-cloud-alloydb-connector",
+    "artifactregistry": "google-cloud-artifact-registry",
+    "billing.budgets": "google-cloud-billing-budgets",
+    "bigtable_admin": "google-cloud-bigtable",
+    # ``google-cloud-dataflow`` is the retired Beam-based SDK, not this client.
+    "dataflow": "google-cloud-dataflow-client",
+    "devtools.cloudbuild": "google-cloud-build",
+    "devtools.containeranalysis": "google-cloud-containeranalysis",
+    "dialogflowcx": "google-cloud-dialogflow-cx",
+    "errorreporting": "google-cloud-error-reporting",
+    "firestore_admin": "google-cloud-firestore",
+    "gkehub": "google-cloud-gke-hub",
+    "iam_admin": "google-cloud-iam",
+    "iam_credentials": "google-cloud-iam",
+    "networkconnectivity": "google-cloud-network-connectivity",
+    "orgpolicy": "google-cloud-org-policy",
+    "osconfig": "google-cloud-os-config",
+    "oslogin": "google-cloud-os-login",
+    "recaptchaenterprise": "google-cloud-recaptcha-enterprise",
+    "resourcemanager": "google-cloud-resource-manager",
+    "secretmanager": "google-cloud-secret-manager",
+    "servicedirectory": "google-cloud-service-directory",
+    "servicemanagement": "google-cloud-service-management",
+    "spanner_admin_database": "google-cloud-spanner",
+    "spanner_admin_instance": "google-cloud-spanner",
+    "spanner_dbapi": "google-cloud-spanner",
+    "sql.connector": "cloud-sql-python-connector",
+    "vpcaccess": "google-cloud-vpc-access",
+}
+
+
+def _google_cloud_path(name: str) -> str:
+    """``google.cloud.pubsub_v1`` -> ``pubsub``: one distribution holds every API version."""
+    return re.sub(r"_v\d[a-z0-9]*$", "", name.removeprefix("google.cloud."))
+
+
 def _scan_imports(source: str) -> set[str]:
     """Collect top-level, non-stdlib module names a cell imports.
 
@@ -972,8 +1012,12 @@ def _scan_imports(source: str) -> set[str]:
         elif isinstance(node, ast.ImportFrom):
             # level > 0 is a relative import, never a third-party dependency.
             if node.module and node.level == 0:
-                if node.module == "google.cloud":
-                    names.update(f"google.cloud.{alias.name}" for alias in node.names)
+                if node.module == "google.cloud" or node.module.startswith("google.cloud."):
+                    # ``from google.cloud.devtools import cloudbuild_v1`` names its
+                    # distribution in the imported name.
+                    names.update(
+                        _distribution_key(f"{node.module}.{alias.name}") for alias in node.names
+                    )
                 else:
                     names.add(_distribution_key(node.module))
     return names - sys.stdlib_module_names
@@ -983,10 +1027,14 @@ def _distribution_key(module: str) -> str:
     """The part of a dotted import that names its distribution.
 
     The top-level package, except under the ``google.cloud`` namespace, where
-    each ``google.cloud.<x>`` is its own ``google-cloud-<x>`` distribution.
+    each ``google.cloud.<x>`` is its own ``google-cloud-<x>`` distribution, or
+    ``google.cloud.<x>.<y>`` for a nested one such as ``sql.connector``.
     """
     parts = module.split(".")
     if parts[:2] == ["google", "cloud"] and len(parts) > 2:
+        nested = ".".join(parts[:4])
+        if len(parts) > 3 and _google_cloud_path(nested) in _GOOGLE_CLOUD_TO_PIP:
+            return nested
         return ".".join(parts[:3])
     return parts[0]
 
@@ -1019,9 +1067,10 @@ def _imports_to_deps(imports: set[str], local_modules: set[str]) -> list[str]:
         if name in local_modules:
             continue
         if name.startswith("google.cloud."):
-            # ``pubsub_v1`` and ``speech_v1p1beta1`` are API versions inside one distribution.
-            package = re.sub(r"_v\d[a-z0-9]*$", "", name.removeprefix("google.cloud."))
-            deps.append("google-cloud-" + package.replace("_", "-"))
+            package = _google_cloud_path(name)
+            deps.append(
+                _GOOGLE_CLOUD_TO_PIP.get(package, "google-cloud-" + package.replace("_", "-"))
+            )
         else:
             deps.append(_IMPORT_TO_PIP.get(name, name))
     return deps

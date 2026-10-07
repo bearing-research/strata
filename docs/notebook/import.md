@@ -208,7 +208,11 @@ inferred-from-imports entry:
    `bs4 → beautifulsoup4`, `yaml → PyYAML`, `mpl_toolkits → matplotlib`,
    `pkg_resources → setuptools`, etc. A `google.cloud.<x>` import maps
    to its own `google-cloud-<x>` package (`from google.cloud import
-   bigquery → google-cloud-bigquery`, `pubsub_v1 → google-cloud-pubsub`).
+   bigquery → google-cloud-bigquery`, `pubsub_v1 → google-cloud-pubsub`),
+   except where the distribution is named differently
+   (`google.cloud.sql.connector → cloud-sql-python-connector`,
+   `secretmanager → google-cloud-secret-manager`,
+   `devtools.cloudbuild_v1 → google-cloud-build`, and so on).
    Anything not in the
    dict is assumed to use the same name on PyPI (right ~95% of the
    time).
