@@ -87,12 +87,21 @@ class FakeTunnelLauncher:
         return handle
 
 
-def _supervisor(runner=None, *, healthy=True, launcher=None):
+def _launched_id(runner) -> str | None:
+    """The launch id the latest launch fed the worker over stdin, which its /health echoes."""
+    for command, stdin_data in zip(reversed(runner.calls), reversed(runner.stdin_writes)):
+        if "nohup strata-worker" in command:
+            return stdin_data.splitlines()[0] if stdin_data else None
+    return None
+
+
+def _supervisor(runner=None, *, healthy=True, launcher=None, launch_id_probe=None):
     launcher = launcher or FakeTunnelLauncher()
     the_runner = runner or _runner()
     sup = RemoteWorkerSupervisor(
         tunnel_launcher=launcher,
         health_probe=lambda port: healthy() if callable(healthy) else healthy,
+        launch_id_probe=launch_id_probe or (lambda port: _launched_id(the_runner)),
         port_picker=lambda: 55001,
         runner_factory=lambda target: the_runner,
     )
@@ -139,27 +148,30 @@ def test_establish_health_failure_cleans_up():
 
 
 @pytest.mark.parametrize(
-    "pidfile",
-    ["", '{"pid": 999, "port": 9000}'],
-    ids=["launched-worker-exited", "pidfile-names-another-pid"],
+    "answered",
+    [None, "another-launch"],
+    ids=["no-launch-id", "another-launch-id"],
 )
-def test_establish_refuses_when_health_is_not_from_the_launched_worker(pidfile):
-    """Something else on the remote port answers /health; the token must not go to it."""
-    runner = ScriptedSshRunner(
-        [
-            (lambda c: c == "true", _ok()),
-            (lambda c: "command -v strata-worker" in c, _ok(_INSTALLED)),
-            (lambda c: c.startswith("cat "), _ok(pidfile)),
-            ("kill -0 ", _ok("up")),
-            (lambda c: "nohup strata-worker" in c, _ok("4321\n")),
-        ]
-    )
-    sup, launcher, _ = _supervisor(runner=runner)
-    with pytest.raises(SshWorkerError, match="pid 4321 is not running"):
+def test_establish_refuses_when_health_is_not_from_the_launched_worker(answered):
+    """Something else on the remote port answers /health; the token must not go to it.
+
+    The launched worker may still be alive, starting up to fail its bind, so its pid
+    being live proves nothing.
+    """
+    sup, launcher, runner = _supervisor(launch_id_probe=lambda port: answered)
+    with pytest.raises(SshWorkerError, match="not from the worker launched as pid 4321"):
         sup.establish("gpu", "user@box")
     assert launcher.handles[0].terminated == 1
     assert sup.get("gpu") is None
     assert sup.token_for("gpu") is None
+    # The launch id went over stdin with the token, never in a command.
+    (launch_stdin,) = [
+        stdin_data
+        for command, stdin_data in zip(runner.calls, runner.stdin_writes)
+        if "nohup strata-worker" in command
+    ]
+    launch_id, _token = launch_stdin.splitlines()
+    assert not any(launch_id in command for command in runner.calls)
 
 
 def test_establish_install_false_when_missing_raises():
@@ -205,12 +217,12 @@ def test_re_establish_publishes_a_token_the_remote_worker_actually_has():
     sup.establish("gpu", "user@box")
 
     launched = [
-        token
-        for command, token in zip(runner.calls, runner.stdin_writes)
+        stdin_data
+        for command, stdin_data in zip(runner.calls, runner.stdin_writes)
         if "nohup strata-worker" in command
     ]
     assert launched, "no worker was ever launched with a token"
-    assert launched[-1].strip() == sup.token_for("gpu")
+    assert launched[-1].splitlines()[-1] == sup.token_for("gpu")
 
 
 # reconcile / status / teardown / shutdown
@@ -330,6 +342,7 @@ def test_concurrent_establish_same_name_is_rejected():
     sup = RemoteWorkerSupervisor(
         tunnel_launcher=launcher,
         health_probe=lambda port: True,
+        launch_id_probe=lambda port: _launched_id(runner),
         port_picker=lambda: 55001,
         runner_factory=lambda target: runner,
     )
@@ -354,6 +367,7 @@ def test_failed_establish_releases_the_name():
     sup = RemoteWorkerSupervisor(
         tunnel_launcher=FakeTunnelLauncher(),
         health_probe=lambda port: True,
+        launch_id_probe=lambda port: _launched_id(runner),
         port_picker=lambda: 55001,
         runner_factory=lambda target: runner,
     )

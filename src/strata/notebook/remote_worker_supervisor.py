@@ -120,6 +120,19 @@ def _default_health_probe(local_port: int) -> bool:
     return resp.status_code == 200
 
 
+def _default_launch_id_probe(local_port: int) -> str | None:
+    """The ``launch_id`` the worker answering ``/health`` through the tunnel reports."""
+    import httpx
+
+    try:
+        resp = httpx.get(f"http://127.0.0.1:{local_port}/health", timeout=3.0)
+        body = resp.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    launch_id = body.get("launch_id") if isinstance(body, dict) else None
+    return launch_id if isinstance(launch_id, str) else None
+
+
 def _pick_free_port() -> int:
     """Ask the OS for a free local TCP port (bind :0, read it back, release)."""
     import socket
@@ -143,12 +156,13 @@ class _ActiveTunnel:
 class RemoteWorkerSupervisor:
     """Owns the ``ssh -L`` tunnels and remote workers for a running server.
 
-    All external effects (``tunnel_launcher``, ``health_probe``, ``port_picker``,
-    ``runner_factory``) are injected so it is testable without a host.
+    All external effects (``tunnel_launcher``, ``health_probe``, ``launch_id_probe``,
+    ``port_picker``, ``runner_factory``) are injected so it is testable without a host.
     """
 
     tunnel_launcher: TunnelLauncher = field(default_factory=SubprocessTunnelLauncher)
     health_probe: Callable[[int], bool] = _default_health_probe
+    launch_id_probe: Callable[[int], str | None] = _default_launch_id_probe
     port_picker: Callable[[], int] = _pick_free_port
     runner_factory: Callable[[SshTarget], SshRunner] | None = None
     _tunnels: dict[str, _ActiveTunnel] = field(default_factory=dict, init=False)
@@ -233,7 +247,8 @@ class RemoteWorkerSupervisor:
 
         token = token or secrets.token_urlsafe(32)
         rport = remote_port or DEFAULT_REMOTE_PORT
-        running = worker.launch(port=rport, token=token)
+        launch_id = secrets.token_urlsafe(16)
+        running = worker.launch(port=rport, token=token, launch_id=launch_id)
         lport = local_port or self.port_picker()
         handle = self.tunnel_launcher.spawn(
             target.target, local_port=lport, remote_port=running.port
@@ -245,14 +260,15 @@ class RemoteWorkerSupervisor:
                 f"127.0.0.1:{lport} within {health_timeout}s"
             )
         # Another listener already on the remote port would answer /health and then
-        # receive the bearer token; our worker would have exited on the bind failure.
-        live = worker.is_running()
-        if live is None or live.pid != running.pid:
+        # receive the bearer token, even while our worker is still starting up to fail
+        # its bind; only the worker we launched knows this launch id.
+        if self.launch_id_probe(lport) != launch_id:
             handle.terminate()
             raise SshWorkerError(
-                f"{name}: /health answered on remote port {running.port}, but the worker "
-                f"launched as pid {running.pid} is not running; another process may hold "
-                f"that port (see ~/.strata/worker-{name}.log on the box)"
+                f"{name}: /health answered on remote port {running.port}, but not from "
+                f"the worker launched as pid {running.pid}; another process may hold that "
+                "port, or the box's strata-worker is older than this server "
+                f"(see ~/.strata/worker-{name}.log on the box)"
             )
 
         record = TunnelRecord(

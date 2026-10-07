@@ -36,6 +36,17 @@ def test_health_open_even_when_token_set(client_with_token):
     assert resp.status_code == 200
 
 
+@pytest.mark.parametrize("launch_id", [None, "lid-123"])
+def test_health_reports_the_launch_id_the_worker_started_with(monkeypatch, launch_id):
+    """The SSH supervisor checks it to tell its worker from another listener on the port."""
+    if launch_id is None:
+        monkeypatch.delenv("STRATA_WORKER_LAUNCH_ID", raising=False)
+    else:
+        monkeypatch.setenv("STRATA_WORKER_LAUNCH_ID", launch_id)
+    client = TestClient(create_notebook_executor_app())
+    assert client.get("/health").json()["launch_id"] == launch_id
+
+
 def test_v1_execute_rejects_no_auth_when_token_set(client_with_token):
     """No token gives 401 before the body is read, so payload errors leak nothing."""
     resp = client_with_token.post("/v1/execute", content=b"")

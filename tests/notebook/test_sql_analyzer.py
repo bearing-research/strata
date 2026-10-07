@@ -112,6 +112,21 @@ def test_placeholders_skip_escaped_single_quotes_in_strings():
     assert _extract_placeholders(sql) == ["real"]
 
 
+def test_placeholders_skip_postgres_escape_strings():
+    """In ``E'it\\'s :z'`` the backslash escapes the quote, so ``:z`` stays inside."""
+    sql = r"SELECT E'it\'s :z', e'a\\', :w FROM t"
+    assert _extract_placeholder_positions(sql) == ["w"]
+    assert len(_blank_strings_and_comments(sql)) == len(sql)
+
+
+def test_placeholders_backslash_is_literal_in_plain_strings():
+    """Outside ``E'...'`` a backslash is a plain character: ``'a\\'`` ends at its quote."""
+    sql = r"SELECT 'a\', :w, name'x' FROM t"
+    assert _extract_placeholder_positions(sql) == ["w"]
+    sql = r"SELECT name'x\', :w FROM t"
+    assert _extract_placeholder_positions(sql) == ["w"]
+
+
 def test_placeholders_skip_line_comments():
     sql = "SELECT 1 -- :ignored\nWHERE x = :real"
     assert _extract_placeholders(sql) == ["real"]
@@ -148,6 +163,12 @@ def test_placeholders_skip_dollar_quoted_strings_with_tag():
     sql = "SELECT $body$:ignored and $$ inside$body$ AS s, :real FROM t"
     refs = _extract_placeholders(sql)
     assert refs == ["real"]
+
+
+def test_placeholders_skip_dollar_quote_holding_an_apostrophe():
+    """A ``'`` inside ``$$ ... $$`` does not open a string that swallows later binds."""
+    assert _extract_placeholder_positions("SELECT $$it's :z$$, :w FROM t") == ["w"]
+    assert _extract_placeholder_positions("SELECT $q$it's :z$q$, :w FROM t") == ["w"]
 
 
 def test_placeholders_handle_unterminated_dollar_quote():
