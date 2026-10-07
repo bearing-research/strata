@@ -25,6 +25,22 @@ export function shouldAdoptRemoteSource(params: {
 }
 
 /**
+ * Put unsent typing back into cells rebuilt from a backend payload: a reopen
+ * after the server lost the session, or a snapshot that added or removed cells.
+ */
+export function keepUnsentSources(
+  previous: ReadonlyArray<{ id: string; source: string }>,
+  next: Array<{ id: string; source: string }>,
+  isDirty: (cellId: string) => boolean,
+) {
+  const unsent = new Map(previous.filter((c) => isDirty(c.id)).map((c) => [c.id, c.source]))
+  for (const cell of next) {
+    const source = unsent.get(cell.id)
+    if (source !== undefined) cell.source = source
+  }
+}
+
+/**
  * Cells whose editor text the backend has not taken yet.
  *
  * A cell stays dirty until its `cell_source_update` actually goes out, so text
@@ -48,6 +64,11 @@ export class DirtySources {
 
   has(cellId: string): boolean {
     return this.dirty.has(cellId)
+  }
+
+  /** Whether any cell has text the backend has not taken. */
+  get pending(): boolean {
+    return this.dirty.size > 0
   }
 
   flush(cellId: string) {

@@ -169,7 +169,7 @@ A cell run as an upstream inside another cell's run may get its console and resu
 
 | Type             | Payload                                    | Description |
 | ---------------- | ------------------------------------------ | ----------- |
-| `session_closed` | `{ "reason": "idle", "message": "..." }` | The server closed this session; the socket closes next with `1000`. `reason` is `idle`, `session_limit`, `memory`, `closed` (the close route) or `deleted`. Reopen the notebook by path; see [Session lifetime](#session-lifetime) |
+| `session_closed` | `{ "reason": "idle", "message": "..." }` | The server closed this session; the socket closes next with `1000`. `reason` is `idle`, `session_limit`, `memory`, `closed` (the close route), `deleted` or `shutdown` (a graceful server stop; sessions do not survive a restart). Reopen the notebook by path; see [Session lifetime](#session-lifetime) |
 
 ### Errors
 

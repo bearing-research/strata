@@ -940,3 +940,71 @@ async def test_auto_attached_session_keeps_its_path_for_reopen(monkeypatch):
         await _wait(pilot, lambda: len(notes) == 1)
         assert app._notebook_path == "/nb/listed"
         assert notes == ["Idle. Press r to reopen it."]
+
+
+def _refused_upgrade() -> Exception:
+    from websockets.datastructures import Headers
+    from websockets.exceptions import InvalidStatus
+    from websockets.http11 import Response
+
+    return InvalidStatus(Response(403, "Forbidden", Headers()))
+
+
+@pytest.mark.asyncio
+async def test_a_refused_reconnect_means_the_session_is_gone_and_r_reopens(monkeypatch):
+    """After a server restart the old id's upgrade is refused (403): stop retrying, offer `r`."""
+    urls: list[str] = []
+
+    def fake_connect(url, **kwargs):
+        urls.append(url)
+        if url.endswith("sid-2"):
+            return _FakeWS([_session_closed_frame("idle", "Idle.")])
+        if urls.count(url) == 1:
+            return _FakeWS([])  # connected, then the server went away
+        if urls.count(url) == 2:
+            raise _refused_upgrade()
+        raise _Reconnected(url)
+
+    monkeypatch.setattr("strata.notebook.tui.app.websockets.connect", fake_connect)
+    notes: list[str] = []
+    monkeypatch.setattr(NotebookTUI, "notify", lambda self, message, **kw: notes.append(message))
+
+    client = _FakeOpenClient()
+    app = NotebookTUI(client=client, notebook_path="/nb/demo")
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _wait(pilot, lambda: len(notes) == 1)
+        assert urls == ["ws://localhost:8765/v1/notebooks/ws/sid-1"] * 2
+        assert "session closed (not found)  ·  r to reopen" in app.sub_title
+        assert notes[0].endswith("it may have restarted. Press r to reopen it.")
+
+        await pilot.press("r")
+        await _wait(pilot, lambda: len(notes) == 2)
+        assert client.opened == ["/nb/demo", "/nb/demo"]
+        assert urls[-1] == "ws://localhost:8765/v1/notebooks/ws/sid-2"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_first_upgrade_of_another_kind_still_retries(monkeypatch):
+    """Only a 403 says the session is gone; a 502 from a proxy is a drop like any other."""
+    from websockets.datastructures import Headers
+    from websockets.exceptions import InvalidStatus
+    from websockets.http11 import Response
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr("strata.notebook.tui.app.asyncio.sleep", no_sleep)
+    attempts: list[str] = []
+
+    def fake_connect(url, **kwargs):
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise InvalidStatus(Response(502, "Bad Gateway", Headers()))
+        raise _Reconnected(url)
+
+    monkeypatch.setattr("strata.notebook.tui.app.websockets.connect", fake_connect)
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="sid-1")
+    with pytest.raises(_Reconnected):
+        await app._ws_loop("sid-1")
+    assert len(attempts) == 2
+    assert app._session_closed is None

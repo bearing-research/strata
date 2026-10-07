@@ -41,6 +41,8 @@ test.beforeEach(() => {
   FakeSocket.all = []
   mock.timers.enable({ apis: ['setTimeout'] })
   for (const level of ['log', 'warn', 'error'] as const) mock.method(console, level, () => {})
+  // Every unexpected close probes the session; no test reaches a real server.
+  fakeFetch(null)
 })
 
 test.afterEach(() => {
@@ -117,4 +119,71 @@ test('open handlers run on every connect, before the sync request', () => {
   for (const socket of FakeSocket.all) {
     assert.deepEqual(socket.sentTypes(), ['cell_source_update', 'notebook_sync'])
   }
+})
+
+// The server's answer to the session probe; `null` stands for an unreachable server.
+function fakeFetch(status: number | null) {
+  const calls: string[] = []
+  const fetch = async (url: string) => {
+    calls.push(url)
+    if (status === null) throw new TypeError('Failed to fetch')
+    return { status } as Response
+  }
+  mock.method(globalThis, 'fetch', fetch)
+  return calls
+}
+
+// Lets the probe's fetch settle; the timers are mocked, setImmediate is not.
+const settle = () => new Promise((resolve) => setImmediate(resolve))
+
+test('a refused reconnect to a session the server no longer has stops retrying', async () => {
+  const calls = fakeFetch(null)
+  const ws = useWebSocket('old-session')
+  let gone = 0
+  ws.onSessionGone(() => gone++)
+  ws.connect()
+  FakeSocket.all[0]!.onopen?.()
+
+  // The server goes down: the probe cannot reach it either, so keep retrying.
+  FakeSocket.all[0]!.close()
+  await settle()
+  assert.equal(ws.state.value, 'reconnecting')
+  assert.equal(gone, 0)
+  assert.match(calls[0]!, /\/v1\/notebooks\/old-session\/dag$/)
+
+  // It is back without the session: the upgrade is refused and the probe says 404.
+  fakeFetch(404)
+  mock.timers.tick(1000)
+  FakeSocket.all[1]!.fail()
+  await settle()
+
+  assert.equal(gone, 1)
+  assert.equal(ws.state.value, 'disconnected')
+  mock.timers.tick(120000)
+  assert.equal(FakeSocket.all.length, 2, 'no retry after the session is gone')
+})
+
+test('a session the server still has keeps reconnecting', async () => {
+  fakeFetch(200)
+  const ws = useWebSocket('nb')
+  let gone = 0
+  ws.onSessionGone(() => gone++)
+  ws.connect()
+  FakeSocket.all[0]!.fail()
+  await settle()
+
+  assert.equal(gone, 0)
+  assert.equal(ws.state.value, 'reconnecting')
+  mock.timers.tick(1000)
+  assert.equal(FakeSocket.all.length, 2)
+})
+
+test('a socket closed by the client does not probe the session', async () => {
+  const calls = fakeFetch(404)
+  const ws = useWebSocket('nb')
+  ws.connect()
+  FakeSocket.all[0]!.onopen?.()
+  ws.disconnect()
+  await settle()
+  assert.deepEqual(calls, [])
 })

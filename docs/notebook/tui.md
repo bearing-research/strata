@@ -201,6 +201,10 @@ The viewer then stops reconnecting, shows why in a notification, and keeps
 `session closed (<reason>)` in its header. Unless the notebook was deleted, its
 results stay on disk.
 
+A restarted server no longer has the session and refuses the viewer's
+reconnect. The viewer then stops retrying and shows
+`session closed (not found)` the same way.
+
 If the viewer knows the notebook's path (you passed `--notebook`, or it
 attached a session from the list or the picker), press `r` to reopen it as a
 new session and keep watching. Attached with `--session ID`, it does not know
