@@ -55,7 +55,7 @@ INFO:     Uvicorn running on http://0.0.0.0:9000
 curl http://localhost:9000/health
 ```
 
-Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, and `hardware` lists what the machine reports):
+Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, `launch_id` is set only on a worker Strata [launched over SSH](#run-cells-on-a-machine-you-can-ssh-to), and `hardware` lists what the machine reports):
 
 ```json
 {
@@ -75,6 +75,7 @@ Expected response (`locked_environments` is `false` if `uv` is not on the worker
   },
   "version": "1.0.0",
   "uptime_seconds": 5.2,
+  "launch_id": null,
   "active_executions": 0,
   "max_concurrent": null,
   "gpu_slots": null,
@@ -173,7 +174,7 @@ strata worker rm-ssh gpu-box --server http://localhost:8765 --session <session-i
 
 - **Key-based SSH only.** Strata runs `ssh` in batch mode and never handles passwords, so the target must authenticate non-interactively (an agent/key that works when you run `ssh user@gpu-box` yourself). A `user@host`, a bare `host`, or an `~/.ssh/config` alias all work.
 - **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); reconnects adopt the already-running worker.
-- **Security.** The worker binds the box's `127.0.0.1` (never a public port) and is reachable only through the authenticated SSH tunnel. A per-worker bearer token is generated for defense-in-depth; it's held in the notebook server's memory and **never written to `notebook.toml`**.
+- **Security.** The worker binds the box's `127.0.0.1` (never a public port) and is reachable only through the authenticated SSH tunnel. A per-worker bearer token is generated for defense-in-depth; it's held in the notebook server's memory and **never written to `notebook.toml`**. Each launch also hands the worker a one-off `launch_id` (over stdin, like the token), and Strata connects only when `/health` through the tunnel reports it, so another process already listening on the box's port never receives the token.
 - **A remote cell runs on the box's filesystem.** Absolute paths in the cell resolve there, not on your machine, and a `file://` mount is refused on any remote worker, and cloud mounts use the box's own credentials. Results are cached under the remote environment's identity, so they don't collide with local runs.
 
 ## Deploy to the cloud
