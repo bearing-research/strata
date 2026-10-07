@@ -302,12 +302,21 @@ def _timed_json_response(
 
 
 def validate_package_name(package: str) -> str:
-    """Validate and sanitize a package specifier; rejects shell metacharacters."""
+    """Validate one PEP 508 requirement (``pandas>=2.0``, ``x[extra]; python_version<"4"``).
+
+    It reaches uv as a single argv element, never a shell, so the risk is a value uv
+    would read as an option or as several packages; a requirement is neither.
+    """
+    from packaging.requirements import InvalidRequirement, Requirement
+
     if len(package) > 200:
         raise ValueError("Package specifier too long")
-    if any(c in package for c in ";&|`$(){}!<>\"'\n\r\t"):
-        raise ValueError("Package specifier contains invalid characters")
-    return package.strip()
+    package = package.strip()
+    try:
+        Requirement(package)
+    except InvalidRequirement as exc:
+        raise ValueError(f"Not a single package requirement: {exc}") from exc
+    return package
 
 
 def _validate_notebook_path(
@@ -744,8 +753,8 @@ class EnvironmentJobRequest(BaseModel):
     @field_validator("package")
     @classmethod
     def validate_package_field(cls, value: str | None) -> str | None:
-        # Rejects shell metacharacters for any action; the R name-shape check runs
-        # again in ``submit_environment_job`` before Rscript sees it.
+        # One requirement for any action; the R name-shape check runs again in
+        # ``submit_environment_job`` before Rscript sees it.
         if value is None:
             return None
         return validate_package_name(value)

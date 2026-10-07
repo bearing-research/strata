@@ -124,7 +124,7 @@ class ScanMetrics:
     """
 
     scan_id: str
-    snapshot_id: int
+    snapshot_id: int | None  # None: the table has no snapshots yet
     table_id: str = ""
     request_id: str = ""
     planning_time_ms: float = 0.0
@@ -199,6 +199,7 @@ class MetricsCollector:
     total_fetches: int = 0
     total_rows_fetched: int = 0
     total_scans: int = 0
+    total_rows_returned: int = 0
     total_row_groups_pruned: int = 0
 
     stream_aborts_timeout: int = 0
@@ -312,6 +313,7 @@ class MetricsCollector:
         """Update aggregate and per-table metrics and emit a ``scan_complete`` log."""
         with self._counter_lock:
             self.total_scans += 1
+            self.total_rows_returned += metrics.rows_returned
             self.total_row_groups_pruned += metrics.pruned_row_groups
 
             if metrics.table_id:
@@ -401,6 +403,7 @@ class MetricsCollector:
                 "bytes_from_cache": self.total_bytes_from_cache,
                 "bytes_from_storage": self.total_bytes_from_storage,
                 "bytes_written_to_cache": self.total_bytes_written_to_cache,
+                "rows_returned": self.total_rows_returned,
                 "row_groups_pruned": self.total_row_groups_pruned,
                 "stream_aborts_timeout": self.stream_aborts_timeout,
                 "stream_aborts_size": self.stream_aborts_size,
@@ -421,6 +424,7 @@ class MetricsCollector:
             self.total_fetches = 0
             self.total_rows_fetched = 0
             self.total_scans = 0
+            self.total_rows_returned = 0
             self.total_row_groups_pruned = 0
             self.stream_aborts_timeout = 0
             self.stream_aborts_size = 0

@@ -649,3 +649,68 @@ class TestOneRunsOutputsTogether:
         assert self._run(executor, tmp_path / "out", 2)
 
         assert self._current(session) == {"model": b'{"run": 2}', "metric": b'{"run": 2}'}
+
+
+class TestVerifyANotebookStore:
+    """`strata artifact verify` on a notebook's store: only Arrow outputs are Arrow."""
+
+    def _store_outputs(self, manager, tmp_path):
+        import pandas as pd
+
+        from strata.notebook.serializer import serialize_value
+
+        class Model:
+            pass
+
+        values = {
+            "df": pd.DataFrame({"x": range(150)}),
+            "feature_names": {"names": ["a", "b"]},
+            "model": Model(),
+        }
+        out = tmp_path / "out"
+        stored = {}
+        for name, value in values.items():
+            meta = serialize_value(value, out, name)
+            stored[name] = manager.store_cell_output(
+                cell_id="c1",
+                variable_name=name,
+                blob_data=(out / meta["file"]).read_bytes(),
+                content_type=meta["content_type"],
+                provenance_hash=f"prov-{name}",
+            )
+        stored["__display__0"] = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="__display__0",
+            blob_data=b"\x89PNG\r\n\x1a\nnot really",
+            content_type="image/png",
+            provenance_hash="prov-png",
+        )
+        return stored
+
+    def test_mixed_outputs_verify_clean(self, manager, tmp_path):
+        stored = self._store_outputs(manager, tmp_path)
+
+        assert {v.id.rsplit("_var_", 1)[1] for v in stored.values()} == {
+            "df",
+            "feature_names",
+            "model",
+            "__display__0",
+        }
+        assert stored["df"].row_count is None  # the writer does not know it
+        assert manager.artifact_store.verify_artifacts() == []
+
+    def test_a_changed_blob_is_still_found(self, manager, tmp_path):
+        stored = self._store_outputs(manager, tmp_path)
+        blobs = manager.artifact_store.blob_store
+        for name in ("feature_names", "df"):
+            version = stored[name]
+            blobs.write_blob(version.id, version.version, b'{"names": ["tampered"]}')
+
+        problems = {
+            (f["artifact_id"], f["problem"]) for f in manager.artifact_store.verify_artifacts()
+        }
+
+        assert problems == {
+            (stored["feature_names"].id, "digest_mismatch"),
+            (stored["df"].id, "invalid_stream"),
+        }

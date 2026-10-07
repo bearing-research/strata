@@ -113,7 +113,16 @@ class _SqlAnalyzer:
     """
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
-        from strata.notebook.sql.analyzer import _extract_placeholders, analyze_sql_cell
+        try:
+            from strata.notebook.sql.analyzer import _extract_placeholders, analyze_sql_cell
+        except ModuleNotFoundError as exc:
+            if exc.name != "sqlglot":
+                raise
+            raise ValueError(
+                f"Cell {cell.id} is a SQL cell, and SQL cells need the sql extra, which "
+                "this server does not have: install strata-notebook[sql] plus a driver "
+                "extra for each database (for example sql-duckdb, sql-sqlite)."
+            ) from exc
 
         result = analyze_sql_cell(cell.source)
         return AnalyzedCell(

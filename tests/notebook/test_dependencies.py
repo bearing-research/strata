@@ -552,6 +552,46 @@ dependencies:
 # REST API tests
 
 
+class TestPackageSpecifierValidation:
+    """REST, environment jobs and the WS frame take one PEP 508 requirement, as the CLI does."""
+
+    @pytest.mark.parametrize(
+        "package",
+        [
+            "pandas>=2.0",
+            "pandas<3",
+            "pandas>=2,<3",
+            "requests[socks]",
+            'numpy; python_version < "3.13"',
+            "six @ https://example.com/six-1.0-py2.py3-none-any.whl",
+        ],
+    )
+    def test_a_requirement_is_accepted(self, package):
+        from strata.notebook.routes import (
+            AddDependencyRequest,
+            EnvironmentJobRequest,
+            validate_package_name,
+        )
+
+        assert validate_package_name(f"  {package} ") == package
+        assert AddDependencyRequest(package=package).package == package
+        assert EnvironmentJobRequest(action="add", package=package).package == package
+
+    @pytest.mark.parametrize(
+        "package",
+        ["pandas numpy", "pandas>=2 numpy", "--index-url=https://evil.example", "-e .", ""],
+    )
+    def test_several_packages_or_an_option_is_refused(self, package):
+        from pydantic import ValidationError
+
+        from strata.notebook.routes import AddDependencyRequest, validate_package_name
+
+        with pytest.raises(ValueError, match="Not a single package requirement"):
+            validate_package_name(package)
+        with pytest.raises(ValidationError):
+            AddDependencyRequest(package=package)
+
+
 class TestDependencyRESTEndpoints:
     """REST endpoints for dependency management."""
 

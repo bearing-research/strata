@@ -126,6 +126,13 @@ class TransformRegistry:
         logger.info(
             f"Transform registry initialized: enabled={enabled}, definitions={len(definitions)}"
         )
+        if enabled and not definitions:
+            # The block is an allowlist: enabling it without entries refuses every transform.
+            logger.warning(
+                "Transforms are enabled but [tool.strata.transforms] lists no registry "
+                "entries, so every transform is refused. For the built-in SQL transform add "
+                'ref = "duckdb_sql@v1", executor_url = "embedded://local".'
+            )
 
         return cls(enabled=enabled, definitions=definitions)
 

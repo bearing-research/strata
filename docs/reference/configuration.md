@@ -145,7 +145,7 @@ Two constraints are enforced at startup rather than papered over at runtime:
 | `STRATA_CATALOG_NAME`        | `default` | Iceberg catalog name                                                                              |
 | `STRATA_CATALOG_PROPERTIES`  | `{}`      | PyIceberg catalog properties (JSON object via env; `[tool.strata.catalog_properties]` in pyproject) |
 | `STRATA_CATALOGS`            | `{}`      | Named catalogs: a JSON object of name to PyIceberg catalog properties (`[tool.strata.catalogs.<name>]` in pyproject), e.g. `{"lake": {"type": "rest", "uri": "https://catalog.example"}}`. A table in one is `<name>:<namespace>.<table>`, for `@table` and scans alike. Credentials a REST catalog vends for a table are used to read that table's files. An entry's `credential` names one in `STRATA_NOTEBOOK_CREDENTIALS` whose fields fill its properties, so no secret is written here (see [Named credentials](notebook-toml.md#named-credentials)) |
-| `STRATA_CATALOG_URI`         | `None`    | Catalog database URI. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject. Environment only |
+| `STRATA_CATALOG_URI`         | `None`    | Catalog database URI, a SQLAlchemy URL such as `postgresql+psycopg://user:pass@host/iceberg_catalog` (the `postgres` extra installs psycopg). A bare `postgresql://` is read the same way when psycopg2 is not installed. Merged into `catalog_properties.uri`, so it does not replace sibling keys set in pyproject. Environment only |
 
 A SQL catalog keeps its tables under the catalog's name, so
 `STRATA_CATALOG_NAME` (or the `STRATA_CATALOGS` key) must match the name
@@ -464,9 +464,10 @@ strata apikey revoke <key_id>
 
 The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
 shown again, by you or by us, and a database disclosure yields no usable
-credentials. Pass `--dsn` (or set `STRATA_ARTIFACT_METADATA_DSN`) when the
-metadata lives on Postgres, so the CLI writes where the server reads;
-`--artifact-dir` reads one local SQLite store instead. `create
+credentials. The command opens the store the server is configured with
+(`[tool.strata]` and `STRATA_*`: its `artifact_dir` and metadata DSN), so it
+writes where the server reads; `--artifact-dir` opens one local SQLite store
+instead, and `--dsn` names a Postgres metadata store directly. `create
 --expires-in-days N` sets an expiry (none by default); `list --principal`
 filters to one principal and `--format json` prints JSON.
 
@@ -524,7 +525,24 @@ poll; there the console goes straight from the log route to the sockets.
 Server-side transform execution and the async build runner (service mode / the
 artifact build pipeline). Transforms are also configured via the
 `[tool.strata.transforms]` block in `pyproject.toml`; `STRATA_TRANSFORMS_ENABLED`
-toggles `enabled` there.
+sets `enabled` there.
+
+With no block, the registry holds the built-in `duckdb_sql@v1`. A block is an
+allowlist: it holds only its `registry` entries, so `enabled = true` alone
+refuses every transform (`403 transform_not_allowed`). To offer the built-in
+SQL transform, list it:
+
+```toml
+[tool.strata.transforms]
+enabled = true
+
+[[tool.strata.transforms.registry]]
+ref = "duckdb_sql@v1"
+executor_url = "embedded://local"
+```
+
+The [executor protocol](executor-protocol.md#core-transform-executors) describes the
+other registry keys.
 
 The v2-pull signed-URL routes (build manifest, signed download / upload, and
 `finalize`) have no on/off switch. They are served whenever the deployment can
@@ -538,6 +556,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 | Variable                                | Default | Description                                                                                     |
 | --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `STRATA_TRANSFORM_MODE`                 | `embedded` | Accepted but **not currently wired up**: the registry is always built in embedded mode, so setting `registry` has no effect. Configure transforms through `transforms_config` instead. |
+| `STRATA_TRANSFORMS_ENABLED`             | _(unset)_ | Sets `enabled` in the transforms block (any boolean: `true`, `1`, `yes`, `false`, ...), overriding `pyproject.toml`. In service mode it turns on server-side transforms and the signed build routes a `signed` notebook worker needs. Environment only. |
 | `STRATA_TRANSFORMS_CONFIG`              | `{}`    | The whole transforms block as a JSON object (`enabled`, `registry`, …). Normally written as `[tool.strata.transforms]` instead; `STRATA_TRANSFORMS_ENABLED` merges into it rather than replacing it. |
 | `STRATA_SIGNED_URL_EXPIRY_SECONDS`      | `600`   | Validity window for pull-model signed build URLs. For a notebook cell on a `signed` worker it is a floor: the URLs last at least the cell's timeout plus `STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` plus 5 minutes, so a long cell can still upload its result. |
 | `STRATA_ARTIFACT_PRESIGNED_URLS` | `false` | Put presigned object-store URLs in build manifests where the blob store can sign them, so a worker's inputs and output bypass the server: S3 with an access key pair or a role (the `s3` extra), GCS with a service-account key or workload identity (the `gcs` extra), Azure with the account key or a managed identity. The output becomes a form upload (`output.fields`) or, on Azure, a `PUT` (`output.method`), which older workers don't send, so enable it once the workers are upgraded. The [executor protocol](executor-protocol.md) says what each store signs with. |

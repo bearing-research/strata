@@ -271,7 +271,7 @@ class NotebookArtifactManager:
             artifact_id=artifact_id,
             version=version,
             schema_json=schema_json if schema_json is not None else "",
-            row_count=row_count or 0,
+            row_count=row_count,
             byte_size=len(blob_data),
             content_sha256=hashlib.sha256(blob_data).hexdigest(),
         )

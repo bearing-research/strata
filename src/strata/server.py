@@ -1503,9 +1503,34 @@ def _mount_mcp_if_enabled() -> None:
         )
         return
 
-    app.mount("/mcp", mcp_app)
+    _mount_mcp(app, mcp_app)
     _mcp_app = mcp_app
     logger.info("mcp_endpoint_mounted", path="/mcp")
+
+
+class _AsSlashedPath:
+    """ASGI app that serves a request for ``/x`` as ``/x/`` through *application*'s router."""
+
+    def __init__(self, application: FastAPI) -> None:
+        self.application = application
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope = {**scope, "path": scope["path"] + "/"}
+        if "raw_path" in scope:
+            scope["raw_path"] = scope["raw_path"] + b"/"
+        await self.application.router(scope, receive, send)
+
+
+def _mount_mcp(application: FastAPI, mcp_app: Starlette) -> None:
+    """Serve *mcp_app* at ``/mcp/`` and at the documented ``/mcp``.
+
+    The mount matches only ``/mcp/...``, so ``/mcp`` alone would reach the SPA catch-all
+    (HTML on GET, 405 on POST); an ASGI route takes it instead, for every method.
+    """
+    from starlette.routing import Route
+
+    application.mount("/mcp", mcp_app)
+    application.router.routes.append(Route("/mcp", _AsSlashedPath(application)))
 
 
 _mount_mcp_if_enabled()
@@ -1518,7 +1543,10 @@ def _require_notebook_worker_admin_access() -> ServerState:
     if state.config.deployment_mode != "service":
         raise HTTPException(
             status_code=409,
-            detail="Server-managed notebook workers are only available in service mode",
+            detail=(
+                "The admin notebook-worker routes are for service mode; a personal "
+                "server reads its workers from [tool.strata.transforms] notebook_workers"
+            ),
         )
 
     if state.config.principal_auth_enabled:
@@ -1565,14 +1593,19 @@ def _get_artifact_store(
     service_write_ok = allow_write and state.config.service_writes_enabled
 
     if not (writes_ok or server_transforms_ok or allow_read or service_write_ok):
+        # Name only the settings that would open this route.
+        remedies = ["set deployment_mode='personal' for local development"]
+        if allow_server_mode:
+            remedies.append("enable server-mode transforms (STRATA_TRANSFORMS_ENABLED=true)")
+        if allow_write:
+            remedies.append("enable service-mode writes (STRATA_SERVICE_WRITES_ENABLED=true)")
         raise HTTPException(
             status_code=403,
             detail={
                 "error": "writes_disabled",
                 "message": (
-                    "Artifact endpoints are disabled in service mode. "
-                    "Set deployment_mode='personal' for local development, "
-                    "or enable server-mode transforms."
+                    "This artifact endpoint is disabled in service mode. "
+                    f"To use it, {' or '.join(remedies)}."
                 ),
             },
         )

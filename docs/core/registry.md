@@ -163,7 +163,7 @@ challenger → a human approves → and the whole history is reconstructible:
 strata artifact lineage taxi/tip-model@champion
 # model <- features <- scan <- table file://...#nyc.trips @ snapshot 2558063...
 strata artifact audit taxi/tip-model
-strata artifact verify    # store-wide blob/metadata consistency check
+strata artifact verify    # every blob exists and matches its digest; Arrow ones their rows
 strata artifact gc --dry-run   # what the retention sweep would collect
 ```
 

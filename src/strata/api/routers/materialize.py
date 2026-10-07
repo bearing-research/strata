@@ -505,6 +505,7 @@ async def _handle_identity_materialize(
         plan.owner_tenant = principal.tenant
 
     from strata.services.materialize import materialize_service, table_input_version
+    from strata.streaming.scan_builds import record_scan_complete
 
     provenance_hash = materialize_service.compute_identity_provenance(
         table_identity=str(plan.table_identity),
@@ -533,6 +534,13 @@ async def _handle_identity_materialize(
                 artifact_id=existing.id,
                 table_uri=table_uri,
                 snapshot_id=plan.snapshot_id,
+            )
+            record_scan_complete(
+                state,
+                plan,
+                rows_returned=existing.row_count or 0,
+                fetch_time_ms=0.0,
+                artifact_bytes=existing.byte_size or 0,
             )
 
             # Lets clients fetch a hit the same way as a miss.

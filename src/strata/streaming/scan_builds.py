@@ -32,6 +32,54 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def record_scan_complete(
+    state: ServerState,
+    plan: ReadPlan,
+    *,
+    rows_returned: int,
+    fetch_time_ms: float,
+    artifact_bytes: int | None = None,
+) -> None:
+    """Count a finished ``scan@v1`` in the scan, per-table and per-tenant metrics.
+
+    *artifact_bytes* marks a scan answered from a stored artifact: every row group
+    counts as a cache hit. Otherwise the plan's tasks say how each row group was read.
+    """
+    from strata.metrics import ScanMetrics
+    from strata.tenant import get_tenant_id
+    from strata.tenant_registry import get_tenant_registry
+
+    tasks = plan.tasks
+    if artifact_bytes is not None:
+        hits, misses, from_cache, from_storage = len(tasks), 0, artifact_bytes, 0
+    else:
+        hits = sum(1 for t in tasks if t.cached)
+        misses = len(tasks) - hits
+        from_cache = sum(t.bytes_read for t in tasks if t.cached)
+        from_storage = sum(t.bytes_read for t in tasks if not t.cached)
+
+    state.metrics.log_scan_complete(
+        ScanMetrics(
+            scan_id=plan.scan_id,
+            snapshot_id=plan.snapshot_id,
+            table_id=str(plan.table_identity),
+            planning_time_ms=plan.planning_time_ms,
+            fetch_time_ms=fetch_time_ms,
+            total_time_ms=plan.planning_time_ms + fetch_time_ms,
+            cache_hits=hits,
+            cache_misses=misses,
+            bytes_from_cache=from_cache,
+            bytes_from_storage=from_storage,
+            total_row_groups=plan.total_row_groups,
+            pruned_row_groups=plan.pruned_row_groups,
+            rows_returned=rows_returned,
+        )
+    )
+    get_tenant_registry().record_scan(
+        get_tenant_id(), hits, misses, from_cache, from_storage, rows_returned
+    )
+
+
 class ScanBuildManager:
     """The active scan table plus opportunistic first-row-group prefetch."""
 
@@ -203,6 +251,7 @@ class ScanBuildManager:
 
         stream_state.started = True
         stream_state.started_at = time.time()
+        build_started = time.perf_counter()
 
         try:
             store = get_artifact_store(state.config.artifact_dir)
@@ -292,18 +341,28 @@ class ScanBuildManager:
         finally:
             # The store read can raise; the slot and the cleanup must not depend on it.
             try:
-                artifact_ready = False
+                artifact = None
                 store = get_artifact_store(state.config.artifact_dir)
                 if store is not None:
                     artifact = store.get_artifact(
                         stream_state.artifact_id, stream_state.artifact_version
                     )
-                    artifact_ready = artifact is not None and artifact.state == "ready"
 
-                if stream_state.completed and stream_state.error_message is None and artifact_ready:
+                if (
+                    stream_state.completed
+                    and stream_state.error_message is None
+                    and artifact is not None
+                    and artifact.state == "ready"
+                ):
                     await record_build_output_bytes(
                         stream_state.qos_tenant_id,
                         stream_state.bytes_streamed,
+                    )
+                    record_scan_complete(
+                        state,
+                        plan,
+                        rows_returned=artifact.row_count or 0,
+                        fetch_time_ms=(time.perf_counter() - build_started) * 1000,
                     )
             finally:
                 if stream_state.build_slot is not None:

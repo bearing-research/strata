@@ -237,6 +237,27 @@ class TestCliOutputStreams:
         assert "cannot be shown again" in captured.err
         assert "key id" not in captured.out
 
+    def test_without_artifact_dir_the_key_lands_in_the_configured_store(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """The server reads STRATA_ARTIFACT_DIR, so a key minted elsewhere 401s."""
+        from strata.api_key_cli import cmd_create
+        from strata.api_keys import ApiKeyStore
+
+        configured = tmp_path / "srvstore"
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(configured))
+        monkeypatch.delenv("STRATA_ARTIFACT_METADATA_DSN", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        args = self._args(tmp_path)
+        args.artifact_dir = None
+        assert cmd_create(args) == 0
+        key = capsys.readouterr().out.strip()
+
+        assert ApiKeyStore(configured / "artifacts.sqlite").verify(key) is not None
+        assert not (tmp_path / "home" / ".strata" / "artifacts" / "artifacts.sqlite").exists()
+
 
 class TestConfiguration:
     def _service(self, **kwargs):

@@ -67,6 +67,13 @@ def _spec() -> TransformSpec:
     return TransformSpec(executor="duckdb_sql_v1", params={"sql": "SELECT 1"}, inputs=[])
 
 
+class TestPing:
+    """The readiness probe's query runs on Postgres."""
+
+    def test_ping_answers_on_a_live_server(self, store):
+        store.ping()
+
+
 class TestSchemaInitialization:
     def test_schema_is_created_without_the_sqlite_migration_path(self, store):
         # supports_legacy_migration is False for Postgres, so _init_schema
