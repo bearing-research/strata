@@ -145,6 +145,24 @@ def test_reverting_a_leafs_own_edit_is_a_hit(tmp_path: Path):
     assert back.stdout == "one\n"
 
 
+def test_reverting_a_leaf_to_a_run_without_displays_is_a_hit(tmp_path: Path):
+    """A run with no displays leaves no display artifact, so the edited run's count must not
+    stand in for the reverted one's."""
+    nb = _build_notebook(tmp_path, cells=[("leaf", "print('one')\n", None)])
+    session = _session(nb)
+
+    assert _run(session, "leaf").display_outputs == []
+    _set(session, nb, "leaf", "print('two')\n'shown'\n")
+    assert len(_run(session, "leaf").display_outputs) == 1
+    _set(session, nb, "leaf", "print('one')\n")
+
+    back = _run(session, "leaf")
+
+    assert back.cache_hit is True
+    assert back.stdout == "one\n"
+    assert back.display_outputs == []
+
+
 # -- finding 3: recovery through a cache hit keeps the display -------------
 
 

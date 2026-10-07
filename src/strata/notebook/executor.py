@@ -1671,6 +1671,7 @@ class CellExecutor:
                                 source_hash=source_hash,
                                 source=source,
                                 env_hash=env_hash,
+                                display_count=len(exec_result.display_outputs),
                             )
 
                     # ⑥ Sync back read-write mounts.
@@ -1774,7 +1775,15 @@ class CellExecutor:
         store = artifact_mgr.artifact_store
         display_count = self._recorded_display_count(cell_id, provenance_hash, None)
         if display_count is None:
-            display_count = current_display_count
+            # A run without displays leaves no display artifact; its console says so.
+            console = store.find_version_by_provenance(
+                artifact_mgr.cell_artifact_id(cell_id, "__console__"),
+                derive_subkey(provenance_hash, "__console__"),
+            )
+            spec = console.transform_spec if console is not None else None
+            params = json.loads(spec).get("params", {}) if spec else {}
+            recorded = params.get("display_count")
+            display_count = int(recorded) if recorded is not None else current_display_count
         labels = ["__console__", *(f"__display__{index}" for index in range(display_count))]
         to_promote: list[tuple[str, int]] = []
         for label in labels:
@@ -4627,16 +4636,22 @@ class CellExecutor:
         source_hash: str = "",
         source: str = "",
         env_hash: str = "",
+        display_count: int | None = None,
     ) -> None:
         """Persist a leaf cell's console output as a provenance-keyed artifact.
 
         So a cell that only prints can still cache-hit and replay its output. Stored
         even when both streams are empty: a leaf has no other artifact, so the console
         is the record that it ran under this provenance (cache hit, ready on reopen).
+        ``display_count`` records how many displays the run made, which a run with
+        none leaves no display artifact to say.
         """
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
+        params = self._fetch_params(cell_id)
+        if display_count is not None:
+            params["display_count"] = str(display_count)
         artifact_mgr.store_cell_output(
             cell_id=cell_id,
             variable_name="__console__",
@@ -4647,7 +4662,7 @@ class CellExecutor:
             source_hash=source_hash,
             source=source,
             env_hash=env_hash,
-            extra_params=self._fetch_params(cell_id),
+            extra_params=params,
         )
 
     def _store_inline_display_outputs(
@@ -6514,6 +6529,7 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=executed_source,
                 env_hash=env_hash,
+                display_count=len(persisted_displays),
             )
 
         # Offer it to the team, as a single run does. Inert unless configured, and it
