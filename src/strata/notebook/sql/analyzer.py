@@ -2,8 +2,9 @@
 
 Extracts the cell's directives, SQL body, ``:name`` bind placeholders and, given
 a dialect, the tables the query reads (via sqlglot). Placeholders are ``:name``
-on every backend and found without a dialect; table extraction needs one, and is
-skipped (``parse_error`` stays None) until the connection's dialect is known.
+on every backend and found without a dialect, which decides only whether a
+backslash escapes a quote; table extraction needs one, and is skipped
+(``parse_error`` stays None) until the connection's dialect is known.
 """
 
 from __future__ import annotations
