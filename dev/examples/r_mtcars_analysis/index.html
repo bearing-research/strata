@@ -2149,7 +2149,7 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <p><sub><strong>kind</strong> r</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a># @name Prepare the mtcars data
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>#
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a># A pure-R notebook — every cell is R. Variables flow cell-to-cell
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a># A pure-R notebook: every cell is R. Variables flow cell-to-cell
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a># through the same content-addressed artifact store the Python cells
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a># use: a data.frame crosses as Arrow IPC, so the next R cell receives
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a># it as a data.frame with no glue code.
@@ -2179,7 +2179,7 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>#
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a># Split-apply-combine in base R: group the cars by cylinder class and
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a># average economy, power, and weight per group. `aggregate()` is the
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a># base-R group-by — no dplyr needed. `cars` arrives as a data.frame
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a># base-R group-by; no dplyr needed. `cars` arrives as a data.frame
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a># (the Arrow IPC handoff from the prep cell), and `by_cyl` leaves as
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a># one too, ready for any downstream cell.
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
@@ -2202,14 +2202,14 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a># level). Three outputs leave this cell with three different fates in
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a># the artifact store:
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>#
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>#   model        — the lm object itself. Not tabular, so the harness
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>#   model        the lm object itself. Not tabular, so the harness
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>#                  stores it as RDS and tags it `r_only`. A downstream
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>#                  *R* cell reads it straight back with readRDS (see the
 <a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>#                  diagnostics cell); a Python cell consuming it would
 <a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>#                  instead get a structured "re-export as a data.frame"
 <a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>#                  error rather than a confusing NameError.
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>#   coefs        — tidy coefficient table (data.frame -&gt; Arrow IPC).
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>#   model_stats  — one-row fit summary (data.frame -&gt; Arrow IPC).
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>#   coefs        tidy coefficient table (data.frame -&gt; Arrow IPC).
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>#   model_stats  one-row fit summary (data.frame -&gt; Arrow IPC).
 <a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>
 <a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>model &lt;- lm(mpg ~ wt + hp + cyl, data = cars)
 <a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>s &lt;- summary(model)
@@ -2242,13 +2242,13 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>#
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a># The headline 0.2.0 R feature: plots render inline as PNG, exactly
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a># like a Python matplotlib figure. A bare trailing ggplot object
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a># auto-prints (REPL-style), so no explicit `print()` is needed — the
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a># auto-prints (REPL-style), so no explicit `print()` is needed: the
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a># plot is the cell's last expression and it just shows up.
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>#
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a># ggplot2 isn't part of the harness baseline (arrow + jsonlite); it
 <a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a># comes from this notebook's renv.lock, restored automatically when you
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a># open the notebook — or one click via the Environment panel's
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a># "Initialize renv". If it's somehow missing you'll see a structured
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a># open the notebook (or one click via the Environment panel's
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a># "Initialize renv"). If it's somehow missing you'll see a structured
 <a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a># "install ggplot2" hint, not a crash.
 <a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>
 <a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>library(ggplot2)
@@ -2272,12 +2272,12 @@ and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a># `plot()` on an lm object draws R's canonical 2x2 diagnostic panel
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a># (residuals vs fitted, Q-Q, scale-location, residuals vs leverage).
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a># It's a base-graphics plot, and it's captured to PNG the same way the
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a># ggplot is — no extra code, no device juggling. `par(mfrow)` tiles the
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a># ggplot is: no extra code, no device juggling. `par(mfrow)` tiles the
 <a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a># four panels onto one image.
 <a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>#
 <a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a># `model` arrives by reading the RDS artifact the fit cell stored: an
 <a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a># R-only object (an lm, S3 class and all) flowing from one R cell to
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a># another with full fidelity — something the tabular Arrow tier can't
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a># another with full fidelity, something the tabular Arrow tier can't
 <a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a># carry. This is the R-to-R counterpart of the cross-language Arrow
 <a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a># handoff.
 <a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>

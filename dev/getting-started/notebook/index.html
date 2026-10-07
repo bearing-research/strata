@@ -2366,7 +2366,11 @@ run it:</p>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>strata-notebook
 </code></pre></div>
 <p>The <code>mcp</code> and <code>tui</code> extras are for <code>strata agent</code> and <code>strata watch</code>
-(see <a href="#whats-next">What's next</a>); the web UI needs neither.
+(see <a href="#whats-next">What's next</a>); the web UI needs neither. SQL
+cells need the <code>sql</code> extra plus a driver extra for each database,
+for example
+<code>uv tool install "strata-notebook[mcp,tui,sql,sql-duckdb,sql-sqlite]"</code>;
+without it a notebook that holds a SQL cell does not open.
 Personal mode is the default (single-user, writes enabled); no
 config needed for a local run. Re-run <code>strata-notebook</code> to start it
 again on later sessions. Requires <a href="https://docs.astral.sh/uv/">uv</a>;
@@ -2434,7 +2438,7 @@ re-add it with the kind you want.</p>
 </tr>
 <tr>
 <td><strong>SQL</strong></td>
-<td>A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream.</td>
+<td>A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. Needs the <code>sql</code> extra and a driver extra (see <a href="../installation/">Installation</a>).</td>
 </tr>
 <tr>
 <td><strong>R</strong></td>
@@ -2662,8 +2666,11 @@ point the storage root at <code>examples/</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>./examples
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="c1"># equivalently: STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook</span>
 </code></pre></div>
-<p>(For Docker, edit <code>docker-compose.yml</code> to mount <code>./examples:/data/notebooks</code>
-and set the env var to that path.)</p>
+<p>(For Docker, in <code>docker-compose.yml</code> replace the
+<code>strata-notebooks:/tmp/strata-notebooks</code> volume with
+<code>./examples:/tmp/strata-notebooks</code> and add <code>UV_PYTHON_DOWNLOADS=automatic</code>
+under <code>environment:</code>. The image ships Python 3.13 only and the examples
+pin 3.12 or 3.14, so uv has to fetch those.)</p>
 <p>Every example is also rendered into the docs site so you can read
 the cells before deciding which to open. See the
 <a href="../../notebook/examples/">Examples catalog</a> for the full list,

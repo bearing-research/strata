@@ -2138,7 +2138,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <h2 id="helpers-config">Helpers &amp; Config<a class="headerlink" href="#helpers-config" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name Helpers &amp; Config</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Module cell — pure defs + literal constants. Downstream cells import</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># Module cell: pure defs + literal constants. Downstream cells import</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># Config, the DuckDB/Alpaca factories, and the cost estimators by name.</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1">#</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Keeping ALL connection and policy knobs in one place is deliberate:</span>
@@ -2172,7 +2172,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>    <span class="n">MIN_ABS_SENTIMENT</span> <span class="o">=</span> <span class="mf">0.4</span>
 <a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>
 <a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>    <span class="c1"># --- Cost model ----------------------------------------------------</span>
-<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>    <span class="c1"># LLM pricing is fetched from LiteLLM's public catalog at runtime —</span>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>    <span class="c1"># LLM pricing is fetched from LiteLLM's public catalog at runtime;</span>
 <a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>    <span class="c1"># see _fetch_litellm_pricing() below. Fallback rate used only when</span>
 <a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>    <span class="c1"># the catalog can't be reached AND the model is unknown; matches</span>
 <a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>    <span class="c1"># mid-tier Sonnet pricing so we overstate rather than log $0.</span>
@@ -2210,7 +2210,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-1-71" name="__codelineno-1-71" href="#__codelineno-1-71"></a>
 <a id="__codelineno-1-72" name="__codelineno-1-72" href="#__codelineno-1-72"></a>
 <a id="__codelineno-1-73" name="__codelineno-1-73" href="#__codelineno-1-73"></a><span class="k">def</span><span class="w"> </span><span class="nf">_ensure_schema</span><span class="p">(</span><span class="n">conn</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-1-74" name="__codelineno-1-74" href="#__codelineno-1-74"></a><span class="w">    </span><span class="sd">"""Idempotent DDL. Run on every open_db() call — CREATE IF NOT EXISTS."""</span>
+<a id="__codelineno-1-74" name="__codelineno-1-74" href="#__codelineno-1-74"></a><span class="w">    </span><span class="sd">"""Idempotent DDL. Run on every open_db() call (CREATE IF NOT EXISTS)."""</span>
 <a id="__codelineno-1-75" name="__codelineno-1-75" href="#__codelineno-1-75"></a>    <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
 <a id="__codelineno-1-76" name="__codelineno-1-76" href="#__codelineno-1-76"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-1-77" name="__codelineno-1-77" href="#__codelineno-1-77"></a><span class="sd">        CREATE TABLE IF NOT EXISTS news_raw (</span>
@@ -2301,7 +2301,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-1-162" name="__codelineno-1-162" href="#__codelineno-1-162"></a>
 <a id="__codelineno-1-163" name="__codelineno-1-163" href="#__codelineno-1-163"></a><span class="sd">    ``paper=True`` routes to paper-api.alpaca.markets; False routes to</span>
 <a id="__codelineno-1-164" name="__codelineno-1-164" href="#__codelineno-1-164"></a><span class="sd">    api.alpaca.markets (live). We never silently swap modes at call</span>
-<a id="__codelineno-1-165" name="__codelineno-1-165" href="#__codelineno-1-165"></a><span class="sd">    time — the caller must own the mode decision.</span>
+<a id="__codelineno-1-165" name="__codelineno-1-165" href="#__codelineno-1-165"></a><span class="sd">    time; the caller must own the mode decision.</span>
 <a id="__codelineno-1-166" name="__codelineno-1-166" href="#__codelineno-1-166"></a><span class="sd">    """</span>
 <a id="__codelineno-1-167" name="__codelineno-1-167" href="#__codelineno-1-167"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">alpaca.trading.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">TradingClient</span>
 <a id="__codelineno-1-168" name="__codelineno-1-168" href="#__codelineno-1-168"></a>
@@ -2329,7 +2329,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-1-190" name="__codelineno-1-190" href="#__codelineno-1-190"></a>
 <a id="__codelineno-1-191" name="__codelineno-1-191" href="#__codelineno-1-191"></a><span class="sd">    LiteLLM maintains per-token USD rates for ~2000 models. If the fetch</span>
 <a id="__codelineno-1-192" name="__codelineno-1-192" href="#__codelineno-1-192"></a><span class="sd">    fails (offline, 403, etc.) we cache an empty dict so we don't retry</span>
-<a id="__codelineno-1-193" name="__codelineno-1-193" href="#__codelineno-1-193"></a><span class="sd">    on every cost lookup — the fallback rate takes over downstream.</span>
+<a id="__codelineno-1-193" name="__codelineno-1-193" href="#__codelineno-1-193"></a><span class="sd">    on every cost lookup; the fallback rate takes over downstream.</span>
 <a id="__codelineno-1-194" name="__codelineno-1-194" href="#__codelineno-1-194"></a><span class="sd">    """</span>
 <a id="__codelineno-1-195" name="__codelineno-1-195" href="#__codelineno-1-195"></a>    <span class="k">global</span> <span class="n">_litellm_pricing_cache</span>  <span class="c1"># noqa: PLW0603</span>
 <a id="__codelineno-1-196" name="__codelineno-1-196" href="#__codelineno-1-196"></a>    <span class="k">if</span> <span class="n">_litellm_pricing_cache</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
@@ -2350,7 +2350,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-1-211" name="__codelineno-1-211" href="#__codelineno-1-211"></a><span class="k">def</span><span class="w"> </span><span class="nf">active_llm_model</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-1-212" name="__codelineno-1-212" href="#__codelineno-1-212"></a><span class="w">    </span><span class="sd">"""The model the Runtime panel last wrote to notebook.toml [ai].model.</span>
 <a id="__codelineno-1-213" name="__codelineno-1-213" href="#__codelineno-1-213"></a>
-<a id="__codelineno-1-214" name="__codelineno-1-214" href="#__codelineno-1-214"></a><span class="sd">    Returns None before the user picks one — callers then fall back to the</span>
+<a id="__codelineno-1-214" name="__codelineno-1-214" href="#__codelineno-1-214"></a><span class="sd">    Returns None before the user picks one; callers then fall back to the</span>
 <a id="__codelineno-1-215" name="__codelineno-1-215" href="#__codelineno-1-215"></a><span class="sd">    conservative rate below. Notebook directory is CWD at cell execution</span>
 <a id="__codelineno-1-216" name="__codelineno-1-216" href="#__codelineno-1-216"></a><span class="sd">    time, so plain relative-path tomllib is enough.</span>
 <a id="__codelineno-1-217" name="__codelineno-1-217" href="#__codelineno-1-217"></a><span class="sd">    """</span>
@@ -2394,7 +2394,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-1-255" name="__codelineno-1-255" href="#__codelineno-1-255"></a><span class="sd">    - TAF fee (sells only, tiny)</span>
 <a id="__codelineno-1-256" name="__codelineno-1-256" href="#__codelineno-1-256"></a><span class="sd">    - slippage (Config.SLIPPAGE_BPS applied to notional, one-way)</span>
 <a id="__codelineno-1-257" name="__codelineno-1-257" href="#__codelineno-1-257"></a>
-<a id="__codelineno-1-258" name="__codelineno-1-258" href="#__codelineno-1-258"></a><span class="sd">    Applied to paper trades too — that's the point, so the backtest</span>
+<a id="__codelineno-1-258" name="__codelineno-1-258" href="#__codelineno-1-258"></a><span class="sd">    Applied to paper trades too. That's the point, so the backtest</span>
 <a id="__codelineno-1-259" name="__codelineno-1-259" href="#__codelineno-1-259"></a><span class="sd">    doesn't tell you a pleasant lie.</span>
 <a id="__codelineno-1-260" name="__codelineno-1-260" href="#__codelineno-1-260"></a><span class="sd">    """</span>
 <a id="__codelineno-1-261" name="__codelineno-1-261" href="#__codelineno-1-261"></a>    <span class="n">notional</span> <span class="o">=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">qty</span><span class="p">)</span> <span class="o">*</span> <span class="n">price</span>
@@ -2448,7 +2448,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <p><sub><strong>kind</strong> python</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @name Fetch overnight news</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># Pulls recent Benzinga headlines for every whitelisted ticker and</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># upserts into the ``news_raw`` table. Idempotent — re-running the</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># upserts into the ``news_raw`` table. Idempotent: re-running the</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># cell only inserts articles we haven't seen before, so the DB grows</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># monotonically across sessions.</span>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="kn">import</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">dt</span>
@@ -2486,7 +2486,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a><span class="n">inserted</span> <span class="o">=</span> <span class="mi">0</span>
 <a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="k">for</span> <span class="n">article</span> <span class="ow">in</span> <span class="n">raw_news</span><span class="p">:</span>
 <a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>    <span class="c1"># alpaca-py returns a NewsSet on some SDK versions and a list on</span>
-<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>    <span class="c1"># others — normalize to the underlying attrs.</span>
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>    <span class="c1"># others, so normalize to the underlying attrs.</span>
 <a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>    <span class="n">article_id</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">article</span><span class="p">,</span> <span class="s2">"id"</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
 <a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>    <span class="n">headline</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">article</span><span class="p">,</span> <span class="s2">"headline"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">""</span>
 <a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a>    <span class="n">summary</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">article</span><span class="p">,</span> <span class="s2">"summary"</span><span class="p">,</span> <span class="s2">""</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">""</span>
@@ -2513,7 +2513,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-2-65" name="__codelineno-2-65" href="#__codelineno-2-65"></a>            <span class="p">)</span>
 <a id="__codelineno-2-66" name="__codelineno-2-66" href="#__codelineno-2-66"></a>            <span class="n">inserted</span> <span class="o">+=</span> <span class="mi">1</span>
 <a id="__codelineno-2-67" name="__codelineno-2-67" href="#__codelineno-2-67"></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-<a id="__codelineno-2-68" name="__codelineno-2-68" href="#__codelineno-2-68"></a>            <span class="c1"># Primary key conflict — already have this article. Fine.</span>
+<a id="__codelineno-2-68" name="__codelineno-2-68" href="#__codelineno-2-68"></a>            <span class="c1"># Primary key conflict: already have this article. Fine.</span>
 <a id="__codelineno-2-69" name="__codelineno-2-69" href="#__codelineno-2-69"></a>            <span class="k">pass</span>
 <a id="__codelineno-2-70" name="__codelineno-2-70" href="#__codelineno-2-70"></a>
 <a id="__codelineno-2-71" name="__codelineno-2-71" href="#__codelineno-2-71"></a><span class="c1"># Log "ingestion cost" as zero but record the row so the ledger has a</span>
@@ -2525,7 +2525,7 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-2-77" name="__codelineno-2-77" href="#__codelineno-2-77"></a>    <span class="n">detail</span><span class="o">=</span><span class="p">{</span><span class="s2">"articles_seen"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">raw_news</span><span class="p">),</span> <span class="s2">"inserted"</span><span class="p">:</span> <span class="n">inserted</span><span class="p">,</span> <span class="s2">"since"</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">since</span><span class="p">)},</span>
 <a id="__codelineno-2-78" name="__codelineno-2-78" href="#__codelineno-2-78"></a><span class="p">)</span>
 <a id="__codelineno-2-79" name="__codelineno-2-79" href="#__codelineno-2-79"></a>
-<a id="__codelineno-2-80" name="__codelineno-2-80" href="#__codelineno-2-80"></a><span class="c1"># What's unprocessed — used by extract_signals.</span>
+<a id="__codelineno-2-80" name="__codelineno-2-80" href="#__codelineno-2-80"></a><span class="c1"># What's unprocessed, used by extract_signals.</span>
 <a id="__codelineno-2-81" name="__codelineno-2-81" href="#__codelineno-2-81"></a><span class="n">unprocessed</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
 <a id="__codelineno-2-82" name="__codelineno-2-82" href="#__codelineno-2-82"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-2-83" name="__codelineno-2-83" href="#__codelineno-2-83"></a><span class="sd">    SELECT n.article_id, n.ticker, n.headline, n.summary, n.published_at</span>
@@ -2570,12 +2570,12 @@ matching price data, and run risk checks before any orders go out.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a># @name signals_batch
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a># @temperature 0.0
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a># @max_tokens 4096
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a># @system You are a quantitative-trading analyst extracting market-impact signals from news headlines. Return a row for every input article — the risk filter downstream drops weak signals, so do not pre-filter here.
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a># @system You are a quantitative-trading analyst extracting market-impact signals from news headlines. Return a row for every input article: the risk filter downstream drops weak signals, so do not pre-filter here.
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a># @output_schema {"type": "object", "properties": {"signals": {"type": "array", "items": {"type": "object", "properties": {"article_id": {"type": "integer"}, "ticker": {"type": "string"}, "sentiment": {"type": "number", "minimum": -1, "maximum": 1}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "theme": {"type": "string", "enum": ["earnings", "guidance", "product", "regulatory", "macro", "m_and_a", "legal", "people", "other"]}, "reasoning": {"type": "string"}}, "required": ["article_id", "ticker", "sentiment", "confidence", "theme", "reasoning"]}}}, "required": ["signals"]}
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a># @validate_retries 3
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>#
 <a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a># Extracts structured sentiment for each article in the unprocessed
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a># batch. The schema enums are deliberately narrow — a tighter enum
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a># batch. The schema enums are deliberately narrow: a tighter enum
 <a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a># means cleaner aggregation SQL downstream. The validate-and-retry
 <a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a># loop kicks in when the provider falls back to json_object mode
 <a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a># (Anthropic, Gemini, Mistral) and the response doesn't quite match.
@@ -2583,19 +2583,19 @@ matching price data, and run risk checks before any orders go out.</p>
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a># Prompt-design note: earlier prompts told the model to "err toward
 <a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a># low confidence on ambiguous headlines." Models read that as "omit
 <a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a># the row" and returned empty arrays on unglamorous news batches.
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a># The current phrasing is explicit — return one row per article,
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a># The current phrasing is explicit: return one row per article,
 <a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a># encode uncertainty in the confidence score, don't drop articles.
 <a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a># Config.MIN_CONFIDENCE + MIN_ABS_SENTIMENT at the risk layer are
 <a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a># where the actual trading threshold lives.
 <a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>
-<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>Return exactly one signal per input article — do NOT omit rows. Encode
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>Return exactly one signal per input article; do NOT omit rows. Encode
 <a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>uncertainty in the `confidence` field. The downstream risk filter
 <a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>drops low-confidence rows before any trade is placed, so your job
 <a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>here is just to characterize every headline we fetched.
 <a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>
 <a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>For each article, emit:
 <a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>
-<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>- `article_id` and `ticker` — copied verbatim from the input row.
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>- `article_id` and `ticker`: copied verbatim from the input row.
 <a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>- `sentiment` in [-1, 1]: -1 = clearly bearish for this ticker,
 <a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>  +1 = clearly bullish, 0 = neutral / not directionally relevant.
 <a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>- `confidence` in [0, 1]:
@@ -2607,9 +2607,9 @@ matching price data, and run risk checks before any orders go out.</p>
 <a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>  - 0.2–0.5 for rumors, side mentions, ambiguous macro.
 <a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>  - &lt; 0.2 for headlines that aren't really about this ticker
 <a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>    (cross-references, generic market commentary). Still return
-<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>    the row — use 0 sentiment and explain in `reasoning`.
-<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>- `theme` — pick the single best enum value.
-<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>- `reasoning` — one short sentence explaining the score.
+<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>    the row; use 0 sentiment and explain in `reasoning`.
+<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>- `theme`: pick the single best enum value.
+<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>- `reasoning`: one short sentence explaining the score.
 <a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a>
 <a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a>Do NOT infer signals for tickers other than the one on each row.
 <a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>
@@ -2630,7 +2630,7 @@ matching price data, and run risk checks before any orders go out.</p>
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">rows</span> <span class="o">=</span> <span class="n">batch</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"signals"</span><span class="p">,</span> <span class="p">[])</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">batch</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="k">else</span> <span class="p">[]</span>
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
 <a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="c1"># Only persist rows whose ticker is in the whitelist. The schema enum</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="c1"># doesn't constrain ticker strings — the LLM could return anything —</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="c1"># doesn't constrain ticker strings (the LLM could return anything),</span>
 <a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="c1"># so this is the last layer of defense before the DB has a row that</span>
 <a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="c1"># place_orders would try to trade.</span>
 <a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="n">allowed</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">Config</span><span class="o">.</span><span class="n">TICKER_WHITELIST</span><span class="p">)</span>
@@ -2666,7 +2666,7 @@ matching price data, and run risk checks before any orders go out.</p>
 <a id="__codelineno-4-45" name="__codelineno-4-45" href="#__codelineno-4-45"></a>        <span class="p">)</span>
 <a id="__codelineno-4-46" name="__codelineno-4-46" href="#__codelineno-4-46"></a>        <span class="n">persisted</span> <span class="o">+=</span> <span class="mi">1</span>
 <a id="__codelineno-4-47" name="__codelineno-4-47" href="#__codelineno-4-47"></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-<a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a>        <span class="c1"># Primary-key conflict on re-run — signal already persisted.</span>
+<a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a>        <span class="c1"># Primary-key conflict on re-run: signal already persisted.</span>
 <a id="__codelineno-4-49" name="__codelineno-4-49" href="#__codelineno-4-49"></a>        <span class="k">pass</span>
 <a id="__codelineno-4-50" name="__codelineno-4-50" href="#__codelineno-4-50"></a>
 <a id="__codelineno-4-51" name="__codelineno-4-51" href="#__codelineno-4-51"></a><span class="c1"># LLM cost accounting. The prompt cell doesn't expose tokens to</span>
@@ -2718,7 +2718,7 @@ matching price data, and run risk checks before any orders go out.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># @name Fetch latest prices</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Pulls daily bars for the watchlist up to "now" and upserts into</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># ``prices``. We need a recent close to size positions; the 15-min</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># REST delay is fine here — daily rebalancing doesn't need sub-minute</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># REST delay is fine here, since daily rebalancing doesn't need sub-minute</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># precision.</span>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="kn">import</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">dt</span>
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
@@ -2769,7 +2769,7 @@ matching price data, and run risk checks before any orders go out.</p>
 <a id="__codelineno-5-52" name="__codelineno-5-52" href="#__codelineno-5-52"></a>    <span class="n">detail</span><span class="o">=</span><span class="p">{</span><span class="s2">"bars_fetched"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">frame</span><span class="p">),</span> <span class="s2">"inserted"</span><span class="p">:</span> <span class="n">inserted</span><span class="p">},</span>
 <a id="__codelineno-5-53" name="__codelineno-5-53" href="#__codelineno-5-53"></a><span class="p">)</span>
 <a id="__codelineno-5-54" name="__codelineno-5-54" href="#__codelineno-5-54"></a>
-<a id="__codelineno-5-55" name="__codelineno-5-55" href="#__codelineno-5-55"></a><span class="c1"># Latest close per ticker — what risk_check uses for sizing.</span>
+<a id="__codelineno-5-55" name="__codelineno-5-55" href="#__codelineno-5-55"></a><span class="c1"># Latest close per ticker, which risk_check uses for sizing.</span>
 <a id="__codelineno-5-56" name="__codelineno-5-56" href="#__codelineno-5-56"></a><span class="n">latest_prices</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
 <a id="__codelineno-5-57" name="__codelineno-5-57" href="#__codelineno-5-57"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-5-58" name="__codelineno-5-58" href="#__codelineno-5-58"></a><span class="sd">    SELECT ticker, close, ts AS as_of</span>
@@ -2789,8 +2789,8 @@ matching price data, and run risk checks before any orders go out.</p>
 <p><sub><strong>kind</strong> python</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @name Risk check &amp; trade plan</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># Translates fresh signals into a concrete list of orders after</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># applying all hard risk constraints. Nothing here talks to Alpaca —</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># output is a DataFrame that place_orders either submits or drops</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># applying all hard risk constraints. Nothing here talks to Alpaca;</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># the output is a DataFrame that place_orders either submits or drops</span>
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># on dry-run.</span>
 <a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
 <a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
@@ -2823,7 +2823,7 @@ matching price data, and run risk checks before any orders go out.</p>
 <a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a><span class="c1">#</span>
 <a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a><span class="c1"># Simple rule: one entry per fresh signal, sized proportionally to</span>
 <a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a><span class="c1"># signal strength (sentiment × confidence), capped at</span>
-<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a><span class="c1"># MAX_POSITION_USD. No pyramiding on existing positions — if we</span>
+<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a><span class="c1"># MAX_POSITION_USD. No pyramiding on existing positions: if we</span>
 <a id="__codelineno-6-38" name="__codelineno-6-38" href="#__codelineno-6-38"></a><span class="c1"># already hold the ticker, skip.</span>
 <a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a><span class="n">trade_plan_rows</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-6-40" name="__codelineno-6-40" href="#__codelineno-6-40"></a><span class="n">held</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">current_positions</span><span class="p">[</span><span class="s2">"ticker"</span><span class="p">])</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">current_positions</span><span class="p">)</span> <span class="k">else</span> <span class="nb">set</span><span class="p">()</span>
@@ -2904,11 +2904,11 @@ day's session for human review.</p>
 <p><sub><strong>kind</strong> python</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># @name Place orders</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># Takes the trade_plan from risk_check and either DRY-RUNs it or</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># submits each row to Alpaca. Re-running is idempotent — if a</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># submits each row to Alpaca. Re-running is idempotent: if a</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># signal_id is already in ``orders``, we skip it.</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1">#</span>
 <a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># The live-mode gate is intentionally verbose. Flipping from paper</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># to live takes two separate edits in helpers.py — this cell enforces</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># to live takes two separate edits in helpers.py, and this cell enforces</span>
 <a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># the second one at runtime.</span>
 <a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
 <a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
@@ -2921,7 +2921,7 @@ day's session for human review.</p>
 <a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="c1"># mid-run.</span>
 <a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="n">mode</span> <span class="o">=</span> <span class="n">Config</span><span class="o">.</span><span class="n">MODE</span>
 <a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>
-<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="c1"># Hard gate — refuses to trade live without the second key.</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="c1"># Hard gate: refuses to trade live without the second key.</span>
 <a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">"live"</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">Config</span><span class="o">.</span><span class="n">I_UNDERSTAND_THIS_IS_REAL_MONEY</span><span class="p">:</span>
 <a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
 <a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>        <span class="s2">"Config.MODE is 'live' but Config.I_UNDERSTAND_THIS_IS_REAL_MONEY is False. "</span>
@@ -3050,8 +3050,8 @@ day's session for human review.</p>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># ``positions``, and books the slippage delta (realized - expected)</span>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># to the cost ledger.</span>
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1">#</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Depends on ``submitted`` to force DAG ordering after ``place_orders``</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># — even when there are zero new submissions we still want to</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Depends on ``submitted`` to force DAG ordering after ``place_orders``.</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># Even when there are zero new submissions we still want to</span>
 <a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># reconcile any open orders from prior runs.</span>
 <a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="kn">import</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">dt</span>
 <a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
@@ -3059,7 +3059,7 @@ day's session for human review.</p>
 <a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="kn">from</span><span class="w"> </span><span class="nn">alpaca.trading.requests</span><span class="w"> </span><span class="kn">import</span> <span class="n">GetOrdersRequest</span>
 <a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>
 <a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># Reference submitted so the DAG runs us after place_orders. The</span>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># variable itself is unused — reconcile pulls authoritative state</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># variable itself is unused: reconcile pulls authoritative state</span>
 <a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="c1"># from Alpaca regardless of what we submitted this run.</span>
 <a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="n">_upstream_gate</span> <span class="o">=</span> <span class="n">submitted</span>  <span class="c1"># noqa: F841</span>
 <a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>
@@ -3192,7 +3192,7 @@ day's session for human review.</p>
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># breakdown and a running daily total.</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="c1">#</span>
 <a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># Depends on ``positions_snapshot`` so the DAG orders us after</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># reconcile — otherwise costs posted during reconciliation</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="c1"># reconcile; otherwise costs posted during reconciliation</span>
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="c1"># (slippage deltas) would miss this aggregation.</span>
 <a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="n">_upstream_gate</span> <span class="o">=</span> <span class="n">positions_snapshot</span>  <span class="c1"># noqa: F841</span>
 <a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>
@@ -3253,7 +3253,7 @@ day's session for human review.</p>
 <a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
 <a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="n">conn</span> <span class="o">=</span> <span class="n">open_db</span><span class="p">()</span>
 <a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1"># Realized P&amp;L is SUM(sell proceeds) - SUM(buy costs) per ticker —</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1"># Realized P&amp;L is SUM(sell proceeds) - SUM(buy costs) per ticker,</span>
 <a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1"># only valid for tickers where quantity has round-tripped back to</span>
 <a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="c1"># zero. Mark unrealized P&amp;L separately against the latest close.</span>
 <a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="n">realized_by_ticker</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span>
@@ -3296,7 +3296,7 @@ day's session for human review.</p>
 <a id="__codelineno-10-54" name="__codelineno-10-54" href="#__codelineno-10-54"></a><span class="p">)</span>
 <a id="__codelineno-10-55" name="__codelineno-10-55" href="#__codelineno-10-55"></a><span class="n">total_costs</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"SELECT COALESCE(SUM(usd), 0) FROM costs"</span><span class="p">)</span><span class="o">.</span><span class="n">fetchone</span><span class="p">()[</span><span class="mi">0</span><span class="p">])</span>
 <a id="__codelineno-10-56" name="__codelineno-10-56" href="#__codelineno-10-56"></a>
-<a id="__codelineno-10-57" name="__codelineno-10-57" href="#__codelineno-10-57"></a><span class="c1"># The headline metric — does the strategy pay for itself?</span>
+<a id="__codelineno-10-57" name="__codelineno-10-57" href="#__codelineno-10-57"></a><span class="c1"># The headline metric: does the strategy pay for itself?</span>
 <a id="__codelineno-10-58" name="__codelineno-10-58" href="#__codelineno-10-58"></a><span class="n">cost_adjusted_pnl</span> <span class="o">=</span> <span class="n">total_realized</span> <span class="o">+</span> <span class="n">total_unrealized</span> <span class="o">-</span> <span class="n">total_costs</span>
 <a id="__codelineno-10-59" name="__codelineno-10-59" href="#__codelineno-10-59"></a>
 <a id="__codelineno-10-60" name="__codelineno-10-60" href="#__codelineno-10-60"></a><span class="n">conn</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
@@ -3331,12 +3331,12 @@ day's session for human review.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a># @name daily_note
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a># @temperature 0.2
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a># @max_tokens 800
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a># @system You are a trading journal assistant. Your job is to produce a concise, honest end-of-day reflection on a small paper-trading strategy. Do not sugarcoat — if the strategy is losing money or being eaten by costs, say so directly.
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a># @system You are a trading journal assistant. Your job is to produce a concise, honest end-of-day reflection on a small paper-trading strategy. Do not sugarcoat: if the strategy is losing money or being eaten by costs, say so directly.
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a># @output_schema {"type": "object", "properties": {"one_liner": {"type": "string"}, "biggest_winner": {"type": "string"}, "biggest_loser": {"type": "string"}, "cost_health": {"type": "string", "enum": ["green", "yellow", "red"]}, "cost_comment": {"type": "string"}, "lessons": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 5}, "tomorrow_watch": {"type": "array", "items": {"type": "string"}}}, "required": ["one_liner", "biggest_winner", "biggest_loser", "cost_health", "cost_comment", "lessons", "tomorrow_watch"]}
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a># @validate_retries 2
 <a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>#
 <a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a># Last cell in the notebook. Produces a structured end-of-day journal
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a># entry from the P&amp;L summary and cost ledger — the kind of thing
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a># entry from the P&amp;L summary and cost ledger, the kind of thing
 <a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a># you'd want to read first the next morning.
 <a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>
 <a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>Trading day recap. Produce an honest, structured summary.
@@ -3355,17 +3355,17 @@ day's session for human review.</p>
 <a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>
 <a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>## Rules for the journal
 <a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a>
-<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a>- `one_liner` — one sentence summarizing the day. Lead with the
+<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a>- `one_liner`: one sentence summarizing the day. Lead with the
 <a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a>  cost-adjusted P&amp;L sign.
-<a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a>- `biggest_winner` / `biggest_loser` — name the ticker and amount;
+<a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a>- `biggest_winner` / `biggest_loser`: name the ticker and amount;
 <a id="__codelineno-11-31" name="__codelineno-11-31" href="#__codelineno-11-31"></a>  use "none" if no closed trades yet.
 <a id="__codelineno-11-32" name="__codelineno-11-32" href="#__codelineno-11-32"></a>- `cost_health`: "green" when costs are &lt; 10% of gross P&amp;L,
 <a id="__codelineno-11-33" name="__codelineno-11-33" href="#__codelineno-11-33"></a>  "yellow" at 10–40%, "red" at &gt;40% or when P&amp;L is negative.
 <a id="__codelineno-11-34" name="__codelineno-11-34" href="#__codelineno-11-34"></a>- `cost_comment`: one sentence explaining the color.
-<a id="__codelineno-11-35" name="__codelineno-11-35" href="#__codelineno-11-35"></a>- `lessons` — 1-5 short imperatives ("cut losers faster", "avoid
+<a id="__codelineno-11-35" name="__codelineno-11-35" href="#__codelineno-11-35"></a>- `lessons`: 1-5 short imperatives ("cut losers faster", "avoid
 <a id="__codelineno-11-36" name="__codelineno-11-36" href="#__codelineno-11-36"></a>  low-confidence signals", etc.). If the sample size is too small to
 <a id="__codelineno-11-37" name="__codelineno-11-37" href="#__codelineno-11-37"></a>  conclude anything, say so in one of the lessons.
-<a id="__codelineno-11-38" name="__codelineno-11-38" href="#__codelineno-11-38"></a>- `tomorrow_watch` — specific things to look at tomorrow. Can be
+<a id="__codelineno-11-38" name="__codelineno-11-38" href="#__codelineno-11-38"></a>- `tomorrow_watch`: specific things to look at tomorrow. Can be
 <a id="__codelineno-11-39" name="__codelineno-11-39" href="#__codelineno-11-39"></a>  empty if there's nothing actionable yet.
 <a id="__codelineno-11-40" name="__codelineno-11-40" href="#__codelineno-11-40"></a>
 <a id="__codelineno-11-41" name="__codelineno-11-41" href="#__codelineno-11-41"></a>Be terse. No filler.

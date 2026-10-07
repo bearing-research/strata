@@ -2709,7 +2709,7 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_ALLOWED_HOSTS</code></td>
 <td><em>(empty)</em></td>
-<td>Host names the server answers to, beyond <code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code> (any port), IP literals and <code>STRATA_HOST</code>. Comma-separated; a leading dot matches a suffix (<code>.example.com</code>); <code>*</code> turns the check off. Any other <code>Host</code> gets 400 (HTTP) or a closed socket (WebSocket), which stops DNS-rebinding pages. Always checked in personal mode; service mode checks only when this is set. List the public hostname of a personal-mode server reached by name (Fly, a LAN name, a Codespace)</td>
+<td>Host names the server answers to, beyond <code>localhost</code>, <code>127.0.0.1</code>, <code>[::1]</code> (any port), IP literals and <code>STRATA_HOST</code>. Comma-separated (not a JSON array, which is read as literal names); a leading dot matches a suffix (<code>.example.com</code>); <code>*</code> turns the check off. Any other <code>Host</code> gets 400 (HTTP) or a closed socket (WebSocket), which stops DNS-rebinding pages. Always checked in personal mode; service mode checks only when this is set. List the public hostname of a personal-mode server reached by name (Fly, a LAN name, a Codespace)</td>
 </tr>
 <tr>
 <td><code>STRATA_EMBED_FRAME_ANCESTORS</code></td>
@@ -3017,6 +3017,12 @@ normal work as overload and walk the tier down to its floor.</p>
 </tr>
 </tbody>
 </table>
+<p>A SQL catalog keeps its tables under the catalog's name, so
+<code>STRATA_CATALOG_NAME</code> (or the <code>STRATA_CATALOGS</code> key) must match the name
+the tables were created under; otherwise a bare <code>ns.table</code> (or
+<code>&lt;name&gt;:ns.table</code>) is "Table not found". A warehouse URI
+(<code>file:///wh#ns.table</code>, <code>s3://bucket/wh#ns.table</code>) always reads its SQL
+catalog under the name <code>strata</code>.</p>
 <p>A SQL catalog (no <code>type</code>, or <code>type = "sql"</code>) whose <code>warehouse</code> is in object
 storage (<code>s3://</code>, <code>gs://</code>, <code>abfss://</code>, any scheme but <code>file://</code>) needs a <code>uri</code>,
 in <code>catalog_properties</code>, in a <code>STRATA_CATALOGS</code> entry, or in the named
@@ -3757,7 +3763,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code></td>
 <td><code>[]</code></td>
-<td>Hosts <code>@fetch</code>, and a prompt cell's <code>[ai] base_url</code> from <code>notebook.toml</code>, may reach even on a private address (an internal data server or model server). Public hosts need no entry; in service mode, private, loopback and link-local addresses are refused unless listed. Personal mode allows them, so <code>localhost</code> works on a laptop. Comma-separated exact names, or a leading dot for a suffix (<code>.internal</code>). Same rule as <code>STRATA_WORKER_ALLOWED_HOSTS</code>, and applied to every redirect hop.</td>
+<td>Hosts <code>@fetch</code>, and a prompt cell's <code>[ai] base_url</code> from <code>notebook.toml</code>, may reach even on a private address (an internal data server or model server). Public hosts need no entry; in service mode, private, loopback and link-local addresses are refused unless listed. Personal mode allows them, so <code>localhost</code> works on a laptop. Comma-separated (not a JSON array) exact names, or a leading dot for a suffix (<code>.internal</code>). Same rule as <code>STRATA_WORKER_ALLOWED_HOSTS</code>, and applied to every redirect hop.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_CELL_LOCK_SECONDS</code></td>

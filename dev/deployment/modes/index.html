@@ -2404,6 +2404,10 @@ raise <code>ValueError</code> during config load:</p>
 flags from a service-mode config into a personal-mode deployment. Remove
 the service-specific flags or switch to <code>deployment_mode=service</code>. The
 service-mode errors name the setting to add.</p>
+<p>Other settings are checked at startup in either mode: a SQL catalog in object
+storage needs a <code>uri</code>, the team cache needs <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>
+and that URL must not be this server, and adaptive concurrency needs its slot
+counts inside its range and no multi-tenancy.</p>
 <h2 id="mode-independent-settings">Mode-independent settings<a class="headerlink" href="#mode-independent-settings" title="Permanent link">&para;</a></h2>
 <p>These apply identically in either mode and can be tuned freely:</p>
 <ul>
@@ -2427,7 +2431,8 @@ build URLs and every link on a <a href="../../notebook/publishing/">publication<
 carry the prefix. Open the UI with the trailing slash
 (<code>https://app.example.com/o/acme/lab/</code>), since its assets load relative to
 the page. The prefix's first segment must not be one of Strata's own
-(<code>v1</code>, <code>p</code>, <code>assets</code>, <code>docs</code>, <code>health</code>), or a stripped request is read as
+(<code>v1</code>, <code>p</code>, <code>assets</code>, <code>docs</code>, <code>redoc</code>, <code>openapi.json</code>, <code>health</code>, <code>metrics</code>,
+<code>oembed</code>, <code>mcp</code>), or a stripped request is read as
 already carrying it.</p>
 <p>Clients take the full URL, path included (<code>https://app.example.com/o/acme/lab</code>):
 the CLI's <code>--server</code>, the TUI and <code>strata_client</code> all append their routes to it.</p>

@@ -2471,7 +2471,8 @@ every endpoint. This is the local-dev default.</p>
   Another tenant's session looks missing: every <code>/{session_id}</code> REST route
   answers <code>404</code> and the WS upgrade is refused with HTTP <code>403</code>, as
   for an unknown id (MCP applies the same rule). <code>admin:*</code> reaches every
-  session, and a session opened without a tenant is open to all. With
+  session, and a session opened by a caller with no tenant belongs to
+  the default tenant (<code>_default</code>). With
   <code>multi_tenant_enabled</code>, <code>/discover</code>, <code>/open</code>, <code>/create</code> and the imports
   are confined to the tenant's own <code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code>
   (<code>admin:*</code> keeps the whole root).</li>
@@ -2709,7 +2710,7 @@ so a client has to handle it on every message it sends:</p>
 <tr>
 <td><code>cell_id</code></td>
 <td>no</td>
-<td>The cell concerned, on <code>cell_busy</code> and <code>cell_locked</code></td>
+<td>The cell concerned, on <code>notebook_busy</code>, <code>cell_busy</code> and <code>cell_locked</code></td>
 </tr>
 <tr>
 <td><code>held_by</code></td>
@@ -2730,6 +2731,10 @@ so a client has to handle it on every message it sends:</p>
 <tr>
 <td><code>ENVIRONMENT_BUSY</code></td>
 <td>An environment job holds the notebook; retry when it finishes</td>
+</tr>
+<tr>
+<td><code>notebook_busy</code></td>
+<td>Another run holds the notebook, so this run was refused; <code>cell_id</code> is the refused cell (absent for run-all). Retry when the run finishes</td>
 </tr>
 <tr>
 <td><code>cell_busy</code></td>

@@ -2471,7 +2471,9 @@ store:</p>
   is edited or run again.</li>
 <li>A <strong>leaf</strong> cell, one nothing else reads, reports <code>ready</code> after it has run
   like any other cell. It stores no variable artifact; its console, even an
-  empty one, is the record of the run.</li>
+  empty one, is the record of the run. A <code># @nocache</code> leaf, or one with a
+  read-write mount, stores no such record, so it reads <code>idle</code> even after it
+  ran.</li>
 </ul>
 <p>For "what is it doing right now", attach one of the live views above.</p>
 <p>If you would rather keep a browser tab than a terminal viewer, start with

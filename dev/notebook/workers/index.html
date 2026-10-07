@@ -2967,6 +2967,12 @@ admin routes, that file is the registry and editing the config table has no
 effect. Delete the file to go back to the configured table. An <em>empty</em>
 registry is a decision, not an absence, so removing every worker through the
 API does not fall back.</p>
+<p><strong>A <code>signed</code> worker needs transforms enabled.</strong> It runs as a build on the
+server, so in service mode set <code>STRATA_TRANSFORMS_ENABLED=true</code>
+(<code>[tool.strata.transforms] enabled = true</code>), which also needs
+<code>STRATA_ARTIFACT_DIR</code>. Without it the cell fails with
+"Signed notebook executor transport requires personal-mode writes or
+server-mode transforms to be enabled". A <code>direct</code> worker needs neither.</p>
 <p><code>POST /v1/admin/notebook-workers/reload</code> re-reads the file, for a fleet
 manager writing it underneath a running server. A restart would work too, but
 it interrupts every cell currently executing.</p>

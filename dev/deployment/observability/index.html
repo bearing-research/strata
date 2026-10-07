@@ -2422,6 +2422,10 @@ log aggregator. Point Strata at yours via env vars:</p>
 entry pointing at <code>&lt;strata-host&gt;:8765/metrics/prometheus</code>. There's
 no push-gateway integration; if you need to push (e.g. for jobs in
 ephemeral containers), wrap the scrape in your own sidecar.</p>
+<p>A personal-mode server answers only to loopback names, IP literals, its
+own <code>STRATA_HOST</code> and the names in <code>STRATA_ALLOWED_HOSTS</code>, so list the
+name your scraper uses there (the compose stack lists <code>strata</code>); service
+mode checks the Host only when that setting is set.</p>
 <p>To use the bundled dashboard with your own Grafana, import
 <code>observability/grafana/provisioning/dashboards/strata.json</code> (Dashboards
 → New → Import) and pick your Prometheus from the dashboard's

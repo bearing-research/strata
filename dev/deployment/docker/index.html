@@ -2284,9 +2284,10 @@ page cannot drive it.</p>
 <li><strong>Frontend builder</strong> (Node 26) builds the Vue.js UI</li>
 <li><strong>Backend builder</strong> (Python + Rust) builds the wheel with native extension</li>
 <li><strong>Runtime</strong>: minimal image with the wheel, the frontend dist, and
-   the <code>otel</code> and <code>postgres</code> extras, so OTLP tracing and a Postgres
-   artifact store (<code>STRATA_ARTIFACT_METADATA_DSN</code>) work without building
-   your own image</li>
+   the <code>otel</code>, <code>postgres</code>, <code>sql</code> and <code>sql-sqlite</code> extras, so OTLP
+   tracing, a Postgres artifact store (<code>STRATA_ARTIFACT_METADATA_DSN</code>)
+   and SQL cells over DuckDB or SQLite work without building your own
+   image</li>
 </ol>
 
 

@@ -2965,7 +2965,7 @@
 <tr>
 <td><code>dag_update</code></td>
 <td><code>{ "edges": [...], "roots": [...], "leaves": [...], "topological_order": [...], "cells": [...], "variant_groups": [...] }</code></td>
-<td>DAG changed after cell edit. Each <code>cells</code> entry carries <code>id</code>, <code>defines</code>, <code>references</code>, <code>upstream_ids</code>, <code>downstream_ids</code>, <code>is_leaf</code>, <code>annotation_diagnostics</code>, <code>variant_group</code> / <code>variant_name</code> / <code>variant_active</code>, <code>is_module_cell</code> / <code>module_exports</code>, and <code>created_by</code> / <code>updated_by</code></td>
+<td>DAG changed after cell edit. Each <code>cells</code> entry carries <code>id</code>, <code>defines</code>, <code>references</code>, <code>upstream_ids</code>, <code>downstream_ids</code>, <code>is_leaf</code>, <code>annotation_diagnostics</code>, <code>variant_group</code> / <code>variant_name</code> / <code>variant_active</code>, <code>is_module_cell</code> / <code>module_exports</code>, and <code>created_by</code> / <code>updated_by</code>. After a <code>cell_source_update</code>, the edited cell's entry also carries its new <code>source</code> on every connection to the session except the one that sent the edit, so another tab can follow it; elsewhere <code>source</code> is null</td>
 </tr>
 </tbody>
 </table>
@@ -3109,7 +3109,7 @@
 <tr>
 <td><code>error</code></td>
 <td><code>{ "error": "...", "code": "...", "cell_id": "...", "held_by": "..." }</code></td>
-<td>A request could not be served. Only <code>error</code> is always present; see <a href="../notebook-protocol/#the-error-frame">the <code>error</code> frame</a> for the codes</td>
+<td>A request could not be served. Only <code>error</code> is always present; see <a href="../notebook-protocol/#the-error-frame">the <code>error</code> frame</a> for the codes. A run refused because another run holds the notebook has <code>code: "notebook_busy"</code> and the refused <code>cell_id</code>, so a client that showed the cell running can put it back</td>
 </tr>
 </tbody>
 </table>

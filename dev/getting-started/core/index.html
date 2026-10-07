@@ -2206,7 +2206,7 @@
 <h2 id="3-materialize-a-result">3. Materialize a result<a class="headerlink" href="#3-materialize-a-result" title="Permanent link">&para;</a></h2>
 <p>Table URIs use the form <code>&lt;scheme&gt;://&lt;warehouse-path&gt;#&lt;namespace&gt;.&lt;table&gt;</code>:</p>
 <ul>
-<li><code>&lt;scheme&gt;</code> is the storage scheme - <code>file://</code> for a local Iceberg warehouse, <code>s3://</code> / <code>gs://</code> / <code>az://</code> for cloud blob storage.</li>
+<li><code>&lt;scheme&gt;</code> is the storage scheme - <code>file://</code> for a local Iceberg warehouse, <code>s3://</code> / <code>gs://</code> / <code>abfs://</code> (or <code>abfss://</code>) for cloud blob storage.</li>
 <li><code>&lt;warehouse-path&gt;</code> is the path to the warehouse root (the directory containing Iceberg metadata).</li>
 <li>The fragment after <code>#</code> names the Iceberg table inside the warehouse, as <code>&lt;namespace&gt;.&lt;table&gt;</code>.</li>
 </ul>
@@ -2295,7 +2295,7 @@ dropping a row you asked for.</p>
 <ul>
 <li><a href="../../reference/configuration/">Configuration</a>: all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)</li>
 <li><a href="../../deployment/modes/">Deployment Modes</a>: <code>personal</code> vs <code>service</code> mode and the auth boundary</li>
-<li><a href="../../reference/rest-api/">REST API</a>: notebook protocol surface (separate from the <code>/v1/materialize</code> endpoint this page calls into)</li>
+<li><a href="../../reference/rest-api/">REST API</a>: the HTTP routes, including the <code>/v1/materialize</code> and <code>/v1/streams</code> endpoints this page calls into</li>
 </ul>
 
 

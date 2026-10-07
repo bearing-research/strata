@@ -2168,9 +2168,10 @@ REST routes and the WebSocket:</p>
 <code>notebook:read</code>: the check is scopes, not ownership. A session records the
 tenant of the caller who opened or created it, and a caller from another tenant
 neither sees it in <code>list_notebooks</code> nor reaches it by <code>session_id</code>, as with
-tenant-scoped artifacts. <code>admin:*</code> sees every tenant's sessions, and a session
-opened without a tenant is visible to all. The notebook REST routes and the
-WebSocket apply the same rule.</p>
+tenant-scoped artifacts. <code>admin:*</code> sees every tenant's sessions, and a caller
+the proxy sends without a tenant is the default tenant (<code>_default</code>), so its
+sessions are visible only to other tenantless callers and to <code>admin:*</code>. The
+notebook REST routes and the WebSocket apply the same rule.</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">From PyPI</label><label for="__tabbed_1_2">From source</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">

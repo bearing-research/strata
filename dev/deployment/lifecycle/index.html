@@ -2368,8 +2368,9 @@ settings, where <code>0</code> turns the limit off. <code>min_idle_seconds</code
 recently than it is collected. <code>collect_latest=true</code>
 (<code>--collect-latest</code>) also collects the current value of caller-chosen ids,
 which deletes live notebook state; use it only on a store you are deliberately
-reclaiming. In service mode the route needs a principal holding <code>admin:*</code>, and
-collects within the caller's tenant.</p>
+reclaiming. In service mode the route needs a principal holding <code>admin:*</code>, and,
+as on every artifact route, <code>admin:*</code> is unscoped: the sweep covers every
+tenant's results.</p>
 <p>A publication (withdrawn ones included) or a pin protects its whole lineage, not
 only the version. A page or a snapshot needs every step behind the result.</p>
 <h3 id="pins">Pins<a class="headerlink" href="#pins" title="Permanent link">&para;</a></h3>

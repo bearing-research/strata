@@ -2287,7 +2287,9 @@ the whole store.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_REGISTRY_PROTECTED_ALIASES</span><span class="o">=</span>champion,production
 </code></pre></div>
 <p>Moves (and deletes) of protected aliases return <strong>202 pending</strong> instead of
-applying. The queue is visible, and approval applies the move with the
+applying. Deleting an alias (<code>DELETE /v1/names/{name}/aliases/{alias}</code>) is a
+personal-mode route and answers 403 in service mode, so there only moves
+reach the queue. The queue is visible, and approval applies the move with the
 approver as the audit actor - atomically with the pending-consumption, so
 a crash can never swallow an approval:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">client</span><span class="o">.</span><span class="n">list_pending_changes</span><span class="p">()</span>

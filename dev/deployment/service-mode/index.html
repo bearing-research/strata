@@ -2537,6 +2537,12 @@ See <a href="../../reference/configuration/#api-key-authentication">Configuratio
 the network-level isolation is. If an attacker can reach Strata's
 IP directly, they can read the token from any leaked config and
 forge headers. Treat the token as defense-in-depth.</p>
+<p>The proxy must pass the browser's <code>Host</code> header through unchanged,
+port included (nginx: <code>proxy_set_header Host $http_host;</code>, not
+<code>$host</code>, which drops the port). Strata accepts a browser write or a
+notebook WebSocket only when its <code>Origin</code> matches that <code>Host</code>; a proxy
+that rewrites <code>Host</code> has to list the public origin in
+<code>STRATA_CORS_ALLOW_ORIGINS</code> instead.</p>
 <h2 id="running-the-demo-stack">Running the demo stack<a class="headerlink" href="#running-the-demo-stack" title="Permanent link">&para;</a></h2>
 <p>The repo ships a complete service-mode demo: Strata + a notebook
 executor sidecar + an nginx proxy that injects two pre-baked
@@ -2790,7 +2796,7 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 </tr>
 <tr>
 <td><code>admin:notebook-workers</code></td>
-<td>The server-managed worker registry, every <code>/v1/admin/notebook-workers*</code> route (list, replace, add, update, delete, refresh, reload)</td>
+<td>The server-managed worker registry, every <code>/v1/admin/notebook-workers*</code> route (list, replace, add, update, delete, refresh, reload); service mode only, <code>409</code> in personal mode</td>
 </tr>
 <tr>
 <td><code>admin:notebooks</code></td>
@@ -2798,7 +2804,7 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 </tr>
 <tr>
 <td><code>admin:*</code></td>
-<td>Garbage collection (<code>POST /v1/artifacts/gc</code>, still limited to the caller's tenant), reading another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code>, the server-wide log buffer (<code>GET /v1/logs</code>, <code>GET /v1/logs/stream</code>), per-table metrics (<code>GET /metrics/tables*</code>), and the process diagnostics under <code>/v1/debug/*</code> (latency, GC pauses, pools, connections, memory, rate limits)</td>
+<td>Garbage collection (<code>POST /v1/artifacts/gc</code>, which sweeps the whole store), reading another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code>, the server-wide log buffer (<code>GET /v1/logs</code>, <code>GET /v1/logs/stream</code>), per-table metrics (<code>GET /metrics/tables*</code>), and the process diagnostics under <code>/v1/debug/*</code> (latency, GC pauses, pools, connections, memory, rate limits)</td>
 </tr>
 <tr>
 <td><code>admin:registry</code></td>
@@ -2822,7 +2828,7 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 </tr>
 <tr>
 <td><code>notebook:write</code></td>
-<td>Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike.</td>
+<td>Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants; also opening, creating, importing, closing and deleting notebooks, a cell's test source, promote, and recents validation. REST and WebSocket alike.</td>
 </tr>
 <tr>
 <td><code>notebook:execute</code></td>
@@ -3196,7 +3202,10 @@ Postgres, Snowflake and BigQuery cells send the query to their database server.
 The server reads a BigQuery connection's <code>credentials_path</code> and
 <code>write_credentials_path</code> key files itself, so each must be a file in the
 notebook's own directory, after following links; one elsewhere fails the cell,
-the schema listing and saving the connection.
+the schema listing and saving the connection. A BigQuery connection must name
+<code>credentials_path</code>: without a key file the driver would use the server's own
+Google credentials (its application default credentials), so one with none is
+refused in the same three places.
 A <code>${VAR}</code> in a connection's <code>auth</code> reads the notebook's env, never the server's
 environment, which would otherwise go to whatever host the notebook names; a
 secret the server holds reaches a connection only as a named <code>credential</code>.</p>

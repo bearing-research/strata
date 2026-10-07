@@ -3391,84 +3391,139 @@
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
-<p>The artifact store looks after its own size, Iceberg tables that other engines
-delete from or evolve are read correctly instead of refused, and service mode
+<p>Strata becomes something a platform can host for many people. Notebook routes
+know their tenant, the server runs under a path behind a proxy, workers reach it
+from behind NAT, and lake reads cover more catalogs and more of what other
+engines write. The artifact store looks after its own size, and service mode
 closes several ways a notebook could reach past its own data.</p>
+<p><strong>A platform can host it.</strong> In service mode every notebook route, the WebSocket
+and MCP treat another tenant's session as missing, and with
+<code>multi_tenant_enabled</code> each tenant keeps its notebooks in its own folder.
+<code>STRATA_PUBLIC_BASE_PATH</code> serves the UI, API and publication pages under a path,
+the editor can be framed without its own chrome, idle sessions close, and a
+result can be promoted to a team store without a name. There are two deployment
+modes and nothing between them: a personal server has one user, and a team runs
+one per member or a service-mode server.</p>
+<p><strong>Workers go where the hardware is.</strong> <code>strata-worker --connect</code> dials out to a
+relay, so a machine behind NAT serves cells with no open port. Workers restore a
+notebook's <code>renv.lock</code> as they do its <code>uv.lock</code>, fetch prebuilt environments
+keyed by what the lock installs, and a remote cell's console streams live,
+across nodes and under authentication.</p>
+<p><strong>More of the lake reads correctly.</strong> Scans apply merge-on-read deletes
+(positional deletes, deletion vectors and equality deletes) and follow schema
+changes by field id, so tables Spark, Flink and DuckDB write are read as Iceberg
+defines them. DuckDB cells attach AWS Glue catalogs and read <code>gs://</code> and <code>az://</code>
+mounts, and a <code># @dataset</code> read carries the dataset's lineage, so the registry
+shows which cells read each name.</p>
 <p><strong>The store stays bounded.</strong> A personal server now collects results nobody has
 used for a while, least recently used first, and never anything named, pinned,
 published or still needed by something kept. A notebook keeps each cell's
 current value and its last few versions.</p>
-<p><strong>More tables read correctly.</strong> Scans apply merge-on-read deletes (positional
-deletes, deletion vectors and equality deletes) and follow schema changes by
-field id, so tables Spark, Flink and DuckDB write are read as Iceberg defines
-them.</p>
-<p><strong>Service mode is tighter.</strong> SQL cells are confined to their own database and
-lake, package installs are wheels only, outbound requests connect only to the
-address the guard checked, R restores run as the harness user, the server's
-Infisical credentials go only to the operator's host, and the log buffer and a
-worker's token are out of other tenants' and cells' reach. Nothing the server
-stores is unpickled or served as a page in its process or on its origin.</p>
-<p><strong>Personal servers are harder to reach from a web page.</strong> A request under a
-hostname the server does not know is refused, which closes DNS rebinding, and
-no route serves files from outside the frontend.</p>
+<p><strong>Service mode is tighter, and personal servers are harder to reach from a web
+page.</strong> SQL cells are confined to their own database, key files and lake,
+package installs are wheels only, outbound requests connect only to the address
+the guard checked, R restores run as the harness user, and the log buffer and a
+worker's token are out of other tenants' and cells' reach. In either mode the
+server's Infisical credentials and AI key go only to the operator's hosts, never
+to one a notebook names. Nothing the server stores is unpickled or
+served as a page in its process or on its origin. A personal server refuses a
+hostname it does not know, which closes DNS rebinding, and no route serves files
+from outside the frontend.</p>
 <p><strong>Upgrading from 0.8.0:</strong></p>
 <ul>
-<li>Scan caches are rebuilt: the first scan of each table reads from storage.
-  The artifact store's metadata migrates on first start, one way. Results
+<li>Scan caches are rebuilt: the first scan of each table reads from storage,
+  and a transform that reads a table directly recomputes once, since a table
+  input's version now carries the schema id as well as the snapshot. Until it
+  does, a name over such a result reports stale (<code>is_stale</code>, the name status
+  route). The artifact store's metadata migrates on first start, one way, and
+  a notebook's own store migrates the first time a command opens it. Results
   stored by 0.8.0 count as used at the upgrade, so none is collected for
   idleness in the first 30 days; the size cap still applies.</li>
+<li>Do not start 0.8.0 on a store this release has migrated: it runs without a
+  warning, and the latest version of each result it writes is never collected.
+  Restore a backup to go back. From this release on, an older Strata refuses
+  to open a store a newer one migrated, naming both versions.</li>
+<li>Some notebook cells run once more after upgrading, then cache as before:
+  every SQL cell (its cache key is now its own query text); a cell that reads
+  a name more than one upstream cell defines, which then reads it from the
+  cell the DAG wires; cells that read a loop cell's output, <code>start_from</code> forks,
+  loops whose <code>@loop_until</code> reads an upstream name, and prompt cells that read
+  an upstream scalar; cells whose <code>[env]</code> held a blanked secret, since that
+  empty value no longer reaches them; and cells in a notebook whose <code>uv.lock</code>
+  has no dev group, since provenance no longer includes the notebook's own
+  project name.</li>
+<li>Leaf cells, ones nothing else reads, are now cache hits on an unchanged run,
+  in Run All too. A leaf kept only for its side effect (writing a file, sending
+  a message) runs once until its source or inputs change; mark it <code># @nocache</code>
+  to run it every time.</li>
 <li>New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
-  <code>[mcp]</code>; textual-image 0.14 and Pillow 12.1 with <code>[tui]</code>.</li>
+  <code>[mcp]</code>; textual-image 0.14 and Pillow 12.1 with <code>[tui]</code>; pydantic 2.13.5
+  with <code>strata-pool[server]</code>.</li>
 <li>Unnamed <code>materialize</code> results can now be collected in personal mode; name or
   pin a result to keep it. <code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code> is removed and a
   leftover value is ignored (use <code>STRATA_ARTIFACT_GC_MAX_IDLE_DAYS</code>);
   <code>garbage_collect(max_age_days=)</code> is now <code>max_idle_days</code>, and a bare
   <code>POST /v1/artifacts/gc</code> applies the configured retention.</li>
 <li>Nanosecond timestamps in v1 and v2 tables come back as microseconds.</li>
-<li>Service mode: dependencies without a wheel no longer install; guarded
-  outbound connections ignore <code>HTTPS_PROXY</code>; R packages are not added from the
-  notebook where cells are isolated; <code>/v1/logs</code> needs <code>admin:*</code>.</li>
-<li>strata-pool: reading a job needs the <code>X-Strata-Tenant</code> header that
-  submitted it.</li>
-<li><code>/health/ready</code> no longer has a <code>stuck_scans</code> field.</li>
 <li>Personal mode refuses a request whose <code>Host</code> is not loopback, an IP
   address, the bind host or a name in the new <code>STRATA_ALLOWED_HOSTS</code>: a server
   reached by a LAN hostname or a custom domain needs that name listed. A
   browser WebSocket from another origin needs <code>STRATA_CORS_ALLOW_ORIGINS</code>.</li>
+<li>A notebook's <code>[ai] base_url</code> that is not the server's <code>STRATA_AI_BASE_URL</code>
+  or a provider's default no longer receives the server's <code>STRATA_AI_API_KEY</code>,
+  in either mode. Put a key in the notebook (any value works for Ollama), or
+  set <code>STRATA_AI_BASE_URL</code> on the server.</li>
+<li>A notebook's <code>[secret_manager] base_url</code> must match <code>INFISICAL_HOST</code>, in
+  personal mode too; set <code>INFISICAL_HOST</code> for a self-hosted Infisical.</li>
+<li>The address guards on <code>@fetch</code>, a notebook's AI <code>base_url</code> and signed-worker
+  manifest URLs now also refuse <code>100.64.0.0/10</code>, the range Tailscale and
+  carrier-grade NAT use. A <code>signed</code> worker that reaches its server over a
+  tailnet needs the server named in <code>STRATA_WORKER_ALLOWED_HOSTS</code>; in service
+  mode an <code>@fetch</code> of a tailnet host needs it in
+  <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. Personal-mode <code>@fetch</code> already allows
+  private addresses.</li>
 <li>Secret env values are no longer sent to clients: REST and WebSocket
   responses carry <code>"__strata_masked__"</code> in their place, and sending the marker
   back keeps the value.</li>
 <li>A prompt cell that reads a pickled Python object sees a placeholder, and a
   SQL bind of a pickled value is refused: the server no longer unpickles cell
   data.</li>
+<li>Service mode: dependencies without a wheel no longer install; guarded
+  outbound connections ignore <code>HTTPS_PROXY</code>; R packages are not added from the
+  notebook where cells are isolated; <code>/v1/logs</code> needs <code>admin:*</code>.</li>
+<li>Service mode: a BigQuery connection needs a <code>credentials_path</code> key file in
+  the notebook's directory. One elsewhere, or none at all (which used the
+  server's own Google credentials), is refused; move the key into the notebook.</li>
 <li>Service mode: <code>name=</code> on materialize needs <code>artifacts:write</code>; under api_key
   the tenant comes from the key, not <code>X-Tenant-ID</code>; the cache histogram,
   metadata cleanup, <code>/metrics/tables*</code> and <code>/v1/debug/*</code> need <code>admin:cache</code> or
   <code>admin:*</code>.</li>
-<li>strata-pool: <code>PUT /v1/machine-types</code> needs the new <code>admin_token</code>;
-  <code>/v1/usage</code> and <code>/v1/workers</code> return only the caller's tenant.
-  <code>GET /v1/machine-types</code> shows <code>env</code> and <code>provider_options</code> values as
-  <code>&lt;redacted&gt;</code> without it.</li>
-<li>Cells whose <code>[env]</code> held a blanked secret re-run once, since that empty
-  value no longer reaches them.</li>
-<li>Shared environments are keyed by what the lock installs, not the raw
-  <code>uv.lock</code> (which carried the project's name): existing shared environments
-  are rebuilt once and the old ones swept. The executor protocol's
-  <code>environment.key</code> changed the same way, so servers and workers (and any
-  registry addressing environments by key) upgrade together.</li>
+<li>Service mode: MCP tools reach only sessions of the caller's tenant; the
+  Prometheus scrape leaves out per-table series under principal auth.</li>
+<li>Service mode: a notebook session belongs to the tenant that opened, created
+  or imported it; with <code>multi_tenant_enabled</code>, each tenant's notebooks live
+  under <code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code>, so notebooks at the top of the
+  storage root are no longer listed or openable by non-admin callers until
+  they are moved into their tenant's folder.</li>
+<li>Service mode: a table URI whose warehouse is in object storage needs a
+  catalog <code>uri</code> (<code>STRATA_CATALOG_URI</code>); without one, scans, cache warming and
+  export to a table answer 400 instead of using a SQLite catalog on the
+  server's disk.</li>
 <li>A configured SQL catalog whose warehouse is in object storage now needs a
   <code>uri</code> (<code>STRATA_CATALOG_URI</code>, or the entry's own): the server refuses to start
   rather than keep the catalog in SQLite on its own disk.</li>
-<li>Notebook sessions with no edits, runs or focus for 4 hours are closed even
-  with a tab open (<code>STRATA_NOTEBOOK_SESSION_TTL_SECONDS</code>); the tab offers to
-  reopen.</li>
-<li><code>.mcp.json</code> and <code>CLAUDE.md</code> are ignored in new notebooks and left out of
-  exports; an existing notebook's <code>.gitignore</code> is not changed.</li>
-<li>strata-pool: the jobs table's state CHECK gains <code>cancelled</code>. A pool database
-  created before this rejects a cancel until that constraint is updated or the
-  database recreated.</li>
-<li>Cell provenance no longer includes the notebook's own project name, so
-  cells in a notebook whose <code>uv.lock</code> has no dev group re-run once.</li>
+<li><code>STRATA_PERSONAL_MODE_USER_HEADER</code> is gone and ignored if set: a personal
+  server has one user, and every caller reaches every notebook. Before
+  upgrading a server that used it, give each member a personal server or
+  switch to service mode. A notebook's <code>owner</code> key is ignored and dropped on
+  the next structural edit. The TUI's <code>--user-header</code>/<code>--user</code> flags are gone.</li>
+<li>Shared environments are keyed by what the lock installs, not the raw
+  <code>uv.lock</code> (which carried the project's name): existing shared environments
+  are rebuilt once, and an old one stays on disk until it has been unused for
+  <code>STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS</code> (7 days; <code>strata env gc --ttl-days 0</code>
+  removes it sooner). The executor protocol's
+  <code>environment.key</code> changed the same way, so servers and workers (and any
+  registry addressing environments by key) upgrade together.</li>
 <li>Workers fetch prebuilt environments from
   <code>STRATA_WORKER_ENV_REGISTRY_URL/&lt;key&gt;/&lt;interpreter&gt;/&lt;platform&gt;</code> and rebuild
   their local environments once; a registry on the old <code>&lt;url&gt;/&lt;key&gt;</code> path
@@ -3478,34 +3533,48 @@ no route serves files from outside the frontend.</p>
   (Azure uploads are a PUT), and R cells carry an <code>environment</code> block. An R
   notebook with an <code>renv.lock</code> is refused on a worker that does not advertise
   <code>locked_r_environments</code>.</li>
-<li>strata-pool: the stored catalogue gains a <code>version</code> column; an existing pool
-  store needs <code>ALTER TABLE catalogue ADD COLUMN version INTEGER NOT NULL
-  DEFAULT 0</code> or a fresh store.</li>
-<li><code>PUT /v1/notebooks/{id}/workers</code> and <code>strata worker add</code> refuse an unknown
-  transport; a worker saved as <code>transport = "http"</code> should be <code>"direct"</code>.</li>
-<li>Service mode: MCP tools reach only sessions of the caller's tenant; the
-  Prometheus scrape leaves out per-table series under principal auth.</li>
-<li>Service mode: a notebook session belongs to the tenant that opened, created
-  or imported it; with <code>multi_tenant_enabled</code>, each tenant's notebooks live
-  under <code>&lt;notebook_storage_dir&gt;/&lt;tenant&gt;/</code>, so notebooks at the top of the
-  storage root are no longer listed or openable by non-admin callers until
-  they are moved into their tenant's folder.</li>
-<li>The root <code>fly.toml</code> is now <code>fly.example.toml</code>; copy it to <code>fly.toml</code>
-  (gitignored) and fill in the placeholders to deploy on Fly.</li>
 <li><code>strata-worker --connect</code> reads its relay token from
   <code>STRATA_WORKER_CONNECT_TOKEN</code>; workers upgrade with the server for the
   relay protocol.</li>
-<li><code>STRATA_PERSONAL_MODE_USER_HEADER</code> is gone and ignored if set: a personal
-  server has one user, and every caller reaches every notebook. Before
-  upgrading a server that used it, give each member a personal server or
-  switch to service mode. A notebook's <code>owner</code> key is ignored and dropped on
-  the next structural edit. The TUI's <code>--user-header</code>/<code>--user</code> flags are gone.</li>
-<li>Service mode: a table URI whose warehouse is in object storage needs a
-  catalog <code>uri</code> (<code>STRATA_CATALOG_URI</code>); without one, scans, cache warming and
-  export to a table answer 400 instead of using a SQLite catalog on the
-  server's disk.</li>
+<li><code>PUT /v1/notebooks/{id}/workers</code> and <code>strata worker add</code> refuse an unknown
+  transport; a worker saved as <code>transport = "http"</code> should be <code>"direct"</code>.</li>
+<li>WebSocket clients: <code>cell_error</code> frames carry the failed run's <code>stdout</code> and
+  <code>stderr</code> and replace the console as <code>cell_output</code> does, and while a cell
+  runs, <code>notebook_state</code> holds only what this run has printed (see the Console
+  section of the WebSocket reference). A run refused because another run holds
+  the notebook is an <code>error</code> frame with <code>code: "notebook_busy"</code> and the refused
+  <code>cell_id</code>. After a source edit, the session's other connections get the
+  edited cell's new <code>source</code> in <code>dag_update</code>; every other entry carries
+  <code>source: null</code>.</li>
+<li>Notebook sessions with no edits, runs or focus for 4 hours are closed even
+  with a tab open (<code>STRATA_NOTEBOOK_SESSION_TTL_SECONDS</code>); the tab offers to
+  reopen.</li>
+<li>strata-client: <code>Artifact.lineage()</code> no longer takes <code>direction</code> (lineage is
+  always upstream), and <code>Artifact.dependents()</code> takes <code>limit</code> (default 100) in
+  place of <code>max_depth</code>.</li>
+<li><code>POST /v1/artifacts/import</code> refuses record fields of the wrong type or shape
+  with a 400: counts must be non-negative integers, and <code>transform_spec</code> and
+  <code>input_versions</code> JSON strings. <code>GET /v1/registry/audit</code> takes <code>limit</code> from 1
+  to 1000 and answers 422 outside that range.</li>
 <li>Naming, aliasing or tagging an artifact that does not exist answers 404
   instead of 400, the same as reading it.</li>
+<li><code>/health/ready</code> no longer has a <code>stuck_scans</code> field.</li>
+<li>strata-pool: reading a job needs the <code>X-Strata-Tenant</code> header that
+  submitted it.</li>
+<li>strata-pool: <code>PUT /v1/machine-types</code> needs the new <code>admin_token</code>;
+  <code>/v1/usage</code> and <code>/v1/workers</code> return only the caller's tenant.
+  <code>GET /v1/machine-types</code> shows <code>env</code> and <code>provider_options</code> values as
+  <code>&lt;redacted&gt;</code> without it.</li>
+<li>strata-pool: the jobs table's state CHECK gains <code>cancelled</code>. A pool database
+  created before this rejects a cancel until that constraint is updated or the
+  database recreated.</li>
+<li>strata-pool: the stored catalogue gains a <code>version</code> column; an existing pool
+  store needs <code>ALTER TABLE catalogue ADD COLUMN version INTEGER NOT NULL
+  DEFAULT 0</code> or a fresh store.</li>
+<li><code>.mcp.json</code> and <code>CLAUDE.md</code> are ignored in new notebooks and left out of
+  exports; an existing notebook's <code>.gitignore</code> is not changed.</li>
+<li>The root <code>fly.toml</code> is now <code>fly.example.toml</code>; copy it to <code>fly.toml</code>
+  (gitignored) and fill in the placeholders to deploy on Fly.</li>
 </ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3575,8 +3644,9 @@ no route serves files from outside the frontend.</p>
   session running a cell or an environment job is never closed.
   <code>STRATA_NOTEBOOK_WARM_POOL_SIZE</code> sets the warm pool (0 turns it off). A
   closed session tells its clients with a <code>session_closed</code> frame, and the
-  browser offers to reopen. <code>POST /v1/notebooks/{id}/close</code> closes a session
-  and keeps the notebook.</li>
+  browser offers to reopen; the terminal viewer stops, shows why, and <code>r</code>
+  reopens the notebook by path. <code>POST /v1/notebooks/{id}/close</code> closes a
+  session and keeps the notebook.</li>
 <li><strong>A worker can answer a direct cell with 202.</strong> <code>POST /v1/execute</code> may
   return a <code>job_url</code>; the server polls it, a machine's boot no longer counts
   against the cell's timeout, and the finished job's URL returns the bundle.</li>
@@ -3594,7 +3664,9 @@ no route serves files from outside the frontend.</p>
   <code>credential = "&lt;name&gt;"</code>, resolved from <code>STRATA_NOTEBOOK_CREDENTIALS</code>.</li>
 <li><strong>Every cell has a digest.</strong> <code>strata run</code> stores leaf cells' variables too,
   so <code>--format json</code> reports a digest for the final result, and the ZIP
-  export's <code>provenance.json</code> lists each cell's output digests.</li>
+  export's <code>provenance.json</code> lists each cell's output digests. A leaf's
+  console record is not an output there, nor in the MCP "no stored output"
+  error.</li>
 <li><strong>Archives verify either file.</strong> The RO-Crate lists <code>artifact.parquet</code> when
   the archive has one, and <code>GET /p/{token}/verify?sha256=</code> names the bundle
   file a digest matches. Each credit edit is a <code>credit</code> event on
@@ -3640,10 +3712,12 @@ no route serves files from outside the frontend.</p>
   the same store; <code>pool.queue</code> and <code>pool.boot</code> spans join the submitter's trace.</li>
 <li>The generic reference executor reports its hardware on <code>GET /health</code>.</li>
 <li><code>benchmarks/capacity_sweep.py --no-server</code> takes <code>--table-uri</code>.</li>
-<li><strong>Tenant-aware notebook routes.</strong> In service mode every notebook REST route,
-  <code>/sessions</code> and the WebSocket treat another tenant's session as missing
-  (404, or close 1008), as MCP already did; <code>admin:*</code> reaches every session.
-  With <code>multi_tenant_enabled</code> each tenant gets its own storage folder. This is a
+<li><strong>Tenant-aware notebook routes.</strong> In service mode every notebook REST route
+  and the WebSocket treat another tenant's session as missing (a 404, or a
+  refused upgrade), as MCP already did; <code>admin:*</code> reaches every session. A
+  member the proxy sends without a tenant header is the default tenant there
+  too. With
+  <code>multi_tenant_enabled</code> each tenant gets its own storage folder. This is a
   convenience for small trusted tenants, not an isolation boundary: cells still
   share the host.</li>
 <li><strong>Serving under a path.</strong> <code>STRATA_PUBLIC_BASE_PATH</code> serves Strata behind a
@@ -3656,6 +3730,14 @@ no route serves files from outside the frontend.</p>
   reference; Strata does not ship a relay.</li>
 <li><code>GET /v1/streams/{id}</code> carries <code>X-Strata-Artifact-Uri</code>, the canonical
   artifact of the rows it serves.</li>
+<li><strong>Superseded versions are counted.</strong> <code>GET /v1/artifacts?state=superseded</code>
+  lists them, <code>GET /v1/artifacts/stats</code> and <code>/usage</code> report
+  <code>superseded_versions</code> beside the ready, building and failed counts, and the
+  web UI's Artifacts page filters by that state and shows the count. Their
+  <code>total_bytes</code> counts every version that still holds bytes, superseded ones
+  included: the figure the size cap uses.</li>
+<li><strong>A cell's test result carries a <code>stale</code> flag</strong>, so tests run against older
+  source, tests or inputs show stale after a reopen.</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3707,17 +3789,28 @@ no route serves files from outside the frontend.</p>
   <code>text/markdown</code>), now under their real media types; anything else downloads
   as <code>application/octet-stream</code>. Every such response carries
   <code>X-Content-Type-Options: nosniff</code> and a <code>sandbox</code> policy. <code>archive.zip</code> is
-  built once per publication and cached on disk, and a table over 128 MiB is
-  archived without its Parquet copy.</li>
-<li><strong>Markdown export escapes raw HTML</strong> as text, as the notebook shows it, and
-  turns <code>javascript:</code> and similar link targets into <code>#</code>.</li>
+  built once per publication and cached on disk (<code>strata artifact unpublish</code>
+  drops it), and a table over 128 MiB is archived without its Parquet copy.</li>
+<li><strong>Publications follow the whole chain their page shows.</strong> The archive walks
+  the chain as deep as the page (25 steps), and so does <code>strata artifact
+  archive --token</code>. A core scan or transform result publishes and archives as
+  Arrow (<code>artifact.arrow</code>).</li>
+<li><strong>Leaf cells are cached like any other.</strong> A cell nothing downstream reads,
+  printing or silent, keeps its console under the cell's provenance, so it
+  reads <code>ready</code> after a reopen (in the web UI, <code>strata status</code> and <code>cell
+  list</code>) and an unchanged run is a cache hit with its output replayed. This
+  holds in Run All, for loop cells, and after a run with the rerun button,
+  Rerun All or <code>strata run --force</code>, whose console the next plain run or
+  reopen shows. Before, a silent leaf always ran again, every leaf re-ran on
+  every Run All, and a printing leaf read idle after a reopen.</li>
 <li><strong><code>strata run</code> keeps notebook INFO logs off stderr</strong>; <code>STRATA_LOG_LEVEL</code>
   brings them back.</li>
 <li><strong>Notebooks share an environment whatever their names.</strong> In shared mode,
   notebooks with the same resolved dependencies link one environment, and the
   notebook's own project is never installed into it.</li>
 <li><strong>Exports carry the committed set.</strong> Snapshot and ZIP exports include
-  <code>cells/tests/</code> and the notebook's <code>.gitignore</code>, and import restores it.</li>
+  everything under <code>cells/</code>, subdirectories too, and the notebook's
+  <code>.gitignore</code>, and import restores it.</li>
 <li><strong><code>publish --to</code> streams and remaps.</strong> Uploads go through the staged import
   route instead of memory, and a chain another tenant already holds lands as
   remapped copies instead of a 409. <code>promote --to</code> also streams.</li>
@@ -3742,7 +3835,8 @@ no route serves files from outside the frontend.</p>
   warming, export and transform inputs (which used to start a build that could
   only fail).</li>
 <li><code>gs://</code> and <code>abfs://</code> warehouse catalogs read with the server's
-  <code>STRATA_GCS_*</code> and <code>STRATA_AZURE_*</code> settings.</li>
+  <code>STRATA_GCS_*</code> and <code>STRATA_AZURE_*</code> settings, including an Azurite or private
+  blob endpoint (Strata derives the connection string adlfs needs).</li>
 <li>A table with no snapshots yet reads as zero rows with its schema (scans,
   transform inputs, cache warm, <code>@table</code> inputs) instead of a 500, and nothing
   read from it is reused.</li>
@@ -3759,6 +3853,18 @@ no route serves files from outside the frontend.</p>
   sharing results through a service-mode store, or one service-mode server.
   <code>discover</code> and the notebook state no longer carry <code>owner</code>, and <code>mcp_enabled</code>
   is no longer refused in personal mode on its account.</li>
+<li>A transform's table input plans in the planning pool under the plan
+  timeout, and answers 504 past it.</li>
+<li>A table an export creates is written under the warehouse the request names,
+  and a table URI that names a warehouse is a 400 when the configured catalog
+  is REST or Hive.</li>
+<li>Signed-worker URLs last at least the cell's timeout plus the provisioning
+  wait plus five minutes; <code>STRATA_SIGNED_URL_EXPIRY_SECONDS</code> is a floor for
+  notebook cells.</li>
+<li>strata-pool submit routes take <code>timeout_seconds</code> and <code>wait_seconds</code> only as
+  positive finite numbers and <code>priority</code> as a 64-bit integer (422 otherwise);
+  a job's timeout can shorten its machine type's but not extend it;
+  <code>PUT /v1/machine-types</code> refuses wrongly typed fields with a 400.</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3771,7 +3877,16 @@ no route serves files from outside the frontend.</p>
   reads, nothing else, and the cell cannot turn that back on. A catalog table
   whose data files live outside its own location is refused under
   confinement, naming the file. A SQLite write cell is refused <code>ATTACH</code>,
-  <code>DETACH</code> and <code>VACUUM</code>. Personal mode is unchanged.</li>
+  <code>DETACH</code> and <code>VACUUM</code>. A SQLite or DuckDB database file must be in the
+  notebook's directory, or outside the server's state and passing the
+  mount-root rule; a SQLite <code>uri</code> is refused, and the file is opened by its
+  resolved path, checked again just before opening. A BigQuery connection must
+  name a <code>credentials_path</code> key file in the notebook's directory (the
+  <code>write_credentials_path</code> one too, when set): without one it would run as the
+  server's own Google credentials. <code>${VAR}</code> in a connection's <code>auth</code> reads the
+  notebook's env, never the server's environment. The cell, the connection's
+  schema listing and saving the connection all refuse what breaks these rules.
+  Personal mode is unchanged.</li>
 <li><strong>Service-mode notebooks install wheels only.</strong> Building a package from a
   source distribution runs its build backend as the server's user with the
   server's environment, which is what the harness user keeps cell code away
@@ -3788,12 +3903,13 @@ no route serves files from outside the frontend.</p>
   go direct and ignore <code>HTTPS_PROXY</code>, since through a proxy the proxy would
   resolve the name; personal-mode fetches and
   <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS</code> keep the environment's proxy settings.</li>
-<li><strong>A service-mode notebook cannot choose where the server's Infisical
-  credentials go.</strong> The secret manager logged in with the server's
-  <code>INFISICAL_CLIENT_ID</code> / <code>INFISICAL_CLIENT_SECRET</code> (or <code>INFISICAL_TOKEN</code>) at
-  whatever host the notebook's <code>[secret_manager] base_url</code> named. In service
-  mode the host is the operator's <code>INFISICAL_HOST</code> (or the public default),
-  and any other <code>base_url</code> is refused before any login. <code>project_id</code>,
+<li><strong>A notebook cannot choose where the server's Infisical credentials go.</strong>
+  The secret manager logged in with the server's <code>INFISICAL_CLIENT_ID</code> /
+  <code>INFISICAL_CLIENT_SECRET</code> (or <code>INFISICAL_TOKEN</code>) at whatever host the
+  notebook's <code>[secret_manager] base_url</code> named. The host is now the
+  operator's <code>INFISICAL_HOST</code> (or the public default), in personal mode too,
+  and any other <code>base_url</code> is refused before any login, so opening a cloned
+  notebook no longer sends your Infisical credentials elsewhere. <code>project_id</code>,
   <code>environment</code> and <code>path</code> still come from the notebook, so scope the machine
   identity to what every notebook author may read.</li>
 <li><strong>R package restores in service mode run as the harness user.</strong> Restoring a
@@ -3812,12 +3928,41 @@ no route serves files from outside the frontend.</p>
   loopback and link-local hosts are refused unless listed in
   <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. The operator's <code>STRATA_AI_BASE_URL</code>
   and the providers' own URLs are not checked.</li>
+<li><strong>The server's AI key goes only to the server's AI hosts.</strong> In either mode
+  <code>STRATA_AI_API_KEY</code> is sent only to <code>STRATA_AI_BASE_URL</code> or a provider's
+  default URL, never to a <code>[ai] base_url</code> a notebook names.</li>
 <li><strong>A confined SQL cell refuses a local mount root that exposes the server.</strong>
   Confinement admits everything under a mount's root, so a <code>file:///</code> mount
   let a DuckDB cell read the whole disk. In service mode a local root is
-  refused if it is <code>/</code> or has fewer than two path components, if it holds the
-  server's artifact, cache, metadata or notebook directories or its home, or
-  if it is inside the home directory, <code>/proc</code>, <code>/sys</code> or <code>/dev</code>.</li>
+  refused if it is <code>/</code> or has fewer than two path components, if it holds or
+  sits inside the server's artifact, cache, metadata or notebook directories
+  or its home (the notebook's own directory excepted), or if it is inside
+  <code>/proc</code>, <code>/sys</code> or <code>/dev</code>.</li>
+<li><strong>Guarded URLs refuse every address that is not globally routable.</strong>
+  <code>@fetch</code>, a notebook's AI <code>base_url</code> and worker manifest URLs checked for
+  private, loopback and link-local addresses; they now refuse any address
+  that is not global, <code>100.64.0.0/10</code> included.</li>
+<li><strong>Opening a notebook no longer downloads its <code>@fetch</code> URLs</strong>; only running
+  the cell does.</li>
+<li><strong>The in-process <code>duckdb_sql@v1</code> transform reads only its inputs</strong>: no
+  server files, <code>COPY TO</code>, <code>ATTACH</code> or extension installs.</li>
+<li><strong>A cell's file must stay inside <code>cells/</code>.</strong> A notebook whose
+  <code>notebook.toml</code> names one outside (an absolute path or <code>..</code>) is refused with
+  an error naming the cell, so a snapshot import can no longer read, overwrite
+  or delete files outside the notebook.</li>
+<li><strong>Worker secrets stay with the worker.</strong> <code>GET /v1/notebooks/{id}/workers</code> no
+  longer returns a managed worker's literal token, and a cell on a <code>signed</code>
+  worker no longer stores its env, secrets included, in the server's build and
+  artifact rows: only the names and a digest are kept, and the values travel
+  only to the worker. Adding an SSH worker fails if the worker it launched is
+  not the one answering, instead of sending the token to whatever answered on
+  that port.</li>
+<li><strong>A withdrawn publication keeps nothing public but its tombstone.</strong>
+  <code>GET /v1/publications/{token}</code> for a withdrawn publication carries only the
+  token, title and the publish and withdraw times, no lineage, sources,
+  environments or principals.</li>
+<li><strong><code>@dataset</code> resolves names in the session's tenant</strong>, and another tenant's
+  version is never handed over.</li>
 <li><strong>A denied table input is denied before it is planned.</strong> A principal denied
   a table used as a transform input got a 422 naming the table and its
   delete-file paths, or a 400 that let materialize build without checking the
@@ -3827,9 +3972,8 @@ no route serves files from outside the frontend.</p>
   worker took <code>STRATA_WORKER_TOKEN</code> and the credential variables out of
   <code>os.environ</code>, but <code>/proc/&lt;pid&gt;/environ</code> still showed the environment it
   started with, and on the worker image cells run as the worker's user. The
-  values are now zeroed there too. An app built directly with
-  <code>create_notebook_executor_app()</code>, as in the Modal example, does not do this
-  yet.</li>
+  values are now zeroed there too, also in an app built with
+  <code>create_notebook_executor_app()</code> (Modal, any ASGI host).</li>
 <li><strong>The server's log buffer needs <code>admin:*</code>.</strong> <code>GET /v1/logs</code> and
   <code>/v1/logs/stream</code> hold every tenant's records and were open to any
   authenticated principal. Under principal auth they now need <code>admin:*</code>;
@@ -3861,7 +4005,8 @@ no route serves files from outside the frontend.</p>
 <li><strong>Exports follow the table ACL and stay in their tenant.</strong> Exporting an
   artifact read from a denied table copied it somewhere readable, and an
   export could overwrite another tenant's table. The ACL now also covers
-  results derived from a denied table.</li>
+  results derived from a denied table (an artifact or name input with a dot in
+  it is not mistaken for a table there).</li>
 <li><strong>Secret env values stay on the server</strong>, even for a <code>notebook:read</code>
   principal in another tenant.</li>
 <li><strong>Service-mode authorization gaps closed:</strong> registry names set through
@@ -3873,8 +4018,14 @@ no route serves files from outside the frontend.</p>
   rewrite a machine type's image and read its <code>env</code>, and read every tenant's
   usage and workers. Tokens are compared in constant time.</li>
 <li><strong>Uploads are bounded before they are read:</strong> an <code>.ipynb</code> import reads at
-  most its cap, and a snapshot whose members would expand past 16 GiB is
-  refused.</li>
+  most its cap, and a snapshot whose members would expand past 16 GiB, or
+  holding a file the import reads whole over 16 MiB, is refused, as is an
+  artifact record of the wrong shape.</li>
+<li><strong>Markdown export escapes what it did not write.</strong> Raw HTML in a cell is
+  shown as text, as the notebook shows it; <code>javascript:</code> and similar link
+  targets become <code>#</code>; cell and notebook names, notes, table text and image
+  attributes are escaped; and an image is written only for an inline
+  <code>data:image/</code> source.</li>
 <li><strong>Only the publication embed card may be framed by any site</strong>; a lookalike
   path no longer frames the editor.</li>
 <li><strong>A worker started through <code>uv run</code> warns that its parent still holds the
@@ -4020,9 +4171,6 @@ no route serves files from outside the frontend.</p>
 <li>Opening a notebook while its imported environment was still building in
   shared mode could hang the whole server; a blocking shared-environment sync
   now refuses to run on the event loop.</li>
-<li>The terminal viewer reconnected into a refusal when the server closed its
-  session. It now stops, shows why, and <code>r</code> reopens the notebook by path (with
-  <code>--session ID</code> it says to run <code>strata watch PATH</code>).</li>
 <li>A personal server read a <code>gs://</code>, <code>az://</code> or <code>abfs://</code> warehouse with no
   catalog <code>uri</code> through a SQLite file at a malformed local path and failed
   with a 500; it now uses the <code>STRATA_METADATA_DB</code> catalog, as <code>s3://</code> does.</li>
@@ -4031,9 +4179,8 @@ no route serves files from outside the frontend.</p>
 <li>A SQL cell binds datetime, date, time, Decimal, UUID and bytes values (and
   numpy scalars) from an upstream Python cell.</li>
 <li>A secret typed this session survives a session reload (changing the timeout,
-  workers, mounts, adding or renaming a cell, reopening).</li>
-<li>A worker app hosted outside <code>strata-worker</code> (Modal, any ASGI host) takes its
-  token and credentials out of its environment.</li>
+  workers, mounts, adding or renaming a cell, reopening), and saving the
+  Runtime panel's env keeps the cells that read it ready.</li>
 <li><code>strata worker add --transport</code>, MCP <code>add_worker</code> and the REST worker PUT
   refuse an unknown transport; the worker editor keeps <code>manifest</code>/<code>build</code>
   workers signed instead of saving them as <code>direct</code>.</li>
@@ -4047,43 +4194,37 @@ no route serves files from outside the frontend.</p>
 <li>The hardware probe answers on Windows.</li>
 <li>The docs no longer list <code>az://</code> as a warehouse scheme (pyiceberg cannot read
   one); use <code>abfs://</code>.</li>
-<li>A publication page's data and Verify links pointed at the server root, which
-  broke behind a path prefix.</li>
 <li>The embed snippet's resize listener accepts messages from the Strata origin
-  only; re-copy a snippet pasted before this.</li>
-<li>On a multi-tenant server, a member the proxy sends without a tenant header
-  is the default tenant for its notebook sessions too: other tenants no longer
-  see, edit or run that member's open notebooks over REST, WebSocket or MCP.</li>
+  only, and several snippets on one page each size their own iframe; re-copy a
+  snippet pasted before this.</li>
 <li><code>POST /v1/notebooks/recents/validate</code> answers only for paths under the
   caller's notebook root, so it no longer reveals which other directories on
-  the server hold a notebook.</li>
+  the server hold a notebook, and one malformed saved path no longer fails the
+  whole check.</li>
 <li>Service mode: a worker's live console chunks are accepted with only the
   signed log URL, so the console streams under trusted-proxy and API-key auth
   instead of arriving only when the cell ends.</li>
 <li>A character split across two reads on a remote worker no longer shows as two
   replacement characters in the live console, and the closing console no
   longer starts a character late after a dropped chunk.</li>
-<li>The TUI console shows only the current run of a remote cell; the previous
-  run's output no longer stays above it.</li>
-<li>Multi-node: a console chunk relayed through the shared store between one
-  node's read and delete is no longer dropped.</li>
-<li>A lake table on Azurite or a private blob endpoint configured with
-  <code>STRATA_AZURE_ACCOUNT_NAME</code>, <code>STRATA_AZURE_ACCOUNT_KEY</code> and
-  <code>STRATA_AZURE_ENDPOINT_URL</code> reads its metadata at that endpoint; adlfs takes
-  the endpoint only from a connection string, so Strata derives one for the
-  catalog.</li>
+<li>The web UI and the terminal viewer show only the current run's console, in
+  the order it arrived, for local and remote cells alike: a failing cell no
+  longer keeps its earlier runs' output, and a cache hit that replays no
+  console shows the cell's last console live, as after a reload. The terminal
+  viewer shows a run's variables as soon as it finishes.</li>
 <li>A transform over a <code>gs://</code>, <code>abfs://</code>, schemeless <code>/wh#ns.t</code>, named-catalog
   or bare table URI, every form <code>scan@v1</code> reads, runs instead of answering
   pending and failing in the runner; an input whose plan fails answers the
   planner's 4xx instead of building a snapshot-less result.</li>
 <li>Two in-flight misses for one scan both serve, and the second artifact reads
   <code>superseded</code> instead of <code>failed</code>; <code>/v1/artifacts/usage</code> counts no failure
-  for it. Its own blob is dropped as soon as it finalizes and its URI serves
-  the canonical artifact's bytes, so the store holds them once instead of
-  until the retention sweep.</li>
-<li>A cell whose only output is printed text reads ready after reopening the
-  notebook, and in <code>strata status</code> and <code>cell list</code>; it was shown idle although
-  its console was restored and the next run was a cache hit.</li>
+  for it, and strata-client returns the canonical artifact, so <code>set_name</code> on
+  it works. A version a duplicate build overtakes drops its own blob as soon
+  as it finalizes and serves the canonical artifact's bytes, so the store
+  holds them once instead of until the retention sweep. Notebook readers,
+  retention, delete and promotion follow it to those bytes (a duplicated
+  prompt cell reads its result on every run), and deleting the canonical
+  first gives a published or pinned duplicate its own copy.</li>
 <li>A worker whose <code>uv sync</code> or <code>renv::restore</code> times out, or whose environment
   registry serves a broken archive, reports a <code>locked environment:</code> error
   naming the step instead of a generic executor failure.</li>
@@ -4098,23 +4239,99 @@ no route serves files from outside the frontend.</p>
 <li>The prompt-cell "LLM not configured" error names <code>[env]</code> in <code>notebook.toml</code>
   and the server's <code>STRATA_AI_API_KEY</code>, not only the Runtime panel.</li>
 <li><code>python -m strata --help</code> prints <code>usage: python -m strata</code>; <code>strata cell
-  --help</code> lists <code>output</code> and <code>pin-fetch</code>.</li>
-<li><code>strata-worker --connect</code> ignores a relay request whose stream id is outside
-  1..2^32-1 instead of failing the request task.</li>
+  --help</code> lists <code>output</code>.</li>
 <li>A failed persist of planning metadata to SQLite is logged at debug instead
   of silently dropped.</li>
 <li>The Azure artifact blob store reads <code>STRATA_AZURE_ENDPOINT_URL</code> as the blob
   host with the account as the first path segment, the way the lake path and
   the docs do; the documented Azurite form with an account name and key now
-  works for artifacts and presigned URLs.</li>
-<li>A leaf cell that stores no variable and prints nothing (<code>import os</code>, or an
-  assignment nothing reads) reads <code>ready</code> after a reopen, in the web UI and in
-  <code>strata status</code> and <code>cell list</code>, and an unchanged re-run is a cache hit
-  instead of another subprocess; its empty console is kept under the cell's
-  provenance like a printing leaf's.</li>
-<li>Run All keeps a leaf cell's console record too: a leaf run in a batch reads
-  <code>ready</code> on reopen and hits the cache on the next Run All with its stdout
-  replayed; before, every leaf re-ran on every Run All.</li>
+  works for artifacts and presigned URLs. A URL that already ends in the
+  account name is used as given, by the blob store and the lake catalog alike.</li>
+<li>A SQL cell's cache key is its own query text, so edits that change the
+  result (for example <code>REAL</code> to <code>NUMERIC</code>) run again; a <code># @cache snapshot</code>
+  SQL cell runs its own query; a DuckDB <code>:name</code> bind in the select list
+  parses.</li>
+<li>A cell reading a name that more than one upstream cell defines gets it from
+  the cell the DAG wires, in single runs, Run All, warm workers, loop seeds,
+  SQL binds and prompt templates; before, it could silently read the shadowed
+  value. Lineage lists only the cell the name was read from.</li>
+<li>A cell reading a loop cell's output runs again when the loop's result
+  changes, and a <code>start_from=&lt;cell&gt;@iter=k</code> loop depends on the cell it starts
+  from.</li>
+<li>Loop cells: a <code>@loop_until</code> that raises fails the cell; names the predicate
+  reads from upstream are inputs; a carry updated in place works; an extra
+  output first read after the loop's last run is stored; a body failure with
+  no message names its exception.</li>
+<li>Prompt cells render an upstream datetime, Decimal or numpy scalar as the
+  value, and a provider timeout names the error type.</li>
+<li>The dependency graph handles <code>import os.path</code>, a name read before the same
+  cell assigns it, PEP 695 generics and <code>type</code> aliases, and <code>match</code> captures;
+  on Python 3.14 a cell with a module-level annotated assignment can share its
+  functions and classes.</li>
+<li>An R cell that reads <code>Sys.getenv("KEY")</code> goes stale when that variable
+  changes, and <code>df$col &lt;- value</code> links the cell to the cell that made <code>df</code>.</li>
+<li><code>@fetch</code> works when the notebook's path has a space or a non-ASCII
+  character, and a mistyped <code>@fetch</code> URL or a damaged <code>.strata/fetch/index.json</code>
+  no longer stops the notebook from opening.</li>
+<li><code>@dataset</code> reads the registry's version even when this clone has its own
+  output with the same id.</li>
+<li>A NaN or infinite widget value is refused, and a notebook that already saved
+  one opens again; a <code>None</code> inside a displayed value is no longer exported as
+  an empty string.</li>
+<li>Cell tests get the cell's <code>@fetch</code> files, <code>@mount</code> paths and env, show stale
+  after reopening when something they depend on changed, and are deleted with
+  their cell.</li>
+<li>Importing a requirements.txt or environment.yaml no longer removes
+  <code>pyarrow</code>, <code>orjson</code> and <code>cloudpickle</code>.</li>
+<li>Jupyter import writes only installable dependencies, leaves <code>%</code> and <code>!</code>
+  inside strings and brackets alone, keeps indented blocks valid, and maps
+  <code>google.cloud.&lt;x&gt;</code> imports to <code>google-cloud-&lt;x&gt;</code>.</li>
+<li>MCP edits reload the session once.</li>
+<li>The notebook page no longer goes blank when the browser blocks site data,
+  an embedded app view included.</li>
+<li>After a dropped connection the notebook keeps retrying until it reconnects,
+  and the header shows "Not connected" while it is down instead of "Live".</li>
+<li>Running a cell while another runs no longer leaves it spinning: the cell
+  returns to its previous status and the notebook says another cell is
+  running.</li>
+<li>Edits are no longer lost when typed while the cell runs, while the
+  connection is down, or while an agent adds or removes a cell, and two tabs on
+  one notebook see each other's edits instead of silently overwriting them.</li>
+<li>Snapshot round trips carry SQL identity and loop iterations, accept file
+  names with spaces or non-ASCII characters, refuse malformed bundles with a
+  400, and export artifacts over 2 GiB.</li>
+<li>Downloading a notebook whose name has non-Latin-1 characters no longer fails
+  with a 500; the file keeps its name.</li>
+<li>The RO-Crate description has no dangling or duplicate ids, and the
+  publication page links an ORCID given as a URL without doubling it.</li>
+<li><code>strata artifact publish</code> and the MCP publish tool publish into the store
+  the server actually serves (Postgres metadata, object-store blobs), and
+  publish's withdraw hint names the right store.</li>
+<li><code>copy_chain</code> copies every ancestor before its descendants, so a published
+  chain no longer shows phantom steps.</li>
+<li>Registry summary and by-tag reads scope tenants correctly: a tenant sees its
+  own notebook stamps, and an <code>admin:*</code> summary lists every tenant.</li>
+<li>A transform build reads its inputs at the versions admission recorded, even
+  after an append or a name move; a pull-model manifest does the same for a
+  <code>strata://name/</code> input.</li>
+<li>A refused, cancelled or failed stream fetch frees its slots and keeps the
+  stream expiring, so overload no longer leaks streams or leaves every later
+  fetch answering 429.</li>
+<li>A Parquet footer whose statistics cannot be converted is served from memory
+  instead of failing the load.</li>
+<li><code>name_prefix</code> and dependents lookups match underscores literally.</li>
+<li>On Postgres: a <code>GET /v1/events</code> follower no longer misses an event that
+  commits late; deleting an artifact while one of its names is deleted no
+  longer deadlocks; and one skipped row no longer rolls back a whole retention
+  sweep whose blobs were already deleted.</li>
+<li>Cleaning up failed artifacts no longer fails on a failed build's record.</li>
+<li>An SSH worker starts on a box whose login shell is bash, dash or sh, and
+  removing an SSH worker in service mode answers 403 instead of 500.</li>
+<li>Cancelling a remote cell while its worker is fetching inputs or building the
+  locked environment stops it before the cell runs; waiting out another cell's
+  environment build is a "locked environment" error, not a 500.</li>
+<li>The Docker pool backend no longer leaves a container running when it cannot
+  read its port.</li>
 </ul>
 <h2 id="080-2026-09-27">0.8.0 - 2026-09-27<a class="headerlink" href="#080-2026-09-27" title="Permanent link">&para;</a></h2>
 <p>A notebook stops being one person's machine. This release is about the three

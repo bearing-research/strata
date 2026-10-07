@@ -2513,6 +2513,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#artifacts-names-cache-and-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifacts, names, cache and diagnostics
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4039,6 +4050,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#artifacts-names-cache-and-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifacts, names, cache and diagnostics
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4161,7 +4183,7 @@
 </tbody>
 </table>
 <p><code>POST /open</code>, <code>POST /create</code> and <code>GET /discover</code> are <strong>not</strong> restricted - they work in service mode. With <code>multi_tenant_enabled</code>, all three (and the imports) are confined to the caller's tenant subdir of the storage root.</p>
-<p><strong>Tenant-scoped sessions.</strong> A session records the tenant of whoever opened, created or imported it, and every <code>/v1/notebooks/{session_id}/...</code> route answers <code>404</code> to a caller from another tenant, as for an unknown session. <code>admin:*</code> reaches every session; a session opened without a tenant is open to all.</p>
+<p><strong>Tenant-scoped sessions.</strong> A session records the tenant of whoever opened, created or imported it, and every <code>/v1/notebooks/{session_id}/...</code> route answers <code>404</code> to a caller from another tenant, as for an unknown session. <code>admin:*</code> reaches every session; a session opened by a caller with no tenant belongs to the default tenant (<code>_default</code>) and is reached only by tenantless callers and <code>admin:*</code>.</p>
 <p><strong>Scope-gated endpoints.</strong> Under principal auth, <strong>every</strong> route on the <code>/v1/notebooks</code> and <code>/v1/projects</code> routers requires a notebook scope in <code>X-Strata-Scopes</code>. The gate is a router-level dependency keyed on the matched path template, so a route added later is covered without anyone remembering to gate it, and it returns <code>403 Forbidden</code> naming the scope it wanted.</p>
 <table>
 <thead>
@@ -4176,7 +4198,7 @@
 <td><code>notebook:read</code></td>
 </tr>
 <tr>
-<td>Content and configuration changes that run nothing: <code>/open</code>, <code>/create</code>, <code>/import</code>, <code>/import-snapshot</code>, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote</td>
+<td>Content and configuration changes that run nothing: <code>/open</code>, <code>/create</code>, <code>/import</code>, <code>/import-snapshot</code>, <code>/recents/validate</code>, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote</td>
 <td><code>notebook:write</code></td>
 </tr>
 <tr>
@@ -4235,7 +4257,7 @@
 </table>
 <p><code>notebook:execute</code> is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is <code>src/strata/notebook/scopes.py</code>, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.</p>
 <p>Without principal auth (personal mode, or <code>auth_mode="none"</code>), the scope gate returns immediately and none of this applies.</p>
-<p>Personal mode with no header configured is effectively trust-on-first-call - anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a <a href="../../deployment/modes/">trust-model decision</a>; see <a href="../../deployment/fly/#trust-model">Fly.io deployment</a> for the load-bearing details.</p>
+<p>Personal mode has no authentication: anyone who can reach the server can use it. Deploying personal mode to a public URL without an auth proxy is a <a href="../../deployment/modes/">trust-model decision</a>; see <a href="../../deployment/fly/#trust-model">Fly.io deployment</a> for the load-bearing details.</p>
 <h3 id="error-shape">Error shape<a class="headerlink" href="#error-shape" title="Permanent link">&para;</a></h3>
 <p>Most <code>4xx</code> and <code>5xx</code> responses use FastAPI's standard JSON shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;human-readable error message&gt;"</span><span class="p">}</span>
@@ -4247,10 +4269,12 @@ and a <code>message</code>, plus context for that code: <code>environment_job</c
 and a <code>message</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cell_locked"</span><span class="p">,</span><span class="w"> </span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4"</span><span class="p">,</span><span class="w"> </span><span class="nt">"held_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span><span class="w"> </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}}</span>
 </code></pre></div>
-<p>Three middleware responses are plain text, not JSON: the tenant check's <code>400</code>
-(missing or invalid tenant header) and <code>403</code> (tenant not enabled), and the rate
-limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seconds) and
-<code>X-RateLimit-Limit-Type</code>.</p>
+<p>Four middleware responses are plain text, not JSON: the host check's <code>400</code> (a
+<code>Host</code> the server does not answer to, see <code>STRATA_ALLOWED_HOSTS</code>), the tenant
+check's <code>400</code> (missing or invalid tenant header) and <code>403</code> (tenant not
+enabled), and the rate limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole
+seconds) and <code>X-RateLimit-Limit-Type</code>. A stream refused by QoS admission is a
+JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</code>.</p>
 <p>Validation errors (<code>422</code>) come from Pydantic and contain structured field info:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
@@ -4274,6 +4298,10 @@ limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seco
 <tr>
 <td><code>200</code></td>
 <td>Success</td>
+</tr>
+<tr>
+<td><code>307</code></td>
+<td><code>GET /v1/streams/{id}</code> on a node that does not hold the stream, redirecting to the one that does (<code>STRATA_NODE_ADVERTISED_URL</code>)</td>
 </tr>
 <tr>
 <td><code>400</code></td>
@@ -4310,6 +4338,14 @@ limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole seco
 <tr>
 <td><code>500</code></td>
 <td>Server bug - captured to logs with the request ID</td>
+</tr>
+<tr>
+<td><code>503</code></td>
+<td>The server is draining for shutdown and takes no new materialize requests</td>
+</tr>
+<tr>
+<td><code>504</code></td>
+<td>Planning a scan exceeded its timeout</td>
 </tr>
 </tbody>
 </table>
@@ -4467,7 +4503,9 @@ instead of typing a filesystem path. Available in both modes; requires
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">{</span><span class="nt">"paths"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"/path/to/notebook"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/path/that/moved"</span><span class="p">]}</span>
 </code></pre></div>
 <p>Returns <code>{"valid": [...]}</code>, the subset of the (at most 100) paths that still
-hold a <code>notebook.toml</code>. The UI uses it to prune its recent-notebooks list.</p>
+hold a <code>notebook.toml</code> and lie inside the caller's notebook root (the tenant's
+folder on a multi-tenant server); any other path is left out like a missing
+one. The UI uses it to prune its recent-notebooks list. Needs <code>notebook:write</code>.</p>
 <h3 id="delete-notebook-by-path">Delete Notebook By Path<a class="headerlink" href="#delete-notebook-by-path" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>POST /v1/notebooks/delete-by-path
 </code></pre></div>
@@ -4753,9 +4791,10 @@ kept in-memory until the session reloads.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-72-1" name="__codelineno-72-1" href="#__codelineno-72-1"></a>GET /v1/notebooks/{session_id}/connections/{name}/schema
 </code></pre></div>
 <p>Enumerates the tables and columns visible through the named connection. Used by
-the schema sidebar. Opens the connection on the read path and returns backend
-errors directly as <code>4xx</code> so auth / driver / connectivity failures are visible
-to the UI.</p>
+the schema sidebar. Opens the connection read-only; an unknown connection is a
+<code>404</code>, an unknown driver a <code>400</code>, and a driver that fails to connect or
+enumerate a <code>502</code> carrying its message, so auth / driver / connectivity
+failures are visible to the UI.</p>
 <h2 id="artifacts">Artifacts<a class="headerlink" href="#artifacts" title="Permanent link">&para;</a></h2>
 <h3 id="list-a-notebooks-published-artifacts">List a Notebook's Published Artifacts<a class="headerlink" href="#list-a-notebooks-published-artifacts" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-73-1" name="__codelineno-73-1" href="#__codelineno-73-1"></a>GET /v1/notebooks/{session_id}/artifacts
@@ -4999,6 +5038,268 @@ one.</p>
 <code>/metrics/prometheus</code> leaves out the per-table series, since table names are
 <code>admin:*</code> data (<code>GET /metrics/tables</code>), and the AI usage series carry no
 <code>principal</code> label: they are per-tenant, per-model totals.</p>
+<h3 id="artifacts-names-cache-and-diagnostics">Artifacts, names, cache and diagnostics<a class="headerlink" href="#artifacts-names-cache-and-diagnostics" title="Permanent link">&para;</a></h3>
+<p>The routes the client SDK and the web UI call that no feature page covers.
+The gate column uses these terms:</p>
+<ul>
+<li><strong>read</strong>: open in both modes; under principal auth scoped to the caller's
+  tenant (<code>admin:*</code> sees every tenant).</li>
+<li><strong>write</strong>: personal mode, or service mode with
+  <code>STRATA_SERVICE_WRITES_ENABLED</code> and the <code>artifacts:write</code> scope.</li>
+<li><strong>personal</strong>: personal mode only; <code>403</code> in service mode.</li>
+<li><strong>build</strong>: personal mode, or service mode with transforms enabled.</li>
+<li><strong>open</strong>: no gate beyond the server's authentication.</li>
+</ul>
+<p>Name, alias, tag and registry reads on a server with
+<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> set answer from that team store.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Gate</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}</code></td>
+<td>read</td>
+<td>An artifact version's metadata, including <code>input_versions</code></td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}</code></td>
+<td>personal</td>
+<td>Delete a version, its blob and its name pointers</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/lineage</code></td>
+<td>read</td>
+<td>The transitive input graph (artifacts and tables), up to <code>max_depth</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/dependents</code></td>
+<td>read</td>
+<td>Ready artifacts that take this one as a direct input</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/tags</code></td>
+<td>read</td>
+<td>The version's tags</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/tags</code></td>
+<td>write</td>
+<td>Set one key/value tag</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/tags/{key}</code></td>
+<td>write</td>
+<td>Delete one tag</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/by-provenance/{hash}</code></td>
+<td>read</td>
+<td>A ready artifact by provenance hash (the team-cache lookup)</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/v1/artifacts/by-provenance/{hash}</code></td>
+<td>write</td>
+<td>Store a result under a provenance key the caller computed</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/artifacts/upload/{id}/v/{n}</code></td>
+<td>personal</td>
+<td>Upload a version's Arrow IPC bytes</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/artifacts/finalize</code></td>
+<td>personal</td>
+<td>Mark an uploaded version ready, optionally naming it</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/artifacts/explain-materialize</code></td>
+<td>read</td>
+<td>Dry-run materialize: hit or miss, and why a rebuild would be needed</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/artifacts/materialize</code></td>
+<td>build</td>
+<td>The cached artifact on a provenance hit, else a <code>building</code> artifact and its build spec</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/builds/{build_id}</code></td>
+<td>build</td>
+<td>Poll an asynchronous build started by materialize (the caller's own builds)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/names/{name}/status</code></td>
+<td>read</td>
+<td>A named artifact's state and whether any input has a newer version</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/names</code></td>
+<td>read</td>
+<td>Every name pointer and its artifact</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/names</code></td>
+<td>write</td>
+<td>Set or move a name pointer</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/names/{name}</code></td>
+<td>read</td>
+<td>Resolve a name to its artifact URI</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/v1/names/{name}</code></td>
+<td>personal</td>
+<td>Delete a name pointer</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/names/{name}/aliases</code></td>
+<td>read</td>
+<td>The aliases a name holds</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/names/{name}/aliases/{alias}</code></td>
+<td>read</td>
+<td>Resolve <code>name @ alias</code> to its version</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/v1/names/{name}/aliases/{alias}</code></td>
+<td>write</td>
+<td>Point an alias at a version; a protected alias answers <code>202</code> and queues</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/v1/names/{name}/aliases/{alias}</code></td>
+<td>personal</td>
+<td>Delete an alias; a protected alias answers <code>202</code> and queues</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/registry/artifacts</code></td>
+<td>read</td>
+<td>Ready artifacts carrying one tag (<code>tag_key</code>, optional <code>tag_value</code>)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/registry/pending</code></td>
+<td>read</td>
+<td>Protected-alias changes awaiting approval</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/cache/stats</code></td>
+<td>open</td>
+<td>Disk cache statistics</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/cache/evictions</code></td>
+<td>open</td>
+<td>Eviction rate and pressure level; <code>include_events=true</code> adds recent events</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/cache/warm</code></td>
+<td>table ACL</td>
+<td>Warm the cache for some tables and wait until every row group is fetched</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/cache/warm/jobs/{job_id}</code></td>
+<td>caller's tenant</td>
+<td>A warming job's progress</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/v1/cache/warm/jobs/{job_id}</code></td>
+<td>caller's tenant</td>
+<td>Cancel a warming job; what it cached stays</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/metadata/stats</code></td>
+<td>open</td>
+<td>Hit/miss counters and entry counts for the metadata store and its caches</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/config/timeouts</code></td>
+<td>open</td>
+<td>Every timeout setting, grouped by planning, scanning, QoS queue, fetching and S3</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/debug/latency</code></td>
+<td><code>admin:*</code></td>
+<td>Latency histograms per stage (plan, first byte, fetch, total)</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/debug/gc/pauses</code></td>
+<td><code>admin:*</code></td>
+<td>Recent Python GC pauses and their totals</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/debug/pools</code></td>
+<td><code>admin:*</code></td>
+<td>Planning and fetch thread pool use and queue depth</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/debug/connections</code></td>
+<td><code>admin:*</code></td>
+<td>HTTP connection metrics: in flight, totals, peak, rate, keep-alive share</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/debug/memory</code></td>
+<td><code>admin:*</code></td>
+<td>Arrow pool, Python GC and process memory</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/debug/rate-limits</code></td>
+<td><code>admin:*</code></td>
+<td>Rate limiter allowed and rejected counts</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/debug/cache/inspect</code></td>
+<td><code>admin:cache</code></td>
+<td>Disk cache entries: key hash, file path, size and stored metadata</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>admin:*</code> and <code>admin:cache</code> gates apply under principal auth; without it
+those routes are open.</p>
 
 
 
