@@ -2469,8 +2469,11 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 <code>wait_seconds</code> (default 300), which bounds the wait and not the job, and is cut to
 the type's <code>boot_timeout_seconds</code> plus <code>job_timeout_seconds</code>. Both times must be
 positive and finite; anything else is a 422 and no job is queued.</p>
-<p><code>PUT /v1/machine-types</code> checks each field's type before storing anything: a
-number sent as a string, an unknown key or a non-finite number is a 400.</p>
+<p><code>PUT /v1/machine-types</code> checks each field's type and range before storing
+anything: a number sent as a string, an unknown key, a non-finite number, a
+<code>max_workers</code> below 1, a timeout, <code>cpus</code>, <code>memory_mb</code> or <code>disk_gb</code> of zero or
+less, or a negative cool-down, <code>health_check_failures</code> or <code>gpu_count</code> is a 400
+naming the field.</p>
 <p>Replacing the catalogue needs the <strong>admin token</strong>. A catalogue entry decides
 which image receives a tenant's jobs, and with them the signed URLs for that
 tenant's data, so the API token every caller holds cannot rewrite it. A pool
@@ -2521,7 +2524,9 @@ depends on how far the job got:</p>
 safe. A job that completed, failed or timed out is a 409, like a result asked
 for too early.</p>
 <p>Every route but <code>/health</code> requires <code>Authorization: Bearer &lt;api_token&gt;</code> (the
-admin token is accepted wherever the API token is), and every job route
+admin token is accepted wherever the API token is). <code>/health</code> is
+unauthenticated and lists the machine-type names and the fleet's machine
+counts by state, so anyone who can reach the pool can read them. Every job route
 requires <code>X-Strata-Tenant</code>, reads included. So do the worker and usage
 listings, unless the caller presents the admin token. A tenant reads only
 its own jobs: another tenant's job id answers 404, not 403, so the id does not

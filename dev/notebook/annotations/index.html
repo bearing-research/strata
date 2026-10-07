@@ -3348,7 +3348,10 @@ iteration.</p>
   stored iteration <code>k</code>. Useful for forking a converged run to explore a
   variant. <code>&lt;cell-id&gt;</code> is the upstream loop cell's <code>id</code> in
   <code>notebook.toml</code> (not its <code>@name</code>) - see <a href="#cell-ids">Cell IDs</a>. The fork
-  depends on that cell: when its result changes, the fork runs again.</li>
+  depends on that cell: when its result changes, the fork runs again.
+  Iteration <code>k</code> must come from that cell's latest run: if the latest run
+  stopped before <code>k</code> (a lower <code>max_iter</code>, an earlier <code>@loop_until</code> exit),
+  the fork fails rather than seed from a step an older run left behind.</li>
 <li><code>until=&lt;expr&gt;</code>, (optional) the same early exit as <code>@loop_until</code>, inline.
   Parameters are split on whitespace, so the expression cannot contain a
   space (<code>until=acc["loss"]&lt;0.05</code>); use <code>@loop_until</code> for anything longer.</li>
@@ -3363,7 +3366,9 @@ reference. An expression that raises fails the cell at that iteration.</p>
 </code></pre></div>
 <p>Each iteration's carry state is stored as <code>…@iter=k</code> artifacts; the final
 iteration becomes the cell's canonical artifact. Progress is broadcast over
-WebSocket as <code>cell_iteration_progress</code> messages.</p>
+WebSocket as <code>cell_iteration_progress</code> messages. The <code>@loop</code> and <code>@loop_until</code>
+parameters are part of the cell's cache key, so editing one (say <code>max_iter</code>)
+runs the loop again rather than returning the old result.</p>
 <hr />
 <h2 id="sql-cell-annotations">SQL Cell Annotations<a class="headerlink" href="#sql-cell-annotations" title="Permanent link">&para;</a></h2>
 <p>A cell with <code>language = "sql"</code> runs a query through a declared connection.
@@ -3590,7 +3595,9 @@ to fan out over - <code># @per_variant model</code> - and the others collapse to
 cell fans out over <strong>one</strong> group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: <code>per_variant_no_sweep_source</code>
 (nothing to fan out over), <code>per_variant_ambiguous_group</code> (bare form, ≥2 groups),
-<code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out).</p>
+<code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out).
+The named group is part of the cell's cache key, so switching it runs the
+instances again.</p>
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's <code>defines</code> against its

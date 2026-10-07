@@ -4806,7 +4806,9 @@ since that is where a cell's <code>put(name=...)</code> went. <code>readers</cod
 notebook's own store: per registry name, the cells whose stored results read
 it with <code># @dataset</code>, as <code>{"notebook_id", "cell_id", "reference"}</code>. The rows of
 <code>GET /v1/registry/summary</code> carry the same <code>readers</code> list for the results in
-the registry's store.</p>
+the registry's store, next to the row's <code>tenant</code> (<code>null</code> for the default
+tenant). A personal server or an <code>admin:*</code> caller gets every tenant's names,
+so one name can have a row per tenant, each with that tenant's readers.</p>
 <h3 id="promote-an-artifact">Promote an Artifact<a class="headerlink" href="#promote-an-artifact" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-74-1" name="__codelineno-74-1" href="#__codelineno-74-1"></a>POST /v1/notebooks/{session_id}/artifacts/{artifact_id}/v/{version}/promote
 </code></pre></div>

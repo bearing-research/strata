@@ -2249,8 +2249,10 @@ of the cell source, the upstream inputs, and your test file staged under a
 rewriting).</p>
 <p>Before the run, any stale upstream cell is materialized, exactly as a normal
 run of the cell would (an unchanged upstream is a cache hit), so <code>cell.sales</code>
-is current. The cell's <code>@fetch</code> files, <code>@mount</code> paths and notebook and <code>@env</code>
-variables are bound as they are in a run.</p>
+is current. The cell's <code>@fetch</code> files, <code>@mount</code> paths, <code>@dataset</code> values,
+<code>@table</code> names (and their <code>_snapshot</code> ids) and notebook and <code>@env</code> variables
+are bound as they are in a run. A fetch, dataset or table that cannot be
+resolved fails the run with one errored result naming it.</p>
 <p><img alt="A Python cell with its results table above an open Tests panel: the test
 source, a green &quot;2 passed&quot; summary, and a tick beside each test name. The flask
 toggle on the cell's left rail carries a green 2/2
@@ -2284,13 +2286,16 @@ without opening the panel:</p>
 </tr>
 <tr>
 <td><code>· stale</code></td>
-<td>the cell or its tests changed since the last run</td>
+<td>the cell, its tests or its inputs changed since the last run</td>
 </tr>
 </tbody>
 </table>
-<p>Stale is computed from a fingerprint of <code>(cell source, test source, input
-versions)</code>. Edit the cell, edit the tests, or change an upstream - the badge
-goes stale, telling you the last green result no longer reflects the code.</p>
+<p>Stale is computed from a fingerprint of <code>(cell source, test source, inputs)</code>,
+where the inputs are everything a run of the cell reads: upstream versions,
+<code>@fetch</code>, <code>@mount</code>, <code>@dataset</code> and <code>@table</code> fingerprints, and the environment
+(env variables the cell reads and the locked dependencies). Edit the cell, edit
+the tests, change an upstream, a mounted file or an env value - the badge goes
+stale, telling you the last green result no longer reflects the code.</p>
 <h2 id="what-persists">What persists<a class="headerlink" href="#what-persists" title="Permanent link">&para;</a></h2>
 <p>Results are saved to <code>.strata/runtime.json</code> and <strong>rehydrate when you reopen the
 notebook</strong>, so you see the last run's pass/fail and the stale badge immediately,

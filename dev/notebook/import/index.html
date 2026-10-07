@@ -2601,11 +2601,19 @@ clean <code>400</code> or <code>409</code> with <code>detail</code> set. An uplo
 <td>Python cell (after magic translation, see below)</td>
 </tr>
 <tr>
+<td>Code (R kernel)</td>
+<td>R cell with the source verbatim</td>
+</tr>
+<tr>
 <td>Raw</td>
 <td>Skipped; counted in the report</td>
 </tr>
 </tbody>
 </table>
+<p>A notebook whose kernel language is R (IRkernel) imports its code
+cells as <a href="../cells/">R cells</a> as written: no magic, shell or <code>;</code>
+translation and no dependency capture. Install the packages it loads
+in system R or with renv.</p>
 <p>Variable rebinding (<code>df = df.dropna()</code>, <code>df = df[df.col &gt; 0]</code>, …)
 is a first-class pattern. Strata's DAG analyser handles read-before-
 write semantics correctly: the cell appears as both a producer
@@ -2616,7 +2624,8 @@ cells see the post-mutation view.</p>
 value. Strata's harness auto-displays the last bare expression too,
 so the converter detects the trailing <code>;</code> (with or without an
 adjacent comment) and appends a <code>pass</code> so the harness skips display.
-The cell still runs.</p>
+The cell still runs. As in IPython, only a <code>;</code> that ends the last
+statement counts: one inside a comment or a string does not.</p>
 <h3 id="magic-translation-table">Magic translation table<a class="headerlink" href="#magic-translation-table" title="Permanent link">&para;</a></h3>
 <p>Single dict in <code>strata.notebook.jupyter_import</code>. Adding a row
 extends support; rows can be:</p>
@@ -2720,7 +2729,11 @@ inferred-from-imports entry:</p>
    <code>bs4 → beautifulsoup4</code>, <code>yaml → PyYAML</code>, <code>mpl_toolkits → matplotlib</code>,
    <code>pkg_resources → setuptools</code>, etc. A <code>google.cloud.&lt;x&gt;</code> import maps
    to its own <code>google-cloud-&lt;x&gt;</code> package (<code>from google.cloud import
-   bigquery → google-cloud-bigquery</code>, <code>pubsub_v1 → google-cloud-pubsub</code>).
+   bigquery → google-cloud-bigquery</code>, <code>pubsub_v1 → google-cloud-pubsub</code>),
+   except where the distribution is named differently
+   (<code>google.cloud.sql.connector → cloud-sql-python-connector</code>,
+   <code>secretmanager → google-cloud-secret-manager</code>,
+   <code>devtools.cloudbuild_v1 → google-cloud-build</code>, and so on).
    Anything not in the
    dict is assumed to use the same name on PyPI (right ~95% of the
    time).</li>
@@ -2736,7 +2749,10 @@ report so you can address them by hand.</p>
 <code>uv sync</code> (which runs automatically when you open the notebook in
 the UI, or when you invoke <code>strata run</code>) resolves them. The
 importer doesn't call <code>uv add</code> itself, that's slow, networked, and
-partial-failure-prone.</p>
+partial-failure-prone. In personal mode that sync builds any dependency
+without a wheel, running its build code as you before any cell runs, so
+read what an untrusted notebook installs first (see
+<a href="../environment/#how-it-works">Environment Management</a>).</p>
 <h2 id="the-import-report">The import report<a class="headerlink" href="#the-import-report" title="Permanent link">&para;</a></h2>
 <p>Every import writes <code>&lt;notebook_dir&gt;/import_report.md</code> and the same
 content is returned inline on the REST response (<code>import_report.report_text</code>).</p>

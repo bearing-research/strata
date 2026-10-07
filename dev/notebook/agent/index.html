@@ -2470,8 +2470,9 @@ store:</p>
 <li>A cell whose last run failed reports <code>error</code>, with its traceback, until it
   is edited or run again.</li>
 <li>A <strong>leaf</strong> cell, one nothing else reads, reports <code>ready</code> after it has run
-  like any other cell. It stores no variable artifact; its console, even an
-  empty one, is the record of the run. A <code># @nocache</code> leaf, or one with a
+  like any other cell, and <code>stale</code> once a cell it reads runs with a new value.
+  It stores no variable artifact; its console, even an empty one, is the
+  record of the run. A <code># @nocache</code> leaf, or one with a
   read-write mount, stores no such record, so it reads <code>idle</code> even after it
   ran.</li>
 </ul>

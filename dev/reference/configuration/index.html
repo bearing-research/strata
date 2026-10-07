@@ -3863,6 +3863,11 @@ without a URL or a config, to find the server. The server does not read
 <td>Optional bearer token. When set, the worker's <code>/v1/*</code> execution endpoints require <code>Authorization: Bearer &lt;token&gt;</code>. <code>/health</code> stays open. See <a href="../../notebook/workers/#authentication">Workers § Authentication</a>.</td>
 </tr>
 <tr>
+<td><code>STRATA_WORKER_LAUNCH_ID</code></td>
+<td><code>None</code></td>
+<td>Reported as <code>launch_id</code> in <code>/health</code>. Strata sets it, over stdin, on a worker it <a href="../../notebook/workers/#run-cells-on-a-machine-you-can-ssh-to">launches over SSH</a> and connects only when the worker answering through the tunnel reports it; there is no reason to set it yourself.</td>
+</tr>
+<tr>
 <td><code>STRATA_WORKER_CONNECT_TOKEN</code></td>
 <td><code>None</code></td>
 <td>The token <code>strata-worker --connect</code> presents to the relay as <code>Authorization: Bearer &lt;token&gt;</code> on its WebSocket handshake. Read once at startup and removed from the environment. Unrelated to <code>STRATA_WORKER_TOKEN</code>, which still guards each request. See <a href="../worker-connect/">Worker Relay Protocol</a>.</td>
