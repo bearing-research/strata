@@ -4,6 +4,11 @@ Precedence is defaults < pyproject < env < overrides. ``_load_from_pyproject`` i
 each test controls the pyproject layer.
 """
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 import strata.config as cfg
@@ -351,3 +356,37 @@ class TestListSettingsAcceptCommaSeparatedEnv:
         monkeypatch.setenv("STRATA_NOTEBOOK_PYTHON_VERSIONS", '["3.12", "3.13"]')
         config = StrataConfig(cache_dir=tmp_path / "c")
         assert config.notebook_python_versions == ["3.12", "3.13"]
+
+
+class TestNoDirectoriesOnLoad:
+    """Loading the config is read-only; a server start creates what it serves from."""
+
+    @staticmethod
+    def _strata_home() -> Path:
+        return Path.home() / ".strata"  # the autouse fixture's empty temp home
+
+    def test_loading_creates_nothing(self, monkeypatch):
+        _pyproject(monkeypatch, {})
+        config = StrataConfig.load()
+        assert config.notebook_storage_dir == self._strata_home() / "notebooks"
+        assert not self._strata_home().exists()
+
+    def test_importing_the_server_creates_nothing(self, tmp_path):
+        """The MCP mount loads the config at import, which every test module importing the
+        server (and anything embedding it) does."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("STRATA_")}
+        env["HOME"] = str(tmp_path)
+        subprocess.run([sys.executable, "-c", "import strata.server"], env=env, check=True)
+        # uv's own cache may appear (the config lists installed Pythons through it).
+        assert not (tmp_path / ".strata").exists()
+
+    def test_server_startup_creates_the_directories(self, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from strata.server import app
+
+        _pyproject(monkeypatch, {})
+        with TestClient(app):
+            pass
+        for name in ("cache", "artifacts", "notebooks"):
+            assert (self._strata_home() / name).is_dir(), name

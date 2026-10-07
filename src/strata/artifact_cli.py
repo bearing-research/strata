@@ -51,8 +51,8 @@ def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
         print(f"invalid configuration: {exc}", file=sys.stderr)
         return None
     artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
-    # Loading the config creates a personal-mode artifact_dir, so an empty
-    # directory proves nothing: a store on SQLite is its database file.
+    # A server start creates a personal-mode artifact_dir, so an empty directory
+    # proves nothing: a store on SQLite is its database file.
     if not config.artifact_metadata_dsn and not (artifact_dir / "artifacts.sqlite").exists():
         print(f"no artifact store in {artifact_dir}", file=sys.stderr)
         return None
