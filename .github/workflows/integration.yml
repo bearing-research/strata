@@ -18,6 +18,11 @@ on:
       - 'LICENSE'
       - '.github/workflows/docs.yml'
 
+# A new push to a PR supersedes its running checks; runs on main all finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -29,6 +34,7 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:

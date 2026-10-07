@@ -18,6 +18,11 @@ on:
       - 'LICENSE'
       - '.github/workflows/docs.yml'
 
+# A new push to a PR supersedes its running checks; runs on main all finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -28,6 +33,7 @@ jobs:
   frontend:
     name: Frontend Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -60,6 +66,7 @@ jobs:
   client-only:
     name: strata-client (no server deps)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -93,6 +100,7 @@ jobs:
   pool-only:
     name: strata-pool (no server deps)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # The shared-store tests run against a real Postgres as well as SQLite.
     services:
       postgres:
@@ -162,6 +170,7 @@ jobs:
   type-check:
     name: Type Check (ty)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -190,7 +199,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Backstop for a deadlocked test, below GitHub's 6h cap; the per-test
     # pytest-timeout normally trips first and dumps the stack. 45, not 30: a
-    # normal macOS run takes about 23 minutes and a congested runner crossed 30.
+    # normal macOS run takes about 13 minutes and a congested runner crossed 30.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -298,6 +307,7 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -347,6 +357,7 @@ jobs:
   r-tests:
     name: R Tests (${{ matrix.os }} · R ${{ matrix.r }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       # Current R on both platforms plus the previous minor ("oldrel-1") on
@@ -431,6 +442,7 @@ jobs:
   notebook-browser-smoke:
     name: Notebook Browser Smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -477,8 +489,19 @@ jobs:
         run: npm run build
         working-directory: frontend
 
+      # No --with-deps: the runner image ships Google Chrome, so Chromium's
+      # system libraries are there, and that apt-get update once hung 28 minutes.
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        run: npx playwright install chromium
         working-directory: frontend
 
       - name: Start Strata notebook server
