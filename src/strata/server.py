@@ -1497,9 +1497,34 @@ def _mount_mcp_if_enabled() -> None:
         )
         return
 
-    app.mount("/mcp", mcp_app)
+    _mount_mcp(app, mcp_app)
     _mcp_app = mcp_app
     logger.info("mcp_endpoint_mounted", path="/mcp")
+
+
+class _AsSlashedPath:
+    """ASGI app that serves a request for ``/x`` as ``/x/`` through *application*'s router."""
+
+    def __init__(self, application: FastAPI) -> None:
+        self.application = application
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        scope = {**scope, "path": scope["path"] + "/"}
+        if "raw_path" in scope:
+            scope["raw_path"] = scope["raw_path"] + b"/"
+        await self.application.router(scope, receive, send)
+
+
+def _mount_mcp(application: FastAPI, mcp_app: Starlette) -> None:
+    """Serve *mcp_app* at ``/mcp/`` and at the documented ``/mcp``.
+
+    The mount matches only ``/mcp/...``, so ``/mcp`` alone would reach the SPA catch-all
+    (HTML on GET, 405 on POST); an ASGI route takes it instead, for every method.
+    """
+    from starlette.routing import Route
+
+    application.mount("/mcp", mcp_app)
+    application.router.routes.append(Route("/mcp", _AsSlashedPath(application)))
 
 
 _mount_mcp_if_enabled()
