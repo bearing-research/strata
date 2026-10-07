@@ -524,6 +524,32 @@ server-mode transforms to be enabled". A `direct` worker needs neither.
 manager writing it underneath a running server. A restart would work too, but
 it interrupts every cell currently executing.
 
+An entry has the fields of a notebook's `[[workers]]` plus `enabled`, in the
+same shape whether it comes from the admin routes or from
+`[tool.strata.transforms] notebook_workers`. `POST /v1/admin/notebook-workers`
+adds one, `PUT /v1/admin/notebook-workers/{name}` replaces it, `PATCH` takes
+`{"enabled": false}`, and `PUT /v1/admin/notebook-workers` replaces the whole
+registry with `{"workers": [...]}`. The routes answer only in service mode
+(`409` otherwise) and, under principal auth, need the `admin:notebook-workers`
+scope.
+
+```bash
+curl -X POST https://strata.example.com/v1/admin/notebook-workers \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "gpu-a100", "backend": "executor", "runtime_id": "gpu-a100-v1",
+       "config": {"url": "https://gpu.internal/v1/execute", "transport": "direct",
+                  "token_env": "STRATA_GPU_WORKER_TOKEN"}}'
+```
+
+```toml
+[tool.strata.transforms]
+notebook_workers = [
+  { name = "gpu-a100", backend = "executor", runtime_id = "gpu-a100-v1", config = { url = "https://gpu.internal/v1/execute", transport = "direct", token_env = "STRATA_GPU_WORKER_TOKEN" } },
+]
+```
+
+`token_env` names a variable in the server's environment.
+
 **Personal-mode servers get the registry too.** A personal server started with
 a registry offers those machine types to every notebook it opens, with no
 `[[workers]]` block in `notebook.toml`, which is the point, since writing one

@@ -49,10 +49,12 @@ proxy that:
    | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`) | For scope-gated endpoints |
    | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN` | Yes, proves the request came from the proxy, not a direct connection |
 
-Machine callers that do not sit behind the proxy (a CI job, an ETL
-service) authenticate with an API key instead: `strata apikey create`
-issues one, and the key carries its own principal, tenant and scopes.
-See [Configuration → API keys](../reference/configuration.md#api-key-authentication).
+API keys are a separate auth mode (`STRATA_AUTH_MODE=api_key`) for a
+server no proxy fronts: `strata apikey create` issues one, and the key
+carries its own principal, tenant and scopes. A trusted-proxy server
+ignores them, so machine callers (a CI job, an ETL service) of a proxied
+server go through the proxy like everyone else. See
+[Configuration → API keys](../reference/configuration.md#api-key-authentication).
 
 3. **Is the only path to Strata.** Strata is on a private network /
    VPC / Kubernetes namespace; the proxy is the only ingress.
@@ -169,6 +171,8 @@ STRATA_DEPLOYMENT_MODE=service
 STRATA_AUTH_MODE=trusted_proxy
 STRATA_PROXY_TOKEN=<shared-secret-with-proxy>
 STRATA_ARTIFACT_DIR=/path/to/dir  # required with any artifact store, blob backend or not
+STRATA_HOST=0.0.0.0               # default 127.0.0.1; bind wider when the proxy runs on another host
+STRATA_TRANSFORM_SIGNING_SECRET=<stable-secret>  # unset: a random one per process, so signed URLs die on restart and differ across replicas
 
 # Multi-tenancy (optional but recommended for >1 team)
 STRATA_MULTI_TENANT_ENABLED=true
@@ -179,10 +183,16 @@ STRATA_TENANT_HEADER=X-Tenant-ID  # match what your proxy injects
 Run the server normally:
 
 ```bash
-uv run python -m strata
-# or
-uv run strata-notebook
+strata-notebook   # or `uv run strata-notebook` in a checkout
 ```
+
+### Rotating the proxy token and the signing secret
+
+`STRATA_PROXY_TOKEN` holds one value, with no overlap window: change it on
+the proxy and the server together, and requests that arrive between the two
+changes get a `401`. Changing `STRATA_TRANSFORM_SIGNING_SECRET` invalidates
+every signed URL already issued, so a build in flight on a `signed` worker
+fails; rotate it between runs and give every replica the same value.
 
 ## What service mode changes
 

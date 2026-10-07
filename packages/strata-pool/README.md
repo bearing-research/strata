@@ -33,6 +33,10 @@ job = await pool.submit(tenant_id="acme", machine_type="cpu-4x", payload=bundle)
 done = await pool.wait(job.id)
 ```
 
+`DockerBackend()` talks to `/var/run/docker.sock`. Docker Desktop on macOS
+puts the socket under your home directory, so pass it:
+`DockerBackend(socket_path=os.path.expanduser("~/.docker/run/docker.sock"))`.
+
 ## Isolation
 
 A machine belongs to **one tenant for its life** and is destroyed rather than
@@ -192,6 +196,17 @@ Both job submit routes take their options as query parameters: `machine_type`
 `wait_seconds` (default 300), which bounds the wait and not the job, and is cut to
 the type's `boot_timeout_seconds` plus `job_timeout_seconds`. Both times must be
 positive and finite; anything else is a 422 and no job is queued.
+
+The `PUT` body is the whole catalogue: a JSON list of machine types, each with
+`MachineType`'s fields (only `name` and `image` are required), the shape `GET`
+returns:
+
+```bash
+curl -X PUT http://pool.internal:8000/v1/machine-types \
+  -H "Authorization: Bearer $STRATA_POOL_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '[{"name": "cpu-4x", "image": "strata-worker:latest", "cpus": 4, "memory_mb": 8192, "max_workers": 5}]'
+```
 
 `PUT /v1/machine-types` checks each field's type and range before storing
 anything: a number sent as a string, an unknown key, a non-finite number, a
