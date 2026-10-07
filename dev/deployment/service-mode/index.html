@@ -3310,8 +3310,10 @@ the artifact store is never read by the cell. The server, in turn, never
 unpickles what a cell stored: prompt and SQL cells do not load a pickled value,
 and cell tests load their inputs in the test process.</p>
 <p>A cell run this way still shares the host's kernel and sees what any local user
-can. A notebook that needs more isolation than that wants a worker on another
-machine.</p>
+can. A process a cell starts in the background is not stopped when the cell
+finishes: it keeps running as the harness user, so the server never writes by
+path into a directory it has handed over. A notebook that needs more isolation
+than that wants a worker on another machine.</p>
 <p><strong>One harness user serves every tenant, so it is not a tenant isolation
 boundary.</strong> It keeps cells away from the server; it does not keep one tenant's
 cells away from another's. Every cell runs as the same user, and that user has
@@ -3437,10 +3439,11 @@ when the notebook opens. Personal mode is unchanged.</p>
 subprocess cannot start without are always included: <code>PATH</code>, <code>HOME</code>, the temp
 and locale variables, and <code>UV_*</code>, <code>PYTHON*</code>, <code>VIRTUAL_ENV</code>, <code>R_*</code> and
 <code>RSTUDIO_*</code>, except names that look like credentials (containing <code>KEY</code>,
-<code>SECRET</code>, <code>TOKEN</code>, <code>PASSWORD</code> or <code>CREDENTIAL</code>), <code>UV_PUBLISH_*</code> and
-<code>UV_INDEX_*_USERNAME</code>. So a private index's login, which the server's <code>uv sync</code>
-needs, does not reach cells; keep index credentials in those variables or a
-netrc rather than inside <code>UV_INDEX_URL</code>, which passes. <code>STRATA_*</code> is dropped
+<code>SECRET</code>, <code>TOKEN</code>, <code>PASSWORD</code> or <code>CREDENTIAL</code>), <code>UV_PUBLISH_*</code>,
+<code>UV_INDEX_*_USERNAME</code>, and the index URLs (<code>UV_INDEX</code>, <code>UV_INDEX_URL</code>,
+<code>UV_EXTRA_INDEX_URL</code>, <code>UV_DEFAULT_INDEX</code>, <code>UV_INDEX_*_URL</code>), which can carry a
+login as <code>https://user:password@host/simple</code>. So a private index's login, which
+the server's <code>uv sync</code> needs, does not reach cells. <code>STRATA_*</code> is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
 accident is the failure the setting exists to prevent. A name you list exactly
 always passes. It applies to every process that runs cell code, the same list

@@ -2291,6 +2291,9 @@ install, no notebook.</p>
 <a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>Withdraw it with: strata artifact unpublish ocxQj-toxGttZYyRl-Zf9...
 </code></pre></div>
+<p>The link starts with the server's <code>STRATA_PUBLIC_BASE_URL</code> and
+<code>STRATA_PUBLIC_BASE_PATH</code> when they are set, or with <code>--to-url</code> when publishing
+to another store.</p>
 <p>Every cell output is already an artifact, and a plot is no exception: it is
 stored under its own id with a provenance hash binding it to its inputs, its
 source, and the environment it ran in. Publishing does not create any of that.
@@ -2529,6 +2532,8 @@ authors and identifiers the hosted page shows, and a <code>--to</code> ending in
 writes the file the route serves, byte for byte:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>--token<span class="w"> </span>&lt;token&gt;<span class="w"> </span>--to<span class="w"> </span>./figure3.zip
 </code></pre></div>
+<p><code>--token</code> also takes the publication's id, which <code>GET /v1/publications</code> lists,
+since the raw token is shown only when the link is minted.</p>
 <p>A withdrawn publication refuses here as it does for the bytes: the page still resolves and says "withdrawn", since a
 reader chasing a footnote deserves that answer, but handing over the archive
 anyway would undo the withdrawal.</p>

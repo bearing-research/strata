@@ -2550,6 +2550,9 @@ open, when memory runs low, or when someone closes or deletes the notebook (see
 The viewer then stops reconnecting, shows why in a notification, and keeps
 <code>session closed (&lt;reason&gt;)</code> in its header. Unless the notebook was deleted, its
 results stay on disk.</p>
+<p>A restarted server no longer has the session and refuses the viewer's
+reconnect. The viewer then stops retrying and shows
+<code>session closed (not found)</code> the same way.</p>
 <p>If the viewer knows the notebook's path (you passed <code>--notebook</code>, or it
 attached a session from the list or the picker), press <code>r</code> to reopen it as a
 new session and keep watching. Attached with <code>--session ID</code>, it does not know

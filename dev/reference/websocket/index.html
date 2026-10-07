@@ -3092,7 +3092,7 @@
 <tr>
 <td><code>session_closed</code></td>
 <td><code>{ "reason": "idle", "message": "..." }</code></td>
-<td>The server closed this session; the socket closes next with <code>1000</code>. <code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code> (the close route) or <code>deleted</code>. Reopen the notebook by path; see <a href="#session-lifetime">Session lifetime</a></td>
+<td>The server closed this session; the socket closes next with <code>1000</code>. <code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code> (the close route), <code>deleted</code> or <code>shutdown</code> (a graceful server stop; sessions do not survive a restart). Reopen the notebook by path; see <a href="#session-lifetime">Session lifetime</a></td>
 </tr>
 </tbody>
 </table>

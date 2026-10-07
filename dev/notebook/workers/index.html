@@ -2981,9 +2981,12 @@ has no effect. An <em>empty</em> registry is a decision, not an absence, so remo
 every worker through the API does not fall back.</p>
 <p><strong>Upgrading from a release that kept <code>notebook_workers.json</code>.</strong> On its first
 start the server imports that file from the artifact directory into the
-metadata store, renames it <code>notebook_workers.json.migrated</code>, and logs it. The
-import is skipped (the file is still renamed) when the store already holds a
-registry, so a second node starting with an old copy does not overwrite it.</p>
+metadata store, renames it <code>notebook_workers.json.migrated</code> (<code>.migrated.1</code> and
+so on when that name is taken, so an earlier copy is never replaced), and logs
+it. The import is skipped (the file is still renamed) when the store already
+holds a registry, so a second node starting with an old copy does not overwrite
+it. A name the file lists twice is imported once, from its last entry, which is
+the one an earlier release dispatched to.</p>
 <p><strong>A <code>signed</code> worker needs transforms enabled.</strong> It runs as a build on the
 server, so in service mode set <code>STRATA_TRANSFORMS_ENABLED=true</code>
 (<code>[tool.strata.transforms] enabled = true</code>), which also needs

@@ -2581,7 +2581,7 @@ corresponding panel:</p>
 </tr>
 <tr>
 <td>WS <code>profiling_request</code> (answered with <code>profiling_summary</code>)</td>
-<td>Profiling panel open</td>
+<td>Profiling panel open, then after each burst of <code>cell_output</code> frames</td>
 <td>Computed on demand.</td>
 </tr>
 </tbody>
@@ -2652,12 +2652,21 @@ or a <a href="../rest-api/">quiesce</a> hold. Before the socket closes (code <co
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"This notebook was closed after a period without activity."</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">}}</span>
 </code></pre></div>
-<p><code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code> or <code>deleted</code>. Do not
-reconnect to the old <code>session_id</code> (the upgrade is refused with HTTP <code>403</code>);
-reopen the notebook by path with <code>POST /v1/notebooks/open</code>, which
-starts a new session. The browser shows the message with a Reopen button;
+<p><code>reason</code> is <code>idle</code>, <code>session_limit</code>, <code>memory</code>, <code>closed</code>, <code>deleted</code> or
+<code>shutdown</code>. Do not reconnect to the old <code>session_id</code> (the upgrade is refused
+with HTTP <code>403</code>); reopen the notebook by path with <code>POST /v1/notebooks/open</code>,
+which starts a new session. The browser shows the message with a Reopen button;
 the <a href="../../notebook/tui/#when-the-server-closes-the-session">terminal viewer</a>
 shows it in a notification and reopens on <code>r</code>.</p>
+<p>Sessions live in memory, so a server restart ends all of them. A graceful stop
+(Ctrl-C, <code>SIGTERM</code>, <code>docker stop</code>) of a server started with <code>python -m strata</code>
+or <code>strata-notebook</code> sends <code>session_closed</code> with <code>reason: "shutdown"</code> first; a
+killed server sends nothing, and the next upgrade is refused. A browser cannot
+read why an upgrade failed, so after a failed reconnect the web UI asks
+<code>GET /v1/notebooks/{session_id}/dag</code>: a <code>404</code> means the session is gone, and
+it reopens the notebook by path, carrying over any typing the old session never
+received. After a <code>shutdown</code> frame it keeps retrying until the server is back,
+then does the same. The terminal viewer reads the <code>403</code> directly.</p>
 <h2 id="message-types">Message types<a class="headerlink" href="#message-types" title="Permanent link">&para;</a></h2>
 <p>The full list of WS frame types lives on the <a href="../websocket/">WebSocket Protocol</a>
 page. <strong>Every type corresponds to a member of

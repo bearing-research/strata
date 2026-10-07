@@ -2370,7 +2370,9 @@ notebook:</p>
 </ul>
 <p>In service mode <code>GET /v1/artifacts/stats</code> and <code>GET /v1/artifacts/usage</code>
 report the caller's own tenant (an <code>admin:*</code> caller sees the whole store, or
-one tenant named with <code>?tenant=</code>), which is the figure to meter storage on.</p>
+one tenant named with <code>?tenant=</code>), which is the figure to meter storage on.
+<code>GET /v1/artifacts</code> is personal-mode only, so there the page shows the stats
+and says that the list is not available, without a table.</p>
 <p>These are convenience surfaces over the same data; use the Prometheus metrics
 and OTLP traces above for production monitoring and alerting.</p>
 <h2 id="grafana-dashboards">Grafana dashboards<a class="headerlink" href="#grafana-dashboards" title="Permanent link">&para;</a></h2>

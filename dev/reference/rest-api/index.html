@@ -4444,7 +4444,8 @@ translation table and limitations.</p>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>Content-Type: multipart/form-data
 </code></pre></div>
 <p>Form fields as for the Jupyter import (<code>file</code>, <code>name</code>, <code>parent_path</code>), where
-<code>file</code> is a bundle from <code>GET …/export?fmt=snapshot</code>. The upload is streamed to
+<code>file</code> is a bundle from <code>GET …/export?fmt=snapshot</code>. Without <code>name</code>, the
+notebook keeps the bundle's name. The upload is streamed to
 disk and capped at 2 GiB, since an <code>include=all</code> snapshot is as large as the
 notebook's store. A bundle whose files would expand to more than 16 GiB, or
 holding a file the import reads whole (manifest, <code>notebook.toml</code>, a cell, a

@@ -3354,8 +3354,8 @@ iteration.</p>
   <code>notebook.toml</code> (not its <code>@name</code>) - see <a href="#cell-ids">Cell IDs</a>. The fork
   depends on that cell: when its result changes, the fork runs again.
   Iteration <code>k</code> must come from that cell's latest run: if the latest run
-  stopped before <code>k</code> (a lower <code>max_iter</code>, an earlier <code>@loop_until</code> exit),
-  the fork fails rather than seed from a step an older run left behind.</li>
+  stopped before <code>k</code> (a lower <code>max_iter</code>, an earlier <code>@loop_until</code> exit, a
+  failure), the fork fails rather than seed from a step an older run left behind.</li>
 <li><code>until=&lt;expr&gt;</code>, (optional) the same early exit as <code>@loop_until</code>, inline.
   Parameters are split on whitespace, so the expression cannot contain a
   space (<code>until=acc["loss"]&lt;0.05</code>); use <code>@loop_until</code> for anything longer.</li>

@@ -2394,7 +2394,8 @@ to edit a cell yourself, re-run it, or keep working after the agent stops.
 the browser while the agent is still going.</p>
 <p>When you quit the viewer, the server <code>strata agent</code> started is shut down with
 it. If you pointed it at a server you started yourself, that one is left
-running.</p>
+running. A server the launcher started writes its logs to
+<code>.strata/server.log</code> in the notebook directory, not to your terminal.</p>
 <details class="info">
 <summary>What <code>strata agent</code> does under the hood</summary>
 <p>The command exists because doing this by hand is a fiddly ordered dance:</p>
