@@ -62,7 +62,11 @@ from outside the frontend.
   directory (without `.venv`) and the artifact directory's
   `notebook_workers.json` too.
   [Operations](deployment/lifecycle.md#backing-up-a-server) has the
-  steps.
+  steps. The `strata artifact` commands that only read (`list`, `show`,
+  `lineage`, `verify`, `audit`, `pending`, `archive`) never migrate a store: on
+  one an older release wrote they refuse and say to start this release's
+  server on it, so checking a backup or the live store before upgrading leaves
+  it unchanged.
 - Stop every node before the first start of this release, and do not run 0.8.0
   and this release against one store, as a rolling upgrade over a shared
   Postgres would. 0.8.0 runs on a migrated store without a warning, and there
@@ -72,7 +76,8 @@ from outside the frontend.
   mints answer 404 once this release serves the store again, and the latest
   version of each result it writes is never collected. To go back, restore the
   backup into an empty database or directory. From this release on, an older
-  Strata refuses to open a store a newer one migrated, naming both versions.
+  Strata refuses to open a store a newer one migrated, naming both versions,
+  and the `strata artifact` commands say so instead of printing a traceback.
 - A configured SQL catalog whose warehouse is in object storage now needs a
   `uri` (`STRATA_CATALOG_URI`, or the entry's own): the server refuses to start
   rather than keep the catalog in SQLite on its own disk.
@@ -108,9 +113,9 @@ from outside the frontend.
   when the tenant next calls. Nothing is logged, and every start narrows them
   again. A sidecar, backup agent or group that reads them as another account
   loses access: run it as the server's account.
-- New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13; mcp 2.2 with
-  `[mcp]`; textual-image 0.14 and Pillow 12.1 with `[tui]`; pydantic 2.13.5
-  with `strata-pool[server]`.
+- New minimums: pyiceberg 0.12, DuckDB 1.5, sqlglot 30.13, filelock 3.24;
+  mcp 2.2 with `[mcp]`; textual-image 0.14 and Pillow 12.1 with `[tui]`;
+  pydantic 2.13.5 with `strata-pool[server]`.
 - Scan caches are rebuilt: the first scan of each table reads from storage,
   and a transform that reads a table directly recomputes once, since a table
   input's version now carries the schema id as well as the snapshot. Until it
@@ -187,8 +192,8 @@ from outside the frontend.
   export to a table answer 400 instead of using a SQLite catalog on the
   server's disk.
 - With `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` set, a cell that needs a
-  credential-named variable under `UV_`, `PYTHON` or `R_`, or anything under
-  `CONDA_`, must name it in the allowlist.
+  credential-named variable under `UV_`, `PYTHON` or `R_`, a uv index URL, or
+  anything under `CONDA_`, must name it in the allowlist.
 - `s3://` and `gs://` notebook mounts need the `s3` or `gcs` extra where
   Strata is installed (for example `uv tool install "strata-notebook[s3]"`),
   which carry s3fs and gcsfs.
@@ -245,7 +250,8 @@ from outside the frontend.
   the notebook is an `error` frame with `code: "notebook_busy"` and the refused
   `cell_id`. After a source edit, the session's other connections get the
   edited cell's new `source` in `dag_update`; every other entry carries
-  `source: null`.
+  `source: null`. A graceful server stop sends `session_closed` with
+  `reason: "shutdown"` before the socket closes.
 - strata-client: `Artifact.lineage()` no longer takes `direction` (lineage is
   always upstream), and `Artifact.dependents()` takes `limit` (default 100) in
   place of `max_depth`.
@@ -356,8 +362,10 @@ from outside the frontend.
   `STRATA_NOTEBOOK_WARM_POOL_SIZE` sets the warm pool (0 turns it off). A
   closed session tells its clients with a `session_closed` frame, and the
   browser offers to reopen; the terminal viewer stops, shows why, and `r`
-  reopens the notebook by path. `POST /v1/notebooks/{id}/close` closes a
-  session and keeps the notebook.
+  reopens the notebook by path. A graceful server stop (Ctrl-C, SIGTERM,
+  `docker stop`) sends it with reason `shutdown`, and the terminal viewer also
+  stops this way when a reconnect is refused. `POST /v1/notebooks/{id}/close`
+  closes a session and keeps the notebook.
 - **A worker can answer a direct cell with 202.** `POST /v1/execute` may
   return a `job_url`; the server polls it, a machine's boot no longer counts
   against the cell's timeout, and the finished job's URL returns the bundle.
@@ -455,6 +463,7 @@ from outside the frontend.
 - `gs://` and `abfs://` warehouse catalogs read with the server's
   `STRATA_GCS_*` and `STRATA_AZURE_*` settings, including an Azurite or private
   blob endpoint (Strata derives the connection string adlfs needs).
+- `strata cell add --language widget` adds a widget cell.
 
 ### Changed
 
@@ -518,11 +527,11 @@ from outside the frontend.
   list`) and an unchanged run is a cache hit with its output replayed. This
   holds in Run All, for loop cells, and after a run with the rerun button,
   Rerun All or `strata run --force`, whose console the next plain run or
-  reopen shows. Reverting an edit is a cache hit for a leaf too. Before, a
-  silent leaf always ran again, every leaf re-ran on every Run All, and a
-  printing leaf read idle after a reopen.
-- **`strata run` keeps notebook INFO logs off stderr**; `STRATA_LOG_LEVEL`
-  brings them back.
+  reopen shows. Reverting an edit is a cache hit for a leaf too, whether or
+  not that run made a display. Before, a silent leaf always ran again, every
+  leaf re-ran on every Run All, and a printing leaf read idle after a reopen.
+- **`strata run`, `strata cell run` and `strata cell add --run` keep notebook
+  INFO logs off stderr**; `STRATA_LOG_LEVEL` brings them back.
 - **Notebooks share an environment whatever their names.** In shared mode,
   notebooks with the same resolved dependencies link one environment, and the
   notebook's own project is never installed into it.
@@ -577,7 +586,11 @@ from outside the frontend.
   store** (Postgres or the SQLite file) instead of `notebook_workers.json`, so
   every node sharing the store offers the same workers and a change made on
   one applies on the others at their next request.
-  `POST /v1/admin/notebook-workers/reload` only refreshes worker health.
+  `POST /v1/admin/notebook-workers/reload` only refreshes worker health. A
+  staleness pass reads the registry once. When the store cannot be read, a
+  service-mode server fails worker resolution and
+  `PUT /v1/notebooks/{id}/workers` rather than fall back to the notebook's own
+  `[[workers]]`.
 - A service-mode server whose transforms block is enabled but lists no
   transforms warns at startup; the docs show the `duckdb_sql@v1` entry
   (`executor_url = "embedded://local"`) the built-in SQL transform needs there.
@@ -587,6 +600,9 @@ from outside the frontend.
   checks; its JSON output adds `metadata` and `blobs`.
 - The REST reference says `POST /v1/notebooks/create` and `/import` return
   before the new environment is synced, and how to wait before running cells.
+- `python -m strata` and `strata-notebook` print `Strata cannot start:` and
+  the reason, then exit 1, on a refused configuration, instead of a
+  traceback.
 
 ### Security
 
@@ -776,12 +792,28 @@ from outside the frontend.
   the stored hash (see Upgrading).
 - **An env allowlist keeps credentials out of cells.** With
   `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` set, credential-looking names under
-  `UV_*`, `PYTHON*` and `R_*`, and `UV_PUBLISH_*` and `UV_INDEX_*_USERNAME`,
-  no longer reach cells, and `CONDA_*` is no longer passed; a name listed
-  exactly still passes.
+  `UV_*`, `PYTHON*` and `R_*`, `UV_PUBLISH_*` and `UV_INDEX_*_USERNAME`, and
+  the uv index URLs that can embed a login (`UV_INDEX`, `UV_INDEX_URL`,
+  `UV_EXTRA_INDEX_URL`, `UV_DEFAULT_INDEX`, `UV_INDEX_<name>_URL`) no longer
+  reach cells, and `CONDA_*` is no longer passed; a name listed exactly still
+  passes.
 - **`strata-worker` listens on loopback without a token.** It bound `0.0.0.0`,
   so a worker started without `STRATA_WORKER_TOKEN` ran whatever anyone who
   reached the port sent. With no token the default is now 127.0.0.1.
+- **A cell cannot reach the server's files through its run directory.** Run
+  as the harness user, a cell owns the directory it writes its outputs to,
+  and a process it leaves running keeps that directory after the cell ends.
+  The server read a cell's outputs, displays, harness result and test results
+  there by path, so a symlink or hard link made it store a file only the
+  server may read, and it wrote a module export, an embedded worker's bundle
+  and a cell-test run's files there by path, through any link planted first.
+  It now reads and writes there without following links, refuses a file name
+  that leaves the directory, and stages a cell-test run before handing its
+  directory over.
+- **Startup refusals no longer print the configuration.** A refused
+  configuration's message ended with the settings it was given, part of the
+  S3 secret key included, in the journal or container log. Notebook
+  connection and worker validation errors no longer echo their input either.
 
 ### Fixed
 
@@ -1011,7 +1043,8 @@ from outside the frontend.
 - A cell reading a loop cell's output runs again when the loop's result
   changes, and a `start_from=<cell>@iter=k` loop depends on the cell it starts
   from, and fails naming it when that cell's latest run stopped before
-  iteration k, instead of seeding from a step an older run left behind.
+  iteration k (failing at the first included), instead of seeding from a step
+  an older run left behind.
 - Loop cells: editing `max_iter`, `carry`, `start_from` or `@loop_until` runs
   the loop again, where it was a cache hit on the old result; a `@loop_until`
   that raises fails the cell; names the predicate reads from upstream are
@@ -1153,8 +1186,10 @@ from outside the frontend.
 - `strata worker add`, MCP `add_worker` and `PUT /v1/notebooks/{id}/workers`
   refuse a worker named `local`: the built-in worker resolves first, so the
   entry never ran and could not be removed.
-- `strata agent --no-tui` prints the session id straight away when its output
-  goes to a file or pipe, and `SIGTERM` stops the server it started.
+- `strata agent` writes the server it starts to `.strata/server.log` instead
+  of the terminal; with `--no-tui` it prints the session id straight away when
+  its output goes to a file or pipe, and `SIGTERM` stops the server it
+  started.
 - The starter cell of a new notebook gets an 8-character id like every other
   cell.
 - A Codespace starts the server again: `.devcontainer/start.sh` was not
@@ -1192,6 +1227,38 @@ from outside the frontend.
 - `strata env gc` removes a collected environment's lock file.
 - A tenant opening a notebook outside its folder is told the notebook must be
   in its own folder, not "inside configured notebook storage".
+- After a server restart, open notebook tabs no longer retry forever showing
+  "Not connected": the page sees the session is gone, reopens the notebook as
+  a new session and sends the typing the old session never received. Closing
+  a tab with unsent typing asks first.
+- The Registry tab's audit list updates after a put, promote, tag or
+  approval, and the Profiling panel after each run.
+- The Connections panel offers DuckDB, no longer labels every connection
+  "Preserved from notebook.toml: options, credential", and shows no literal
+  backticks.
+- The browser no longer logs a warning for each `cascade_progress` frame, and
+  the lineage modal closes on Escape.
+- In service mode the Artifacts page shows the team's stats without an empty
+  table under a "disabled" error.
+- A cell that has never run no longer offers "Why stale?".
+- Adding, removing or importing packages from the Environment panel records
+  the environment as installed, as REST, the CLI and MCP do, so team-store
+  publishing is no longer skipped until a reopen, and "Last sync" updates.
+- In service mode a `# @worker` naming a worker from the server's catalog no
+  longer warns that it is not declared and execution will fail; one naming a
+  worker the notebook declares, which service mode refuses, is flagged.
+- Jupyter import no longer drops code from a `;`-suppressed cell containing
+  U+2028, a form feed or a bare carriage return.
+- Loading the configuration (importing `strata.server`, CLI commands,
+  notebook runs) no longer creates the `artifacts`, `cache` and `notebooks`
+  directories under `~/.strata`; the server creates them when it starts.
+- Cells that do not use matplotlib no longer import `matplotlib.pyplot`, so
+  its font-cache notice no longer shows up as another cell's stderr.
+- A snapshot import's `name` names the notebook, not only its directory.
+- `strata artifact publish` prints the link with `STRATA_PUBLIC_BASE_URL` and
+  `STRATA_PUBLIC_BASE_PATH`.
+- The TUI data viewer's key hint,
+  `[n]ext [p]rev  [s]ort col  [e]xport csv`, shows its brackets.
 
 ## 0.8.0 - 2026-09-27
 
