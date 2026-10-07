@@ -4262,11 +4262,12 @@
 <p>Most <code>4xx</code> and <code>5xx</code> responses use FastAPI's standard JSON shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;human-readable error message&gt;"</span><span class="p">}</span>
 </code></pre></div>
-<p>Some carry an object in <code>detail</code> instead. The notebook <code>409</code>s name a <code>code</code>
-and a <code>message</code>, plus context for that code: <code>environment_job</code> on
-<code>ENVIRONMENT_BUSY</code>, <code>cell_id</code> and <code>held_by</code> on <code>cell_locked</code>. Some core-route
-<code>400</code>s and <code>403</code>s name an <code>error</code> (<code>writes_disabled</code>, <code>transform_unknown</code>, …)
-and a <code>message</code>.</p>
+<p>Some carry an object in <code>detail</code> instead. The environment, cell-lock and
+quiesce <code>409</code>s name a <code>code</code> and a <code>message</code>, plus context for that code:
+<code>environment_job</code> on <code>ENVIRONMENT_BUSY</code>, <code>cell_id</code> and <code>held_by</code> on
+<code>cell_locked</code>. Some core-route <code>400</code>s and <code>403</code>s name an <code>error</code>
+(<code>writes_disabled</code>, <code>transform_unknown</code>, …) and a <code>message</code>. A <code>409</code> because a
+cell is already running (execute, close, delete) carries a plain string.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cell_locked"</span><span class="p">,</span><span class="w"> </span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a1b2c3d4"</span><span class="p">,</span><span class="w"> </span><span class="nt">"held_by"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span><span class="w"> </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}}</span>
 </code></pre></div>
 <p>Four middleware responses are plain text, not JSON: the host check's <code>400</code> (a
@@ -4313,7 +4314,7 @@ JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</c
 </tr>
 <tr>
 <td><code>403</code></td>
-<td>Authenticated, but missing the required scope (e.g. <code>admin:cache</code>), or a personal-mode-only endpoint called in service mode. A table the ACL denies, or another tenant's artifact, build or stream, is <code>404</code> instead while <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true</code> (the default)</td>
+<td>Authenticated, but missing the required scope (e.g. <code>admin:cache</code>), or a personal-mode-only endpoint called in service mode; also a browser write whose <code>Origin</code> the server does not allow. A table the ACL denies, or another tenant's artifact, build or stream, is <code>404</code> instead while <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true</code> (the default)</td>
 </tr>
 <tr>
 <td><code>404</code></td>
@@ -4321,7 +4322,7 @@ JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</c
 </tr>
 <tr>
 <td><code>409</code></td>
-<td>Conflict - concurrent environment job, a cell someone else is editing (<code>cell_locked</code>), or a quiesced notebook (<code>NOTEBOOK_QUIESCED</code>)</td>
+<td>Conflict - concurrent environment job, a cell already running in the notebook (execute, close, delete), a cell someone else is editing (<code>cell_locked</code>), or a quiesced notebook (<code>NOTEBOOK_QUIESCED</code>)</td>
 </tr>
 <tr>
 <td><code>413</code></td>
@@ -4364,7 +4365,17 @@ JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</c
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">"starter_cell"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">}</span>
 </code></pre></div>
-<p>Returns notebook state with <code>session_id</code>.</p>
+<p>Returns notebook state with <code>session_id</code> as soon as the notebook exists. Unlike
+<code>open</code>, it does not wait for the environment: the new venv's first <code>uv sync</code>
+runs as an environment job, which the response reports in <code>environment_job</code>
+(<code>status: "running"</code>) and <code>environment.sync_state</code> (<code>"pending"</code>), so a client
+can show the notebook while it builds. Until the job finishes, running a cell,
+starting another environment job or deleting the notebook answers <code>409</code> with
+<code>code: "ENVIRONMENT_BUSY"</code>. To run cells straight after creating, wait for the
+<code>environment_job_finished</code> WebSocket frame, or poll
+<a href="#get-current-environment-job"><code>GET /v1/notebooks/{session_id}/environment/jobs/current</code></a>
+until <code>environment_job.status</code> is <code>completed</code> (or <code>failed</code>). <code>POST
+/v1/notebooks/import</code> behaves the same way.</p>
 <h3 id="open-notebook">Open Notebook<a class="headerlink" href="#open-notebook" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>POST /v1/notebooks/open
 </code></pre></div>
@@ -4513,8 +4524,9 @@ one. The UI uses it to prune its recent-notebooks list. Needs <code>notebook:wri
 <a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/path/to/notebook"</span>
 <a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="p">}</span>
 </code></pre></div>
-<p>Deletes a notebook directory by filesystem path. This is primarily a personal-mode
-management endpoint.</p>
+<p>Deletes a notebook directory by filesystem path. Personal mode only (<code>403</code> in
+service mode). An open session on the path is closed first; <code>409</code> while it runs
+a cell or an environment job.</p>
 <h3 id="rename-notebook">Rename Notebook<a class="headerlink" href="#rename-notebook" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>PUT /v1/notebooks/{session_id}/name
 </code></pre></div>
@@ -4575,7 +4587,8 @@ authenticated caller to credit.</p>
 <p>The optional <code>mode</code> query parameter selects the run mode: <code>normal</code> (default -
 use the cache and materialize stale upstreams), <code>rerun</code> (bypass the target
 cell's cache, still materialize upstreams), or <code>force</code> (run against whatever
-upstream artifacts already exist). An unrecognized mode returns <code>400</code>.</p>
+upstream artifacts already exist). An unrecognized mode returns <code>400</code>.
+While another cell in the notebook runs, the request is refused with <code>409</code>.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 </div>
@@ -4687,7 +4700,9 @@ endpoint blocks the request until the sync finishes.</p>
 <a id="__codelineno-51-3" name="__codelineno-51-3" href="#__codelineno-51-3"></a><span class="w">  </span><span class="nt">"package"</span><span class="p">:</span><span class="w"> </span><span class="s2">"scikit-learn"</span>
 <a id="__codelineno-51-4" name="__codelineno-51-4" href="#__codelineno-51-4"></a><span class="p">}</span>
 </code></pre></div>
-<p>Actions: <code>add</code>, <code>remove</code>, <code>sync</code>, <code>import</code>, <code>change_python</code>, <code>r_init</code>, <code>r_add</code>.</p>
+<p>Actions: <code>add</code>, <code>remove</code> and <code>r_add</code> (each needs <code>package</code>), <code>sync</code>, <code>import</code>,
+<code>r_init</code>. A Python version change goes through
+<a href="#change-python-version">Change Python Version</a>. Returns <strong>202</strong> with the job.</p>
 <p>For <code>import</code>, send exactly one of <code>requirements</code> or <code>environment_yaml</code>.</p>
 <h3 id="change-python-version">Change Python Version<a class="headerlink" href="#change-python-version" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a>PUT /v1/notebooks/{session_id}/python-version
@@ -4732,6 +4747,8 @@ not in the server's <code>available_python_versions</code> is a <code>400</code>
 <h3 id="update-worker-catalog">Update Worker Catalog<a class="headerlink" href="#update-worker-catalog" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-63-1" name="__codelineno-63-1" href="#__codelineno-63-1"></a>PUT /v1/notebooks/{session_id}/workers
 </code></pre></div>
+<p>Replaces the notebook's <code>[[workers]]</code>. A worker named <code>local</code> is refused with
+<code>400</code>: the name is reserved for the built-in worker.</p>
 <h3 id="ssh-workers">SSH Workers<a class="headerlink" href="#ssh-workers" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-64-1" name="__codelineno-64-1" href="#__codelineno-64-1"></a>GET    /v1/notebooks/{session_id}/workers/ssh
 <a id="__codelineno-64-2" name="__codelineno-64-2" href="#__codelineno-64-2"></a>POST   /v1/notebooks/{session_id}/workers/ssh
@@ -4792,7 +4809,8 @@ kept in-memory until the session reloads.</p>
 </code></pre></div>
 <p>Enumerates the tables and columns visible through the named connection. Used by
 the schema sidebar. Opens the connection read-only; an unknown connection is a
-<code>404</code>, an unknown driver a <code>400</code>, and a driver that fails to connect or
+<code>404</code>; an unknown driver, a database the server may not open, or credentials it
+cannot resolve a <code>400</code>; and a driver that fails to connect or
 enumerate a <code>502</code> carrying its message, so auth / driver / connectivity
 failures are visible to the UI.</p>
 <h2 id="artifacts">Artifacts<a class="headerlink" href="#artifacts" title="Permanent link">&para;</a></h2>
@@ -5044,16 +5062,22 @@ one.</p>
 <p>The routes the client SDK and the web UI call that no feature page covers.
 The gate column uses these terms:</p>
 <ul>
-<li><strong>read</strong>: open in both modes; under principal auth scoped to the caller's
-  tenant (<code>admin:*</code> sees every tenant).</li>
+<li><strong>read</strong>: open in both modes. Under principal auth, a route that takes an
+  artifact id (<code>/v1/artifacts/{id}/v/{n}</code> and its <code>lineage</code> and <code>dependents</code>)
+  answers for the caller's tenant's versions and tenantless ones, refuses a
+  caller with no tenant (<code>400</code>), and lets <code>admin:*</code> reach every tenant. Name,
+  alias, tag, pending, tag-search and provenance lookups resolve in the
+  caller's own tenant (the default tenant when it has none), <code>admin:*</code>
+  included.</li>
 <li><strong>write</strong>: personal mode, or service mode with
   <code>STRATA_SERVICE_WRITES_ENABLED</code> and the <code>artifacts:write</code> scope.</li>
 <li><strong>personal</strong>: personal mode only; <code>403</code> in service mode.</li>
 <li><strong>build</strong>: personal mode, or service mode with transforms enabled.</li>
 <li><strong>open</strong>: no gate beyond the server's authentication.</li>
 </ul>
-<p>Name, alias, tag and registry reads on a server with
-<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> set answer from that team store.</p>
+<p>On a server with <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> set, the name, alias,
+tag and registry routes, writes included, and artifact lineage are answered
+by that team store, after this server's own gate.</p>
 <table>
 <thead>
 <tr>
@@ -5074,7 +5098,7 @@ The gate column uses these terms:</p>
 <td><code>DELETE</code></td>
 <td><code>/v1/artifacts/{id}/v/{n}</code></td>
 <td>personal</td>
-<td>Delete a version, its blob and its name pointers</td>
+<td>Delete a version, its blob and its name pointers; a published version is a <code>409</code> until withdrawn</td>
 </tr>
 <tr>
 <td><code>GET</code></td>

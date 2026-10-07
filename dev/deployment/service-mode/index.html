@@ -1825,6 +1825,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Minimum service-mode env vars">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rotating-the-proxy-token-and-the-signing-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotating the proxy token and the signing secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1832,6 +1849,17 @@
     <span class="md-ellipsis">
       
         What service mode changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-more-than-one-replica" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running more than one replica
       
     </span>
   </a>
@@ -2262,6 +2290,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Minimum service-mode env vars">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rotating-the-proxy-token-and-the-signing-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rotating the proxy token and the signing secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2269,6 +2314,17 @@
     <span class="md-ellipsis">
       
         What service mode changes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-more-than-one-replica" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running more than one replica
       
     </span>
   </a>
@@ -2490,43 +2546,74 @@ proxy that:</p>
 <ol>
 <li><strong>Terminates auth</strong>: JWT, OIDC, mTLS, Cloudflare Access, SAML,
    whatever. Strata doesn't care which.</li>
-<li><strong>Injects identity headers</strong> on every request:</li>
+<li><strong>Sets every identity header on every request</strong>, replacing whatever
+   the client sent:</li>
 </ol>
 <table>
 <thead>
 <tr>
 <th>Header</th>
 <th>Value</th>
-<th>Required</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>X-Strata-Principal</code></td>
 <td>Stable user identifier (email, sub claim, etc.)</td>
-<td>Yes</td>
 </tr>
 <tr>
 <td><code>X-Tenant-ID</code></td>
-<td>Tenant the user belongs to, when multi-tenant is on. Header name is configurable via <code>tenant_header</code>.</td>
-<td>When <code>multi_tenant_enabled=true</code></td>
+<td>Tenant the user belongs to. Header name is configurable via <code>tenant_header</code>. Empty when multi-tenancy is off.</td>
 </tr>
 <tr>
 <td><code>X-Strata-Scopes</code></td>
-<td>Space-separated capability set (e.g. <code>notebook:read notebook:write artifacts:write admin:cache</code>)</td>
-<td>For scope-gated endpoints</td>
+<td>Space-separated capability set (e.g. <code>notebook:read notebook:write artifacts:write admin:cache</code>). Empty for a user with no scopes.</td>
 </tr>
 <tr>
 <td><code>X-Strata-Proxy-Token</code></td>
-<td>Shared secret matching <code>STRATA_PROXY_TOKEN</code></td>
-<td>Yes, proves the request came from the proxy, not a direct connection</td>
+<td>Shared secret matching <code>STRATA_PROXY_TOKEN</code>; proves the request came through the proxy</td>
 </tr>
 </tbody>
 </table>
-<p>Machine callers that do not sit behind the proxy (a CI job, an ETL
-service) authenticate with an API key instead: <code>strata apikey create</code>
-issues one, and the key carries its own principal, tenant and scopes.
-See <a href="../../reference/configuration/#api-key-authentication">Configuration → API keys</a>.</p>
+<p>Strata cannot tell a header the proxy set from one the client sent
+   and the proxy passed along. A header the proxy leaves alone reaches
+   Strata from the client: a proxy that sets no <code>X-Strata-Scopes</code> for a
+   user lets that user send <code>X-Strata-Scopes: admin:*</code> and become an
+   admin. So the proxy sets all four on every request, and sets an
+   empty value when the user has none (nginx drops a header set to
+   <code>""</code>, which is what you want). A minimal nginx block:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">map</span><span class="w"> </span><span class="nv">$http_upgrade</span><span class="w"> </span><span class="nv">$connection_upgrade</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="c1"># in the http {} block</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="kn">default</span><span class="w"> </span><span class="s">upgrade</span><span class="p">;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="kn">''</span><span class="w">      </span><span class="s">close</span><span class="p">;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="k">location</span><span class="w"> </span><span class="s">/</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="kn">proxy_pass</span><span class="w"> </span><span class="s">http://strata:8765</span><span class="p">;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="kn">proxy_http_version</span><span class="w"> </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">Upgrade</span><span class="w"> </span><span class="nv">$http_upgrade</span><span class="p">;</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">Connection</span><span class="w"> </span><span class="nv">$connection_upgrade</span><span class="p">;</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">Host</span><span class="w"> </span><span class="nv">$http_host</span><span class="p">;</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="c1"># Every identity header, on every request, from the auth layer only.</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Strata-Proxy-Token</span><span class="w"> </span><span class="s">"&lt;shared-secret&gt;"</span><span class="p">;</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Strata-Principal</span><span class="w">   </span><span class="nv">$authenticated_user</span><span class="p">;</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Tenant-ID</span><span class="w">          </span><span class="nv">$authenticated_tenant</span><span class="p">;</span><span class="w">  </span><span class="c1"># "" if multi-tenancy is off</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Strata-Scopes</span><span class="w">      </span><span class="nv">$authenticated_scopes</span><span class="p">;</span><span class="w">  </span><span class="c1"># "" for no scopes</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>$authenticated_*</code> stand for whatever your auth layer provides (for
+   example <code>auth_request_set</code> from an <code>auth_request</code> subrequest). If you
+   renamed a header with <code>STRATA_PRINCIPAL_HEADER</code>, <code>STRATA_TENANT_HEADER</code>
+   or <code>STRATA_SCOPES_HEADER</code>, set the renamed one. Check it from outside
+   the proxy: a request carrying <code>X-Strata-Scopes: admin:*</code> for an
+   ordinary user must still get 403 from <code>GET /v1/logs</code>. The demo
+   stack's <code>.docker/service-mode/nginx.conf</code> sets all four.</p>
+<p>API keys are a separate auth mode (<code>STRATA_AUTH_MODE=api_key</code>) for a
+server no proxy fronts: <code>strata apikey create</code> issues one, and the key
+carries its own principal, tenant and scopes. A trusted-proxy server
+ignores them, so machine callers (a CI job, an ETL service) of a proxied
+server go through the proxy like everyone else. See
+<a href="../../reference/configuration/#api-key-authentication">Configuration → API keys</a>.</p>
 <ol>
 <li><strong>Is the only path to Strata.</strong> Strata is on a private network /
    VPC / Kubernetes namespace; the proxy is the only ingress.
@@ -2547,7 +2634,7 @@ that rewrites <code>Host</code> has to list the public origin in
 <p>The repo ships a complete service-mode demo: Strata + a notebook
 executor sidecar + an nginx proxy that injects two pre-baked
 identities for testing.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.service.yml<span class="w"> </span>up<span class="w"> </span>--build
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.service.yml<span class="w"> </span>up<span class="w"> </span>--build
 </code></pre></div>
 <p>The proxy exposes Strata on two ports, same server, different
 synthesized callers:</p>
@@ -2593,31 +2680,31 @@ because a service-mode server does not run cell code on its own host (see
 the proxy container (<code>docker compose -f docker-compose.service.yml
 restart proxy</code>).</p>
 <h2 id="production-reference-architecture">Production reference architecture<a class="headerlink" href="#production-reference-architecture" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>┌────────────────┐     ┌─────────────────┐     ┌──────────────┐
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>│  Your auth     │     │                 │     │              │
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>│  provider      │◄────┤  Auth proxy     │     │  Strata      │
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>│  (OIDC/SAML/   │     │  (nginx,        │────►│  (service    │
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   Cloudflare   │     │   Envoy,        │     │   mode)      │
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   Access, …)   │     │   Cloud Run     │     │              │
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│                │     │   ingress, …)   │     │              │
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>└────────────────┘     │                 │     └──────┬───────┘
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>                       │  Adds headers:  │            │
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>                       │  Principal      │            ▼
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>                       │  Tenant         │     ┌──────────────┐
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>                       │  Scopes         │     │ Notebook     │
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>                       │  Proxy-Token    │     │ executors    │
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>                       └─────────────────┘     │ (sidecars or │
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>                                               │  remote)     │
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>                                               └──────┬───────┘
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>                                                      │
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>                                                      ▼
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                                        ┌─────────────────────────┐
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>                                        │ Artifact store          │
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>                                        │                         │
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>                                        │  metadata → Postgres    │
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>                                        │  blobs    → S3 / GCS /  │
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>                                        │             Azure       │
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>                                        └─────────────────────────┘
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>┌────────────────┐     ┌─────────────────┐     ┌──────────────┐
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>│  Your auth     │     │                 │     │              │
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>│  provider      │◄────┤  Auth proxy     │     │  Strata      │
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>│  (OIDC/SAML/   │     │  (nginx,        │────►│  (service    │
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>│   Cloudflare   │     │   Envoy,        │     │   mode)      │
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>│   Access, …)   │     │   Cloud Run     │     │              │
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>│                │     │   ingress, …)   │     │              │
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>└────────────────┘     │                 │     └──────┬───────┘
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>                       │  Adds headers:  │            │
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>                       │  Principal      │            ▼
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>                       │  Tenant         │     ┌──────────────┐
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>                       │  Scopes         │     │ Notebook     │
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>                       │  Proxy-Token    │     │ executors    │
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>                       └─────────────────┘     │ (sidecars or │
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>                                               │  remote)     │
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>                                               └──────┬───────┘
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>                                                      │
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>                                                      ▼
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>                                        ┌─────────────────────────┐
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>                                        │ Artifact store          │
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>                                        │                         │
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>                                        │  metadata → Postgres    │
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>                                        │  blobs    → S3 / GCS /  │
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>                                        │             Azure       │
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>                                        └─────────────────────────┘
 </code></pre></div>
 <p>Strata sits on a private network, only the auth proxy can reach it.
 Notebook execution dispatches to executors; the demo stack runs one
@@ -2635,35 +2722,52 @@ startup for the same reason: shared metadata pointing at blobs only one
 node can read is worse than either alone. See
 <a href="../../reference/configuration/#sharing-one-artifact-store-across-nodes">Configuration → artifact metadata</a>
 for the settings and <code>strata migrate</code> for moving an existing store
-across.</p>
+across, and <a href="#running-more-than-one-replica">Running more than one replica</a>
+for what else the nodes must share.</p>
 <h2 id="minimum-service-mode-env-vars">Minimum service-mode env vars<a class="headerlink" href="#minimum-service-mode-env-vars" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Required</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">  </span><span class="c1"># required with any artifact store, blob backend or not</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Multi-tenancy (optional but recommended for &gt;1 team)</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="nv">STRATA_REQUIRE_TENANT_HEADER</span><span class="o">=</span><span class="nb">true</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="nv">STRATA_TENANT_HEADER</span><span class="o">=</span>X-Tenant-ID<span class="w">  </span><span class="c1"># match what your proxy injects</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Required</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">  </span><span class="c1"># required with any artifact store, blob backend or not</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nv">STRATA_HOST</span><span class="o">=</span><span class="m">0</span>.0.0.0<span class="w">               </span><span class="c1"># default 127.0.0.1; bind wider when the proxy runs on another host</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="nv">STRATA_TRANSFORM_SIGNING_SECRET</span><span class="o">=</span>&lt;stable-secret&gt;<span class="w">  </span><span class="c1"># unset: a random one per process, so signed URLs die on restart and differ across replicas</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="c1"># Multi-tenancy (optional but recommended for &gt;1 team)</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="nv">STRATA_REQUIRE_TENANT_HEADER</span><span class="o">=</span><span class="nb">true</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="nv">STRATA_TENANT_HEADER</span><span class="o">=</span>X-Tenant-ID<span class="w">  </span><span class="c1"># match what your proxy injects</span>
 </code></pre></div>
 <p>Run the server normally:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># or</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata-notebook<span class="w">   </span><span class="c1"># or `uv run strata-notebook` in a checkout</span>
 </code></pre></div>
+<h3 id="rotating-the-proxy-token-and-the-signing-secret">Rotating the proxy token and the signing secret<a class="headerlink" href="#rotating-the-proxy-token-and-the-signing-secret" title="Permanent link">&para;</a></h3>
+<p><code>STRATA_PROXY_TOKEN</code> holds one value, with no overlap window: change it on
+the proxy and the server together, and requests that arrive between the two
+changes get a <code>401</code>. Changing <code>STRATA_TRANSFORM_SIGNING_SECRET</code> invalidates
+every signed URL already issued, so a build in flight on a <code>signed</code> worker
+fails; rotate it between runs and give every replica the same value.</p>
 <h2 id="what-service-mode-changes">What service mode changes<a class="headerlink" href="#what-service-mode-changes" title="Permanent link">&para;</a></h2>
 <p>Compared to personal mode:</p>
 <ul>
 <li><strong>No default artifact dir.</strong> The artifact store exists only when
-  <code>STRATA_ARTIFACT_DIR</code> is set, including when
-  <code>STRATA_ARTIFACT_METADATA_DSN</code> and a blob backend such as
-  <code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code> hold everything durable; the
-  directory then keeps nothing that needs a backup. Service mode refuses
-  to start with a DSN, a non-local blob backend or
-  <code>STRATA_SERVICE_WRITES_ENABLED</code> and no <code>STRATA_ARTIFACT_DIR</code>. Without
-  any of those it runs scan-only, with no artifact store.</li>
+  <code>STRATA_ARTIFACT_DIR</code> is set, even when its metadata and blobs live
+  elsewhere. Service mode refuses to start with a DSN, a non-local blob
+  backend or <code>STRATA_SERVICE_WRITES_ENABLED</code> and no
+  <code>STRATA_ARTIFACT_DIR</code>. Without any of those it runs scan-only, with no
+  artifact store.</li>
+<li><strong>What is durable, and where.</strong> The <em>metadata store</em> (Postgres with
+  <code>STRATA_ARTIFACT_METADATA_DSN</code>, otherwise <code>artifacts.sqlite</code> in the
+  artifact directory) holds artifact metadata, names, aliases,
+  publications, pins, API keys and the server-managed
+  <a href="../../notebook/workers/#server-managed-workers-service-mode">worker registry</a>.
+  The <em>blob store</em> holds artifact bytes: the configured bucket, or
+  <code>blobs/</code> in the artifact directory with the local backend. Notebooks
+  live in <code>STRATA_NOTEBOOK_STORAGE_DIR</code>. Back up those three. The
+  artifact directory itself is node-local working space, and the SQLite
+  file and local blobs are the only durable things in it, so with a DSN
+  and a bucket it holds nothing that needs a backup. The row-group cache
+  (<code>STRATA_CACHE_DIR</code>) is a cache and can always be thrown away.</li>
 <li><strong>Reads work; direct writes are off by default.</strong> Clients can read
   results - scan/stream a table, fetch an artifact's data
   (<code>GET /v1/artifacts/{id}/v/{n}/data</code>), and resolve a dataset by name
@@ -2687,6 +2791,46 @@ across.</p>
   gets its own QoS limiter pool, its own metric labels, and its own
   cache keying, bulk queries from tenant A can't starve tenant B's
   dashboards.</li>
+</ul>
+<h2 id="running-more-than-one-replica">Running more than one replica<a class="headerlink" href="#running-more-than-one-replica" title="Permanent link">&para;</a></h2>
+<p>Several service-mode nodes can sit behind one proxy when they share
+everything durable:</p>
+<ul>
+<li><strong>One metadata store and one blob store.</strong> Every node sets the same
+  <code>STRATA_ARTIFACT_METADATA_DSN</code> and the same bucket (see
+  <a href="#production-reference-architecture">above</a>). The worker registry
+  lives in the metadata store, so a worker added through
+  <code>/v1/admin/notebook-workers</code> on one node is offered by every node from
+  its next request.</li>
+<li><strong>One notebook storage.</strong> Every node mounts the same
+  <code>STRATA_NOTEBOOK_STORAGE_DIR</code> (NFS, EFS, Filestore or similar), so any
+  node can open any notebook. A notebook's environment is built inside
+  its directory (or in <code>STRATA_NOTEBOOK_SHARED_ENV_DIR</code>, which then has
+  to be shared too), so run the same image on every node.</li>
+<li><strong>The same secrets.</strong> <code>STRATA_PROXY_TOKEN</code> and
+  <code>STRATA_TRANSFORM_SIGNING_SECRET</code> must match on every node, or a URL
+  signed on one node fails on another. Set <code>STRATA_NODE_ADVERTISED_URL</code>
+  per node to its own address, so stream fetches and a remote cell's
+  console reach the right node (see
+  <a href="../../reference/configuration/#running-several-nodes-behind-one-address">Running several nodes</a>).</li>
+<li><strong>Session-affine routing.</strong> A notebook session, which
+  <code>POST /v1/notebooks/open</code> or <code>/create</code> returns, lives in the memory of
+  the node that opened it, together with its WebSocket and running
+  cells. Every later request for it must reach that node; any other node
+  answers <code>404</code>. Route each user to one node, with a sticky cookie or a
+  hash of the principal header, so the open and everything after it land
+  together.</li>
+</ul>
+<p>Not supported:</p>
+<ul>
+<li><strong>Moving a live session.</strong> When a node goes away its sessions go with
+  it. Opening the notebook again on another node starts a new session;
+  cells whose inputs did not change are cache hits when they run again.</li>
+<li><strong>One notebook open on two nodes at once.</strong> Each node keeps its own
+  session and writes the same files, with nothing coordinating them.</li>
+<li><strong>Cluster-wide views of per-node state.</strong> Cache warm jobs
+  (<code>/v1/cache/warm/jobs*</code>), QoS limits, rate limits and metrics are per
+  node; sum the metrics in your dashboards.</li>
 </ul>
 <h2 id="multi-tenancy">Multi-tenancy<a class="headerlink" href="#multi-tenancy" title="Permanent link">&para;</a></h2>
 <p><code>STRATA_MULTI_TENANT_ENABLED=true</code> activates per-tenant isolation.
@@ -2730,21 +2874,21 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
 <p>A tenant registry tracks active tenants (LRU-bounded; only a tenant with nothing in flight is evicted). <a href="https://github.com/bearing-research/strata/tree/main/src/strata">Implementation details are in the source tree</a> if you need to extend the tenant-scoping behavior.</p>
 <h2 id="acls">ACLs<a class="headerlink" href="#acls" title="Permanent link">&para;</a></h2>
 <p><code>acl_config</code> is a <code>pyproject.toml</code> block:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[tool.strata.acl_config]</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Action when no rule matches. Defaults to "allow" -- set it to "deny"</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># if you want an allowlist, or every table not named below stays readable.</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"deny"</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Deny rules evaluate first; explicit denies cannot be bypassed.</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># "*:" covers every address of a table (see the configuration reference).</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="k">[[tool.strata.acl_config.deny]]</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"guest@example.com"</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"*:internal.*"</span><span class="p">]</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="k">[[tool.strata.acl_config.allow]]</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"analyst@example.com"</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">tenant</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"marketing"</span><span class="w">          </span><span class="c1"># optional; omit to match any tenant</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"file:marketing.*"</span><span class="p">,</span><span class="w"> </span><span class="s2">"file:public.*"</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[tool.strata.acl_config]</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># Action when no rule matches. Defaults to "allow" -- set it to "deny"</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># if you want an allowlist, or every table not named below stays readable.</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"deny"</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># Deny rules evaluate first; explicit denies cannot be bypassed.</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># "*:" covers every address of a table (see the configuration reference).</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="k">[[tool.strata.acl_config.deny]]</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"guest@example.com"</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"*:internal.*"</span><span class="p">]</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="k">[[tool.strata.acl_config.allow]]</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"analyst@example.com"</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="n">tenant</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"marketing"</span><span class="w">          </span><span class="c1"># optional; omit to match any tenant</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"file:marketing.*"</span><span class="p">,</span><span class="w"> </span><span class="s2">"file:public.*"</span><span class="p">]</span>
 </code></pre></div>
 <p>A rule matches when the principal matches (<code>*</code> matches any, and is the
 default), the tenant matches if the rule names one, and <strong>at least one</strong> table
@@ -2874,22 +3018,22 @@ directly - <code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags
   <code>404 Artifact not found</code>, the same as a missing artifact or a read of it.
   The publishing principal is recorded in the registry audit.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">   </span><span class="c1"># required with any artifact store, blob backend or not</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">              </span><span class="c1"># team = tenant</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="nv">STRATA_SERVICE_WRITES_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">            </span><span class="c1"># the opt-in</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/dir<span class="w">   </span><span class="c1"># required with any artifact store, blob backend or not</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">              </span><span class="c1"># team = tenant</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nv">STRATA_SERVICE_WRITES_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">            </span><span class="c1"># the opt-in</span>
 </code></pre></div>
 <p>The proxy injects <code>X-Strata-Scopes: artifacts:write</code> for principals allowed to
 publish. The publish → consume loop then looks like:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Researcher A (team-a, artifacts:write) publishes a processed dataset:</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[],</span> <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">"ref"</span><span class="p">:</span> <span class="s2">"clean@v1"</span><span class="p">},</span> <span class="n">data</span><span class="o">=</span><span class="n">cleaned</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Any teammate (team-a) resolves the name to its current artifact and reads it:</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">info</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">resolve_name</span><span class="p">(</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>  <span class="c1"># {artifact_uri, version, …}</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># Other-team principals (team-b) cannot resolve team-a's name - tenant isolation.</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Researcher A (team-a, artifacts:write) publishes a processed dataset:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[],</span> <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">"ref"</span><span class="p">:</span> <span class="s2">"clean@v1"</span><span class="p">},</span> <span class="n">data</span><span class="o">=</span><span class="n">cleaned</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Any teammate (team-a) resolves the name to its current artifact and reads it:</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">info</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">resolve_name</span><span class="p">(</span><span class="s2">"team/cleaned-events"</span><span class="p">)</span>  <span class="c1"># {artifact_uri, version, …}</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># Other-team principals (team-b) cannot resolve team-a's name - tenant isolation.</span>
 </code></pre></div>
 <h3 id="connecting-a-notebook-to-the-shared-store">Connecting a notebook to the shared store<a class="headerlink" href="#connecting-a-notebook-to-the-shared-store" title="Permanent link">&para;</a></h3>
 <p>Each researcher runs their own notebook, which <strong>computes locally</strong> but points
@@ -2897,10 +3041,10 @@ its ambient <code>strata</code> client at the central store via
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>. The notebook's own cell outputs and
 provenance stay local; only what a cell explicitly publishes
 (<code>strata.put(name=…)</code>) goes to the shared store.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># On each researcher's notebook server:</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_URL</span><span class="o">=</span>https://store.team.example
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Auth the remote store needs (set via env, not committed config):</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</span><span class="o">=</span><span class="s1">'{"X-Strata-Proxy-Token":"…","X-Strata-Principal":"alice@team","X-Tenant-ID":"team-a","X-Strata-Scopes":"artifacts:write"}'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># On each researcher's notebook server:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_URL</span><span class="o">=</span>https://store.team.example
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># Auth the remote store needs (set via env, not committed config):</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</span><span class="o">=</span><span class="s1">'{"X-Strata-Proxy-Token":"…","X-Strata-Principal":"alice@team","X-Tenant-ID":"team-a","X-Strata-Scopes":"artifacts:write"}'</span>
 </code></pre></div>
 <p>In a fully proxy-fronted setup the notebook's requests instead flow through the
 same auth proxy, which injects identity, and <code>notebook_remote_store_headers</code>
@@ -2925,8 +3069,8 @@ miss</strong> the notebook asks the shared store whether anyone has already run 
 exact computation, and on a hit it fetches the result instead of running the
 cell. After a cell does run, its outputs are offered back to the store so the
 next teammate hits.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># On each researcher's notebook server, alongside the two settings above:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># On each researcher's notebook server, alongside the two settings above:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
 </code></pre></div>
 <p>It works because a cell's provenance key -
 <code>sha256(sorted_input_hashes + source_hash + env_hash)</code> - contains no notebook id
@@ -3035,8 +3179,8 @@ the team's store, whether or not they meant to share it.</p>
 </tbody>
 </table>
 <p>Under <code>promoted</code>, a result reaches the team when someone says so:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c2_var_model<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/model<span class="w"> </span>--alias<span class="w"> </span>champion
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c2_var_model<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/model<span class="w"> </span>--alias<span class="w"> </span>champion
 </code></pre></div>
 <p><code>--tag KEY=VALUE</code> (repeatable) tags the promoted version, <code>--header 'Name:
 value'</code> (repeatable) adds a header for <code>--to</code> beyond the <code>STRATA_STORE_TOKEN</code>
@@ -3059,7 +3203,7 @@ where the tab reads, and a protected alias filed from one person's server gets
 approved from another's.</p>
 <p>A cell can promote one of its own upstream results without leaving the
 notebook, naming it the way the cell reads it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">strata</span><span class="o">.</span><span class="n">promote</span><span class="p">(</span><span class="s2">"rows"</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"taxi/rows"</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">"champion"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">strata</span><span class="o">.</span><span class="n">promote</span><span class="p">(</span><span class="s2">"rows"</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"taxi/rows"</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">"champion"</span><span class="p">)</span>
 </code></pre></div>
 <p><code>off</code> is the whole feature off without unsetting
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>, which a cell's ambient <code>strata</code> client
@@ -3067,9 +3211,9 @@ still needs.</p>
 <h3 id="promoting-into-an-iceberg-table">Promoting into an Iceberg table<a class="headerlink" href="#promoting-into-an-iceberg-table" title="Permanent link">&para;</a></h3>
 <p>A tabular result can also become a table in the team's warehouse, so tools
 outside Strata read it as a table and a notebook reads it with <code>@table</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c1_var_features<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/features<span class="w"> </span>--alias<span class="w"> </span>champion<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span>--table<span class="w"> </span><span class="s2">"s3://lake/warehouse#taxi.features"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>promote<span class="w"> </span>nb_taxi_cell_c1_var_features<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>--to<span class="w"> </span>https://store.example<span class="w"> </span>--name<span class="w"> </span>taxi/features<span class="w"> </span>--alias<span class="w"> </span>champion<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>--table<span class="w"> </span><span class="s2">"s3://lake/warehouse#taxi.features"</span>
 </code></pre></div>
 <p>The team store does the writing, with its own catalog settings, since that is
 where the bytes and the warehouse credentials are. <code>--table</code> takes the same
@@ -3119,7 +3263,7 @@ say how that is safe. There are two answers:</p>
    different host is isolation that needs nothing arranged on this one.</li>
 <li><strong>Run cells as a separate OS user.</strong> Set <code>STRATA_NOTEBOOK_HARNESS_USER</code> to a
    user that exists on the server host. Cells then cannot read the server's
-   environment through <code>/proc</code>, its config, or other notebooks' files.</li>
+   environment through <code>/proc</code>, nor state the server keeps owner-only (below).</li>
 </ol>
 <p>Without either, a cell that would run on the server host fails with a message
 naming both. Cache hits are still served, since a hit starts no cell code.
@@ -3138,8 +3282,8 @@ inspect REPL, cell tests and the R package restore. It is POSIX only. What the h
 </thead>
 <tbody>
 <tr>
-<td>notebook directories</td>
-<td>read</td>
+<td>notebook directories (and, with multi-tenancy, each tenant's directory above them)</td>
+<td>read, or traverse for the tenant directory</td>
 </tr>
 <tr>
 <td>each notebook's <code>.venv</code></td>
@@ -3168,6 +3312,52 @@ and cell tests load their inputs in the test process.</p>
 <p>A cell run this way still shares the host's kernel and sees what any local user
 can. A notebook that needs more isolation than that wants a worker on another
 machine.</p>
+<p><strong>One harness user serves every tenant, so it is not a tenant isolation
+boundary.</strong> It keeps cells away from the server; it does not keep one tenant's
+cells away from another's. Every cell runs as the same user, and that user has
+to read every notebook directory, so a cell can read any tenant's notebook
+source and data files, and the bytes another notebook fetched (<code>.strata/fetch</code>)
+or mounted (<code>.strata/mount_cache</code>), given the path. Tenants that must not see
+each other need separate servers (or containers, each with its own storage),
+or every cell on workers that serve one tenant each.</p>
+<p>What Strata keeps from the harness user, and from any other account on the
+host, is its own state. It creates these owner-only, and narrows any an earlier
+release left wider when it next opens them:</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_ARTIFACT_DIR</code>, its <code>artifacts.sqlite</code> (with <code>-wal</code> / <code>-shm</code>) and <code>blobs/</code></td>
+<td>directories <code>0700</code>, files <code>0600</code></td>
+</tr>
+<tr>
+<td><code>STRATA_CACHE_DIR</code></td>
+<td><code>0700</code></td>
+</tr>
+<tr>
+<td>each notebook's <code>.strata/</code></td>
+<td><code>0711</code>: the harness user passes through to its per-run directories and inputs, but cannot list it</td>
+</tr>
+<tr>
+<td>in it, <code>artifacts/</code>, <code>console/</code>, <code>runtime.json</code> and <code>environment_jobs.json</code></td>
+<td><code>0700</code> / <code>0600</code></td>
+</tr>
+<tr>
+<td>each tenant's notebook directory under the storage root</td>
+<td><code>0711</code></td>
+</tr>
+</tbody>
+</table>
+<p>Strata only removes permission bits, so a stricter umask stands. Publication
+tokens are stored as their SHA-256, so even a copy of <code>artifacts.sqlite</code> holds no
+working link. Not covered, and yours to make owner-only: the server's config file
+(a <code>pyproject.toml</code> holding <code>proxy_token</code>), the server's home, and
+<code>STRATA_METADATA_DB</code>.</p>
 <p>SQL cells are different: their queries run inside the server process, not as
 the harness user, so the server checks which database file a SQLite or DuckDB
 connection opens. After resolving <code>../</code> and following links, its <code>path</code> must be
@@ -3240,14 +3430,21 @@ package in <code>renv.lock</code> where the notebook is authored, and the server
 when the notebook opens. Personal mode is unchanged.</p>
 <h3 id="what-a-cell-is-given-strata_notebook_harness_env_allowlist">What a cell is given: <code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code><a class="headerlink" href="#what-a-cell-is-given-strata_notebook_harness_env_allowlist" title="Permanent link">&para;</a></h3>
 <p>The allowlist narrows the environment a cell receives:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</span><span class="o">=</span>AWS_*,HF_TOKEN
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nv">STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</span><span class="o">=</span>AWS_*,HF_TOKEN
 </code></pre></div>
 <p>Entries are exact names or a prefix with a trailing <code>*</code>. The essentials a
-subprocess cannot start without are always included, and <code>STRATA_*</code> is dropped
+subprocess cannot start without are always included: <code>PATH</code>, <code>HOME</code>, the temp
+and locale variables, and <code>UV_*</code>, <code>PYTHON*</code>, <code>VIRTUAL_ENV</code>, <code>R_*</code> and
+<code>RSTUDIO_*</code>, except names that look like credentials (containing <code>KEY</code>,
+<code>SECRET</code>, <code>TOKEN</code>, <code>PASSWORD</code> or <code>CREDENTIAL</code>), <code>UV_PUBLISH_*</code> and
+<code>UV_INDEX_*_USERNAME</code>. So a private index's login, which the server's <code>uv sync</code>
+needs, does not reach cells; keep index credentials in those variables or a
+netrc rather than inside <code>UV_INDEX_URL</code>, which passes. <code>STRATA_*</code> is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
-accident is the failure the setting exists to prevent. It applies to every
-process that runs cell code, the same list as above.</p>
+accident is the failure the setting exists to prevent. A name you list exactly
+always passes. It applies to every process that runs cell code, the same list
+as above.</p>
 <p>The list stays short because a cell's own configuration does not come through
 the process environment. <code>[env]</code> in <code>notebook.toml</code> and mount credentials
 travel in the cell manifest and are applied inside the harness.</p>
@@ -3291,9 +3488,9 @@ server:</p>
 </li>
 <li>
 <p><strong>Flip the mode</strong> in env or <code>pyproject.toml</code>:
-   <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
 </code></pre></div>
    Boot will fail with a clear error if anything's missing, that's
    the fail-closed property at work.</p>
@@ -3306,11 +3503,21 @@ server:</p>
 </li>
 <li>
 <p><strong>(Optional) Add server-side transforms.</strong> Configure the
-   <code>transforms_config</code> block in <code>pyproject.toml</code> to expose the
+   <code>[tool.strata.transforms]</code> block in <code>pyproject.toml</code> to expose the
    computations you want the platform to run on the client's
-   behalf. The notebook executor in the demo stack is one example.</p>
+   behalf. The block is an allowlist: <code>enabled = true</code> (or
+   <code>STRATA_TRANSFORMS_ENABLED=true</code>) alone refuses every transform, so
+   list each one. The built-in SQL transform runs in the server process:</p>
 </li>
 </ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">[tool.strata.transforms]</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="k">[[tool.strata.transforms.registry]]</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"duckdb_sql@v1"</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="n">executor_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"embedded://local"</span>
+</code></pre></div>
+<p>The notebook executor in the demo stack is another example.</p>
 <p>The demo compose stack is a working starting point you can fork:
 swap <code>nginx.conf</code> for your real auth proxy config, move the
 artifact blobs to S3, and you have most of what production needs.</p>

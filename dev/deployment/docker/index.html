@@ -2266,6 +2266,11 @@ mental model.</p>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">STRATA_DEPLOYMENT_MODE=personal</span>
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">STRATA_CACHE_DIR=/home/strata/.strata/cache</span>
 </code></pre></div>
+<p>To serve on another host port, change the host side of <code>ports:</code>
+(<code>"9000:8765"</code>) and leave <code>STRATA_PORT</code> alone. Changing <code>STRATA_PORT</code>
+moves the port inside the container: the healthcheck follows it, but the
+container side of <code>ports:</code> (and, in the service-mode demo, the nginx
+upstream) must change with it.</p>
 <p>Browsing to <code>localhost</code> or the machine's IP address works as is. To
 reach the container by a host name (<code>devbox.lan</code>), add that name:
 personal mode answers only to the names it expects, so a DNS-rebinding

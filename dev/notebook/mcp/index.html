@@ -2355,8 +2355,9 @@ colleagues' cells already read from, inside a store that still needs
 credentials; publishing mints a link that needs none and exposes every upstream
 step's code and environment along with the result. <code>publish_preflight</code> returns
 that exposure list, and an agent should put it in front of the user and get
-their agreement before calling <code>publish</code>. Withdrawing is
-<code>strata artifact unpublish &lt;token&gt;</code>.</p>
+their agreement before calling <code>publish</code>. <code>publish</code> returns the <code>token</code> only
+when it mints the link; for a version already published it is empty, with the
+publication's <code>id</code>. Withdrawing is <code>strata artifact unpublish &lt;token or id&gt;</code>.</p>
 <p>A <strong>widget cell</strong> declares controls; what they are set to is runtime state,
 not source. Editing the cell therefore cannot change what the notebook
 computes, and reading the source cannot tell you what it is computing.

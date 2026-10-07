@@ -2434,7 +2434,9 @@ during a run; set <code>STRATA_LOG_LEVEL=INFO</code> to see them. Pipe stdout to
 on two machines can be diffed digest by digest with no server involved.
 <code>strata run</code> stores the variables of leaf cells too (cells nothing downstream
 reads, which the notebook otherwise keeps no artifact for), so the notebook's
-final results have digests to compare; a value that cannot be serialized is
+final results have digests to compare; a leaf that is a cache hit from a run
+outside <code>strata run</code> (the UI, <code>cell run</code>, MCP) lists only what that run stored,
+so pass <code>--force</code> once before comparing; a value that cannot be serialized is
 skipped. Display outputs appear as <code>__display__N</code>; a leaf's cached console is
 not listed. An output stored before digests were recorded gets its
 digest computed from its bytes when the report is written. The ZIP export's
@@ -2561,6 +2563,8 @@ view. They open the notebook locally - no server, no env sync:</p>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>strata<span class="w"> </span>dag<span class="w">       </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># dependency edges + topological order</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>strata<span class="w"> </span>status<span class="w">    </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># per-cell status + staleness summary</span>
 </code></pre></div>
+<p>Every <code>&lt;cell_id&gt;</code> here and below is the id from <code>notebook.toml</code> or <code>cell list</code>,
+not the cell's <code># @name</code>.</p>
 <p>Each takes <code>--format human|json</code> (JSON is the default - these are agent-first).
 The JSON shapes match the server's REST API (<code>GET /{id}/cells</code>, <code>GET /{id}/dag</code>),
 so a script written against the local CLI keeps working against a running

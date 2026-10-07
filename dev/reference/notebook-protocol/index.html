@@ -2411,9 +2411,10 @@ client can do - there's no internal API.</p>
    returns; sockets already connected to a reopened session see its
    <code>environment_job_*</code> frames.</li>
 </ol>
-<p>Alternatively, if you already have a <code>session_id</code> from a previous open
-   (page refresh case), <code>GET /v1/notebooks/sessions/{session_id}</code> returns
-   the same payload shape.
+<p>Alternatively, on a personal server, if you already have a <code>session_id</code>
+   from a previous open (page refresh case),
+   <code>GET /v1/notebooks/sessions/{session_id}</code> returns the same payload shape;
+   in service mode open the path again, which returns your own session.
 2. <strong>Connect the WebSocket.</strong> <code>ws://.../v1/notebooks/ws/{session_id}</code>. The
    handler verifies the session exists and is visible to the caller's tenant,
    and refuses the upgrade otherwise. A browser upgrade whose <code>Origin</code> is
@@ -2425,15 +2426,18 @@ client can do - there's no internal API.</p>
    only frame sent on accept is <code>presence</code> (see
    <a href="#presence-and-soft-locks">Presence and soft locks</a>).
 3. <strong>Send <code>notebook_sync</code></strong> as the first client → server message. The server
-   answers with a <code>notebook_state</code> frame containing the same fields as the
-   open response. This is your sole resync primitive on reconnects - there's
+   answers with a <code>notebook_state</code> frame holding the same notebook state as
+   the open response, without <code>session_id</code> and the runtime config, and with a
+   <code>dag</code> of <code>edges</code>, <code>roots</code>, <code>leaves</code> and <code>topological_order</code> only. This is your sole resync primitive on reconnects - there's
    no <code>resume_after_seq</code>.
 4. <strong>Listen.</strong> Execution events (cell status, output, console, errors,
    cascade prompts, DAG updates, environment-job lifecycle, agent notes) all
-   arrive over the WS. Subsequent structural edits - adding / removing /
-   reordering cells, updating env / mounts / workers, dependency mutations
-   - go via REST; the backend re-broadcasts the affected state through the
-   WS automatically.</p>
+   arrive over the WS. Structural edits go via REST. Adding, removing,
+   reordering or editing a cell, or saving a cell's tests, re-broadcasts the
+   notebook as a <code>notebook_state</code> frame to every connection, and a dependency
+   change arrives as <code>environment_job_*</code> frames. Saving env, mounts, workers,
+   the notebook worker, the timeout or connections answers only the caller:
+   another client sees the change on its next <code>notebook_sync</code>.</p>
 <p>That is the entire bootstrap. The remaining sections of this page explain the
 gotchas in that flow.</p>
 <h2 id="path-parameter-gotcha-session_id-vs-notebook-id">Path parameter gotcha: session_id vs notebook id<a class="headerlink" href="#path-parameter-gotcha-session_id-vs-notebook-id" title="Permanent link">&para;</a></h2>
@@ -2506,14 +2510,14 @@ further calls are required before showing a useful UI. The shape is
 </tr>
 <tr>
 <td><code>dag</code></td>
-<td>Formatted upstream/downstream/staleness map.</td>
+<td><code>edges</code>, <code>topological_order</code>, <code>roots</code>, <code>leaves</code> and <code>variable_producer</code> (which cell defines each variable); <code>error</code> instead when the DAG cannot be built.</td>
 </tr>
 <tr>
 <td>Runtime config</td>
 <td><code>deployment_mode</code>, <code>default_parent_path</code>, <code>available_python_versions</code>, <code>default_python_version</code>, <code>python_selection_fixed</code>, <code>registry_enabled</code>, <code>team_store_configured</code>.</td>
 </tr>
 <tr>
-<td><code>id</code>, <code>name</code>, <code>worker</code>, <code>timeout</code>, <code>env</code>, <code>ai</code></td>
+<td><code>id</code>, <code>name</code>, <code>worker</code>, <code>timeout</code>, <code>env</code>, <code>created_at</code>, <code>updated_at</code></td>
 <td><code>notebook.toml</code>, plus fetched secrets in <code>env</code>; secret values are masked (see <a href="../rest-api/#update-notebook-default-env">Update Notebook Default Env</a>)</td>
 </tr>
 <tr>
@@ -2521,7 +2525,7 @@ further calls are required before showing a useful UI. The shape is
 <td>Secret-manager fetch status</td>
 </tr>
 <tr>
-<td><code>workers</code>, <code>mounts</code>, <code>connections</code>, <code>malformed_connections</code>, <code>secret_manager_config</code>, <code>variant_groups</code></td>
+<td><code>workers</code>, <code>mounts</code>, <code>connections</code>, <code>malformed_connections</code>, <code>catalogs</code>, <code>r</code>, <code>secret_manager_config</code>, <code>variant_groups</code>, <code>variant_active_selections</code>, <code>variant_modes</code></td>
 <td><code>notebook.toml</code></td>
 </tr>
 <tr>

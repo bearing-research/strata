@@ -2276,7 +2276,8 @@
 replicator, you in eighteen months) sees the result, the code that produced
 it, and the code and environment of every step behind it. No account, no
 install, no notebook.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>publish<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Figure 3"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>publish<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Figure 3"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--artifact-dir<span class="w"> </span>./paper/.strata/artifacts
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>nb_paper_cell_c2_var___display__0@v=1 is public at /p/ocxQj-toxGttZYyRl-Zf9...
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Published into ~/.strata/artifacts (the store your server serves).
@@ -2299,7 +2300,10 @@ It grants read access to one version of it.</p>
 serves whatever <code>artifact_dir</code> it was started with, <code>~/.strata/artifacts</code> by
 default. Publishing therefore copies the artifact, and every step behind it
 since the page shows their code, into the store the server serves, and mints
-the token there. The command says how many it moved:</p>
+the token there. Point <code>--artifact-dir</code> at the notebook's <code>.strata/artifacts</code>,
+as above; without it the command reads the server's store, which does not hold
+the notebook's outputs until something copies them there. The command says how
+many it moved:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Copied 4 artifacts across so the link resolves.
 </code></pre></div>
 <p>The copies keep their original ids, versions, provenance hashes, authors and
@@ -2390,6 +2394,12 @@ nothing published runs script on your server's origin.</p>
 <h2 id="withdrawing">Withdrawing<a class="headerlink" href="#withdrawing" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>unpublish<span class="w"> </span>&lt;token&gt;
 </code></pre></div>
+<p><code>&lt;token&gt;</code> can also be the publication's id, which <code>GET /v1/publications</code>
+lists. The store keeps only each token's SHA-256 (its id), so the token, and the
+link built from it, is shown once: in the answer to the publish that minted it.
+Publishing the same version again returns the existing publication without a
+token; keep the link when it is minted, or unpublish and publish again for a new
+one.</p>
 <p>The link then reports that it was withdrawn, rather than 404ing. A reader
 chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
@@ -2472,7 +2482,8 @@ link on the page and in the card then carries it.</p>
 <p>A hosted link resolves for as long as your server does. A URL printed in a
 paper outlives most servers, so there is a second form:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--to<span class="w"> </span>./figure3-bundle<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Figure 3"</span><span class="w"> </span>--author<span class="w"> </span><span class="s2">"F. Li"</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>--artifact-dir<span class="w"> </span>./paper/.strata/artifacts<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>--to<span class="w"> </span>./figure3-bundle<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Figure 3"</span><span class="w"> </span>--author<span class="w"> </span><span class="s2">"F. Li"</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>figure3-bundle/
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>├── index.html              the page: opens in a browser, no server, no external requests
@@ -2578,7 +2589,7 @@ change under the reader would be worthless. A body naming <code>artifact_id</cod
 reads a 200 as "the link now shows the other version". To cite another version,
 publish it for its own link.</p>
 <p>Each patch is recorded on the store's event feed (<code>GET /v1/events</code>) as a
-<code>credit</code> event with the token in <code>value</code>, beside <code>publish</code> and <code>withdraw</code>, so a
+<code>credit</code> event with the publication's id in <code>value</code>, beside <code>publish</code> and <code>withdraw</code>, so a
 service mirroring the page learns of a new DOI without polling.</p>
 <h2 id="copying-a-chain-into-another-store">Copying a chain into another store<a class="headerlink" href="#copying-a-chain-into-another-store" title="Permanent link">&para;</a></h2>
 <p>A link resolves from the store its server serves, and a chain lives in the
@@ -2620,22 +2631,22 @@ Publishing the same chain again writes nothing.</p>
 <tr>
 <td><code>POST /v1/artifacts/{id}/v/{n}/publish</code></td>
 <td>yes (<code>artifacts:publish</code>)</td>
-<td>Mint a link. Idempotent: republishing returns the existing token.</td>
+<td>Mint a link. The response carries <code>token</code> and <code>url</code>, the only time they are shown, and <code>id</code>. Idempotent: republishing returns the existing publication, with <code>token</code> and <code>url</code> null.</td>
 </tr>
 <tr>
 <td><code>DELETE /v1/publications/{token}</code></td>
 <td>yes (<code>artifacts:publish</code>)</td>
-<td>Withdraw.</td>
+<td>Withdraw, by token or id.</td>
 </tr>
 <tr>
 <td><code>PATCH /v1/publications/{token}</code></td>
 <td>yes (<code>artifacts:publish</code>)</td>
-<td>Set authors and external identifiers. Cannot change what the token points at: <code>artifact_id</code> or <code>version</code> in the body is a 400.</td>
+<td>Set authors and external identifiers, by token or id. Cannot change what the token points at: <code>artifact_id</code> or <code>version</code> in the body is a 400.</td>
 </tr>
 <tr>
 <td><code>GET /v1/publications</code></td>
 <td>yes</td>
-<td>List this tenant's live links (<code>?include_revoked=true</code> adds withdrawn ones).</td>
+<td>List this tenant's live publications by id, without tokens (<code>?include_revoked=true</code> adds withdrawn ones).</td>
 </tr>
 <tr>
 <td><code>PUT /v1/artifacts/import/blobs/{content_sha256}</code></td>

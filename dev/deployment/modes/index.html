@@ -2227,7 +2227,7 @@ own identity.</p>
 <tr>
 <td><strong>Auth</strong></td>
 <td>None</td>
-<td><code>X-Strata-Principal</code> + <code>X-Strata-Proxy-Token</code> from a trusted proxy, or an API key</td>
+<td>Required, one of two modes: <code>X-Strata-Principal</code> + <code>X-Strata-Proxy-Token</code> from a trusted proxy (<code>trusted_proxy</code>), or API keys (<code>api_key</code>)</td>
 </tr>
 <tr>
 <td><strong>Identity scoping</strong></td>
@@ -2325,12 +2325,16 @@ personal-mode-only.</p>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret&gt;<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
-<p>Short version: an upstream proxy authenticates the caller, injects
+<p>Short version: an upstream proxy authenticates the caller, sets the
 identity headers (<code>X-Strata-Principal</code>, tenant header,
-<code>X-Strata-Scopes</code>, <code>X-Strata-Proxy-Token</code>), and is the only ingress
-path. Strata trusts the proxy rather than authenticating users itself;
-machine callers outside the proxy can use an API key instead
-(<code>STRATA_AUTH_MODE=api_key</code>).</p>
+<code>X-Strata-Scopes</code>, <code>X-Strata-Proxy-Token</code>) on every request, replacing
+any the client sent (empty when the user has none), and is the only
+ingress path. A header the proxy does not set reaches Strata from the
+client, so a proxy that never sets <code>X-Strata-Scopes</code> lets a user claim
+<code>admin:*</code>. Strata trusts the proxy rather than authenticating users itself, so
+machine callers of a proxied server go through the proxy too. API keys
+(<code>STRATA_AUTH_MODE=api_key</code>) are a separate auth mode, for a server no
+proxy fronts; a trusted-proxy server ignores them.</p>
 <p>See <a href="../service-mode/">Service Mode</a> for the full story:</p>
 <ul>
 <li>The trusted-proxy header contract.</li>
@@ -2377,6 +2381,10 @@ raise <code>ValueError</code> during config load:</p>
 <tr>
 <td><code>deployment_mode=personal</code> + <code>auth_mode=api_key</code></td>
 <td>Personal mode is single-user on loopback; authenticating yourself to your own machine buys nothing</td>
+</tr>
+<tr>
+<td><code>deployment_mode=service</code> + <code>auth_mode=none</code> (the default)</td>
+<td>Every route, cell execution and the admin worker registry included, would be open to anyone who reaches the server. Set <code>STRATA_AUTH_MODE</code> to <code>trusted_proxy</code> or <code>api_key</code></td>
 </tr>
 <tr>
 <td><code>deployment_mode=service</code> + <code>multi_tenant_enabled</code> or <code>acl_config</code> rules or <code>mcp_enabled</code>, without <code>trusted_proxy</code> / <code>api_key</code> auth</td>

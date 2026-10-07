@@ -1823,6 +1823,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#backing-up-a-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backing up a server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#moving-between-machines" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2110,6 +2121,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#backing-up-a-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backing up a server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#moving-between-machines" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2243,7 +2265,7 @@
 <td><strong>Server-side artifact store</strong></td>
 <td><code>~/.strata/artifacts/</code> (or <code>STRATA_ARTIFACT_DIR</code>)</td>
 <td>The Core SDK's artifact blobs + metadata SQLite (the metadata moves to Postgres with <code>STRATA_ARTIFACT_METADATA_DSN</code>, and <code>strata migrate</code> copies an existing SQLite store across). <strong>Distinct from the per-notebook <code>.strata/artifacts/</code></strong> below.</td>
-<td>If you use <code>StrataClient.materialize</code>, named artifact pointers, publications or pins you care about, or API keys (they live in the same database)</td>
+<td>If you use <code>StrataClient.materialize</code>, named artifact pointers, publications or pins you care about, API keys, or the service-mode worker registry (they live in the same database)</td>
 </tr>
 </tbody>
 </table>
@@ -2277,6 +2299,14 @@ up if you write tables that way.</p>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">'http://localhost:8765/v1/notebooks/&lt;session_id&gt;/release'</span>
 </code></pre></div>
 <p>Quiesce waits for running cells (cancelling any still running after <code>timeout_seconds</code>, default 30), then refuses runs and edits with a 409 until release or <code>max_hold_seconds</code> (default 600). <code>POST /v1/projects/{path}/quiesce</code> and <code>.../release</code> do the same for every notebook under a directory, open or not. Under principal auth both need the <code>admin:notebooks</code> scope.</p>
+<h2 id="backing-up-a-server">Backing up a server<a class="headerlink" href="#backing-up-a-server" title="Permanent link">&para;</a></h2>
+<p>Back up a server before every upgrade: a new release migrates the artifact store's metadata on its first start, one way, and the backup is the only way back. Stop every server that shares the store first, so the metadata and the blobs agree.</p>
+<ul>
+<li><strong>SQLite store (the default):</strong> copy the whole artifact directory (<code>STRATA_ARTIFACT_DIR</code>, <code>~/.strata/artifacts</code> by default). It holds <code>artifacts.sqlite</code> and the blobs.</li>
+<li><strong>Postgres and an object store:</strong> <code>pg_dump</code> the database <code>STRATA_ARTIFACT_METADATA_DSN</code> names, and copy the blob bucket (<code>aws s3 sync s3://&lt;bucket&gt; &lt;backup-dir&gt;</code>, or your provider's equivalent).</li>
+<li><strong>Either way:</strong> archive the notebook storage directory without <code>.venv</code> (as in <a href="#backup">Backup</a>). The workers registered through <code>/v1/admin/notebook-workers</code> are in the metadata store, so the steps above cover them; a server from before 0.9.0 kept them in <code>notebook_workers.json</code> in the artifact directory, so copy that file too when backing one up before the upgrade.</li>
+</ul>
+<p>To go back, restore all of it and start the release that wrote it.</p>
 <h2 id="moving-between-machines">Moving between machines<a class="headerlink" href="#moving-between-machines" title="Permanent link">&para;</a></h2>
 <p>Same idea: copy the notebook directory minus <code>.venv/</code>. Optionally minus <code>.strata/</code> if you want a clean cache.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># On source</span>

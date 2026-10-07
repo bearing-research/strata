@@ -2309,8 +2309,8 @@ for it.</p>
   records the tenant of the caller who opened it and looks missing to
   other tenants, and a multi-tenant server gives each tenant its own
   subdirectory of the storage root. Within a tenant there are no
-  per-notebook ACLs: if Alice's notebook ID leaks to Bob in her tenant
-  and Bob holds <code>notebook:read</code>, he can open it.</li>
+  per-notebook ACLs: anyone in Alice's tenant with <code>notebook:read</code> sees
+  her notebooks listed by <code>/v1/notebooks/discover</code> and can open them.</li>
 <li><strong>Notebook deletion is personal-mode only.</strong> Service mode refuses
   <code>DELETE /v1/notebooks/{id}</code> and <code>delete-by-path</code>.</li>
 </ul>

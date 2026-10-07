@@ -2661,7 +2661,7 @@
 <h2 id="connection">Connection<a class="headerlink" href="#connection" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>ws://localhost:8765/v1/notebooks/ws/{session_id}
 </code></pre></div>
-<p>The <code>{session_id}</code> is the one returned by <code>POST /v1/notebooks/open</code> or <code>/create</code>. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode each open creates its own session.</p>
+<p>The <code>{session_id}</code> is the one returned by <code>POST /v1/notebooks/open</code> or <code>/create</code>. A session is single-process. On a personal server, opening the same notebook again returns the session already open on that path, so a second tab, the terminal viewer and an agent all drive one execution context and see each other's runs. In service mode an open returns the session the same principal already has open on that path, never another principal's, and an open without a principal always starts a new session.</p>
 <p>Under principal auth, the upgrade carries the same credentials as a REST call: <code>X-Strata-Principal</code>, <code>X-Strata-Proxy-Token</code>, and <code>X-Tenant-ID</code> if multi-tenant under <code>trusted_proxy</code>, or <code>Authorization: Bearer &lt;key&gt;</code> under <code>api_key</code>. A missing or invalid credential refuses the upgrade with HTTP <code>403</code> (see <a href="#close-codes">Close codes</a>). Each client → server frame is then checked against the notebook scope it needs (<code>notebook:read</code>, <code>notebook:write</code> or <code>notebook:execute</code>); a frame the principal's scopes do not cover is answered with an <code>error</code> frame, <code>code: "insufficient_scope"</code>.</p>
 <p>A read-only app view connects with <code>?role=viewer</code>. Such a connection may send only <code>widget_update</code> and <code>notebook_sync</code>; anything else is answered with <code>code: "read_only"</code>.</p>
 <h2 id="envelope">Envelope<a class="headerlink" href="#envelope" title="Permanent link">&para;</a></h2>
@@ -2878,7 +2878,7 @@
 <tr>
 <td><code>cell_status</code></td>
 <td><code>{ "cell_id": "...", "status": "running", "remote_worker": "...", "remote_transport": "...", "remote_build_state": "...", "staleness_reasons": [...], "causality": {...} }</code></td>
-<td>Status changed. Only <code>cell_id</code> and <code>status</code> are always present: the <code>remote_*</code> fields come with <code>running</code> for a remote cell (<code>remote_build_state</code> is <code>starting</code> while a worker provisions the job), <code>staleness_reasons</code> and <code>causality</code> with a staleness update. <code>running</code> starts a run: clear the cell's console (see <a href="#console">Console</a>)</td>
+<td>Status changed. Only <code>cell_id</code> and <code>status</code> are always present: the <code>remote_*</code> fields come with <code>running</code> for a remote cell (<code>remote_build_state</code> is <code>starting</code> while a worker provisions the job), <code>staleness_reasons</code> and <code>causality</code> with a staleness update. A remote cell on a worker that queues its jobs gets two more <code>running</code> frames during the run, with <code>remote_build_state</code> <code>starting</code> and then <code>running</code>; they update the badge and do not start a new run. A <code>running</code> frame without <code>remote_build_state</code> starts a run: clear the cell's console (see <a href="#console">Console</a>)</td>
 </tr>
 <tr>
 <td><code>cell_output</code></td>
@@ -2898,7 +2898,7 @@
 <tr>
 <td><code>cell_error</code></td>
 <td><code>{ "cell_id": "...", "error": "...", "stdout": "...", "stderr": "...", "suggest_install": "...", "suggest_install_language": "python" }</code></td>
-<td>Execution error. <code>stdout</code> / <code>stderr</code>, when present, are the failed run's whole console and replace it, as on <code>cell_output</code>; a failure before the cell ran carries neither. <code>error_code</code>, when present, is a stable name to branch on (<code>fetch_pin_mismatch</code>: a <code># @fetch ... sha256=</code> pin no longer matches the URL's bytes). <code>suggest_install</code> names a missing package to offer installing, with <code>python</code> or <code>r</code> for which installer. A remote run adds the <code>remote_*</code> fields of <code>cell_output</code> plus <code>remote_error_code</code></td>
+<td>Execution error. <code>stdout</code> / <code>stderr</code> are the failed run's whole console and replace it, as on <code>cell_output</code>; a cell that failed before it ran (a fetch pin mismatch, a missing input) sends them empty. Only an internal server error carries neither, and leaves the console as it was. <code>error_code</code>, when present, is a stable name to branch on (<code>fetch_pin_mismatch</code>: a <code># @fetch ... sha256=</code> pin no longer matches the URL's bytes). <code>suggest_install</code> names a missing package to offer installing, with <code>python</code> or <code>r</code> for which installer. A remote run adds the <code>remote_*</code> fields of <code>cell_output</code> plus <code>remote_error_code</code></td>
 </tr>
 <tr>
 <td><code>cell_iteration_progress</code></td>
@@ -2925,7 +2925,7 @@
 <h3 id="console">Console<a class="headerlink" href="#console" title="Permanent link">&para;</a></h3>
 <p>A cell's console follows three rules, in this order of frames:</p>
 <ol>
-<li><code>cell_status</code> with <code>status: "running"</code> starts a run: clear the cell's stdout and stderr.</li>
+<li><code>cell_status</code> with <code>status: "running"</code> starts a run: clear the cell's stdout and stderr. A <code>running</code> frame that carries <code>remote_build_state</code> only moves a remote cell's badge between <code>starting</code> and <code>running</code> during the run; leave the console as it is.</li>
 <li><code>cell_console</code> appends <code>text</code> to its <code>stream</code>; a frame with <code>chunk_seq: 0</code> first clears that stream.</li>
 <li><code>cell_output</code> and <code>cell_error</code> that carry <code>stdout</code> / <code>stderr</code> strings replace the console with them. The <code>cell_output</code> of a cache hit that replays no console carries the cell's last console, as <code>notebook_state</code> does.</li>
 </ol>
@@ -2982,7 +2982,7 @@
 <tr>
 <td><code>notebook_state</code></td>
 <td><code>{ "id": "...", "cells": [...], "dag": {...}, "environment": {...}, "environment_job": {...}, "environment_job_history": [...], "r_environment": {...}, ... }</code></td>
-<td>Full state (response to <code>notebook_sync</code>). Carries the rest of the notebook's state as well (name, mounts, workers, env, variant groups)</td>
+<td>Full state: the answer to <code>notebook_sync</code>, and broadcast to every connection after a cell is added, removed, reordered or edited over REST or MCP. Carries the rest of the notebook's state as well (name, mounts, workers, env, variant groups)</td>
 </tr>
 <tr>
 <td><code>impact_preview</code></td>

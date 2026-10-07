@@ -2105,7 +2105,7 @@
 <p><strong><code>postCreateCommand</code></strong> (<code>setup.sh</code>) runs once on container creation:</p>
 <ul>
 <li>Installs <code>uv</code></li>
-<li><code>uv tool install strata-notebook</code> - the prebuilt wheel, so it finishes in under a minute (no Rust compilation)</li>
+<li><code>uv tool install 'strata-notebook[sql,sql-duckdb,sql-sqlite]'</code> - the prebuilt wheel, so it finishes in under a minute (no Rust compilation), with the extras SQL cells on SQLite and DuckDB need</li>
 </ul>
 </li>
 <li>

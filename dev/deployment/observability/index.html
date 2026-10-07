@@ -2350,8 +2350,10 @@ trace id.</p>
 <code>level</code>, <code>logger</code>, <code>message</code>, <code>timestamp</code> (Unix seconds), and the
 request's context fields: <code>request_id</code>, <code>method</code>, <code>path</code>, <code>tenant_id</code>,
 and <code>trace_id</code> / <code>span_id</code> when tracing is on.
-Pipe <code>docker compose logs strata</code> through <code>jq</code> for readable
-output.</p>
+uvicorn's own startup and access lines stay plain text, so keep only
+the JSON records before reading them with <code>jq</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>--no-log-prefix<span class="w"> </span>strata<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-R<span class="w"> </span><span class="s1">'fromjson? // empty'</span>
+</code></pre></div>
 <h3 id="web-ui-logs-artifacts-pages">Web UI: Logs &amp; Artifacts pages<a class="headerlink" href="#web-ui-logs-artifacts-pages" title="Permanent link">&para;</a></h3>
 <p>The notebook UI ships two operator views, reachable from any notebook's header
 (<strong>Logs</strong> / <strong>Artifacts</strong>) and via a <strong>← Back</strong> button that returns to the
@@ -2409,14 +2411,14 @@ Grafana container.</p>
 <p>The compose stack is opinionated for local dev. In production you
 typically have an existing OTel collector, Prometheus instance, and
 log aggregator. Point Strata at yours via env vars:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Tracing (needs the otel extra, which the published image includes)</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">OTEL_EXPORTER_OTLP_ENDPOINT</span><span class="o">=</span>https://your-collector:4317
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="nv">authorization</span><span class="o">=</span>Bearer<span class="w"> </span>&lt;token&gt;
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nv">OTEL_SERVICE_NAME</span><span class="o">=</span>strata-prod
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Logs</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nv">STRATA_LOG_FORMAT</span><span class="o">=</span>json
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="nv">STRATA_LOG_LEVEL</span><span class="o">=</span>INFO
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Tracing (needs the otel extra, which the published image includes)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">OTEL_EXPORTER_OTLP_ENDPOINT</span><span class="o">=</span>https://your-collector:4317
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nv">OTEL_EXPORTER_OTLP_HEADERS</span><span class="o">=</span><span class="nv">authorization</span><span class="o">=</span>Bearer<span class="w"> </span>&lt;token&gt;
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nv">OTEL_SERVICE_NAME</span><span class="o">=</span>strata-prod
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1"># Logs</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="nv">STRATA_LOG_FORMAT</span><span class="o">=</span>json
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="nv">STRATA_LOG_LEVEL</span><span class="o">=</span>INFO
 </code></pre></div>
 <p>Prometheus scraping is pull-based, your scrape config needs an
 entry pointing at <code>&lt;strata-host&gt;:8765/metrics/prometheus</code>. There's
@@ -2443,8 +2445,8 @@ in the container). Then run a few <code>scan@v1</code> materializes against
 <a href="../../getting-started/core/#3-materialize-a-result">Python client</a>,
 using <code>file:///data/warehouse#&lt;namespace&gt;.&lt;table&gt;</code> as the input.</p>
 <p>For sustained load, point <code>benchmarks/capacity_sweep.py</code> at the stack:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>benchmarks/capacity_sweep.py<span class="w"> </span>--no-server<span class="w"> </span>--base-url<span class="w"> </span>http://localhost:8765<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span>--table-uri<span class="w"> </span><span class="s1">'file:///data/warehouse#&lt;namespace&gt;.&lt;table&gt;'</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>python<span class="w"> </span>benchmarks/capacity_sweep.py<span class="w"> </span>--no-server<span class="w"> </span>--base-url<span class="w"> </span>http://localhost:8765<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span>--table-uri<span class="w"> </span><span class="s1">'file:///data/warehouse#&lt;namespace&gt;.&lt;table&gt;'</span>
 </code></pre></div>
 <p><code>--table-uri</code> is repeatable, and each table needs the columns the
 sweep's queries use: <code>id</code>, <code>ts</code>, <code>user_id</code>, <code>category</code> and <code>value</code>.
@@ -2474,7 +2476,7 @@ checks:</p>
 </tr>
 <tr>
 <td><code>GET /health/ready</code></td>
-<td>Readiness. <code>503</code> while draining, when both QoS tiers have been saturated for over 30s, or when the metadata store is unreachable.</td>
+<td>Readiness. <code>503</code> while draining, when both QoS tiers have been saturated for over 30s, when the Parquet metadata cache (SQLite under <code>STRATA_CACHE_DIR</code>) is unreachable, or when the artifact store's database (SQLite, or Postgres through <code>STRATA_ARTIFACT_METADATA_DSN</code>) does not answer a query within 5 seconds. The blob backend is not probed.</td>
 </tr>
 <tr>
 <td><code>GET /health/dependencies</code></td>

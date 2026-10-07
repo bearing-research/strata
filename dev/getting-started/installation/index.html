@@ -2349,11 +2349,11 @@ is not supported; see the uv requirement above.</p>
 </tr>
 <tr>
 <td><code>s3</code></td>
-<td>Presigned build-manifest URLs (<code>STRATA_ARTIFACT_PRESIGNED_URLS</code>) from an S3 role (instance profile, ECS task role, web identity) rather than an access key pair.</td>
+<td>Notebook <code>s3://</code> mounts (<code>s3fs</code>), and presigned build-manifest URLs (<code>STRATA_ARTIFACT_PRESIGNED_URLS</code>) from an S3 role (instance profile, ECS task role, web identity) rather than an access key pair.</td>
 </tr>
 <tr>
 <td><code>gcs</code></td>
-<td>Presigned build-manifest URLs (<code>STRATA_ARTIFACT_PRESIGNED_URLS</code>) for the GCS artifact backend.</td>
+<td>Notebook <code>gs://</code> mounts (<code>gcsfs</code>), and presigned build-manifest URLs (<code>STRATA_ARTIFACT_PRESIGNED_URLS</code>) for the GCS artifact backend.</td>
 </tr>
 <tr>
 <td><code>otel</code></td>
@@ -2431,7 +2431,7 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 </tr>
 <tr>
 <td><code>uv run strata cell &lt;action&gt;</code>, <code>strata dag</code>, <code>strata status</code>, <code>strata dep &lt;action&gt;</code></td>
-<td>Agent-facing notebook tooling: inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>), save a display output such as a plot to a file (<code>cell output</code>), execute (<code>cell run/test</code>), and author (<code>cell add/edit/rm/mv/annotate</code>, <code>dep add/rm</code>) - offline against a directory or <code>--server/--session</code> against a running server. See <a href="../../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</td>
+<td>Agent-facing notebook tooling: inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>), save a display output such as a plot to a file (<code>cell output</code>), execute (<code>cell run/test</code>), and author (<code>cell add/edit/rm/mv/annotate</code>, <code>cell pin-fetch</code>, <code>dep add/rm</code>) - offline against a directory or <code>--server/--session</code> against a running server. See <a href="../../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata worker &lt;action&gt;</code></td>
@@ -2451,7 +2451,7 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 </tr>
 <tr>
 <td><code>uv run strata artifact &lt;cmd&gt; [--artifact-dir DIR]</code></td>
-<td>Inspect a local artifact store without a server: <code>list</code>, <code>show &lt;ref&gt;</code>, <code>lineage &lt;ref&gt;</code> (renders model ← features ← scan ← table @ snapshot), <code>pull &lt;ref&gt; --to FILE</code>, <code>audit [name]</code> (registry history), <code>pending</code> (approval queue), <code>verify</code>, <code>gc</code> (collect what nothing holds, least recently used first; <code>--dry-run</code> to preview, <code>--max-bytes</code>, <code>--max-idle-days</code>, <code>--min-idle-seconds</code>). Also publishes and moves results: <code>publish</code> / <code>unpublish</code> (a link anyone can open), <code>promote</code> (copy an artifact and its chain to the team store and name it there), <code>export</code> (write a tabular artifact into an Iceberg table), <code>archive</code> (a self-contained bundle: page, bytes, manifest, README). <code>&lt;ref&gt;</code> is a name, <code>id@v=N</code>, or bare id.</td>
+<td>Inspect the server's configured artifact store (its metadata DSN and blob backend included) without a running server, or one local SQLite store with <code>--artifact-dir</code>: <code>list</code>, <code>show &lt;ref&gt;</code>, <code>lineage &lt;ref&gt;</code> (renders model ← features ← scan ← table @ snapshot), <code>pull &lt;ref&gt; --to FILE</code>, <code>audit [name]</code> (registry history), <code>pending</code> (approval queue), <code>verify</code>, <code>gc</code> (collect what nothing holds, least recently used first; <code>--dry-run</code> to preview, <code>--max-bytes</code>, <code>--max-idle-days</code>, <code>--min-idle-seconds</code>). Also publishes and moves results: <code>publish</code> / <code>unpublish</code> (a link anyone can open), <code>promote</code> (copy an artifact and its chain to the team store and name it there), <code>export</code> (write a tabular artifact into an Iceberg table), <code>archive</code> (a self-contained bundle: page, bytes, manifest, README). <code>&lt;ref&gt;</code> is a name, <code>id@v=N</code>, or bare id.</td>
 </tr>
 <tr>
 <td><code>uv run strata migrate --to-dsn &lt;dsn&gt;</code></td>
@@ -2475,7 +2475,7 @@ and call <code>strata-notebook</code> / <code>strata</code> / <code>strata-worke
 </tr>
 <tr>
 <td><code>strata-worker --port 9000</code></td>
-<td>Start a remote worker for <code># @worker</code> cells. Run the installed binary (for example <code>.venv/bin/strata-worker</code>), not through <code>uv run</code>, whose process would keep <code>STRATA_WORKER_TOKEN</code> readable to cells. With <code>--connect wss://...</code> it binds no port and dials out to a relay instead. See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
+<td>Start a remote worker for <code># @worker</code> cells. It binds <code>127.0.0.1</code> unless <code>STRATA_WORKER_TOKEN</code> is set (then <code>0.0.0.0</code>) or <code>--host</code> says otherwise. Run the installed binary (for example <code>.venv/bin/strata-worker</code>), not through <code>uv run</code>, whose process would keep <code>STRATA_WORKER_TOKEN</code> readable to cells. With <code>--connect wss://...</code> it binds no port and dials out to a relay instead. See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
 </tr>
 </tbody>
 </table>

@@ -1354,6 +1354,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#install-the-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install the client
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-start-the-server" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2082,6 +2093,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#install-the-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install the client
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-start-the-server" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2191,16 +2213,24 @@
 <li>Safe reuse across runs and processes</li>
 </ul>
 <p>Reading from an Iceberg table is itself a <code>materialize</code> call with the built-in <code>scan@v1</code> transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, and a snapshot never changes, so a scan result never goes stale and there's no invalidation problem. A table with no snapshots yet (created, never written) reads as zero rows with its schema, and with no snapshot to key it on that result is never reused, so the first read after the first write sees the data. An unnamed result is still a cache entry: the store keeps it while it is used and may collect it later (see <a href="#core-behaviors">Core behaviors</a>).</p>
+<h2 id="install-the-client">Install the client<a class="headerlink" href="#install-the-client" title="Permanent link">&para;</a></h2>
+<p>The Python examples on this page use <code>strata_client</code>, a package separate from
+the server. Add it to your own project with the extras step 5 uses:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>add<span class="w"> </span><span class="s2">"strata-client[pandas,polars,duckdb]"</span>
+</code></pre></div>
+<p>The <code>all</code> extra adds DataFusion too. Step 2's demo is <code>examples/hello_world.py</code>
+from a checkout of the <a href="https://github.com/bearing-research/strata">Strata repo</a>,
+where <code>uv run</code> already has the client.</p>
 <h2 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <h2 id="2-run-the-demo">2. Run the demo<a class="headerlink" href="#2-run-the-demo" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/hello_world.py
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>examples/hello_world.py
 </code></pre></div>
 <p>This creates a local Iceberg table with 100K rows, clears the server's row-group cache, and times the same <code>scan@v1</code> call three times:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Run 1  (cold)       read Parquet, store the result as an artifact
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Run 2  (cache hit)  same provenance hash: the server returns the stored artifact
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Run 3  (cache hit)  the same artifact again, after a metadata cleanup call
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Run 1  (cold)       read Parquet, store the result as an artifact
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Run 2  (cache hit)  same provenance hash: the server returns the stored artifact
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Run 3  (cache hit)  the same artifact again, after a metadata cleanup call
 </code></pre></div>
 <p>Runs 2 and 3 are both artifact-store cache hits: the server finds the earlier result by provenance hash and serves its stored bytes without reading Parquet.</p>
 <h2 id="3-materialize-a-result">3. Materialize a result<a class="headerlink" href="#3-materialize-a-result" title="Permanent link">&para;</a></h2>
@@ -2211,26 +2241,26 @@
 <li>The fragment after <code>#</code> names the Iceberg table inside the warehouse, as <code>&lt;namespace&gt;.&lt;table&gt;</code>.</li>
 </ul>
 <p>A table URI is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code>. The demo prints the exact one it created when it runs, because it builds its warehouse in a temporary directory rather than at a fixed path; copy that line rather than the shape below.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">()</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">artifact</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">],</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="s2">"executor"</span><span class="p">:</span> <span class="s2">"scan@v1"</span><span class="p">,</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>        <span class="s2">"params"</span><span class="p">:</span> <span class="p">{</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>            <span class="s2">"columns"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">],</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>            <span class="s2">"filters"</span><span class="p">:</span> <span class="p">[{</span><span class="s2">"column"</span><span class="p">:</span> <span class="s2">"value"</span><span class="p">,</span> <span class="s2">"op"</span><span class="p">:</span> <span class="s2">"&gt;"</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">:</span> <span class="mi">100</span><span class="p">}],</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>        <span class="p">},</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>    <span class="p">},</span>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="p">)</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"URI: </span><span class="si">{</span><span class="n">artifact</span><span class="o">.</span><span class="n">uri</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Cache hit: </span><span class="si">{</span><span class="n">artifact</span><span class="o">.</span><span class="n">cache_hit</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">()</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">artifact</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">],</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>        <span class="s2">"executor"</span><span class="p">:</span> <span class="s2">"scan@v1"</span><span class="p">,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>        <span class="s2">"params"</span><span class="p">:</span> <span class="p">{</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>            <span class="s2">"columns"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"id"</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">],</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>            <span class="s2">"filters"</span><span class="p">:</span> <span class="p">[{</span><span class="s2">"column"</span><span class="p">:</span> <span class="s2">"value"</span><span class="p">,</span> <span class="s2">"op"</span><span class="p">:</span> <span class="s2">"&gt;"</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">:</span> <span class="mi">100</span><span class="p">}],</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>        <span class="p">},</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>    <span class="p">},</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="p">)</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"URI: </span><span class="si">{</span><span class="n">artifact</span><span class="o">.</span><span class="n">uri</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Cache hit: </span><span class="si">{</span><span class="n">artifact</span><span class="o">.</span><span class="n">cache_hit</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>URI: strata://artifact/3f6c1a2e-8b4d-4e7a-9c15-2d0b7e4f8a61@v=1
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>Cache hit: False
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>URI: strata://artifact/3f6c1a2e-8b4d-4e7a-9c15-2d0b7e4f8a61@v=1
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>Cache hit: False
 </code></pre></div>
 <p>Re-running the same call returns the same URI with <code>Cache hit: True</code>.</p>
 <div class="admonition note">
@@ -2246,39 +2276,39 @@ row group is safe to skip, it reads it. That keeps a filter from ever
 dropping a row you asked for.</p>
 </div>
 <h2 id="4-fetch-the-result">4. Fetch the result<a class="headerlink" href="#4-fetch-the-result" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">table</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">artifact</span><span class="o">.</span><span class="n">uri</span><span class="p">)</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">table</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">artifact</span><span class="o">.</span><span class="n">uri</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
 </code></pre></div>
-<div class="highlight"><span class="filename">Output (illustrative; pruning keeps whole row groups, so rows outside the filter can appear)</span><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>     id    value
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>0   101   142.50
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>1   102   178.30
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>2   103   215.75
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>3   104   311.20
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>4   105   168.40
+<div class="highlight"><span class="filename">Output (illustrative; pruning keeps whole row groups, so rows outside the filter can appear)</span><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>     id    value
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>0   101   142.50
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>1   102   178.30
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>2   103   215.75
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>3   104   311.20
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>4   105   168.40
 </code></pre></div>
 <h2 id="5-integration-with-data-libraries">5. Integration with data libraries<a class="headerlink" href="#5-integration-with-data-libraries" title="Permanent link">&para;</a></h2>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Pandas</label><label for="__tabbed_1_2">Polars</label><label for="__tabbed_1_3">DuckDB</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.pandas</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_pandas</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">fetch_to_pandas</span><span class="p">(</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">)</span>
-</code></pre></div>
-</div>
-<div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.polars</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_polars</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.pandas</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_pandas</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">fetch_to_polars</span><span class="p">(</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">)</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">fetch_to_pandas</span><span class="p">(</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">)</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.duckdb</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataScanner</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.polars</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_polars</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">with</span> <span class="n">StrataScanner</span><span class="p">()</span> <span class="k">as</span> <span class="n">scanner</span><span class="p">:</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">scanner</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="s2">"events"</span><span class="p">,</span> <span class="s2">"file:///warehouse#db.events"</span><span class="p">)</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">scanner</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">"SELECT category, COUNT(*) FROM events GROUP BY category"</span><span class="p">)</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">())</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">fetch_to_polars</span><span class="p">(</span><span class="s2">"file:///warehouse#db.events"</span><span class="p">)</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.duckdb</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataScanner</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="k">with</span> <span class="n">StrataScanner</span><span class="p">()</span> <span class="k">as</span> <span class="n">scanner</span><span class="p">:</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">scanner</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="s2">"events"</span><span class="p">,</span> <span class="s2">"file:///warehouse#db.events"</span><span class="p">)</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">scanner</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">"SELECT category, COUNT(*) FROM events GROUP BY category"</span><span class="p">)</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">())</span>
 </code></pre></div>
 </div>
 </div>

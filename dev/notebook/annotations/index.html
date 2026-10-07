@@ -3042,7 +3042,7 @@ UI for renaming a cell ID; a friendly ID is set by editing
 </code></pre></div>
 <p>During execution, the UI shows a pulsing "dispatching → df-cluster" badge on the cell. After completion, the worker name appears in the cell's metadata.</p>
 <p>Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion cluster on Fly, a beefy EC2 instance, or a local process on a different port. The built-in <code>remote_executor.py</code> provides a reference implementation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>-m<span class="w"> </span>strata.notebook.remote_executor<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata-worker<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span>
 </code></pre></div>
 <p>If no <code>@worker</code> is set, the cell runs locally in the notebook's Python environment.</p>
 <hr />
@@ -3095,6 +3095,10 @@ or <code>OMP_NUM_THREADS</code>.</p>
 resolved local path (the cached mirror for remote URIs, the URI's local
 filesystem path for <code>file://</code> URIs). Use standard <code>Path</code> operations: <code>/</code> for
 joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
+<p>Strata mirrors a remote mount in its own process, not the notebook's venv, so
+its filesystem library goes where Strata is installed: the <code>s3</code> extra for
+<code>s3://</code> (<code>s3fs</code>), <code>gcs</code> for <code>gs://</code> (<code>gcsfs</code>) and <code>azure</code> for <code>az://</code>
+(<code>adlfs</code>), for example <code>uv tool install "strata-notebook[s3]"</code>.</p>
 <p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw] [credential=&lt;name&gt;]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. <code>credential=</code> names a <a href="../../reference/notebook-toml/#named-credentials">server-defined credential</a> instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).</p>
 <hr />
 <h2 id="fetch">@fetch<a class="headerlink" href="#fetch" title="Permanent link">&para;</a></h2>

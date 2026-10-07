@@ -2255,7 +2255,7 @@ the registry with full audit + lineage - without leaving the notebook.</p>
 <hr />
 <h2 id="1-open-the-notebook-ui">1. Open the notebook UI<a class="headerlink" href="#1-open-the-notebook-ui" title="Permanent link">&para;</a></h2>
 <p>Start the server and open it in a browser:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>strata<span class="w">          </span><span class="c1"># serves the bundled UI on http://localhost:8765</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>strata-notebook<span class="w">           </span><span class="c1"># serves the bundled UI on http://localhost:8765</span>
 </code></pre></div>
 <p>Open <strong>http://localhost:8765</strong> and open (or create) a notebook.</p>
 <h2 id="2-publish-a-model-from-a-cell">2. Publish a model from a cell<a class="headerlink" href="#2-publish-a-model-from-a-cell" title="Permanent link">&para;</a></h2>
@@ -2340,7 +2340,7 @@ looks like when a protected alias holds a move back.)</p>
 <h2 id="6-approval-gates-protected-aliases">6. Approval gates (protected aliases)<a class="headerlink" href="#6-approval-gates-protected-aliases" title="Permanent link">&para;</a></h2>
 <p>To require a human for sensitive promotions, mark aliases protected when you
 start the server:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">STRATA_REGISTRY_PROTECTED_ALIASES</span><span class="o">=</span>champion,production<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">STRATA_REGISTRY_PROTECTED_ALIASES</span><span class="o">=</span>champion,production<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Now a promote to <code>champion</code> (step 4) returns <strong><code>⏳ pending</code></strong> instead of applying.
 The <strong>pending banner</strong> appears at the top of the Registry tab; click <strong>Approve</strong>

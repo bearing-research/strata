@@ -2072,6 +2072,9 @@ materialized locally by fsspec on first read.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Then open <code>examples/s3_mount</code> from the Strata home page.</p>
+<p>Strata reads the bucket in its own process, so an installed Strata
+needs the <code>s3</code> extra (<code>s3fs</code>): <code>uv tool install "strata-notebook[s3]"</code>.
+The development environment already has it.</p>
 <h2 id="swapping-in-a-private-bucket">Swapping in a private bucket<a class="headerlink" href="#swapping-in-a-private-bucket" title="Permanent link">&para;</a></h2>
 <p>Drop the <code>options = { anon = true }</code> line and configure AWS credentials
 the normal way (<code>aws configure</code>, <code>AWS_PROFILE</code>, IAM role, etc.). fsspec

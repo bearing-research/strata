@@ -3013,7 +3013,7 @@ normal work as overload and walk the tier down to its floor.</p>
 <tr>
 <td><code>STRATA_CATALOG_URI</code></td>
 <td><code>None</code></td>
-<td>Catalog database URI. Merged into <code>catalog_properties.uri</code>, so it does not replace sibling keys set in pyproject. Environment only</td>
+<td>Catalog database URI, a SQLAlchemy URL such as <code>postgresql+psycopg://user:pass@host/iceberg_catalog</code> (the <code>postgres</code> extra installs psycopg). A bare <code>postgresql://</code> is read the same way when psycopg2 is not installed. Merged into <code>catalog_properties.uri</code>, so it does not replace sibling keys set in pyproject. Environment only</td>
 </tr>
 </tbody>
 </table>
@@ -3042,6 +3042,10 @@ is a REST or Hive one (a <code>type</code> other than <code>sql</code>, or a <co
 <code>http</code> or <code>thrift</code>), a table URI cannot name a warehouse at all; the request is
 a 400, and the table is addressed as <code>&lt;namespace&gt;.&lt;table&gt;</code> in that catalog.</p>
 <h2 id="s3-storage">S3 Storage<a class="headerlink" href="#s3-storage" title="Permanent link">&para;</a></h2>
+<p>Credentials for the S3 blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code>). The
+same settings read lake tables on S3: a table named by an <code>s3://</code> warehouse
+URI has its catalog and data files read with this region, endpoint and key, so
+a MinIO lake needs only <code>STRATA_S3_ENDPOINT_URL</code> and its keys here.</p>
 <table>
 <thead>
 <tr>
@@ -3312,7 +3316,7 @@ store's database. That is what makes a build started on one node visible to
 <p>The schema is created on first connection. <strong>A DSN starts an empty store</strong>:
 existing SQLite metadata is not carried over automatically. To move one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># 1. Boot once against the target so the stores create their schema.</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STRATA_ARTIFACT_METADATA_DSN</span><span class="o">=</span><span class="s1">'postgresql://...'</span><span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata<span class="w">   </span><span class="c1"># then stop it</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STRATA_ARTIFACT_METADATA_DSN</span><span class="o">=</span><span class="s1">'postgresql://...'</span><span class="w"> </span>strata-notebook<span class="w">   </span><span class="c1"># then stop it</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># 2. See what would move.</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>strata<span class="w"> </span>migrate<span class="w"> </span>--to-dsn<span class="w"> </span><span class="s1">'postgresql://...'</span><span class="w"> </span>--dry-run
@@ -3355,7 +3359,7 @@ writing build rows directly.</p>
 <tr>
 <td><code>STRATA_AUTH_MODE</code></td>
 <td><code>none</code></td>
-<td><code>none</code>, <code>trusted_proxy</code>, or <code>api_key</code></td>
+<td><code>none</code>, <code>trusted_proxy</code>, or <code>api_key</code>; service mode refuses to start with <code>none</code></td>
 </tr>
 <tr>
 <td><code>STRATA_PROXY_TOKEN</code></td>
@@ -3488,9 +3492,10 @@ makes bootstrapping possible:</p>
 </code></pre></div>
 <p>The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
 shown again, by you or by us, and a database disclosure yields no usable
-credentials. Pass <code>--dsn</code> (or set <code>STRATA_ARTIFACT_METADATA_DSN</code>) when the
-metadata lives on Postgres, so the CLI writes where the server reads;
-<code>--artifact-dir</code> reads one local SQLite store instead. <code>create
+credentials. The command opens the store the server is configured with
+(<code>[tool.strata]</code> and <code>STRATA_*</code>: its <code>artifact_dir</code> and metadata DSN), so it
+writes where the server reads; <code>--artifact-dir</code> opens one local SQLite store
+instead, and <code>--dsn</code> names a Postgres metadata store directly. <code>create
 --expires-in-days N</code> sets an expiry (none by default); <code>list --principal</code>
 filters to one principal and <code>--format json</code> prints JSON.</p>
 <p><strong>Revocation is immediate</strong>: verification reads the row on each request, so a
@@ -3555,7 +3560,21 @@ poll; there the console goes straight from the log route to the sockets.</p>
 <p>Server-side transform execution and the async build runner (service mode / the
 artifact build pipeline). Transforms are also configured via the
 <code>[tool.strata.transforms]</code> block in <code>pyproject.toml</code>; <code>STRATA_TRANSFORMS_ENABLED</code>
-toggles <code>enabled</code> there.</p>
+sets <code>enabled</code> there.</p>
+<p>A personal-mode server always offers the built-in <code>duckdb_sql@v1</code>, and an
+enabled block adds its <code>registry</code> entries to it. In service mode the block is
+an allowlist: it holds only its <code>registry</code> entries, so <code>enabled = true</code> alone
+refuses every transform (<code>403 transform_not_allowed</code>). To offer the built-in
+SQL transform there, list it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[tool.strata.transforms]</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="k">[[tool.strata.transforms.registry]]</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"duckdb_sql@v1"</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">executor_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"embedded://local"</span>
+</code></pre></div>
+<p>The <a href="../executor-protocol/#core-transform-executors">executor protocol</a> describes the
+other registry keys.</p>
 <p>The v2-pull signed-URL routes (build manifest, signed download / upload, and
 <code>finalize</code>) have no on/off switch. They are served whenever the deployment can
 issue and honor them at all (personal mode, or service mode with transforms
@@ -3577,6 +3596,11 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td><code>STRATA_TRANSFORM_MODE</code></td>
 <td><code>embedded</code></td>
 <td>Accepted but <strong>not currently wired up</strong>: the registry is always built in embedded mode, so setting <code>registry</code> has no effect. Configure transforms through <code>transforms_config</code> instead.</td>
+</tr>
+<tr>
+<td><code>STRATA_TRANSFORMS_ENABLED</code></td>
+<td><em>(unset)</em></td>
+<td>Sets <code>enabled</code> in the transforms block (any boolean: <code>true</code>, <code>1</code>, <code>yes</code>, <code>false</code>, ...), overriding <code>pyproject.toml</code>. In service mode it turns on server-side transforms and the signed build routes a <code>signed</code> notebook worker needs. Environment only.</td>
 </tr>
 <tr>
 <td><code>STRATA_TRANSFORMS_CONFIG</code></td>
@@ -3793,12 +3817,12 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code></td>
 <td><code>[]</code> (everything)</td>
-<td>Which of the server's environment variables a cell subprocess is given. A cell is arbitrary Python, so when it is unset (the default, and right on a laptop) every member who can run a cell can read <code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code>, <code>STRATA_PROXY_TOKEN</code>, worker tokens and every data-source credential the server holds. Entries are exact names or a prefix written with a trailing <code>*</code>; the essentials a subprocess cannot start without (<code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code>, <code>UV_*</code>, …) are always included, and <code>STRATA_*</code> is dropped unless named exactly. A cell's own <code>[env]</code> and mount credentials travel in the manifest rather than the process environment, so the list stays short. Applies to every process that runs cell code: the cold, R and batch harnesses, the warm pool worker, the inspect REPL and cell tests. Not isolation on its own: a cell running as the server's user can read <code>/proc/&lt;server pid&gt;/environ</code>; see <code>STRATA_NOTEBOOK_HARNESS_USER</code>.</td>
+<td>Which of the server's environment variables a cell subprocess is given. A cell is arbitrary Python, so when it is unset (the default, and right on a laptop) every member who can run a cell can read <code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code>, <code>STRATA_PROXY_TOKEN</code>, worker tokens and every data-source credential the server holds. Entries are exact names or a prefix written with a trailing <code>*</code>; the essentials a subprocess cannot start without (<code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code>, <code>UV_*</code>, <code>PYTHON*</code>, <code>R_*</code>, …) are always included, minus credential-looking names (<code>KEY</code>, <code>SECRET</code>, <code>TOKEN</code>, <code>PASSWORD</code>, <code>CREDENTIAL</code>), <code>UV_PUBLISH_*</code> and <code>UV_INDEX_*_USERNAME</code>, and <code>STRATA_*</code> is dropped unless named exactly. A name listed exactly always passes. A cell's own <code>[env]</code> and mount credentials travel in the manifest rather than the process environment, so the list stays short. Applies to every process that runs cell code: the cold, R and batch harnesses, the warm pool worker, the inspect REPL and cell tests. Not isolation on its own: a cell running as the server's user can read <code>/proc/&lt;server pid&gt;/environ</code>; see <code>STRATA_NOTEBOOK_HARNESS_USER</code>.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_HARNESS_USER</code></td>
 <td><code>None</code></td>
-<td>The OS user cell code runs as. In <strong>service mode</strong>, a cell that would run on the server's own host is refused unless this is set, or the cell is assigned a server-managed worker on another machine. Cache hits are still served. Setting it needs the server to run as root, so it can switch users, and the harness user must be able to read the notebook directories, their <code>.venv</code>s and the interpreter behind them (install uv-managed Pythons outside <code>/root</code>, e.g. <code>UV_PYTHON_INSTALL_DIR=/opt/uv-python</code>). POSIX only. In personal mode nothing is refused, and the user applies only when set. See <a href="../../deployment/service-mode/#what-a-cell-can-read">Service Mode → What a cell can read</a>.</td>
+<td>The OS user cell code runs as. In <strong>service mode</strong>, a cell that would run on the server's own host is refused unless this is set, or the cell is assigned a server-managed worker on another machine. Cache hits are still served. Setting it needs the server to run as root, so it can switch users, and the harness user must be able to read the notebook directories, their <code>.venv</code>s and the interpreter behind them (install uv-managed Pythons outside <code>/root</code>, e.g. <code>UV_PYTHON_INSTALL_DIR=/opt/uv-python</code>). POSIX only. One harness user serves every tenant, so it is not a tenant isolation boundary: per-tenant isolation needs separate servers or containers. In personal mode nothing is refused, and the user applies only when set. See <a href="../../deployment/service-mode/#what-a-cell-can-read">Service Mode → What a cell can read</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code></td>
@@ -4071,12 +4095,12 @@ and is not checked, nor is a notebook naming that same URL or a provider's
 default. In every mode the server's <code>STRATA_AI_API_KEY</code> goes only to those
 trusted URLs: a notebook whose <code>[ai] base_url</code> names another host needs its own
 key (the Runtime panel, or <code>[ai] api_key</code>).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[ai]</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://localhost:11434/v1"</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"llama3"</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">[ai]</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://localhost:11434/v1"</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"llama3"</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
 </code></pre></div>
 <p>All fields are optional, set only the ones you want to override.</p>
 <h2 id="timeouts">Timeouts<a class="headerlink" href="#timeouts" title="Permanent link">&para;</a></h2>
