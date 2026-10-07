@@ -444,28 +444,25 @@ def mixed_data_pipeline():
 
 if __name__ == "__main__":
     print("=== Basic put_json ===")
-    # basic_put_json()
+    basic_put_json()
 
     print("\n=== Cache Hit Detection ===")
-    # cache_hit_detection()
+    cache_hit_detection()
 
     print("\n=== Lineage Tracking ===")
-    # lineage_tracking()
+    lineage_tracking()
 
     print("\n=== Crash Recovery ===")
-    # crash_recovery()
+    crash_recovery()
 
     print("\n=== Branching Deliberation ===")
-    # branching_deliberation()
+    branching_deliberation()
 
     print("\n=== Arrow Table ===")
-    # put_with_arrow_table()
+    put_with_arrow_table()
 
     print("\n=== Pandas DataFrame ===")
-    # put_with_pandas()
+    put_with_pandas()
 
     print("\n=== Mixed Data Pipeline ===")
-    # mixed_data_pipeline()
-
-    print("\nNote: Uncomment the function calls to run examples")
-    print("Requires a running Strata server with artifacts enabled")
+    mixed_data_pipeline()

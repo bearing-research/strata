@@ -6,7 +6,7 @@ This example shows the simplest way to use Strata to query an Iceberg table.
 
 Prerequisites:
     1. Start the Strata server: strata-notebook
-    2. Have an Iceberg table accessible via file:// URI
+    2. Create the demo table: uv run python examples/setup_demo.py
 
 What you'll learn:
     - How to connect to a Strata server
@@ -14,14 +14,18 @@ What you'll learn:
     - How to convert results to pandas
 """
 
+import sys
+from pathlib import Path
+
 from strata_client import StrataClient
 
 # Connect to Strata server
 client = StrataClient(base_url="http://127.0.0.1:8765")
 
-# Define your table URI
-# Format: file://<warehouse_path>#<namespace>.<table>
-table_uri = "file:///path/to/warehouse#my_db.my_table"
+# Table URI format: file://<warehouse_path>#<namespace>.<table>
+# The table examples/setup_demo.py creates; pass another table URI as the first argument.
+DEMO_WAREHOUSE = Path(__file__).resolve().parent.parent / "demo-warehouse"
+table_uri = sys.argv[1] if len(sys.argv) > 1 else f"file://{DEMO_WAREHOUSE}#analytics.events"
 
 # Materialize the table - returns an Artifact with metadata
 artifact = client.materialize(

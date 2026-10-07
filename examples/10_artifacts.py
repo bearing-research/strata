@@ -14,10 +14,14 @@ What you'll learn:
     - How to check artifact staleness
 """
 
+import sys
+from pathlib import Path
+
 from strata_client import StrataClient
 
-# Source table URI
-SOURCE_URI = "file:///path/to/warehouse#analytics.events"
+# The table examples/setup_demo.py creates; pass another table URI as the first argument.
+DEMO_WAREHOUSE = Path(__file__).resolve().parent.parent / "demo-warehouse"
+SOURCE_URI = sys.argv[1] if len(sys.argv) > 1 else f"file://{DEMO_WAREHOUSE}#analytics.events"
 
 
 def sql_transform(sql: str) -> dict:
@@ -238,25 +242,22 @@ def advanced_transform():
 
 if __name__ == "__main__":
     print("=== Basic Materialize ===")
-    # basic_materialize()
+    basic_materialize()
 
     print("\n=== Chained Artifacts ===")
-    # chained_artifacts()
+    chained_artifacts()
 
     print("\n=== Lineage ===")
-    # view_lineage()
+    view_lineage()
 
     print("\n=== Staleness ===")
-    # check_staleness()
+    check_staleness()
 
     print("\n=== Explain ===")
-    # explain_materialize()
+    explain_materialize()
 
     print("\n=== Data Access ===")
-    # data_access_patterns()
+    data_access_patterns()
 
     print("\n=== Advanced Transform ===")
-    # advanced_transform()
-
-    print("\nNote: Uncomment the function calls to run examples")
-    print("Requires a running Strata server with artifacts enabled")
+    advanced_transform()

@@ -67,18 +67,21 @@ strata run examples/iris_classification
 
 ## SDK scripts
 
-These talk to a running Strata server through `StrataClient`. Start the
-server first:
+These talk to a running Strata server through `StrataClient`. From a Strata
+checkout, start the server, build the demo table the scripts read, then run a
+script:
 
 ```bash
-uv run python -m strata
-```
-
-Then run any of the scripts below:
-
-```bash
+uv run strata-notebook
+uv run python examples/setup_demo.py
 uv run python examples/01_basic_usage.py
 ```
+
+The scan scripts read `setup_demo.py`'s `analytics.events` table; pass another
+table URI as the first argument to point one elsewhere (`04_time_travel.py`
+reads the demo table's snapshots and takes no argument). Every script here runs
+as is against the demo table except `09_s3_storage.py`, a template that needs an
+Iceberg warehouse in S3 and your credentials filled in.
 
 ### Core usage
 
@@ -95,7 +98,7 @@ uv run python examples/01_basic_usage.py
 |---|---|
 | [05_duckdb_integration.py](05_duckdb_integration.py) | SQL over Strata-served tables with DuckDB |
 | [08_polars_integration.py](08_polars_integration.py) | Zero-copy Arrow → Polars DataFrames |
-| [09_s3_storage.py](09_s3_storage.py) | Iceberg tables backed by S3 |
+| [09_s3_storage.py](09_s3_storage.py) | Iceberg tables backed by S3 (template: needs an S3 warehouse and credentials) |
 
 ### Advanced features
 
@@ -111,7 +114,7 @@ uv run python examples/01_basic_usage.py
 
 | File | Description |
 |---|---|
-| [setup_demo.py](setup_demo.py) | Create a demo Iceberg table for testing |
+| [setup_demo.py](setup_demo.py) | Create the demo Iceberg table the scripts read (`demo-warehouse/`, two snapshots) |
 | [hello_world.py](hello_world.py) | Time a cold scan against two artifact-cache hits |
 
 ---

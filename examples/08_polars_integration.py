@@ -16,12 +16,17 @@ Important: Polars filter operations (e.g., df.filter(...)) are applied
 filters to the scan functions.
 """
 
+import sys
+from pathlib import Path
+
 import polars as pl
 
 from strata_client import gt
 from strata_client.integration.polars import StrataPolarsScanner, scan_to_lazy, scan_to_polars
 
-table_uri = "file:///path/to/warehouse#my_db.events"
+# The table examples/setup_demo.py creates; pass another table URI as the first argument.
+DEMO_WAREHOUSE = Path(__file__).resolve().parent.parent / "demo-warehouse"
+table_uri = sys.argv[1] if len(sys.argv) > 1 else f"file://{DEMO_WAREHOUSE}#analytics.events"
 
 # Method 1: Simple one-shot scan
 df = scan_to_polars(
@@ -45,7 +50,7 @@ result = (
     .group_by("category")
     .agg(
         [
-            pl.count().alias("count"),
+            pl.len().alias("count"),
             pl.col("value").mean().alias("avg_value"),
         ]
     )
@@ -67,7 +72,7 @@ with StrataPolarsScanner() as scanner:
     # Polars operations
     summary = events.group_by("category").agg(
         [
-            pl.count().alias("count"),
+            pl.len().alias("count"),
             pl.col("value").sum().alias("total_value"),
         ]
     )
