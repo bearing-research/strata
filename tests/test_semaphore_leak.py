@@ -509,6 +509,33 @@ class TestAStreamFetchThatFailsReleasesEverything:
         assert state.qos.active_scans == 0
         assert body["stream_id"] in state.streams._cleanup_tasks
 
+    @pytest.mark.parametrize("failing", ["open_store", "start_build"])
+    def test_a_failure_before_the_build_frees_the_admission_slot(
+        self, in_process, temp_warehouse, monkeypatch, failing
+    ):
+        import strata.artifact_store
+        from strata.tenant_registry import get_tenant_registry
+
+        client, state = in_process
+        body = client.post(
+            "/v1/materialize", json=build_materialize_request(temp_warehouse["table_uri"])
+        ).json()
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("injected")
+
+        if failing == "open_store":
+            monkeypatch.setattr(strata.artifact_store, "get_artifact_store", fail)
+        else:
+            monkeypatch.setattr(state.scan_builds, "build_identity_artifact", fail)
+        response = client.get(body["stream_url"])
+
+        assert response.status_code == 500
+        interactive_in_use, _, bulk_in_use, _ = get_tenant_registry().aggregate_limiter_usage()
+        assert (interactive_in_use, bulk_in_use) == (0, 0)
+        assert state.qos.active_scans == 0
+        assert body["stream_id"] in state.streams._cleanup_tasks
+
     async def test_a_store_error_after_a_build_frees_its_build_slot(
         self, in_process, temp_warehouse, monkeypatch
     ):

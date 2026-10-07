@@ -120,7 +120,12 @@ async def get_stream(stream_id: str, request: Request):
 
     from strata.artifact_store import get_artifact_store
 
-    store = get_artifact_store(state.config.artifact_dir)
+    try:
+        store = get_artifact_store(state.config.artifact_dir)
+    except BaseException:
+        await admission.release()
+        state.streams.schedule_cleanup(stream_id, scan_id)
+        raise
 
     # No artifact store: stream a bounded pass-through from the fetcher. With
     # nothing to finalize, a client disconnect just ends the generator.
@@ -167,21 +172,19 @@ async def get_stream(stream_id: str, request: Request):
             media_type="application/vnd.apache.arrow.stream",
         )
 
-    # Decouple the build from this client's read so a slow or dropped reader
-    # cannot poison the cache entry: the background build writes row groups
-    # straight to the blob and finalizes on its own, then we serve the blob.
-    if stream_state.background_task is None:
-        stream_state.background_task = asyncio.create_task(
-            state.scan_builds.build_identity_artifact(state, stream_state)
-        )
-    build_task = stream_state.background_task
-
     # Shielded so a client disconnect never cancels the build. A handler cancel
     # (e.g. shutdown) frees the slot but leaves the build running. The slot gated the
     # scan, which is done: release it on every exit here, a store error included, not in
     # the generator's finally, so a client gone before iteration can't strand it.
     try:
-        await asyncio.shield(build_task)
+        # Decouple the build from this client's read so a slow or dropped reader
+        # cannot poison the cache entry: the background build writes row groups
+        # straight to the blob and finalizes on its own, then we serve the blob.
+        if stream_state.background_task is None:
+            stream_state.background_task = asyncio.create_task(
+                state.scan_builds.build_identity_artifact(state, stream_state)
+            )
+        await asyncio.shield(stream_state.background_task)
         artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
     finally:
         await admission.release()
