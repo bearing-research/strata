@@ -87,11 +87,12 @@ Most `4xx` and `5xx` responses use FastAPI's standard JSON shape:
 {"detail": "<human-readable error message>"}
 ```
 
-Some carry an object in `detail` instead. The notebook `409`s name a `code`
-and a `message`, plus context for that code: `environment_job` on
-`ENVIRONMENT_BUSY`, `cell_id` and `held_by` on `cell_locked`. Some core-route
-`400`s and `403`s name an `error` (`writes_disabled`, `transform_unknown`, …)
-and a `message`.
+Some carry an object in `detail` instead. The environment, cell-lock and
+quiesce `409`s name a `code` and a `message`, plus context for that code:
+`environment_job` on `ENVIRONMENT_BUSY`, `cell_id` and `held_by` on
+`cell_locked`. Some core-route `400`s and `403`s name an `error`
+(`writes_disabled`, `transform_unknown`, …) and a `message`. A `409` because a
+cell is already running (execute, close, delete) carries a plain string.
 
 ```json
 {"detail": {"code": "cell_locked", "cell_id": "a1b2c3d4", "held_by": "alice", "message": "..."}}
@@ -126,9 +127,9 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | `307` | `GET /v1/streams/{id}` on a node that does not hold the stream, redirecting to the one that does (`STRATA_NODE_ADVERTISED_URL`) |
 | `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
-| `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
+| `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode; also a browser write whose `Origin` the server does not allow. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
 | `404` | Notebook session not found (or another tenant's), a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above) |
-| `409` | Conflict - concurrent environment job, a cell someone else is editing (`cell_locked`), or a quiesced notebook (`NOTEBOOK_QUIESCED`) |
+| `409` | Conflict - concurrent environment job, a cell already running in the notebook (execute, close, delete), a cell someone else is editing (`cell_locked`), or a quiesced notebook (`NOTEBOOK_QUIESCED`) |
 | `413` | Request body or scan response exceeded the configured byte cap |
 | `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which. A table the ACL denies is refused first, so its caller gets the `403`/`404` instead |
 | `429` | Rate limit exceeded - global, per-client, or per-tenant |
@@ -345,8 +346,9 @@ POST /v1/notebooks/delete-by-path
 }
 ```
 
-Deletes a notebook directory by filesystem path. This is primarily a personal-mode
-management endpoint.
+Deletes a notebook directory by filesystem path. Personal mode only (`403` in
+service mode). An open session on the path is closed first; `409` while it runs
+a cell or an environment job.
 
 ### Rename Notebook
 
@@ -450,6 +452,7 @@ The optional `mode` query parameter selects the run mode: `normal` (default -
 use the cache and materialize stale upstreams), `rerun` (bypass the target
 cell's cache, still materialize upstreams), or `force` (run against whatever
 upstream artifacts already exist). An unrecognized mode returns `400`.
+While another cell in the notebook runs, the request is refused with `409`.
 
 !!! tip
 For interactive use, prefer the WebSocket `cell_execute` message. The REST endpoint is for programmatic access.
@@ -627,7 +630,9 @@ POST /v1/notebooks/{session_id}/environment/jobs
 }
 ```
 
-Actions: `add`, `remove`, `sync`, `import`, `change_python`, `r_init`, `r_add`.
+Actions: `add`, `remove` and `r_add` (each needs `package`), `sync`, `import`,
+`r_init`. A Python version change goes through
+[Change Python Version](#change-python-version). Returns **202** with the job.
 
 For `import`, send exactly one of `requirements` or `environment_yaml`.
 
@@ -801,7 +806,8 @@ GET /v1/notebooks/{session_id}/connections/{name}/schema
 
 Enumerates the tables and columns visible through the named connection. Used by
 the schema sidebar. Opens the connection read-only; an unknown connection is a
-`404`, an unknown driver a `400`, and a driver that fails to connect or
+`404`; an unknown driver, a database the server may not open, or credentials it
+cannot resolve a `400`; and a driver that fails to connect or
 enumerate a `502` carrying its message, so auth / driver / connectivity
 failures are visible to the UI.
 
@@ -1103,21 +1109,27 @@ Both are unauthenticated, for scrapers. Under principal auth
 The routes the client SDK and the web UI call that no feature page covers.
 The gate column uses these terms:
 
-- **read**: open in both modes; under principal auth scoped to the caller's
-  tenant (`admin:*` sees every tenant).
+- **read**: open in both modes. Under principal auth, a route that takes an
+  artifact id (`/v1/artifacts/{id}/v/{n}` and its `lineage` and `dependents`)
+  answers for the caller's tenant's versions and tenantless ones, refuses a
+  caller with no tenant (`400`), and lets `admin:*` reach every tenant. Name,
+  alias, tag, pending, tag-search and provenance lookups resolve in the
+  caller's own tenant (the default tenant when it has none), `admin:*`
+  included.
 - **write**: personal mode, or service mode with
   `STRATA_SERVICE_WRITES_ENABLED` and the `artifacts:write` scope.
 - **personal**: personal mode only; `403` in service mode.
 - **build**: personal mode, or service mode with transforms enabled.
 - **open**: no gate beyond the server's authentication.
 
-Name, alias, tag and registry reads on a server with
-`STRATA_NOTEBOOK_REMOTE_STORE_URL` set answer from that team store.
+On a server with `STRATA_NOTEBOOK_REMOTE_STORE_URL` set, the name, alias,
+tag and registry routes, writes included, and artifact lineage are answered
+by that team store, after this server's own gate.
 
 | Method | Path | Gate | What it does |
 | --- | --- | --- | --- |
 | `GET` | `/v1/artifacts/{id}/v/{n}` | read | An artifact version's metadata, including `input_versions` |
-| `DELETE` | `/v1/artifacts/{id}/v/{n}` | personal | Delete a version, its blob and its name pointers |
+| `DELETE` | `/v1/artifacts/{id}/v/{n}` | personal | Delete a version, its blob and its name pointers; a published version is a `409` until withdrawn |
 | `GET` | `/v1/artifacts/{id}/v/{n}/lineage` | read | The transitive input graph (artifacts and tables), up to `max_depth` |
 | `GET` | `/v1/artifacts/{id}/v/{n}/dependents` | read | Ready artifacts that take this one as a direct input |
 | `GET` | `/v1/artifacts/{id}/v/{n}/tags` | read | The version's tags |
