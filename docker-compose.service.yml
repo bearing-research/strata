@@ -33,7 +33,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8765/health').read()",
+          "import os, urllib.request; urllib.request.urlopen('http://localhost:%s/health' % os.environ.get('STRATA_PORT', '8765')).read()",
         ]
       interval: 10s
       timeout: 5s
@@ -59,6 +59,10 @@ services:
         "--port",
         "8766",
       ]
+    environment:
+      # The signed worker fetches its manifest URLs from http://strata:8765,
+      # a private compose address the worker's address guard refuses unless named.
+      - STRATA_WORKER_ALLOWED_HOSTS=strata
     healthcheck:
       test:
         [
