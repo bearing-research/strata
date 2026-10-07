@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -188,6 +189,10 @@ def _establish_ssh_worker(server_url: str, session_id: str, ssh_target: str) -> 
     print(_dim(f"ssh worker '{name}' ready; cells run on {ssh_target} by default"))
 
 
+def _interrupt(signum: int, frame: object) -> None:
+    raise KeyboardInterrupt
+
+
 def _terminate(proc: subprocess.Popen) -> None:
     """Stop a spawned server, escalating to kill if it ignores SIGTERM."""
     if proc.poll() is not None:
@@ -304,7 +309,8 @@ def _print_ready(notebook_dir: Path, server_url: str, session_id: str, *, tui: b
     else:
         # --no-tui: there is no viewer below to watch or quit.
         print(_dim(f"watch it happen live in the web UI at {server_url}."))
-    print()
+    # A script reading a pipe needs the session id now, not when the buffer fills.
+    print(flush=True)
 
 
 def _launch_tui(server_url: str, session_id: str) -> None:
@@ -327,36 +333,36 @@ def agent_main(args: argparse.Namespace) -> int:
         return 2
 
     spawned: subprocess.Popen | None = None
-    if _server_alive(server_url):
-        if not _mcp_mounted(server_url):
-            print(
-                f"error: a server is already running at {server_url} but its MCP "
-                f"endpoint is disabled.\n"
-                f"hint: stop it and let `strata agent` start one, or restart it "
-                f"with STRATA_MCP_ENABLED=true",
-                file=sys.stderr,
-            )
-            return 2
-        print(_dim(f"reusing server at {server_url}"))
-    else:
-        host, port = _server_endpoints(server_url)
-        print(_dim(f"starting server on {host}:{port} (MCP enabled)…"))
-        spawned = _spawn_server(host, port, notebook_dir)
-        if not _await_health(server_url, spawned):
-            print(f"error: server failed to start at {server_url}", file=sys.stderr)
-            _terminate(spawned)
-            return 2
-        if not _mcp_mounted(server_url):
-            print(
-                "error: the MCP endpoint did not mount; the [mcp] extra is "
-                "likely missing.\nhint: in a checkout, `uv sync --extra mcp`; "
-                "for an installed tool, `uv tool install 'strata-notebook[mcp,tui]'`",
-                file=sys.stderr,
-            )
-            _terminate(spawned)
-            return 2
-
+    # SIGTERM unwinds like Ctrl-C, so the finally below stops the server we started.
+    previous_sigterm = signal.signal(signal.SIGTERM, _interrupt)
     try:
+        if _server_alive(server_url):
+            if not _mcp_mounted(server_url):
+                print(
+                    f"error: a server is already running at {server_url} but its MCP "
+                    f"endpoint is disabled.\n"
+                    f"hint: stop it and let `strata agent` start one, or restart it "
+                    f"with STRATA_MCP_ENABLED=true",
+                    file=sys.stderr,
+                )
+                return 2
+            print(_dim(f"reusing server at {server_url}"))
+        else:
+            host, port = _server_endpoints(server_url)
+            print(_dim(f"starting server on {host}:{port} (MCP enabled)…"))
+            spawned = _spawn_server(host, port, notebook_dir)
+            if not _await_health(server_url, spawned):
+                print(f"error: server failed to start at {server_url}", file=sys.stderr)
+                return 2
+            if not _mcp_mounted(server_url):
+                print(
+                    "error: the MCP endpoint did not mount; the [mcp] extra is "
+                    "likely missing.\nhint: in a checkout, `uv sync --extra mcp`; "
+                    "for an installed tool, `uv tool install 'strata-notebook[mcp,tui]'`",
+                    file=sys.stderr,
+                )
+                return 2
+
         try:
             session_id = _open_session(server_url, notebook_dir)
         except (_OpenError, KeyError) as exc:
@@ -379,16 +385,17 @@ def agent_main(args: argparse.Namespace) -> int:
 
         if args.no_tui:
             if spawned is not None:
-                print(_dim("server running; press Ctrl-C to stop."))
+                print(_dim("server running; press Ctrl-C to stop."), flush=True)
                 try:
                     spawned.wait()
                 except KeyboardInterrupt:
-                    pass
+                    return 0  # Ctrl-C or SIGTERM: the finally stops the server
             return 0
 
         _launch_tui(server_url, session_id)
         return 0
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
         if spawned is not None:
             _terminate(spawned)
 

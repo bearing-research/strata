@@ -41,8 +41,8 @@ Add extras in brackets, for example
 | `sql` | SQL cells. Add a driver extra for each database you connect to: `sql-duckdb`, `sql-sqlite`, `sql-postgres`, `sql-snowflake`, `sql-bigquery`. |
 | `postgres` | A Postgres metadata database for the artifact store (`STRATA_ARTIFACT_METADATA_DSN`), for several nodes sharing one store. |
 | `azure` | The Azure Blob Storage artifact backend, and reading Azure lake tables (`adlfs`). |
-| `s3` | Presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) from an S3 role (instance profile, ECS task role, web identity) rather than an access key pair. |
-| `gcs` | Presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) for the GCS artifact backend. |
+| `s3` | Notebook `s3://` mounts (`s3fs`), and presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) from an S3 role (instance profile, ECS task role, web identity) rather than an access key pair. |
+| `gcs` | Notebook `gs://` mounts (`gcsfs`), and presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) for the GCS artifact backend. |
 | `otel` | OpenTelemetry tracing. |
 | `notebook` | The cell runtime libraries (pandas, numpy, orjson, cloudpickle, matplotlib, Pillow) in Strata's own environment. A remote worker image needs it; a local server does not, since each notebook gets its own venv. |
 

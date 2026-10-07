@@ -444,3 +444,31 @@ def test_dropped_cell_is_removed_on_resync():
     vm.apply_notebook_state(_state({"id": "a"}))  # b removed
     assert vm.cell_order == ["a"]
     assert "b" not in vm.cells
+
+
+async def test_a_remote_phase_frame_keeps_the_console_streamed_so_far(server_frames, tmp_path):
+    """The badge's ``starting`` / ``running`` frames arrive mid-run, after chunks may have."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.models import WorkerBackendType, WorkerSpec
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import create_notebook
+
+    nb = create_notebook(tmp_path / "nb", "Phases")
+    executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+    worker = WorkerSpec(
+        name="pool",
+        backend=WorkerBackendType.EXECUTOR,
+        config={"url": "https://pool.example/v1/execute", "transport": "signed"},
+    )
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame("cell_status", {"cell_id": "a", "status": "running"})
+    vm.apply_frame(
+        "cell_console", {"cell_id": "a", "stream": "stdout", "text": "epoch 1\n", "chunk_seq": 0}
+    )
+    await executor._broadcast_remote_phase("a", worker, "running")
+    _apply(vm, server_frames)
+
+    assert vm.cells["a"].status == "running"
+    assert vm.cells["a"].console == "epoch 1\n"

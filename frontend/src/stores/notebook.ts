@@ -53,7 +53,7 @@ import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import type { DatasetReader } from '../utils/datasetReaders'
 import { DirtySources, shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { OptimisticRuns } from '../utils/optimisticRun'
-import { appendConsole, replaceConsole, startConsoleRun } from '../utils/consoleChunk'
+import { appendConsole, replaceConsole, startConsoleRun, startsRun } from '../utils/consoleChunk'
 import { othersOnCell as othersOnCellIn } from '../utils/presence'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
 import { refusalNotice } from '../utils/refusal'
@@ -1927,7 +1927,7 @@ function initializeWebSocket() {
 
       // A new run: drop the previous run's stream buffer. Run-all, cascade
       // and force paths skip the local execute* helpers that clear it.
-      if (cell && status === 'running') {
+      if (cell && startsRun(p)) {
         cell.streamBuffer = undefined
         cell.streamAttempt = undefined
         startConsoleRun(cell)

@@ -106,6 +106,45 @@ def test_reverting_a_value_shows_that_values_preview(tmp_path: Path):
     assert session.notebook_state.get_cell("p").display_output.preview == 2
 
 
+def test_reverting_an_upstream_edit_is_a_hit_for_a_leaf(tmp_path: Path):
+    """A leaf's record is its console and displays; the revert finds the earlier run's."""
+    from strata.notebook.models import CellStatus
+
+    nb = _build_notebook(
+        tmp_path,
+        cells=[("p", "x = 1\n", None), ("leaf", "print(x * 10)\nx * 10\n", "p")],
+    )
+    session = _session(nb)
+
+    assert _run(session, "leaf").stdout == "10\n"
+    _set(session, nb, "p", "x = 2\n")
+    assert _run(session, "leaf").stdout == "20\n"
+    _set(session, nb, "p", "x = 1\n")
+
+    back = _run(session, "leaf")
+
+    assert back.cache_hit is True
+    assert back.stdout == "10\n"
+    assert back.display_output["preview"] == 10
+    # Staleness reads the record the run served.
+    assert session.compute_staleness()["leaf"].status == CellStatus.READY
+
+
+def test_reverting_a_leafs_own_edit_is_a_hit(tmp_path: Path):
+    nb = _build_notebook(tmp_path, cells=[("leaf", "print('one')\n", None)])
+    session = _session(nb)
+
+    assert _run(session, "leaf").stdout == "one\n"
+    _set(session, nb, "leaf", "print('two')\n")
+    assert _run(session, "leaf").stdout == "two\n"
+    _set(session, nb, "leaf", "print('one')\n")
+
+    back = _run(session, "leaf")
+
+    assert back.cache_hit is True
+    assert back.stdout == "one\n"
+
+
 # -- finding 3: recovery through a cache hit keeps the display -------------
 
 

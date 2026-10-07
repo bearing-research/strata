@@ -538,6 +538,8 @@ def test_create_notebook_endpoint_with_starter_cell(client, tmp_path):
     assert len(data["cells"]) == 1
     assert data["cells"][0]["source"] == ""
     assert data["cells"][0]["language"] == "python"
+    # Every cell id the server mints is an 8-character prefix.
+    assert len(data["cells"][0]["id"]) == 8
 
 
 def test_create_notebook_endpoint_rejects_unsupported_python_version(client, monkeypatch, tmp_path):

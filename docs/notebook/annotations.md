@@ -191,6 +191,11 @@ resolved local path (the cached mirror for remote URIs, the URI's local
 filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
 joining, `.read_text()`, `.iterdir()`, etc.
 
+Strata mirrors a remote mount in its own process, not the notebook's venv, so
+its filesystem library goes where Strata is installed: the `s3` extra for
+`s3://` (`s3fs`), `gcs` for `gs://` (`gcsfs`) and `azure` for `az://`
+(`adlfs`), for example `uv tool install "strata-notebook[s3]"`.
+
 Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---

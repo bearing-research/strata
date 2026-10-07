@@ -103,6 +103,14 @@ def test_cli_worker_add_refuses_an_unknown_transport(nb, capsys):
     assert parse_notebook(nb).workers == []
 
 
+def test_cli_worker_add_refuses_the_reserved_local_name(nb, capsys):
+    """Removal refuses ``local``, so accepting it would leave an entry no command undoes."""
+    rc = main(["worker", "add", str(nb), "local", "--url", URL])
+    assert rc == 1
+    assert "reserved" in json.loads(capsys.readouterr().out)["error"]
+    assert parse_notebook(nb).workers == []
+
+
 def test_remove_worker_missing_and_builtin(nb):
     ops = LocalNotebookOps(nb)
     with pytest.raises(NotebookOpsError, match="no worker named"):
