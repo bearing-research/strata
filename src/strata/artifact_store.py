@@ -593,6 +593,18 @@ _MIGRATIONS: list[_Migration] = [
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
 
 
+class StoreSchemaMismatch(RuntimeError):
+    """The store's schema is not one this release can open as asked."""
+
+
+def _newer_schema_error(current: int) -> StoreSchemaMismatch:
+    return StoreSchemaMismatch(
+        f"The artifact store's schema is version {current}, newer than this Strata "
+        f"supports ({_LATEST_SCHEMA_VERSION}). Upgrade Strata, or restore a backup "
+        "taken before the upgrade."
+    )
+
+
 _SCHEMA_SQL = """
 -- Artifact versions: immutable once state="ready"
 CREATE TABLE IF NOT EXISTS artifact_versions (
@@ -818,6 +830,8 @@ class ArtifactStore:
         artifact_dir: Path,
         blob_store: BlobStore | None = None,
         dialect: SqlDialect | None = None,
+        *,
+        read_only: bool = False,
     ):
         """Open or create the store under ``artifact_dir``.
 
@@ -825,6 +839,13 @@ class ArtifactStore:
         ``dialect`` defaults to SQLite under ``artifact_dir``. With a shared
         ``PostgresDialect`` the blob store should be remote too, or the store is only
         coherent on one machine.
+
+        ``read_only`` is for commands that only inspect a store: it never creates or
+        migrates the schema, and refuses a store that is not at this release's version.
+
+        Raises:
+            StoreSchemaMismatch: the schema is newer than this release, or, with
+                ``read_only``, older or missing.
         """
         from strata.file_modes import narrow, private_dir, private_file
 
@@ -859,7 +880,10 @@ class ArtifactStore:
         # has to be taught about; see strata/sql_backend.py for what differs.
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(self.db_path)
 
-        self._init_schema()
+        if read_only:
+            self._require_current_schema()
+        else:
+            self._init_schema()
 
     def _get_connection(self) -> StoreConnection:
         """Open a connection configured by the active dialect (see ``SqliteDialect.connect``)."""
@@ -1163,6 +1187,27 @@ class ArtifactStore:
             return ImportedArtifact(duplicate[0], duplicate[1], written=False)
         return None
 
+    def _require_current_schema(self) -> None:
+        """Refuse a store this release would migrate, without touching it."""
+        conn = self._get_connection()
+        try:
+            current = None
+            if self._dialect.schema_exists(conn, "schema_version"):
+                row = conn.execute("SELECT MAX(version) AS version FROM schema_version").fetchone()
+                current = row["version"] if row is not None else None
+        finally:
+            conn.close()
+        if current is not None and current > _LATEST_SCHEMA_VERSION:
+            raise _newer_schema_error(current)
+        if current is None or current < _LATEST_SCHEMA_VERSION:
+            raise StoreSchemaMismatch(
+                f"The artifact store's schema is version {current or _BASELINE_SCHEMA_VERSION}, "
+                f"older than this Strata ({_LATEST_SCHEMA_VERSION}). This command only reads, "
+                "so it does not migrate it. Back the store up, then start this release's "
+                "server on it once (a notebook's store migrates when the notebook is "
+                "opened); or inspect it with the release that wrote it."
+            )
+
     def _apply_schema_migrations(self, conn: StoreConnection) -> None:
         """Bring one database up to ``_LATEST_SCHEMA_VERSION``; a cheap no-op once current."""
         conn.executescript(self._dialect.adapt_ddl(_SCHEMA_VERSION_SQL))
@@ -1177,11 +1222,7 @@ class ArtifactStore:
         elif current > _LATEST_SCHEMA_VERSION:
             # A newer Strata migrated this store; running on it would write rows that
             # Strata does not expect.
-            raise RuntimeError(
-                f"The artifact store's schema is version {current}, newer than this Strata "
-                f"supports ({_LATEST_SCHEMA_VERSION}). Upgrade Strata, or restore a backup "
-                "taken before the upgrade."
-            )
+            raise _newer_schema_error(current)
 
         for migration in _MIGRATIONS:
             if migration.version <= current:

@@ -1368,6 +1368,34 @@ class TestSchemaMigrations:
         finally:
             dialect.close()
 
+    def test_a_read_only_open_leaves_an_older_database_alone(self, postgres_dsn, tmp_path, store):
+        """A shared database older nodes still serve: inspecting it must not migrate it."""
+        from strata.artifact_store import StoreSchemaMismatch
+
+        conn = store._get_connection()
+        try:
+            conn.execute("DROP TABLE notebook_workers")
+            conn.execute("DROP TABLE notebook_worker_registry")
+            conn.execute("UPDATE schema_version SET version = 8")
+            conn.commit()
+        finally:
+            conn.close()
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            with pytest.raises(StoreSchemaMismatch, match="version 8, older"):
+                ArtifactStore(tmp_path / "artifacts", dialect=dialect, read_only=True)
+
+            conn = dialect.connect()
+            try:
+                stamped = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
+                assert stamped["v"] == 8
+                assert not dialect.schema_exists(conn, "notebook_workers")
+            finally:
+                conn.close()
+        finally:
+            dialect.close()
+
     def test_an_existing_database_gains_the_worker_registry(self, postgres_dsn, tmp_path, store):
         from strata.artifact_store import _LATEST_SCHEMA_VERSION
 

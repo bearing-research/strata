@@ -148,7 +148,8 @@ class ConnectionSpec(BaseModel):
     holds runtime tunables that do not change which objects the connection sees.
     """
 
-    model_config = ConfigDict(extra="allow")
+    # The error text reaches the UI and logs; ``auth`` may hold a literal secret.
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
 
     name: str = Field(
         ...,
@@ -221,7 +222,8 @@ class WorkerConfig(BaseModel):
     ``strata_url``; ``local`` uses none.
     """
 
-    model_config = ConfigDict(extra="allow")
+    # ``token`` may be a literal secret.
+    model_config = ConfigDict(extra="allow", hide_input_in_errors=True)
 
     url: str | None = None  # executor endpoint (executor backend)
     transport: str | None = None  # "direct" | … (executor backend)

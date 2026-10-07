@@ -50,6 +50,11 @@ _ESSENTIAL_PREFIXES = ("UV_", "LC_", "PYTHON", "VIRTUAL_ENV", "R_", "RSTUDIO_")
 
 _SECRET_PREFIX = "STRATA_"
 
+# Index URLs: uv takes an index login embedded in them (``https://user:pass@host/simple``).
+_UV_INDEX_URL_NAMES = frozenset(
+    {"UV_INDEX", "UV_INDEX_URL", "UV_EXTRA_INDEX_URL", "UV_DEFAULT_INDEX"}
+)
+
 
 def _essential(name: str) -> bool:
     """In the floor, minus credentials: a private index's login or a publish token is
@@ -58,9 +63,9 @@ def _essential(name: str) -> bool:
         return True
     if not name.startswith(_ESSENTIAL_PREFIXES) or _is_sensitive_env_key(name):
         return False
-    if name.startswith("UV_PUBLISH_"):
+    if name.startswith("UV_PUBLISH_") or name in _UV_INDEX_URL_NAMES:
         return False
-    return not (name.startswith("UV_INDEX_") and name.endswith("_USERNAME"))
+    return not (name.startswith("UV_INDEX_") and name.endswith(("_USERNAME", "_URL")))
 
 
 def _allowed(name: str, allowlist: list[str]) -> bool:

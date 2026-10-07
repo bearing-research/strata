@@ -11,6 +11,7 @@ from strata.artifact_store import (
     _LATEST_SCHEMA_VERSION,
     _MIGRATIONS,
     ArtifactStore,
+    StoreSchemaMismatch,
 )
 
 
@@ -124,6 +125,58 @@ class TestExistingDatabase:
 
         with pytest.raises(RuntimeError, match="newer than this Strata supports"):
             ArtifactStore(tmp_path / "s")
+
+
+class TestAReadOnlyOpen:
+    """For commands that only inspect: the store stays exactly as it was."""
+
+    def test_an_older_database_is_refused_untouched(self, tmp_path):
+        db_path = ArtifactStore(tmp_path / "old").db_path
+        conn = sqlite3.connect(db_path)
+        conn.execute("DROP TABLE notebook_workers")
+        conn.execute("DELETE FROM schema_version WHERE version >= 9")
+        conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (8, 0)")
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(StoreSchemaMismatch, match="version 8, older"):
+            ArtifactStore(tmp_path / "old", read_only=True)
+
+        assert _version(db_path) == 8
+        conn = sqlite3.connect(db_path)
+        try:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+        finally:
+            conn.close()
+        assert "notebook_workers" not in tables
+
+    def test_a_database_from_before_versioning_is_refused(self, tmp_path):
+        db_path = ArtifactStore(tmp_path / "old").db_path
+        conn = sqlite3.connect(db_path)
+        conn.execute("DROP TABLE schema_version")
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(StoreSchemaMismatch, match="older"):
+            ArtifactStore(tmp_path / "old", read_only=True)
+
+    def test_a_newer_database_is_refused_as_before(self, tmp_path):
+        db_path = ArtifactStore(tmp_path / "s").db_path
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, 0)",
+            (_LATEST_SCHEMA_VERSION + 1,),
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(StoreSchemaMismatch, match="newer than this Strata supports"):
+            ArtifactStore(tmp_path / "s", read_only=True)
+
+    def test_a_current_database_opens(self, tmp_path):
+        ArtifactStore(tmp_path / "s")
+
+        assert ArtifactStore(tmp_path / "s", read_only=True).stats()["total_versions"] == 0
 
 
 class TestTheWorkerRegistryMigration:

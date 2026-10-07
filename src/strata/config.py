@@ -14,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -30,6 +31,16 @@ from strata.types import CacheGranularity
 
 
 logger = logging.getLogger(__name__)
+
+
+def describe_config_error(exc: ValidationError) -> str:
+    """Why a configuration was refused, one problem per line, without pydantic's framing."""
+    lines = []
+    for error in exc.errors():
+        message = str(error["msg"]).removeprefix("Value error, ")
+        where = ".".join(str(part) for part in error["loc"])
+        lines.append(f"{where}: {message}" if where else message)
+    return "\n".join(lines)
 
 
 class AclRule(BaseModel):
@@ -154,6 +165,8 @@ class StrataConfig(BaseSettings):
         # A field carrying validation_alias still has to be settable by its own
         # name, because load() passes pyproject keys as init kwargs.
         populate_by_name=True,
+        # A refusal's message would otherwise end with the merged settings, secrets included.
+        hide_input_in_errors=True,
     )
 
     # Server settings

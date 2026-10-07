@@ -321,6 +321,34 @@ class TestModeCoherence:
         with pytest.raises(ValueError, match="STRATA_AUTH_MODE"):
             StrataConfig.load(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "art")
 
+    @pytest.mark.parametrize(
+        "env",
+        [
+            {"STRATA_DEPLOYMENT_MODE": "service"},
+            # The catalog-uri refusal, with the secret coming from the AWS fallback.
+            {"STRATA_CATALOG_PROPERTIES": '{"warehouse": "s3://bucket/wh"}'},
+        ],
+        ids=["service-without-auth", "catalog-without-uri"],
+    )
+    def test_a_refusal_does_not_print_the_secret_key(self, tmp_path, monkeypatch, env):
+        """load() passes the S3 keys last, so pydantic's input_value ended with the secret."""
+        secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        monkeypatch.delenv("STRATA_AUTH_MODE", raising=False)
+        monkeypatch.setenv("STRATA_S3_SECRET_KEY", secret)
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", secret)
+        # From the environment, not kwargs, so the secret is the last value as in a real start.
+        monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
+        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "art"))
+        monkeypatch.chdir(tmp_path)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig.load()
+
+        assert "uri" in str(exc_info.value) or "STRATA_AUTH_MODE" in str(exc_info.value)
+        assert secret[-8:] not in str(exc_info.value)
+
     def test_service_transforms_without_artifact_dir_rejected(self, tmp_path):
         """Transform builds persist artifacts, so they need a store."""
         with pytest.raises(ValueError) as exc_info:

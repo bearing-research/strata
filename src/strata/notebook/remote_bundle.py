@@ -9,6 +9,8 @@ import tarfile
 from pathlib import Path
 from typing import Any
 
+from strata.notebook.harness_user import open_run_file
+
 SCHEMA_VERSION = "notebook-output-bundle@v1"
 
 # Per-member cap: a member is read fully into memory on unpack, so an
@@ -142,7 +144,8 @@ def pack_notebook_output_bundle(
             if not isinstance(arcname, str) or arcname in added:
                 continue
             added.add(arcname)
-            tar.add(output_dir / Path(arcname).name, arcname=arcname)
+            with open_run_file(output_dir, Path(arcname).name) as f:
+                tar.addfile(tar.gettarinfo(arcname=arcname, fileobj=f), f)
 
 
 def unpack_notebook_output_bundle(

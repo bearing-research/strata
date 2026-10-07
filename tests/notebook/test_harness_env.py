@@ -92,6 +92,15 @@ class TestTheFloorCarriesNoCredentials:
         monkeypatch.setenv("UV_INDEX_CORP_USERNAME", "svc")
         monkeypatch.setenv("UV_PUBLISH_TOKEN", "pypi-tok")
         monkeypatch.setenv("UV_PUBLISH_URL", "https://upload.example")
+        # uv also takes an index login embedded in the index URL.
+        for name in (
+            "UV_INDEX",
+            "UV_INDEX_URL",
+            "UV_EXTRA_INDEX_URL",
+            "UV_DEFAULT_INDEX",
+            "UV_INDEX_CORP_URL",
+        ):
+            monkeypatch.setenv(name, "https://ci:s3cret@pypi.internal/simple")
         monkeypatch.setenv("R_LIBS_SECRET", "x")
         monkeypatch.setenv("PYTHON_KEYRING_TOKEN", "y")
         monkeypatch.setenv("CONDA_PREFIX", "/opt/conda")
@@ -104,6 +113,11 @@ class TestTheFloorCarriesNoCredentials:
             "UV_INDEX_CORP_USERNAME",
             "UV_PUBLISH_TOKEN",
             "UV_PUBLISH_URL",
+            "UV_INDEX",
+            "UV_INDEX_URL",
+            "UV_EXTRA_INDEX_URL",
+            "UV_DEFAULT_INDEX",
+            "UV_INDEX_CORP_URL",
             "R_LIBS_SECRET",
             "PYTHON_KEYRING_TOKEN",
         ):
@@ -131,6 +145,7 @@ class TestTheFloorCarriesNoCredentials:
 
     def test_naming_a_credential_exactly_still_hands_it_over(self):
         assert harness_env(["UV_INDEX_CORP_PASSWORD"])["UV_INDEX_CORP_PASSWORD"] == "s3cret"
+        assert "UV_INDEX_URL" in harness_env(["UV_INDEX_URL"])
 
 
 class TestExtra:

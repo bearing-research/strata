@@ -63,6 +63,8 @@ Quiesce waits for running cells (cancelling any still running after `timeout_sec
 
 Back up a server before every upgrade: a new release migrates the artifact store's metadata on its first start, one way, and the backup is the only way back. Stop every server that shares the store first, so the metadata and the blobs agree.
 
+The commands that only read a store (`strata artifact list`, `show`, `lineage`, `verify`, `audit`, `pending` and `archive`) never migrate it. Run against a store an older release wrote, such as a backup or a database older nodes still serve, they refuse and say so; start the new release's server on it to migrate it. Commands that write to a store (`promote`, `publish`, `pull`, `gc`, `migrate`, …) migrate it the way the server does.
+
 - **SQLite store (the default):** copy the whole artifact directory (`STRATA_ARTIFACT_DIR`, `~/.strata/artifacts` by default). It holds `artifacts.sqlite` and the blobs.
 - **Postgres and an object store:** `pg_dump` the database `STRATA_ARTIFACT_METADATA_DSN` names, and copy the blob bucket (`aws s3 sync s3://<bucket> <backup-dir>`, or your provider's equivalent).
 - **Either way:** archive the notebook storage directory without `.venv` (as in [Backup](#backup)). The workers registered through `/v1/admin/notebook-workers` are in the metadata store, so the steps above cover them; a server from before 0.9.0 kept them in `notebook_workers.json` in the artifact directory, so copy that file too when backing one up before the upgrade.
