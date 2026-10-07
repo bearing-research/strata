@@ -161,7 +161,17 @@ POST /v1/notebooks/create
 }
 ```
 
-Returns notebook state with `session_id`.
+Returns notebook state with `session_id` as soon as the notebook exists. Unlike
+`open`, it does not wait for the environment: the new venv's first `uv sync`
+runs as an environment job, which the response reports in `environment_job`
+(`status: "running"`) and `environment.sync_state` (`"pending"`), so a client
+can show the notebook while it builds. Until the job finishes, running a cell,
+starting another environment job or deleting the notebook answers `409` with
+`code: "ENVIRONMENT_BUSY"`. To run cells straight after creating, wait for the
+`environment_job_finished` WebSocket frame, or poll
+[`GET /v1/notebooks/{session_id}/environment/jobs/current`](#get-current-environment-job)
+until `environment_job.status` is `completed` (or `failed`). `POST
+/v1/notebooks/import` behaves the same way.
 
 ### Open Notebook
 
