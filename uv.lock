@@ -4087,7 +4087,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "filelock", specifier = ">=3.16.0" },
+    { name = "filelock", specifier = ">=3.24" },
     { name = "gcsfs", marker = "extra == 'gcs'", specifier = ">=2026.0.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
     { name = "grandalf", marker = "extra == 'tui'", specifier = ">=0.8" },
