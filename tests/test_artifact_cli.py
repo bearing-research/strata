@@ -591,3 +591,71 @@ class TestArchive:
         dest = self._archive(chain_store, tmp_path)
 
         assert "F. Li" in (dest / "index.html").read_text()
+
+
+class TestReadOnlyCommandsDoNotMigrate:
+    """Inspecting a backup, or a store older nodes still serve, must leave it as it was."""
+
+    @pytest.fixture
+    def old_store(self, chain_store):
+        """The chain store stamped as schema 5, the version 0.8.0 wrote; the later
+        migrations are idempotent, so they re-run cleanly on it."""
+        import sqlite3
+
+        db_path = chain_store["store"].db_path
+        conn = sqlite3.connect(db_path)
+        conn.execute("UPDATE schema_version SET version = 5")
+        conn.commit()
+        conn.close()
+        return chain_store["dir"], db_path
+
+    @staticmethod
+    def _versions(db_path) -> list[int]:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            return [row[0] for row in conn.execute("SELECT version FROM schema_version")]
+        finally:
+            conn.close()
+
+    @pytest.mark.parametrize(
+        ("command", "extra"),
+        [
+            ("cmd_list", {"state": None, "limit": 5}),
+            ("cmd_show", {"ref": "demo/model", "tenant": None}),
+            ("cmd_lineage", {"ref": "demo/model", "tenant": None, "max_depth": 5}),
+            ("cmd_verify", {"tenant": None}),
+            ("cmd_audit", {"name": None, "limit": 5}),
+            ("cmd_pending", {}),
+        ],
+    )
+    def test_an_older_store_is_refused_and_left_at_its_version(
+        self, old_store, capsys, command, extra
+    ):
+        import strata.artifact_cli as artifact_cli
+
+        artifact_dir, db_path = old_store
+
+        rc = getattr(artifact_cli, command)(_args(artifact_dir=artifact_dir, **extra))
+
+        assert rc == 2
+        assert max(self._versions(db_path)) == 5
+        err = capsys.readouterr().err
+        assert "version 5, older than this Strata" in err
+        assert "start this release's server on it once" in err
+
+    def test_a_write_command_still_migrates(self, old_store):
+        from strata.artifact_cli import _open_store
+        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+
+        artifact_dir, db_path = old_store
+
+        assert _open_store(artifact_dir) is not None
+        assert max(self._versions(db_path)) == _LATEST_SCHEMA_VERSION
+
+    def test_a_current_store_reads_without_writing_a_version(self, chain_store):
+        before = self._versions(chain_store["store"].db_path)
+
+        assert cmd_list(_args(artifact_dir=chain_store["dir"], state=None, limit=5)) == 0
+        assert self._versions(chain_store["store"].db_path) == before
