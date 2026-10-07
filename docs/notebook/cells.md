@@ -453,7 +453,7 @@ The cell above pulls `min_amount` from an upstream Python cell, sends a paramete
 
 ### Connections
 
-A SQL cell references a **named connection**. Connections live in `notebook.toml` under `[connections.<name>]`, but you don't need to edit that file by hand. Open the **Connections panel** in the right sidebar, click `+ Add connection`, and fill in the form. The driver dropdown switches the field layout per backend (path for SQLite; URI + auth + role + search path for PostgreSQL; account / warehouse / database / schema for Snowflake; project / dataset / credentials for BigQuery).
+A SQL cell references a **named connection**. Connections live in `notebook.toml` under `[connections.<name>]`, but you don't need to edit that file by hand. Open the **Connections panel** in the right sidebar, click `+ Add connection`, and fill in the form. The driver dropdown switches the field layout per backend (path for DuckDB and SQLite; URI + auth + role + search path for PostgreSQL; account / warehouse / database / schema for Snowflake; project / dataset / credentials for BigQuery).
 
 ```toml
 [connections.warehouse]

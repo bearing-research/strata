@@ -4,13 +4,12 @@ import { ref, shallowRef } from 'vue'
 import type { WsMessage, WsClientMessageType, WsServerMessageType } from '../types/notebook'
 import { BASE_PATH, strataHttpBase, strataWsBase } from '../utils/strataBase.ts'
 
-const STRATA_WS_URL = strataWsBase(
-  strataHttpBase(
-    (import.meta as any).env?.VITE_STRATA_URL,
-    typeof window !== 'undefined' ? window.location.origin : undefined,
-    BASE_PATH,
-  ),
+const STRATA_HTTP_URL = strataHttpBase(
+  (import.meta as any).env?.VITE_STRATA_URL,
+  typeof window !== 'undefined' ? window.location.origin : undefined,
+  BASE_PATH,
 )
+const STRATA_WS_URL = strataWsBase(STRATA_HTTP_URL)
 
 export type WsConnectionState =
   'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
@@ -26,6 +25,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
   const clientSeq = ref(0)
   const messageHandlers = new Map<WsServerMessageType, MessageHandler[]>()
   const openHandlers: Array<() => void> = []
+  const goneHandlers: Array<() => void> = []
   const reconnectAttempts = ref(0)
   // Only disconnect() stops reconnecting. Not read from `state`: a failed
   // attempt fires onerror (state 'error') before onclose.
@@ -95,6 +95,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
           state.value = 'disconnected'
         } else {
           scheduleReconnect()
+          void stopIfSessionGone()
         }
       }
 
@@ -119,6 +120,27 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     setTimeout(() => {
       if (!closedByUser) connect()
     }, delay)
+  }
+
+  // The browser hides why an upgrade failed, so a refused one (403: the server
+  // restarted and no longer has this session) looks like the server being down.
+  // Ask over REST instead; only a 404 means gone, anything else keeps retrying.
+  async function sessionGone(): Promise<boolean> {
+    try {
+      const resp = await fetch(
+        `${STRATA_HTTP_URL}/v1/notebooks/${encodeURIComponent(notebookId)}/dag`,
+      )
+      return resp.status === 404
+    } catch {
+      return false
+    }
+  }
+
+  async function stopIfSessionGone(): Promise<void> {
+    if (!(await sessionGone()) || closedByUser) return
+    console.warn('[WebSocket] Session is gone on the server:', notebookId)
+    disconnect()
+    goneHandlers.forEach((handler) => handler())
   }
 
   function disconnect(): void {
@@ -157,6 +179,11 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
   /** Run `handler` each time the socket opens, reconnects included. */
   function onOpen(handler: () => void): void {
     openHandlers.push(handler)
+  }
+
+  /** Run `handler` once the server says this session no longer exists; retries stop. */
+  function onSessionGone(handler: () => void): void {
+    goneHandlers.push(handler)
   }
 
   /** Register a handler for a message type; a type can have several. */
@@ -327,6 +354,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     send,
     onMessage,
     onOpen,
+    onSessionGone,
 
     // High-level actions
     requestSync,

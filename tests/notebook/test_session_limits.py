@@ -396,6 +396,33 @@ class TestCloseRoute:
         assert close == NOTEBOOK_SCOPE_WRITE
 
 
+class TestServerShutdown:
+    async def test_every_connected_client_is_told_before_uvicorn_closes_it(
+        self, config, manager, monkeypatch, tmp_path
+    ):
+        import uvicorn
+
+        from strata.server import _ShutdownAnnouncingServer
+
+        first, second = (manager.open_notebook(_notebook(tmp_path, n)) for n in ("one", "two"))
+        connected = [await _connect(first), await _connect(second)]
+        sockets = [socket for socket, _ in connected]
+        reasons_when_uvicorn_shut_down: list[list[str]] = []
+
+        async def uvicorn_shutdown(self, sockets_=None):
+            reasons_when_uvicorn_shut_down.extend(
+                [f["reason"] for f in s.closed_frames()] for s in sockets
+            )
+
+        monkeypatch.setattr(uvicorn.Server, "shutdown", uvicorn_shutdown)
+        await _ShutdownAnnouncingServer(uvicorn.Config("strata.server:app")).shutdown()
+
+        assert reasons_when_uvicorn_shut_down == [["shutdown"], ["shutdown"]]
+        for socket, task in connected:
+            await _until(task.done)
+            assert socket.closed == (1000, "Session closed")
+
+
 class TestServiceModeReuse:
     def test_open_reuses_only_the_callers_own_session(self, manager, tmp_path):
         notebook_dir = _notebook(tmp_path, "shared")

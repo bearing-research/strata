@@ -8,12 +8,15 @@ import ipaddress
 import math
 import os
 import re
+import socket
 import sys
 import time
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+import uvicorn
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -1940,9 +1943,23 @@ def _apply_server_cli_overrides(args) -> None:
         )
 
 
+class _ShutdownAnnouncingServer(uvicorn.Server):
+    """A uvicorn server that tells notebook clients it is stopping.
+
+    uvicorn closes every WebSocket with 1012 before the lifespan shutdown runs, so
+    only here can a client still learn that its session is gone.
+    """
+
+    async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
+        from strata.notebook.ws import announce_shutdown
+
+        await announce_shutdown()
+        await super().shutdown(sockets)
+
+
 def main(argv: list[str] | None = None):
     """Run the server."""
-    import uvicorn
+    from uvicorn.config import STARTUP_FAILURE
 
     from strata._uv_runtime import assert_uv_managed_runtime
 
@@ -1958,15 +1975,22 @@ def main(argv: list[str] | None = None):
         sys.exit(f"Strata cannot start: {describe_config_error(exc)}")
     # Users often expect new notebooks in the current directory.
     print(f"Strata: new notebooks are created in {config.notebook_storage_dir}")
-    uvicorn.run(
-        "strata.server:app",
-        host=config.host,
-        port=config.port,
-        log_level="info",
-        # The default legacy ``websockets`` protocol asserts on asyncio internals
-        # that changed in CPython 3.14, killing notebook WebSockets there.
-        ws="websockets-sansio",
+    server = _ShutdownAnnouncingServer(
+        uvicorn.Config(
+            "strata.server:app",
+            host=config.host,
+            port=config.port,
+            log_level="info",
+            # The default legacy ``websockets`` protocol asserts on asyncio internals
+            # that changed in CPython 3.14, killing notebook WebSockets there.
+            ws="websockets-sansio",
+        )
     )
+    # What uvicorn.run does around Server.run.
+    with contextlib.suppress(KeyboardInterrupt):
+        server.run()
+    if not server.started:
+        sys.exit(STARTUP_FAILURE)
 
 
 if __name__ == "__main__":

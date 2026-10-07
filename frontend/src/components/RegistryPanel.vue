@@ -13,7 +13,6 @@ const {
   registryLoading,
   registryError,
   refreshRegistryAction,
-  fetchRegistryAuditAction,
   setAliasAction,
   approvePendingAction,
   rejectPendingAction,
@@ -27,7 +26,6 @@ const openMenu = ref<string | null>(null) // name whose Promote menu is open
 
 onMounted(() => {
   void refreshRegistryAction()
-  void fetchRegistryAuditAction()
 })
 
 async function promote(

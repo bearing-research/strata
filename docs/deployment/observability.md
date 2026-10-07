@@ -133,6 +133,8 @@ notebook:
 In service mode `GET /v1/artifacts/stats` and `GET /v1/artifacts/usage`
 report the caller's own tenant (an `admin:*` caller sees the whole store, or
 one tenant named with `?tenant=`), which is the figure to meter storage on.
+`GET /v1/artifacts` is personal-mode only, so there the page shows the stats
+and says that the list is not available, without a table.
 
 These are convenience surfaces over the same data; use the Prometheus metrics
 and OTLP traces above for production monitoring and alerting.

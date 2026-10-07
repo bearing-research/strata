@@ -43,9 +43,9 @@ def test_a_strata_command_is_refused_outside_uv(tmp_path, outside_uv, capsys):
 
 
 def test_the_server_is_refused_outside_uv_before_it_starts(outside_uv, capsys, monkeypatch):
-    import uvicorn
-
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: pytest.fail("the server started"))
+    monkeypatch.setattr(
+        server._ShutdownAnnouncingServer, "run", lambda *a, **k: pytest.fail("the server started")
+    )
 
     monkeypatch.delenv("STRATA_NOTEBOOK_STORAGE_DIR", raising=False)
 

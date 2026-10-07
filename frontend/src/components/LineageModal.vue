@@ -1,8 +1,20 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
 import { useNotebook } from '../stores/notebook'
 
 const { lineageOpen, lineageTitle, lineageRows, lineageLoading, lineageError, closeLineage } =
   useNotebook()
+
+function onKeydown(event: KeyboardEvent) {
+  if (lineageOpen.value && event.key === 'Escape') closeLineage()
+}
+
+onMounted(() => document.addEventListener('keydown', onKeydown))
+// The open flag lives in the store; leaving the page must not leave the overlay up.
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  closeLineage()
+})
 
 function formatMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`
