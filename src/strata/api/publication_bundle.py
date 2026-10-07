@@ -232,7 +232,7 @@ def cached_bundle_zip(
     """
     record = {k: v for k, v in dataclasses.asdict(publication).items() if k != "revoked_at"}
     key = hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode()).hexdigest()
-    cache_dir = _archive_cache_dir(store, publication.token)
+    cache_dir = _archive_cache_dir(store, publication.id)
     prefix = f"{key[:32]}-"
     cached = next(cache_dir.glob(f"{prefix}*.zip"), None)
     if cached is not None:
@@ -257,14 +257,17 @@ def cached_bundle_zip(
 
 
 def drop_cached_bundles(store: ArtifactStore, token: str) -> None:
-    """Remove every cached archive of the publication *token*."""
-    cache_dir = _archive_cache_dir(store, token)
+    """Remove every cached archive of the publication *token* (raw, or its id)."""
+    from strata.artifact_store import publication_key
+
+    cache_dir = _archive_cache_dir(store, publication_key(token))
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
 
 
-def _archive_cache_dir(store: ArtifactStore, token: str) -> Path:
-    return store.artifact_dir / ARCHIVE_CACHE_DIRNAME / token
+def _archive_cache_dir(store: ArtifactStore, publication_id: str) -> Path:
+    # Named by id, never by token: a directory listing is not a place for working links.
+    return store.artifact_dir / ARCHIVE_CACHE_DIRNAME / publication_id
 
 
 def _write_parquet_companion(

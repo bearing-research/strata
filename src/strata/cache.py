@@ -18,6 +18,7 @@ from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
 from strata.config import StrataConfig
 from strata.fetcher import Fetcher, create_fetcher
+from strata.file_modes import private_dir
 from strata.metrics import MetricsCollector
 from strata.tracing import trace_span
 from strata.types import CacheGranularity, CacheKey, ReadPlan, Task
@@ -143,7 +144,8 @@ class DiskCache:
         self.granularity = config.cache_granularity
         self.metrics = metrics or MetricsCollector()
 
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # Row groups of every tenant's tables: no other account on the host reads them.
+        private_dir(self.cache_dir)
         self._remove_other_versions()
 
     def _remove_other_versions(self) -> None:

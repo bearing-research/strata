@@ -688,7 +688,9 @@ class StrataConfig(BaseSettings):
     @model_validator(mode="after")
     def setup_paths_and_defaults(self) -> StrataConfig:
         """Set up paths and defaults after model creation."""
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        from strata.file_modes import private_dir
+
+        private_dir(self.cache_dir)
 
         if self.metadata_db is None:
             self.metadata_db = Path.home() / ".strata" / "meta.sqlite"
@@ -848,6 +850,16 @@ class StrataConfig(BaseSettings):
         # inert.
         if self.deployment_mode == "service":
             conflicts: list[str] = []
+
+            # Service mode serves a network: with no auth every route, notebook
+            # execution and the admin worker registry included, is open to anyone.
+            if not self.principal_auth_enabled:
+                conflicts.append(
+                    "auth_mode='none' (every route, including cell execution and "
+                    "the admin worker registry, would be open to anyone who "
+                    "reaches the server; set STRATA_AUTH_MODE to 'trusted_proxy' "
+                    "or 'api_key')"
+                )
 
             # Multi-tenancy is an access-control boundary: without auth the tenant header is
             # spoofable and direct artifact reads aren't tenant-filtered.

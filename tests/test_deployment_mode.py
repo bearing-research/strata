@@ -19,6 +19,8 @@ class TestDeploymentModeConfig:
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
         )
         assert config.deployment_mode == "service"
         assert config.writes_enabled is False
@@ -44,7 +46,12 @@ class TestDeploymentModeConfig:
         assert artifact_dir.exists()
 
     def test_service_mode_no_artifact_dir(self, tmp_path):
-        config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode="service")
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+        )
         assert config.artifact_dir is None
 
 
@@ -114,6 +121,8 @@ class TestPersonalModeBinding:
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             host="0.0.0.0",
         )
         # Service mode is read-only, so any bind is allowed.
@@ -147,6 +156,8 @@ class TestWritesEnabled:
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
         )
         assert config.writes_enabled is False
 
@@ -297,13 +308,18 @@ class TestModeCoherence:
         )
         assert config.acl_config.default == "deny"
 
-    def test_service_default_acl_without_auth_allowed(self, tmp_path):
-        """The default ACL (allow-all, no rules) does not count as configured."""
-        config = StrataConfig(
-            cache_dir=tmp_path / "cache",
-            deployment_mode="service",
-        )
-        assert config.auth_mode == "none"
+    def test_service_without_auth_rejected(self, tmp_path):
+        """Service mode with no auth would open every route to anyone who reaches it."""
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(cache_dir=tmp_path / "cache", deployment_mode="service")
+        assert "STRATA_AUTH_MODE" in str(exc_info.value)
+
+    def test_service_without_auth_from_env_rejected(self, tmp_path, monkeypatch):
+        """The documented env-only setup without STRATA_AUTH_MODE refuses to start."""
+        monkeypatch.setenv("STRATA_DEPLOYMENT_MODE", "service")
+        monkeypatch.delenv("STRATA_AUTH_MODE", raising=False)
+        with pytest.raises(ValueError, match="STRATA_AUTH_MODE"):
+            StrataConfig.load(cache_dir=tmp_path / "cache", artifact_dir=tmp_path / "art")
 
     def test_service_transforms_without_artifact_dir_rejected(self, tmp_path):
         """Transform builds persist artifacts, so they need a store."""
@@ -319,6 +335,8 @@ class TestModeCoherence:
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             artifact_dir=tmp_path / "artifacts",
             transforms_config={"enabled": True},
         )
@@ -399,6 +417,8 @@ class TestUnsetSigningSecretIsSurfaced:
     def test_service_mode_without_a_secret_warns(self, tmp_path):
         config = StrataConfig(
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             artifact_dir=tmp_path / "artifacts",
             cache_dir=tmp_path / "cache",
         )
@@ -407,6 +427,8 @@ class TestUnsetSigningSecretIsSurfaced:
     def test_a_configured_secret_is_quiet(self, tmp_path):
         config = StrataConfig(
             deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
             artifact_dir=tmp_path / "artifacts",
             cache_dir=tmp_path / "cache",
             transform_signing_secret="a-stable-secret",

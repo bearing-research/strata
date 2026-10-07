@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from strata.file_modes import PASS_THROUGH_DIR, private_dir, private_file
 from strata.notebook import console_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
@@ -268,6 +269,9 @@ class NotebookSession:
 
         from strata.notebook.artifact_integration import NotebookArtifactManager
 
+        # The harness user passes through to its per-run directories and the
+        # fetched and mounted inputs here; what else is here is the server's.
+        private_dir(path / ".strata", PASS_THROUGH_DIR)
         self.artifact_manager = NotebookArtifactManager(
             notebook_id=notebook_state.id,
             artifact_dir=path / ".strata" / "artifacts",
@@ -1743,6 +1747,7 @@ class NotebookSession:
         """Persist recent finished environment jobs to notebook runtime state."""
         history_path = self._environment_job_history_path()
         history_path.parent.mkdir(parents=True, exist_ok=True)
+        private_file(history_path)
         history_path.write_text(
             json.dumps(
                 [

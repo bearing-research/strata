@@ -250,7 +250,9 @@ class RemoteStore:
             )
         body = response.json()
         return Publication(
-            token=str(body["token"]),
+            # Absent when the far side already held a grant: only minting shows the token.
+            token=body.get("token") or "",
+            id=str(body.get("id") or ""),
             artifact_id=str(body["artifact_id"]),
             version=int(body["version"]),
             title=body.get("title"),

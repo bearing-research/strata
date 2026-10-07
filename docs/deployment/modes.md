@@ -105,10 +105,13 @@ STRATA_DEPLOYMENT_MODE=service \
   uv run strata-notebook
 ```
 
-Short version: an upstream proxy authenticates the caller, injects
+Short version: an upstream proxy authenticates the caller, sets the
 identity headers (`X-Strata-Principal`, tenant header,
-`X-Strata-Scopes`, `X-Strata-Proxy-Token`), and is the only ingress
-path. Strata trusts the proxy rather than authenticating users itself;
+`X-Strata-Scopes`, `X-Strata-Proxy-Token`) on every request, replacing
+any the client sent (empty when the user has none), and is the only
+ingress path. A header the proxy does not set reaches Strata from the
+client, so a proxy that never sets `X-Strata-Scopes` lets a user claim
+`admin:*`. Strata trusts the proxy rather than authenticating users itself;
 machine callers outside the proxy can use an API key instead
 (`STRATA_AUTH_MODE=api_key`).
 
@@ -144,6 +147,7 @@ raise `ValueError` during config load:
 | `deployment_mode=personal` + `multi_tenant_enabled=True` | Personal mode is single-user; there are no tenants to isolate |
 | `deployment_mode=personal` + `require_tenant_header=True` | Same reason, no tenant dimension in personal mode |
 | `deployment_mode=personal` + `auth_mode=api_key` | Personal mode is single-user on loopback; authenticating yourself to your own machine buys nothing |
+| `deployment_mode=service` + `auth_mode=none` (the default) | Every route, cell execution and the admin worker registry included, would be open to anyone who reaches the server. Set `STRATA_AUTH_MODE` to `trusted_proxy` or `api_key` |
 | `deployment_mode=service` + `multi_tenant_enabled` or `acl_config` rules or `mcp_enabled`, without `trusted_proxy` / `api_key` auth | The tenant header would be spoofable, ACL rules are only evaluated for an authenticated caller, and MCP would have no caller to check |
 | `deployment_mode=service` + `auth_mode=trusted_proxy` without `proxy_token` | Every request would be accepted and the identity headers could be spoofed |
 | `deployment_mode=service` + `service_writes_enabled` without `auth_mode=trusted_proxy` | Writes are stamped with the caller's principal and tenant |

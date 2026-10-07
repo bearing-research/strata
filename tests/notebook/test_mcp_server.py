@@ -793,7 +793,7 @@ class TestPublish:
 
         assert result["token"]
         assert result["copied"] == 1
-        assert [p.token for p in served.list_publications()] == [result["token"]]
+        assert [p.id for p in served.list_publications()] == [result["id"]]
 
     def test_the_bytes_land_in_the_servers_configured_blob_backend(
         self, sm_with_a_stored_output, tmp_path, monkeypatch
@@ -843,5 +843,5 @@ async def test_publish_records_who_published_it_and_whose_it_is(sm_with_a_stored
         result = _publish(sm, session_id, "a", "x", title="Figure 1")
 
     published = served.list_publications()
-    assert [p.token for p in published] == [result["token"]]
+    assert [p.id for p in published] == [result["id"]]
     assert published[0].published_by == "scientist"

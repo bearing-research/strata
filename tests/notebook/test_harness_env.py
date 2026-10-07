@@ -82,6 +82,57 @@ class TestSet:
         assert "STRATA_PROXY_TOKEN" not in env
 
 
+class TestTheFloorCarriesNoCredentials:
+    """UV_*, PYTHON* and R_* pass without being listed, so a credential under one of
+    them would reach every cell: a private index's login is for the server's uv sync."""
+
+    @pytest.fixture(autouse=True)
+    def index_credentials(self, monkeypatch):
+        monkeypatch.setenv("UV_INDEX_CORP_PASSWORD", "s3cret")
+        monkeypatch.setenv("UV_INDEX_CORP_USERNAME", "svc")
+        monkeypatch.setenv("UV_PUBLISH_TOKEN", "pypi-tok")
+        monkeypatch.setenv("UV_PUBLISH_URL", "https://upload.example")
+        monkeypatch.setenv("R_LIBS_SECRET", "x")
+        monkeypatch.setenv("PYTHON_KEYRING_TOKEN", "y")
+        monkeypatch.setenv("CONDA_PREFIX", "/opt/conda")
+
+    def test_credentials_under_the_essential_prefixes_are_dropped(self):
+        env = harness_env(["HF_TOKEN"])
+
+        for name in (
+            "UV_INDEX_CORP_PASSWORD",
+            "UV_INDEX_CORP_USERNAME",
+            "UV_PUBLISH_TOKEN",
+            "UV_PUBLISH_URL",
+            "R_LIBS_SECRET",
+            "PYTHON_KEYRING_TOKEN",
+        ):
+            assert name not in env, name
+
+    def test_what_uv_python_and_r_need_still_passes(self, monkeypatch):
+        monkeypatch.setenv("UV_CACHE_DIR", "/cache/uv")
+        monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", "/opt/uv-python")
+        monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
+        monkeypatch.setenv("R_LIBS_USER", "/r/lib")
+        monkeypatch.setenv("LC_ALL", "C.UTF-8")
+
+        env = harness_env(["HF_TOKEN"])
+
+        assert env["UV_CACHE_DIR"] == "/cache/uv"
+        assert env["UV_PYTHON_INSTALL_DIR"] == "/opt/uv-python"
+        assert env["PYTHONIOENCODING"] == "utf-8"
+        assert env["R_LIBS_USER"] == "/r/lib"
+        assert env["LC_ALL"] == "C.UTF-8"
+        assert env["HF_TOKEN"] == "hf_x"
+
+    def test_conda_activation_is_not_a_cell_need(self):
+        """Notebook environments are uv venvs; nothing in a cell's start-up reads CONDA_*."""
+        assert "CONDA_PREFIX" not in harness_env(["HF_TOKEN"])
+
+    def test_naming_a_credential_exactly_still_hands_it_over(self):
+        assert harness_env(["UV_INDEX_CORP_PASSWORD"])["UV_INDEX_CORP_PASSWORD"] == "s3cret"
+
+
 class TestExtra:
     def test_extra_is_set_after_filtering(self):
         """The batch harness is told which file descriptors to use through the

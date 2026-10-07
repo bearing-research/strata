@@ -383,7 +383,7 @@ class TestBuildingIt:
         assert len(builds) == 2
         with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
             assert "10.5555/figure-1" in bundle.read("manifest.json").decode()
-        cached = list((artifact_dir / ARCHIVE_CACHE_DIRNAME / publication.token).iterdir())
+        cached = list((artifact_dir / ARCHIVE_CACHE_DIRNAME / publication.id).iterdir())
         assert len(cached) == 1
 
     def test_withdrawing_drops_the_built_copy(self, served):
@@ -391,7 +391,7 @@ class TestBuildingIt:
 
         base_url, publication, artifact_dir = served
         _fetch(base_url, publication.token)
-        cache_dir = artifact_dir / ARCHIVE_CACHE_DIRNAME / publication.token
+        cache_dir = artifact_dir / ARCHIVE_CACHE_DIRNAME / publication.id
         assert any(cache_dir.iterdir())
 
         revoked = httpx.delete(f"{base_url}/v1/publications/{publication.token}", timeout=10)

@@ -485,7 +485,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "starting to resolve to something else."
         ),
     )
-    unpublish_parser.add_argument("token", help="The publication token")
+    unpublish_parser.add_argument("token", help="The publication token, or its id")
     _add_artifact_dir_arg(unpublish_parser)
     _add_tenant_arg(unpublish_parser)
     unpublish_parser.set_defaults(func=_dispatch_artifact("cmd_unpublish"))

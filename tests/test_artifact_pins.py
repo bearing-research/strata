@@ -219,7 +219,14 @@ def test_without_principal_auth_service_mode_refuses_gc(monkeypatch, tmp_path):
     from strata.config import StrataConfig
     from strata.server import ServerState, app
 
-    config = StrataConfig(deployment_mode="service", artifact_dir=tmp_path / "a")
+    config = StrataConfig(
+        deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
+        artifact_dir=tmp_path / "a",
+    )
+    # Startup refuses this config; the route gate is the second line of defence.
+    config = config.model_copy(update={"auth_mode": "none"})
     monkeypatch.setattr(server_module, "_state", ServerState(config))
 
     response = TestClient(app).post("/v1/artifacts/gc")

@@ -136,10 +136,15 @@ class TestLegitimateHostsAreAllowed:
 class TestServiceMode:
     def test_unconfigured_service_mode_does_not_check(self, state):
         """It sits behind a proxy that may present any public name."""
-        state(deployment_mode="service")
+        state(deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t")
         assert _client(EVIL).get("/health").status_code == 200
 
     def test_configured_service_mode_checks(self, state):
-        state(deployment_mode="service", allowed_hosts=["strata.example.com"])
+        state(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="t",
+            allowed_hosts=["strata.example.com"],
+        )
         assert _client(EVIL).get("/health").status_code == 400
         assert _client("strata.example.com").get("/health").status_code == 200

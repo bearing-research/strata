@@ -301,3 +301,46 @@ def test_an_allowlist_written_as_json_is_read_the_way_the_server_reads_it(monkey
     env = _cell_env()
     assert env.get("MY_TOOL_HOME") == "/opt/tool"
     assert "SOMEONE_ELSES" not in env
+
+
+class TestTheDefaultBind:
+    """A worker runs code for anyone who reaches it, so without a token it stays on loopback."""
+
+    @pytest.fixture
+    def bound(self, monkeypatch):
+        import uvicorn
+
+        from strata.notebook import remote_executor
+
+        seen: dict[str, str] = {}
+        monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: seen.update(kwargs))
+        monkeypatch.setattr(remote_executor, "parent_still_holds_secret", lambda name: False)
+        monkeypatch.delenv("STRATA_WORKER_TOKEN", raising=False)
+        return seen
+
+    def test_without_a_token_it_binds_loopback(self, bound, caplog):
+        from strata.notebook import remote_executor
+
+        with caplog.at_level("WARNING", logger=remote_executor.logger.name):
+            assert remote_executor.main(["--port", "9"]) == 0
+
+        assert bound["host"] == "127.0.0.1"
+        assert any("127.0.0.1 only" in r.getMessage() for r in caplog.records)
+
+    def test_with_a_token_it_binds_every_interface(self, bound, monkeypatch):
+        from strata.notebook import remote_executor
+
+        monkeypatch.setenv("STRATA_WORKER_TOKEN", "worker-bearer-token")
+
+        assert remote_executor.main(["--port", "9"]) == 0
+
+        assert bound["host"] == "0.0.0.0"
+
+    def test_an_explicit_host_wins_and_still_warns(self, bound, caplog):
+        from strata.notebook import remote_executor
+
+        with caplog.at_level("WARNING", logger=remote_executor.logger.name):
+            assert remote_executor.main(["--host", "0.0.0.0", "--port", "9"]) == 0
+
+        assert bound["host"] == "0.0.0.0"
+        assert any("WITHOUT authentication" in r.getMessage() for r in caplog.records)

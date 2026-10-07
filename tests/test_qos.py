@@ -582,9 +582,12 @@ class TestQoSCharacterization:
             port=port,
             cache_dir=tmp_path / "cache",
             deployment_mode="service",  # no artifact_dir: pass-through streaming
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
         )
+        headers = {"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"}
         with run_server(config) as base_url:
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=10.0, headers=headers) as client:
                 resp = client.post(
                     f"{base_url}/v1/materialize",
                     json=build_materialize_request(qos_warehouse["large_table_uri"]),

@@ -40,14 +40,52 @@ proxy that:
 
 1. **Terminates auth**: JWT, OIDC, mTLS, Cloudflare Access, SAML,
    whatever. Strata doesn't care which.
-2. **Injects identity headers** on every request:
+2. **Sets every identity header on every request**, replacing whatever
+   the client sent:
 
-   | Header | Value | Required |
-   |---|---|---|
-   | `X-Strata-Principal` | Stable user identifier (email, sub claim, etc.) | Yes |
-   | `X-Tenant-ID` | Tenant the user belongs to, when multi-tenant is on. Header name is configurable via `tenant_header`. | When `multi_tenant_enabled=true` |
-   | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`) | For scope-gated endpoints |
-   | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN` | Yes, proves the request came from the proxy, not a direct connection |
+   | Header | Value |
+   |---|---|
+   | `X-Strata-Principal` | Stable user identifier (email, sub claim, etc.) |
+   | `X-Tenant-ID` | Tenant the user belongs to. Header name is configurable via `tenant_header`. Empty when multi-tenancy is off. |
+   | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`). Empty for a user with no scopes. |
+   | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN`; proves the request came through the proxy |
+
+   Strata cannot tell a header the proxy set from one the client sent
+   and the proxy passed along. A header the proxy leaves alone reaches
+   Strata from the client: a proxy that sets no `X-Strata-Scopes` for a
+   user lets that user send `X-Strata-Scopes: admin:*` and become an
+   admin. So the proxy sets all four on every request, and sets an
+   empty value when the user has none (nginx drops a header set to
+   `""`, which is what you want). A minimal nginx block:
+
+   ```nginx
+   map $http_upgrade $connection_upgrade {  # in the http {} block
+       default upgrade;
+       ''      close;
+   }
+
+   location / {
+       proxy_pass http://strata:8765;
+       proxy_http_version 1.1;
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection $connection_upgrade;
+       proxy_set_header Host $http_host;
+
+       # Every identity header, on every request, from the auth layer only.
+       proxy_set_header X-Strata-Proxy-Token "<shared-secret>";
+       proxy_set_header X-Strata-Principal   $authenticated_user;
+       proxy_set_header X-Tenant-ID          $authenticated_tenant;  # "" if multi-tenancy is off
+       proxy_set_header X-Strata-Scopes      $authenticated_scopes;  # "" for no scopes
+   }
+   ```
+
+   `$authenticated_*` stand for whatever your auth layer provides (for
+   example `auth_request_set` from an `auth_request` subrequest). If you
+   renamed a header with `STRATA_PRINCIPAL_HEADER`, `STRATA_TENANT_HEADER`
+   or `STRATA_SCOPES_HEADER`, set the renamed one. Check it from outside
+   the proxy: a request carrying `X-Strata-Scopes: admin:*` for an
+   ordinary user must still get 403 from `GET /v1/logs`. The demo
+   stack's `.docker/service-mode/nginx.conf` sets all four.
 
 Machine callers that do not sit behind the proxy (a CI job, an ETL
 service) authenticate with an API key instead: `strata apikey create`
@@ -647,7 +685,7 @@ say how that is safe. There are two answers:
    different host is isolation that needs nothing arranged on this one.
 2. **Run cells as a separate OS user.** Set `STRATA_NOTEBOOK_HARNESS_USER` to a
    user that exists on the server host. Cells then cannot read the server's
-   environment through `/proc`, its config, or other notebooks' files.
+   environment through `/proc`, nor state the server keeps owner-only (below).
 
 Without either, a cell that would run on the server host fails with a message
 naming both. Cache hits are still served, since a hit starts no cell code.
@@ -661,7 +699,7 @@ inspect REPL, cell tests and the R package restore. It is POSIX only. What the h
 
 | Path | Access |
 | --- | --- |
-| notebook directories | read |
+| notebook directories (and, with multi-tenancy, each tenant's directory above them) | read, or traverse for the tenant directory |
 | each notebook's `.venv` | read and execute |
 | the Python interpreter behind the venvs | read and execute |
 | each notebook's `.strata/` | traverse |
@@ -680,6 +718,33 @@ and cell tests load their inputs in the test process.
 A cell run this way still shares the host's kernel and sees what any local user
 can. A notebook that needs more isolation than that wants a worker on another
 machine.
+
+**One harness user serves every tenant, so it is not a tenant isolation
+boundary.** It keeps cells away from the server; it does not keep one tenant's
+cells away from another's. Every cell runs as the same user, and that user has
+to read every notebook directory, so a cell can read any tenant's notebook
+source and data files, and the bytes another notebook fetched (`.strata/fetch`)
+or mounted (`.strata/mount_cache`), given the path. Tenants that must not see
+each other need separate servers (or containers, each with its own storage),
+or every cell on workers that serve one tenant each.
+
+What Strata keeps from the harness user, and from any other account on the
+host, is its own state. It creates these owner-only, and narrows any an earlier
+release left wider when it next opens them:
+
+| State | Mode |
+| --- | --- |
+| `STRATA_ARTIFACT_DIR`, its `artifacts.sqlite` (with `-wal` / `-shm`) and `blobs/` | directories `0700`, files `0600` |
+| `STRATA_CACHE_DIR` | `0700` |
+| each notebook's `.strata/` | `0711`: the harness user passes through to its per-run directories and inputs, but cannot list it |
+| in it, `artifacts/`, `console/`, `runtime.json` and `environment_jobs.json` | `0700` / `0600` |
+| each tenant's notebook directory under the storage root | `0711` |
+
+Strata only removes permission bits, so a stricter umask stands. Publication
+tokens are stored as their SHA-256, so even a copy of `artifacts.sqlite` holds no
+working link. Not covered, and yours to make owner-only: the server's config file
+(a `pyproject.toml` holding `proxy_token`), the server's home, and
+`STRATA_METADATA_DB`.
 
 SQL cells are different: their queries run inside the server process, not as
 the harness user, so the server checks which database file a SQLite or DuckDB
@@ -767,10 +832,17 @@ STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST=AWS_*,HF_TOKEN
 ```
 
 Entries are exact names or a prefix with a trailing `*`. The essentials a
-subprocess cannot start without are always included, and `STRATA_*` is dropped
+subprocess cannot start without are always included: `PATH`, `HOME`, the temp
+and locale variables, and `UV_*`, `PYTHON*`, `VIRTUAL_ENV`, `R_*` and
+`RSTUDIO_*`, except names that look like credentials (containing `KEY`,
+`SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL`), `UV_PUBLISH_*` and
+`UV_INDEX_*_USERNAME`. So a private index's login, which the server's `uv sync`
+needs, does not reach cells; keep index credentials in those variables or a
+netrc rather than inside `UV_INDEX_URL`, which passes. `STRATA_*` is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
-accident is the failure the setting exists to prevent. It applies to every
-process that runs cell code, the same list as above.
+accident is the failure the setting exists to prevent. A name you list exactly
+always passes. It applies to every process that runs cell code, the same list
+as above.
 
 The list stays short because a cell's own configuration does not come through
 the process environment. `[env]` in `notebook.toml` and mount credentials

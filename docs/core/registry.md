@@ -80,7 +80,8 @@ SDK exposes `get_registry_audit(name=..., artifact_id=...)`.
 
 Publishing an artifact, withdrawing a publication and changing its credits
 (authors or identifiers, `PATCH /v1/publications/{token}`) are recorded in the
-same log, as `publish`, `withdraw` and `credit` with the token in `value`.
+same log, as `publish`, `withdraw` and `credit` with the publication's id (the
+SHA-256 of its token, never the token) in `value`.
 
 ### Following the store
 

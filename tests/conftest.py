@@ -184,6 +184,20 @@ def _reset_transform_singletons() -> None:
     reset_build_runner()
 
 
+SERVICE_PROXY_TOKEN = "test-token"
+
+
+# What a proxy in front of a ``service_auth()`` server sends for an ordinary caller.
+SERVICE_CALLER = {"X-Strata-Proxy-Token": SERVICE_PROXY_TOKEN, "X-Strata-Principal": "user-1"}
+
+
+def service_auth(mode: str = "service") -> dict[str, str]:
+    """The settings service mode needs to start (it refuses no auth); none for personal."""
+    if mode != "service":
+        return {}
+    return {"auth_mode": "trusted_proxy", "proxy_token": SERVICE_PROXY_TOKEN}
+
+
 def find_free_port() -> int:
     """Find an available port on localhost."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

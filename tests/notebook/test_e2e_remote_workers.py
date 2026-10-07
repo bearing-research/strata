@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from strata.config import StrataConfig
+from tests.conftest import SERVICE_PROXY_TOKEN, service_auth
 from tests.notebook.e2e_fixtures import (
     NotebookBuilder,
     execute_cell_and_wait,
@@ -39,6 +40,7 @@ def service_mode_notebook_client(tmp_path):
         host="127.0.0.1",
         port=8765,
         deployment_mode="service",
+        **service_auth(),
         cache_dir=tmp_path / "cache",
         artifact_dir=artifact_dir,
         notebook_storage_dir=tmp_path,
@@ -62,7 +64,14 @@ def service_mode_notebook_client(tmp_path):
     original_state = server_module._state
     server_module._state = ServerState(config)
 
-    client = TestClient(app)
+    client = TestClient(
+        app,
+        headers={
+            "X-Strata-Proxy-Token": SERVICE_PROXY_TOKEN,
+            "X-Strata-Principal": "admin",
+            "X-Strata-Scopes": "admin:*",
+        },
+    )
     try:
         yield client, tmp_path
     finally:

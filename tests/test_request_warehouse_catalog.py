@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from strata.config import StrataConfig
 from strata.iceberg import CatalogUriRequired, PyIcebergCatalog
+from tests.conftest import SERVICE_CALLER, service_auth
 
 OBJECT_STORE = ["s3://lake/wh", "gs://lake/wh", "az://lake/wh", "abfs://c@acct/wh"]
 
@@ -21,6 +22,7 @@ OBJECT_STORE = ["s3://lake/wh", "gs://lake/wh", "az://lake/wh", "abfs://c@acct/w
 def _config(tmp_path, mode: str, **overrides) -> StrataConfig:
     return StrataConfig(
         deployment_mode=mode,
+        **service_auth(mode),
         cache_dir=tmp_path / "cache",
         metadata_db=tmp_path / "meta.sqlite",
         **overrides,
@@ -224,7 +226,7 @@ def service_client(tmp_path, monkeypatch):
     from strata.server import ServerState, app
 
     monkeypatch.setattr(server_module, "_state", ServerState(_config(tmp_path, "service")))
-    return TestClient(app)
+    return TestClient(app, headers=SERVICE_CALLER)
 
 
 def _scan(table_uri: str) -> dict:

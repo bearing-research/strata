@@ -44,14 +44,16 @@ class TestPublicationGrants:
 
         assert publication.content_sha256 == hashlib.sha256(payload).hexdigest()
 
-    def test_publishing_twice_returns_the_same_token(self, store):
+    def test_publishing_twice_returns_the_same_grant(self, store):
         """Two live URLs for one artifact would make revocation a lie."""
         version = _ready_artifact(store, "fig", b"x")
 
         first = store.publish_artifact("fig", version)
         second = store.publish_artifact("fig", version)
 
-        assert first.token == second.token
+        assert first.id == second.id
+        # The store keeps only the token's hash, so only the mint can show it.
+        assert first.token and second.token == ""
 
     def test_revoking_keeps_the_row_so_the_token_is_never_reissued(self, store):
         """A citation must fail closed, never start resolving to other content."""
@@ -83,6 +85,145 @@ class TestPublicationGrants:
 
         with pytest.raises(ValueError, match="not readable"):
             store.publish_artifact("half", 1)
+
+
+def _rewind_to_raw_tokens(store: ArtifactStore, token: str) -> None:
+    """Put *token* back the way a store before token hashing kept it: raw, in the row
+    and in its audit entries, with the schema stamped before that migration."""
+    import sqlite3
+
+    from strata.artifact_store import publication_id
+
+    conn = sqlite3.connect(store.db_path)
+    try:
+        hashed = publication_id(token)
+        conn.execute("UPDATE artifact_publications SET token = ? WHERE token = ?", (token, hashed))
+        conn.execute("UPDATE registry_audit SET value = ? WHERE value = ?", (token, hashed))
+        conn.execute("DELETE FROM schema_version WHERE version >= 8")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class TestTokensAreHashedAtRest:
+    """A copy of the database (a backup, a read of the file) must hold no working link."""
+
+    def test_the_database_holds_the_tokens_hash_not_the_token(self, store):
+        import sqlite3
+
+        version = _ready_artifact(store, "fig", b"x")
+        publication = store.publish_artifact("fig", version)
+
+        conn = sqlite3.connect(store.db_path)
+        try:
+            dump = "\n".join(conn.iterdump())
+        finally:
+            conn.close()
+        assert publication.token not in dump
+        assert publication.id == hashlib.sha256(publication.token.encode()).hexdigest()
+        assert publication.id in dump
+
+    def test_the_token_looks_it_up_and_the_id_does_not(self, store):
+        """The id is printed in the feed and the owner's list, so it must not open the page."""
+        version = _ready_artifact(store, "fig", b"x")
+        publication = store.publish_artifact("fig", version)
+
+        found = store.get_publication(publication.token)
+        assert found is not None and found.id == publication.id
+        assert found.token == publication.token
+        assert store.get_publication(publication.id) is None
+
+    def test_the_owner_lists_ids_and_withdraws_by_either(self, store):
+        first = store.publish_artifact("fig", _ready_artifact(store, "fig", b"x"))
+        second = store.publish_artifact("map", _ready_artifact(store, "map", b"y"))
+
+        listed = {p.id: p.token for p in store.list_publications()}
+        assert listed == {first.id: "", second.id: ""}
+        assert store.revoke_publication(first.id)
+        assert store.revoke_publication(second.token)
+        assert store.list_publications() == []
+
+    def test_the_migration_hashes_existing_tokens_and_old_links_keep_working(self, tmp_path):
+        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+
+        store = ArtifactStore(tmp_path / "old")
+        publication = store.publish_artifact("fig", _ready_artifact(store, "fig", b"x"))
+        store.update_publication_credits(publication.token, authors=[{"name": "Ana"}])
+        _rewind_to_raw_tokens(store, publication.token)
+        assert store.get_publication(publication.token) is None  # truly the old shape
+
+        reopened = ArtifactStore(tmp_path / "old")
+
+        found = reopened.get_publication(publication.token)
+        assert found is not None and found.id == publication.id
+        assert [dict(a) for a in found.authors] == [{"name": "Ana"}]
+        events = reopened.read_events()
+        assert [(e["action"], e["value"]) for e in events] == [
+            ("publish", publication.id),
+            ("credit", publication.id),
+        ]
+        conn = reopened._get_connection()
+        try:
+            stamped = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()["v"]
+        finally:
+            conn.close()
+        assert stamped == _LATEST_SCHEMA_VERSION
+
+    def test_an_old_link_still_opens_the_page_after_the_upgrade(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.artifact_store import reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState, app
+
+        artifact_dir = tmp_path / "artifacts"
+        store = ArtifactStore(artifact_dir)
+        publication = store.publish_artifact("fig", _ready_artifact(store, "fig", b"x"))
+        _rewind_to_raw_tokens(store, publication.token)
+
+        config = StrataConfig(
+            deployment_mode="personal", cache_dir=tmp_path / "cache", artifact_dir=artifact_dir
+        )
+        original = server_module._state
+        server_module._state = ServerState(config)
+        reset_artifact_store()
+        try:
+            client = TestClient(app)
+            assert client.get(f"/p/{publication.token}/data").content == b"x"
+            assert client.get(f"/p/{publication.id}").status_code == 404
+        finally:
+            server_module._state = original
+            reset_artifact_store()
+
+    def test_only_the_response_that_mints_it_carries_the_link(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        import strata.server as server_module
+        from strata.artifact_store import reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState, app
+
+        artifact_dir = tmp_path / "artifacts"
+        version = _ready_artifact(ArtifactStore(artifact_dir), "fig", b"x")
+        config = StrataConfig(
+            deployment_mode="personal", cache_dir=tmp_path / "cache", artifact_dir=artifact_dir
+        )
+        original = server_module._state
+        server_module._state = ServerState(config)
+        reset_artifact_store()
+        try:
+            client = TestClient(app)
+            minted = client.post(f"/v1/artifacts/fig/v/{version}/publish", json={}).json()
+            again = client.post(f"/v1/artifacts/fig/v/{version}/publish", json={}).json()
+            listed = client.get("/v1/publications").json()
+        finally:
+            server_module._state = original
+            reset_artifact_store()
+
+        assert minted["url"] == f"/p/{minted['token']}"
+        assert (again["id"], again["token"], again["url"]) == (minted["id"], None, None)
+        assert [(p["id"], p["token"]) for p in listed] == [(minted["id"], None)]
 
 
 class TestAuthExemption:
@@ -659,12 +800,13 @@ class TestPublishDestination:
         cached, _ = cached_bundle_zip(store, artifact, publication=publication)
         assert cached.exists()
 
+        # A listed publication has no token, only its id, which the owner can withdraw by.
         args = argparse.Namespace(
-            token=publication.token, artifact_dir=str(tmp_path / "source"), tenant=None
+            token=publication.id, artifact_dir=str(tmp_path / "source"), tenant=None
         )
         assert cmd_unpublish(args) == 0
 
-        assert not (tmp_path / "source" / ARCHIVE_CACHE_DIRNAME / publication.token).exists()
+        assert not (tmp_path / "source" / ARCHIVE_CACHE_DIRNAME / publication.id).exists()
 
     def test_here_keeps_it_in_the_source_store(self, tmp_path, capsys):
         from strata.artifact_store import ArtifactStore

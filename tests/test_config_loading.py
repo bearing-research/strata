@@ -171,6 +171,8 @@ class TestNestedConfigMerge:
             monkeypatch,
             {
                 "deployment_mode": "service",
+                "auth_mode": "trusted_proxy",
+                "proxy_token": "test-token",
                 "artifact_dir": str(tmp_path / "a"),
                 # A transforms block with a registry but no ``enabled``.
                 "transforms": {

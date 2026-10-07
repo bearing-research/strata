@@ -190,7 +190,9 @@ class Publication:
     """An opt-in public read grant for one artifact version.
 
     ``token`` is an unguessable secret and the only credential for the
-    unauthenticated reader. The version binding is permanent. ``content_sha256``
+    unauthenticated reader. The store keeps only its SHA-256, ``id``, so
+    ``token`` is set only when the grant is minted or looked up by it, and
+    is empty otherwise. The version binding is permanent. ``content_sha256``
     is the digest of the bytes as published, the basis of the page's integrity
     claim. ``revoked_at`` is set on withdrawal; the row survives so the token is
     never reissued. ``authors`` (ordered ``{"name", "orcid", "affiliation"}``) is
@@ -209,6 +211,7 @@ class Publication:
     revoked_at: float | None = None
     authors: tuple[dict[str, str], ...] = ()
     external_ids: tuple[dict[str, str], ...] = ()
+    id: str = ""
 
     @property
     def is_active(self) -> bool:
@@ -419,6 +422,45 @@ def _add_publication_credits(conn: StoreConnection, dialect: SqlDialect) -> None
             conn.execute(f"ALTER TABLE artifact_publications ADD COLUMN {column} TEXT")
 
 
+_PUBLICATION_ID = re.compile(r"^[0-9a-f]{64}$")
+
+
+def publication_id(token: str) -> str:
+    """What the store keeps for a publication token: its SHA-256 hex digest.
+
+    A copy of the database, a backup or a read of the file then holds no working link.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def publication_key(token_or_id: str) -> str:
+    """The stored key for a raw token, or for a publication id given as is.
+
+    A raw token (43 base64url characters) is never 64 hex digits, so the two cannot
+    be confused. Only routes behind authentication may take an id: on a public route
+    the id would work as the link.
+    """
+    return token_or_id if _PUBLICATION_ID.match(token_or_id) else publication_id(token_or_id)
+
+
+def _hash_publication_tokens(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Replace every stored publication token, and its audit entries, with its SHA-256.
+
+    Links already handed out keep working: a lookup hashes the token it is given.
+    """
+    del dialect
+    rows = conn.execute("SELECT token FROM artifact_publications").fetchall()
+    for token in [row["token"] for row in rows]:
+        if _PUBLICATION_ID.match(token):
+            continue
+        hashed = publication_id(token)
+        conn.execute("UPDATE artifact_publications SET token = ? WHERE token = ?", (hashed, token))
+        conn.execute(
+            "UPDATE registry_audit SET value = ? WHERE key = 'token' AND value = ?",
+            (hashed, token),
+        )
+
+
 def _add_pins(conn: StoreConnection, dialect: SqlDialect) -> None:
     """Add pins, so a platform can hold a chain the store has no other reason to keep."""
     conn.execute(
@@ -529,6 +571,7 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(5, "import_staging", _add_import_staging),
     _Migration(6, "artifact_versions.last_used_at + minted", _add_use_and_minted),
     _Migration(7, "artifact_versions.superseded_by", _add_superseded_by),
+    _Migration(8, "artifact_publications.token hashed", _hash_publication_tokens),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -662,7 +705,7 @@ CREATE TABLE IF NOT EXISTS registry_pending (
 # closed, never resolve to something else.
 _PUBLICATION_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artifact_publications (
-    token TEXT PRIMARY KEY,
+    token TEXT PRIMARY KEY,  -- SHA-256 hex of the link's token (migration 8), never the token
     artifact_id TEXT NOT NULL,
     version INTEGER NOT NULL,
     tenant TEXT NOT NULL DEFAULT '',
@@ -750,14 +793,17 @@ class ArtifactStore:
         ``PostgresDialect`` the blob store should be remote too, or the store is only
         coherent on one machine.
         """
+        from strata.file_modes import narrow, private_dir, private_file
+
         self.artifact_dir = artifact_dir
         self.db_path = artifact_dir / "artifacts.sqlite"
+        # Every tenant's metadata, names and blobs: no other account on the host reads them.
+        private_dir(artifact_dir)
 
         if blob_store is None:
             from strata.blob_store import LocalBlobStore
 
             self.blobs_dir = artifact_dir / "blobs"
-            self.blobs_dir.mkdir(parents=True, exist_ok=True)
             self.blob_store: BlobStore = LocalBlobStore(self.blobs_dir)
         else:
             self.blob_store = blob_store
@@ -769,7 +815,12 @@ class ArtifactStore:
             else:
                 self.blobs_dir = artifact_dir / "blobs"  # May not exist for remote stores
 
-        self.artifact_dir.mkdir(parents=True, exist_ok=True)
+        if dialect is None:
+            private_file(self.db_path)
+            for journal in ("-wal", "-shm"):
+                sibling = self.db_path.with_name(self.db_path.name + journal)
+                if sibling.exists():
+                    narrow(sibling, 0o600)
 
         # Every query goes through _get_connection, so the dialect is the one place a second backend
         # has to be taught about; see strata/sql_backend.py for what differs.
@@ -2513,9 +2564,11 @@ class ArtifactStore:
     # --- Publications (opt-in public read grants), then registry: aliases, tags, audit ---
 
     @staticmethod
-    def _publication_from_row(row) -> Publication:
+    def _publication_from_row(row, token: str = "") -> Publication:
+        """``token`` is the raw token when the caller has it; the row holds only its hash."""
         return Publication(
-            token=row["token"],
+            token=token,
+            id=row["token"],
             artifact_id=row["artifact_id"],
             version=row["version"],
             tenant=row["tenant"] or "",
@@ -2617,13 +2670,15 @@ class ArtifactStore:
             if existing is not None:
                 return self._publication_from_row(existing)
 
+            token = secrets.token_urlsafe(32)
             publication = Publication(
                 # The version's own digest, not a second computation: a publication disagreeing with
                 # its artifact would be the more alarming answer. Read from the row in hand rather
                 # than via ``content_digest``, which would open and write through a second
                 # connection while this one holds the publication.
                 content_sha256=row["content_sha256"] or self.blob_digest(artifact_id, version),
-                token=secrets.token_urlsafe(32),
+                token=token,
+                id=publication_id(token),
                 artifact_id=artifact_id,
                 version=version,
                 tenant=effective_tenant,
@@ -2639,7 +2694,7 @@ class ArtifactStore:
                 "published_by, content_sha256, authors, external_ids) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    publication.token,
+                    publication.id,
                     publication.artifact_id,
                     publication.version,
                     publication.tenant,
@@ -2660,7 +2715,7 @@ class ArtifactStore:
                 artifact_id=artifact_id,
                 to_version=version,
                 key="token",
-                value=publication.token,
+                value=publication.id,
                 actor=published_by,
                 tenant=effective_tenant,
             )
@@ -2670,16 +2725,17 @@ class ArtifactStore:
             conn.close()
 
     def get_publication(self, token: str) -> Publication | None:
-        """Look up a publication by token, revoked ones included.
+        """Look up a publication by its raw token, revoked ones included.
 
-        So the caller can answer "withdrawn" rather than "no such page".
+        So the caller can answer "withdrawn" rather than "no such page". Never by
+        id: this is what the public routes call, and an id is not a credential.
         """
         conn = self._get_connection()
         try:
             row = conn.execute(
-                "SELECT * FROM artifact_publications WHERE token = ?", (token,)
+                "SELECT * FROM artifact_publications WHERE token = ?", (publication_id(token),)
             ).fetchone()
-            return self._publication_from_row(row) if row is not None else None
+            return self._publication_from_row(row, token) if row is not None else None
         finally:
             conn.close()
 
@@ -2695,10 +2751,12 @@ class ArtifactStore:
         """Set a publication's authors and external ids after the fact (audited as ``credit``).
 
         Never touches the artifact binding. ``None`` leaves a column alone; an empty
-        list clears it. Returns the updated publication, or ``None`` if the token is
-        unknown in this tenant.
+        list clears it. ``token`` is the raw token or the publication's id. Returns the
+        updated publication, or ``None`` if it is unknown in this tenant.
         """
         effective_tenant = tenant if tenant is not None else ""
+        key = publication_key(token)
+        raw = "" if key == token else token
         assignments: list[str] = []
         params: list[Any] = []
         if authors is not None:
@@ -2714,7 +2772,7 @@ class ArtifactStore:
                 cursor = conn.execute(
                     f"UPDATE artifact_publications SET {', '.join(assignments)} "
                     "WHERE token = ? AND tenant = ?",
-                    (*params, token, effective_tenant),
+                    (*params, key, effective_tenant),
                 )
                 if cursor.rowcount == 0:
                     conn.commit()
@@ -2722,7 +2780,7 @@ class ArtifactStore:
                 bound = conn.execute(
                     "SELECT artifact_id, version FROM artifact_publications "
                     "WHERE token = ? AND tenant = ?",
-                    (token, effective_tenant),
+                    (key, effective_tenant),
                 ).fetchone()
                 self._audit_in_connection(
                     conn,
@@ -2730,35 +2788,39 @@ class ArtifactStore:
                     artifact_id=bound["artifact_id"],
                     to_version=bound["version"],
                     key="token",
-                    value=token,
+                    value=key,
                     actor=actor,
                     tenant=effective_tenant,
                 )
                 conn.commit()
             row = conn.execute(
                 "SELECT * FROM artifact_publications WHERE token = ? AND tenant = ?",
-                (token, effective_tenant),
+                (key, effective_tenant),
             ).fetchone()
-            return self._publication_from_row(row) if row is not None else None
+            return self._publication_from_row(row, raw) if row is not None else None
         finally:
             conn.close()
 
     def revoke_publication(
         self, token: str, tenant: str | None = None, actor: str | None = None
     ) -> bool:
-        """Withdraw a grant (audited). Returns False if it was unknown or already gone."""
+        """Withdraw a grant (audited), named by raw token or id.
+
+        Returns False if it was unknown or already gone.
+        """
         effective_tenant = tenant if tenant is not None else ""
+        key = publication_key(token)
         conn = self._get_connection()
         try:
             row = conn.execute(
                 "SELECT artifact_id, version FROM artifact_publications "
                 "WHERE token = ? AND tenant = ?",
-                (token, effective_tenant),
+                (key, effective_tenant),
             ).fetchone()
             cursor = conn.execute(
                 "UPDATE artifact_publications SET revoked_at = ? "
                 "WHERE token = ? AND tenant = ? AND revoked_at IS NULL",
-                (time.time(), token, effective_tenant),
+                (time.time(), key, effective_tenant),
             )
             # Only the call that actually withdrew it records it: a second
             # revoke of the same token changes nothing and is not an event.
@@ -2771,7 +2833,7 @@ class ArtifactStore:
                 artifact_id=row["artifact_id"],
                 to_version=row["version"],
                 key="token",
-                value=token,
+                value=key,
                 actor=actor,
                 tenant=effective_tenant,
             )
@@ -3842,8 +3904,8 @@ class ArtifactStore:
             ).fetchone()
             if published is not None:
                 raise ValueError(
-                    f"{artifact_id}@v={version} is published as {published['token']}; "
-                    "revoke the publication before deleting it"
+                    f"{artifact_id}@v={version} is published (publication id "
+                    f"{published['token']}); revoke the publication before deleting it"
                 )
             # A published or pinned version reading these bytes through superseded_by gets
             # its own copy first: deleting this version must not empty a link somebody holds.

@@ -33,8 +33,15 @@ Start by getting a worker running on your own machine. This verifies your instal
 **1. Start the worker:**
 
 ```bash
-strata-worker --port 9000
+strata-worker --host 127.0.0.1 --port 9000
 ```
+
+A worker runs whatever code it is sent, so this one listens on loopback only.
+Without `STRATA_WORKER_TOKEN` that is also the default bind; with the token set
+the default is `0.0.0.0`. Bind wider (`--host 0.0.0.0`) only with a token, as
+in [Authentication](#authentication): a worker on `0.0.0.0` with
+no token lets anyone who reaches the port run code on the machine, and logs a
+warning saying so.
 
 Run the installed `strata-worker` (for example `.venv/bin/strata-worker`), not
 `uv run strata-worker`: `uv run` stays alive as the worker's parent with
@@ -46,7 +53,7 @@ You should see uvicorn start up:
 
 ```
 INFO:     Started server process [12345]
-INFO:     Uvicorn running on http://0.0.0.0:9000
+INFO:     Uvicorn running on http://127.0.0.1:9000
 ```
 
 **2. Verify it's healthy:**

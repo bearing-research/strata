@@ -130,6 +130,13 @@ nothing published runs script on your server's origin.
 strata artifact unpublish <token>
 ```
 
+`<token>` can also be the publication's id, which `GET /v1/publications`
+lists. The store keeps only each token's SHA-256 (its id), so the token, and the
+link built from it, is shown once: in the answer to the publish that minted it.
+Publishing the same version again returns the existing publication without a
+token; keep the link when it is minted, or unpublish and publish again for a new
+one.
+
 The link then reports that it was withdrawn, rather than 404ing. A reader
 chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
@@ -376,7 +383,7 @@ reads a 200 as "the link now shows the other version". To cite another version,
 publish it for its own link.
 
 Each patch is recorded on the store's event feed (`GET /v1/events`) as a
-`credit` event with the token in `value`, beside `publish` and `withdraw`, so a
+`credit` event with the publication's id in `value`, beside `publish` and `withdraw`, so a
 service mirroring the page learns of a new DOI without polling.
 
 ## Copying a chain into another store
@@ -416,10 +423,10 @@ Publishing the same chain again writes nothing.
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
-| `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. Idempotent: republishing returns the existing token. |
-| `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw. |
-| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at: `artifact_id` or `version` in the body is a 400. |
-| `GET /v1/publications` | yes | List this tenant's live links (`?include_revoked=true` adds withdrawn ones). |
+| `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. The response carries `token` and `url`, the only time they are shown, and `id`. Idempotent: republishing returns the existing publication, with `token` and `url` null. |
+| `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw, by token or id. |
+| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers, by token or id. Cannot change what the token points at: `artifact_id` or `version` in the body is a 400. |
+| `GET /v1/publications` | yes | List this tenant's live publications by id, without tokens (`?include_revoked=true` adds withdrawn ones). |
 | `PUT /v1/artifacts/import/blobs/{content_sha256}` | yes (`artifacts:write`) | Upload a version's bytes ahead of its record. |
 | `POST /v1/artifacts/import` | yes (`artifacts:write`) | Import a version, keeping its id and number. |
 | `GET /p/{token}` | **no** | The page. |

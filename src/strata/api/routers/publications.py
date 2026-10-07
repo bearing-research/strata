@@ -92,8 +92,11 @@ class PublicationCreditsRequest(BaseModel):
 
 
 class PublicationResponse(BaseModel):
-    token: str
-    url: str
+    # The store keeps only the token's SHA-256 (``id``), so the token and its link
+    # are in the response that mints them and in no other.
+    id: str
+    token: str | None = None
+    url: str | None = None
     artifact_id: str
     version: int
     title: str | None = None
@@ -106,8 +109,9 @@ class PublicationResponse(BaseModel):
 
 def _to_response(publication) -> PublicationResponse:
     return PublicationResponse(
-        token=publication.token,
-        url=f"/p/{publication.token}",
+        id=publication.id,
+        token=publication.token or None,
+        url=f"/p/{publication.token}" if publication.token else None,
         artifact_id=publication.artifact_id,
         version=publication.version,
         title=publication.title,
@@ -134,8 +138,9 @@ async def publish_artifact(
 ):
     """Grant unauthenticated read access to one artifact version.
 
-    Idempotent: an already-published version returns its existing token, so one
-    revocation always withdraws the artifact.
+    Idempotent: an already-published version returns its existing grant, so one
+    revocation always withdraws the artifact. Only the call that mints it carries
+    the token: the store keeps its hash.
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
@@ -176,6 +181,7 @@ async def list_publications(
     ]
 
 
+# ``{token}`` on the authenticated routes is the raw token or the publication's id.
 @router.patch(
     "/v1/publications/{token}",
     response_model=PublicationResponse,
@@ -407,7 +413,7 @@ _archive_locks: dict[str, asyncio.Lock] = {}
 async def _built_archive(store, artifact, publication) -> tuple[Path, str]:
     """The publication's archive, built off the loop and once per record: anyone with the link
     can ask."""
-    async with _archive_locks.setdefault(publication.token, asyncio.Lock()):
+    async with _archive_locks.setdefault(publication.id, asyncio.Lock()):
         try:
             return await asyncio.to_thread(
                 cached_bundle_zip, store, artifact, publication=publication

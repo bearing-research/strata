@@ -1035,10 +1035,14 @@ def unauthenticated_service_client(temp_dir, artifact_store, build_store):
     config = StrataConfig(
         cache_dir=temp_dir / "cache-noauth",
         deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
         transforms_config={"enabled": True},
         artifact_dir=temp_dir / "artifacts",
         signed_url_expiry_seconds=600.0,
     )
+    # Startup refuses this config; the route gate is the second line of defence.
+    config = config.model_copy(update={"auth_mode": "none"})
 
     mock_state = MagicMock()
     mock_state.config = config

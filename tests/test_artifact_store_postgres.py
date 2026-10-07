@@ -173,8 +173,8 @@ class TestRoundTrip:
         store.update_publication_credits(publication.token, authors=[{"name": "F. Li"}])
 
         assert [(e["action"], e["value"]) for e in store.read_events()] == [
-            ("publish", publication.token),
-            ("credit", publication.token),
+            ("publish", publication.id),
+            ("credit", publication.id),
         ]
 
 
@@ -1233,6 +1233,56 @@ class TestSchemaMigrations:
             assert has_column is not None, "the migration never reached an existing database"
             assert stamped == _LATEST_SCHEMA_VERSION
             assert reopened.get_artifact("keeper", version) is not None, "rows must survive"
+        finally:
+            dialect.close()
+
+    def test_existing_publication_tokens_are_hashed_and_still_resolve(
+        self, postgres_dsn, tmp_path, store
+    ):
+        from strata.artifact_store import publication_id
+        from strata.sql_backend import PostgresDialect
+
+        version = store.create_artifact("fig", "prov-fig", _spec())
+        with store.open_blob_writer("fig", version) as writer:
+            writer.write(b"figure bytes")
+        store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
+        publication = store.publish_artifact("fig", version, title="Figure")
+
+        # Back to a store from before the hashing migration: raw tokens in the row and audit.
+        conn = store._get_connection()
+        try:
+            conn.execute(
+                "UPDATE artifact_publications SET token = ? WHERE token = ?",
+                (publication.token, publication.id),
+            )
+            conn.execute(
+                "UPDATE registry_audit SET value = ? WHERE value = ?",
+                (publication.token, publication.id),
+            )
+            conn.execute("DELETE FROM schema_version WHERE version >= 8")
+            conn.commit()
+        finally:
+            conn.close()
+        assert store.get_publication(publication.token) is None
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+
+            found = reopened.get_publication(publication.token)
+            assert found is not None and found.id == publication_id(publication.token)
+            assert [e["value"] for e in reopened.read_events() if e["key"] == "token"] == [
+                publication.id
+            ]
+            conn = reopened._get_connection()
+            try:
+                stored = [
+                    row["token"]
+                    for row in conn.execute("SELECT token FROM artifact_publications").fetchall()
+                ]
+            finally:
+                conn.close()
+            assert stored == [publication.id]
         finally:
             dialect.close()
 

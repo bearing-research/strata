@@ -761,7 +761,10 @@ def _publish(
         published_by=caller.id if caller is not None else None,
     )
     return {
+        # Empty when the version was already published: the store keeps only the
+        # token's hash, so the link is shown once, when it is minted.
         "token": publication.token,
+        "id": publication.id,
         "artifact_uri": f"strata://artifact/{published_id}@v={published_version}",
         "title": publication.title,
         "content_sha256": publication.content_sha256,
@@ -1271,8 +1274,9 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
 
         This is not undoable by you: the URL needs no credentials and exposes
         the whole chain behind the artifact. Call ``publish_preflight`` and put
-        what it returns in front of the user before calling this. Withdrawing
-        is ``strata artifact unpublish <token>``.
+        what it returns in front of the user before calling this. The token is
+        returned only when the link is minted; for a version already published it
+        is empty. Withdrawing is ``strata artifact unpublish <token or id>``.
         """
         return _publish(session_manager, session_id, cell_id, variable, title)
 

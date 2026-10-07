@@ -108,8 +108,15 @@ def service_mode_server(tmp_path):
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
-    with run_server_with_context(cache_dir, deployment_mode="service") as ctx:
-        yield {"config": ctx.config, "port": ctx.port, "base_url": ctx.base_url}
+    with run_server_with_context(
+        cache_dir, deployment_mode="service", auth_mode="trusted_proxy", proxy_token="test-token"
+    ) as ctx:
+        yield {
+            "config": ctx.config,
+            "port": ctx.port,
+            "base_url": ctx.base_url,
+            "headers": {"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"},
+        }
 
 
 class TestArtifactEndpoints:
@@ -247,6 +254,7 @@ class TestServiceModeBlocking:
         response = httpx.post(
             f"{service_mode_server['base_url']}/v1/artifacts/materialize",
             json={"inputs": [], "transform": {"executor": "test", "params": {}}},
+            headers=service_mode_server["headers"],
         )
         assert response.status_code == 403
         assert "writes_disabled" in response.json()["detail"]["error"]
@@ -256,19 +264,21 @@ class TestServiceModeBlocking:
         gateway has no artifact_dir.
         """
         base_url = service_mode_server["base_url"]
+        headers = service_mode_server["headers"]
 
         # Writing a name stays blocked (403).
         assert (
             httpx.post(
                 f"{base_url}/v1/names",
                 json={"name": "test", "artifact_id": "x", "version": 1},
+                headers=headers,
             ).status_code
             == 403
         )
         # Listing and resolving names are reads, so not mode-gated; 404 here only because
         # this gateway has no store.
-        assert httpx.get(f"{base_url}/v1/names").status_code == 404
-        assert httpx.get(f"{base_url}/v1/names/test").status_code == 404
+        assert httpx.get(f"{base_url}/v1/names", headers=headers).status_code == 404
+        assert httpx.get(f"{base_url}/v1/names/test", headers=headers).status_code == 404
 
 
 class TestArtifactContract:

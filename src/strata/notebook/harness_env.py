@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 
+from strata.notebook.writer import _is_sensitive_env_key
+
 # Without these a subprocess cannot start or cannot find its interpreter,
 # temp directory or locale. They are the floor, not a judgement about cells.
 _ESSENTIAL_NAMES = frozenset(
@@ -42,14 +44,27 @@ _ESSENTIAL_NAMES = frozenset(
     }
 )
 
-# ``uv run`` resolves the notebook's interpreter, and Python start-up reads PYTHON*.
-_ESSENTIAL_PREFIXES = ("UV_", "LC_", "PYTHON", "VIRTUAL_ENV", "CONDA_", "R_", "RSTUDIO_")
+# ``uv run`` finds its cache and the notebook's interpreter through UV_*, Python
+# start-up reads PYTHON*, and R and RStudio tools read R_* and RSTUDIO_*.
+_ESSENTIAL_PREFIXES = ("UV_", "LC_", "PYTHON", "VIRTUAL_ENV", "R_", "RSTUDIO_")
 
 _SECRET_PREFIX = "STRATA_"
 
 
+def _essential(name: str) -> bool:
+    """In the floor, minus credentials: a private index's login or a publish token is
+    for the server's ``uv sync``, not for every cell. Listed by name, one still passes."""
+    if name in _ESSENTIAL_NAMES:
+        return True
+    if not name.startswith(_ESSENTIAL_PREFIXES) or _is_sensitive_env_key(name):
+        return False
+    if name.startswith("UV_PUBLISH_"):
+        return False
+    return not (name.startswith("UV_INDEX_") and name.endswith("_USERNAME"))
+
+
 def _allowed(name: str, allowlist: list[str]) -> bool:
-    if name in _ESSENTIAL_NAMES or name.startswith(_ESSENTIAL_PREFIXES):
+    if _essential(name):
         return True
     for entry in allowlist:
         if entry.endswith("*"):
