@@ -203,6 +203,21 @@ _MINIO_DIGEST = "sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b
 MINIO_IMAGE = f"cgr.dev/chainguard/minio@{_MINIO_DIGEST}"
 
 
+def make_azurite():
+    """An Azurite container that accepts any storage API version.
+
+    The Azure SDKs adopt a new API version before Azurite supports it, and Azurite refuses
+    a version it does not know with ``InvalidHeaderValue``. The image's own command, plus
+    the check skipped.
+    """
+    from testcontainers.community.azurite import AzuriteContainer
+
+    return AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest").with_command(
+        "azurite -l /data --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0"
+        " --skipApiVersionCheck"
+    )
+
+
 def start_container_or_skip(container, *, label: str, ready=None):
     """Start a testcontainers container, skipping the module if startup fails.
 

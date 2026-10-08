@@ -21,11 +21,10 @@ def _docker_daemon_reachable() -> bool:
 if not _docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
-from testcontainers.community.azurite import AzuriteContainer  # noqa: E402
 
 from strata.blob_store import AzureBlobStore  # noqa: E402
 from strata.config import StrataConfig  # noqa: E402
-from tests.conftest import start_container_or_skip  # noqa: E402
+from tests.conftest import make_azurite, start_container_or_skip  # noqa: E402
 from tests.presign_helpers import run_presigned_job  # noqa: E402
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
@@ -35,10 +34,7 @@ CONTAINER = "strata-presign"
 
 @pytest.fixture(scope="module")
 def azurite():
-    # :latest because older Azurite rejects the installed SDK's API version.
-    container = start_container_or_skip(
-        AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
-    )
+    container = start_container_or_skip(make_azurite(), label="Azurite")
     try:
         from azure.storage.blob import BlobServiceClient
 
