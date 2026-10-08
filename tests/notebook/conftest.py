@@ -193,18 +193,6 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
         "strata.notebook.dependencies.run_uv_command_streaming", _fake_streaming_sync
     )
 
-    def _harness_command_direct(self, manifest_path: Path, venv_python: Path, harness_user):
-        """The harness with Python directly instead of ``uv run``.
-
-        Only the command differs; the spawn around it (environment, OS user, service-mode
-        refusal) stays production's.
-        """
-        return [str(venv_python), str(self.harness_path), str(manifest_path)]
-
-    monkeypatch.setattr(
-        "strata.notebook.executor.CellExecutor._harness_command", _harness_command_direct
-    )
-
 
 @pytest.fixture
 def notebook_executor_server(monkeypatch):
