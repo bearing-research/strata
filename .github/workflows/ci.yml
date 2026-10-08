@@ -200,7 +200,9 @@ jobs:
     # Backstop for a deadlocked test, below GitHub's 6h cap; the per-test
     # pytest-timeout normally trips first and dumps the stack. 45, not 30: a
     # normal macOS run takes about 13 minutes and a congested runner crossed 30.
-    timeout-minutes: 45
+    # On main every cell records diffcone evidence, running the suite under a
+    # tracer (1.5-4x slower), hence 90 there.
+    timeout-minutes: ${{ github.event_name == 'push' && 90 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -209,6 +211,35 @@ jobs:
 
     env:
       RUSTUP_TOOLCHAIN: stable
+      # The unit run, through diffcone in the steps below (Windows skips the
+      # notebook subsystem).
+      UNIT_TEST_ARGS: >-
+        tests/
+        --ignore=tests/test_e2e_artifacts.py
+        --ignore=tests/test_lineage.py
+        --ignore=tests/test_s3_integration.py
+        --ignore=tests/test_presigned_urls_minio.py
+        --ignore=tests/test_presigned_urls_azurite.py
+        --ignore=tests/test_lake_catalogs_integration.py
+        --ignore=tests/test_artifact_store_postgres.py
+        --ignore=tests/test_migrate_to_postgres.py
+        --ignore=tests/notebook/test_e2e_mounts_s3.py
+        --ignore=tests/notebook/test_e2e_mounts_azure.py
+        --ignore=tests/notebook/test_e2e_mounts_gcs.py
+        --ignore=tests/notebook/test_e2e_duckdb_lake.py
+        -n auto --dist loadscope --tb=short
+      WINDOWS_UNIT_TEST_ARGS: >-
+        tests/
+        --ignore=tests/test_e2e_artifacts.py
+        --ignore=tests/test_lineage.py
+        --ignore=tests/test_s3_integration.py
+        --ignore=tests/test_presigned_urls_minio.py
+        --ignore=tests/test_presigned_urls_azurite.py
+        --ignore=tests/test_lake_catalogs_integration.py
+        --ignore=tests/test_artifact_store_postgres.py
+        --ignore=tests/test_migrate_to_postgres.py
+        --ignore=tests/notebook
+        -n auto --dist loadscope --tb=short
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -247,24 +278,40 @@ jobs:
         shell: bash
         run: uv sync --python ${{ matrix.python-version }} --all-extras
 
-      - name: Run unit tests (non-Windows)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          uv run pytest tests/ \
-            --ignore=tests/test_e2e_artifacts.py \
-            --ignore=tests/test_lineage.py \
-            --ignore=tests/test_s3_integration.py \
-            --ignore=tests/test_presigned_urls_minio.py \
-            --ignore=tests/test_presigned_urls_azurite.py \
-            --ignore=tests/test_lake_catalogs_integration.py \
-            --ignore=tests/test_artifact_store_postgres.py \
-            --ignore=tests/test_migrate_to_postgres.py \
-            --ignore=tests/notebook/test_e2e_mounts_s3.py \
-            --ignore=tests/notebook/test_e2e_mounts_azure.py \
-            --ignore=tests/notebook/test_e2e_mounts_gcs.py \
-            --ignore=tests/notebook/test_e2e_duckdb_lake.py \
-            -n auto --dist loadscope --tb=short
+      # diffcone (https://github.com/bearing-research/diffcone). On main this
+      # is the full run, recorded per cell: each push's own change is planned
+      # from the previous recording and checked against this run, and a new
+      # failure the plan did not select (and that fails again when re-run)
+      # fails the job. On pull requests only the tests the change can affect
+      # run, planned from main's newest recording of the same cell.
+      - name: Run unit tests and record (diffcone, main)
+        id: record
+        if: github.event_name == 'push'
+        uses: bearing-research/diffcone/actions/record@d1bdc2ee155b801c8f4d83618246aa0b91a69093  # v0.2.0
+        with:
+          key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
+          command: uv run pytest
+          pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          check: true
+          fail-on-test-failure: true
+
+      - name: Run the affected unit tests (diffcone, pull request)
+        if: github.event_name == 'pull_request'
+        uses: bearing-research/diffcone/actions/run@d1bdc2ee155b801c8f4d83618246aa0b91a69093  # v0.2.0
+        with:
+          key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
+          command: uv run pytest
+          pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+
+      - name: Upload the diffcone plan and verdict
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: ${{ steps.record.outputs.results || 'diffcone-results' }}
+          if-no-files-found: ignore
 
       # Needs root and a second OS user, which the suite cannot arrange: a cell
       # run as the harness user must not read the server's environment through
@@ -287,27 +334,15 @@ jobs:
           # A skip passes pytest; here it would mean nothing was checked.
           grep -q " 1 passed" harness-e2e.log
 
-      - name: Run unit tests (Windows, notebook subsystem skipped)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          uv run pytest tests/ \
-            --ignore=tests/test_e2e_artifacts.py \
-            --ignore=tests/test_lineage.py \
-            --ignore=tests/test_s3_integration.py \
-            --ignore=tests/test_presigned_urls_minio.py \
-            --ignore=tests/test_presigned_urls_azurite.py \
-            --ignore=tests/test_lake_catalogs_integration.py \
-            --ignore=tests/test_artifact_store_postgres.py \
-            --ignore=tests/test_migrate_to_postgres.py \
-            --ignore=tests/notebook \
-            -n auto --dist loadscope --tb=short
-
   # E2E and integration tests, Ubuntu only for speed.
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ github.event_name == 'push' && 45 || 15 }}
+    env:
+      E2E_TEST_ARGS: >-
+        tests/test_e2e_artifacts.py tests/test_lineage.py tests/test_executor_protocol.py
+        -v --tb=short
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -339,17 +374,36 @@ jobs:
       - name: Install dependencies and build Rust extension
         run: uv sync --python 3.12 --all-extras
 
-      - name: Run E2E artifact tests
-        run: |
-          uv run pytest tests/test_e2e_artifacts.py -v --tb=short
+      # diffcone, as in the unit tests: the full run recorded and checked on
+      # main, the affected tests on pull requests.
+      - name: Run E2E tests and record (diffcone, main)
+        id: record
+        if: github.event_name == 'push'
+        uses: bearing-research/diffcone/actions/record@d1bdc2ee155b801c8f4d83618246aa0b91a69093  # v0.2.0
+        with:
+          key-prefix: diffcone-e2e
+          command: uv run pytest
+          pytest-args: ${{ env.E2E_TEST_ARGS }}
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          check: true
+          fail-on-test-failure: true
 
-      - name: Run lineage tests
-        run: |
-          uv run pytest tests/test_lineage.py -v --tb=short
+      - name: Run the affected E2E tests (diffcone, pull request)
+        if: github.event_name == 'pull_request'
+        uses: bearing-research/diffcone/actions/run@d1bdc2ee155b801c8f4d83618246aa0b91a69093  # v0.2.0
+        with:
+          key-prefix: diffcone-e2e
+          command: uv run pytest
+          pytest-args: ${{ env.E2E_TEST_ARGS }}
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
 
-      - name: Run executor protocol tests
-        run: |
-          uv run pytest tests/test_executor_protocol.py -v --tb=short
+      - name: Upload the diffcone plan and verdict
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: diffcone-e2e
+          path: ${{ steps.record.outputs.results || 'diffcone-results' }}
+          if-no-files-found: ignore
 
   # R-cell tests in their own job: R does not care about the Python version,
   # so installing it in the unit-tests matrix only multiplies the cost.
@@ -357,7 +411,7 @@ jobs:
   r-tests:
     name: R Tests (${{ matrix.os }} · R ${{ matrix.r }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ github.event_name == 'push' && 60 || 20 }}
     strategy:
       fail-fast: false
       # Current R on both platforms plus the previous minor ("oldrel-1") on
@@ -374,6 +428,13 @@ jobs:
 
     env:
       RUSTUP_TOOLCHAIN: stable
+      R_TEST_ARGS: >-
+        tests/notebook/test_r_cells.py
+        tests/notebook/test_language_r_executor.py
+        tests/notebook/test_language_r_analyzer.py
+        tests/notebook/test_shared_renv.py
+        tests/notebook/test_r_workers.py
+        -v --tb=short
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -428,16 +489,41 @@ jobs:
           }
 
       # Only the R-marked tier the unit-tests matrix skips for lack of Rscript.
-      - name: Run R-related test files
+      # The R version is recorded with the evidence and checked, so a newer R
+      # than the recording's runs everything.
+      - name: The R version, for diffcone
         shell: bash
-        run: |
-          uv run pytest \
-            tests/notebook/test_r_cells.py \
-            tests/notebook/test_language_r_executor.py \
-            tests/notebook/test_language_r_analyzer.py \
-            tests/notebook/test_shared_renv.py \
-            tests/notebook/test_r_workers.py \
-            -v --tb=short
+        run: echo "R_VERSION=$(Rscript -e 'cat(R.version.string)')" >> "$GITHUB_ENV"
+
+      - name: Run R tests and record (diffcone, main)
+        id: record
+        if: github.event_name == 'push'
+        uses: bearing-research/diffcone/actions/record@d1bdc2ee155b801c8f4d83618246aa0b91a69093  # v0.2.0
+        with:
+          key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
+          command: uv run pytest
+          pytest-args: ${{ env.R_TEST_ARGS }}
+          env-vars: R_VERSION
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          check: true
+          fail-on-test-failure: true
+
+      - name: Run the affected R tests (diffcone, pull request)
+        if: github.event_name == 'pull_request'
+        uses: bearing-research/diffcone/actions/run@d1bdc2ee155b801c8f4d83618246aa0b91a69093  # v0.2.0
+        with:
+          key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
+          command: uv run pytest
+          pytest-args: ${{ env.R_TEST_ARGS }}
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+
+      - name: Upload the diffcone plan and verdict
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
+          path: ${{ steps.record.outputs.results || 'diffcone-results' }}
+          if-no-files-found: ignore
 
   notebook-browser-smoke:
     name: Notebook Browser Smoke
