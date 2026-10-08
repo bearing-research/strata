@@ -200,7 +200,9 @@ jobs:
     # Backstop for a deadlocked test, below GitHub's 6h cap; the per-test
     # pytest-timeout normally trips first and dumps the stack. 45, not 30: a
     # normal macOS run takes about 13 minutes and a congested runner crossed 30.
-    timeout-minutes: 45
+    # Linux 3.13 records diffcone evidence on main, which runs the suite
+    # under a tracer (1.5-4x slower), hence 75 there.
+    timeout-minutes: ${{ (matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13') && 75 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -209,6 +211,23 @@ jobs:
 
     env:
       RUSTUP_TOOLCHAIN: stable
+      # The non-Windows unit run. Shared with the diffcone steps below, which
+      # must run exactly the suite the plain run does.
+      UNIT_TEST_ARGS: >-
+        tests/
+        --ignore=tests/test_e2e_artifacts.py
+        --ignore=tests/test_lineage.py
+        --ignore=tests/test_s3_integration.py
+        --ignore=tests/test_presigned_urls_minio.py
+        --ignore=tests/test_presigned_urls_azurite.py
+        --ignore=tests/test_lake_catalogs_integration.py
+        --ignore=tests/test_artifact_store_postgres.py
+        --ignore=tests/test_migrate_to_postgres.py
+        --ignore=tests/notebook/test_e2e_mounts_s3.py
+        --ignore=tests/notebook/test_e2e_mounts_azure.py
+        --ignore=tests/notebook/test_e2e_mounts_gcs.py
+        --ignore=tests/notebook/test_e2e_duckdb_lake.py
+        -n auto --dist loadscope --tb=short
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -248,23 +267,36 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} --all-extras
 
       - name: Run unit tests (non-Windows)
-        if: runner.os != 'Windows'
+        # Linux 3.13 runs through diffcone instead (the next two steps).
+        if: runner.os != 'Windows' && !(runner.os == 'Linux' && matrix.python-version == '3.13')
         shell: bash
-        run: |
-          uv run pytest tests/ \
-            --ignore=tests/test_e2e_artifacts.py \
-            --ignore=tests/test_lineage.py \
-            --ignore=tests/test_s3_integration.py \
-            --ignore=tests/test_presigned_urls_minio.py \
-            --ignore=tests/test_presigned_urls_azurite.py \
-            --ignore=tests/test_lake_catalogs_integration.py \
-            --ignore=tests/test_artifact_store_postgres.py \
-            --ignore=tests/test_migrate_to_postgres.py \
-            --ignore=tests/notebook/test_e2e_mounts_s3.py \
-            --ignore=tests/notebook/test_e2e_mounts_azure.py \
-            --ignore=tests/notebook/test_e2e_mounts_gcs.py \
-            --ignore=tests/notebook/test_e2e_duckdb_lake.py \
-            -n auto --dist loadscope --tb=short
+        run: uv run pytest $UNIT_TEST_ARGS
+
+      # diffcone (https://github.com/bearing-research/diffcone), Linux 3.13
+      # only. On main this is the full run, recorded: each push's own change
+      # is planned from the previous recording and checked against this run,
+      # and a new failure the plan did not select (and that fails again when
+      # re-run) fails the job. On pull requests only the tests the change can
+      # affect run, planned from main's newest recording.
+      - name: Run unit tests and record (diffcone, main)
+        if: runner.os == 'Linux' && matrix.python-version == '3.13' && github.event_name == 'push'
+        uses: bearing-research/diffcone/actions/record@c4b64a60460780a808c240f220398a29dcc6af6d  # main, pre-0.2.0
+        with:
+          key-prefix: diffcone-unit-ubuntu-py313
+          command: uv run pytest
+          pytest-args: ${{ env.UNIT_TEST_ARGS }}
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          check: true
+          fail-on-test-failure: true
+
+      - name: Run the affected unit tests (diffcone, pull request)
+        if: runner.os == 'Linux' && matrix.python-version == '3.13' && github.event_name == 'pull_request'
+        uses: bearing-research/diffcone/actions/run@c4b64a60460780a808c240f220398a29dcc6af6d  # main, pre-0.2.0
+        with:
+          key-prefix: diffcone-unit-ubuntu-py313
+          command: uv run pytest
+          pytest-args: ${{ env.UNIT_TEST_ARGS }}
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
 
       # Needs root and a second OS user, which the suite cannot arrange: a cell
       # run as the harness user must not read the server's environment through
