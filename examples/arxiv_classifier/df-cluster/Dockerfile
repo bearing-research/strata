@@ -21,7 +21,7 @@ FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea5
 # The worker must be the same release as the server that dispatches to it.
 # Plain pip, not a uv venv: the uv-runtime guard gates strata-notebook but
 # not the worker entry point.
-ARG STRATA_VERSION=0.8.0
+ARG STRATA_VERSION=0.9.0
 RUN pip install --no-cache-dir \
     "strata-notebook[notebook]==${STRATA_VERSION}" \
     "datafusion>=42" \

@@ -41,7 +41,7 @@ FROM python:3.14-slim@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab
 # (worker_env.py). Without uv the worker reports
 # ``locked_environments: false`` and cells run in this image, ignoring the
 # notebook's pins.
-ARG STRATA_VERSION=0.8.0
+ARG STRATA_VERSION=0.9.0
 RUN pip install --no-cache-dir "strata-notebook[notebook]==${STRATA_VERSION}" "uv==0.12.23"
 
 # R cells, with --build-arg WITH_R=true:
