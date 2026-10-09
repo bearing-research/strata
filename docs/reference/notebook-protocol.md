@@ -93,7 +93,8 @@ every endpoint. This is the local-dev default.
   `api_key`, `Authorization: Bearer <key>`. The WS upgrade carries the same
   credentials; a missing or invalid one refuses the upgrade with HTTP
   `403`. Under `api_key` the key is checked again on every frame that needs
-  `notebook:write` or `notebook:execute`, and the open socket closes with
+  `notebook:write` or `notebook:execute`, and at most every 5 seconds before
+  a read frame or an outbound frame; the open socket closes with
   `1008 Unauthorized` once the key is revoked or expired.
 - `/open`, `/create` and `/discover` work in service mode. What is
   personal-mode-only is narrower: the two delete routes (`DELETE

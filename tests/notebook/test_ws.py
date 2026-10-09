@@ -652,7 +652,9 @@ async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_ses
     monkeypatch.setattr(
         "strata.server._state",
         SimpleNamespace(
-            config=SimpleNamespace(deployment_mode="service", notebook_harness_user=None)
+            config=SimpleNamespace(
+                deployment_mode="service", notebook_harness_user=None, auth_mode="none"
+            )
         ),
     )
 
@@ -2570,6 +2572,89 @@ async def test_ws_revoked_key_stops_changing_the_notebook(notebook_session, api_
     root = next(c for c in session.notebook_state.cells if c.id == "root")
     assert root.source == "x = 10"
     assert fake.closed == (1008, "Unauthorized")
+
+
+@pytest.mark.asyncio
+async def test_ws_revoked_key_stops_receiving_broadcasts(
+    notebook_session, api_key_mode, monkeypatch
+):
+    """A socket that only listens must stop getting frames once its key is revoked."""
+    import strata.notebook.ws as ws_module
+
+    monkeypatch.setattr(ws_module, "_API_KEY_RECHECK_SECONDS", 0.0)
+    _, session = notebook_session
+    scopes = frozenset({"notebook:read"})
+    revoked_key, revoked_record = api_key_mode.create_key(principal_id="alice", scopes=scopes)
+    kept_key, _ = api_key_mode.create_key(principal_id="bob", scopes=scopes)
+    listener = FakeNotebookWebSocket(headers={"authorization": f"Bearer {revoked_key}"})
+    other = FakeNotebookWebSocket(headers={"authorization": f"Bearer {kept_key}"})
+    connections = ws_module._notebook_connections.setdefault(session.id, [])
+    connections.extend([cast(WebSocket, listener), cast(WebSocket, other)])
+    try:
+        await ws_module._broadcast_message(session.id, {"type": "cell_output", "payload": {}})
+        api_key_mode.revoke(revoked_record.key_id)
+        await ws_module._broadcast_message(session.id, {"type": "cell_output", "payload": {}})
+
+        assert len(listener.frames_of("cell_output")) == 1
+        assert listener.closed == (1008, "Unauthorized")
+        assert listener not in connections
+        assert len(other.frames_of("cell_output")) == 2
+        assert other.closed is None
+    finally:
+        ws_module._notebook_connections.pop(session.id, None)
+
+
+@pytest.mark.asyncio
+async def test_ws_revoked_key_read_frame_closes_the_socket(
+    notebook_session, api_key_mode, monkeypatch
+):
+    """A read frame after revocation gets no reply: the notebook state could carry outputs."""
+    import strata.notebook.ws as ws_module
+    from strata.notebook.ws import notebook_websocket
+
+    monkeypatch.setattr(ws_module, "_API_KEY_RECHECK_SECONDS", 0.0)
+    _, session = notebook_session
+    key, record = api_key_mode.create_key(principal_id="alice", scopes=frozenset({"notebook:read"}))
+
+    class _RevokedBeforeSync(FakeNotebookWebSocket):
+        async def receive_text(self) -> str:
+            api_key_mode.revoke(record.key_id)
+            return await super().receive_text()
+
+    fake = _RevokedBeforeSync(
+        inbound=[_envelope("notebook_sync")], headers={"authorization": f"Bearer {key}"}
+    )
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    assert fake.frames_of("notebook_state") == []
+    assert fake.closed == (1008, "Unauthorized")
+
+
+@pytest.mark.asyncio
+async def test_ws_broadcast_key_check_is_not_a_query_per_frame(notebook_session, api_key_mode):
+    """Within the recheck window a broadcast reuses the last verification."""
+    import strata.notebook.ws as ws_module
+
+    _, session = notebook_session
+    key, _ = api_key_mode.create_key(principal_id="alice", scopes=frozenset({"notebook:read"}))
+    calls: list[str] = []
+    verify = api_key_mode.verify
+
+    def _counting_verify(presented: str):
+        calls.append(presented)
+        return verify(presented)
+
+    api_key_mode.verify = _counting_verify
+    listener = FakeNotebookWebSocket(headers={"authorization": f"Bearer {key}"})
+    ws_module._notebook_connections.setdefault(session.id, []).append(cast(WebSocket, listener))
+    try:
+        for _ in range(3):
+            await ws_module._broadcast_message(session.id, {"type": "cell_output", "payload": {}})
+    finally:
+        ws_module._notebook_connections.pop(session.id, None)
+
+    assert len(listener.frames_of("cell_output")) == 3
+    assert calls == [key]
 
 
 @pytest.mark.asyncio
