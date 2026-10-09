@@ -1,9 +1,9 @@
 """Environment hashing for notebook dependencies.
 
-The env hash folds ``uv.lock`` (and ``renv.lock``). With a ``[dependency-groups]
-dev`` group, the uv part is a fingerprint of the runtime closure only, so adding
-or removing a dev tool never invalidates a cell's cache; otherwise it is
-``uv_lock_key``. Neither depends on the notebook project's own name.
+The env hash folds ``uv.lock`` (and ``renv.lock``). The uv part is a fingerprint
+of the runtime closure only, so adding or removing a dev tool, the first one
+included, never invalidates a cell's cache. It does not depend on the notebook
+project's own name.
 """
 
 from __future__ import annotations
@@ -142,8 +142,7 @@ def uv_lock_key(lock: str) -> str:
     SHA-256 of the lock with the notebook project's own name, version, source and
     declared specifiers left out, so notebooks with the same resolved packages
     share one environment. Its dependency edges (extras, markers, dev group) stay,
-    since they choose what is installed. Also the provenance env hash's uv part
-    when the lock has no dev group.
+    since they choose what is installed.
     """
     data: dict[str, Any] = tomllib.loads(lock)
     packages = data.get("package", [])
@@ -191,10 +190,10 @@ def renv_lock_key(lock: str) -> str:
 def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
     """Fingerprint a ``uv.lock``'s runtime dependency closure, or ``None``.
 
-    ``None`` when the lock has no dev-dependencies or cannot be parsed; the
-    caller then folds the raw bytes. Otherwise folds ``name@version`` and
-    artifact hashes of every package reachable from the root's runtime deps,
-    so transitive runtime upgrades count but dev tools do not.
+    ``None`` when the lock has no project root or cannot be parsed. Otherwise
+    folds ``name@version``, source and artifact hashes of every package reachable
+    from the root's runtime deps, so transitive runtime upgrades count but dev
+    tools do not, whether or not the lock has a dev group yet.
     """
     try:
         data: Any = tomllib.loads(raw_uv_lock.decode("utf-8"))
@@ -220,8 +219,7 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
         ):
             root = pkg
 
-    # No identifiable root or no dev group: the caller folds raw bytes.
-    if root is None or not root.get("dev-dependencies"):
+    if root is None:
         return None
 
     def _dep_names(entries: Any) -> list[str]:
@@ -256,6 +254,9 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
             hasher.update(name.encode("utf-8"))
             hasher.update(b"@")
             hasher.update(str(pkg.get("version", "")).encode("utf-8"))
+            # A git source has no artifact hashes; its commit lives in the source.
+            hasher.update(b"|source=")
+            hasher.update(json.dumps(pkg.get("source"), sort_keys=True).encode("utf-8"))
             # Artifact hashes catch a same-version re-pin.
             artifact_hashes: list[str] = []
             sdist = pkg.get("sdist")
@@ -290,9 +291,8 @@ def _fold_lockfile_into_hash(
     except OSError as exc:
         logger.warning("Could not read %s: %s", filename, exc)
         return
-    # With a dev group, fold only the runtime dependency closure so dev tools
-    # (pytest/ruff/ty) don't invalidate cell caches. Otherwise fold the lock without
-    # the project's own name, so same-dependency notebooks share cache hits.
+    # Fold only the runtime closure, dev group or not: a basis that switched when
+    # the first dev tool arrived would invalidate every cell once.
     if filename == "uv.lock":
         fingerprint = _runtime_uv_closure_fingerprint(content)
         if fingerprint is not None:

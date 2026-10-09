@@ -651,10 +651,13 @@ class TestLockfileHash:
         nb_dir = create_notebook(tmp_path, "hash_change")
         h1 = compute_lockfile_hash(nb_dir)
 
+        # A package only counts once the project depends on it; an orphan is not installed.
         lockfile = nb_dir / "uv.lock"
-        lockfile.write_text(
-            lockfile.read_text() + '\n[[package]]\nname = "extra"\nversion = "1.0.0"\n'
-        )
+        lock = tomllib.loads(lockfile.read_text())
+        root = next(p for p in lock["package"] if p["source"].get("virtual") == ".")
+        root.setdefault("dependencies", []).append({"name": "extra"})
+        lock["package"].append({"name": "extra", "version": "1.0.0"})
+        lockfile.write_text(tomli_w.dumps(lock))
 
         h2 = compute_lockfile_hash(nb_dir)
         assert h1 != h2
