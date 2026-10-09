@@ -200,13 +200,101 @@ def test_a_real_dependency_difference_still_changes_the_hash(tmp_path):
     assert len({base, bumped, added}) == 3
 
 
-def test_the_dev_group_path_folds_the_runtime_closure(tmp_path):
-    """With a dev group, the uv part is the runtime-closure fingerprint, as before."""
-    lock_text = _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev={"pytest": "9.1.1"})
-    fingerprint = _runtime_uv_closure_fingerprint(lock_text.encode())
-    assert fingerprint is not None
-    expected = hashlib.sha256(b"\0uv-runtime=" + fingerprint).hexdigest()
-    assert _hash_with(tmp_path, lock_text) == expected
+def test_the_uv_part_is_the_runtime_closure_with_or_without_a_dev_group(tmp_path):
+    """Both lock shapes fold the runtime-closure fingerprint, so they cannot disagree."""
+    for dev in (None, {"pytest": "9.1.1"}):
+        lock_text = _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev=dev)
+        fingerprint = _runtime_uv_closure_fingerprint(lock_text.encode())
+        assert fingerprint is not None
+        expected = hashlib.sha256(b"\0uv-runtime=" + fingerprint).hexdigest()
+        assert _hash_with(tmp_path, lock_text) == expected
+
+
+def test_the_first_dev_dependency_does_not_change_hash(tmp_path):
+    """A lock with no dev group and the same lock after the first dev tool hash alike."""
+    without_dev = _hash_with(tmp_path, _uv_lock(runtime={"cloudpickle": "3.1.2"}))
+    with_dev = _hash_with(
+        tmp_path,
+        _uv_lock(
+            runtime={"cloudpickle": "3.1.2"},
+            dev={"pytest": "9.1.1"},
+            transitive={"pytest": ("9.1.1", ["pluggy"]), "pluggy": ("1.6.0", [])},
+        ),
+    )
+    assert without_dev == with_dev
+
+
+def test_a_git_dependency_repinned_to_another_commit_changes_hash(tmp_path):
+    """A git source has no artifact hashes and keeps its version, so its commit must count."""
+
+    def lock(commit: str, dev_group: str) -> str:
+        return (
+            'version = 1\nrevision = 3\nrequires-python = ">=3.12"\n\n'
+            '[[package]]\nname = "probe"\nversion = "0.1.0"\nsource = { virtual = "." }\n'
+            'dependencies = [\n    { name = "mylib" },\n]\n'
+            f"{dev_group}\n"
+            '[[package]]\nname = "mylib"\nversion = "0.1.0"\n'
+            f'source = {{ git = "https://github.com/x/mylib?rev=main#{commit}" }}\n'
+        )
+
+    for dev_group in ("", '\n[package.dev-dependencies]\ndev = [\n    { name = "pytest" },\n]\n'):
+        before = _hash_with(tmp_path, lock("a" * 40, dev_group))
+        assert before != _hash_with(tmp_path, lock("b" * 40, dev_group))
+
+
+async def test_the_first_dev_dependency_keeps_a_cached_cell_cached(tmp_path):
+    """Adding the first dev tool to a lock with no dev group neither stales a cell nor
+    misses its cache.
+    """
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    root = (
+        'version = 1\nrevision = 3\nrequires-python = ">=3.12"\n\n'
+        '[[package]]\nname = "nb"\nversion = "0.1.0"\nsource = { virtual = "." }\n'
+        'dependencies = [\n    { name = "pyarrow" },\n]\n'
+    )
+    pyarrow = (
+        '[[package]]\nname = "pyarrow"\nversion = "21.0.0"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+        'sdist = { url = "https://x/pyarrow-21.0.0.tar.gz", hash = "sha256:00" }\n'
+    )
+    without_dev = (
+        root
+        + '\n[package.metadata]\nrequires-dist = [{ name = "pyarrow", specifier = ">=18" }]\n\n'
+    ) + pyarrow
+    with_dev = (
+        root + '\n[package.dev-dependencies]\ndev = [\n    { name = "pytest" },\n]\n\n'
+        '[package.metadata]\nrequires-dist = [{ name = "pyarrow", specifier = ">=18" }]\n\n'
+        '[package.metadata.requires-dev]\ndev = [{ name = "pytest", specifier = ">=9" }]\n\n'
+        + pyarrow
+        + '\n[[package]]\nname = "pytest"\nversion = "9.1.1"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+        'sdist = { url = "https://x/pytest-9.1.1.tar.gz", hash = "sha256:11" }\n'
+    )
+
+    notebook_dir = create_notebook(tmp_path / "nb", "nb")
+    (notebook_dir / "uv.lock").write_text(without_dev)
+    add_cell_to_notebook(notebook_dir, "up", None)
+    write_cell(notebook_dir, "up", "value = 21")
+    add_cell_to_notebook(notebook_dir, "down", "up")
+    write_cell(notebook_dir, "down", "doubled = value * 2")
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.ensure_venv_synced()
+
+    first = await CellExecutor(session).execute_cell("up", "value = 21")
+    assert first.success, first.error
+    assert first.cache_hit is False
+    assert session.compute_staleness()["up"].status == "ready"
+
+    (notebook_dir / "uv.lock").write_text(with_dev)
+
+    assert session.compute_staleness()["up"].status == "ready"
+    second = await CellExecutor(session).execute_cell("up", "value = 21")
+    assert second.success, second.error
+    assert second.cache_hit is True, "the first dev dependency invalidated the cell"
 
 
 def test_unparseable_lock_falls_back_to_raw_bytes(tmp_path):
