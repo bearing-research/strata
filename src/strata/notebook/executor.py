@@ -134,12 +134,25 @@ logger = logging.getLogger(__name__)
 DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
 
 
-def cell_timeout_message(timeout_seconds: float) -> str:
+def cell_timeout_message(timeout_seconds: float, *, set_by: str | None = None) -> str:
     """A timed-out-cell error that names the remedy.
 
-    Points at all three levers (per-cell annotation, notebook default, CLI flag),
-    since a bare "timed out" does not say the limit is configurable.
+    ``set_by`` is where the limit came from: ``"annotation"``, ``"notebook"``
+    (notebook.toml), or ``None`` for the default or CLI flag. A lever that a higher
+    one overrides is not offered, since raising it would change nothing.
     """
+    if set_by == "annotation":
+        return (
+            f"Cell execution timed out after {timeout_seconds}s, the limit the cell's "
+            f"'# @timeout' annotation sets. Raise it there; the annotation overrides "
+            f"notebook.toml and 'strata run --timeout'."
+        )
+    if set_by == "notebook":
+        return (
+            f"Cell execution timed out after {timeout_seconds}s, the limit 'timeout' in "
+            f"notebook.toml sets. Raise it there or add a '# @timeout <seconds>' "
+            f"annotation to the cell; both override 'strata run --timeout'."
+        )
     return (
         f"Cell execution timed out after {timeout_seconds}s. Raise the limit with a "
         f"'# @timeout <seconds>' annotation on the cell, a 'timeout' key in "
@@ -860,7 +873,7 @@ class CellExecutor:
                 )
             self._materializing.add(cell_id)
             try:
-                return await self._execute_loop_cell(
+                loop_result = await self._execute_loop_cell(
                     cell_id,
                     source,
                     annotations.loop,
@@ -871,6 +884,9 @@ class CellExecutor:
                 )
             finally:
                 self._materializing.discard(cell_id)
+            # As the Python path does: a CLI run has no WS handler to persist the console.
+            self.session.apply_execution_result_metadata(cell_id, loop_result)
+            return loop_result
         effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
         worker_spec = resolve_worker_spec(
             self.session.notebook_state,
@@ -881,11 +897,16 @@ class CellExecutor:
                 self.session.notebook_state,
                 effective_worker,
             )
+            unsupported = (
+                "is unknown; it is not a worker this notebook can use"
+                if worker_spec is None
+                else "is not implemented yet"
+            )
             return CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
                 error=policy_error
-                or (f"Execution failed: worker '{effective_worker}' is not implemented yet"),
+                or f"Execution failed: worker '{effective_worker}' {unsupported}",
             )
 
         start_time = time.time()
@@ -975,6 +996,17 @@ class CellExecutor:
             return notebook_timeout
 
         return timeout_seconds
+
+    def _timeout_message(self, cell_id: str | None, timeout_seconds: float) -> str:
+        """``cell_timeout_message`` naming the lever ``_resolve_effective_timeout`` took."""
+        cell = self.session.notebook_state.get_cell(cell_id) if cell_id else None
+        if cell is not None and parse_annotations(cell.source).timeout is not None:
+            return cell_timeout_message(timeout_seconds, set_by="annotation")
+        if (
+            cell is not None and cell.timeout is not None
+        ) or self.session.notebook_state.timeout is not None:
+            return cell_timeout_message(timeout_seconds, set_by="notebook")
+        return cell_timeout_message(timeout_seconds)
 
     def _resolve_effective_runtime_env(
         self,
@@ -1732,7 +1764,7 @@ class CellExecutor:
                 cell_id=cell_id,
                 success=False,
                 duration_ms=duration_ms,
-                error=cell_timeout_message(timeout_seconds),
+                error=self._timeout_message(cell_id, timeout_seconds),
             ).apply_remote_metadata(**remote_metadata)
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
@@ -2662,7 +2694,7 @@ class CellExecutor:
         async def _receive_bundle(response: httpx.Response) -> None:
             if response.status_code == 408:
                 raise RemoteExecutionError(
-                    cell_timeout_message(timeout_seconds),
+                    self._timeout_message(cell_id, timeout_seconds),
                     remote_error_code="TIMEOUT",
                 )
             if response.status_code != 200:
@@ -2738,7 +2770,7 @@ class CellExecutor:
                 raise
             except httpx.TimeoutException as exc:
                 raise RemoteExecutionError(
-                    cell_timeout_message(timeout_seconds),
+                    self._timeout_message(cell_id, timeout_seconds),
                     remote_error_code="TIMEOUT",
                 ) from exc
             except httpx.HTTPError as exc:
@@ -3012,7 +3044,7 @@ class CellExecutor:
         except httpx.TimeoutException as exc:
             _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
             raise RemoteExecutionError(
-                cell_timeout_message(timeout_seconds),
+                self._timeout_message(cell_id, timeout_seconds),
                 remote_build_state="failed",
                 remote_error_code="TIMEOUT",
             ) from exc
@@ -3038,7 +3070,7 @@ class CellExecutor:
             if response.status_code == 408:
                 _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
                 raise RemoteExecutionError(
-                    cell_timeout_message(timeout_seconds),
+                    self._timeout_message(cell_id, timeout_seconds),
                     remote_build_state="failed",
                     remote_error_code="TIMEOUT",
                 )
@@ -3284,7 +3316,7 @@ class CellExecutor:
                     if now - running_since > timeout_seconds:
                         await cancel()
                         raise RemoteExecutionError(
-                            cell_timeout_message(timeout_seconds),
+                            self._timeout_message(cell_id, timeout_seconds),
                             remote_build_state="failed",
                             remote_error_code="TIMEOUT",
                         )
@@ -5402,8 +5434,8 @@ class CellExecutor:
                             f"Loop cell iter {k} timed out after "
                             f"{timeout_seconds}s (per-iteration timeout)."
                         ),
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=duration_ms,
                         execution_method="loop",
                     )
@@ -5427,8 +5459,8 @@ class CellExecutor:
                         success=False,
                         error=f"Loop cell iter {k} failed: {error_msg}",
                         traceback=traceback_text,
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=duration_ms,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
@@ -5442,8 +5474,8 @@ class CellExecutor:
                         cell_id=cell_id,
                         success=False,
                         error=f"Loop cell iter {k}: {loop_state['error']}",
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=(time.time() - start_time) * 1000,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
@@ -5466,8 +5498,8 @@ class CellExecutor:
                             f"body must rebind `{loop.carry}` every "
                             f"iteration."
                         ),
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=duration_ms,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
@@ -5641,8 +5673,8 @@ class CellExecutor:
             self._store_console_outputs(
                 cell_id,
                 cell_provenance,
-                "\n".join(combined_stdout),
-                "\n".join(combined_stderr),
+                "".join(combined_stdout),
+                "".join(combined_stderr),
                 prov.input_hashes,
                 source_hash=source_hash,
                 source=source,
@@ -5660,8 +5692,8 @@ class CellExecutor:
         return CellExecutionResult(
             cell_id=cell_id,
             success=True,
-            stdout="\n".join(combined_stdout),
-            stderr="\n".join(combined_stderr),
+            stdout="".join(combined_stdout),
+            stderr="".join(combined_stderr),
             outputs={
                 loop.carry: {
                     "content_type": carry_content_type,

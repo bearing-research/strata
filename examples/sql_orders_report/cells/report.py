@@ -1,9 +1,8 @@
 # @name report
 """Combine the two SQL results into a markdown report.
 
-The SQL cells return Arrow Tables; the notebook serializer hands
-them back as pandas DataFrames at the Python boundary, so we can
-work with familiar ``.iterrows()`` / ``.to_dict``.
+The SQL cells return Arrow Tables, which reach this cell as
+``pyarrow.Table``; ``.to_pandas()`` gives the familiar ``.iterrows()``.
 """
 
 lines = [
@@ -14,7 +13,7 @@ lines = [
     "| customer | sku | category | amount | ordered |",
     "|---|---|---|---:|---|",
 ]
-for _, row in top_orders.iterrows():
+for _, row in top_orders.to_pandas().iterrows():
     lines.append(
         f"| {row['customer']} | {row['sku']} | {row['category']} | "
         f"${row['amount']:.2f} | {row['ordered_at']} |"
@@ -27,7 +26,7 @@ lines += [
     "| category | SKUs | orders | revenue |",
     "|---|---:|---:|---:|",
 ]
-for _, row in category_summary.iterrows():
+for _, row in category_summary.to_pandas().iterrows():
     revenue = row["total_revenue"]
     revenue_str = f"${revenue:.2f}" if revenue is not None else "n/a"
     lines.append(

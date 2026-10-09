@@ -671,3 +671,23 @@ def test_cli_cell_runs_hold_back_info_logs(chain_nb, monkeypatch, argv):
         executor_logger.removeHandler(handler)
 
     assert [r.levelno for r in records] == [logging.WARNING]
+
+
+def test_cli_cell_run_saves_a_loop_cells_console(tmp_path, capsys):
+    """`cell show` and `strata export` read the console a CLI run of a loop cell left."""
+    from tests.notebook.test_cli import _mk_fake_venv
+
+    nb = _build_notebook(
+        tmp_path,
+        cells=[
+            ("seed", "state = 0", None),
+            ("loop", "# @loop max_iter=2 carry=state\nprint('iter', state)\nstate += 1", "seed"),
+        ],
+    )
+    _mk_fake_venv(nb)
+    rc = main(["cell", "run", str(nb), "loop", "--rerun", "--no-sync", "--format", "json"])
+    assert rc == 0, capsys.readouterr().err
+    capsys.readouterr()
+
+    assert main(["cell", "show", str(nb), "loop", "--format", "json"]) == 0
+    assert "iter 1" in json.loads(capsys.readouterr().out)["console_stdout"]

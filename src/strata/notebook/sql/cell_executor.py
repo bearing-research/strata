@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING, Any, cast
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.provenance import derive_subkey
-from strata.notebook.serializer import _META_SHAPE, _SHAPE_SCALAR, _extract_scalar_from_table
+from strata.notebook.serializer import (
+    _META_SHAPE,
+    _SHAPE_SCALAR,
+    _extract_scalar_from_table,
+    _table_from_pyarrow,
+)
 from strata.notebook.sql.adapter import FreshnessToken
 from strata.notebook.sql.analyzer import (
     analyze_sql_cell,
@@ -1250,6 +1255,9 @@ def _safely_close(handle: Any) -> None:
 def _serialize_arrow_ipc(table: Any) -> bytes:
     import pyarrow as pa
 
+    # Tagged as a pyarrow.Table: the reader turns untagged tables into pandas when it
+    # imports, so the downstream type would depend on the notebook's packages.
+    table = _table_from_pyarrow(table)
     sink = io.BytesIO()
     with pa.ipc.new_stream(sink, table.schema) as writer:
         writer.write_table(table)

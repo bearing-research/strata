@@ -30,7 +30,7 @@ QUERY = (
     "SELECT region, SUM(gross) AS net FROM orders "
     "WHERE gross >= :minimum_amount GROUP BY region ORDER BY net DESC\n"
 )
-CONSUMER = "total = float(regional_revenue['net'].sum())\n{'total': total}\n"
+CONSUMER = "total = float(regional_revenue.to_pandas()['net'].sum())\n{'total': total}\n"
 
 
 @pytest.fixture

@@ -674,6 +674,25 @@ async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_ses
 
 
 @pytest.mark.asyncio
+async def test_cascade_counts_only_the_cells_it_runs(temp_notebook):
+    """A ready upstream is skipped: not offered in the prompt, not counted in progress."""
+    notebook_dir, _ = temp_notebook
+    session = open_session(notebook_dir)
+    await _run_cell_to_terminal(session, "root")
+    assert session.notebook_state.get_cell("root").status == "ready"
+
+    fake = await _run_cell_to_terminal(session, "leaf")
+
+    [prompt] = fake.frames_of("cascade_prompt")
+    assert prompt["payload"]["cells_to_run"] == ["middle", "leaf"]
+    progress = [
+        (f["payload"]["current_cell_id"], f["payload"]["completed"], f["payload"]["total"])
+        for f in fake.frames_of("cascade_progress")
+    ]
+    assert progress == [("middle", 0, 2), ("leaf", 1, 2), ("leaf", 2, 2)]
+
+
+@pytest.mark.asyncio
 async def test_cell_execute_cascade_emits_multiple_display_payloads_in_order(temp_notebook):
     notebook_dir, _ = temp_notebook
     write_cell(

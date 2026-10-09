@@ -906,7 +906,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         )
 
         assert result.success is False
-        assert result.error == "Execution failed: worker 'gpu-a100' is not implemented yet"
+        assert result.error == (
+            "Execution failed: worker 'gpu-a100' is unknown; "
+            "it is not a worker this notebook can use"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_allows_registered_local_worker_annotation(
@@ -946,7 +949,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         result = await executor.execute_cell("cell1", "x = 1")
 
         assert result.success is False
-        assert result.error == "Execution failed: worker 'gpu-default' is not implemented yet"
+        assert result.error == (
+            "Execution failed: worker 'gpu-default' is unknown; "
+            "it is not a worker this notebook can use"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_rejects_unimplemented_cell_worker_override(
@@ -963,7 +969,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         result = await executor.execute_cell("cell1", "x = 1")
 
         assert result.success is False
-        assert result.error == "Execution failed: worker 'gpu-override' is not implemented yet"
+        assert result.error == (
+            "Execution failed: worker 'gpu-override' is unknown; "
+            "it is not a worker this notebook can use"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_rejects_disallowed_service_mode_worker(
@@ -2551,6 +2560,27 @@ class TestLoopCellExecution:
         # Final iteration is k=2 with max_iter=3.
         artifact_mgr = session.get_artifact_manager()
         assert artifact_mgr.get_iteration_artifact("loop", "state", 2) is not None
+
+    @pytest.mark.asyncio
+    async def test_loop_console_is_each_iterations_output_as_written(self, loop_notebook):
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        loop_source = (
+            "# @loop max_iter=3 carry=state\n"
+            "print('iter', state['n'])\n"
+            "state = {'n': state['n'] + 1, 'history': []}\n"
+        )
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+        executor = CellExecutor(session)
+
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        result = await executor.execute_cell("loop", loop_source)
+
+        assert result.success, result.error
+        assert result.stdout == "iter 0\niter 1\niter 2\n"
+        assert result.stderr == ""
 
     @pytest.mark.asyncio
     async def test_loop_until_terminates_early(self, loop_notebook):
