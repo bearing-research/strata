@@ -245,6 +245,32 @@ async def test_a_build_input_is_read_off_the_loop(served, runner, by_name):
     path.unlink()
 
 
+async def test_an_input_copy_cancelled_midway_leaves_its_file_registered(served, runner, tmp_path):
+    """A stopping runner cancels the build while the copy thread runs on.
+
+    The build's cleanup can only remove files it knows about, so the file must be
+    registered before the copy starts.
+    """
+    version = _ready(served.store, "input", ARROW)
+    temp_files: list = []
+    served.blobs.gated = "read"
+    task = asyncio.ensure_future(
+        runner._acquire_input(f"strata://artifact/input@v={version}", temp_files)
+    )
+    try:
+        assert await asyncio.to_thread(served.blobs.entered.wait, 30), "the copy never started"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        served.blobs.release.set()
+    assert await asyncio.to_thread(served.blobs.done.wait, 30)
+
+    on_disk = set((tmp_path / "artifacts").glob("tmp*.arrow"))
+    assert on_disk <= set(temp_files)
+    assert temp_files, "nothing was registered for cleanup"
+
+
 @pytest.mark.parametrize("gate", ["publish", "read"])
 async def test_a_build_publishes_and_finalizes_off_the_loop(served, runner, tmp_path, gate):
     """``publish`` is the output upload; ``read`` is finalize hashing it back."""
@@ -430,3 +456,37 @@ async def test_an_import_that_loses_a_race_leaves_the_winner_intact(served):
     # The loser wrote under a key of its own, and removed it.
     winner_key = served.store._blob_key("shared", 1)[0]
     assert [p.name for p in served.store.blobs_dir.rglob("*.arrow")] == [f"{winner_key}@v=1.arrow"]
+
+
+async def test_an_uploaded_artifact_is_ready_only_with_its_name(served, monkeypatch):
+    """Finalize runs in a thread, so a reader can look the moment it commits."""
+    store = served.store
+    version = store.create_artifact(artifact_id="uploaded", provenance_hash="d" * 64)
+    store.write_blob("uploaded", version, ARROW)
+    seen_at_commit = []
+
+    def observed(finalize):
+        def call(*args, **kwargs):
+            result = finalize(*args, **kwargs)
+            seen_at_commit.append(store.get_name("the-upload"))
+            return result
+
+        return call
+
+    for method in ("finalize_artifact", "finalize_and_set_name"):
+        monkeypatch.setattr(store, method, observed(getattr(store, method)))
+    body = {
+        "artifact_id": "uploaded",
+        "version": version,
+        "arrow_schema": "",
+        "row_count": 3,
+        "name": "the-upload",
+    }
+
+    async with _client(served) as client:
+        response = await client.post("/v1/artifacts/finalize", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["name_uri"] == "strata://name/the-upload"
+    [name] = seen_at_commit
+    assert (name.artifact_id, name.version) == ("uploaded", version)
