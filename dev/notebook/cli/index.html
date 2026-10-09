@@ -2420,8 +2420,8 @@ run.</p>
 finishes: <code>{"notebook", "success", "duration_ms", "cells": [...]}</code> with one
 entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped</code>, <code>duration_ms</code>,
 <code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> - truncated at 10k chars - and
-<code>error</code> / <code>reason</code> where applicable, and <code>error_code</code> when the failure has a
-stable name, such as <code>fetch_pin_mismatch</code>). For a cell that produces an output
+<code>error</code> / <code>reason</code> where applicable, <code>traceback</code> when the cell raised, and
+<code>error_code</code> when the failure has a stable name, such as <code>fetch_pin_mismatch</code>). For a cell that produces an output
 artifact, a cache hit replays that artifact without re-emitting console
 output, so <code>stdout</code> can be absent on warm runs (<code>--force</code> re-executes). A
 leaf cell that only <code>print</code>s is different: its stdout/stderr are cached by
@@ -2466,7 +2466,7 @@ digest computed from its bytes when the report is written. The ZIP export's
 </table>
 <p>CI scripts can branch on the exit code; the structured output stays parseable
 even when some cells failed (each failure produces a JSON object with
-<code>status: "error"</code> and the traceback).</p>
+<code>status: "error"</code>, its <code>error</code>, and the <code>traceback</code> when the cell raised).</p>
 <h2 id="example-github-actions">Example: GitHub Actions<a class="headerlink" href="#example-github-actions" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">jobs</span><span class="p">:</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">notebooks</span><span class="p">:</span>

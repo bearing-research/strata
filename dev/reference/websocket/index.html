@@ -2943,12 +2943,12 @@
 <tr>
 <td><code>cascade_prompt</code></td>
 <td><code>{ "cell_id": "...", "plan_id": "...", "cells_to_run": [...], "estimated_duration_ms": 0 }</code></td>
-<td>Upstream cells need execution</td>
+<td>Upstream cells need execution. <code>cells_to_run</code> is the cells that will run, in order; ready upstreams are left out</td>
 </tr>
 <tr>
 <td><code>cascade_progress</code></td>
 <td><code>{ "plan_id": "...", "current_cell_id": "...", "completed": 1, "total": 3 }</code></td>
-<td>Cascade progress</td>
+<td>Sent as each cell starts. <code>completed</code> counts finished cells of the <code>total</code> that run; a cascade that succeeds ends with a frame where <code>completed</code> equals <code>total</code></td>
 </tr>
 </tbody>
 </table>
