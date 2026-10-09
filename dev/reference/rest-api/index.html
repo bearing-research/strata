@@ -5057,8 +5057,10 @@ one.</p>
 </code></pre></div>
 <p>Both are unauthenticated, for scrapers. Under principal auth
 <code>/metrics/prometheus</code> leaves out the per-table series, since table names are
-<code>admin:*</code> data (<code>GET /metrics/tables</code>), and the AI usage series carry no
-<code>principal</code> label: they are per-tenant, per-model totals.</p>
+<code>admin:*</code> data (<code>GET /metrics/tables</code>), and the per-tenant series, since
+tenant ids are <code>admin:tenants</code> data (<code>GET /v1/admin/tenants</code>). The AI usage
+series carry no <code>tenant</code> or <code>principal</code> label there: they are per-model
+totals.</p>
 <h3 id="artifacts-names-cache-and-diagnostics">Artifacts, names, cache and diagnostics<a class="headerlink" href="#artifacts-names-cache-and-diagnostics" title="Permanent link">&para;</a></h3>
 <p>The routes the client SDK and the web UI call that no feature page covers.
 The gate column uses these terms:</p>

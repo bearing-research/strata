@@ -3501,7 +3501,9 @@ filters to one principal and <code>--format json</code> prints JSON.</p>
 <p><strong>Revocation is immediate</strong>: verification reads the row on each request, so a
 revoked key stops working at once rather than after a cache expiry. A notebook
 WebSocket opened with the key re-checks it on every frame that edits or runs
-something and closes on the first one after revocation.</p>
+something and closes on the first one after revocation. A socket that only reads
+or listens re-checks it at most every 5 seconds, before a read frame or a frame
+the server sends, so it stops receiving within that window.</p>
 <h3 id="running-several-nodes-behind-one-address">Running several nodes behind one address<a class="headerlink" href="#running-several-nodes-behind-one-address" title="Permanent link">&para;</a></h3>
 <p>Streams cannot move between nodes. A stream holds a live task and an in-memory
 read plan, so only the node that planned it can serve it. A request for it

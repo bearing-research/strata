@@ -2301,7 +2301,11 @@ families include:</p>
   pools, Arrow memory, GC pauses</li>
 <li><strong>Per tenant</strong>: <code>strata_tenant_scans_total</code>,
   <code>strata_tenant_cache_hit_rate</code> and <code>strata_tenant_bytes_total</code>, labelled
-  by <code>tenant</code>, once a tenant has made a request</li>
+  by <code>tenant</code>, once a tenant has made a request, and the build series
+  <code>strata_build_tenant_started_total</code> and <code>strata_build_tenant_bytes_out_total</code>.
+  Left out under principal auth (<code>trusted_proxy</code> or <code>api_key</code>): the route is
+  unauthenticated for scrapers, and tenant ids are <code>admin:tenants</code> data there
+  (<code>GET /v1/admin/tenants</code>)</li>
 <li><strong>Per table</strong>: <code>strata_table_scans_total</code>, <code>strata_table_latency_p95_ms</code>
   and <code>strata_table_cache_hit_rate</code>, labelled by <code>table</code>, for the 20 most
   scanned tables. Left out under principal auth (<code>trusted_proxy</code> or
@@ -2312,9 +2316,10 @@ families include:</p>
   <code>model</code>. Counted from each provider response a prompt cell receives. The
   labels are the caller the request ran as, and are empty in personal mode. The series appear after the first
   model call. Under principal auth (<code>trusted_proxy</code> or <code>api_key</code>) the
-  <code>principal</code> label is left out and each series is the tenant's total per
-  model: the route is unauthenticated for scrapers, and who called a model
-  is not theirs to see. Per-principal counts are not exported in that mode.</li>
+  <code>tenant</code> and <code>principal</code> labels are left out and each series is the
+  server's total per model: the route is unauthenticated for scrapers, and
+  who called a model is not theirs to see. Per-tenant and per-principal
+  counts are not exported in that mode.</li>
 </ul>
 <h3 id="traces-opentelemetry-otlp">Traces, OpenTelemetry OTLP<a class="headerlink" href="#traces-opentelemetry-otlp" title="Permanent link">&para;</a></h3>
 <p>Tracing is on whenever the <code>otel</code> extra is installed (the published
