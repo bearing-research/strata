@@ -559,6 +559,16 @@ def _raise_environment_busy(session: NotebookSession, message: str) -> None:
     )
 
 
+async def _start_missing_warm_pools(session: NotebookSession, mutation: str) -> None:
+    """Start any warm pool the mutation's invalidation left absent (it restarts existing ones)."""
+    try:
+        await session._ensure_warm_pool_started(mutation)
+    except Exception:
+        logger.warning(
+            "Failed to start warm pool after %s for %s", mutation, session.path, exc_info=True
+        )
+
+
 # --- Request/Response Models ---
 
 
@@ -1861,8 +1871,9 @@ async def import_environment_requirements(
 ) -> dict:
     """Replace direct notebook dependencies from ``requirements.txt`` text."""
 
+    mutation = "requirements import"
     try:
-        session._begin_synchronous_environment_mutation("requirements import")
+        session._begin_synchronous_environment_mutation(mutation)
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 
@@ -1871,6 +1882,7 @@ async def import_environment_requirements(
             outcome = await session.import_requirements(req.requirements)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        await _start_missing_warm_pools(session, mutation)
     finally:
         session._end_synchronous_environment_mutation()
 
@@ -1918,8 +1930,9 @@ async def import_environment_yaml(
 ) -> dict:
     """Best-effort import of Conda-style ``environment.yaml`` text."""
 
+    mutation = "environment.yaml import"
     try:
-        session._begin_synchronous_environment_mutation("environment.yaml import")
+        session._begin_synchronous_environment_mutation(mutation)
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 
@@ -1928,6 +1941,7 @@ async def import_environment_yaml(
             outcome = await session.import_environment_yaml(req.environment_yaml)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        await _start_missing_warm_pools(session, mutation)
     finally:
         session._end_synchronous_environment_mutation()
 
@@ -2846,6 +2860,13 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         cell = session.notebook_state.get_cell(cell_id)
         if not cell:
             raise HTTPException(status_code=500, detail="Failed to create cell")
+        if cell.language == CellLanguage.R:
+            # A notebook opened without R cells has no R pool yet. The cell is already
+            # written, so a pool that fails to start only leaves R cells running cold.
+            try:
+                session.start_r_pool_background()
+            except Exception:
+                logger.warning("Failed to start the R pool for %s", session.path, exc_info=True)
 
         await _broadcast_state(notebook_id, session)
         return session.serialize_cell(cell)
@@ -3334,13 +3355,15 @@ async def add_notebook_dependency(
     If the lockfile changes, the session's venv_python is re-synced.
     """
 
+    mutation = f"add {req.package}"
     try:
-        session._begin_synchronous_environment_mutation(f"add {req.package}")
+        session._begin_synchronous_environment_mutation(mutation)
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 
     try:
         outcome = await session.mutate_dependency(req.package, action="add")
+        await _start_missing_warm_pools(session, mutation)
     finally:
         session._end_synchronous_environment_mutation()
     result = outcome.result
@@ -3379,13 +3402,15 @@ async def remove_notebook_dependency(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    mutation = f"remove {package_name}"
     try:
-        session._begin_synchronous_environment_mutation(f"remove {package_name}")
+        session._begin_synchronous_environment_mutation(mutation)
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 
     try:
         outcome = await session.mutate_dependency(package_name, action="remove")
+        await _start_missing_warm_pools(session, mutation)
     finally:
         session._end_synchronous_environment_mutation()
     result = outcome.result
