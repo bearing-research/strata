@@ -1723,14 +1723,15 @@ async def get_notebook_runtime_config(request: Request) -> dict:
 async def sync_environment(notebook_id: str, session: SessionDep) -> dict:
     """Re-sync the notebook environment and invalidate stale runtimes."""
 
+    mutation = "environment sync"
     try:
-        session._begin_synchronous_environment_mutation("environment sync")
+        session._begin_synchronous_environment_mutation(mutation)
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 
     try:
         old_hash = session.serialize_environment_state()["lockfile_hash"]
-        staleness_map = await session.sync_environment()
+        staleness_map = await session.sync_environment(owner=mutation)
         new_hash = session.serialize_environment_state()["lockfile_hash"]
     finally:
         session._end_synchronous_environment_mutation()

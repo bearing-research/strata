@@ -5,15 +5,19 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+from types import SimpleNamespace
 from typing import cast
 
+import httpx
 import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from strata.notebook import quiesce
 from strata.notebook import routes as notebook_routes
-from strata.notebook.session import SessionManager
+from strata.notebook.dependencies import EnvironmentOperationLog
+from strata.notebook.session import EnvironmentJobSnapshot, SessionManager
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 from tests.notebook.e2e_fixtures import FakeNotebookWebSocket, create_test_app
 from tests.notebook.e2e_fixtures import _reset_ws_globals as _reset_ws
@@ -158,6 +162,98 @@ class TestWarmPoolAndTimeout:
         assert manager.list_sessions() == []
         # The process, not the queue: the drain dequeues before the kill finishes.
         await _until(lambda: warm.process.returncode is not None)
+
+    @pytest.mark.warm_pool
+    @pytest.mark.parametrize("sync_after_open", [False, True])
+    async def test_a_notebook_opened_through_the_server_runs_warm(
+        self, config, manager, monkeypatch, tmp_path, sync_after_open
+    ):
+        # The open's environment job, or a later sync route, must not block its own pool.
+        async def _uv_succeeds(*args, **kwargs):
+            return SimpleNamespace(
+                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
+            )
+
+        monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
+        notebook_dir = _notebook(tmp_path, "served", environment=True)
+        transport = httpx.ASGITransport(app=create_test_app())
+        session = None
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                opened = await client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+                assert opened.status_code == 200, opened.text
+                session = manager.get_session(opened.json()["session_id"])
+                assert session is not None
+                if sync_after_open:
+                    if session.warm_pool is not None:
+                        await asyncio.gather(*session.warm_pool._background_tasks)
+                        await session.warm_pool.drain()
+                        session.warm_pool = None
+                    synced = await client.post(f"/v1/notebooks/{session.id}/environment/sync")
+                    assert synced.status_code == 200, synced.text
+                assert session.warm_pool is not None
+                await asyncio.gather(*session.warm_pool._background_tasks)
+
+                ran = await client.post(f"/v1/notebooks/{session.id}/cells/root/execute")
+
+            assert ran.status_code == 200, ran.text
+            assert ran.json()["status"] == "ready"
+            assert ran.json()["execution_method"] == "warm"
+        finally:
+            if session is not None:
+                await asyncio.gather(*manager.close_session(session.id))
+
+    async def test_a_notebook_with_r_cells_opened_through_the_server_gets_an_r_pool(
+        self, config, manager, monkeypatch, tmp_path
+    ):
+        async def _uv_succeeds(*args, **kwargs):
+            return SimpleNamespace(
+                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
+            )
+
+        monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
+        # The fixture keeps WarmProcessPool.start a no-op, so this never runs a worker.
+        rscript = tmp_path / "bin" / "Rscript"
+        rscript.parent.mkdir()
+        rscript.write_text("#!/bin/sh\nexit 1\n")
+        rscript.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{rscript.parent}{os.pathsep}{os.environ['PATH']}")
+        notebook_dir = _notebook(tmp_path, "served-r", environment=True)
+        add_cell_to_notebook(notebook_dir, "rcell", language="r")
+        write_cell(notebook_dir, "rcell", "y <- 1")
+        transport = httpx.ASGITransport(app=create_test_app())
+
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            opened = await client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+
+        assert opened.status_code == 200, opened.text
+        session = manager.get_session(opened.json()["session_id"])
+        assert session is not None
+        assert session.r_warm_pool is not None
+        assert session.r_warm_pool.worker_command is not None
+        assert session.r_warm_pool.worker_command[0] == str(rscript)
+
+    def test_only_the_mutation_starting_the_pool_is_exempt(self, config, manager, tmp_path):
+        session = manager.open_notebook(
+            _notebook(tmp_path, "mutating", environment=True), skip_initial_venv_sync=True
+        )
+
+        def _job() -> EnvironmentJobSnapshot:
+            return EnvironmentJobSnapshot(
+                id="job", action="sync", command="uv sync", status="running", started_at=0
+            )
+
+        running = _job()
+        session.environment_job = running
+        assert session._should_start_warm_pool(running)
+        assert not session._should_start_warm_pool(_job())
+        assert not session._should_start_warm_pool()
+
+        session.environment_job = None
+        session._synchronous_environment_mutation = "environment sync"
+        assert session._should_start_warm_pool("environment sync")
+        assert not session._should_start_warm_pool("add numpy")
+        assert not session._should_start_warm_pool(running)
 
     def test_a_pool_size_of_zero_starts_no_pool(self, config, manager, tmp_path):
         config.notebook_warm_pool_size = 0

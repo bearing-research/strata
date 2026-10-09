@@ -796,7 +796,7 @@ def test_sync_environment_endpoint(client, monkeypatch, tmp_path):
     session = get_session_manager().get_session(session_id)
     assert session is not None
 
-    async def _fake_sync_environment():
+    async def _fake_sync_environment(**_):
         session.environment_sync_state = "ready"
         session.environment_sync_error = None
         session.environment_sync_notice = "Using existing notebook venv."
