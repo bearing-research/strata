@@ -2553,6 +2553,27 @@ class TestLoopCellExecution:
         assert artifact_mgr.get_iteration_artifact("loop", "state", 2) is not None
 
     @pytest.mark.asyncio
+    async def test_loop_console_is_each_iterations_output_as_written(self, loop_notebook):
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        loop_source = (
+            "# @loop max_iter=3 carry=state\n"
+            "print('iter', state['n'])\n"
+            "state = {'n': state['n'] + 1, 'history': []}\n"
+        )
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+        executor = CellExecutor(session)
+
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        result = await executor.execute_cell("loop", loop_source)
+
+        assert result.success, result.error
+        assert result.stdout == "iter 0\niter 1\niter 2\n"
+        assert result.stderr == ""
+
+    @pytest.mark.asyncio
     async def test_loop_until_terminates_early(self, loop_notebook):
         """``@loop_until`` terminates as soon as the predicate is truthy."""
         from strata.notebook.writer import write_cell

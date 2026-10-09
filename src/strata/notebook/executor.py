@@ -5405,8 +5405,8 @@ class CellExecutor:
                             f"Loop cell iter {k} timed out after "
                             f"{timeout_seconds}s (per-iteration timeout)."
                         ),
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=duration_ms,
                         execution_method="loop",
                     )
@@ -5430,8 +5430,8 @@ class CellExecutor:
                         success=False,
                         error=f"Loop cell iter {k} failed: {error_msg}",
                         traceback=traceback_text,
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=duration_ms,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
@@ -5445,8 +5445,8 @@ class CellExecutor:
                         cell_id=cell_id,
                         success=False,
                         error=f"Loop cell iter {k}: {loop_state['error']}",
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=(time.time() - start_time) * 1000,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
@@ -5469,8 +5469,8 @@ class CellExecutor:
                             f"body must rebind `{loop.carry}` every "
                             f"iteration."
                         ),
-                        stdout="\n".join(combined_stdout),
-                        stderr="\n".join(combined_stderr),
+                        stdout="".join(combined_stdout),
+                        stderr="".join(combined_stderr),
                         duration_ms=duration_ms,
                         execution_method="loop",
                         mutation_warnings=all_mutation_warnings,
@@ -5644,8 +5644,8 @@ class CellExecutor:
             self._store_console_outputs(
                 cell_id,
                 cell_provenance,
-                "\n".join(combined_stdout),
-                "\n".join(combined_stderr),
+                "".join(combined_stdout),
+                "".join(combined_stderr),
                 prov.input_hashes,
                 source_hash=source_hash,
                 source=source,
@@ -5663,8 +5663,8 @@ class CellExecutor:
         return CellExecutionResult(
             cell_id=cell_id,
             success=True,
-            stdout="\n".join(combined_stdout),
-            stderr="\n".join(combined_stderr),
+            stdout="".join(combined_stdout),
+            stderr="".join(combined_stderr),
             outputs={
                 loop.carry: {
                     "content_type": carry_content_type,
