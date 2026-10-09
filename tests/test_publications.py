@@ -1096,7 +1096,7 @@ class TestImportAcrossStores:
             raise OSError("disk went away mid-upload")
 
         with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(target, "open_blob_writer", die)
+            patch.setattr(target.blob_store, "open_blob_writer", die)
             with pytest.raises(OSError):
                 target.import_artifact(record, b"x")
 

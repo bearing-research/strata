@@ -82,8 +82,7 @@ class TestIdempotencyByCompleteness:
 
         _post(client, _metadata("fig", 1, "d" * 64), blob=b"payload")
         store = ArtifactStore(served_dir)
-        blob_path = store._blob_path("fig", 1)
-        blob_path.unlink()
+        assert store.blob_store.delete_blob(*store._blob_key("fig", 1))
         assert not store.blob_exists("fig", 1)
 
         body = _post(client, _metadata("fig", 1, "d" * 64), blob=b"payload").json()
