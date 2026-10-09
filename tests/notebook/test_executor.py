@@ -2562,6 +2562,39 @@ class TestLoopCellExecution:
         assert artifact_mgr.get_iteration_artifact("loop", "state", 2) is not None
 
     @pytest.mark.asyncio
+    async def test_loop_display_is_the_stopping_iterations_and_a_cache_hit_keeps_it(
+        self, loop_notebook
+    ):
+        from strata.notebook.runtime_state import load_runtime_state
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        loop_source = (
+            "# @loop max_iter=5 carry=state\n"
+            "# @loop_until state['n'] >= 2\n"
+            "state = {'n': state['n'] + 1, 'history': []}\n"
+            "state['n'] * 10\n"
+        )
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+        executor = CellExecutor(session)
+
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        result = await executor.execute_cell("loop", loop_source)
+        assert result.success, result.error
+        [display] = result.display_outputs
+        assert display["preview"] == 20
+        uri = display["artifact_uri"]
+        persisted = load_runtime_state(notebook_dir).cells["loop"].display_outputs
+        assert [d["artifact_uri"] for d in persisted] == [uri]
+
+        hit = await executor.execute_cell("loop", loop_source)
+        assert hit.cache_hit
+        assert [d["artifact_uri"] for d in hit.display_outputs] == [uri]
+        cell = session.notebook_state.get_cell("loop")
+        assert [d.artifact_uri for d in cell.display_outputs] == [uri]
+
+    @pytest.mark.asyncio
     async def test_loop_console_is_each_iterations_output_as_written(self, loop_notebook):
         from strata.notebook.writer import write_cell
 
