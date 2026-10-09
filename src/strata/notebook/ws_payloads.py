@@ -123,7 +123,8 @@ class CellVariantProgressPayload(WsPayload):
 class CascadePromptPayload(WsPayload):
     """``cascade_prompt``: upstream cells must run before the requested cell.
 
-    The client confirms by sending ``cell_execute_cascade`` with the ``plan_id``.
+    ``cells_to_run`` lists, in run order, the cells that will run (ready upstreams are
+    left out). The client confirms by sending ``cell_execute_cascade`` with the ``plan_id``.
     """
 
     cell_id: str
@@ -133,7 +134,11 @@ class CascadePromptPayload(WsPayload):
 
 
 class CascadeProgressPayload(WsPayload):
-    """``cascade_progress``: which cell of a confirmed cascade is now running."""
+    """``cascade_progress``: which cell of a confirmed cascade is now running.
+
+    ``completed`` counts the cells finished of the ``total`` that run; a cascade that
+    succeeds ends with a frame where they are equal.
+    """
 
     plan_id: str
     current_cell_id: str

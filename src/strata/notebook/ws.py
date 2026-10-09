@@ -1019,7 +1019,7 @@ async def _handle_cell_execute_reserved(
                 CascadePromptPayload(
                     cell_id=cell_id,
                     plan_id=plan.plan_id,
-                    cells_to_run=[s.cell_id for s in plan.steps],
+                    cells_to_run=[s.cell_id for s in plan.steps if not s.skip],
                     estimated_duration_ms=plan.estimated_duration_ms,
                 ).model_dump(mode="json"),
             ),
@@ -2092,15 +2092,16 @@ async def _execute_cascade(
     )
 
     cascade_failed = False
+    # Under target_force the cached-ready target must still rerun.
+    steps_to_run = [
+        s for s in plan.steps if not s.skip or (target_force and s.cell_id == plan.target_cell_id)
+    ]
+    completed = 0
 
     # So a @nocache step isn't re-executed by each later step's upstreams.
     with executor.one_run():
         try:
-            for i, step in enumerate(plan.steps):
-                # Under target_force the cached-ready target must still rerun.
-                if step.skip and not (target_force and step.cell_id == plan.target_cell_id):
-                    continue
-
+            for step in steps_to_run:
                 cell_id = step.cell_id
                 cell = session.notebook_state.get_cell(cell_id)
                 if not cell:
@@ -2136,8 +2137,8 @@ async def _execute_cascade(
                         CascadeProgressPayload(
                             plan_id=plan.plan_id,
                             current_cell_id=cell_id,
-                            completed=i,
-                            total=len([s for s in plan.steps if not s.skip]),
+                            completed=completed,
+                            total=len(steps_to_run),
                         ).model_dump(mode="json"),
                     ),
                 )
@@ -2221,7 +2222,22 @@ async def _execute_cascade(
                     )
                     await _broadcast_downstream_stale(notebook_id, downstream_stale)
                     cascade_failed = True
+                completed += 1
             if not cascade_failed:
+                if steps_to_run:
+                    await _broadcast_message(
+                        notebook_id,
+                        _make_message(
+                            MessageType.CASCADE_PROGRESS,
+                            next_notebook_sequence(notebook_id),
+                            CascadeProgressPayload(
+                                plan_id=plan.plan_id,
+                                current_cell_id=steps_to_run[-1].cell_id,
+                                completed=completed,
+                                total=len(steps_to_run),
+                            ).model_dump(mode="json"),
+                        ),
+                    )
                 previous_snapshot = session.capture_cell_state_snapshot()
                 await _refresh_and_broadcast_changed_staleness(
                     session,

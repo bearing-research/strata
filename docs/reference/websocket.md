@@ -121,8 +121,8 @@ A cell run as an upstream inside another cell's run may get its console and resu
 
 | Type               | Payload                                                                      | Description                   |
 | ------------------ | ---------------------------------------------------------------------------- | ----------------------------- |
-| `cascade_prompt`   | `{ "cell_id": "...", "plan_id": "...", "cells_to_run": [...], "estimated_duration_ms": 0 }` | Upstream cells need execution |
-| `cascade_progress` | `{ "plan_id": "...", "current_cell_id": "...", "completed": 1, "total": 3 }` | Cascade progress              |
+| `cascade_prompt`   | `{ "cell_id": "...", "plan_id": "...", "cells_to_run": [...], "estimated_duration_ms": 0 }` | Upstream cells need execution. `cells_to_run` is the cells that will run, in order; ready upstreams are left out |
+| `cascade_progress` | `{ "plan_id": "...", "current_cell_id": "...", "completed": 1, "total": 3 }` | Sent as each cell starts. `completed` counts finished cells of the `total` that run; a cascade that succeeds ends with a frame where `completed` equals `total` |
 
 ### DAG
 
