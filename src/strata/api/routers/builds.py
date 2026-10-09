@@ -410,12 +410,14 @@ async def append_build_log(
     if not get_state().url_signer.verify_log_signature(build_id, expires_float, signature):
         raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
-    body = await request.body()
-    if len(body) > _MAX_LOG_CHUNK_BYTES:
-        # Keep the tail; a runaway cell must not grow server memory through a display route.
-        body = body[-_MAX_LOG_CHUNK_BYTES:]
+    # Keep only the tail as it arrives; a runaway cell must not grow server memory
+    # through a display route, so the whole body is never held.
+    tail = bytearray()
+    async for chunk in request.stream():
+        tail += chunk
+        del tail[:-_MAX_LOG_CHUNK_BYTES]
 
-    text = body.decode("utf-8", errors="replace")
+    text = tail.decode("utf-8", errors="replace")
     delivered = await console_relay.deliver(build_id, stream, seq, text)
     store = get_build_store()
     if not delivered and get_state().config.node_advertised_url and store is not None:

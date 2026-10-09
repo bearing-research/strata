@@ -1017,3 +1017,64 @@ class TestLogRoute:
 
         assert response.json() == {"delivered": False}
         assert route["store"].take_console_chunks("b1") == []
+
+    def test_an_oversized_chunk_keeps_its_last_bytes(self, route, monkeypatch):
+        from strata.api.routers.builds import _MAX_LOG_CHUNK_BYTES
+
+        monkeypatch.setattr(route["state"].config, "node_advertised_url", "http://node-b")
+        body = b"h" * 1000 + b"t" * _MAX_LOG_CHUNK_BYTES
+
+        response = route["client"].post(route["url"] + "&stream=stdout&seq=0", content=body)
+
+        assert response.json() == {"delivered": True}
+        assert route["store"].take_console_chunks("b1") == [
+            ("stdout", 0, "t" * _MAX_LOG_CHUNK_BYTES)
+        ]
+
+    async def test_a_huge_body_is_never_held_whole(self, route, monkeypatch):
+        """Memory stays near the cap while the body arrives, whatever its total size."""
+        import tracemalloc
+        from urllib.parse import parse_qs, urlsplit
+
+        from starlette.requests import Request
+
+        from strata.api.routers.builds import _MAX_LOG_CHUNK_BYTES, append_build_log
+
+        chunk_size = 64 * 1024
+        chunks = 256  # 16 MiB in all, 64x the cap
+        sent = 0
+        baseline = 0
+        held: list[int] = []
+
+        def _chunk(n: int) -> bytes:
+            return bytes([ord("a") + n % 26]) * chunk_size
+
+        async def receive():
+            nonlocal sent
+            held.append(tracemalloc.get_traced_memory()[0] - baseline)
+            sent += 1
+            return {"type": "http.request", "body": _chunk(sent), "more_body": sent < chunks}
+
+        delivered: list[str] = []
+
+        async def _deliver(build_id, stream, seq, text):
+            delivered.append(text)
+            return True
+
+        monkeypatch.setattr(console_relay, "deliver", _deliver)
+        query = {k: v[0] for k, v in parse_qs(urlsplit(route["url"]).query).items()}
+        request = Request({"type": "http", "method": "POST", "headers": []}, receive)
+
+        tracemalloc.start()
+        try:
+            baseline = tracemalloc.get_traced_memory()[0]
+            await append_build_log(
+                "b1", query["expires_at"], query["signature"], request, seq=0, stream="stdout"
+            )
+        finally:
+            tracemalloc.stop()
+
+        whole = b"".join(_chunk(n) for n in range(1, chunks + 1))
+        assert delivered == [whole[-_MAX_LOG_CHUNK_BYTES:].decode()]
+        # Holding the whole body shows up as about len(whole); the tail stays far below.
+        assert max(held) < len(whole) // 4
