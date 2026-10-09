@@ -986,8 +986,9 @@ pre-spawned R workers (R startup, `.Rprofile`/renv activation, and
 `jsonlite`/`arrow` loads already paid), so an R cell run skips the ~1–2s
 interpreter cold-start. Workers are single-shot - one cell each, then
 replaced - preserving per-cell isolation; editing `renv.lock` drains and
-respawns the pool. Pure-Python notebooks and machines without `Rscript`
-never start one.
+respawns the pool. Adding the first R cell starts the pool, so a notebook
+that began as pure Python does not need reopening. Pure-Python notebooks
+and machines without `Rscript` never start one.
 
 R execution and display are complete; remaining R polish is tracked on GitHub: [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
 

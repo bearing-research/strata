@@ -2753,22 +2753,21 @@ class NotebookSession:
     async def _ensure_warm_pool_started(
         self, owner: EnvironmentJobSnapshot | str | None = None
     ) -> None:
-        """Create and start the warm process pool when the runtime is ready."""
-        if self.warm_pool is not None or not self._should_start_warm_pool(owner):
-            return
+        """Create and start the warm process pools when the runtime is ready."""
+        if self.warm_pool is None and self._should_start_warm_pool(owner):
+            from strata.notebook.pool import WarmProcessPool
 
-        from strata.notebook.pool import WarmProcessPool
-
-        self.warm_pool = WarmProcessPool(
-            notebook_dir=self.path,
-            pool_size=_session_setting("notebook_warm_pool_size"),
-            python_executable=self.venv_python or Path("python"),
-        )
-        try:
-            task = asyncio.get_running_loop().create_task(self.warm_pool.start())
-            self.warm_pool.track_background_task(task)
-        except RuntimeError:
-            pass  # No running loop; pool stays cold until first acquire
+            self.warm_pool = WarmProcessPool(
+                notebook_dir=self.path,
+                pool_size=_session_setting("notebook_warm_pool_size"),
+                python_executable=self.venv_python or Path("python"),
+            )
+            try:
+                task = asyncio.get_running_loop().create_task(self.warm_pool.start())
+                self.warm_pool.track_background_task(task)
+            except RuntimeError:
+                pass  # No running loop; pool stays cold until first acquire
+        # Even with a Python pool: R cells can arrive after it started.
         self.start_r_pool_background(owner)
 
     def _has_r_cells(self) -> bool:

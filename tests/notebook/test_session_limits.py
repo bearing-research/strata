@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
 from types import SimpleNamespace
 from typing import cast
 
@@ -232,6 +233,172 @@ class TestWarmPoolAndTimeout:
         assert session.r_warm_pool is not None
         assert session.r_warm_pool.worker_command is not None
         assert session.r_warm_pool.worker_command[0] == str(rscript)
+
+    async def test_the_first_r_cell_added_through_the_server_starts_an_r_pool(
+        self, config, manager, monkeypatch, tmp_path
+    ):
+        async def _uv_succeeds(*args, **kwargs):
+            return SimpleNamespace(
+                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
+            )
+
+        monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
+        # The fixture keeps WarmProcessPool.start a no-op, so this never runs a worker.
+        rscript = tmp_path / "bin" / "Rscript"
+        rscript.parent.mkdir()
+        rscript.write_text("#!/bin/sh\nexit 1\n")
+        rscript.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{rscript.parent}{os.pathsep}{os.environ['PATH']}")
+        notebook_dir = _notebook(tmp_path, "python-then-r", environment=True)
+        transport = httpx.ASGITransport(app=create_test_app())
+        session = None
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                opened = await client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+                assert opened.status_code == 200, opened.text
+                session = manager.get_session(opened.json()["session_id"])
+                assert session is not None
+                await session.wait_for_environment_job()
+                assert session.warm_pool is not None
+                assert session.r_warm_pool is None
+
+                added = await client.post(
+                    f"/v1/notebooks/{session.id}/cells",
+                    json={"after_cell_id": "root", "language": "r"},
+                )
+
+            assert added.status_code == 200, added.text
+            assert session.r_warm_pool is not None
+            assert session.r_warm_pool.worker_command is not None
+            assert session.r_warm_pool.worker_command[0] == str(rscript)
+        finally:
+            if session is not None:
+                await asyncio.gather(*manager.close_session(session.id))
+
+    async def test_a_sync_starts_the_r_pool_beside_a_running_python_pool(
+        self, config, manager, monkeypatch, tmp_path
+    ):
+        # R installed after the first R cell was added: the next sync must still start its pool.
+        async def _uv_succeeds(*args, **kwargs):
+            return SimpleNamespace(
+                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
+            )
+
+        monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
+        which = shutil.which
+        monkeypatch.setattr(
+            shutil,
+            "which",
+            lambda name, *a, **k: None if name == "Rscript" else which(name, *a, **k),
+        )
+        notebook_dir = _notebook(tmp_path, "r-installed-later", environment=True)
+        transport = httpx.ASGITransport(app=create_test_app())
+        session = None
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                opened = await client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+                assert opened.status_code == 200, opened.text
+                session = manager.get_session(opened.json()["session_id"])
+                assert session is not None
+                await session.wait_for_environment_job()
+                added = await client.post(
+                    f"/v1/notebooks/{session.id}/cells",
+                    json={"after_cell_id": "root", "language": "r"},
+                )
+                assert added.status_code == 200, added.text
+                assert session.warm_pool is not None
+                assert session.r_warm_pool is None
+
+                rscript = tmp_path / "bin" / "Rscript"
+                rscript.parent.mkdir()
+                rscript.write_text("#!/bin/sh\nexit 1\n")
+                rscript.chmod(0o755)
+                monkeypatch.setenv("PATH", f"{rscript.parent}{os.pathsep}{os.environ['PATH']}")
+                monkeypatch.setattr(shutil, "which", which)
+                synced = await client.post(f"/v1/notebooks/{session.id}/environment/sync")
+
+            assert synced.status_code == 200, synced.text
+            assert session.r_warm_pool is not None
+            assert session.r_warm_pool.worker_command is not None
+            assert session.r_warm_pool.worker_command[0] == str(rscript)
+        finally:
+            if session is not None:
+                await asyncio.gather(*manager.close_session(session.id))
+
+    @pytest.mark.warm_pool
+    @pytest.mark.parametrize("change", ["add", "remove", "requirements"])
+    async def test_a_dependency_change_through_the_server_leaves_cells_running_warm(
+        self, config, manager, monkeypatch, tmp_path, change
+    ):
+        # The open's sync fails, so no pool exists; the change that repairs the env starts one.
+        from strata.notebook.dependencies import DependencyChangeResult, RequirementsImportResult
+
+        async def _uv_fails(*args, **kwargs):
+            return SimpleNamespace(
+                success=False, error="boom", operation_log=EnvironmentOperationLog(command="uv")
+            )
+
+        def _touch_lock(notebook_dir) -> EnvironmentOperationLog:
+            with (notebook_dir / "uv.lock").open("a") as lock:
+                lock.write(f"\n# {change}\n")
+            return EnvironmentOperationLog(command=f"uv {change}")
+
+        def _fake_mutation(action):
+            def _mutate(notebook_dir, package):
+                return DependencyChangeResult(
+                    success=True,
+                    package=package,
+                    action=action,
+                    lockfile_changed=True,
+                    operation_log=_touch_lock(notebook_dir),
+                )
+
+            return _mutate
+
+        def _fake_import(notebook_dir, text):
+            return RequirementsImportResult(
+                success=True, lockfile_changed=True, operation_log=_touch_lock(notebook_dir)
+            )
+
+        monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_fails)
+        monkeypatch.setattr("strata.notebook.dependencies.add_dependency", _fake_mutation("add"))
+        monkeypatch.setattr(
+            "strata.notebook.dependencies.remove_dependency", _fake_mutation("remove")
+        )
+        monkeypatch.setattr("strata.notebook.session.import_requirements_text", _fake_import)
+        notebook_dir = _notebook(tmp_path, "dep-change", environment=True)
+        transport = httpx.ASGITransport(app=create_test_app())
+        session = None
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                opened = await client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+                assert opened.status_code == 200, opened.text
+                session = manager.get_session(opened.json()["session_id"])
+                assert session is not None
+                await session.wait_for_environment_job()
+                assert session.warm_pool is None
+
+                base = f"/v1/notebooks/{session.id}"
+                if change == "add":
+                    changed = await client.post(f"{base}/dependencies", json={"package": "six"})
+                elif change == "remove":
+                    changed = await client.delete(f"{base}/dependencies/six")
+                else:
+                    changed = await client.post(
+                        f"{base}/environment/requirements.txt", json={"requirements": "six\n"}
+                    )
+                assert changed.status_code == 200, changed.text
+                assert session.warm_pool is not None
+                await asyncio.gather(*session.warm_pool._background_tasks)
+
+                ran = await client.post(f"{base}/cells/root/execute")
+
+            assert ran.status_code == 200, ran.text
+            assert ran.json()["status"] == "ready"
+            assert ran.json()["execution_method"] == "warm"
+        finally:
+            if session is not None:
+                await asyncio.gather(*manager.close_session(session.id))
 
     def test_only_the_mutation_starting_the_pool_is_exempt(self, config, manager, tmp_path):
         session = manager.open_notebook(
