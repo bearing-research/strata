@@ -479,7 +479,9 @@ filters to one principal and `--format json` prints JSON.
 **Revocation is immediate**: verification reads the row on each request, so a
 revoked key stops working at once rather than after a cache expiry. A notebook
 WebSocket opened with the key re-checks it on every frame that edits or runs
-something and closes on the first one after revocation.
+something and closes on the first one after revocation. A socket that only reads
+or listens re-checks it at most every 5 seconds, before a read frame or a frame
+the server sends, so it stops receiving within that window.
 
 ### Running several nodes behind one address
 

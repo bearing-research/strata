@@ -10,6 +10,8 @@ import asyncio
 import inspect
 import json
 import logging
+import time
+import weakref
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -126,6 +128,11 @@ _notebook_inspect_managers: dict[str, InspectManager] = {}
 # doesn't cancel a long-running cell. A reconnect cancels the pending task.
 _notebook_grace_tasks: dict[str, asyncio.Task[None]] = {}
 _GRACE_CANCEL_SECONDS = 60.0
+
+# Outbound frames and read frames recheck an API key at most this often: each check is a
+# key-store query, and a revoked key keeps receiving for at most this long.
+_API_KEY_RECHECK_SECONDS = 5.0
+_api_key_checked_at: weakref.WeakKeyDictionary[WebSocket, float] = weakref.WeakKeyDictionary()
 
 
 def _get_session_manager() -> SessionManager:
@@ -701,20 +708,26 @@ def _frame_scope_error(msg_type: str) -> str | None:
     return f"'{msg_type}' requires the {required} scope"
 
 
-def _api_key_no_longer_valid(websocket: WebSocket) -> bool:
+def _api_key_no_longer_valid(websocket: WebSocket, *, max_age: float = 0.0) -> bool:
     """Whether the socket's API key has been revoked or has expired since the upgrade.
 
     The upgrade verifies the key once; without this an open socket outlives its revocation.
+    A key verified within ``max_age`` seconds is not looked up again.
     """
     from strata.auth import AuthError, parse_api_key_principal
     from strata.server import get_state
 
     if _configured_auth_mode() != "api_key":
         return False
+    now = time.monotonic()
+    checked_at = _api_key_checked_at.get(websocket)
+    if checked_at is not None and now - checked_at < max_age:
+        return False
     try:
         parse_api_key_principal(dict(websocket.headers), get_state().config)
     except AuthError:
         return True
+    _api_key_checked_at[websocket] = now
     return False
 
 
@@ -847,10 +860,11 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                     )
                 )
                 continue
-            # One key lookup per frame that changes or runs something, so a revoked key stops
-            # writing at once; read frames skip it.
-            if required_scope_for_frame(msg_type) != NOTEBOOK_SCOPE_READ and (
-                _api_key_no_longer_valid(websocket)
+            # A frame that changes or runs something rechecks the key every time, so a
+            # revoked key stops writing at once; read frames recheck on the outbound cadence.
+            is_write = required_scope_for_frame(msg_type) != NOTEBOOK_SCOPE_READ
+            if _api_key_no_longer_valid(
+                websocket, max_age=0.0 if is_write else _API_KEY_RECHECK_SECONDS
             ):
                 logger.warning("ws_auth_failed reason=api_key_no_longer_valid")
                 await _cleanup_notebook_websocket(notebook_id, websocket)
@@ -3147,6 +3161,9 @@ async def broadcast_presence(notebook_id: str, session: NotebookSession) -> None
     # numbers would leave each client a gap the size of the audience.
     seq = next_notebook_sequence(notebook_id)
     for ws in list(connections):
+        if _api_key_no_longer_valid(ws, max_age=_API_KEY_RECHECK_SECONDS):
+            await _close_revoked_socket(connections, ws)
+            continue
         you = session.presence.principal_of(ws) or resolve_author()
         message = _make_message(
             MessageType.PRESENCE,
@@ -3176,6 +3193,20 @@ async def _handle_cell_focus(
         await broadcast_presence(notebook_id, session)
 
 
+async def _close_revoked_socket(connections: list[WebSocket], websocket: WebSocket) -> None:
+    """Stop sending to a socket whose API key no longer validates, and close it.
+
+    Its receive loop then ends and runs the usual cleanup.
+    """
+    logger.warning("ws_auth_failed reason=api_key_no_longer_valid")
+    if websocket in connections:
+        connections.remove(websocket)
+    try:
+        await websocket.close(code=1008, reason="Unauthorized")
+    except Exception as exc:
+        logger.debug("Could not close a socket whose key was revoked: %s", exc)
+
+
 async def _broadcast_message(
     notebook_id: str,
     message: dict[str, Any],
@@ -3198,6 +3229,10 @@ async def _broadcast_message(
     # Copy: another coroutine can remove from the list during a send await,
     # which would skip the next client.
     for ws in list(connections):
+        # A socket that only listens never hits the per-frame check in the receive loop.
+        if _api_key_no_longer_valid(ws, max_age=_API_KEY_RECHECK_SECONDS):
+            await _close_revoked_socket(connections, ws)
+            continue
         try:
             await ws.send_text(message_text if ws is sender else others_text)
         except Exception:

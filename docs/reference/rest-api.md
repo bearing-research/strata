@@ -1115,8 +1115,10 @@ GET /metrics/prometheus
 
 Both are unauthenticated, for scrapers. Under principal auth
 `/metrics/prometheus` leaves out the per-table series, since table names are
-`admin:*` data (`GET /metrics/tables`), and the AI usage series carry no
-`principal` label: they are per-tenant, per-model totals.
+`admin:*` data (`GET /metrics/tables`), and the per-tenant series, since
+tenant ids are `admin:tenants` data (`GET /v1/admin/tenants`). The AI usage
+series carry no `tenant` or `principal` label there: they are per-model
+totals.
 
 ### Artifacts, names, cache and diagnostics
 

@@ -55,7 +55,11 @@ families include:
   pools, Arrow memory, GC pauses
 - **Per tenant**: `strata_tenant_scans_total`,
   `strata_tenant_cache_hit_rate` and `strata_tenant_bytes_total`, labelled
-  by `tenant`, once a tenant has made a request
+  by `tenant`, once a tenant has made a request, and the build series
+  `strata_build_tenant_started_total` and `strata_build_tenant_bytes_out_total`.
+  Left out under principal auth (`trusted_proxy` or `api_key`): the route is
+  unauthenticated for scrapers, and tenant ids are `admin:tenants` data there
+  (`GET /v1/admin/tenants`)
 - **Per table**: `strata_table_scans_total`, `strata_table_latency_p95_ms`
   and `strata_table_cache_hit_rate`, labelled by `table`, for the 20 most
   scanned tables. Left out under principal auth (`trusted_proxy` or
@@ -66,9 +70,10 @@ families include:
   `model`. Counted from each provider response a prompt cell receives. The
   labels are the caller the request ran as, and are empty in personal mode. The series appear after the first
   model call. Under principal auth (`trusted_proxy` or `api_key`) the
-  `principal` label is left out and each series is the tenant's total per
-  model: the route is unauthenticated for scrapers, and who called a model
-  is not theirs to see. Per-principal counts are not exported in that mode.
+  `tenant` and `principal` labels are left out and each series is the
+  server's total per model: the route is unauthenticated for scrapers, and
+  who called a model is not theirs to see. Per-tenant and per-principal
+  counts are not exported in that mode.
 
 ### Traces, OpenTelemetry OTLP
 

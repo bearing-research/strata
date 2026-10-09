@@ -1,7 +1,7 @@
 """``/metrics/prometheus`` is open to scrapers, so it must not name who called a model.
 
-Under principal auth the AI usage series sum each tenant's principals per model; in
-personal mode they keep the ``principal`` label.
+Under principal auth the AI usage series sum every tenant and principal per model; in
+personal mode they keep the ``tenant`` and ``principal`` labels.
 """
 
 from __future__ import annotations
@@ -65,16 +65,16 @@ def scrape(tmp_path):
 
 
 @pytest.mark.parametrize("multi_tenant", [True, False])
-def test_a_service_with_principal_auth_names_no_principal(scrape, multi_tenant):
+def test_a_service_with_principal_auth_names_no_caller(scrape, multi_tenant):
     body = scrape(**{**SERVICE, "multi_tenant_enabled": multi_tenant})
 
-    assert "principal=" not in body
+    assert "principal=" not in body and "tenant=" not in body
     assert "ana" not in body and "ben" not in body
-    assert 'strata_ai_calls_total{tenant="acme",model="m-1"} 2' in body
-    assert 'strata_ai_input_tokens_total{tenant="acme",model="m-1"} 15' in body
-    assert 'strata_ai_output_tokens_total{tenant="acme",model="m-1"} 2' in body
-    assert 'strata_ai_input_tokens_total{tenant="acme",model="m-2"} 4' in body
-    assert 'strata_ai_input_tokens_total{tenant="globex",model="m-1"} 3' in body
+    assert "acme" not in body and "globex" not in body
+    assert 'strata_ai_calls_total{model="m-1"} 3' in body
+    assert 'strata_ai_input_tokens_total{model="m-1"} 18' in body
+    assert 'strata_ai_output_tokens_total{model="m-1"} 3' in body
+    assert 'strata_ai_input_tokens_total{model="m-2"} 4' in body
     # The rest of the scrape is still there.
     assert "strata_scans_total" in body
 
