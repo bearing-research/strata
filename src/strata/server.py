@@ -1857,6 +1857,11 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
     return None
 
 
+# Only the bundle's own scripts run, so markup injected through a cell output or a
+# markdown cell cannot execute. frame_ancestors_middleware appends frame-ancestors.
+_SPA_CSP = "script-src 'self'; object-src 'none'; base-uri 'self'"
+
+
 def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
     """Mount the frontend SPA from ``dist_dir``, or the first dist directory that exists.
 
@@ -1892,8 +1897,10 @@ def _mount_frontend(application: FastAPI, dist_dir: Path | None = None) -> None:
         file_path = (dist_root / full_path).resolve()
         if not (file_path.is_relative_to(dist_root) and file_path.is_file()):
             file_path = index
-        # index.html names this build's hashed assets; a cached copy outlives an upgrade.
-        headers = {"Cache-Control": "no-cache"} if file_path == index else None
+        headers = {"Content-Security-Policy": _SPA_CSP}
+        if file_path == index:
+            # index.html names this build's hashed assets; a cached copy outlives an upgrade.
+            headers["Cache-Control"] = "no-cache"
         root_path = request.scope.get("root_path", "")
         if file_path == index and root_path:
             # The UI reads this to put its API and WebSocket calls under the proxy's path.

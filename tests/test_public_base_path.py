@@ -96,6 +96,10 @@ class TestTheBundledUi:
         assert f'<meta name="strata-base-path" content="{BASE}">' in response.text
         assert 'src="./assets/app.js"' in response.text
         assert response.headers["cache-control"] == "no-cache"
+        # 'self' is the origin, so the same policy holds under any base path.
+        assert response.headers["content-security-policy"] == (
+            "script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+        )
 
     @PROXY_STYLES
     def test_its_relative_assets_resolve(self, served, prefix):

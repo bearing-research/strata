@@ -13,6 +13,7 @@ from strata.config import StrataConfig
 from strata.server import ServerState, _mount_frontend, app
 
 INDEX = "<!doctype html><title>strata-index</title>"
+SPA_CSP = "script-src 'self'; object-src 'none'; base-uri 'self'"
 
 
 @pytest.fixture
@@ -92,6 +93,50 @@ def test_only_the_embed_route_itself_may_be_framed_anywhere(spa, path):
     response = client.get("http://testserver" + path)
 
     assert response.text == INDEX
+    assert response.headers["content-security-policy"] == SPA_CSP + "; frame-ancestors 'self'"
+
+
+@pytest.mark.parametrize("path", ["/", "/index.html", "/notebook/anything", "/favicon.svg"])
+def test_the_app_runs_only_its_own_scripts(spa, path):
+    """Markup injected through a cell output or a markdown cell must not run as script."""
+    client, _ = spa
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == SPA_CSP + "; frame-ancestors 'self'"
+
+
+@pytest.mark.parametrize(
+    ("ancestors", "expected"),
+    [
+        (["https://a.example"], "frame-ancestors 'self' https://a.example"),
+        (["*"], "frame-ancestors *"),
+    ],
+)
+def test_the_app_policy_keeps_the_embed_setting(spa, tmp_path, ancestors, expected):
+    client, _ = spa
+    server_module._state = ServerState(
+        StrataConfig(
+            deployment_mode="personal",
+            cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
+            embed_frame_ancestors=ancestors,
+        )
+    )
+
+    response = client.get("/notebook/anything")
+
+    assert response.headers["content-security-policy"] == f"{SPA_CSP}; {expected}"
+
+
+@pytest.mark.parametrize("path", ["/health", "/v1/notebooks/sessions"])
+def test_the_api_keeps_only_the_framing_rule(spa, path):
+    client, _ = spa
+
+    response = client.get(path)
+
+    assert response.status_code == 200
     assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
 
 

@@ -730,9 +730,8 @@ class TestTheBytesAreServedAsData:
         assert response.headers["content-type"] == "application/octet-stream"
         assert response.headers["content-disposition"] == "attachment"
         assert response.headers["x-content-type-options"] == "nosniff"
-        assert "sandbox" in _csp_directives(response)
-        # The route's own sandbox policy keeps the server's framing rule too.
-        assert "frame-ancestors 'self'" in _csp_directives(response)
+        # The route's own sandbox policy keeps the server's framing rule and nothing else.
+        assert _csp_directives(response) == ["sandbox", "frame-ancestors 'self'"]
 
     @pytest.mark.parametrize(
         ("content_type", "served_as"),
@@ -1287,7 +1286,9 @@ class TestEmbedding:
 
         response = httpx.get(f"{base_url}{path}", timeout=10)
 
-        assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
+        # With a built frontend this is index.html, whose policy also limits scripts.
+        framing = [d for d in _csp_directives(response) if d.startswith("frame-ancestors")]
+        assert framing == ["frame-ancestors 'self'"]
 
     def test_oembed_matches_a_host_written_differently(self, published_server):
         """Case and an explicit default port name the same server."""
