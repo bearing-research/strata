@@ -284,7 +284,7 @@ jobs:
           set -euo pipefail
           CLIENT_WHEEL=$(ls dist/strata_client-*-py3-none-any.whl | head -1)
           echo "::notice::Testing client wheel ${CLIENT_WHEEL}"
-          uv venv /tmp/client-smoke
+          uv venv --python 3.12 /tmp/client-smoke
           VIRTUAL_ENV=/tmp/client-smoke uv pip install \
             --index https://pypi.org/simple/ "${CLIENT_WHEEL}"
           /tmp/client-smoke/bin/python -c "
@@ -326,7 +326,7 @@ jobs:
           set -euo pipefail
           POOL_WHEEL=$(ls dist/strata_pool-*-py3-none-any.whl | head -1)
           echo "::notice::Testing pool wheel ${POOL_WHEEL}"
-          uv venv /tmp/pool-smoke
+          uv venv --python 3.12 /tmp/pool-smoke
           VIRTUAL_ENV=/tmp/pool-smoke uv pip install \
             --index https://pypi.org/simple/ "${POOL_WHEEL}"
           /tmp/pool-smoke/bin/python -c "
@@ -339,7 +339,7 @@ jobs:
           print('strata_pool imports ok, base install stayed slim')
           "
           # The server extra is a documented install path, so it is built too.
-          uv venv /tmp/pool-server-smoke
+          uv venv --python 3.12 /tmp/pool-server-smoke
           VIRTUAL_ENV=/tmp/pool-server-smoke uv pip install \
             --index https://pypi.org/simple/ "${POOL_WHEEL}[server]"
           /tmp/pool-server-smoke/bin/python -c "

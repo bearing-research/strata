@@ -298,9 +298,9 @@ def test_the_shared_environment_does_not_install_a_notebook_s_own_project(tmp_pa
     synced = get_backend(packaged).sync(python_version=None, timeout=180)
 
     assert synced.success, synced.error
-    site_packages = list(_linked(packaged).glob("lib/python*/site-packages/*"))
-    assert site_packages, "nothing was installed at all"
-    assert not [path for path in site_packages if path.name.startswith("packaged")], (
+    # uv 0.13 leaves a venv with no dependencies an empty site-packages.
+    (site_packages,) = _linked(packaged).glob("lib/python*/site-packages")
+    assert not list(site_packages.glob("*packaged*")), (
         "a notebook's own project went into an environment other notebooks link to"
     )
     assert get_backend(plain).sync(python_version=None, timeout=180).success
