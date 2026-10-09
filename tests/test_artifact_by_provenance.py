@@ -210,6 +210,33 @@ def _publish_by_provenance(
     )
 
 
+@pytest.mark.parametrize("finished", [True, False])
+def test_a_named_id_is_held_by_its_tenant_from_its_first_upload(team_server, finished):
+    """Another team cannot append a version to it, even while its first upload is in flight."""
+    store = ArtifactStore(team_server["artifact_dir"])
+    version = store.create_artifact("nb_x", "a" * 64, tenant="team-a")
+    if finished:
+        store.write_blob("nb_x", version, b"payload")
+        store.finalize_artifact("nb_x", version, "", row_count=None, byte_size=7)
+
+    response = httpx.put(
+        f"{team_server['base_url']}/v1/artifacts/by-provenance/{'b' * 64}",
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps({"content_type": "pickle/object", "artifact_id": "nb_x"}),
+                "application/json",
+            ),
+            "data": ("data.bin", b"other", "application/octet-stream"),
+        },
+        headers=_headers("team-b", "carol", scopes="artifacts:write"),
+        timeout=30.0,
+    )
+
+    assert response.status_code == 409, response.text
+    assert store.get_artifact("nb_x", version + 1) is None
+
+
 def test_a_caller_computed_key_round_trips_with_opaque_bytes(personal_server):
     """Non-Arrow bytes (a pickle) must survive; only the notebook's serializer knows the format."""
     base_url = personal_server["base_url"]

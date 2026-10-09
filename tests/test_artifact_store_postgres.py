@@ -118,6 +118,12 @@ class TestRoundTrip:
         assert store.import_artifact(record, b"payload").written is True
         assert store.read_blob("copied", version) == b"payload"
 
+    def test_an_id_is_held_by_the_tenant_of_its_first_version(self, store):
+        assert store.id_tenant("held") is None
+        store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
+
+        assert store.id_tenant("held") == "team-a"
+
     def test_versions_increment(self, store):
         assert store.create_artifact("a1", "p1", _spec()) == 1
         assert store.create_artifact("a1", "p2", _spec()) == 2

@@ -2190,6 +2190,22 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def id_tenant(self, artifact_id: str) -> str | None:
+        """The tenant ('' for none) holding ``artifact_id``, or None for an unused id.
+
+        Any version counts, a ``building`` one included: an upload holds its id from
+        the moment its row exists.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT tenant FROM artifact_versions WHERE id = ? ORDER BY version LIMIT 1",
+                (artifact_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return None if row is None else (row["tenant"] or "")
+
     def get_latest_version(self, artifact_id: str) -> ArtifactVersion | None:
         """Get the current value of an artifact: its newest ready or superseded version.
 
