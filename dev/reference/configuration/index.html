@@ -2835,7 +2835,7 @@ authentication. This is a startup error, not a warning:</p>
 <tr>
 <td><code>STRATA_MAX_UPLOAD_BYTES</code></td>
 <td><code>10737418240</code> (10 GB)</td>
-<td>Max request body for the artifact write routes (<code>PUT /v1/artifacts</code>, <code>PUT /v1/artifacts/by-provenance/...</code>, <code>POST /v1/artifacts/import</code>, <code>PUT /v1/artifacts/import/blobs/...</code>, <code>POST /v1/artifacts/upload/...</code>); 413 if exceeded</td>
+<td>Max request body for the artifact write routes (<code>PUT /v1/artifacts</code>, <code>PUT /v1/artifacts/by-provenance/...</code>, <code>POST /v1/artifacts/import</code>, <code>PUT /v1/artifacts/import/blobs/...</code>, <code>POST /v1/artifacts/upload/...</code>); 413 if exceeded. The <code>metadata</code> part of a multipart upload, and the JSON body of a staged import, are held to 16 MiB</td>
 </tr>
 <tr>
 <td><code>STRATA_MAX_EQUALITY_DELETE_ROWS</code></td>
