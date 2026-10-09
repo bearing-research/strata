@@ -81,7 +81,7 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_PLAN_TIMEOUT_SECONDS` | `30.0`               | Planning timeout                    |
 | `STRATA_SCAN_TIMEOUT_SECONDS` | `300.0`              | Scan streaming timeout              |
 | `STRATA_MAX_RESPONSE_BYTES`   | `536870912` (512 MB) | Max response size (413 if exceeded) |
-| `STRATA_MAX_UPLOAD_BYTES`     | `10737418240` (10 GB) | Max request body for the artifact write routes (`PUT /v1/artifacts`, `PUT /v1/artifacts/by-provenance/...`, `POST /v1/artifacts/import`, `PUT /v1/artifacts/import/blobs/...`, `POST /v1/artifacts/upload/...`); 413 if exceeded |
+| `STRATA_MAX_UPLOAD_BYTES`     | `10737418240` (10 GB) | Max request body for the artifact write routes (`PUT /v1/artifacts`, `PUT /v1/artifacts/by-provenance/...`, `POST /v1/artifacts/import`, `PUT /v1/artifacts/import/blobs/...`, `POST /v1/artifacts/upload/...`); 413 if exceeded. The `metadata` part of a multipart upload, and the JSON body of a staged import, are held to 16 MiB |
 | `STRATA_MAX_EQUALITY_DELETE_ROWS` | `10000000` | Iceberg equality delete rows a row group may need in memory; a scan over it is refused, pointing at compaction |
 | `STRATA_STREAM_STATE_TTL_SECONDS` | `300.0`          | How long a completed/abandoned stream's state lingers before cleanup. A `mode="stream"` miss whose stream is never fetched in that time is marked `failed`, and the same request later computes it again |
 

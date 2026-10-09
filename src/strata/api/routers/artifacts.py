@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as FastPath
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from starlette.datastructures import UploadFile
 from starlette.types import Message
 
 from strata.api.dependencies import (
@@ -58,23 +59,29 @@ logger = get_logger(__name__)
 router = APIRouter(tags=["artifacts"])
 
 
-def _upload_too_large(limit: int) -> HTTPException:
-    return HTTPException(
-        status_code=413, detail=f"Request body exceeds max_upload_bytes ({limit} bytes)"
-    )
+# Metadata is read whole, so it gets a limit of its own far below max_upload_bytes.
+_MAX_METADATA_BYTES = 16 * 1024 * 1024
 
 
-def _capped(request: Request) -> Request:
-    """*request* with its body refused (413) past ``max_upload_bytes``.
+def _upload_too_large(limit: int, what: str = "max_upload_bytes") -> HTTPException:
+    return HTTPException(status_code=413, detail=f"Request body exceeds {what} ({limit} bytes)")
+
+
+def _capped(request: Request, *, metadata_only: bool = False) -> Request:
+    """*request* with its body refused (413) past ``max_upload_bytes``, or past the
+    metadata limit for a body that is only metadata.
 
     The count runs as the body arrives, so a chunked body with no Content-Length is held to it.
     """
     from strata.server import get_state
 
-    limit = get_state().config.max_upload_bytes
+    if metadata_only:
+        limit, what = _MAX_METADATA_BYTES, "the metadata limit"
+    else:
+        limit, what = get_state().config.max_upload_bytes, "max_upload_bytes"
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > limit:
-        raise _upload_too_large(limit)
+        raise _upload_too_large(limit, what)
     received = 0
 
     async def receive() -> Message:
@@ -83,10 +90,18 @@ def _capped(request: Request) -> Request:
         if message["type"] == "http.request":
             received += len(message.get("body", b""))
             if received > limit:
-                raise _upload_too_large(limit)
+                raise _upload_too_large(limit, what)
         return message
 
     return Request(request.scope, receive)
+
+
+async def _read_metadata(part: UploadFile) -> bytes:
+    """A form's ``metadata`` part, refused (413) past the metadata limit."""
+    content = await part.read(_MAX_METADATA_BYTES + 1)
+    if len(content) > _MAX_METADATA_BYTES:
+        raise _upload_too_large(_MAX_METADATA_BYTES, "the metadata limit")
+    return content
 
 
 def _spool_upload(source: BinaryIO, dest: Path) -> tuple[str, int]:
@@ -152,7 +167,7 @@ async def _put_artifact(
                 status_code=400,
                 detail="'metadata' field must be a file, not form data",
             )
-        metadata_content = await metadata_file.read()
+        metadata_content = await _read_metadata(metadata_file)
         try:
             metadata = json_module.loads(metadata_content)
         except json_module.JSONDecodeError as e:
@@ -453,7 +468,7 @@ async def _import_artifact(
     received_digest: str | None = None
     if staged:
         try:
-            metadata = await _capped(request).json()
+            metadata = await _capped(request, metadata_only=True).json()
         except (json_module.JSONDecodeError, UnicodeDecodeError) as exc:
             raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
         if not isinstance(metadata, dict):
@@ -466,7 +481,7 @@ async def _import_artifact(
             raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
 
         try:
-            metadata = json_module.loads(await metadata_file.read())
+            metadata = json_module.loads(await _read_metadata(metadata_file))
         except json_module.JSONDecodeError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
         if not isinstance(metadata, dict):
@@ -668,7 +683,7 @@ async def _put_artifact_by_provenance(
         raise HTTPException(status_code=400, detail="Missing 'data' file field")
 
     try:
-        metadata = json_module.loads(await metadata_file.read())
+        metadata = json_module.loads(await _read_metadata(metadata_file))
     except json_module.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
     if not isinstance(metadata, dict):
@@ -719,9 +734,9 @@ async def _put_artifact_by_provenance(
     artifact_id = str(named_id or uuid.uuid4())
     # The caller names the id, so it can name somebody else's; a version appended there becomes that
     # artifact's latest, which a notebook reads and GC protects. The import route refuses the same
-    # case.
-    existing = store.get_latest_version(artifact_id)
-    if existing is not None and (existing.tenant or "") != (tenant_id or ""):
+    # case. Checked against any version, since one still uploading holds the id too.
+    holder = store.id_tenant(artifact_id)
+    if holder is not None and holder != (tenant_id or ""):
         raise HTTPException(
             status_code=409,
             detail=f"{artifact_id} already exists under another tenant",

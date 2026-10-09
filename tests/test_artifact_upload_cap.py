@@ -153,3 +153,39 @@ def test_an_upload_under_the_cap_is_stored(served, method, path, metadata):
     response = _chunked(method, f"{base}{path}", files)
 
     assert response.status_code == 200, response.text
+
+
+@pytest.fixture
+def default_cap(tmp_path):
+    with run_server_with_context(tmp_path / "cache", tmp_path / "artifacts", "personal") as ctx:
+        yield ctx.base_url
+
+
+# Metadata is read whole, so it is held to a limit far below max_upload_bytes.
+_HUGE_METADATA_PAD = "x" * (16 * 1024 * 1024)
+
+
+@pytest.mark.parametrize(("method", "path", "metadata"), _ROUTES)
+def test_oversized_metadata_is_a_413_under_the_upload_cap(default_cap, method, path, metadata):
+    files = {
+        "metadata": (
+            "metadata.json",
+            json.dumps({**metadata, "pad": _HUGE_METADATA_PAD}),
+            "application/json",
+        ),
+        "data": ("data.bin", b"tiny", "application/octet-stream"),
+    }
+
+    response = httpx.request(method, f"{default_cap}{path}", files=files, timeout=30)
+
+    assert response.status_code == 413, response.text
+    assert "metadata" in response.json()["detail"]
+
+
+def test_an_oversized_staged_import_body_is_a_413(default_cap):
+    body = {**_IMPORT_METADATA, "content_sha256": DIGEST, "pad": _HUGE_METADATA_PAD}
+
+    response = httpx.post(f"{default_cap}/v1/artifacts/import", json=body, timeout=30)
+
+    assert response.status_code == 413, response.text
+    assert "metadata" in response.json()["detail"]
