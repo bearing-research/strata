@@ -57,6 +57,7 @@ from strata.notebook.harness_user import (
     write_run_file,
 )
 from strata.notebook.immutability import MutationWarning
+from strata.notebook.lifeline import lifeline_handoff
 from strata.notebook.models import (
     CellLanguage,
     CellOutput,
@@ -5008,13 +5009,15 @@ class CellExecutor:
         )
 
         hand_over(manifest_path.parent, harness_user)
+        lifeline_fds, lifeline_vars = lifeline_handoff()
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             # ``uv run`` must find the notebook's .venv, not the server's environment.
-            env=uv_env(identity_env(self._harness_env(), harness_user)),
+            env=uv_env(identity_env(self._harness_env(lifeline_vars), harness_user)),
+            pass_fds=lifeline_fds,
             **spawn_kwargs(harness_user),
             **subprocess_kwargs_for_new_group(),
         )
@@ -5868,12 +5871,14 @@ class CellExecutor:
             }
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
+            lifeline_fds, lifeline_vars = lifeline_handoff()
             env = identity_env(
                 self._harness_env(
                     {
                         "STRATA_BATCH_FRAME_FD": str(frame_w),
                         "STRATA_BATCH_RESP_FD": str(resp_r),
                         "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
+                        **lifeline_vars,
                     }
                 ),
                 harness_user,
@@ -5888,7 +5893,7 @@ class CellExecutor:
                 "--batch",
                 str(manifest_path),
                 env=env,
-                pass_fds=(frame_w, resp_r),
+                pass_fds=(frame_w, resp_r, *lifeline_fds),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.session.path),

@@ -21,6 +21,7 @@ from strata.notebook.harness_user import (
     resolve_harness_user,
     spawn_kwargs,
 )
+from strata.notebook.lifeline import lifeline_handoff
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
     kill_subprocess_tree_nowait,
@@ -123,6 +124,7 @@ class WarmProcessPool:
             # The env allowlist applies here too: this is the default path, so
             # skipping it would expose server secrets to most cells.
             allowlist = configured_allowlist()
+            lifeline_fds, lifeline_vars = lifeline_handoff()
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
@@ -130,7 +132,8 @@ class WarmProcessPool:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.notebook_dir),
                 limit=SUBPROCESS_LINE_LIMIT,
-                env=identity_env(harness_env(allowlist) if allowlist else None, harness_user),
+                env=identity_env(harness_env(allowlist, lifeline_vars), harness_user),
+                pass_fds=lifeline_fds,
                 **spawn_kwargs(harness_user),
                 **subprocess_kwargs_for_new_group(),
             )

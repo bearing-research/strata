@@ -39,6 +39,7 @@ _ser = _load_local_module("serializer.py", "_nb_serializer")
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
+_lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 
 # Harness-injected, not user inputs: excluded from mutation fingerprinting.
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
@@ -770,6 +771,7 @@ class _Tee(io.StringIO):
 
 
 def main():
+    _lifeline.watch_lifeline()
     if len(sys.argv) > 1 and sys.argv[1] == "--batch":
         batch_main()
         return
