@@ -310,6 +310,40 @@ async def test_a_scan_build_commits_its_blob_off_the_loop(served, temp_warehouse
     assert store.get_artifact("scanned", version).state == "ready"
 
 
+async def test_a_scan_build_hashes_its_blob_off_the_loop(served, temp_warehouse, monkeypatch):
+    from strata.streaming import StreamState
+
+    state, store = served.state, served.store
+    plan = state.planner.plan(temp_warehouse["table_uri"])
+    version = store.create_artifact(artifact_id="scanned", provenance_hash="f" * 64)
+    stream_state = StreamState(
+        stream_id="scanned",
+        plan=plan,
+        artifact_id="scanned",
+        artifact_version=version,
+        created_at=time.time(),
+        mode="artifact",
+    )
+    state.streams.register(stream_state)
+    on_loop: list[bool] = []
+    blob_digest = store.blob_digest
+
+    def recording(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return blob_digest(*args, **kwargs)
+
+    monkeypatch.setattr(store, "blob_digest", recording)
+
+    await state.scan_builds.build_identity_artifact(state, stream_state)
+
+    assert store.get_artifact("scanned", version).state == "ready"
+    assert on_loop == [False]
+
+
 async def test_a_named_build_is_ready_only_with_its_name(served, runner, tmp_path, monkeypatch):
     """The build completes and its name moves in one commit.
 
