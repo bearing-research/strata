@@ -1916,6 +1916,8 @@ class ArtifactStore:
                 self.blob_store.delete_blob(*duplicate_blob)
                 return existing
 
+            digest = self.blob_digest(artifact_id, version, blob_attempt)
+
             if existing is not None and existing.version != version:
                 # Refresh rebuild: same id, older ready version with the same provenance. Supersede
                 # the old version (still fetchable by explicit id+version) so the rebuild becomes
@@ -1934,13 +1936,14 @@ class ArtifactStore:
                     """
                     UPDATE artifact_versions
                     SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                        blob_attempt = ?, last_used_at = ?
+                        content_sha256 = ?, blob_attempt = ?, last_used_at = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
                     (
                         schema_json,
                         row_count,
                         byte_size,
+                        digest,
                         blob_attempt,
                         time.time(),
                         artifact_id,

@@ -281,7 +281,7 @@ class TestAnUnpublishedAttemptIsSwept:
         def finalize_fails(*_args, **_kwargs):
             raise RuntimeError("database went away")
 
-        monkeypatch.setattr(artifact_store, "finalize_artifact", finalize_fails)
+        monkeypatch.setattr(artifact_store, "finalize_and_set_name", finalize_fails)
         await a._execute_build(build_store.get_build(build_id))
 
         assert build_store.get_build(build_id).state == "failed"

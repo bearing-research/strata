@@ -43,6 +43,18 @@ class TestRecordedOnWrite:
 
         assert artifact.content_sha256 == hashlib.sha256(blob).hexdigest()
 
+    def test_finalizing_with_a_name_records_it_too(self, store):
+        """The build runner, scan builds and v2 builds finalize through this path."""
+        blob = _ipc_bytes([4, 5, 6])
+        version = store.create_artifact("n", hashlib.sha256(b"n").hexdigest())
+        store.write_blob("n", version, blob)
+
+        artifact = store.finalize_and_set_name(
+            "n", version, '{"fields": []}', 3, len(blob), name="the-name"
+        )
+
+        assert artifact.content_sha256 == hashlib.sha256(blob).hexdigest()
+
     def test_a_caller_holding_the_bytes_is_believed(self, store):
         """A caller-supplied digest is stored without re-reading the blob."""
         blob = _ipc_bytes([1, 2, 3])
