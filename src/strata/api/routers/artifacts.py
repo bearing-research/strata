@@ -1347,14 +1347,16 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
     try:
-        # Without a digest, finalize reads the whole blob to hash it.
+        # Finalize reads the whole blob to hash it, so it runs in a thread, and the loop
+        # serves requests meanwhile: the name moves in the same commit as the ready state.
         finalized_artifact = await asyncio.to_thread(
-            store.finalize_artifact,
+            store.finalize_and_set_name,
             artifact_id=request.artifact_id,
             version=request.version,
             schema_json=request.arrow_schema,
             row_count=request.row_count,
             byte_size=byte_size,
+            name=request.name,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1362,19 +1364,8 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
     if finalized_artifact is None:
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
 
-    artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
-    name_uri = None
-
-    if request.name:
-        try:
-            store.set_name(request.name, finalized_artifact.id, finalized_artifact.version)
-            name_uri = f"strata://name/{request.name}"
-        except ValueError as e:
-            # A name failure does not fail the whole request.
-            logger.warning(f"Failed to set name {request.name}: {e}")
-
     return UploadFinalizeResponse(
-        artifact_uri=artifact_uri,
+        artifact_uri=f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}",
         byte_size=finalized_artifact.byte_size or byte_size,
-        name_uri=name_uri,
+        name_uri=f"strata://name/{request.name}" if request.name else None,
     )

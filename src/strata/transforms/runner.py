@@ -582,16 +582,27 @@ class BuildRunner:
                     except Exception:
                         pass
 
-    def _blob_to_temp_file(self, artifact_id: str, version: int) -> Path | None:
-        """Copy a blob to a temp file under ``artifact_dir``, or None if there is none. Blocking."""
-        blob = self.artifact_store.read_blob(artifact_id, version)
-        if blob is None:
-            return None
+    async def _blob_to_temp_file(
+        self, artifact_id: str, version: int, temp_files: list[Path]
+    ) -> Path | None:
+        """Copy a blob to a temp file under ``artifact_dir``, or None if there is none.
+
+        The file is created and registered before the copy starts in a thread, so a build
+        cancelled meanwhile still cleans it up, as ``_scan_to_file`` does.
+        """
         fd, tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
         os.close(fd)  # Windows: handle must be closed before rename
         temp_file = Path(tmp_path)
-        temp_file.write_bytes(blob)
-        return temp_file
+        temp_files.append(temp_file)
+
+        def copy() -> bool:
+            blob = self.artifact_store.read_blob(artifact_id, version)
+            if blob is None:
+                return False
+            temp_file.write_bytes(blob)
+            return True
+
+        return temp_file if await asyncio.to_thread(copy) else None
 
     async def _acquire_input(
         self,
@@ -618,10 +629,9 @@ class BuildRunner:
             artifact_id = match.group(1)
             version = int(match.group(2))
 
-            temp_file = await asyncio.to_thread(self._blob_to_temp_file, artifact_id, version)
+            temp_file = await self._blob_to_temp_file(artifact_id, version, temp_files)
             if temp_file is None:
                 raise ValueError(f"Artifact blob not found: {input_uri}")
-            temp_files.append(temp_file)
             return temp_file
 
         if input_uri.startswith("strata://name/"):
@@ -637,10 +647,9 @@ class BuildRunner:
                     raise ValueError(f"Name not found: {name}")
                 target_id, target_version = artifact.id, artifact.version
 
-            temp_file = await asyncio.to_thread(self._blob_to_temp_file, target_id, target_version)
+            temp_file = await self._blob_to_temp_file(target_id, target_version, temp_files)
             if temp_file is None:
                 raise ValueError(f"Artifact blob not found for name: {name}")
-            temp_files.append(temp_file)
             return temp_file
 
         if input_uri.startswith("strata://"):
