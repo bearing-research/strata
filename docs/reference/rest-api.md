@@ -59,7 +59,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | --- | --- |
 | Every `GET` and `HEAD`, plus the two `environment/*/preview` posts | `notebook:read` |
 | Content and configuration changes that run nothing: `/open`, `/create`, `/import`, `/import-snapshot`, `/recents/validate`, session close, notebook delete, cell add/edit/reorder/delete, a cell's test source, mounts, connections, workers (except provisioning an SSH worker), env, secret manager, name, timeout, variants, quiesce/release, promote | `notebook:write` |
-| Anything that runs code - execute, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
+| Anything that runs code - execute, cancelling a run, running tests, dependency and Python-version changes (uv runs build scripts), provisioning an SSH worker - **and any route nobody has classified** | `notebook:execute` |
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
 | Artifact and registry writes, including `name` on `POST /v1/materialize` | `artifacts:write` |
@@ -467,6 +467,22 @@ While another cell in the notebook runs, the request is refused with `409`.
 
 !!! tip
 For interactive use, prefer the WebSocket `cell_execute` message. The REST endpoint is for programmatic access.
+
+A run cancelled before it finishes returns `200` with `"status": "error"` and
+`"error_code": "cancelled"`.
+
+### Cancel Cell (REST)
+
+```
+POST /v1/notebooks/{session_id}/cells/{cell_id}/cancel
+```
+
+Cancels the cell's run, however it was started (REST, MCP, or the browser), as
+the WebSocket `cell_cancel` message does: the run stops (a local cell's process
+group is killed) and the cell goes back to `idle`. Needs `notebook:execute`,
+like the frame. Returns `{ "cell_id", "cancelled", "status" }`. `cancelled` is
+`false` when no run of the cell was in flight; a finished cell keeps its state,
+and `status` says what it is. An unknown cell returns `404`.
 
 ### Run Cell Tests (REST)
 

@@ -149,7 +149,7 @@ async def test_a_cancelled_query_stops_waiting_and_publishes_nothing(tmp_path):
     # Let the query get under way before asking for it to stop.
     await asyncio.sleep(0.5)
 
-    await _handle_cell_cancel(session, {"cell_id": "q"}, execution_state, session.id)
+    await _handle_cell_cancel(session, {"cell_id": "q"}, session.id)
 
     assert run.cancelled()
     cell = session.notebook_state.get_cell("q")
@@ -171,7 +171,7 @@ async def test_the_notebook_runs_again_after_a_cancelled_query(tmp_path):
         execution_state.execution_task = run
         execution_state.running_cell = "q"
     await asyncio.sleep(0.5)
-    await _handle_cell_cancel(session, {"cell_id": "q"}, execution_state, session.id)
+    await _handle_cell_cancel(session, {"cell_id": "q"}, session.id)
 
     result = await _run(session, "fast")
     assert result is not None and result.success

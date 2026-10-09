@@ -1128,6 +1128,15 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     run_p.add_argument("--format", choices=["human", "json"], default="json")
     run_p.set_defaults(func=cell_run_main)
 
+    cancel_p = sub.add_parser("cancel", help="Cancel a cell's run on a server (--server/--session)")
+    # The local positional is accepted only to explain why it cannot work.
+    cancel_p.add_argument("notebook_dir", nargs="?", help=argparse.SUPPRESS)
+    cancel_p.add_argument("--server", help="Server root, e.g. http://localhost:8765")
+    cancel_p.add_argument("--session", help="Session id the run is on")
+    cancel_p.add_argument("cell_id", help="Cell id whose run to cancel")
+    cancel_p.add_argument("--format", choices=["human", "json"], default="json")
+    cancel_p.set_defaults(func=cell_cancel_main)
+
     test_p = sub.add_parser("test", help="Run a cell's unit tests")
     _add_target_args(test_p)
     test_p.add_argument("cell_id", help="Cell id whose tests to run")
@@ -1935,6 +1944,36 @@ async def _cell_run_async(args: argparse.Namespace) -> int:
             print("--- error ---")
             print(result.error)
     return 0 if result.status == "ok" else 1
+
+
+def cell_cancel_main(args: argparse.Namespace) -> int:
+    """Cancel a run on a server; exit 0 if one was cancelled, 1 if none was running."""
+    if not args.server:
+        print(
+            "error: cell cancel needs --server/--session. A run without --server lives "
+            "in the process that started it; stop that process (Ctrl-C) instead.",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.session:
+        print("error: --server requires --session <id>", file=sys.stderr)
+        return 2
+    from strata.notebook.ops import NotebookOpsError, RemoteNotebookOps
+
+    ops = RemoteNotebookOps(args.server, args.session)
+    try:
+        result = ops.cancel_cell(args.cell_id)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    finally:
+        ops.close()
+    if args.format == "json":
+        _emit_json(result.model_dump(mode="json"))
+    elif result.cancelled:
+        print(f"cancelled {result.cell_id}  ({result.status})")
+    else:
+        print(f"{result.cell_id} is not running ({result.status}); nothing to cancel")
+    return 0 if result.cancelled else 1
 
 
 def cell_test_main(args: argparse.Namespace) -> int:

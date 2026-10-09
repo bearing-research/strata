@@ -33,6 +33,7 @@ def _headers(scopes: str) -> dict[str, str]:
 
 
 EXECUTE = "/v1/notebooks/nb1/cells/c1/execute"
+CANCEL = "/v1/notebooks/nb1/cells/c1/cancel"
 CREATE_CELL = "/v1/notebooks/nb1/cells"
 SESSIONS = "/v1/notebooks/sessions"
 
@@ -76,6 +77,16 @@ class TestUnderPrincipalAuth:
         assert create.status_code == 404
         assert execute.status_code == 403
 
+    def test_cancel_needs_execute_like_the_ws_frame(self):
+        client = self._client()
+
+        write = client.post(CANCEL, headers=_headers("notebook:read notebook:write"))
+        execute = client.post(CANCEL, headers=_headers("notebook:read notebook:execute"))
+
+        assert write.status_code == 403
+        assert "notebook:execute" in write.json()["detail"]
+        assert execute.status_code == 404
+
     def test_execute_scope_passes_the_gate(self):
         response = self._client().post(
             EXECUTE, json={}, headers=_headers("notebook:read notebook:execute")
@@ -101,6 +112,8 @@ class TestTheTable:
     def test_code_and_environment_routes_need_execute(self):
         for method, path in (
             ("POST", "/v1/notebooks/{notebook_id}/cells/{cell_id}/execute"),
+            # As the WS ``cell_cancel`` frame: stopping a run is part of running.
+            ("POST", "/v1/notebooks/{notebook_id}/cells/{cell_id}/cancel"),
             ("POST", "/v1/notebooks/{notebook_id}/cells/{cell_id}/tests"),
             ("POST", "/v1/notebooks/{notebook_id}/dependencies"),
             ("PUT", "/v1/notebooks/{notebook_id}/python-version"),

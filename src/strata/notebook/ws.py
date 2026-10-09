@@ -1473,14 +1473,23 @@ async def _handle_cell_run_tests(
 async def _handle_cell_cancel(
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle cell_cancel without clobbering completed cell state."""
     cell_id = payload.get("cell_id")
     if not cell_id:
         return
+    await cancel_cell_run(session, cell_id, notebook_id)
 
+
+async def cancel_cell_run(session: NotebookSession, cell_id: str, notebook_id: str) -> bool:
+    """Cancel the run executing or queued for *cell_id*; shared by WS, REST and MCP.
+
+    Returns whether a run was cancelled. With none in flight, a cell left
+    ``running`` or ``idle`` is re-announced idle, but a completed cell's state is
+    never rewritten.
+    """
+    execution_state = _ensure_execution_state(notebook_id)
     async with execution_state.control_lock:
         running_cell = execution_state.running_cell
         requested_cell = execution_state.requested_cell
@@ -1496,11 +1505,12 @@ async def _handle_cell_cancel(
             await _set_cell_idle(
                 session, notebook_id, next_notebook_sequence(notebook_id), requested_cell
             )
-        return
+        return True
 
     cell = session.notebook_state.get_cell(cell_id)
     if cell is not None and cell.status in {CellStatus.IDLE, CellStatus.RUNNING}:
         await _set_cell_idle(session, notebook_id, next_notebook_sequence(notebook_id), cell_id)
+    return False
 
 
 async def _handle_cell_source_update(
@@ -1930,7 +1940,8 @@ async def execute_cell_exclusive(
     Takes the same reservation as the WS handlers and registers the run as the
     execution task, so an agent run and a browser run cannot execute concurrently
     and ``cell_cancel`` and grace teardown can reach it. Raises
-    :class:`NotebookBusyError` when a run is already active.
+    :class:`NotebookBusyError` when a run is already active. A cancelled run
+    returns a failed result with ``error_code`` ``cancelled``.
     """
     execution_state = _ensure_execution_state(notebook_id)
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
@@ -1951,8 +1962,13 @@ async def execute_cell_exclusive(
         return await task
     except asyncio.CancelledError:
         if task.cancelled():
-            # The run was cancelled (cell_cancel, grace teardown): no result.
-            return None
+            # The run was cancelled (cell_cancel, grace teardown), not failed.
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error="Cancelled before it finished",
+                error_code="cancelled",
+            )
         # The caller was cancelled: the run continues for spectators, like a
         # WS run outliving its socket.
         raise

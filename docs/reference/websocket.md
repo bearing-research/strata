@@ -43,7 +43,7 @@ All messages are JSON with this shape:
 | `cell_execute_cascade` | `{ "cell_id": "...", "plan_id": "..." }` | Confirm cascade execution                                   |
 | `cell_execute_force`   | `{ "cell_id": "..." }`                   | Run cell ignoring staleness (no upstream materialization)   |
 | `cell_execute_rerun`   | `{ "cell_id": "..." }`                   | Force re-execute target cell while cascading upstream rebuilds |
-| `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell (see [Cancelling a SQL cell](#cancelling-a-sql-cell)) |
+| `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell (see [Cancelling a SQL cell](#cancelling-a-sql-cell)); REST twin: [`POST …/cells/{cell_id}/cancel`](rest-api.md#cancel-cell-rest) |
 | `notebook_run_all`     | `{ "continue_on_error": true }`          | Run all cells in topological order (default continues on error) |
 | `notebook_rerun_all`   | `{ "continue_on_error": true }`          | Re-execute every cell with cache off                        |
 

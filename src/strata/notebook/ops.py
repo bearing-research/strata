@@ -165,6 +165,15 @@ class RunResult(BaseModel):
         return _cap_console(value)
 
 
+class CancelResult(BaseModel):
+    """The outcome of cancelling a cell's run, agent-facing."""
+
+    cell_id: str
+    # False when no run of the cell was in flight.
+    cancelled: bool
+    status: str  # the cell's status afterwards
+
+
 class TestRunResult(BaseModel):
     """The outcome of running a cell's unit tests, agent-facing."""
 
@@ -972,6 +981,16 @@ class RemoteNotebookOps:
             params={"mode": mode},
         )
         return _run_result_from_wire(data)
+
+    def cancel_cell(self, cell_id: str) -> CancelResult:
+        """Cancel a cell's run on the server.
+
+        Only a server can do this: a local run lives in the process that started it.
+        """
+        data = self._cell_op(
+            "POST", f"/v1/notebooks/{self._session_id}/cells/{cell_id}/cancel", cell_id=cell_id
+        )
+        return CancelResult.model_validate(data)
 
     async def run_tests(self, cell_id: str) -> TestRunResult:
         """Run a cell's unit tests on the server (see :meth:`NotebookOps.run_tests`)."""

@@ -177,6 +177,8 @@ _WRITE_TOOLS = frozenset(
 _EXECUTE_TOOLS = frozenset(
     {
         "run_cell",
+        # As the WS ``cell_cancel`` frame.
+        "cancel_cell",
         "run_tests",
         "run_snippet",
         # Re-materializes the widget cell, so it is a run, gated like ``run_cell``.

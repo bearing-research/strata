@@ -3495,6 +3495,23 @@ async def execute_cell(
     return result.to_dict()
 
 
+@router.post("/{notebook_id}/cells/{cell_id}/cancel")
+async def cancel_cell(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
+    """Cancel the cell's run, as the WS ``cell_cancel`` frame does.
+
+    ``cancelled`` is false when no run of this cell was in flight; a finished
+    cell keeps its state. ``status`` is the cell's status afterwards.
+    """
+    cell = session.notebook_state.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    from strata.notebook.ws import cancel_cell_run
+
+    cancelled = await cancel_cell_run(session, cell_id, notebook_id)
+    return {"cell_id": cell_id, "cancelled": cancelled, "status": cell.status}
+
+
 @router.put("/{notebook_id}/cells/{cell_id}/tests")
 async def set_cell_tests_endpoint(
     notebook_id: str, session: SessionDep, cell_id: str, req: UpdateCellTestsRequest
