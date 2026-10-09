@@ -206,6 +206,8 @@ class StrataConfig(BaseSettings):
     plan_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
     scan_timeout_seconds: Annotated[float, Field(gt=0)] = 300.0
     max_response_bytes: Annotated[int, Field(gt=0)] = 512 * 1024 * 1024  # 512 MB
+    # Largest request body an artifact write route accepts (413 past it).
+    max_upload_bytes: Annotated[int, Field(gt=0)] = 10 * 1024 * 1024 * 1024  # 10 GB
     # Iceberg equality deletes a row group may need in memory at once (all
     # the delete rows whose key range can meet it). A scan over the limit is
     # refused while planning, with a pointer to compaction; see

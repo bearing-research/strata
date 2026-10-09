@@ -16,7 +16,7 @@ import tempfile
 import uuid
 from dataclasses import replace
 from pathlib import Path
-from typing import Annotated, NamedTuple
+from typing import Annotated, BinaryIO, NamedTuple
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as FastPath
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from starlette.types import Message
 
 from strata.api.dependencies import (
     CurrentPrincipal,
@@ -57,6 +58,65 @@ logger = get_logger(__name__)
 router = APIRouter(tags=["artifacts"])
 
 
+def _upload_too_large(limit: int) -> HTTPException:
+    return HTTPException(
+        status_code=413, detail=f"Request body exceeds max_upload_bytes ({limit} bytes)"
+    )
+
+
+def _capped(request: Request) -> Request:
+    """*request* with its body refused (413) past ``max_upload_bytes``.
+
+    The count runs as the body arrives, so a chunked body with no Content-Length is held to it.
+    """
+    from strata.server import get_state
+
+    limit = get_state().config.max_upload_bytes
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise _upload_too_large(limit)
+    received = 0
+
+    async def receive() -> Message:
+        nonlocal received
+        message = await request.receive()
+        if message["type"] == "http.request":
+            received += len(message.get("body", b""))
+            if received > limit:
+                raise _upload_too_large(limit)
+        return message
+
+    return Request(request.scope, receive)
+
+
+def _spool_upload(source: BinaryIO, dest: Path) -> tuple[str, int]:
+    """Copy an uploaded part to *dest* in chunks, returning its sha256 and size."""
+    hasher = hashlib.sha256()
+    size = 0
+    source.seek(0)
+    with open(dest, "wb") as out:
+        while chunk := source.read(BLOB_STREAM_CHUNK_BYTES):
+            hasher.update(chunk)
+            size += len(chunk)
+            out.write(chunk)
+    return hasher.hexdigest(), size
+
+
+def _arrow_stream_shape(path: Path) -> tuple[str, int]:
+    """The schema and row count of the one Arrow IPC stream in *path*, read through a memory map.
+
+    Trailing bytes (concatenated streams) are refused: every standard reader downstream would
+    silently drop them.
+    """
+    with pa.memory_map(str(path)) as source:
+        reader = ipc.open_stream(source)
+        row_count = sum(batch.num_rows for batch in reader)
+        trailing = source.size() - source.tell()
+        if trailing:
+            raise ValueError(f"{trailing} trailing bytes after stream end (concatenated streams?)")
+        return reader.schema.to_string(), row_count
+
+
 @router.put("/v1/artifacts", response_model=PutArtifactResponse)
 async def put_artifact(request: Request, store: WriteStore, principal: CurrentPrincipal):
     """Upload and persist a locally computed artifact with provenance tracking.
@@ -65,13 +125,21 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
     JSON plus ``data`` Arrow IPC bytes). An existing artifact with the same
     provenance hash is returned with ``hit=True`` and nothing is stored.
     """
+    with tempfile.TemporaryDirectory(prefix="strata_put_") as workdir:
+        return await _put_artifact(request, store, principal, Path(workdir) / "data")
+
+
+async def _put_artifact(
+    request: Request, store: ArtifactStore, principal: Principal | None, data_path: Path
+) -> PutArtifactResponse:
+    """The PUT route's body, with a path to hold the uploaded bytes."""
     import json as json_module
 
     content_type = request.headers.get("content-type", "")
 
     if "multipart/form-data" in content_type:
         # Multipart: metadata JSON + Arrow IPC data
-        form = await request.form()
+        form = await _capped(request).form()
 
         metadata_file = form.get("metadata")
         if metadata_file is None:
@@ -102,31 +170,18 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
                 status_code=400,
                 detail="'data' field must be a file, not form data",
             )
-        arrow_bytes = await data_file.read()
-
-        # The buffer must be exactly one IPC stream: trailing bytes (concatenated streams) would be
-        # silently dropped by every standard reader downstream.
+        content_sha256, byte_size = await asyncio.to_thread(
+            _spool_upload, data_file.file, data_path
+        )
         try:
-            buf = pa.BufferReader(arrow_bytes)
-            reader = ipc.open_stream(buf)
-            table = reader.read_all()
-            if buf.tell() != len(arrow_bytes):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Invalid Arrow IPC data: {len(arrow_bytes) - buf.tell()} trailing "
-                        "bytes after stream end (concatenated streams?)"
-                    ),
-                )
-        except HTTPException:
-            raise
+            schema_json, row_count = await asyncio.to_thread(_arrow_stream_shape, data_path)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid Arrow IPC data: {e}")
 
     else:
         # JSON body (legacy format)
         try:
-            body = await request.json()
+            body = await _capped(request).json()
         except json_module.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
@@ -152,6 +207,10 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         with ipc.new_stream(sink, table.schema) as writer:
             writer.write_table(table)
         arrow_bytes = sink.getvalue().to_pybytes()
+        data_path.write_bytes(arrow_bytes)
+        content_sha256 = hashlib.sha256(arrow_bytes).hexdigest()
+        byte_size = len(arrow_bytes)
+        schema_json, row_count = table.schema.to_string(), table.num_rows
 
     executor = transform_dict.get("executor")
     if not executor:
@@ -227,16 +286,15 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         minted=True,
     )
 
-    store.write_blob(artifact_id, version, arrow_bytes)
+    await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
 
-    schema_json = table.schema.to_string()
     finalized_artifact = store.finalize_artifact(
         artifact_id=artifact_id,
         version=version,
         schema_json=schema_json,
-        row_count=table.num_rows,
-        byte_size=len(arrow_bytes),
-        content_sha256=hashlib.sha256(arrow_bytes).hexdigest(),
+        row_count=row_count,
+        byte_size=byte_size,
+        content_sha256=content_sha256,
     )
     if finalized_artifact is None:
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
@@ -259,7 +317,7 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
     return PutArtifactResponse(
         artifact_uri=artifact_uri,
         hit=finalized_artifact.id != artifact_id or finalized_artifact.version != version,
-        byte_size=finalized_artifact.byte_size or len(arrow_bytes),
+        byte_size=finalized_artifact.byte_size or byte_size,
         name_uri=name_uri,
     )
 
@@ -313,7 +371,7 @@ async def stage_import_blob_route(
         hasher = hashlib.sha256()
         byte_size = 0
         with open(staged, "wb") as out:
-            async for chunk in request.stream():
+            async for chunk in _capped(request).stream():
                 hasher.update(chunk)
                 byte_size += len(chunk)
                 out.write(chunk)
@@ -391,16 +449,17 @@ async def _import_artifact(
 
     tenant_id = principal.tenant if principal else None
     staged = request.headers.get("content-type", "").startswith("application/json")
-    blob: bytes | Path | None = None
+    blob: Path | None = None
+    received_digest: str | None = None
     if staged:
         try:
-            metadata = await request.json()
+            metadata = await _capped(request).json()
         except (json_module.JSONDecodeError, UnicodeDecodeError) as exc:
             raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}")
         if not isinstance(metadata, dict):
             raise HTTPException(status_code=400, detail="The body must be a JSON object")
     else:
-        form = await request.form()
+        form = await _capped(request).form()
         metadata_file = form.get("metadata")
         data_file = form.get("data")
         if metadata_file is None or isinstance(metadata_file, str):
@@ -413,7 +472,8 @@ async def _import_artifact(
         if not isinstance(metadata, dict):
             raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
         if data_file is not None and not isinstance(data_file, str):
-            blob = await data_file.read()
+            blob = workdir / "blob"
+            received_digest, _ = await asyncio.to_thread(_spool_upload, data_file.file, blob)
 
     artifact_id = str(metadata.get("id") or "").strip()
     if not artifact_id:
@@ -476,18 +536,17 @@ async def _import_artifact(
         if await asyncio.to_thread(_copy_staged_blob, store, tenant_id, declared_digest, copied):
             # Checked against this digest when it was uploaded.
             blob = copied
-    elif declared_digest and isinstance(blob, bytes):
+    elif declared_digest and received_digest is not None:
         # Verified before anything is written. The digest is the caller's claim
         # about its own bytes, and an import that stored bytes contradicting it
         # would publish a page whose verify step fails against a record this
         # store vouched for.
-        actual = hashlib.sha256(blob).hexdigest()
-        if actual != declared_digest:
+        if received_digest != declared_digest:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Uploaded bytes do not match the declared digest "
-                    f"(declared {declared_digest[:12]}…, received {actual[:12]}…)"
+                    f"(declared {declared_digest[:12]}…, received {received_digest[:12]}…)"
                 ),
             )
 
@@ -504,7 +563,7 @@ async def _import_artifact(
         input_versions=metadata.get("input_versions"),
         tenant=tenant_id,
         principal=metadata.get("principal"),
-        content_sha256=declared_digest or None,
+        content_sha256=declared_digest or received_digest,
     )
 
     existing = store.get_artifact(artifact_id, version)
@@ -545,8 +604,8 @@ async def _import_artifact(
                 ),
             )
 
-    landed = store.import_artifact(record, blob)
-    if isinstance(blob, Path):
+    landed = await asyncio.to_thread(store.import_artifact, record, blob)
+    if staged and blob is not None:
         await asyncio.to_thread(store.release_staged_import, tenant_id, declared_digest)
     return {
         "artifact_uri": f"strata://artifact/{landed.ref}",
@@ -575,11 +634,25 @@ async def put_artifact_by_provenance(
     existing hash, so a second write of the same key returns the first. The body is
     opaque bytes (Arrow, JSON or pickle); ``content_type`` travels in the metadata.
     """
+    with tempfile.TemporaryDirectory(prefix="strata_put_") as workdir:
+        return await _put_artifact_by_provenance(
+            request, store, principal, provenance_hash, Path(workdir) / "data"
+        )
+
+
+async def _put_artifact_by_provenance(
+    request: Request,
+    store: ArtifactStore,
+    principal: Principal | None,
+    provenance_hash: str,
+    data_path: Path,
+) -> PutArtifactResponse:
+    """The by-provenance PUT route's body, with a path to hold the uploaded bytes."""
     import json as json_module
 
     from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 
-    form = await request.form()
+    form = await _capped(request).form()
     metadata_file = form.get("metadata")
     data_file = form.get("data")
     if metadata_file is None or isinstance(metadata_file, str):
@@ -607,7 +680,7 @@ async def put_artifact_by_provenance(
             status_code=400, detail="Metadata 'row_count' must be a non-negative integer"
         )
 
-    blob = await data_file.read()
+    content_sha256, byte_size = await asyncio.to_thread(_spool_upload, data_file.file, data_path)
     tenant_id = principal.tenant if principal else None
 
     # First writer wins. Returning the incumbent rather than superseding it is
@@ -660,14 +733,14 @@ async def put_artifact_by_provenance(
         # "latest"; an upload that named nothing got an id nobody resolves.
         minted=not named_id,
     )
-    store.write_blob(artifact_id, version, blob)
+    await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
     finalized = store.finalize_artifact(
         artifact_id=artifact_id,
         version=version,
         schema_json=str(metadata.get("schema_json") or ""),
         row_count=row_count,
-        byte_size=len(blob),
-        content_sha256=hashlib.sha256(blob).hexdigest(),
+        byte_size=byte_size,
+        content_sha256=content_sha256,
     )
     if finalized is None:
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
@@ -675,7 +748,7 @@ async def put_artifact_by_provenance(
     return PutArtifactResponse(
         artifact_uri=f"strata://artifact/{finalized.id}@v={finalized.version}",
         hit=finalized.id != artifact_id or finalized.version != version,
-        byte_size=finalized.byte_size or len(blob),
+        byte_size=finalized.byte_size or byte_size,
     )
 
 
@@ -1237,7 +1310,7 @@ async def upload_artifact_blob(
     staged = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as dst:
-            async for chunk in request.stream():
+            async for chunk in _capped(request).stream():
                 if not chunk:
                     continue
                 byte_size += len(chunk)
@@ -1267,7 +1340,9 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
     try:
-        finalized_artifact = store.finalize_artifact(
+        # Without a digest, finalize reads the whole blob to hash it.
+        finalized_artifact = await asyncio.to_thread(
+            store.finalize_artifact,
             artifact_id=request.artifact_id,
             version=request.version,
             schema_json=request.arrow_schema,
