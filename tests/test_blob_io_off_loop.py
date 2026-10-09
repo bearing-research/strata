@@ -308,3 +308,54 @@ async def test_a_scan_build_commits_its_blob_off_the_loop(served, temp_warehouse
     assert ran
     assert stream_state.error_message is None
     assert store.get_artifact("scanned", version).state == "ready"
+
+
+async def test_a_named_build_is_ready_only_with_its_name(served, runner, tmp_path, monkeypatch):
+    """The build completes and its name moves in one commit.
+
+    Finalize runs in a thread, so the loop serves requests the moment it commits: a client that
+    saw the build ready and then asked for the name must find it.
+    """
+    store = served.store
+    version = store.create_artifact(
+        artifact_id="named",
+        provenance_hash="f" * 64,
+        transform_spec=TransformSpec(executor="service://test_sql@v1", params={}, inputs=[]),
+        input_versions={},
+    )
+    build_id = str(uuid.uuid4())
+    runner.build_store.create_build(
+        build_id=build_id,
+        artifact_id="named",
+        version=version,
+        executor_ref="test_sql@v1",
+        executor_url="http://executor",
+        name="the-output",
+    )
+    output = tmp_path / "output.arrow"
+
+    async def executor(**_kwargs):
+        output.write_bytes(ARROW)
+        return output, None
+
+    runner._call_executor = executor
+    seen_at_commit = []
+
+    def observed(finalize):
+        def call(*args, **kwargs):
+            result = finalize(*args, **kwargs)
+            seen_at_commit.append(
+                (runner.build_store.get_build(build_id).state, store.get_name("the-output"))
+            )
+            return result
+
+        return call
+
+    for method in ("finalize_artifact", "finalize_and_set_name"):
+        monkeypatch.setattr(store, method, observed(getattr(store, method)))
+
+    await runner._execute_build(runner.build_store.get_build(build_id))
+
+    [(state, name)] = seen_at_commit
+    assert state == "ready"
+    assert name is not None and (name.artifact_id, name.version) == ("named", version)

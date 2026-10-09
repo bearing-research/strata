@@ -468,14 +468,18 @@ class BuildRunner:
                     )
 
                 try:
-                    # Finalize reads the attempt's bytes back to hash them.
+                    # Finalize reads the attempt's bytes back to hash them. The name moves in
+                    # the same commit: the loop serves requests during the thread, and a client
+                    # that sees the build ready asks for the name next.
                     finalized_artifact = await asyncio.to_thread(
-                        self.artifact_store.finalize_artifact,
+                        self.artifact_store.finalize_and_set_name,
                         artifact_id=build.artifact_id,
                         version=build.version,
                         schema_json=schema_json,
                         row_count=row_count,
                         byte_size=output_bytes,
+                        name=build.name,
+                        tenant=build.tenant_id,
                         blob_attempt=attempt,
                         fence=_complete,
                     )
@@ -496,15 +500,6 @@ class BuildRunner:
                 # Deduplicated to an artifact that already existed: the build points at it, and
                 # finalize dropped this attempt's bytes, leaving the superseded version reading
                 # the canonical's by the URI the materialize response handed out.
-
-                # Set here because the materialize endpoint can't: the build is async.
-                if build.name:
-                    self.artifact_store.set_name(
-                        build.name,
-                        finalized_artifact.id,
-                        finalized_artifact.version,
-                        tenant=build.tenant_id,
-                    )
                 from strata.transforms.build_qos import get_build_qos
 
                 build_qos = get_build_qos()
