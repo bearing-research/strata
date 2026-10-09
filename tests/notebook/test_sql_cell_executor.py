@@ -532,6 +532,37 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_downstream_cell_gets_a_pyarrow_table_with_pandas_installed(tmp_path):
+    """The reader turns untagged tables into pandas when it can; SQL output stays Arrow."""
+    pytest.importorskip("pandas")
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    db_path = tmp_path / "events.db"
+    _seed_sqlite(db_path)
+    nb_dir = create_notebook(tmp_path, "sql_type")
+    add_cell_to_notebook(nb_dir, "sql", language="sql")
+    write_cell(nb_dir, "sql", "# @sql connection=db\nSELECT name FROM events ORDER BY id\n")
+    add_cell_to_notebook(nb_dir, "py", after_cell_id="sql", language="python")
+    write_cell(nb_dir, "py", "print(type(result).__module__, type(result).__name__)\n")
+    toml_path = nb_dir / "notebook.toml"
+    toml_path.write_text(
+        toml_path.read_text() + f'\n[connections.db]\ndriver = "sqlite"\npath = "{db_path}"\n'
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    session.refresh_environment_runtime()
+    executor = CellExecutor(session)
+
+    sql_result = await executor.execute_cell("sql", _read_cell(nb_dir, "sql"))
+    assert sql_result.success, sql_result.error
+    py_result = await executor.execute_cell("py", _read_cell(nb_dir, "py"))
+    assert py_result.success, py_result.error
+    assert py_result.stdout.strip() == "pyarrow.lib Table"
+
+
+@pytest.mark.asyncio
 async def test_sql_cell_executor_dispatched_via_main_executor(tmp_path):
     """``CellExecutor`` dispatches ``language='sql'`` to the SQL path."""
     from strata.notebook.executor import CellExecutor
