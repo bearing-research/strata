@@ -756,3 +756,28 @@ def test_cell_timeout_message_names_the_remedy():
     assert "@timeout" in msg
     assert "notebook.toml" in msg
     assert "--timeout" in msg
+
+
+def test_a_timeout_its_annotation_set_points_at_the_annotation(tmp_path, capsys):
+    """The annotation overrides `--timeout`, so suggesting the flag would not help."""
+    notebook_dir = _build_notebook(
+        tmp_path, cells=[("c1", "# @timeout 0.5\nimport time\ntime.sleep(60)", None)]
+    )
+    _mk_fake_venv(notebook_dir)
+
+    rc = run_main([str(notebook_dir), "--no-sync", "--format", "json", "--timeout", "600"])
+
+    assert rc == 1
+    [cell] = json.loads(capsys.readouterr().out)["cells"]
+    assert "0.5s" in cell["error"]
+    assert "@timeout" in cell["error"]
+    assert "strata run --timeout <seconds>' for" not in cell["error"]
+
+
+def test_a_timeout_notebook_toml_set_points_at_notebook_toml():
+    from strata.notebook.executor import cell_timeout_message
+
+    msg = cell_timeout_message(30.0, set_by="notebook")
+    assert "30.0s" in msg
+    assert "'timeout' in notebook.toml" in msg
+    assert "for a one-off run" not in msg

@@ -134,12 +134,25 @@ logger = logging.getLogger(__name__)
 DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
 
 
-def cell_timeout_message(timeout_seconds: float) -> str:
+def cell_timeout_message(timeout_seconds: float, *, set_by: str | None = None) -> str:
     """A timed-out-cell error that names the remedy.
 
-    Points at all three levers (per-cell annotation, notebook default, CLI flag),
-    since a bare "timed out" does not say the limit is configurable.
+    ``set_by`` is where the limit came from: ``"annotation"``, ``"notebook"``
+    (notebook.toml), or ``None`` for the default or CLI flag. A lever that a higher
+    one overrides is not offered, since raising it would change nothing.
     """
+    if set_by == "annotation":
+        return (
+            f"Cell execution timed out after {timeout_seconds}s, the limit the cell's "
+            f"'# @timeout' annotation sets. Raise it there; the annotation overrides "
+            f"notebook.toml and 'strata run --timeout'."
+        )
+    if set_by == "notebook":
+        return (
+            f"Cell execution timed out after {timeout_seconds}s, the limit 'timeout' in "
+            f"notebook.toml sets. Raise it there or add a '# @timeout <seconds>' "
+            f"annotation to the cell; both override 'strata run --timeout'."
+        )
     return (
         f"Cell execution timed out after {timeout_seconds}s. Raise the limit with a "
         f"'# @timeout <seconds>' annotation on the cell, a 'timeout' key in "
@@ -984,6 +997,17 @@ class CellExecutor:
 
         return timeout_seconds
 
+    def _timeout_message(self, cell_id: str | None, timeout_seconds: float) -> str:
+        """``cell_timeout_message`` naming the lever ``_resolve_effective_timeout`` took."""
+        cell = self.session.notebook_state.get_cell(cell_id) if cell_id else None
+        if cell is not None and parse_annotations(cell.source).timeout is not None:
+            return cell_timeout_message(timeout_seconds, set_by="annotation")
+        if (
+            cell is not None and cell.timeout is not None
+        ) or self.session.notebook_state.timeout is not None:
+            return cell_timeout_message(timeout_seconds, set_by="notebook")
+        return cell_timeout_message(timeout_seconds)
+
     def _resolve_effective_runtime_env(
         self,
         cell_id: str,
@@ -1740,7 +1764,7 @@ class CellExecutor:
                 cell_id=cell_id,
                 success=False,
                 duration_ms=duration_ms,
-                error=cell_timeout_message(timeout_seconds),
+                error=self._timeout_message(cell_id, timeout_seconds),
             ).apply_remote_metadata(**remote_metadata)
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
@@ -2670,7 +2694,7 @@ class CellExecutor:
         async def _receive_bundle(response: httpx.Response) -> None:
             if response.status_code == 408:
                 raise RemoteExecutionError(
-                    cell_timeout_message(timeout_seconds),
+                    self._timeout_message(cell_id, timeout_seconds),
                     remote_error_code="TIMEOUT",
                 )
             if response.status_code != 200:
@@ -2746,7 +2770,7 @@ class CellExecutor:
                 raise
             except httpx.TimeoutException as exc:
                 raise RemoteExecutionError(
-                    cell_timeout_message(timeout_seconds),
+                    self._timeout_message(cell_id, timeout_seconds),
                     remote_error_code="TIMEOUT",
                 ) from exc
             except httpx.HTTPError as exc:
@@ -3020,7 +3044,7 @@ class CellExecutor:
         except httpx.TimeoutException as exc:
             _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
             raise RemoteExecutionError(
-                cell_timeout_message(timeout_seconds),
+                self._timeout_message(cell_id, timeout_seconds),
                 remote_build_state="failed",
                 remote_error_code="TIMEOUT",
             ) from exc
@@ -3046,7 +3070,7 @@ class CellExecutor:
             if response.status_code == 408:
                 _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
                 raise RemoteExecutionError(
-                    cell_timeout_message(timeout_seconds),
+                    self._timeout_message(cell_id, timeout_seconds),
                     remote_build_state="failed",
                     remote_error_code="TIMEOUT",
                 )
@@ -3292,7 +3316,7 @@ class CellExecutor:
                     if now - running_since > timeout_seconds:
                         await cancel()
                         raise RemoteExecutionError(
-                            cell_timeout_message(timeout_seconds),
+                            self._timeout_message(cell_id, timeout_seconds),
                             remote_build_state="failed",
                             remote_error_code="TIMEOUT",
                         )
