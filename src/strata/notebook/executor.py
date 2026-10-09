@@ -860,7 +860,7 @@ class CellExecutor:
                 )
             self._materializing.add(cell_id)
             try:
-                return await self._execute_loop_cell(
+                loop_result = await self._execute_loop_cell(
                     cell_id,
                     source,
                     annotations.loop,
@@ -871,6 +871,9 @@ class CellExecutor:
                 )
             finally:
                 self._materializing.discard(cell_id)
+            # As the Python path does: a CLI run has no WS handler to persist the console.
+            self.session.apply_execution_result_metadata(cell_id, loop_result)
+            return loop_result
         effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
         worker_spec = resolve_worker_spec(
             self.session.notebook_state,
