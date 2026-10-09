@@ -105,6 +105,19 @@ class TestRoundTrip:
         assert found.id == "a1"
         assert store.read_blob("a1", version) == b"payload"
 
+    def test_an_import_keeps_its_id_and_reads_its_bytes(self, store):
+        from dataclasses import replace
+
+        version = store.create_artifact("src", "prov-import", _spec())
+        store.write_blob("src", version, b"payload")
+        store.finalize_artifact("src", version, "{}", row_count=1, byte_size=7)
+        record = replace(
+            store.get_artifact("src", version), id="copied", provenance_hash="prov-other"
+        )
+
+        assert store.import_artifact(record, b"payload").written is True
+        assert store.read_blob("copied", version) == b"payload"
+
     def test_versions_increment(self, store):
         assert store.create_artifact("a1", "p1", _spec()) == 1
         assert store.create_artifact("a1", "p2", _spec()) == 2

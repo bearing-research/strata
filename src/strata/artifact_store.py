@@ -1269,7 +1269,7 @@ class ArtifactStore:
         that knows the inputs. Bytes, id, version and provenance hash never change.
         """
         if blob is not None and not self.blob_exists(landed.id, landed.version):
-            self._write_imported_blob(landed.id, landed.version, blob)
+            self._write_imported_blob(*self._blob_key(landed.id, landed.version), blob)
 
         if not record.input_versions:
             return
@@ -1293,17 +1293,22 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def _write_imported_blob(self, artifact_id: str, version: int, blob: bytes | Path) -> None:
-        """Write an import's bytes, from memory or from a local file.
+    def _write_imported_blob(self, blob_id: str, version: int, blob: bytes | Path) -> None:
+        """Write an import's bytes under blob key ``blob_id``, from memory or a local file.
 
         A file is published rather than read, so a staged import never holds the
         whole artifact in memory.
         """
         if isinstance(blob, Path):
-            self.publish_blob_from_path(artifact_id, version, blob)
+            self.blob_store.publish_blob_from_path(blob_id, version, blob)
             return
-        with self.open_blob_writer(artifact_id, version) as writer:
+        with self.blob_store.open_blob_writer(blob_id, version) as writer:
             writer.write(blob)
+
+    def _drop_import_attempt(self, record: ArtifactVersion, attempt: str | None) -> None:
+        """Remove bytes an import wrote for a row it did not insert."""
+        if attempt is not None:
+            self.blob_store.delete_blob(attempt_blob_id(record.id, attempt), record.version)
 
     def stage_import_blob(
         self,
@@ -1393,7 +1398,9 @@ class ArtifactStore:
         superseded, since it may be named or published.
 
         Bytes are written before the row, so a crash leaves collectable bytes with no
-        row rather than a ready row with no bytes that no retry would repair. The
+        row rather than a ready row with no bytes that no retry would repair. They go
+        under a key of their own, recorded on the row, so an import that loses a race
+        for the same ``id@v=N`` cannot overwrite the bytes of the one that won. The
         check inside the write transaction is authoritative.
         """
         reject_unsafe_artifact_id(record.id)
@@ -1407,15 +1414,22 @@ class ArtifactStore:
             self.record_use(no_op.id, no_op.version)
             return no_op
 
+        attempt = None
         if blob is not None:
-            self._write_imported_blob(record.id, record.version, blob)
+            attempt = secrets.token_hex(16)
+            self._write_imported_blob(attempt_blob_id(record.id, attempt), record.version, blob)
 
         conn = self._get_connection()
         try:
             self._dialect.begin_write(conn, record.id)
-            no_op = self._import_no_op(conn, record)
+            try:
+                no_op = self._import_no_op(conn, record)
+            except ArtifactImportConflict:
+                self._drop_import_attempt(record, attempt)
+                raise
             if no_op is not None:
                 conn.commit()
+                self._drop_import_attempt(record, attempt)
                 self.record_use(no_op.id, no_op.version)
                 return no_op
 
@@ -1427,8 +1441,8 @@ class ArtifactStore:
                 INSERT INTO artifact_versions
                     (id, version, state, provenance_hash, schema_json, row_count,
                      byte_size, created_at, transform_spec, input_versions,
-                     tenant, principal, content_sha256, last_used_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tenant, principal, content_sha256, last_used_at, blob_attempt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -1450,6 +1464,7 @@ class ArtifactStore:
                     record.content_sha256
                     or (hashlib.sha256(blob).hexdigest() if isinstance(blob, bytes) else None),
                     time.time(),
+                    attempt,
                 ),
             )
             conn.commit()

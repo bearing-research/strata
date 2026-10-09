@@ -36,7 +36,7 @@ from strata.api.dependencies import (
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.api.served_bytes import data_headers
-from strata.artifact_store import ArtifactStore, reject_unsafe_artifact_id
+from strata.artifact_store import ArtifactImportConflict, ArtifactStore, reject_unsafe_artifact_id
 from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
@@ -604,7 +604,14 @@ async def _import_artifact(
                 ),
             )
 
-    landed = await asyncio.to_thread(store.import_artifact, record, blob)
+    try:
+        landed = await asyncio.to_thread(store.import_artifact, record, blob)
+    except ArtifactImportConflict as exc:
+        # Another import of this id@v=N with a different computation committed
+        # after the check above.
+        raise HTTPException(
+            status_code=409, detail=f"{exc} Retry with remap=true to import it under a fresh id."
+        ) from exc
     if staged and blob is not None:
         await asyncio.to_thread(store.release_staged_import, tenant_id, declared_digest)
     return {

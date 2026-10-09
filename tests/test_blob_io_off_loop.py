@@ -359,3 +359,40 @@ async def test_a_named_build_is_ready_only_with_its_name(served, runner, tmp_pat
     [(state, name)] = seen_at_commit
     assert state == "ready"
     assert name is not None and (name.artifact_id, name.version) == ("named", version)
+
+
+async def test_an_import_that_loses_a_race_leaves_the_winner_intact(served):
+    """Two imports of one id@v with different computations, the second landing mid-first.
+
+    The import writes its bytes in a thread, so the other import can commit before the
+    first inserts its row. The loser is a 409 and the winner's row reads its own bytes.
+    """
+    first_bytes = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
+    second_bytes = table_to_ipc_bytes(pa.table({"x": [7, 8, 9, 10]}))
+    first_meta = {"id": "shared", "version": 1, "provenance_hash": "a" * 64, "created_at": 1.0}
+    second_meta = {"id": "shared", "version": 1, "provenance_hash": "b" * 64, "created_at": 1.0}
+    blobs = served.blobs
+    blobs.gated = "publish"
+    async with _client(served) as client:
+        first = asyncio.ensure_future(
+            client.post("/v1/artifacts/import", files=_files(first_meta, first_bytes))
+        )
+        try:
+            assert await asyncio.to_thread(blobs.entered.wait, 30), "the first import never wrote"
+            blobs.gated = None
+            second = await client.post(
+                "/v1/artifacts/import", files=_files(second_meta, second_bytes)
+            )
+        finally:
+            blobs.release.set()
+        first = await first
+
+    assert second.status_code == 200
+    assert first.status_code == 409
+    row = served.store.get_artifact("shared", 1)
+    assert row.provenance_hash == "b" * 64
+    assert served.store.read_blob("shared", 1) == second_bytes
+    assert row.content_sha256 == hashlib.sha256(second_bytes).hexdigest()
+    # The loser wrote under a key of its own, and removed it.
+    winner_key = served.store._blob_key("shared", 1)[0]
+    assert [p.name for p in served.store.blobs_dir.rglob("*.arrow")] == [f"{winner_key}@v=1.arrow"]
