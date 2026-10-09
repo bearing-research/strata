@@ -352,13 +352,14 @@ alphanumeric / `_` / `-` characters and hashed into:
 - **Cache warm jobs**: a background job from `POST /v1/cache/warm/async`
   is listed, read and cancelled (`/v1/cache/warm/jobs*`) only by its
   own tenant; `admin:*` sees every tenant's.
-- **Metric labels**: Prometheus output carries a `tenant` label so
-  you can dashboard per-tenant usage. It names no tables and no
-  principals: `/metrics/prometheus` is unauthenticated for scrapers, so
-  under principal auth the per-table series are left out (read them from
-  `GET /metrics/tables` with `admin:*`), and the AI usage series
-  (`strata_ai_*`) are per-tenant, per-model totals without a `principal`
-  label.
+- **Metric labels**: under principal auth Prometheus output names no
+  tenants, tables or principals: `/metrics/prometheus` is unauthenticated
+  for scrapers, so the per-tenant series (`strata_tenant_*`,
+  `strata_build_tenant_*`) and the per-table series are left out, and the
+  AI usage series (`strata_ai_*`) are per-model totals with no `tenant` or
+  `principal` label. Read per-tenant usage from `GET /v1/admin/tenants`
+  (`admin:tenants`) and per-table usage from `GET /metrics/tables`
+  (`admin:*`).
 
 A tenant registry tracks active tenants (LRU-bounded; only a tenant with nothing in flight is evicted). [Implementation details are in the source tree](https://github.com/bearing-research/strata/tree/main/src/strata) if you need to extend the tenant-scoping behavior.
 

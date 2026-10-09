@@ -436,8 +436,8 @@ class BuildMetricsCollector:
                 for e in events
             ]
 
-    def get_prometheus_metrics(self) -> str:
-        """Generate Prometheus metrics text for builds."""
+    def get_prometheus_metrics(self, *, include_tenants: bool = True) -> str:
+        """Generate Prometheus metrics text for builds; per-tenant series need *include_tenants*."""
         lines = []
 
         with self._lock:
@@ -541,11 +541,8 @@ class BuildMetricsCollector:
                         f'strata_build_transform_failed_total{{transform="{ref}"}} {stats.failed}'
                     )
 
-            tenant_list = sorted(
-                self._tenant_stats.values(),
-                key=lambda s: s.started,
-                reverse=True,
-            )[:20]
+            tenants = self._tenant_stats.values() if include_tenants else []
+            tenant_list = sorted(tenants, key=lambda s: s.started, reverse=True)[:20]
 
             if tenant_list:
                 lines.append("# HELP strata_build_tenant_started_total Builds started by tenant")

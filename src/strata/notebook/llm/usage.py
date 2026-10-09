@@ -43,14 +43,14 @@ def record_llm_usage(model: str, input_tokens: int, output_tokens: int) -> None:
         totals[2] += int(output_tokens or 0)
 
 
-def llm_usage(*, by_principal: bool = True) -> list[UsageRow]:
-    """The totals so far; without *by_principal*, a tenant's principals are summed per model."""
+def llm_usage(*, by_caller: bool = True) -> list[UsageRow]:
+    """The totals so far; without *by_caller*, every tenant and principal is summed per model."""
     with _lock:
-        if by_principal:
+        if by_caller:
             return [UsageRow(*key, *totals) for key, totals in sorted(_totals.items())]
         merged: dict[tuple[str, str, str], list[int]] = {}
-        for (tenant, _principal, model), totals in _totals.items():
-            summed = merged.setdefault((tenant, "", model), [0, 0, 0])
+        for (_tenant, _principal, model), totals in _totals.items():
+            summed = merged.setdefault(("", "", model), [0, 0, 0])
             for index, count in enumerate(totals):
                 summed[index] += count
         return [UsageRow(*key, *totals) for key, totals in sorted(merged.items())]

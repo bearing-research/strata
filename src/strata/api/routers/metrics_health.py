@@ -739,8 +739,8 @@ async def metrics_prometheus():
                 f'strata_table_cache_hit_rate{{table="{table_id}"}} {tm["cache_hit_rate"]}'
             )
 
-    tenant_registry = get_tenant_registry()
-    tenant_metrics = tenant_registry.get_all_tenant_metrics()
+    # Tenant ids are not for an unauthenticated scraper either.
+    tenant_metrics = [] if principal_auth else get_tenant_registry().get_all_tenant_metrics()
     if tenant_metrics:
         lines.extend(
             [
@@ -781,8 +781,9 @@ async def metrics_prometheus():
     # Model tokens, by who used them. Absent until the first model call.
     from strata.notebook.llm.usage import llm_usage
 
-    # Under principal auth who called a model is not for an unauthenticated scraper.
-    usage = llm_usage(by_principal=not principal_auth)
+    # Under principal auth who called a model (tenant or principal) is not for an
+    # unauthenticated scraper.
+    usage = llm_usage(by_caller=not principal_auth)
     if usage:
         for field, name, help_text in (
             ("calls", "strata_ai_calls_total", "Model calls"),
@@ -791,11 +792,15 @@ async def metrics_prometheus():
         ):
             lines.extend(["", f"# HELP {name} {help_text}", f"# TYPE {name} counter"])
             for row in usage:
-                labels = (
-                    f'tenant="{_prom_label(row.tenant)}",'
-                    + ("" if principal_auth else f'principal="{_prom_label(row.principal)}",')
-                    + f'model="{_prom_label(row.model)}"'
+                caller = (
+                    ""
+                    if principal_auth
+                    else (
+                        f'tenant="{_prom_label(row.tenant)}",'
+                        f'principal="{_prom_label(row.principal)}",'
+                    )
                 )
+                labels = caller + f'model="{_prom_label(row.model)}"'
                 lines.append(f"{name}{{{labels}}} {getattr(row, field)}")
 
     try:
@@ -803,7 +808,7 @@ async def metrics_prometheus():
 
         build_metrics = get_build_metrics()
         if build_metrics is not None:
-            build_prom = build_metrics.get_prometheus_metrics()
+            build_prom = build_metrics.get_prometheus_metrics(include_tenants=not principal_auth)
             if build_prom:
                 lines.append("")
                 lines.append(build_prom)
