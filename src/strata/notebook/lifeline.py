@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import signal
 import stat
+import subprocess
 import sys
 import threading
 
@@ -35,6 +36,17 @@ def lifeline_handoff() -> tuple[tuple[int, ...], dict[str, str]]:
     return (_pipe[0],), {LIFELINE_FD_ENV: str(_pipe[0])}
 
 
+def lifeline_command(argv: list[str]) -> list[str]:
+    """*argv* run under a Python that watches the lifeline for it.
+
+    For children that cannot watch one themselves (Rscript, ssh). The caller still
+    passes the handoff and starts the wrapper as a process-group leader.
+    """
+    if sys.platform == "win32":
+        return argv
+    return [sys.executable, "-I", __file__, *argv]
+
+
 def watch_lifeline() -> None:
     """Child side: start a daemon thread that kills this process group on EOF."""
     raw = os.environ.pop(LIFELINE_FD_ENV, None)
@@ -54,3 +66,18 @@ def _await_eof(fd: int) -> None:
     while os.read(fd, 1):  # nobody writes; only EOF matters
         continue
     os.killpg(os.getpgrp(), signal.SIGKILL)
+
+
+def _run_watched(argv: list[str]) -> int:
+    """Run *argv* in this process group under its lifeline; return a shell-style status."""
+    watch_lifeline()
+    child = subprocess.Popen(argv)
+    # A group-wide signal reaches the child anyway; a terminate aimed at the wrapper alone
+    # must too.
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: child.terminate())
+    returncode = child.wait()
+    return returncode if returncode >= 0 else 128 - returncode
+
+
+if __name__ == "__main__":
+    sys.exit(_run_watched(sys.argv[1:]))

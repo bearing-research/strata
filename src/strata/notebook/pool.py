@@ -21,7 +21,7 @@ from strata.notebook.harness_user import (
     resolve_harness_user,
     spawn_kwargs,
 )
-from strata.notebook.lifeline import lifeline_handoff
+from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
     kill_subprocess_tree_nowait,
@@ -108,7 +108,7 @@ class WarmProcessPool:
         self._warming += 1
         try:
             if self.worker_command is not None:
-                command = self.worker_command
+                command = lifeline_command(self.worker_command)
             else:
                 worker_script = Path(__file__).parent / "pool_worker.py"
                 command = [

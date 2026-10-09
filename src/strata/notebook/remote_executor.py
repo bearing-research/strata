@@ -250,17 +250,22 @@ async def _run_harness(
     cancel route can reach it. With *log_url*, output is also forwarded live to the
     dispatching server; the bundle is the same either way.
     """
-    from strata.notebook.lifeline import lifeline_handoff
+    from strata.notebook.lifeline import lifeline_command, lifeline_handoff
     from strata.notebook.process_tree import (
         subprocess_kwargs_for_new_group,
         terminate_subprocess_tree,
     )
 
-    lifeline_fds, lifeline_vars = lifeline_handoff()
-    proc = await asyncio.create_subprocess_exec(
+    argv = [
         str(interpreter) if interpreter is not None else sys.executable,
         str(harness_path),
         str(manifest_path),
+    ]
+    if harness_path.suffix == ".R":
+        argv = lifeline_command(argv)  # Rscript cannot watch the lifeline itself
+    lifeline_fds, lifeline_vars = lifeline_handoff()
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env={**(os.environ if env is None else env), **lifeline_vars},
