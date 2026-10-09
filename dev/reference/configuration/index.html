@@ -2833,6 +2833,11 @@ authentication. This is a startup error, not a warning:</p>
 <td>Max response size (413 if exceeded)</td>
 </tr>
 <tr>
+<td><code>STRATA_MAX_UPLOAD_BYTES</code></td>
+<td><code>10737418240</code> (10 GB)</td>
+<td>Max request body for the artifact write routes (<code>PUT /v1/artifacts</code>, <code>PUT /v1/artifacts/by-provenance/...</code>, <code>POST /v1/artifacts/import</code>, <code>PUT /v1/artifacts/import/blobs/...</code>, <code>POST /v1/artifacts/upload/...</code>); 413 if exceeded</td>
+</tr>
+<tr>
 <td><code>STRATA_MAX_EQUALITY_DELETE_ROWS</code></td>
 <td><code>10000000</code></td>
 <td>Iceberg equality delete rows a row group may need in memory; a scan over it is refused, pointing at compaction</td>
