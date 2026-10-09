@@ -1774,12 +1774,19 @@ class NotebookSession:
                     "Failed to persist environment job history for %s", self.path, exc_info=True
                 )
 
-    def has_active_environment_mutation(self) -> bool:
-        """Return whether an environment change is currently in progress."""
+    def has_active_environment_mutation(
+        self, *, besides: EnvironmentJobSnapshot | str | None = None
+    ) -> bool:
+        """Return whether an environment change other than ``besides`` is in progress.
+
+        ``besides`` is the job, or synchronous mutation label, the caller is running.
+        """
         with self._environment_state_lock:
-            return (
-                self.environment_job is not None and self.environment_job.status == "running"
-            ) or self._synchronous_environment_mutation is not None
+            job = self.environment_job
+            if job is not None and job.status == "running" and job is not besides:
+                return True
+            mutation = self._synchronous_environment_mutation
+            return mutation is not None and mutation != besides
 
     def _active_environment_mutation_label(self) -> str | None:
         """Return the label of the current environment mutation, if any."""
@@ -2732,17 +2739,22 @@ class NotebookSession:
         self.environment_last_synced_at = persisted.last_synced_at or int(_time.time() * 1000)
         self.environment_last_sync_duration_ms = int((_time.perf_counter() - started) * 1000)
 
-    def _should_start_warm_pool(self) -> bool:
-        """Return whether the notebook has a stable enough runtime for warm workers."""
+    def _should_start_warm_pool(self, owner: EnvironmentJobSnapshot | str | None = None) -> bool:
+        """Return whether the notebook has a stable enough runtime for warm workers.
+
+        ``owner`` is the mutation the caller is finishing: its own venv work is done.
+        """
         if _session_setting("notebook_warm_pool_size") == 0:
             return False
-        if self.has_active_environment_mutation():
+        if self.has_active_environment_mutation(besides=owner):
             return False
         return self.environment_sync_state in {"ready", "fallback"}
 
-    async def _ensure_warm_pool_started(self) -> None:
+    async def _ensure_warm_pool_started(
+        self, owner: EnvironmentJobSnapshot | str | None = None
+    ) -> None:
         """Create and start the warm process pool when the runtime is ready."""
-        if self.warm_pool is not None or not self._should_start_warm_pool():
+        if self.warm_pool is not None or not self._should_start_warm_pool(owner):
             return
 
         from strata.notebook.pool import WarmProcessPool
@@ -2757,7 +2769,7 @@ class NotebookSession:
             self.warm_pool.track_background_task(task)
         except RuntimeError:
             pass  # No running loop; pool stays cold until first acquire
-        self.start_r_pool_background()
+        self.start_r_pool_background(owner)
 
     def _has_r_cells(self) -> bool:
         """Whether any cell in the notebook is an R cell."""
@@ -2765,13 +2777,13 @@ class NotebookSession:
 
         return any(cell.language == CellLanguage.R for cell in self.notebook_state.cells)
 
-    def start_r_pool_background(self) -> None:
+    def start_r_pool_background(self, owner: EnvironmentJobSnapshot | str | None = None) -> None:
         """Create and start the warm R pool when the notebook needs one.
 
         Only for notebooks with R cells on machines with Rscript. Safe to call
         repeatedly.
         """
-        if self.r_warm_pool is not None or not self._should_start_warm_pool():
+        if self.r_warm_pool is not None or not self._should_start_warm_pool(owner):
             return
         if not self._has_r_cells():
             return
@@ -2814,13 +2826,16 @@ class NotebookSession:
             except Exception:
                 logger.exception("Failed to invalidate R warm pool")
 
-    async def sync_environment(self) -> dict[str, CellStaleness]:
-        """Re-sync the notebook environment and refresh runtime metadata."""
+    async def sync_environment(self, *, owner: str | None = None) -> dict[str, CellStaleness]:
+        """Re-sync the notebook environment and refresh runtime metadata.
+
+        ``owner`` is the synchronous mutation label the caller holds.
+        """
         old_hash = compute_lockfile_hash(self.path)
         await asyncio.to_thread(self.ensure_venv_synced)
         await self._invalidate_warm_pool_for_environment_change()
         try:
-            await self._ensure_warm_pool_started()
+            await self._ensure_warm_pool_started(owner)
         except Exception:
             logger.warning("Failed to start warm pool after sync for %s", self.path, exc_info=True)
 
@@ -3442,7 +3457,7 @@ class NotebookSession:
         job.phase = "starting_warm_pool"
         await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
         try:
-            await self._ensure_warm_pool_started()
+            await self._ensure_warm_pool_started(job)
         except Exception:
             logger.warning(
                 "Failed to start warm pool after environment job for %s",

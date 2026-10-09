@@ -148,7 +148,7 @@ class TestRPoolSessionGating:
             cells=[CellState(id="c1", source=source, language=language)],
         )
         session.environment_sync_state = "ready"
-        session.has_active_environment_mutation = lambda: False
+        session.has_active_environment_mutation = lambda **_: False
         return session
 
     def test_python_only_notebook_skips_r_pool(self, tmp_path):
