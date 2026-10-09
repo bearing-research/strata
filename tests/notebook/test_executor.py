@@ -906,7 +906,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         )
 
         assert result.success is False
-        assert result.error == "Execution failed: worker 'gpu-a100' is not implemented yet"
+        assert result.error == (
+            "Execution failed: worker 'gpu-a100' is unknown; "
+            "it is not a worker this notebook can use"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_allows_registered_local_worker_annotation(
@@ -946,7 +949,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         result = await executor.execute_cell("cell1", "x = 1")
 
         assert result.success is False
-        assert result.error == "Execution failed: worker 'gpu-default' is not implemented yet"
+        assert result.error == (
+            "Execution failed: worker 'gpu-default' is unknown; "
+            "it is not a worker this notebook can use"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_rejects_unimplemented_cell_worker_override(
@@ -963,7 +969,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         result = await executor.execute_cell("cell1", "x = 1")
 
         assert result.success is False
-        assert result.error == "Execution failed: worker 'gpu-override' is not implemented yet"
+        assert result.error == (
+            "Execution failed: worker 'gpu-override' is unknown; "
+            "it is not a worker this notebook can use"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_rejects_disallowed_service_mode_worker(

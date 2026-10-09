@@ -884,11 +884,16 @@ class CellExecutor:
                 self.session.notebook_state,
                 effective_worker,
             )
+            unsupported = (
+                "is unknown; it is not a worker this notebook can use"
+                if worker_spec is None
+                else "is not implemented yet"
+            )
             return CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
                 error=policy_error
-                or (f"Execution failed: worker '{effective_worker}' is not implemented yet"),
+                or f"Execution failed: worker '{effective_worker}' {unsupported}",
             )
 
         start_time = time.time()
