@@ -735,6 +735,17 @@ class TestRunJsonConsoleOutput:
         assert "stdout" not in payload["cells"][0]
         assert "stderr" not in payload["cells"][0]
 
+    def test_a_failure_carries_its_traceback(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1 / 0", None)])
+        _mk_fake_venv(notebook_dir)
+
+        assert run_main([str(notebook_dir), "--no-sync", "--format", "json"]) == 1
+
+        [cell] = json.loads(capsys.readouterr().out)["cells"]
+        assert cell["status"] == "error"
+        assert cell["traceback"].startswith("Traceback (most recent call last):")
+        assert cell["traceback"].rstrip().endswith("ZeroDivisionError: division by zero")
+
 
 def test_cell_timeout_message_names_the_remedy():
     from strata.notebook.executor import cell_timeout_message

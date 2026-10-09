@@ -392,6 +392,8 @@ async def _run_notebook(args: argparse.Namespace) -> int:
                 entry["mutation_warnings"] = [dict(w) for w in result.mutation_warnings]
             if not result.success:
                 entry["error"] = result.error or "cell failed"
+                if result.traceback:
+                    entry["traceback"] = result.traceback
                 if result.error_code:
                     entry["error_code"] = result.error_code
                 failed_cells.add(cell_id)

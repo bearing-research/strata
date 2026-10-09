@@ -44,8 +44,8 @@ run.
 finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
-`error` / `reason` where applicable, and `error_code` when the failure has a
-stable name, such as `fetch_pin_mismatch`). For a cell that produces an output
+`error` / `reason` where applicable, `traceback` when the cell raised, and
+`error_code` when the failure has a stable name, such as `fetch_pin_mismatch`). For a cell that produces an output
 artifact, a cache hit replays that artifact without re-emitting console
 output, so `stdout` can be absent on warm runs (`--force` re-executes). A
 leaf cell that only `print`s is different: its stdout/stderr are cached by
@@ -77,7 +77,7 @@ digest computed from its bytes when the report is written. The ZIP export's
 
 CI scripts can branch on the exit code; the structured output stays parseable
 even when some cells failed (each failure produces a JSON object with
-`status: "error"` and the traceback).
+`status: "error"`, its `error`, and the `traceback` when the cell raised).
 
 ## Example: GitHub Actions
 
