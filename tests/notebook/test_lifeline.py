@@ -154,3 +154,107 @@ def test_the_harness_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
         if harness_group is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(harness_group, signal.SIGKILL)
+
+
+# Rscript and ssh cannot watch the lifeline themselves, so they run under a wrapper
+# that does. The fakes stand in for them: each records its pid and waits.
+_FAKE_PROGRAM = """#!/bin/sh
+echo $$ > "$STRATA_TEST_PID_FILE.tmp" && mv "$STRATA_TEST_PID_FILE.tmp" "$STRATA_TEST_PID_FILE"
+echo ready
+exec sleep 600
+"""
+
+_WRAPPED_PARENTS = {
+    "r_harness": """
+from strata.notebook.executor import CellExecutor
+
+executor = CellExecutor.__new__(CellExecutor)
+executor.r_harness_path = work / "harness.R"
+executor.session = SimpleNamespace(path=work)
+asyncio.run(executor._run_r_harness(work / "manifest.json", 600.0))
+""",
+    "r_warm_pool_worker": """
+from strata.notebook.pool import WarmProcessPool
+
+async def main():
+    pool = WarmProcessPool(
+        work, pool_size=1, worker_command=[str(work / "bin" / "Rscript")], ready_timeout_seconds=600
+    )
+    await pool._spawn_warm_process()
+    await pool._available.get_nowait().process.wait()
+
+asyncio.run(main())
+""",
+    "strata_worker_r_harness": """
+from strata.notebook.remote_executor import _run_harness
+
+rscript = work / "bin" / "Rscript"
+asyncio.run(_run_harness(work / "harness.R", work / "manifest.json", 600.0, interpreter=rscript))
+""",
+    "ssh_tunnel": """
+import time
+from strata.notebook.remote_worker_supervisor import SubprocessTunnelLauncher
+
+SubprocessTunnelLauncher().spawn("box", local_port=1, remote_port=2)
+time.sleep(600)
+""",
+}
+
+
+@pytest.mark.parametrize("path", sorted(_WRAPPED_PARENTS))
+def test_a_wrapped_child_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("Rscript", "ssh"):
+        fake = bin_dir / name
+        fake.write_text(_FAKE_PROGRAM)
+        fake.chmod(0o755)
+    pid_file = tmp_path / "child.pid"
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "STRATA_TEST_PID_FILE": str(pid_file),
+    }
+    parent = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import asyncio, sys\nfrom pathlib import Path\nfrom types import SimpleNamespace\n"
+            "work = Path(sys.argv[1])\n" + _WRAPPED_PARENTS[path],
+            str(tmp_path),
+        ],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    child_pid: int | None = None
+    child_group: int | None = None
+    try:
+        deadline = time.monotonic() + _STARTUP_BOUND
+        while not pid_file.exists():
+            if parent.poll() is not None:
+                pytest.fail(f"the parent exited first: {parent.stderr.read().decode()}")
+            if time.monotonic() > deadline:
+                pytest.fail("the child never started")
+            time.sleep(0.05)
+        child_pid = int(pid_file.read_text())
+        child_group = os.getpgid(child_pid)
+        assert child_group != os.getpgrp(), "the child must run in its own process group"
+
+        parent.kill()
+        parent.wait()
+
+        deadline = time.monotonic() + _EXIT_BOUND
+        while not _gone(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _gone(child_pid), "the child outlived the process that spawned it"
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait()
+        with contextlib.suppress(ProcessLookupError):
+            if child_group is not None and child_group != os.getpgrp():
+                os.killpg(child_group, signal.SIGKILL)
+            elif child_pid is not None:
+                os.kill(child_pid, signal.SIGKILL)  # never our own group

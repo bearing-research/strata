@@ -90,7 +90,10 @@ class SubprocessTunnelLauncher:
     """:class:`TunnelLauncher` that runs a real ``ssh -N -L`` forward."""
 
     def spawn(self, ssh_target: str, *, local_port: int, remote_port: int) -> TunnelHandle:
+        import os
         import subprocess
+
+        from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 
         argv = [
             "ssh",
@@ -102,8 +105,17 @@ class SubprocessTunnelLauncher:
             f"{local_port}:127.0.0.1:{remote_port}",
             ssh_target,
         ]
+        # Under the lifeline so a killed server does not leave the forward holding its port.
+        lifeline_fds, lifeline_vars = lifeline_handoff()
         try:
-            proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(
+                lifeline_command(argv),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                env={**os.environ, **lifeline_vars},
+                pass_fds=lifeline_fds,
+                start_new_session=True,
+            )
         except OSError as exc:
             raise SshWorkerError(f"could not start ssh tunnel: {exc}") from exc
         return _PopenTunnelHandle(proc)

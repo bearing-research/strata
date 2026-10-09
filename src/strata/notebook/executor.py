@@ -57,7 +57,7 @@ from strata.notebook.harness_user import (
     write_run_file,
 )
 from strata.notebook.immutability import MutationWarning
-from strata.notebook.lifeline import lifeline_handoff
+from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.models import (
     CellLanguage,
     CellOutput,
@@ -5088,7 +5088,7 @@ class CellExecutor:
                 "variables": {},
             }
 
-        cmd = [rscript, str(self.r_harness_path), str(manifest_path)]
+        cmd = lifeline_command([rscript, str(self.r_harness_path), str(manifest_path)])
 
         from strata.notebook.process_tree import (
             subprocess_kwargs_for_new_group,
@@ -5096,12 +5096,14 @@ class CellExecutor:
         )
 
         hand_over(manifest_path.parent, harness_user)
+        lifeline_fds, lifeline_vars = lifeline_handoff()
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=identity_env(self._harness_env(), harness_user),
+            env=identity_env(self._harness_env(lifeline_vars), harness_user),
+            pass_fds=lifeline_fds,
             **spawn_kwargs(harness_user),
             **subprocess_kwargs_for_new_group(),
         )
