@@ -324,7 +324,7 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
 
     inline_png = None
     if publication.is_active and content_type == "image/png":
-        inline_png = _inline_png(store, publication)
+        inline_png = await asyncio.to_thread(_inline_png, store, publication)
 
     base = _public_base(http_request)
     page_url = quote(f"{base}/p/{token}", safe="")
@@ -393,7 +393,9 @@ async def publication_data(token: str, store: ReadStore):
     """
     publication, artifact = _load_published(store, token, require_active=True)
 
-    reader_cm = store.open_blob_reader(publication.artifact_id, publication.version)
+    reader_cm = await asyncio.to_thread(
+        store.open_blob_reader, publication.artifact_id, publication.version
+    )
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="The published bytes are gone")
 
@@ -542,7 +544,11 @@ async def publication_embed(token: str, store: ReadStore, http_request: Request)
         max_depth=PUBLICATION_MAX_DEPTH,
     )
     content_type = content_type_of(artifact)
-    image_src = _inline_png(store, publication) if content_type == "image/png" else None
+    image_src = (
+        await asyncio.to_thread(_inline_png, store, publication)
+        if content_type == "image/png"
+        else None
+    )
 
     return HTMLResponse(
         render_embed(

@@ -286,7 +286,7 @@ async def _put_artifact(
         minted=True,
     )
 
-    store.publish_blob_from_path(artifact_id, version, data_path)
+    await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
 
     finalized_artifact = store.finalize_artifact(
         artifact_id=artifact_id,
@@ -604,7 +604,7 @@ async def _import_artifact(
                 ),
             )
 
-    landed = store.import_artifact(record, blob)
+    landed = await asyncio.to_thread(store.import_artifact, record, blob)
     if staged and blob is not None:
         await asyncio.to_thread(store.release_staged_import, tenant_id, declared_digest)
     return {
@@ -733,7 +733,7 @@ async def _put_artifact_by_provenance(
         # "latest"; an upload that named nothing got an id nobody resolves.
         minted=not named_id,
     )
-    store.publish_blob_from_path(artifact_id, version, data_path)
+    await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
     finalized = store.finalize_artifact(
         artifact_id=artifact_id,
         version=version,
@@ -1340,7 +1340,9 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
     try:
-        finalized_artifact = store.finalize_artifact(
+        # Without a digest, finalize reads the whole blob to hash it.
+        finalized_artifact = await asyncio.to_thread(
+            store.finalize_artifact,
             artifact_id=request.artifact_id,
             version=request.version,
             schema_json=request.arrow_schema,

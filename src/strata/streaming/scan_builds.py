@@ -267,8 +267,11 @@ class ScanBuildManager:
                 else:
                     empty_stream = b""
 
-                store.write_blob(
-                    stream_state.artifact_id, stream_state.artifact_version, empty_stream
+                await asyncio.to_thread(
+                    store.write_blob,
+                    stream_state.artifact_id,
+                    stream_state.artifact_version,
+                    empty_stream,
                 )
                 await self.finalize_written_blob(state, stream_state, 0, len(empty_stream))
                 stream_state.bytes_streamed = len(empty_stream)
@@ -282,11 +285,12 @@ class ScanBuildManager:
             start_time = time.perf_counter()
 
             # Write-through for bounded memory. The merger emits one IPC stream across row
-            # groups so standard readers see every row; the blob commits on context exit.
+            # groups so standard readers see every row. Writes go to a local staging file; the
+            # commit, an upload on a remote store, runs off the loop.
             merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
-            with store.open_blob_writer(
-                stream_state.artifact_id, stream_state.artifact_version
-            ) as blob:
+            writer = store.open_blob_writer(stream_state.artifact_id, stream_state.artifact_version)
+            blob = writer.__enter__()
+            try:
                 for index, task in enumerate(plan.tasks):
                     if state._draining:
                         raise RuntimeError("Server is shutting down")
@@ -322,6 +326,10 @@ class ScanBuildManager:
                     if tail:
                         blob.write(tail)
                         byte_size += len(tail)
+            except BaseException as exc:
+                writer.__exit__(type(exc), exc, exc.__traceback__)
+                raise
+            await asyncio.to_thread(writer.__exit__, None, None, None)
 
             await self.finalize_written_blob(state, stream_state, row_count, byte_size)
             stream_state.bytes_streamed = byte_size

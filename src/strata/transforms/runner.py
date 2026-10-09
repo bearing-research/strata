@@ -445,8 +445,12 @@ class BuildRunner:
                     attempt,
                     writable_until=time.time(),
                 )
-                self.artifact_store.publish_blob_from_path(
-                    build.artifact_id, build.version, output_path, attempt=attempt
+                await asyncio.to_thread(
+                    self.artifact_store.publish_blob_from_path,
+                    build.artifact_id,
+                    build.version,
+                    output_path,
+                    attempt=attempt,
                 )
 
                 # Publishing the attempt and completing the build are one transaction,
@@ -464,7 +468,9 @@ class BuildRunner:
                     )
 
                 try:
-                    finalized_artifact = self.artifact_store.finalize_artifact(
+                    # Finalize reads the attempt's bytes back to hash them.
+                    finalized_artifact = await asyncio.to_thread(
+                        self.artifact_store.finalize_artifact,
                         artifact_id=build.artifact_id,
                         version=build.version,
                         schema_json=schema_json,
@@ -581,6 +587,17 @@ class BuildRunner:
                     except Exception:
                         pass
 
+    def _blob_to_temp_file(self, artifact_id: str, version: int) -> Path | None:
+        """Copy a blob to a temp file under ``artifact_dir``, or None if there is none. Blocking."""
+        blob = self.artifact_store.read_blob(artifact_id, version)
+        if blob is None:
+            return None
+        fd, tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
+        os.close(fd)  # Windows: handle must be closed before rename
+        temp_file = Path(tmp_path)
+        temp_file.write_bytes(blob)
+        return temp_file
+
     async def _acquire_input(
         self,
         input_uri: str,
@@ -606,14 +623,9 @@ class BuildRunner:
             artifact_id = match.group(1)
             version = int(match.group(2))
 
-            blob = self.artifact_store.read_blob(artifact_id, version)
-            if blob is None:
+            temp_file = await asyncio.to_thread(self._blob_to_temp_file, artifact_id, version)
+            if temp_file is None:
                 raise ValueError(f"Artifact blob not found: {input_uri}")
-
-            _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
-            os.close(_fd)  # Windows: handle must be closed before rename
-            temp_file = Path(_tmp_path)
-            temp_file.write_bytes(blob)
             temp_files.append(temp_file)
             return temp_file
 
@@ -630,14 +642,9 @@ class BuildRunner:
                     raise ValueError(f"Name not found: {name}")
                 target_id, target_version = artifact.id, artifact.version
 
-            blob = self.artifact_store.read_blob(target_id, target_version)
-            if blob is None:
+            temp_file = await asyncio.to_thread(self._blob_to_temp_file, target_id, target_version)
+            if temp_file is None:
                 raise ValueError(f"Artifact blob not found for name: {name}")
-
-            _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
-            os.close(_fd)  # Windows: handle must be closed before rename
-            temp_file = Path(_tmp_path)
-            temp_file.write_bytes(blob)
             temp_files.append(temp_file)
             return temp_file
 
