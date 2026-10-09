@@ -57,6 +57,7 @@ _MISSING = object()
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
+_lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 
 # Harness-injected names excluded from mutation fingerprinting (the ``display``
 # buffer grows every run and would read as an in-place mutation).
@@ -373,6 +374,7 @@ def execute_harness(manifest: dict) -> dict:
 
 
 def main() -> None:
+    _lifeline.watch_lifeline()
     try:
         imports = parse_common_imports()
         warm_imports(imports)

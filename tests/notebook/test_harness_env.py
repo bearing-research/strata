@@ -7,6 +7,8 @@ to anyone who can run a cell.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from strata.notebook.harness_env import harness_env
@@ -215,18 +217,20 @@ class TestEverySpawnApplied:
         assert seen["env"]["HF_TOKEN"] == "hf_x"
 
     def test_the_warm_pool_inherits_when_unset(self, tmp_path, monkeypatch):
-        """``env=None`` rather than a copy, so an unconfigured deployment gets
-        the spawn it always got."""
+        """An unconfigured deployment hands over the server's whole environment, plus
+        only the lifeline fd that lets the worker die with the server."""
         import asyncio as _asyncio
 
         from strata.notebook import pool as pool_module
+        from strata.notebook.lifeline import LIFELINE_FD_ENV
 
         seen = self._capture(monkeypatch, pool_module)
 
         warm = pool_module.WarmProcessPool(tmp_path, pool_size=1)
         _asyncio.run(warm._spawn_warm_process())
 
-        assert seen["env"] is None
+        inherited = {k: v for k, v in seen["env"].items() if k != LIFELINE_FD_ENV}
+        assert inherited == dict(os.environ)
 
     def test_the_r_harness_is_filtered(self, monkeypatch):
         """R cells are cell code like any other."""
