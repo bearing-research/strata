@@ -131,7 +131,7 @@ class TableIdentity:
     def from_table_id(cls, table_id: str, catalog: str = "strata") -> "TableIdentity":
         """Create from a ``'namespace.table'`` id; raises ValueError on any other shape."""
         parts = table_id.split(".")
-        if len(parts) != 2:
+        if len(parts) != 2 or not all(parts):
             raise ValueError(f"Invalid table_id '{table_id}': expected 'namespace.table' format")
         return cls(catalog=catalog, namespace=parts[0], table=parts[1])
 

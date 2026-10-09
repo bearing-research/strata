@@ -13,7 +13,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-MALFORMED = ["events", "a.b.c", "file:///wh#a.b.c"]
+MALFORMED = ["events", "a.b.c", "file:///wh#a.b.c", "file:///wh#.events", "file:///wh#ns."]
 
 
 @pytest.fixture
