@@ -25,7 +25,7 @@ from strata.fetcher import create_fetcher
 from strata.notebook.models import TableSpec
 from strata.notebook.tables import resolve_table_snapshot
 from strata.planner import ReadPlanner
-from tests.conftest import MINIO_IMAGE, start_container_or_skip
+from tests.conftest import MINIO_IMAGE, make_azurite, start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -290,12 +290,8 @@ def test_a_gcs_request_warehouse_reads_with_the_gcs_settings(tmp_path, fake_gcs)
 def azurite():
     """Azurite with a ``lake`` container."""
     from azure.storage.blob import BlobServiceClient
-    from testcontainers.community.azurite import AzuriteContainer
 
-    # :latest because older Azurite rejects the installed SDK's API version.
-    container = start_container_or_skip(
-        AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
-    )
+    container = start_container_or_skip(make_azurite(), label="Azurite")
     try:
         connection_string = container.get_connection_string()
         BlobServiceClient.from_connection_string(connection_string).create_container("lake")

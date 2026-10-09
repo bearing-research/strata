@@ -28,7 +28,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.conftest import MINIO_IMAGE, service_auth, start_container_or_skip
+from tests.conftest import MINIO_IMAGE, make_azurite, service_auth, start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -267,11 +267,8 @@ def gcs_mount():
 def azure_mount():
     """An Azurite container ``raw`` holding ``events/part-0.parquet``: (uri, options)."""
     from azure.storage.blob import BlobServiceClient
-    from testcontainers.community.azurite import AzuriteContainer
 
-    container = start_container_or_skip(
-        AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
-    )
+    container = start_container_or_skip(make_azurite(), label="Azurite")
     try:
         client = BlobServiceClient.from_connection_string(container.get_connection_string())
         client.create_container("raw").upload_blob("events/part-0.parquet", _parquet([4, 5]))

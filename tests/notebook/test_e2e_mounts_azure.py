@@ -28,7 +28,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
-from tests.conftest import start_container_or_skip
+from tests.conftest import make_azurite, start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -51,14 +51,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 @pytest.fixture(scope="module")
 def azurite_container():
-    """Module-scoped Azurite container exposing the Blob endpoint.
-
-    ``:latest`` on purpose: older Azurite rejects the installed SDK's API version with
-    ``InvalidHeaderValue``, and a fixed pin drifts worse than latest breaks.
-    """
-    container = start_container_or_skip(
-        AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
-    )
+    """Module-scoped Azurite container exposing the Blob endpoint."""
+    container = start_container_or_skip(make_azurite(), label="Azurite")
     try:
         yield container
     finally:
