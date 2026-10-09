@@ -699,6 +699,38 @@ class TestFinalizeEndpoint:
             "Arrow validation reader ran on the event loop thread"
         )
 
+    def test_finalize_hashes_the_output_off_the_event_loop(
+        self, client, build_store, artifact_store, monkeypatch
+    ):
+        """Finalize reads the whole output back to hash it; a loop doing that serves nobody."""
+        import asyncio
+
+        version = create_test_artifact(artifact_store, "fin-output-digest", finalize=False)
+        build_store.create_build(
+            build_id="fin-build-digest",
+            artifact_id="fin-output-digest",
+            version=version,
+            executor_ref="test@v1",
+        )
+        artifact_store.write_blob("fin-output-digest", version, create_test_arrow_blob())
+        on_loop: list[bool] = []
+        real_blob_digest = artifact_store.blob_digest
+
+        def _recording_blob_digest(*args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(True)
+            except RuntimeError:
+                on_loop.append(False)
+            return real_blob_digest(*args, **kwargs)
+
+        monkeypatch.setattr(artifact_store, "blob_digest", _recording_blob_digest)
+
+        response = client.post("/v1/builds/fin-build-digest/finalize")
+
+        assert response.status_code == 200, response.text
+        assert on_loop == [False]
+
     def test_finalize_records_quota_bytes(self, client, build_store, artifact_store):
         """Finalize charges the produced bytes to the build's QoS quota."""
         qos = BuildQoS(BuildQoSConfig(bytes_per_day_limit=10 * 1024 * 1024))

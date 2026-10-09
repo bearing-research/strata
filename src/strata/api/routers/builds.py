@@ -616,7 +616,9 @@ async def finalize_build(
             )
 
     try:
-        finalized_artifact = store.finalize_and_set_name(
+        # Finalize reads the blob back to hash it.
+        finalized_artifact = await asyncio.to_thread(
+            store.finalize_and_set_name,
             artifact_id=build.artifact_id,
             version=build.version,
             schema_json=schema_json,

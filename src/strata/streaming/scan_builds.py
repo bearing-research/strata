@@ -417,8 +417,10 @@ class ScanBuildManager:
                     f"{readable_rows} rows, build reported {row_count}"
                 )
 
-            # Marks ready and sets metadata and the name pointer atomically.
-            finalized_artifact = store.finalize_and_set_name(
+            # Marks ready and sets metadata and the name pointer atomically. It reads the
+            # blob back to hash it, so it runs off the loop.
+            finalized_artifact = await asyncio.to_thread(
+                store.finalize_and_set_name,
                 artifact_id=stream_state.artifact_id,
                 version=stream_state.artifact_version,
                 schema_json=schema_json,
