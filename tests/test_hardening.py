@@ -50,6 +50,41 @@ def append_rows(table, start: int, count: int) -> None:
 
 
 @pytest.fixture
+def serve():
+    """Start a server on the ServerState already set for *config*; each stops at teardown.
+
+    A server left running outlives its test: its build runner keeps polling until the
+    interpreter exits, logging an error on every tick.
+    """
+    from strata.server import app
+    from tests.conftest import wait_for_server
+
+    started: list[tuple[uvicorn.Server, threading.Thread]] = []
+
+    def start(config: StrataConfig) -> None:
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host=config.host,
+                port=config.port,
+                log_level="error",
+                ws="websockets-sansio",
+            )
+        )
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        started.append((server, thread))
+        assert wait_for_server(config.port, thread=thread), "the server did not start"
+
+    yield start
+    for server, _ in started:
+        server.should_exit = True
+    for _, thread in started:
+        # Generous, so the lifespan shutdown (stopping the build runner) completes.
+        thread.join(timeout=15.0)
+
+
+@pytest.fixture
 def temp_warehouse(tmp_path):
     """Create a temporary warehouse with a sample Iceberg table."""
     if sys.platform == "win32":
@@ -255,7 +290,7 @@ class TestConcurrentRequestsNoThunderingHerd:
 
         assert all(r == results[0] for r in results)
 
-    def test_server_concurrent_scans_use_semaphore(self, temp_warehouse, tmp_path):
+    def test_server_concurrent_scans_use_semaphore(self, temp_warehouse, tmp_path, serve):
         """The server limits concurrent scans with a semaphore."""
         import socket
 
@@ -276,22 +311,11 @@ class TestConcurrentRequestsNoThunderingHerd:
         )
 
         import strata.server as server_module
-        from strata.server import ServerState, app
+        from strata.server import ServerState
 
         server_module._state = ServerState(config)
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         client = StrataClient(base_url=f"http://127.0.0.1:{port}")
 
@@ -437,7 +461,7 @@ class TestStreamingIntegration:
     """The HTTP streaming endpoint against a running server."""
 
     @pytest.fixture
-    def server_with_client(self, temp_warehouse, tmp_path):
+    def server_with_client(self, temp_warehouse, tmp_path, serve):
         """A running server and a client for it."""
         import socket
 
@@ -455,22 +479,11 @@ class TestStreamingIntegration:
         )
 
         import strata.server as server_module
-        from strata.server import ServerState, app
+        from strata.server import ServerState
 
         server_module._state = ServerState(config)
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         client = StrataClient(base_url=f"http://127.0.0.1:{port}")
 
@@ -704,7 +717,7 @@ class TestStreamingIntegration:
             batches = list(reader)
             assert len(batches) > 0
 
-    def test_timeout_aborts_stream_with_error(self, temp_warehouse, tmp_path):
+    def test_timeout_aborts_stream_with_error(self, temp_warehouse, tmp_path, serve):
         """A scan past its (very short) timeout errors instead of truncating silently."""
         import socket
 
@@ -727,23 +740,12 @@ class TestStreamingIntegration:
             deployment_mode="personal",
         )
 
-        from strata.server import ServerState, app
+        from strata.server import ServerState
 
         state = ServerState(config)
         server_module._state = state
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         # Three row groups, not two: the first can come from a finished prefetch, so
         # the check before the second can land inside 1ms. The check before the third
@@ -802,7 +804,7 @@ class TestStreamAbortMetrics:
     """Stream abort counters."""
 
     @pytest.fixture
-    def server_with_metrics(self, temp_warehouse, tmp_path):
+    def server_with_metrics(self, temp_warehouse, tmp_path, serve):
         """A running server with access to its metrics."""
         import socket
 
@@ -820,23 +822,12 @@ class TestStreamAbortMetrics:
         )
 
         import strata.server as server_module
-        from strata.server import ServerState, app
+        from strata.server import ServerState
 
         state = ServerState(config)
         server_module._state = state
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         yield {
             "state": state,
@@ -852,7 +843,7 @@ class TestStreamAbortMetrics:
     # TestStreamingIntegration.test_client_disconnect_releases_resources and
     # test_semaphore_leak.test_concurrent_disconnects_no_leak.
 
-    def test_timeout_increments_counter(self, temp_warehouse, tmp_path):
+    def test_timeout_increments_counter(self, temp_warehouse, tmp_path, serve):
         import socket
 
         import httpx
@@ -872,23 +863,12 @@ class TestStreamAbortMetrics:
         )
 
         import strata.server as server_module
-        from strata.server import ServerState, app
+        from strata.server import ServerState
 
         state = ServerState(config)
         server_module._state = state
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         append_rows(temp_warehouse["table"], 1000, 25)
         table_uri = temp_warehouse["table_uri"]
@@ -924,7 +904,7 @@ class TestStreamAbortMetrics:
         final_timeouts = state.metrics.stream_aborts_timeout
         assert final_timeouts > initial_timeouts
 
-    def test_size_limit_increments_counter(self, temp_warehouse, tmp_path):
+    def test_size_limit_increments_counter(self, temp_warehouse, tmp_path, serve):
         """Pre-flight size rejection increments stream_aborts_size."""
         import socket
 
@@ -945,23 +925,12 @@ class TestStreamAbortMetrics:
         )
 
         import strata.server as server_module
-        from strata.server import ServerState, app
+        from strata.server import ServerState
 
         state = ServerState(config)
         server_module._state = state
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         initial_size_aborts = state.metrics.stream_aborts_size
 
@@ -1084,7 +1053,7 @@ class TestActiveScanCount:
         asyncio.run(test_counting())
         reset_tenant_registry()
 
-    def test_active_scans_released_on_completion(self, temp_warehouse, tmp_path):
+    def test_active_scans_released_on_completion(self, temp_warehouse, tmp_path, serve):
         import socket
 
         import httpx
@@ -1104,23 +1073,12 @@ class TestActiveScanCount:
         )
 
         import strata.server as server_module
-        from strata.server import ServerState, _get_active_scan_count, app
+        from strata.server import ServerState, _get_active_scan_count
 
         state = ServerState(config)
         server_module._state = state
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         table_uri = temp_warehouse["table_uri"]
 
@@ -1144,7 +1102,7 @@ class TestActiveScanCount:
 
 
 class TestConcurrentScans:
-    def test_concurrent_scans_all_succeed(self, temp_warehouse, tmp_path):
+    def test_concurrent_scans_all_succeed(self, temp_warehouse, tmp_path, serve):
         """Five concurrent scans of one table all return 200 with valid IPC.
 
         A shared non-thread-safe cursor, a deadlock or a corrupted shared cache would error or hang.
@@ -1169,22 +1127,11 @@ class TestConcurrentScans:
         )
 
         import strata.server as server_module
-        from strata.server import ServerState, app
+        from strata.server import ServerState
 
         server_module._state = ServerState(config)
 
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={
-                "app": app,
-                "host": config.host,
-                "port": config.port,
-                "log_level": "error",
-            },
-            daemon=True,
-        )
-        server_thread.start()
-        time.sleep(1)
+        serve(config)
 
         table_uri = temp_warehouse["table_uri"]
 
