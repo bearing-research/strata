@@ -261,6 +261,38 @@ def test_a_named_id_is_held_by_its_tenant_from_its_first_upload(team_server, fin
     assert store.get_artifact("nb_x", version + 1) is None
 
 
+def test_another_teams_upload_landing_mid_request_still_holds_the_id(team_server, monkeypatch):
+    """Team-b's first version of the id commits after team-a's route found the id unused."""
+    other = ArtifactStore(team_server["artifact_dir"])
+    create = ArtifactStore.create_artifact
+
+    def team_b_lands_first(self, artifact_id, *args, **kwargs):
+        if artifact_id == "nb_race" and kwargs.get("tenant") == "team-a":
+            create(other, "nb_race", "a" * 64, tenant="team-b")
+        return create(self, artifact_id, *args, **kwargs)
+
+    monkeypatch.setattr(ArtifactStore, "create_artifact", team_b_lands_first)
+
+    response = httpx.put(
+        f"{team_server['base_url']}/v1/artifacts/by-provenance/{'b' * 64}",
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps({"content_type": "pickle/object", "artifact_id": "nb_race"}),
+                "application/json",
+            ),
+            "data": ("data.bin", b"other", "application/octet-stream"),
+        },
+        headers=_headers("team-a", "alice", scopes="artifacts:write"),
+        timeout=30.0,
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "nb_race already exists under another tenant"
+    assert other.get_artifact("nb_race", 1).tenant == "team-b"
+    assert other.get_artifact("nb_race", 2) is None
+
+
 def test_a_caller_computed_key_round_trips_with_opaque_bytes(personal_server):
     """Non-Arrow bytes (a pickle) must survive; only the notebook's serializer knows the format."""
     base_url = personal_server["base_url"]

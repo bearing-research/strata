@@ -47,6 +47,14 @@ class ArtifactImportConflict(ValueError):
     """
 
 
+class ArtifactIdTaken(ValueError):
+    """Another tenant's versions hold this artifact id.
+
+    A version appended under it would become that tenant's latest, which its
+    notebook reads and retention protects.
+    """
+
+
 def reject_unsafe_artifact_id(artifact_id: str) -> None:
     """Refuse an id from another store that would name a path.
 
@@ -1140,6 +1148,9 @@ class ArtifactStore:
         URI to version for staleness checks. ``minted`` means the caller made the id up
         (``uuid4``) for this computation, so retention may collect its latest version;
         later versions of a minted id stay minted.
+
+        Raises:
+            ArtifactIdTaken: If a version of ``artifact_id`` belongs to another tenant.
         """
         conn = self._get_connection()
         try:
@@ -1147,6 +1158,9 @@ class ArtifactStore:
             # same id into a primary-key collision. The key names what is contended so a backend can
             # lock narrowly; SQLite ignores it and locks the file.
             self._dialect.begin_write(conn, artifact_id)
+            if self._held_by_another_tenant(conn, artifact_id, tenant):
+                conn.rollback()
+                raise ArtifactIdTaken(f"{artifact_id} already exists under another tenant")
             row = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) + 1 AS next_version, "
                 "COALESCE(MAX(minted), 0) AS was_minted "
@@ -1185,6 +1199,20 @@ class ArtifactStore:
             conn.close()
 
     @staticmethod
+    def _held_by_another_tenant(
+        conn: StoreConnection, artifact_id: str, tenant: str | None
+    ) -> bool:
+        """Whether a version of ``artifact_id``, ``building`` included, belongs to another tenant.
+
+        Run on the caller's write transaction, so no version can appear before its insert.
+        """
+        row = conn.execute(
+            "SELECT 1 FROM artifact_versions WHERE id = ? AND COALESCE(tenant, '') <> ? LIMIT 1",
+            (artifact_id, tenant or ""),
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
     def _ready_with_provenance(
         conn: StoreConnection, record: ArtifactVersion
     ) -> tuple[str, int] | None:
@@ -1220,8 +1248,10 @@ class ArtifactStore:
         """Where this record already lives here, else ``None``.
 
         Either the exact ``id@v=N`` or the same computation under another id; both
-        mean nothing is written.
+        mean nothing is written. An id another tenant holds is a conflict, at any version.
         """
+        if self._held_by_another_tenant(conn, record.id, record.tenant):
+            raise ArtifactImportConflict(f"{record.id} is already here, under another tenant.")
         existing = conn.execute(
             "SELECT provenance_hash FROM artifact_versions WHERE id = ? AND version = ?",
             (record.id, record.version),

@@ -7,6 +7,7 @@ imports the record whose ``content_sha256`` names them. Large artifacts never si
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -208,6 +209,43 @@ class TestInACentralStore:
         assert remapped.status_code == 200, remapped.text
         assert remapped.json()["remapped"] is True
         assert remapped.json()["id"] != "fig"
+
+    def test_a_new_version_of_an_id_another_tenant_holds_is_a_409(self, central):
+        """Appended, it would become the other team's latest for that id."""
+        base, artifact_dir = central
+        _stage(base, headers=_headers("team-a"))
+        _import(base, _record(), headers=_headers("team-a"))
+        _stage(base, headers=_headers("team-b"))
+
+        clash = _import(base, _record(version=2), headers=_headers("team-b"))
+        assert clash.status_code == 409, clash.text
+        assert ArtifactStore(artifact_dir).get_artifact("fig", 2) is None
+
+        remapped = _import(base, _record(version=2), headers=_headers("team-b"), remap="true")
+        assert remapped.status_code == 200, remapped.text
+        assert remapped.json()["id"] != "fig"
+
+    def test_another_tenants_import_landing_mid_request_still_holds_the_id(
+        self, central, monkeypatch
+    ):
+        """Team-a's import commits after team-b's route found the id unused."""
+        base, artifact_dir = central
+        other = ArtifactStore(artifact_dir)
+        import_artifact = ArtifactStore.import_artifact
+
+        def team_a_lands_first(self, record, blob):
+            if record.id == "fig" and record.tenant == "team-b":
+                import_artifact(other, replace(record, tenant="team-a"), b"team-a's bytes")
+            return import_artifact(self, record, blob)
+
+        monkeypatch.setattr(ArtifactStore, "import_artifact", team_a_lands_first)
+        _stage(base, headers=_headers("team-b"))
+
+        response = _import(base, _record(), headers=_headers("team-b"))
+
+        assert response.status_code == 409, response.text
+        assert other.get_artifact("fig", 1).tenant == "team-a"
+        assert other.read_blob("fig", 1) == b"team-a's bytes"
 
     @pytest.mark.parametrize("step", ["stage", "import"])
     def test_without_the_write_scope_nothing_is_taken(self, central, step):

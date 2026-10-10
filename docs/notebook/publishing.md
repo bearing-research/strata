@@ -417,8 +417,9 @@ POST /v1/artifacts/import                    {"id": ..., "version": ..., "proven
 The record's `content_sha256` names the bytes uploaded before it, and only the
 same tenant's upload counts: a digest is printed on every publication's page,
 so knowing one proves nothing. An upload nothing imports is dropped a day later.
-The import stamps the caller's tenant on the row, answers 409 for a version
-another tenant or another computation holds unless `?remap=true` is set, and is
+The import stamps the caller's tenant on the row, answers 409 for an id another
+tenant holds (at any version) or a version another computation holds unless
+`?remap=true` is set, and is
 idempotent: repeating a finished import writes nothing and needs no new upload.
 The same route also takes a multipart body with the record as `metadata` and
 the bytes as `data`, which holds the whole artifact in memory on both sides.
