@@ -11,6 +11,7 @@ from strata.artifact_store import (
     compute_provenance_hash,
     reset_artifact_store,
 )
+from tests.conftest import race_after_pending_read
 
 
 @pytest.fixture
@@ -1251,6 +1252,70 @@ class TestApproveAtomicity:
             "alias_request_set",
         ]
         assert entries[0]["actor"] == "approver"
+
+
+def _no_wait_store(artifact_dir):
+    """A second store on the same database (as another process would open) that never waits."""
+    competitor = ArtifactStore(artifact_dir)
+    connect = competitor._get_connection
+
+    def no_wait():
+        conn = connect()
+        conn.execute("PRAGMA busy_timeout = 0")
+        return conn
+
+    competitor._get_connection = no_wait
+    return competitor
+
+
+_DECISIONS = {
+    "approve": lambda s: s.approve_alias_change("demo/model", "champion"),
+    "reject": lambda s: s.reject_alias_change("demo/model", "champion"),
+}
+
+
+class TestPendingChangeRaces:
+    """Reading a pending change and consuming it is one step, even across connections."""
+
+    @pytest.mark.parametrize(("first", "second"), [("approve", "reject"), ("reject", "approve")])
+    def test_an_approve_and_a_reject_of_one_change_have_one_winner(
+        self, store, artifact_dir, first, second
+    ):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.request_alias_change("demo/model", "champion", "set", artifact_id="m1", version=1)
+
+        won, lost = race_after_pending_read(
+            store, _no_wait_store(artifact_dir), _DECISIONS[first], _DECISIONS[second]
+        )
+
+        assert won["artifact_id"] == "m1"
+        assert isinstance(lost, ValueError) and "No pending change" in str(lost)
+        actions = [e["action"] for e in store.read_audit(name="demo/model")]
+        assert ("alias_approved" in actions, "alias_rejected" in actions) == (
+            first == "approve",
+            first == "reject",
+        )
+        assert (store.resolve_alias("demo/model", "champion") is not None) == (first == "approve")
+
+    def test_an_approval_leaves_a_newer_request_pending(self, store, artifact_dir):
+        _make_ready_artifact(store, "m1", "prov-1")
+        _make_ready_artifact(store, "m2", "prov-2")
+        store.request_alias_change("demo/model", "champion", "set", artifact_id="m1", version=1)
+
+        applied, requested = race_after_pending_read(
+            store,
+            _no_wait_store(artifact_dir),
+            _DECISIONS["approve"],
+            lambda s: s.request_alias_change(
+                "demo/model", "champion", "set", artifact_id="m2", version=1
+            ),
+        )
+
+        assert applied["artifact_id"] == "m1" and requested is True
+        assert store.resolve_alias("demo/model", "champion").id == "m1"
+        audit = store.read_audit(name="demo/model")
+        assert [e["artifact_id"] for e in audit if e["action"] == "alias_approved"] == ["m1"]
+        assert [p["artifact_id"] for p in store.list_pending_changes()] == ["m2"]
 
 
 class TestCreateArtifactVersionRace:

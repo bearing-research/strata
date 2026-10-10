@@ -3502,6 +3502,9 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             effective_tenant = tenant if tenant is not None else ""
+            # Lock before reading, or a reject or newer request committed in between is
+            # consumed while the stale change read here is applied.
+            self._dialect.begin_write(conn, "registry_audit")
             cursor = conn.execute(
                 "SELECT name, alias, action, artifact_id, version, requested_by "
                 "FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
@@ -3540,7 +3543,6 @@ class ArtifactStore:
                         "change or submit a new request"
                     )
 
-            self._serialize_audit(conn)
             conn.execute(
                 "DELETE FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
                 (name, alias, effective_tenant),
@@ -3631,6 +3633,8 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             effective_tenant = tenant if tenant is not None else ""
+            # Lock before reading, so an approve cannot apply the change rejected here.
+            self._dialect.begin_write(conn, "registry_audit")
             cursor = conn.execute(
                 "SELECT name, alias, action, artifact_id, version, requested_by "
                 "FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
@@ -3639,7 +3643,6 @@ class ArtifactStore:
             pending = cursor.fetchone()
             if pending is None:
                 raise ValueError(f"No pending change for alias '{name}@{alias}'")
-            self._serialize_audit(conn)
             conn.execute(
                 "DELETE FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
                 (name, alias, effective_tenant),

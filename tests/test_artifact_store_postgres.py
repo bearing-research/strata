@@ -16,6 +16,7 @@ from testcontainers.community.postgres import PostgresContainer
 from strata.artifact_cli import _server_store as _configured_server_store
 from strata.artifact_store import ArtifactStore, TransformSpec
 from strata.sql_backend import PostgresDialect, advisory_lock_id
+from tests.conftest import race_after_pending_read
 
 
 def _docker_daemon_reachable() -> bool:
@@ -1200,6 +1201,77 @@ class TestWriterSerialization:
         assert result is not None
         found = store.find_by_provenance("same-prov")
         assert found is not None
+
+
+@pytest.fixture
+def no_wait_store(postgres_dsn, tmp_path, store):
+    """A second node on the same database whose statements never wait for a lock."""
+    dialect = PostgresDialect(postgres_dsn)
+    competitor = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+    connect = competitor._get_connection
+
+    def no_wait():
+        conn = connect()
+        conn.execute("SET lock_timeout = '1ms'")
+        return conn
+
+    competitor._get_connection = no_wait
+    yield competitor
+    dialect.close()
+
+
+_DECISIONS = {
+    "approve": lambda s: s.approve_alias_change("model", "champion"),
+    "reject": lambda s: s.reject_alias_change("model", "champion"),
+}
+
+
+class TestPendingChangeRaces:
+    """Reading a pending change and consuming it is one step across nodes."""
+
+    def _ready(self, store, artifact_id):
+        version = store.create_artifact(artifact_id, f"prov-{artifact_id}", _spec())
+        store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=0)
+
+    @pytest.mark.parametrize(("first", "second"), [("approve", "reject"), ("reject", "approve")])
+    def test_an_approve_and_a_reject_of_one_change_have_one_winner(
+        self, store, no_wait_store, first, second
+    ):
+        self._ready(store, "m1")
+        store.request_alias_change("model", "champion", "set", artifact_id="m1", version=1)
+
+        won, lost = race_after_pending_read(
+            store, no_wait_store, _DECISIONS[first], _DECISIONS[second]
+        )
+
+        assert won["artifact_id"] == "m1"
+        assert isinstance(lost, ValueError) and "No pending change" in str(lost)
+        actions = [e["action"] for e in store.read_audit(name="model")]
+        assert ("alias_approved" in actions, "alias_rejected" in actions) == (
+            first == "approve",
+            first == "reject",
+        )
+        assert (store.resolve_alias("model", "champion") is not None) == (first == "approve")
+
+    def test_an_approval_leaves_a_newer_request_pending(self, store, no_wait_store):
+        self._ready(store, "m1")
+        self._ready(store, "m2")
+        store.request_alias_change("model", "champion", "set", artifact_id="m1", version=1)
+
+        applied, requested = race_after_pending_read(
+            store,
+            no_wait_store,
+            _DECISIONS["approve"],
+            lambda s: s.request_alias_change(
+                "model", "champion", "set", artifact_id="m2", version=1
+            ),
+        )
+
+        assert applied["artifact_id"] == "m1" and requested is True
+        assert store.resolve_alias("model", "champion").id == "m1"
+        audit = store.read_audit(name="model")
+        assert [e["artifact_id"] for e in audit if e["action"] == "alias_approved"] == ["m1"]
+        assert [p["artifact_id"] for p in store.list_pending_changes()] == ["m2"]
 
 
 def _worker_entry(name: str, enabled: bool = True) -> dict:
