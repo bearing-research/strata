@@ -1441,10 +1441,12 @@ class TestResolveUv:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the recording uv is a shell script")
 class TestUvCommandsIgnoreTheServersEnvironment:
-    """uv commands for a notebook drop the server's UV_PROJECT_ENVIRONMENT and VIRTUAL_ENV.
+    """uv commands for a notebook drop the server's UV_PROJECT_ENVIRONMENT, VIRTUAL_ENV
+    and UV_PYTHON.
 
     A server started with them (``uv run`` sets VIRTUAL_ENV) would otherwise make uv sync,
-    add to and run in that environment instead of the notebook's ``.venv``.
+    add to and run in that environment instead of the notebook's ``.venv``, or on an
+    interpreter other than the one the notebook's requires-python names.
     """
 
     @pytest.fixture
@@ -1459,6 +1461,7 @@ class TestUvCommandsIgnoreTheServersEnvironment:
         monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
         monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/server/env")
         monkeypatch.setenv("VIRTUAL_ENV", "/server/venv")
+        monkeypatch.setenv("UV_PYTHON", "3.99")
 
         def read() -> dict[str, str]:
             lines = record.read_text().splitlines()
@@ -1470,6 +1473,7 @@ class TestUvCommandsIgnoreTheServersEnvironment:
     def _assert_notebook_environment(env: dict[str, str]) -> None:
         assert "UV_PROJECT_ENVIRONMENT" not in env
         assert "VIRTUAL_ENV" not in env
+        assert "UV_PYTHON" not in env
 
     def test_a_uv_command(self, tmp_path, recorded):
         from strata.notebook.dependencies import _run_uv_command

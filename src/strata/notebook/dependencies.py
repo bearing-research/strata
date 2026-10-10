@@ -216,7 +216,8 @@ def resolve_uv() -> str | None:
 
 # Vars that point uv at the server's environment instead of the notebook's
 # ``.venv``. A foreign VIRTUAL_ENV only warns, but in every operation log.
-_FOREIGN_ENVIRONMENT_VARS = ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV")
+# UV_PYTHON overrides the notebook's requires-python, and fails when they differ.
+_FOREIGN_ENVIRONMENT_VARS = ("UV_PROJECT_ENVIRONMENT", "VIRTUAL_ENV", "UV_PYTHON")
 
 
 def uv_env(
