@@ -2483,7 +2483,7 @@ checks:</p>
 </tr>
 <tr>
 <td><code>GET /health/ready</code></td>
-<td>Readiness. <code>503</code> while draining, when both QoS tiers have been saturated for over 30s, when the Parquet metadata cache (SQLite under <code>STRATA_CACHE_DIR</code>) is unreachable, or when the artifact store's database (SQLite, or Postgres through <code>STRATA_ARTIFACT_METADATA_DSN</code>) does not answer a query within 5 seconds. The blob backend is not probed.</td>
+<td>Readiness. <code>503</code> while draining, when both QoS tiers have been saturated for over 30s, or when the Parquet metadata cache (SQLite under <code>STRATA_CACHE_DIR</code>) or the artifact store's database (SQLite, or Postgres through <code>STRATA_ARTIFACT_METADATA_DSN</code>) does not answer a query within 5 seconds. The blob backend is not probed.</td>
 </tr>
 <tr>
 <td><code>GET /health/dependencies</code></td>
