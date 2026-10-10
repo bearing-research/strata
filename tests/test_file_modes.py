@@ -84,6 +84,27 @@ class TestTheArtifactStore:
         assert _mode(tmp_path / "artifacts" / "blobs") == 0o700
         assert _mode(db) == 0o600
 
+    def test_journals_sqlite_deletes_while_the_store_opens_are_skipped(self, tmp_path, monkeypatch):
+        """A live server's last connection closing deletes them between any check and the chmod."""
+        import strata.file_modes
+
+        db = ArtifactStore(tmp_path / "artifacts").db_path
+        held = _held_open(db)
+        assert all(p.exists() for p in _journals(db))
+        real_narrow = strata.file_modes.narrow
+
+        def narrow_after_the_other_process_closes(path, mode):
+            if path in _journals(db):
+                held.close()
+            real_narrow(path, mode)
+
+        monkeypatch.setattr(strata.file_modes, "narrow", narrow_after_the_other_process_closes)
+
+        store = ArtifactStore(tmp_path / "artifacts")
+
+        assert not any(p.exists() for p in _journals(db))
+        assert store.create_artifact("fig", "prov") == 1
+
 
 class TestTheApiKeyCli:
     def test_a_key_minted_before_the_first_start_leaves_the_store_owner_only(
