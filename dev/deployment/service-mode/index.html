@@ -2801,7 +2801,9 @@ everything durable:</p>
   <a href="#production-reference-architecture">above</a>). The worker registry
   lives in the metadata store, so a worker added through
   <code>/v1/admin/notebook-workers</code> on one node is offered by every node from
-  its next request.</li>
+  its next request. Each node can hold up to 41 connections to the
+  database, so size its <code>max_connections</code> for every node at once (see
+  <a href="../../reference/configuration/#sharing-one-artifact-store-across-nodes">Sharing one artifact store</a>).</li>
 <li><strong>One notebook storage.</strong> Every node mounts the same
   <code>STRATA_NOTEBOOK_STORAGE_DIR</code> (NFS, EFS, Filestore or similar), so any
   node can open any notebook. A notebook's environment is built inside
