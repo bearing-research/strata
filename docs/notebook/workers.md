@@ -503,11 +503,13 @@ strata worker rm ./my-notebook fly-cpu
 
 A `signed` (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback, link-local or other non-public address (`100.64.0.0/10` included). A Strata server on your own network or tailnet trips this. Name its host in `STRATA_WORKER_ALLOWED_HOSTS` on the worker, or set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to turn the check off (local dev). Those connections also ignore `HTTPS_PROXY`, so a worker that reaches the server only through a proxy needs `STRATA_WORKER_ALLOW_LOCAL_HOSTS`. See [Worker configuration](../reference/configuration.md#worker).
 
-### Server-managed workers (service mode)
+### Server-managed workers
 
-A service-mode server keeps its own registry, managed through
-`/v1/admin/notebook-workers*` rather than any notebook's `[[workers]]`. Two
-things are worth knowing about where it lives:
+A server keeps its own registry of machine types, managed through
+`/v1/admin/notebook-workers*` rather than any notebook's `[[workers]]`. In
+service mode it is the only list notebooks may use; a personal server offers it
+alongside each notebook's own (see below). Two things are worth knowing about
+where it lives:
 
 **It is persisted in the artifact metadata store.** Changes made through the
 admin routes are written to the same database as the artifact metadata
@@ -529,7 +531,9 @@ so on when that name is taken, so an earlier copy is never replaced), and logs
 it. The import is skipped (the file is still renamed) when the store already
 holds a registry, so a second node starting with an old copy does not overwrite
 it. A name the file lists twice is imported once, from its last entry, which is
-the one an earlier release dispatched to.
+the one an earlier release dispatched to. The file is not read again, so a
+fleet manager that writes it before the first start changes the registry of a
+running server through the routes below.
 
 **A `signed` worker needs transforms enabled.** It runs as a build on the
 server, so in service mode set `STRATA_TRANSFORMS_ENABLED=true`
@@ -541,16 +545,19 @@ server-mode transforms to be enabled". A `direct` worker needs neither.
 `POST /v1/admin/notebook-workers/reload` refreshes every worker's health and
 drops cached health for workers no longer listed. The registry itself needs no
 reload, since it is read from the store on every request; a fleet manager
-changes it through the admin routes.
+changes it through the admin routes, on a running server and in either mode,
+and the next catalogue or dispatch sees the change.
 
 An entry has the fields of a notebook's `[[workers]]` plus `enabled`, in the
 same shape whether it comes from the admin routes or from
 `[tool.strata.transforms] notebook_workers`. `POST /v1/admin/notebook-workers`
 adds one, `PUT /v1/admin/notebook-workers/{name}` replaces it, `PATCH` takes
 `{"enabled": false}`, and `PUT /v1/admin/notebook-workers` replaces the whole
-registry with `{"workers": [...]}`. The routes answer only in service mode
-(`409` otherwise) and, under principal auth, need the `admin:notebook-workers`
-scope.
+registry with `{"workers": [...]}`. Under principal auth (service mode) they
+need the `admin:notebook-workers` scope. A personal server has no principal
+auth, so they answer whoever can reach it, the same callers that can already
+run cells there: loopback by default, behind the cross-origin and `Host`
+checks every route has.
 
 ```bash
 curl -X POST https://strata.example.com/v1/admin/notebook-workers \
@@ -569,8 +576,8 @@ notebook_workers = [
 
 `token_env` names a variable in the server's environment.
 
-**Personal-mode servers get the registry too.** A personal server started with
-a registry offers those machine types to every notebook it opens, with no
+**Personal-mode servers get the registry too.** A personal server with a
+registry offers those machine types to every notebook it opens, with no
 `[[workers]]` block in `notebook.toml`, which is the point, since writing one
 into every notebook puts the catalogue in git diffs and drifts as soon as it
 changes. They appear in the Workers panel with `source: server`.

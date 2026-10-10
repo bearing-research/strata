@@ -1,17 +1,17 @@
-"""Admin routes: the service-mode notebook worker registry and per-tenant observability.
+"""Admin routes: the server-managed notebook worker registry and per-tenant observability.
 
-Worker routes are gated by ``require_notebook_worker_admin`` (service mode plus the
-``admin:notebook-workers`` scope); tenant routes by ``require_scope("admin:tenants")``.
+Worker routes need the ``admin:notebook-workers`` scope under principal auth, in either mode:
+a personal server's caller already runs cells as its owner. Tenant routes need ``admin:tenants``.
 """
 
 from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from strata.api.dependencies import require_notebook_worker_admin, require_scope
+from strata.api.dependencies import require_scope
 from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
 from strata.notebook.workers import (
     ManagedWorkerRecord,
@@ -104,7 +104,7 @@ def _validate_admin_notebook_worker_names(
 
 @router.get(
     "/v1/admin/notebook-workers",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def list_admin_notebook_workers(refresh: bool = False):
     """List the server-managed notebook worker registry."""
@@ -113,7 +113,7 @@ async def list_admin_notebook_workers(refresh: bool = False):
 
 @router.put(
     "/v1/admin/notebook-workers",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def update_admin_notebook_workers(request: AdminNotebookWorkersRequest):
     """Replace the server-managed notebook worker registry."""
@@ -132,7 +132,7 @@ async def update_admin_notebook_workers(request: AdminNotebookWorkersRequest):
 
 @router.post(
     "/v1/admin/notebook-workers",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def create_admin_notebook_worker(request: AdminNotebookWorkerEntryRequest):
     """Create one service-managed notebook worker."""
@@ -153,7 +153,7 @@ async def create_admin_notebook_worker(request: AdminNotebookWorkerEntryRequest)
 
 @router.put(
     "/v1/admin/notebook-workers/{worker_name}",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def replace_admin_notebook_worker(
     worker_name: str,
@@ -180,7 +180,7 @@ async def replace_admin_notebook_worker(
 
 @router.patch(
     "/v1/admin/notebook-workers/{worker_name}",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def patch_admin_notebook_worker(
     worker_name: str,
@@ -196,7 +196,7 @@ async def patch_admin_notebook_worker(
 
 @router.delete(
     "/v1/admin/notebook-workers/{worker_name}",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def delete_admin_notebook_worker(worker_name: str):
     """Delete one service-managed notebook worker."""
@@ -209,7 +209,7 @@ async def delete_admin_notebook_worker(worker_name: str):
 
 @router.post(
     "/v1/admin/notebook-workers/{worker_name}/refresh",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def refresh_admin_notebook_worker(worker_name: str):
     """Force-refresh health for one service-managed notebook worker."""
@@ -221,7 +221,7 @@ async def refresh_admin_notebook_worker(worker_name: str):
 
 @router.post(
     "/v1/admin/notebook-workers/reload",
-    dependencies=[Depends(require_notebook_worker_admin)],
+    dependencies=[require_scope("admin:notebook-workers")],
 )
 async def reload_admin_notebook_workers():
     """Refresh every worker's health and drop cached health for workers no longer listed.
