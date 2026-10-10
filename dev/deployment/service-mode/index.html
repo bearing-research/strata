@@ -2760,7 +2760,7 @@ fails; rotate it between runs and give every replica the same value.</p>
   <code>STRATA_ARTIFACT_METADATA_DSN</code>, otherwise <code>artifacts.sqlite</code> in the
   artifact directory) holds artifact metadata, names, aliases,
   publications, pins, API keys and the server-managed
-  <a href="../../notebook/workers/#server-managed-workers-service-mode">worker registry</a>.
+  <a href="../../notebook/workers/#server-managed-workers">worker registry</a>.
   The <em>blob store</em> holds artifact bytes: the configured bucket, or
   <code>blobs/</code> in the artifact directory with the local backend. Notebooks
   live in <code>STRATA_NOTEBOOK_STORAGE_DIR</code>. Back up those three. The
@@ -2941,7 +2941,7 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 </tr>
 <tr>
 <td><code>admin:notebook-workers</code></td>
-<td>The server-managed worker registry, every <code>/v1/admin/notebook-workers*</code> route (list, replace, add, update, delete, refresh, reload); service mode only, <code>409</code> in personal mode</td>
+<td>The server-managed worker registry, every <code>/v1/admin/notebook-workers*</code> route (list, replace, add, update, delete, refresh, reload); a personal server, which has no principal auth, serves them to whoever can reach it</td>
 </tr>
 <tr>
 <td><code>admin:notebooks</code></td>

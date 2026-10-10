@@ -1124,10 +1124,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#server-managed-workers-service-mode" class="md-nav__link">
+  <a href="#server-managed-workers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Server-managed workers (service mode)
+        Server-managed workers
       
     </span>
   </a>
@@ -2388,10 +2388,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#server-managed-workers-service-mode" class="md-nav__link">
+  <a href="#server-managed-workers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Server-managed workers (service mode)
+        Server-managed workers
       
     </span>
   </a>
@@ -2964,10 +2964,12 @@ service, and the isolation model.</p>
 <p><code>add</code> replaces a worker of the same name; <code>--transport</code> defaults to <code>direct</code> and must be <code>direct</code> or <code>signed</code> (<code>manifest</code> and <code>build</code> are aliases of <code>signed</code>; the MCP tool and the REST workers route refuse anything else too), and <code>--default</code> also makes it the notebook default. <code>rm</code> refuses the built-in <code>local</code> worker and clears the default if it named the removed one. Each prints the resulting worker list, as JSON by default (<code>--format human</code> for a table). In service mode the server owns worker definitions, so these commands are refused. For a box you reach over SSH, use <a href="#run-cells-on-a-machine-you-can-ssh-to"><code>add-ssh</code> / <code>rm-ssh</code></a> instead.</p>
 <h3 id="signed-workers-and-private-hosts">Signed workers and private hosts<a class="headerlink" href="#signed-workers-and-private-hosts" title="Permanent link">&para;</a></h3>
 <p>A <code>signed</code> (pull) worker fetches its inputs from, and uploads its result to, the URLs in the manifest, so it refuses any manifest URL whose host resolves to a private, loopback, link-local or other non-public address (<code>100.64.0.0/10</code> included). A Strata server on your own network or tailnet trips this. Name its host in <code>STRATA_WORKER_ALLOWED_HOSTS</code> on the worker, or set <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS=1</code> to turn the check off (local dev). Those connections also ignore <code>HTTPS_PROXY</code>, so a worker that reaches the server only through a proxy needs <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS</code>. See <a href="../../reference/configuration/#worker">Worker configuration</a>.</p>
-<h3 id="server-managed-workers-service-mode">Server-managed workers (service mode)<a class="headerlink" href="#server-managed-workers-service-mode" title="Permanent link">&para;</a></h3>
-<p>A service-mode server keeps its own registry, managed through
-<code>/v1/admin/notebook-workers*</code> rather than any notebook's <code>[[workers]]</code>. Two
-things are worth knowing about where it lives:</p>
+<h3 id="server-managed-workers">Server-managed workers<a class="headerlink" href="#server-managed-workers" title="Permanent link">&para;</a></h3>
+<p>A server keeps its own registry of machine types, managed through
+<code>/v1/admin/notebook-workers*</code> rather than any notebook's <code>[[workers]]</code>. In
+service mode it is the only list notebooks may use; a personal server offers it
+alongside each notebook's own (see below). Two things are worth knowing about
+where it lives:</p>
 <p><strong>It is persisted in the artifact metadata store.</strong> Changes made through the
 admin routes are written to the same database as the artifact metadata
 (Postgres with <code>STRATA_ARTIFACT_METADATA_DSN</code>, otherwise <code>artifacts.sqlite</code> in
@@ -2986,7 +2988,9 @@ so on when that name is taken, so an earlier copy is never replaced), and logs
 it. The import is skipped (the file is still renamed) when the store already
 holds a registry, so a second node starting with an old copy does not overwrite
 it. A name the file lists twice is imported once, from its last entry, which is
-the one an earlier release dispatched to.</p>
+the one an earlier release dispatched to. The file is not read again, so a
+fleet manager that writes it before the first start changes the registry of a
+running server through the routes below.</p>
 <p><strong>A <code>signed</code> worker needs transforms enabled.</strong> It runs as a build on the
 server, so in service mode set <code>STRATA_TRANSFORMS_ENABLED=true</code>
 (<code>[tool.strata.transforms] enabled = true</code>), which also needs
@@ -2996,15 +3000,18 @@ server-mode transforms to be enabled". A <code>direct</code> worker needs neithe
 <p><code>POST /v1/admin/notebook-workers/reload</code> refreshes every worker's health and
 drops cached health for workers no longer listed. The registry itself needs no
 reload, since it is read from the store on every request; a fleet manager
-changes it through the admin routes.</p>
+changes it through the admin routes, on a running server and in either mode,
+and the next catalogue or dispatch sees the change.</p>
 <p>An entry has the fields of a notebook's <code>[[workers]]</code> plus <code>enabled</code>, in the
 same shape whether it comes from the admin routes or from
 <code>[tool.strata.transforms] notebook_workers</code>. <code>POST /v1/admin/notebook-workers</code>
 adds one, <code>PUT /v1/admin/notebook-workers/{name}</code> replaces it, <code>PATCH</code> takes
 <code>{"enabled": false}</code>, and <code>PUT /v1/admin/notebook-workers</code> replaces the whole
-registry with <code>{"workers": [...]}</code>. The routes answer only in service mode
-(<code>409</code> otherwise) and, under principal auth, need the <code>admin:notebook-workers</code>
-scope.</p>
+registry with <code>{"workers": [...]}</code>. Under principal auth (service mode) they
+need the <code>admin:notebook-workers</code> scope. A personal server has no principal
+auth, so they answer whoever can reach it, the same callers that can already
+run cells there: loopback by default, behind the cross-origin and <code>Host</code>
+checks every route has.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://strata.example.com/v1/admin/notebook-workers<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"name": "gpu-a100", "backend": "executor", "runtime_id": "gpu-a100-v1",</span>
@@ -3017,8 +3024,8 @@ scope.</p>
 <a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="p">]</span>
 </code></pre></div>
 <p><code>token_env</code> names a variable in the server's environment.</p>
-<p><strong>Personal-mode servers get the registry too.</strong> A personal server started with
-a registry offers those machine types to every notebook it opens, with no
+<p><strong>Personal-mode servers get the registry too.</strong> A personal server with a
+registry offers those machine types to every notebook it opens, with no
 <code>[[workers]]</code> block in <code>notebook.toml</code>, which is the point, since writing one
 into every notebook puts the catalogue in git diffs and drifts as soon as it
 changes. They appear in the Workers panel with <code>source: server</code>.</p>

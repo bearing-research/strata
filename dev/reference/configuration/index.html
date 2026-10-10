@@ -3582,6 +3582,12 @@ SQL transform there, list it:</p>
 </code></pre></div>
 <p>The <a href="../executor-protocol/#core-transform-executors">executor protocol</a> describes the
 other registry keys.</p>
+<p>The block's <code>notebook_workers</code> list seeds the server-managed notebook worker
+registry in either mode. Once the registry has been set it lives in the
+artifact metadata store and the list is no longer read, so to change the
+machine types a running server offers, personal or service, use
+<code>/v1/admin/notebook-workers*</code>. See
+<a href="../../notebook/workers/#server-managed-workers">Server-managed workers</a>.</p>
 <p>The v2-pull signed-URL routes (build manifest, signed download / upload, and
 <code>finalize</code>) have no on/off switch. They are served whenever the deployment can
 issue and honor them at all (personal mode, or service mode with transforms
