@@ -272,6 +272,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
+          python-version: "3.12"
           version: "latest"
 
       - name: Build the strata-client wheel + sdist
@@ -284,7 +285,7 @@ jobs:
           set -euo pipefail
           CLIENT_WHEEL=$(ls dist/strata_client-*-py3-none-any.whl | head -1)
           echo "::notice::Testing client wheel ${CLIENT_WHEEL}"
-          uv venv --python 3.12 /tmp/client-smoke
+          uv venv /tmp/client-smoke
           VIRTUAL_ENV=/tmp/client-smoke uv pip install \
             --index https://pypi.org/simple/ "${CLIENT_WHEEL}"
           /tmp/client-smoke/bin/python -c "
@@ -313,6 +314,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
+          python-version: "3.12"
           version: "latest"
 
       - name: Build the strata-pool wheel + sdist
@@ -326,7 +328,7 @@ jobs:
           set -euo pipefail
           POOL_WHEEL=$(ls dist/strata_pool-*-py3-none-any.whl | head -1)
           echo "::notice::Testing pool wheel ${POOL_WHEEL}"
-          uv venv --python 3.12 /tmp/pool-smoke
+          uv venv /tmp/pool-smoke
           VIRTUAL_ENV=/tmp/pool-smoke uv pip install \
             --index https://pypi.org/simple/ "${POOL_WHEEL}"
           /tmp/pool-smoke/bin/python -c "
@@ -339,7 +341,7 @@ jobs:
           print('strata_pool imports ok, base install stayed slim')
           "
           # The server extra is a documented install path, so it is built too.
-          uv venv --python 3.12 /tmp/pool-server-smoke
+          uv venv /tmp/pool-server-smoke
           VIRTUAL_ENV=/tmp/pool-server-smoke uv pip install \
             --index https://pypi.org/simple/ "${POOL_WHEEL}[server]"
           /tmp/pool-server-smoke/bin/python -c "
@@ -377,6 +379,8 @@ jobs:
           path: dist
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
 
       - name: Smoke-test the wheel
         env:
@@ -390,7 +394,7 @@ jobs:
 
           # Strata's runtime guard requires a uv-managed venv (the `uv =`
           # marker in pyvenv.cfg).
-          uv venv --python ${{ matrix.python }} /tmp/strata-smoke
+          uv venv /tmp/strata-smoke
           VIRTUAL_ENV=/tmp/strata-smoke uv pip install \
             --index https://pypi.org/simple/ \
             "${WHEEL}"

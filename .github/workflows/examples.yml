@@ -79,6 +79,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
+          python-version: "3.13"
           version: 'latest'
           # Restore only; ci.yml's unit-tests saves this cache (see there).
           save-cache: false
@@ -104,7 +105,7 @@ jobs:
           }
 
       - name: Build Strata (and the Rust extension)
-        run: uv sync --python 3.13 --all-extras
+        run: uv sync --all-extras
 
       # Every example runs even after one fails (a flaky public S3 read must
       # not hide a real failure elsewhere). uv sync installs the interpreter
@@ -112,6 +113,9 @@ jobs:
       # previous run's artifacts cannot mask a cell-execution regression.
       - name: Run every example
         shell: bash
+        # UV_PYTHON (from setup-uv) would override each example's own pin.
+        env:
+          UV_PYTHON: ""
         run: |
           failed=()
           for example in $EXAMPLES; do
