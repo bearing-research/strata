@@ -130,7 +130,7 @@ def _to_response(publication) -> PublicationResponse:
     response_model=PublicationResponse,
     dependencies=[require_scope("artifacts:publish")],
 )
-async def publish_artifact(
+def publish_artifact(
     artifact_id: str,
     version: int,
     store: ReadStore,
@@ -171,7 +171,7 @@ async def publish_artifact(
 
 
 @router.get("/v1/publications", response_model=list[PublicationResponse])
-async def list_publications(
+def list_publications(
     store: ReadStore,
     tenant_filter: CurrentTenant,
     include_revoked: bool = False,
@@ -189,7 +189,7 @@ async def list_publications(
     response_model=PublicationResponse,
     dependencies=[require_scope("artifacts:publish")],
 )
-async def update_publication_credits(
+def update_publication_credits(
     token: str,
     request: PublicationCreditsRequest,
     store: ReadStore,
@@ -234,7 +234,7 @@ async def update_publication_credits(
     "/v1/publications/{token}",
     dependencies=[require_scope("artifacts:publish")],
 )
-async def revoke_publication(
+def revoke_publication(
     token: str,
     store: ReadStore,
     tenant_filter: CurrentTenant,
@@ -275,7 +275,7 @@ def _load_published(store, token: str, *, require_active: bool):
 
 
 @router.get("/v1/publications/{token}", response_model=None)
-async def read_publication_record(token: str, store: ReadStore):
+def read_publication_record(token: str, store: ReadStore):
     """The machine-readable record behind the page. Unauthenticated.
 
     A withdrawn publication answers with only what its page shows: that it was withdrawn, and when.
@@ -566,7 +566,7 @@ async def publication_embed(token: str, store: ReadStore, http_request: Request)
 
 
 @router.get("/oembed")
-async def oembed(url: str, store: ReadStore, http_request: Request, format: str = "json"):
+def oembed(url: str, store: ReadStore, http_request: Request, format: str = "json"):
     """oEmbed provider, so pasting a publication link unfurls into the card.
 
     Only ``json`` is served; any other format gets a 501.
@@ -620,7 +620,7 @@ def _token_from_url(url: str, base: str) -> str | None:
 
 
 @router.get("/p/{token}/ro-crate")
-async def publication_ro_crate(token: str, store: ReadStore, http_request: Request):
+def publication_ro_crate(token: str, store: ReadStore, http_request: Request):
     """The chain as RO-Crate JSON-LD, for software rather than readers.
 
     The same graph the page embeds and a bundle ships as ``ro-crate-metadata.json``.
@@ -652,7 +652,7 @@ async def publication_ro_crate(token: str, store: ReadStore, http_request: Reque
 
 
 @router.get("/p/{token}/badge.svg")
-async def publication_badge(token: str, store: ReadStore):
+def publication_badge(token: str, store: ReadStore):
     """A README-sized pill reporting the size of the recorded chain.
 
     Served live so a withdrawn publication stops asserting, though image proxies

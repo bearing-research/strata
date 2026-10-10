@@ -44,7 +44,7 @@ _LEASE_MARGIN_SECONDS = 60.0
 
 
 @router.get("/v1/artifacts/builds/{build_id}", response_model=BuildStatusResponse)
-async def get_build_status(build_id: str):
+def get_build_status(build_id: str):
     """Poll the state of an asynchronous build started by materialize."""
     from strata.server import (
         _authorize_build_access,
@@ -109,9 +109,9 @@ async def get_build_status(build_id: str):
 
 
 @router.get("/v1/builds/{build_id}", response_model=BuildStatusResponse, include_in_schema=False)
-async def get_build_status_compat(build_id: str):
+def get_build_status_compat(build_id: str):
     """Compatibility alias for older clients polling build status."""
-    return await get_build_status(build_id)
+    return get_build_status(build_id)
 
 
 @router.get("/v1/builds/{build_id}/manifest")
