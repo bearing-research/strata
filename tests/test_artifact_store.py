@@ -2044,3 +2044,47 @@ class TestFinalizeTogether:
             store.finalize_canonical_together([first, second])
 
         assert store.get_artifact(first.artifact_id, first.version).state == "building"
+
+
+def _rebuild_after_first_lookup(store, monkeypatch, artifact_id: str, provenance: str) -> None:
+    """Land a rebuild of ``artifact_id``, superseding what the first provenance lookup returns."""
+    find = store.find_by_provenance
+    landed = []
+
+    def find_then_rebuild(*args, **kwargs):
+        found = find(*args, **kwargs)
+        if not landed:
+            landed.append(True)
+            version = store.create_artifact(artifact_id, provenance)
+            store.finalize_artifact(artifact_id, version, "{}", 1, 10, content_sha256="e" * 64)
+        return found
+
+    monkeypatch.setattr(store, "find_by_provenance", find_then_rebuild)
+
+
+class TestFindReadyAndSetName:
+    def test_it_names_the_ready_version(self, store):
+        _make_ready_artifact(store, "a1", "prov-1")
+
+        found = store.find_ready_and_set_name("prov-1", "the-name")
+
+        assert (found.id, found.version) == ("a1", 1)
+        name = store.get_name("the-name")
+        assert (name.artifact_id, name.version) == ("a1", 1)
+
+    def test_nothing_ready_names_nothing(self, store):
+        store.create_artifact("a1", "prov-1")
+
+        assert store.find_ready_and_set_name("prov-1", "the-name") is None
+        assert store.get_name("the-name") is None
+
+    def test_a_rebuild_between_the_lookup_and_the_name_gets_the_name(self, store, monkeypatch):
+        _make_ready_artifact(store, "a1", "prov-1")
+        _rebuild_after_first_lookup(store, monkeypatch, "a1", "prov-1")
+
+        found = store.find_ready_and_set_name("prov-1", "the-name")
+
+        assert (found.id, found.version, found.state) == ("a1", 2, "ready")
+        name = store.get_name("the-name")
+        assert (name.artifact_id, name.version) == ("a1", 2)
+        assert store.get_artifact("a1", 1).state == "superseded"
