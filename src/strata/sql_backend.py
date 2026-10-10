@@ -33,7 +33,8 @@ _CONNECT_TIMEOUT_SECONDS = 10
 SERVER_THREAD_LIMIT = 40
 
 # max_size is per process: one connection per thread token, plus the event loop thread, which
-# still calls the store inline. A thread then never waits for a connection, only for a token.
+# still calls the store inline at startup, at shutdown and from notebook sessions. A thread then
+# never waits for a connection, only for a token.
 # The store nests acquisition two deep; re-entrant sharing (``PostgresDialect.connect``) keeps
 # that at one connection per thread.
 _POOL_MIN_SIZE = 0
