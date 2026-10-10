@@ -593,6 +593,8 @@ class TestThroughTheServer:
         """Nothing just written goes: the configured one-hour floor applies."""
         import httpx
 
+        from tests.conftest import LIVE_SERVER_TIMEOUT
+
         base_url, store = server
         key = _ready(store)
         _last_used(store, key, 60)
@@ -600,7 +602,9 @@ class TestThroughTheServer:
         _last_used(store, idle, 7200)
 
         dry = httpx.post(
-            f"{base_url}/v1/artifacts/gc", params={"dry_run": True, "max_idle_days": 0}
+            f"{base_url}/v1/artifacts/gc",
+            params={"dry_run": True, "max_idle_days": 0},
+            timeout=LIVE_SERVER_TIMEOUT,
         )
 
         assert dry.status_code == 200, dry.text

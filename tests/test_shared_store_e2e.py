@@ -10,7 +10,7 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
-from tests.conftest import run_server_with_context, table_to_ipc_bytes
+from tests.conftest import LIVE_SERVER_TIMEOUT, run_server_with_context, table_to_ipc_bytes
 
 PROXY_TOKEN = "shared-store-token"
 
@@ -71,6 +71,7 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
         resolved = httpx.get(
             f"{base}/v1/names/team/cleaned-events",
             headers=_headers("team-a", "bob"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resolved.status_code == 200
         artifact_uri = resolved.json()["artifact_uri"]
@@ -82,6 +83,7 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
         data_resp = httpx.get(
             f"{base}/v1/artifacts/{art_id}/v/{version}/data",
             headers=_headers("team-a", "bob"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert data_resp.status_code == 200
         round_trip = ipc.open_stream(data_resp.content).read_all()
@@ -91,6 +93,7 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
         cross = httpx.get(
             f"{base}/v1/names/team/cleaned-events",
             headers=_headers("team-b", "carol"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert cross.status_code == 404
 
@@ -164,7 +167,10 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
 
         # (1) Approve without admin:registry: 403.
         no_scope = httpx.post(
-            f"{base}/v1/registry/pending/approve", json=body, headers=_headers("team-a", "frank")
+            f"{base}/v1/registry/pending/approve",
+            json=body,
+            headers=_headers("team-a", "frank"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert no_scope.status_code == 403
 
@@ -173,6 +179,7 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
             f"{base}/v1/registry/pending/approve",
             json=body,
             headers=_headers("team-a", "alice", "admin:registry"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert self_app.status_code == 403
         assert "Separation of duty" in self_app.json()["detail"]
@@ -188,12 +195,15 @@ def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path)
             f"{base}/v1/registry/pending/approve",
             json=body,
             headers=_headers("team-a", "frank", "admin:registry"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert ok.status_code == 200, ok.text
         assert ok.json()["status"] == "approved"
 
         resolved = httpx.get(
-            f"{base}/v1/names/team/model/aliases/champion", headers=_headers("team-a", "bob")
+            f"{base}/v1/names/team/model/aliases/champion",
+            headers=_headers("team-a", "bob"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resolved.status_code == 200
 
@@ -244,11 +254,16 @@ def test_protected_alias_admin_star_is_break_glass_self_approve(tmp_path):
             f"{base}/v1/registry/pending/approve",
             json={"name": "team/model", "alias": "champion"},
             headers=admin,
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert ok.status_code == 200, ok.text
         assert ok.json()["status"] == "approved"
 
-        resolved = httpx.get(f"{base}/v1/names/team/model/aliases/champion", headers=admin)
+        resolved = httpx.get(
+            f"{base}/v1/names/team/model/aliases/champion",
+            headers=admin,
+            timeout=LIVE_SERVER_TIMEOUT,
+        )
         assert resolved.status_code == 200
 
 
@@ -289,7 +304,10 @@ def test_reject_requires_registry_scope(tmp_path):
 
         body = {"name": "team/model", "alias": "champion"}
         denied = httpx.post(
-            f"{base}/v1/registry/pending/reject", json=body, headers=_headers("team-a", "mallory")
+            f"{base}/v1/registry/pending/reject",
+            json=body,
+            headers=_headers("team-a", "mallory"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert denied.status_code == 403
 
@@ -297,6 +315,7 @@ def test_reject_requires_registry_scope(tmp_path):
             f"{base}/v1/registry/pending/reject",
             json=body,
             headers=_headers("team-a", "frank", "admin:registry"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert ok.status_code == 200
         assert ok.json()["status"] == "rejected"
@@ -304,6 +323,7 @@ def test_reject_requires_registry_scope(tmp_path):
         gone = httpx.get(
             f"{base}/v1/names/team/model/aliases/champion",
             headers=_headers("team-a", "alice"),
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert gone.status_code == 404
         assert _champion_events(base, "team-a") == [
@@ -340,13 +360,31 @@ def test_writes_to_another_tenants_artifact_answer_like_reads(tmp_path):
                     f"{base}/v1/artifacts/{artifact_id}/v/{version}/tags",
                     json={"key": "k", "value": "v"},
                     headers=other,
+                    timeout=LIVE_SERVER_TIMEOUT,
                 ),
-                httpx.post(f"{base}/v1/names", json={"name": "mine", **target}, headers=other),
-                httpx.put(f"{base}/v1/names/mine/aliases/candidate", json=target, headers=other),
-                httpx.put(f"{base}/v1/names/mine/aliases/champion", json=target, headers=other),
+                httpx.post(
+                    f"{base}/v1/names",
+                    json={"name": "mine", **target},
+                    headers=other,
+                    timeout=LIVE_SERVER_TIMEOUT,
+                ),
+                httpx.put(
+                    f"{base}/v1/names/mine/aliases/candidate",
+                    json=target,
+                    headers=other,
+                    timeout=LIVE_SERVER_TIMEOUT,
+                ),
+                httpx.put(
+                    f"{base}/v1/names/mine/aliases/champion",
+                    json=target,
+                    headers=other,
+                    timeout=LIVE_SERVER_TIMEOUT,
+                ),
             ]
 
-        read = httpx.get(f"{base}/v1/artifacts/{art_id}/v/{version}", headers=other)
+        read = httpx.get(
+            f"{base}/v1/artifacts/{art_id}/v/{version}", headers=other, timeout=LIVE_SERVER_TIMEOUT
+        )
         assert read.status_code == 404
         for resp in writes(art_id):
             assert resp.status_code == 404, resp.text
