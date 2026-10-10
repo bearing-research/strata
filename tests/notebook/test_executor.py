@@ -1523,6 +1523,147 @@ class Person:
         assert result.success, result.error
         assert on_loop == [False]
 
+    def _record_store_calls_on_loop(self, monkeypatch, build_server, artifact_names, build_names):
+        """Wrap server store methods; record, per call, whether it ran on this loop's thread."""
+        loop_thread = threading.get_ident()
+        calls: list[tuple[str, bool]] = []
+
+        def _wrap(store, name):
+            real = getattr(store, name)
+
+            def _recording(*args, **kwargs):
+                calls.append((name, threading.get_ident() == loop_thread))
+                return real(*args, **kwargs)
+
+            monkeypatch.setattr(store, name, _recording)
+
+        for name in artifact_names:
+            _wrap(build_server["artifact_store"], name)
+        for name in build_names:
+            _wrap(build_server["build_store"], name)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_signed_transport_store_and_blob_work_runs_off_the_event_loop(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """Staging inputs, creating the build, reading it back and copying the result bundle
+        hit the server's store and blob backend; none of it may run on the loop."""
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
+        cell2.worker = "gpu-http-signed"
+        cell2.source = "y = x + 1"
+        sample_notebook.re_analyze_cell("cell2")
+        calls = self._record_store_calls_on_loop(
+            monkeypatch,
+            notebook_build_server,
+            ["create_artifact", "write_blob", "finalize_artifact", "open_blob_reader"],
+            ["create_build", "start_build", "get_build"],
+        )
+
+        executor = CellExecutor(sample_notebook)
+        first = await executor.execute_cell("cell1", "x = 1")
+        second = await executor.execute_cell("cell2", "y = x + 1")
+
+        assert first.success, first.error
+        assert second.success, second.error
+        assert second.outputs["y"]["preview"] == 2
+        # The second run staged its input, so every wrapped method was reached.
+        assert {name for name, _ in calls} == {
+            "create_artifact",
+            "write_blob",
+            "finalize_artifact",
+            "open_blob_reader",
+            "create_build",
+            "start_build",
+            "get_build",
+        }
+        assert [name for name, on_loop in calls if on_loop] == []
+
+    @pytest.mark.asyncio
+    async def test_signed_transport_failure_is_recorded_off_the_event_loop(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """A worker's error answer reads the build and fails the build and artifact rows."""
+        notebook_build_server["config"].transforms_config["notebook_workers"] = [
+            {
+                "name": "gpu-http-signed",
+                "backend": "executor",
+                "runtime_id": "gpu-http-signed-a100",
+                "config": {
+                    "url": notebook_executor_server["execute_url"],
+                    "transport": "signed",
+                    "strata_url": "http://127.0.0.1:9",
+                },
+            }
+        ]
+        sample_notebook.notebook_state.worker = "gpu-http-signed"
+        cell = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell.worker = "gpu-http-signed"
+        calls = self._record_store_calls_on_loop(
+            monkeypatch, notebook_build_server, ["fail_artifact"], ["get_build", "fail_build"]
+        )
+
+        result = await CellExecutor(sample_notebook).execute_cell("cell1", "x = 1")
+
+        assert result.success is False
+        assert result.remote_build_state == "failed"
+        assert result.remote_error_code == "EXECUTOR_HTTP_ERROR"
+        assert {name for name, _ in calls} >= {"get_build", "fail_build", "fail_artifact"}
+        assert [name for name, on_loop in calls if on_loop] == []
+        build = notebook_build_server["build_store"].get_build(result.remote_build_id)
+        artifact = notebook_build_server["artifact_store"].get_artifact(
+            build.artifact_id, build.version
+        )
+        assert (build.state, artifact.state) == ("failed", "failed")
+
+    @pytest.mark.asyncio
+    async def test_the_loop_runs_while_a_signed_build_is_being_created(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """A slow store (a Postgres lock wait) holds up only this cell, not the server's loop:
+        the call is released by a coroutine that can only run while the loop is free."""
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        build_store = notebook_build_server["build_store"]
+        real_start = build_store.start_build
+        entered = threading.Event()
+        release = threading.Event()
+        released_by_loop: list[bool] = []
+
+        def _blocking_start(build_id):
+            entered.set()
+            # Bounded so a regression fails the assertion below instead of hanging the run.
+            released_by_loop.append(release.wait(timeout=10))
+            return real_start(build_id)
+
+        monkeypatch.setattr(build_store, "start_build", _blocking_start)
+
+        async def _other_coroutine():
+            await asyncio.to_thread(entered.wait, 10)
+            release.set()
+
+        result, _ = await asyncio.gather(
+            CellExecutor(sample_notebook).execute_cell("cell1", "x = 1"),
+            _other_coroutine(),
+        )
+
+        assert released_by_loop == [True]
+        assert result.success, result.error
+        assert result.remote_build_state == "ready"
+        assert result.outputs["x"]["preview"] == 1
+
     @pytest.mark.asyncio
     async def test_a_personal_server_says_what_but_not_who(
         self,

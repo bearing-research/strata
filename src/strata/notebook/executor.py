@@ -14,6 +14,7 @@ source-as-transform. The two share only the artifact store
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -2870,13 +2871,19 @@ class CellExecutor:
                         artifact_version,
                     )
 
-        staged_input_specs, input_artifacts = self._stage_signed_transport_inputs(
-            artifact_store=artifact_store,
-            build_id=build_id,
-            input_specs=input_specs,
-            output_dir=output_dir,
-            tenant_id=tenant_id,
-            principal_id=principal_id,
+        async def _fail(message: str, error_code: str) -> None:
+            await anyio.to_thread.run_sync(_mark_failed, message, error_code)
+
+        staged_input_specs, input_artifacts = await anyio.to_thread.run_sync(
+            functools.partial(
+                self._stage_signed_transport_inputs,
+                artifact_store=artifact_store,
+                build_id=build_id,
+                input_specs=input_specs,
+                output_dir=output_dir,
+                tenant_id=tenant_id,
+                principal_id=principal_id,
+            )
         )
         input_uris = sorted(
             {str(spec["uri"]) for spec in staged_input_specs.values() if spec.get("uri")}
@@ -2940,7 +2947,8 @@ class CellExecutor:
             inputs=input_uris,
         )
 
-        try:
+        def _start_build() -> None:
+            nonlocal artifact_version
             artifact_version = artifact_store.create_artifact(
                 artifact_id=artifact_id,
                 provenance_hash=transport_provenance,
@@ -2961,6 +2969,9 @@ class CellExecutor:
                 params=recorded_params,
             )
             build_store.start_build(build_id)
+
+        try:
+            await anyio.to_thread.run_sync(_start_build)
 
             # Presigning can call the cloud (role credentials, IAM signBlob, a delegation key).
             manifest = (
@@ -3036,25 +3047,25 @@ class CellExecutor:
                         cell_id=cell_id,
                     )
         except RemoteExecutionError as exc:
-            _mark_failed(str(exc), exc.remote_error_code or "EXECUTOR_ERROR")
+            await _fail(str(exc), exc.remote_error_code or "EXECUTOR_ERROR")
             raise
         except asyncio.CancelledError:
-            _mark_failed("Notebook manifest execution cancelled", "CANCELLED")
-            # Shielded: inside a cancellation an unshielded await is cancelled before the worker
-            # hears.
+            # Shielded: inside a cancellation an unshielded await is cancelled before the build
+            # is failed or the worker hears.
+            await asyncio.shield(_fail("Notebook manifest execution cancelled", "CANCELLED"))
             await asyncio.shield(
                 self._cancel_remote_execution(executor_url, build_id, worker_token)
             )
             raise
         except httpx.TimeoutException as exc:
-            _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
+            await _fail("Notebook manifest execution timed out", "TIMEOUT")
             raise RemoteExecutionError(
                 self._timeout_message(cell_id, timeout_seconds),
                 remote_build_state="failed",
                 remote_error_code="TIMEOUT",
             ) from exc
         except httpx.HTTPError as exc:
-            _mark_failed(
+            await _fail(
                 f"Remote executor request failed for worker '{worker_spec.name}': {exc}",
                 "REQUEST_FAILED",
             )
@@ -3064,55 +3075,46 @@ class CellExecutor:
                 remote_error_code="REQUEST_FAILED",
             ) from exc
         except Exception as exc:
-            _mark_failed(str(exc), "SETUP_FAILED")
+            await _fail(str(exc), "SETUP_FAILED")
             raise RemoteExecutionError(
                 f"Remote executor setup failed for worker '{worker_spec.name}': {exc}",
                 remote_build_state="failed",
                 remote_error_code="SETUP_FAILED",
             ) from exc
 
-        try:
-            if response.status_code == 408:
-                _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
-                raise RemoteExecutionError(
-                    self._timeout_message(cell_id, timeout_seconds),
-                    remote_build_state="failed",
-                    remote_error_code="TIMEOUT",
-                )
-            if response.status_code != 200:
-                detail = self._extract_remote_error(response)
-                build = build_store.get_build(build_id)
-                inferred_error_code = (
-                    "FINALIZE_FAILED"
-                    if "Failed to finalize notebook bundle build" in detail
-                    else "EXECUTOR_HTTP_ERROR"
-                )
-                error_code = (
-                    build.error_code
-                    if build is not None and build.state == "failed" and build.error_code
-                    else inferred_error_code
-                )
-                error_message = (
-                    build.error_message
-                    if build is not None and build.state == "failed" and build.error_message
-                    else (
-                        f"Remote executor '{worker_spec.name}' returned "
-                        f"{response.status_code}: {detail}"
-                    )
-                )
-                _mark_failed(
-                    error_message,
-                    error_code,
-                )
-                refreshed_build = build_store.get_build(build_id)
-                raise RemoteExecutionError(
-                    error_message,
-                    remote_build_state=(
-                        refreshed_build.state if refreshed_build is not None else "failed"
-                    ),
-                    remote_error_code=error_code,
-                )
+        def _executor_error(status_code: int, detail: str) -> RemoteExecutionError:
+            """Fail the build for a non-200 answer, keeping the failure the build recorded."""
+            build = build_store.get_build(build_id)
+            inferred_error_code = (
+                "FINALIZE_FAILED"
+                if "Failed to finalize notebook bundle build" in detail
+                else "EXECUTOR_HTTP_ERROR"
+            )
+            error_code = (
+                build.error_code
+                if build is not None and build.state == "failed" and build.error_code
+                else inferred_error_code
+            )
+            error_message = (
+                build.error_message
+                if build is not None and build.state == "failed" and build.error_message
+                else f"Remote executor '{worker_spec.name}' returned {status_code}: {detail}"
+            )
+            _mark_failed(
+                error_message,
+                error_code,
+            )
+            refreshed_build = build_store.get_build(build_id)
+            return RemoteExecutionError(
+                error_message,
+                remote_build_state=(
+                    refreshed_build.state if refreshed_build is not None else "failed"
+                ),
+                remote_error_code=error_code,
+            )
 
+        def _fetch_bundle(bundle_path: Path) -> None:
+            """Copy the finalized result bundle, possibly from object storage, to a local file."""
             build = build_store.get_build(build_id)
             if build is None or build.state != "ready":
                 build_error_message = build.error_message if build is not None else None
@@ -3138,7 +3140,6 @@ class CellExecutor:
                     remote_error_code="MISSING_OUTPUT_BLOB",
                 )
 
-            bundle_path = output_dir / "notebook-output-bundle.tar"
             with reader_cm as blob_reader, open(bundle_path, "wb") as dst:
                 while True:
                     chunk = blob_reader.read(BLOB_STREAM_CHUNK_BYTES)
@@ -3146,10 +3147,25 @@ class CellExecutor:
                         break
                     dst.write(chunk)
 
+        try:
+            if response.status_code == 408:
+                await _fail("Notebook manifest execution timed out", "TIMEOUT")
+                raise RemoteExecutionError(
+                    self._timeout_message(cell_id, timeout_seconds),
+                    remote_build_state="failed",
+                    remote_error_code="TIMEOUT",
+                )
+            if response.status_code != 200:
+                detail = self._extract_remote_error(response)
+                raise await anyio.to_thread.run_sync(_executor_error, response.status_code, detail)
+
+            bundle_path = output_dir / "notebook-output-bundle.tar"
+            await anyio.to_thread.run_sync(_fetch_bundle, bundle_path)
+
             try:
                 read_notebook_output_bundle_manifest_path(bundle_path)
             except Exception as exc:
-                _mark_failed(
+                await _fail(
                     f"Notebook build {build_id} produced an invalid output bundle: {exc}",
                     "INVALID_NOTEBOOK_BUNDLE",
                 )
@@ -3163,12 +3179,12 @@ class CellExecutor:
             unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
             return unpacked_result, unpacked_dir, "executor", {}
         except asyncio.CancelledError:
-            _mark_failed("Notebook manifest execution cancelled", "CANCELLED")
+            await asyncio.shield(_fail("Notebook manifest execution cancelled", "CANCELLED"))
             raise
         except RemoteExecutionError:
             raise
         except Exception as exc:
-            _mark_failed(str(exc), "EXECUTOR_ERROR")
+            await _fail(str(exc), "EXECUTOR_ERROR")
             raise RemoteExecutionError(
                 str(exc),
                 remote_build_state="failed",
