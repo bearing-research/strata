@@ -124,6 +124,33 @@ class TestRoundTrip:
 
         assert store.id_tenant("held") == "team-a"
 
+    def test_another_tenant_cannot_create_under_a_held_id(self, store):
+        from strata.artifact_store import ArtifactIdTaken
+
+        store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
+
+        with pytest.raises(ArtifactIdTaken):
+            store.create_artifact("held", "prov-other", _spec(), tenant="team-b")
+        with pytest.raises(ArtifactIdTaken):
+            store.create_artifact("held", "prov-other", _spec())
+        assert store.create_artifact("held", "prov-again", _spec(), tenant="team-a") == 2
+
+    def test_another_tenant_cannot_import_under_a_held_id(self, store):
+        from dataclasses import replace
+
+        from strata.artifact_store import ArtifactImportConflict
+
+        version = store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
+        store.write_blob("held", version, b"payload")
+        store.finalize_artifact("held", version, "{}", row_count=1, byte_size=7)
+        record = replace(store.get_artifact("held", version), tenant="team-b")
+
+        with pytest.raises(ArtifactImportConflict):
+            store.import_artifact(record, b"payload")
+        with pytest.raises(ArtifactImportConflict):
+            store.import_artifact(replace(record, version=2), b"payload")
+        assert store.get_artifact("held", 2) is None
+
     def test_versions_increment(self, store):
         assert store.create_artifact("a1", "p1", _spec()) == 1
         assert store.create_artifact("a1", "p2", _spec()) == 2

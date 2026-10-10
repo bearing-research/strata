@@ -37,7 +37,12 @@ from strata.api.dependencies import (
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.api.served_bytes import data_headers
-from strata.artifact_store import ArtifactImportConflict, ArtifactStore, reject_unsafe_artifact_id
+from strata.artifact_store import (
+    ArtifactIdTaken,
+    ArtifactImportConflict,
+    ArtifactStore,
+    reject_unsafe_artifact_id,
+)
 from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
@@ -585,8 +590,10 @@ async def _import_artifact(
     # Two ways the id is already taken: by another tenant, and by another
     # computation. Ids are not globally unique -- a notebook's are built from
     # its own id and its cells' -- so two people working from one repository
-    # send the same id for cells they have each edited differently.
-    taken_by_another_tenant = existing is not None and (existing.tenant or "") != (tenant_id or "")
+    # send the same id for cells they have each edited differently. Another
+    # tenant holds the id at every version: a new one would become its latest.
+    holder = store.id_tenant(artifact_id)
+    taken_by_another_tenant = holder is not None and holder != (tenant_id or "")
     taken_by_another_computation = (
         existing is not None
         and not taken_by_another_tenant
@@ -594,13 +601,14 @@ async def _import_artifact(
     )
     if taken_by_another_tenant or taken_by_another_computation:
         if not remap:
-            held = "another tenant" if taken_by_another_tenant else "a different computation"
+            held = (
+                f"{artifact_id} already exists under another tenant"
+                if taken_by_another_tenant
+                else f"{artifact_id}@v={version} already exists, holding a different computation"
+            )
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    f"{artifact_id}@v={version} already exists, holding {held}. "
-                    f"Retry with remap=true to import it under a fresh id."
-                ),
+                detail=f"{held}. Retry with remap=true to import it under a fresh id.",
             )
         record = replace(record, id=f"{artifact_id}@import={uuid.uuid4().hex[:8]}")
 
@@ -734,29 +742,25 @@ async def _put_artifact_by_provenance(
 
     named_id = metadata.get("artifact_id")
     artifact_id = str(named_id or uuid.uuid4())
-    # The caller names the id, so it can name somebody else's; a version appended there becomes that
-    # artifact's latest, which a notebook reads and GC protects. The import route refuses the same
-    # case. Checked against any version, since one still uploading holds the id too.
-    holder = store.id_tenant(artifact_id)
-    if holder is not None and holder != (tenant_id or ""):
-        raise HTTPException(
-            status_code=409,
-            detail=f"{artifact_id} already exists under another tenant",
+    try:
+        version = store.create_artifact(
+            artifact_id=artifact_id,
+            provenance_hash=provenance_hash,
+            transform_spec=ArtifactTransformSpec(
+                executor="notebook/cell@v1",
+                params=params,
+                inputs=[],
+            ),
+            tenant=tenant_id,
+            principal=principal.id if principal else None,
+            # A notebook storing a cell output names its id and reads it back as
+            # "latest"; an upload that named nothing got an id nobody resolves.
+            minted=not named_id,
         )
-    version = store.create_artifact(
-        artifact_id=artifact_id,
-        provenance_hash=provenance_hash,
-        transform_spec=ArtifactTransformSpec(
-            executor="notebook/cell@v1",
-            params=params,
-            inputs=[],
-        ),
-        tenant=tenant_id,
-        principal=principal.id if principal else None,
-        # A notebook storing a cell output names its id and reads it back as
-        # "latest"; an upload that named nothing got an id nobody resolves.
-        minted=not named_id,
-    )
+    except ArtifactIdTaken as exc:
+        # The caller names the id, so it can name somebody else's. The store refuses
+        # inside its write, where a concurrent first upload cannot slip in after the check.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
     finalized = store.finalize_artifact(
         artifact_id=artifact_id,

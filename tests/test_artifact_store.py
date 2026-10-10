@@ -1837,6 +1837,61 @@ class TestAnIdTwoComputationsClaim:
         assert store.read_blob("nb_shared_cell_c1_var_rows", 1) == b"ALICE"
 
 
+class TestAnIdIsHeldByOneTenant:
+    """A version under another tenant's id becomes that id's latest, which its notebook reads.
+
+    Refused inside the write, since a route's earlier look can go stale before the insert.
+    """
+
+    @pytest.mark.parametrize("holder,caller", [("team-b", "team-a"), ("team-b", None), (None, "a")])
+    def test_create_refuses_an_id_another_tenant_holds(self, store, holder, caller):
+        from strata.artifact_store import ArtifactIdTaken
+
+        store.create_artifact("nb_x", "a" * 64, tenant=holder)
+
+        with pytest.raises(ArtifactIdTaken):
+            store.create_artifact("nb_x", "b" * 64, tenant=caller)
+
+        assert store.get_artifact("nb_x", 2) is None
+
+    @pytest.mark.parametrize("tenant,again", [("team-a", "team-a"), (None, ""), ("", None)])
+    def test_create_appends_to_its_own_tenants_id(self, store, tenant, again):
+        store.create_artifact("nb_x", "a" * 64, tenant=tenant)
+
+        assert store.create_artifact("nb_x", "b" * 64, tenant=again) == 2
+
+    @pytest.mark.parametrize("version", [1, 2])
+    def test_import_refuses_an_id_another_tenant_holds(self, store, version):
+        """Version 1 is the same computation, which used to resolve onto the other tenant's row."""
+        from strata.artifact_store import ArtifactImportConflict, ArtifactVersion
+
+        held = store.create_artifact("nb_x", "a" * 64, tenant="team-b")
+        store.write_blob("nb_x", held, b"TEAMB")
+        store.finalize_artifact("nb_x", held, "", row_count=None, byte_size=5)
+        record = ArtifactVersion(
+            id="nb_x",
+            version=version,
+            state="ready",
+            provenance_hash="a" * 64,
+            schema_json="",
+            row_count=None,
+            byte_size=5,
+            created_at=1.0,
+            transform_spec=None,
+            input_versions=json.dumps({"strata://artifact/up@v=1": "up@v=1"}),
+            principal=None,
+            tenant="team-a",
+            content_sha256=None,
+        )
+
+        with pytest.raises(ArtifactImportConflict):
+            store.import_artifact(record, b"TEAMA")
+
+        assert store.get_artifact("nb_x", 2) is None
+        assert store.read_blob("nb_x", 1) == b"TEAMB"
+        assert store.get_artifact("nb_x", 1).input_versions is None
+
+
 class TestTwoIdsOneComputation:
     """A duplicated notebook yields one provenance under two ids.
 
