@@ -185,11 +185,16 @@ def get_build_manifest(build_id: str, request: Request, build_store: BuildTransp
     elif build.lease_owner == _EXTERNAL_LEASE_OWNER:
         # Re-fetch of a manifest issued here: it mints fresh URLs, so push the lease out
         # to cover them, or the sweep could reclaim while the executor can still finalize.
-        build_store.renew_lease(
+        if not build_store.renew_lease(
             build_id,
             _EXTERNAL_LEASE_OWNER,
             lease_duration_seconds=lease_seconds,
-        )
+        ):
+            # Reclaimed since the read; the re-read below would sign the new holder's claim.
+            raise HTTPException(
+                status_code=409,
+                detail="Build lease was reclaimed by the local runner; retry is not safe",
+            )
     elif build.lease_owner is not None:
         # BuildRunner holds the lease (it claims with its own runner id); capabilities now
         # would put a second writer on the same blob. A lease_owner of None is not the

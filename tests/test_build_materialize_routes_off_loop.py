@@ -271,6 +271,39 @@ async def test_a_stale_executor_cannot_fail_a_build_a_newer_claim_holds(served, 
     assert served.store.get_artifact("pulled", version).state == "building"
 
 
+async def test_a_manifest_refetch_whose_lease_was_reclaimed_mints_nothing(served, monkeypatch):
+    """The runner reclaims the expired lease between the re-fetch's read and its renewal.
+
+    URLs minted from the re-read row would carry the runner's claim, letting the executor
+    finalize over the runner.
+    """
+    build_id, _ = _queued_build(served)
+    build_store = served.build_store
+    async with _client(served) as client:
+        assert (await client.get(f"/v1/builds/{build_id}/manifest")).status_code == 200
+
+        renew_lease = build_store.renew_lease
+
+        def reclaimed_meanwhile(*args, **kwargs):
+            conn = build_store._get_connection()
+            try:
+                conn.execute(
+                    "UPDATE artifact_builds SET lease_expires_at = ? WHERE build_id = ?",
+                    (time.time() - 1.0, build_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            assert build_store.reclaim_expired_build(build_id, new_lease_owner="runner-9")
+            return renew_lease(*args, **kwargs)
+
+        monkeypatch.setattr(build_store, "renew_lease", reclaimed_meanwhile)
+        response = await client.get(f"/v1/builds/{build_id}/manifest")
+
+    assert response.status_code == 409, response.text
+    assert build_store.get_build(build_id).lease_owner == "runner-9"
+
+
 # --- materialize ---
 
 
