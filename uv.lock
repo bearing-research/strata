@@ -3956,6 +3956,7 @@ name = "strata-notebook"
 version = "0.9.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "filelock" },
@@ -4081,6 +4082,7 @@ requires-dist = [
     { name = "adbc-driver-snowflake", marker = "extra == 'sql-snowflake'", specifier = ">=1.0.0" },
     { name = "adbc-driver-sqlite", marker = "extra == 'sql-sqlite'", specifier = ">=1.0.0" },
     { name = "adlfs", marker = "extra == 'azure'", specifier = ">=2026.0.0" },
+    { name = "anyio", specifier = ">=4.1" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
     { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
