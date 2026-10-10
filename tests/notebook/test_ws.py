@@ -8,6 +8,7 @@ deadlocks on session tasks created during a WS upgrade.
 import asyncio
 import json
 import tempfile
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -2832,6 +2833,75 @@ async def test_ws_broadcast_key_check_is_not_a_query_per_frame(notebook_session,
 
     assert len(listener.frames_of("cell_output")) == 3
     assert calls == [key]
+
+
+def _hold_verify(monkeypatch, store) -> SimpleNamespace:
+    """Make ``store.verify`` block until ``release`` is set; it then runs as before."""
+    gate = SimpleNamespace(
+        entered=threading.Event(), release=threading.Event(), done=threading.Event()
+    )
+    verify = store.verify
+
+    def held(presented: str):
+        gate.entered.set()
+        # A guard, so a lookup stuck on the loop fails the test rather than hanging it.
+        gate.release.wait(timeout=30)
+        try:
+            return verify(presented)
+        finally:
+            gate.done.set()
+
+    monkeypatch.setattr(store, "verify", held)
+    return gate
+
+
+async def _loop_ran_while_held(gate, coro) -> bool:
+    """Run ``coro`` until its key lookup blocks; whether the loop ran meanwhile."""
+    task = asyncio.ensure_future(coro)
+    try:
+        assert await asyncio.to_thread(gate.entered.wait, 30), "the key was not looked up"
+        await asyncio.sleep(0)
+        return not gate.done.is_set()
+    finally:
+        gate.release.set()
+        await task
+
+
+@pytest.mark.asyncio
+async def test_ws_upgrade_key_lookup_does_not_block_the_loop(
+    notebook_session, api_key_mode, monkeypatch
+):
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    key, _ = api_key_mode.create_key(principal_id="alice", scopes=frozenset({"notebook:read"}))
+    gate = _hold_verify(monkeypatch, api_key_mode)
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")], headers={"authorization": f"Bearer {key}"}
+    )
+
+    assert await _loop_ran_while_held(gate, notebook_websocket(cast(WebSocket, fake), session.id))
+    assert fake.frames_of("notebook_state"), "the socket was refused after the lookup"
+
+
+@pytest.mark.asyncio
+async def test_ws_broadcast_key_recheck_does_not_block_the_loop(
+    notebook_session, api_key_mode, monkeypatch
+):
+    import strata.notebook.ws as ws_module
+
+    _, session = notebook_session
+    key, _ = api_key_mode.create_key(principal_id="alice", scopes=frozenset({"notebook:read"}))
+    gate = _hold_verify(monkeypatch, api_key_mode)
+    listener = FakeNotebookWebSocket(headers={"authorization": f"Bearer {key}"})
+    ws_module._notebook_connections.setdefault(session.id, []).append(cast(WebSocket, listener))
+    try:
+        broadcast = ws_module._broadcast_message(session.id, {"type": "cell_output", "payload": {}})
+        assert await _loop_ran_while_held(gate, broadcast)
+    finally:
+        ws_module._notebook_connections.pop(session.id, None)
+
+    assert len(listener.frames_of("cell_output")) == 1
 
 
 @pytest.mark.asyncio
