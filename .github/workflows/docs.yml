@@ -52,10 +52,11 @@ jobs:
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
+          python-version: "3.12"
           save-cache: false
 
       - name: Install docs dependencies
-        run: uv sync --python 3.12 --group docs --no-install-project
+        run: uv sync --group docs --no-install-project
 
       - name: Validate build (PRs)
         if: github.event_name == 'pull_request'
