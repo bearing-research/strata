@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from strata.auth import get_principal, principal_context
 from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
 from strata.notebook.scopes import required_scope_for_tool, session_visible_to_caller
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from starlette.applications import Starlette
 
     from strata.notebook.session import SessionManager
@@ -870,6 +873,43 @@ def _mcp_import_failure(missing: str | None) -> str:
     )
 
 
+class _ServerHosts:
+    """The server's own Host rule (``STRATA_ALLOWED_HOSTS``), as the SDK's allowed-hosts list.
+
+    The SDK matches only exact values or ``name:*``, which cannot say "any IP literal" or
+    ``.suffix``. It tests ``host in allowed_hosts`` first, so membership is the server's rule.
+    """
+
+    def __contains__(self, host: object) -> bool:
+        return isinstance(host, str) and _server_answers_to(host)
+
+    def __iter__(self) -> Iterator[str]:
+        # The SDK's ``name:*`` patterns: none, membership already decided.
+        return iter(())
+
+
+class _ServerOrigins:
+    """An Origin on a host the server answers to, or one in ``cors_allow_origins``."""
+
+    def __contains__(self, origin: object) -> bool:
+        if not isinstance(origin, str):
+            return False
+        if origin in _server_config().cors_allow_origins:
+            return True
+        host = urlsplit(origin).netloc
+        return bool(host) and _server_answers_to(host)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(())
+
+
+def _server_answers_to(host: str) -> bool:
+    """Whether the running server answers to this ``Host`` value."""
+    from strata.server import _host_is_allowed
+
+    return _host_is_allowed(host, _server_config())
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -1310,8 +1350,16 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         """
         return _publish(session_manager, session_id, cell_id, variable, title)
 
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    # Unvalidated, since validation would copy the two predicates into plain lists.
+    security = TransportSecuritySettings.model_construct(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_ServerHosts(),
+        allowed_origins=_ServerOrigins(),
+    )
     # The default path would nest the endpoint at "/mcp/mcp".
-    app = mcp.streamable_http_app(streamable_http_path="/")
+    app = mcp.streamable_http_app(streamable_http_path="/", transport_security=security)
     # Lets tests read the tool list without an MCP client.
     app.state.mcp_server = mcp
     return app
