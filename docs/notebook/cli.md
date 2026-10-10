@@ -299,6 +299,27 @@ Exit codes: `cell run` → `0` ran ok, `1` the cell errored (or unknown cell), `
 setup error (no `.venv/bin/python` under `--no-sync`, sync failure). `cell test` → `0` all
 passed, `1` a test failed/errored, `2` pytest unavailable in the venv.
 
+### Cancelling a run (`cell cancel`)
+
+A run on a live session can be stopped from another shell, whoever started it
+(a `cell run --server`, an MCP agent, or the browser):
+
+```bash
+strata cell cancel --server http://localhost:8765 --session $SID <cell_id>
+```
+
+It does what the browser's stop button does: the run stops (a cell running in
+a local process has its whole process group killed), the cell goes back to
+`idle`, and the `cell run` that was waiting on it returns `status: "error"` with
+`error_code: "cancelled"`. The output is `{"cell_id", "cancelled", "status"}`.
+Exit codes: `0` a run was cancelled, `1` the cell was not running
+(`cancelled: false`; a finished cell keeps its state) or an operation error,
+`2` invocation error.
+
+Only a server run can be cancelled this way. A `cell run` on a notebook
+directory executes inside that command's own process, so `cell cancel` given a
+path exits `2` and says so; stop that run with Ctrl-C instead.
+
 ## Authoring cells and dependencies (`cell add/edit/rm/mv`, `dep`)
 
 An agent can also build and edit a notebook through commands (instead of writing

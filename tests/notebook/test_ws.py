@@ -1154,7 +1154,7 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
     await _wait_until(lambda: bool(_running_frames(fake, root_cell.id)))
     await asyncio.wait_for(started.wait(), timeout=2.0)
 
-    await _handle_cell_cancel(session, {"cell_id": root_cell.id}, execution_state, session.id)
+    await _handle_cell_cancel(session, {"cell_id": root_cell.id}, session.id)
 
     idle = [
         f
@@ -1656,7 +1656,7 @@ async def test_cell_cancel(notebook_session):
     cell_id = session.notebook_state.cells[0].id
 
     fake, execution_state = _make_fake_ws(session)
-    await _handle_cell_cancel(session, {"cell_id": cell_id}, execution_state, session.id)
+    await _handle_cell_cancel(session, {"cell_id": cell_id}, session.id)
 
     statuses = fake.frames_of("cell_status")
     assert statuses
@@ -1691,7 +1691,7 @@ async def test_cell_cancel_interrupts_running_execution(notebook_session, monkey
     # long sleep before we cancel it.
     await _wait_until(lambda: bool(_running_frames(fake, cell_id)))
 
-    await _handle_cell_cancel(session, {"cell_id": cell_id}, execution_state, session.id)
+    await _handle_cell_cancel(session, {"cell_id": cell_id}, session.id)
 
     idle = [
         f
@@ -1715,7 +1715,7 @@ async def test_stale_cell_cancel_does_not_clobber_ready_state(notebook_session):
     assert terminal["payload"]["status"] == "ready"
 
     cancel_fake, execution_state = _make_fake_ws(session)
-    await _handle_cell_cancel(session, {"cell_id": cell_id}, execution_state, session.id)
+    await _handle_cell_cancel(session, {"cell_id": cell_id}, session.id)
 
     idle = [
         f
@@ -2366,8 +2366,9 @@ async def test_exclusive_run_is_cancellable(notebook_session, monkeypatch):
     assert active is not None  # visible to cell_cancel
 
     active.cancel()
-    result = await caller  # cancelled run surfaces as "no result", not a crash
-    assert result is None
+    result = await caller  # a cancelled run surfaces as such, not as a crash or a failure
+    assert result is not None
+    assert not result.success and result.error_code == "cancelled"
     assert state.active_task() is None  # state fully reset
 
 

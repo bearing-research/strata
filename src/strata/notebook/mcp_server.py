@@ -249,6 +249,25 @@ async def _run_cell(
     return run
 
 
+async def _cancel_cell(
+    session_manager: SessionManager, session_id: str, cell_id: str
+) -> dict[str, Any]:
+    """Cancel the cell's run, as the WS ``cell_cancel`` frame and the REST route do."""
+    from strata.notebook.ops import CancelResult
+    from strata.notebook.ws import cancel_cell_run
+
+    session = _live_session(session_manager, session_id)
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise NotebookOpsError(f"no cell with id {cell_id!r}")
+    cancelled = await cancel_cell_run(session, cell_id, session_id)
+    if cancelled:
+        await _agent_note(session_id, "mcp", f"cancelled cell {cell_id}")
+    return CancelResult(cell_id=cell_id, cancelled=cancelled, status=cell.status).model_dump(
+        mode="json"
+    )
+
+
 async def _set_widget_value(
     session_manager: SessionManager,
     session_id: str,
@@ -1004,6 +1023,17 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         get_cell afterwards for the rendered outputs.
         """
         return await _run_cell(session_manager, session_id, cell_id, mode)
+
+    @mcp.tool()
+    async def cancel_cell(session_id: str, cell_id: str) -> dict[str, Any]:
+        """Cancel a cell's run, whoever started it (this agent, the CLI, a browser).
+
+        Stops the run and leaves the cell idle, as the browser's stop button
+        does; a run_cell waiting on it returns status error with error_code
+        ``cancelled``. Returns ``cancelled: false`` when the cell was not
+        running; a finished cell keeps its state.
+        """
+        return await _cancel_cell(session_manager, session_id, cell_id)
 
     @mcp.tool()
     async def set_widget_value(
