@@ -241,6 +241,36 @@ async def test_a_signed_upload_reads_the_build_off_the_loop(served, monkeypatch)
     assert response.status_code == 200, response.text
 
 
+async def test_a_stale_executor_cannot_fail_a_build_a_newer_claim_holds(served, monkeypatch):
+    """The manifest is re-issued while a stale executor's bad upload is being checked.
+
+    Its finalize passed the lease check, but failing the build would take it from the newer
+    claim, and failing the artifact would void what that claim is building.
+    """
+    from strata.api.routers.builds import _EXTERNAL_LEASE_OWNER
+
+    build_id, version = _queued_build(served)
+    async with _client(served) as client:
+        manifest = (await client.get(f"/v1/builds/{build_id}/manifest")).json()
+        upload = await client.post(manifest["output"]["url"], content=b"not arrow")
+        assert upload.status_code == 200, upload.text
+
+        blob_size = served.store.blob_size
+
+        def reissued_meanwhile(*args, **kwargs):
+            assert served.build_store.renew_lease(build_id, _EXTERNAL_LEASE_OWNER, 600.0)
+            return blob_size(*args, **kwargs)
+
+        monkeypatch.setattr(served.store, "blob_size", reissued_meanwhile)
+        response = await client.post(manifest["finalize_url"])
+
+    assert response.status_code == 409, response.text
+    build = served.build_store.get_build(build_id)
+    assert build.state == "building"
+    assert build.lease_owner == _EXTERNAL_LEASE_OWNER
+    assert served.store.get_artifact("pulled", version).state == "building"
+
+
 # --- materialize ---
 
 

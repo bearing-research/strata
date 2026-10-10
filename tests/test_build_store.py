@@ -167,6 +167,26 @@ class TestBuildStore:
         assert state.error_message == "Executor timeout"
         assert state.error_code == "EXECUTOR_TIMEOUT"
 
+    def test_a_fail_fenced_on_a_claim_needs_that_exact_claim(self, build_store):
+        """Every manifest claims as the same owner, so only the deadline tells claims apart."""
+        build_id = str(uuid.uuid4())
+        build_store.create_build(
+            build_id=build_id, artifact_id="art-123", version=1, executor_ref="duckdb_sql@v1"
+        )
+        assert build_store.claim_build(build_id, "external:manifest", 60.0)
+        stale = build_store.get_build(build_id).lease_expires_at
+        assert build_store.renew_lease(build_id, "external:manifest", 120.0)
+        current = build_store.get_build(build_id).lease_expires_at
+
+        assert not build_store.fail_build(
+            build_id, "bad upload", lease_owner="external:manifest", lease_expires_at=stale
+        )
+        assert build_store.get_build(build_id).state == "building"
+        assert build_store.fail_build(
+            build_id, "bad upload", lease_owner="external:manifest", lease_expires_at=current
+        )
+        assert build_store.get_build(build_id).state == "failed"
+
     def test_fail_pending_build(self, build_store):
         """A pending build can fail before it starts."""
         build_id = str(uuid.uuid4())

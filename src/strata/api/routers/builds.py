@@ -531,7 +531,16 @@ async def finalize_build(
     )
 
     def fail(message: str, code: str) -> None:
-        build_store.fail_build(build_id, message, code)
+        """Fail the build and its artifact; under a lease, only while this claim holds it.
+
+        Otherwise a stale executor's bad upload would fail what a newer claim is building.
+        """
+        if claim is None:
+            build_store.fail_build(build_id, message, code)
+        elif not build_store.fail_build(
+            build_id, message, code, lease_owner=claim[0], lease_expires_at=claim[1]
+        ):
+            raise HTTPException(status_code=409, detail=_LEASE_LOST_UNPUBLISHED)
         store.fail_artifact(build.artifact_id, build.version)
 
     # On S3, GCS or Azure each blob probe is a network round trip.
