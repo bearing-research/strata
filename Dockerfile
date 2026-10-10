@@ -66,6 +66,7 @@ COPY packages ./packages
 #   --extra sql, --extra sql-sqlite: SQL cells (DuckDB is a core dependency).
 #     Without sql a notebook holding a SQL cell does not open; the SQLite driver
 #     is what the shipped SQL example connects with.
+#   --extra mcp: without it, STRATA_MCP_ENABLED only logs that /mcp is off.
 RUN mkdir -p dist && \
     uv export \
       --frozen \
@@ -78,6 +79,7 @@ RUN mkdir -p dist && \
       --extra postgres \
       --extra sql \
       --extra sql-sqlite \
+      --extra mcp \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 

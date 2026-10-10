@@ -50,7 +50,8 @@ jobs:
 
       - name: Start container
         run: |
-          docker run -d --name strata-test -p 8765:8765 strata:test
+          docker run -d --name strata-test -p 8765:8765 \
+            -e STRATA_MCP_ENABLED=true strata:test
 
       - name: Health check
         run: |
@@ -67,6 +68,18 @@ jobs:
       - name: Check metrics endpoint
         run: |
           curl -f http://localhost:8765/metrics
+
+      - name: Check MCP endpoint
+        run: |
+          # The image ships the mcp extra. Without it /mcp is not mounted and
+          # the SPA catch-all answers this POST with 405.
+          out=$(curl -fsS -X POST http://localhost:8765/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}')
+          grep -q '"serverInfo"' <<<"$out" || {
+            echo "FAIL: /mcp did not answer initialize"; echo "$out"; exit 1;
+          }
 
       - name: Stop container
         if: always()
