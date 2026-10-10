@@ -78,7 +78,7 @@ class TestRegistryHooks:
             created_at=time.time(),
         )
 
-    def test_register_claims_and_pop_releases(self):
+    async def test_claim_claims_and_pop_releases(self):
         claimed: list[tuple[str, float]] = []
         released: list[str] = []
         registry = StreamRegistry(
@@ -88,6 +88,7 @@ class TestRegistryHooks:
         )
 
         registry.register(self._state())
+        await registry.claim("s1")
         assert claimed == [("s1", 30.0)]
 
         registry.pop("s1")

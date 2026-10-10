@@ -38,6 +38,8 @@ _MAX_LOG_CHUNK_BYTES = 256 * 1024
 # Marks a build handed to a pull-model executor, so BuildRunner won't also run it.
 _EXTERNAL_LEASE_OWNER = "external:manifest"
 
+_LEASE_LOST_UNPUBLISHED = "Build lease is no longer held by this caller; nothing was published"
+
 # The lease must outlive every signed URL handed to the executor, or BuildRunner
 # can reclaim the build while those URLs are still usable.
 _LEASE_MARGIN_SECONDS = 60.0
@@ -115,11 +117,13 @@ def get_build_status_compat(build_id: str):
 
 
 @router.get("/v1/builds/{build_id}/manifest")
-async def get_build_manifest(build_id: str, request: Request, build_store: BuildTransportStore):
+def get_build_manifest(build_id: str, request: Request, build_store: BuildTransportStore):
     """Get the pull-model manifest of signed URLs for a build.
 
     It carries download URLs for each input, an upload URL for the output, and the
-    finalize URL to call once the upload completes.
+    finalize URL to call once the upload completes. A sync route: the claim, the presign
+    (which can call the cloud for role credentials, IAM signBlob or a delegation key) and
+    the attempt record all run in a worker thread.
     """
     from strata.server import (
         _ACTIVE_BUILD_STATES,
@@ -205,20 +209,16 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
     leased = build_store.get_build(build_id) or build
 
     try:
-        # Presigning can call the cloud (role credentials, IAM signBlob, a delegation key).
-        manifest = await anyio.to_thread.run_sync(
-            functools.partial(
-                build_service.assemble_manifest,
-                store,
-                signer=state.url_signer,
-                build=build,
-                base_url=base_url,
-                max_output_bytes=state.config.max_transform_output_bytes,
-                url_expiry_seconds=state.config.signed_url_expiry_seconds,
-                lease_owner=leased.lease_owner,
-                lease_expires_at=leased.lease_expires_at,
-                presign=state.config.artifact_presigned_urls,
-            )
+        manifest = build_service.assemble_manifest(
+            store,
+            signer=state.url_signer,
+            build=build,
+            base_url=base_url,
+            max_output_bytes=state.config.max_transform_output_bytes,
+            url_expiry_seconds=state.config.signed_url_expiry_seconds,
+            lease_owner=leased.lease_owner,
+            lease_expires_at=leased.lease_expires_at,
+            presign=state.config.artifact_presigned_urls,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -238,14 +238,17 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
 
 
 @router.get("/v1/artifacts/download")
-async def download_artifact_signed(
+def download_artifact_signed(
     artifact_id: str,
     version: str,
     build_id: str,
     expires_at: str,
     signature: str,
 ):
-    """Download an input artifact's Arrow IPC bytes via a Strata-signed, unexpired URL."""
+    """Download an input artifact's Arrow IPC bytes via a Strata-signed, unexpired URL.
+
+    A sync route, so its store and blob reads run in a worker thread.
+    """
     from strata.server import _get_artifact_store, get_state
 
     try:
@@ -275,7 +278,7 @@ async def download_artifact_signed(
             detail=f"Artifact is not ready (state={artifact.state})",
         )
 
-    reader_cm = await anyio.to_thread.run_sync(store.open_blob_reader, artifact_id, version_int)
+    reader_cm = store.open_blob_reader(artifact_id, version_int)
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="Artifact blob not found")
 
@@ -338,13 +341,15 @@ async def upload_artifact_signed(
     ):
         raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
-    # Resolved in-body, not via RequiredBuildStore, so the signature check (the
-    # authorization) runs before any store-500.
-    build_store = runtime_build_store()
-    if build_store is None:
-        raise HTTPException(status_code=500, detail="Build store not initialized")
+    def load_build():
+        # Resolved in-body, not via RequiredBuildStore, so the signature check (the
+        # authorization) runs before any store-500.
+        build_store = runtime_build_store()
+        if build_store is None:
+            raise HTTPException(status_code=500, detail="Build store not initialized")
+        return build_store.get_build(build_id)
 
-    build = build_store.get_build(build_id)
+    build = await anyio.to_thread.run_sync(load_build)
     if build is None:
         raise HTTPException(status_code=404, detail="Build not found")
 
@@ -456,54 +461,55 @@ async def finalize_build(
     )
     from strata.transforms.build_qos import record_build_output_bytes
 
-    build = build_store.get_build(build_id)
-    if build is None:
-        raise HTTPException(status_code=404, detail="Build not found")
+    def admit() -> tuple[Any, Any]:
+        """The build, and the claim this request's lease token was verified against, if any."""
+        build = build_store.get_build(build_id)
+        if build is None:
+            raise HTTPException(status_code=404, detail="Build not found")
 
-    # The claim this request's lease token was verified against, if any.
-    current = None
-    if signature is not None or expires_at is not None:
-        if signature is None or expires_at is None:
-            raise HTTPException(status_code=400, detail="Missing finalize signature parameters")
-        try:
-            expires_at_float = float(expires_at)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid parameter format")
+        current = None
+        if signature is not None or expires_at is not None:
+            if signature is None or expires_at is None:
+                raise HTTPException(status_code=400, detail="Missing finalize signature parameters")
+            try:
+                expires_at_float = float(expires_at)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid parameter format")
 
-        if not get_state().url_signer.verify_finalize_signature(
-            build_id=build_id,
-            expires_at=expires_at_float,
-            signature=signature,
-            lease=lease,
-        ):
-            raise HTTPException(status_code=403, detail="Invalid or expired signature")
+            if not get_state().url_signer.verify_finalize_signature(
+                build_id=build_id,
+                expires_at=expires_at_float,
+                signature=signature,
+                lease=lease,
+            ):
+                raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
-        # Ownership before publication: everything below writes, and the final fence can
-        # only refuse the build row, not un-publish bytes. The signature proves this
-        # server minted the capability; the lease token proves it was minted for the
-        # claim current now, which a stale executor cannot satisfy. Read the row fresh.
-        if lease:
-            current = build_store.get_build(build_id)
-            expected = lease_token(
-                current.lease_owner if current else None,
-                current.lease_expires_at if current else None,
-            )
-            if not compare_digest(lease, expected):
-                raise HTTPException(
-                    status_code=409,
-                    detail="Build lease is no longer held by this caller; nothing was published",
+            # Ownership before publication: everything below writes, and the final fence can
+            # only refuse the build row, not un-publish bytes. The signature proves this
+            # server minted the capability; the lease token proves it was minted for the
+            # claim current now, which a stale executor cannot satisfy. Read the row fresh.
+            if lease:
+                current = build_store.get_build(build_id)
+                expected = lease_token(
+                    current.lease_owner if current else None,
+                    current.lease_expires_at if current else None,
                 )
-    else:
-        _authorize_build_access(
-            owner_principal=build.principal_id,
-            owner_tenant=build.tenant_id,
-        )
+                if not compare_digest(lease, expected):
+                    raise HTTPException(status_code=409, detail=_LEASE_LOST_UNPUBLISHED)
+        else:
+            _authorize_build_access(
+                owner_principal=build.principal_id,
+                owner_tenant=build.tenant_id,
+            )
 
-    if build.state not in _ACTIVE_BUILD_STATES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Build is not in pending or building state (state={build.state})",
-        )
+        if build.state not in _ACTIVE_BUILD_STATES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Build is not in pending or building state (state={build.state})",
+            )
+        return build, current
+
+    build, current = await anyio.to_thread.run_sync(admit)
 
     try:
         finalize_payload = await request.json()
@@ -518,6 +524,16 @@ async def finalize_build(
     # an earlier manifest wrote somewhere else.
     attempt = lease_attempt(lease) if current is not None else None
     store = _get_artifact_store(allow_server_mode=True)
+    claim = (
+        (current.lease_owner, current.lease_expires_at)
+        if current is not None and current.lease_owner is not None
+        else None
+    )
+
+    def fail(message: str, code: str) -> None:
+        build_store.fail_build(build_id, message, code)
+        store.fail_artifact(build.artifact_id, build.version)
+
     # On S3, GCS or Azure each blob probe is a network round trip.
     if not await anyio.to_thread.run_sync(
         store.blob_exists, build.artifact_id, build.version, attempt
@@ -537,12 +553,11 @@ async def finalize_build(
     # A presigned upload bypasses the upload route's size check, so enforce it here.
     max_output_bytes = get_state().config.max_transform_output_bytes
     if byte_size > max_output_bytes:
-        build_store.fail_build(
-            build_id,
+        await anyio.to_thread.run_sync(
+            fail,
             f"Output is {byte_size} bytes, over the {max_output_bytes}-byte limit",
             "OUTPUT_TOO_LARGE",
         )
-        store.fail_artifact(build.artifact_id, build.version)
         raise HTTPException(
             status_code=413,
             detail=f"Output exceeds maximum size: {byte_size} > {max_output_bytes}",
@@ -575,8 +590,7 @@ async def finalize_build(
         try:
             schema_json, row_count = await anyio.to_thread.run_sync(_validate_notebook_bundle)
         except Exception as e:
-            build_store.fail_build(build_id, str(e), "INVALID_NOTEBOOK_BUNDLE")
-            store.fail_artifact(build.artifact_id, build.version)
+            await anyio.to_thread.run_sync(fail, str(e), "INVALID_NOTEBOOK_BUNDLE")
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid notebook output bundle: {e}",
@@ -600,8 +614,7 @@ async def finalize_build(
         try:
             schema_json, row_count = await anyio.to_thread.run_sync(_parse_arrow_stream)
         except Exception as e:
-            build_store.fail_build(build_id, str(e), "INVALID_ARROW_FORMAT")
-            store.fail_artifact(build.artifact_id, build.version)
+            await anyio.to_thread.run_sync(fail, str(e), "INVALID_ARROW_FORMAT")
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid Arrow IPC format: {e}",
@@ -610,8 +623,8 @@ async def finalize_build(
     # Under a lease, publishing and completing the build are one transaction fenced
     # on this request's claim; the check at the top still left a window.
     fence = None
-    if current is not None and current.lease_owner is not None:
-        claim_owner, claim_deadline = current.lease_owner, current.lease_expires_at
+    if claim is not None:
+        claim_owner, claim_deadline = claim
 
         def fence(conn, artifact_id: str, version: int) -> bool:
             return build_store.complete_within(
@@ -645,17 +658,12 @@ async def finalize_build(
             await anyio.to_thread.run_sync(
                 store.delete_attempt_blob, build.artifact_id, build.version, attempt
             )
-        raise HTTPException(
-            status_code=409,
-            detail="Build lease is no longer held by this caller; nothing was published",
-        )
+        raise HTTPException(status_code=409, detail=_LEASE_LOST_UNPUBLISHED)
     except ValueError as e:
-        build_store.fail_build(build_id, str(e), "FINALIZE_FAILED")
-        store.fail_artifact(build.artifact_id, build.version)
+        await anyio.to_thread.run_sync(fail, str(e), "FINALIZE_FAILED")
         raise HTTPException(status_code=400, detail=str(e))
     if finalized_artifact is None:
-        build_store.fail_build(build_id, "Failed to finalize artifact", "FINALIZE_FAILED")
-        store.fail_artifact(build.artifact_id, build.version)
+        await anyio.to_thread.run_sync(fail, "Failed to finalize artifact", "FINALIZE_FAILED")
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
 
     if fence is not None:
@@ -663,19 +671,25 @@ async def finalize_build(
         await record_build_output_bytes(build.tenant_id, byte_size)
         return _finalized(build, finalized_artifact, byte_size, row_count)
 
-    # The pull model may finalize a build that is still pending.
-    if build.state == "pending":
-        build_store.start_build(build_id)
-    if finalized_artifact.id != build.artifact_id or finalized_artifact.version != build.version:
-        build_store.update_build_output(
-            build_id,
-            finalized_artifact.id,
-            finalized_artifact.version,
-        )
-    # Fenced on the owner seen at request start, so an executor whose lease was
-    # reclaimed mid-flight cannot record over its successor. A ``lease_owner`` of None
-    # stays unfenced for the deprecated ``start_build`` path and legacy rows.
-    if not build_store.complete_build(build_id, lease_owner=build.lease_owner):
+    def record_completion() -> bool:
+        # The pull model may finalize a build that is still pending.
+        if build.state == "pending":
+            build_store.start_build(build_id)
+        if (finalized_artifact.id, finalized_artifact.version) != (
+            build.artifact_id,
+            build.version,
+        ):
+            build_store.update_build_output(
+                build_id,
+                finalized_artifact.id,
+                finalized_artifact.version,
+            )
+        # Fenced on the owner seen at request start, so an executor whose lease was
+        # reclaimed mid-flight cannot record over its successor. A ``lease_owner`` of None
+        # stays unfenced for the deprecated ``start_build`` path and legacy rows.
+        return build_store.complete_build(build_id, lease_owner=build.lease_owner)
+
+    if not await anyio.to_thread.run_sync(record_completion):
         raise HTTPException(
             status_code=409,
             detail="Build lease is no longer held by this caller; result not recorded",

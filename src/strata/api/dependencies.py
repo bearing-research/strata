@@ -7,7 +7,6 @@ imported lazily: server imports this module at load time, so the import stays on
 
 from __future__ import annotations
 
-import asyncio
 import functools
 from typing import Annotated, NamedTuple
 
@@ -275,11 +274,12 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
         raise HTTPException(status_code=403, detail="Access denied")
 
 
-async def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
+def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     """Resolve an input URI to its current version, enforcing table ACL and artifact access.
 
     A table input is planned in the planning pool under ``plan_timeout_seconds``, as a scan is.
-    Side effect: records a use of an artifact input for retention.
+    Side effect: records a use of an artifact input for retention. It queries the store, so an
+    async caller runs it in a worker thread, never on the loop.
 
     Raises:
         HTTPException: 400/404 for an unresolvable URI; 401/403/404 for a denied input; 504 for a
@@ -314,12 +314,15 @@ async def resolve_input_version(input_uri: str, tenant: str | None = None) -> st
         if input_uri.startswith("strata://"):
             resolved = resolve()
         else:
-            # A plan reads the catalog and manifests; on the loop it would stall every request.
+            # Planning has its own pool, sized for catalog and manifest reads.
             with get_pool_tracker().track("planning"):
-                resolved = await asyncio.wait_for(
-                    asyncio.get_running_loop().run_in_executor(state._planning_executor, resolve),
-                    timeout=plan_timeout,
-                )
+                planned = state._planning_executor.submit(resolve)
+                try:
+                    resolved = planned.result(timeout=plan_timeout)
+                except TimeoutError:
+                    # Drops a plan still queued; one already running finishes unread.
+                    planned.cancel()
+                    raise
     except TimeoutError as e:
         raise HTTPException(
             status_code=504, detail=f"Planning timed out after {plan_timeout}s."

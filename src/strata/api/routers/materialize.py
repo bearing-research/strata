@@ -7,9 +7,11 @@ server-private gates through lazy ``from strata.server import ...``, so this mod
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
 from typing import TYPE_CHECKING
 
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pyiceberg.exceptions import NoSuchTableError
@@ -37,6 +39,7 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
+    from strata.artifact_store import ArtifactStore, ArtifactVersion
     from strata.server import ServerState
 
 logger = get_logger(__name__)
@@ -45,7 +48,7 @@ router = APIRouter(tags=["materialize"])
 
 
 @router.post("/v1/artifacts/explain-materialize", response_model=ExplainMaterializeResponse)
-async def explain_materialize(
+def explain_materialize(
     request: ExplainMaterializeRequest, store: ReadStore, principal: CurrentPrincipal
 ):
     """Dry-run materialize: report hit or miss and why a rebuild would be needed."""
@@ -58,7 +61,7 @@ async def explain_materialize(
     resolved_versions: dict[str, str] = {}
     for input_uri in request.inputs:
         try:
-            resolved_versions[input_uri] = await resolve_input_version(input_uri, tenant=tenant_id)
+            resolved_versions[input_uri] = resolve_input_version(input_uri, tenant=tenant_id)
         except HTTPException as e:
             resolved_versions[input_uri] = f"<error: {e.detail}>"
 
@@ -152,6 +155,15 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
     )
 
 
+def _find_existing(
+    store: ArtifactStore, provenance_hash: str, request: MaterializeRequest, tenant: str | None
+) -> ArtifactVersion | None:
+    """The ready artifact for ``provenance_hash``; a hit takes the request's name with it."""
+    if request.name and not request.refresh:
+        return store.find_ready_and_set_name(provenance_hash, request.name, tenant)
+    return store.find_by_provenance(provenance_hash, tenant=tenant)
+
+
 def _authorize_name_write() -> None:
     """Gate ``name`` on a materialize request with the ``POST /v1/names`` write gate.
 
@@ -195,24 +207,26 @@ async def materialize_artifact(request: MaterializeRequest):
         inputs=request.inputs,
     )
 
-    # Versions feed both the hash and staleness tracking. An input that does not resolve
-    # (denied, missing, unreadable, or a plan that failed) refuses the request: building past
-    # it would record a snapshot-less version and dedup later runs onto the result.
-    input_versions: dict[str, str] = {
-        input_uri: await resolve_input_version(input_uri, tenant=tenant_id)
-        for input_uri in request.inputs
-    }
-
     from strata.services.materialize import materialize_service
 
-    provenance_hash = materialize_service.compute_provenance(transform_spec, input_versions)
+    def resolve_and_find() -> tuple[dict[str, str], str, ArtifactVersion | None]:
+        # Versions feed both the hash and staleness tracking. An input that does not resolve
+        # (denied, missing, unreadable, or a plan that failed) refuses the request: building
+        # past it would record a snapshot-less version and dedup later runs onto the result.
+        input_versions = {
+            input_uri: resolve_input_version(input_uri, tenant=tenant_id)
+            for input_uri in request.inputs
+        }
+        provenance_hash = materialize_service.compute_provenance(transform_spec, input_versions)
+        return (
+            input_versions,
+            provenance_hash,
+            _find_existing(store, provenance_hash, request, tenant_id),
+        )
 
-    existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
+    input_versions, provenance_hash, existing = await anyio.to_thread.run_sync(resolve_and_find)
     if existing is not None and not request.refresh:
         artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
-
-        if request.name:
-            store.set_name(request.name, existing.id, existing.version, tenant=tenant_id)
 
         return MaterializeResponse(
             hit=True,
@@ -226,14 +240,19 @@ async def materialize_artifact(request: MaterializeRequest):
     artifact_id = materialize_service.rebuild_artifact_id(
         existing, refresh=request.refresh, new_id=new_id
     )
-    version = store.create_artifact(
-        artifact_id=artifact_id,
-        provenance_hash=provenance_hash,
-        transform_spec=transform_spec,
-        input_versions=input_versions,
-        tenant=tenant_id,
-        principal=principal_id,
-        minted=artifact_id == new_id,
+    # Two misses for one computation each create a version; finalize keeps the first ready one
+    # and supersedes the other.
+    version = await anyio.to_thread.run_sync(
+        functools.partial(
+            store.create_artifact,
+            artifact_id=artifact_id,
+            provenance_hash=provenance_hash,
+            transform_spec=transform_spec,
+            input_versions=input_versions,
+            tenant=tenant_id,
+            principal=principal_id,
+            minted=artifact_id == new_id,
+        )
     )
 
     artifact_uri = f"strata://artifact/{artifact_id}@v={version}"
@@ -283,7 +302,7 @@ async def materialize_artifact(request: MaterializeRequest):
             try:
                 await build_qos.check_quota(build_tenant_id, estimated_output_bytes)
             except BuildQoSError as e:
-                store.fail_artifact(artifact_id, version)
+                await anyio.to_thread.run_sync(store.fail_artifact, artifact_id, version)
                 return JSONResponse(
                     status_code=e.status_code,
                     content=e.to_dict(),
@@ -293,7 +312,7 @@ async def materialize_artifact(request: MaterializeRequest):
             try:
                 build_slot = await build_qos.acquire(build_tenant_id, priority)
             except BuildQoSError as e:
-                store.fail_artifact(artifact_id, version)
+                await anyio.to_thread.run_sync(store.fail_artifact, artifact_id, version)
                 return JSONResponse(
                     status_code=e.status_code,
                     content=e.to_dict(),
@@ -301,33 +320,32 @@ async def materialize_artifact(request: MaterializeRequest):
                 )
 
         try:
-            build_store.create_build(
-                build_id=build_id,
-                artifact_id=artifact_id,
-                version=version,
-                executor_ref=executor_ref,
-                executor_url=transform_defn.executor_url if transform_defn else None,
-                tenant_id=tenant_id,
-                principal_id=principal_id,
-                input_uris=request.inputs,
-                params=transform.params,
-                name=request.name,
+            await anyio.to_thread.run_sync(
+                functools.partial(
+                    build_store.create_build,
+                    build_id=build_id,
+                    artifact_id=artifact_id,
+                    version=version,
+                    executor_ref=executor_ref,
+                    executor_url=transform_defn.executor_url if transform_defn else None,
+                    tenant_id=tenant_id,
+                    principal_id=principal_id,
+                    input_uris=request.inputs,
+                    params=transform.params,
+                    name=request.name,
+                )
             )
-
-            # Queued now; the runner has its own execution concurrency control.
+        finally:
+            # Queued (or refused, a cancel included); the runner has its own concurrency control.
             if build_slot:
                 await build_slot.release()
 
-            return MaterializeResponse(
-                hit=False,
-                artifact_uri=artifact_uri,
-                build_id=build_id,
-                state="pending",
-            )
-        except Exception:
-            if build_slot:
-                await build_slot.release()
-            raise
+        return MaterializeResponse(
+            hit=False,
+            artifact_uri=artifact_uri,
+            build_id=build_id,
+            state="pending",
+        )
 
     # No build runtime: the client executes the build spec.
     build_spec = BuildSpec(
@@ -522,12 +540,11 @@ async def _handle_identity_materialize(
 
     existing = None
     if store is not None:
-        existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
+        existing = await anyio.to_thread.run_sync(
+            _find_existing, store, provenance_hash, request, tenant_id
+        )
         if existing is not None and existing.state == "ready" and not request.refresh:
             artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
-
-            if request.name:
-                store.set_name(request.name, existing.id, existing.version, tenant=tenant_id)
 
             logger.info(
                 "identity_materialize_cache_hit",
@@ -569,14 +586,17 @@ async def _handle_identity_materialize(
             params=request.transform.params,
             inputs=request.inputs,
         )
-        artifact_version = store.create_artifact(
-            artifact_id=artifact_id,
-            provenance_hash=provenance_hash,
-            transform_spec=transform_spec,
-            input_versions=input_versions,
-            tenant=tenant_id,
-            principal=principal_id,
-            minted=artifact_id == new_id,
+        artifact_version = await anyio.to_thread.run_sync(
+            functools.partial(
+                store.create_artifact,
+                artifact_id=artifact_id,
+                provenance_hash=provenance_hash,
+                transform_spec=transform_spec,
+                input_versions=input_versions,
+                tenant=tenant_id,
+                principal=principal_id,
+                minted=artifact_id == new_id,
+            )
         )
 
     artifact_uri = f"strata://artifact/{artifact_id}@v={artifact_version}"
@@ -608,6 +628,8 @@ async def _handle_identity_materialize(
         state.scan_builds.register_scan(plan)
         state.scan_builds.start_prefetch(state, plan)
         state.streams.schedule_cleanup(stream_id, plan.scan_id)
+        # Last, so a cancel here leaves a stream its cleanup already covers.
+        await state.streams.claim(stream_id)
 
         return MaterializeResponse(
             hit=False,
@@ -649,8 +671,7 @@ async def _handle_identity_materialize(
                 stream_state.build_slot = await build_qos.acquire(qos_tenant_id, priority)
                 stream_state.qos_tenant_id = qos_tenant_id
             except BuildQoSError as e:
-                if store is not None:
-                    store.fail_artifact(artifact_id, artifact_version)
+                await anyio.to_thread.run_sync(store.fail_artifact, artifact_id, artifact_version)
                 return JSONResponse(
                     status_code=e.status_code,
                     content=e.to_dict(),
@@ -661,6 +682,7 @@ async def _handle_identity_materialize(
         stream_state.background_task = asyncio.create_task(
             state.scan_builds.build_identity_artifact(state, stream_state)
         )
+        await state.streams.claim(stream_id)
         return MaterializeResponse(
             hit=False,
             artifact_uri=artifact_uri,

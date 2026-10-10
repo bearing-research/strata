@@ -5,6 +5,8 @@ ACL deny beats allow; scan ownership is enforced; hide_forbidden_as_not_found gi
 403.
 """
 
+from concurrent.futures import Future
+
 import pytest
 
 from strata.api.dependencies import resolve_input_version
@@ -301,6 +303,16 @@ class TestAclConfigParsing:
         assert acl_config.allow_rules[0].principal == "admin"
 
 
+def _plan_inline(fn) -> Future:
+    """A planning pool that runs the plan at submission."""
+    future: Future = Future()
+    try:
+        future.set_result(fn())
+    except Exception as exc:
+        future.set_exception(exc)
+    return future
+
+
 class TestTransformInputAclParity:
     """A table used as a transform input is gated by the same ACL as a direct scan.
 
@@ -327,7 +339,7 @@ class TestTransformInputAclParity:
         state.config.principal_auth_enabled = True
         state.config.hide_forbidden_as_not_found = hide_as_404
         state.config.plan_timeout_seconds = 30.0
-        state._planning_executor = None
+        state._planning_executor.submit.side_effect = _plan_inline
         state.config.acl_config = AclConfig(
             default="deny",
             deny_rules=[],
@@ -347,7 +359,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                await resolve_input_version("file:///wh#secret.events")
+                resolve_input_version("file:///wh#secret.events")
             assert exc.value.status_code == 403
         finally:
             set_principal(None)
@@ -359,7 +371,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                await resolve_input_version("file:///wh#secret.events")
+                resolve_input_version("file:///wh#secret.events")
             assert exc.value.status_code == 404
         finally:
             set_principal(None)
@@ -368,7 +380,7 @@ class TestTransformInputAclParity:
         self._patch_state(monkeypatch, namespace="public")
         set_principal(Principal(id="analyst"))
         try:
-            assert await resolve_input_version("file:///wh#public.events") == "4242:0"
+            assert resolve_input_version("file:///wh#public.events") == "4242:0"
         finally:
             set_principal(None)
 
@@ -403,7 +415,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="intruder"))
         try:
             with pytest.raises(HTTPException) as exc:
-                await resolve_input_version("file:///wh#secret.events")
+                resolve_input_version("file:///wh#secret.events")
         finally:
             set_principal(None)
 
@@ -423,7 +435,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="analyst"))
         try:
             with pytest.raises(HTTPException) as exc:
-                await resolve_input_version("file:///wh#public.events")
+                resolve_input_version("file:///wh#public.events")
         finally:
             set_principal(None)
 
@@ -438,7 +450,7 @@ class TestTransformInputAclParity:
         set_principal(Principal(id="analyst"))
         try:
             with pytest.raises(HTTPException) as exc:
-                await resolve_input_version("file:///wh#public.events")
+                resolve_input_version("file:///wh#public.events")
         finally:
             set_principal(None)
 

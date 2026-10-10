@@ -11,8 +11,6 @@ are swallowed as part of the name.
 
 from __future__ import annotations
 
-import functools
-
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -423,49 +421,50 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
 
     tenant_id = principal.tenant if principal else None
 
-    status = await anyio.to_thread.run_sync(
-        functools.partial(store.get_name_status, name, tenant=tenant_id)
-    )
-    if status is None:
-        raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
+    def local() -> NameStatusResponse:
+        status = store.get_name_status(name, tenant=tenant_id)
+        if status is None:
+            raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
 
-    changed_inputs: list[InputChangeInfo] = []
-    for input_uri, old_version in status.input_versions.items():
-        try:
-            current_version = await resolve_input_version(input_uri, tenant=tenant_id)
-            if current_version != old_version:
+        changed_inputs: list[InputChangeInfo] = []
+        for input_uri, old_version in status.input_versions.items():
+            try:
+                current_version = resolve_input_version(input_uri, tenant_id)
+                if current_version != old_version:
+                    changed_inputs.append(
+                        InputChangeInfo(
+                            input_uri=input_uri,
+                            old_version=old_version,
+                            new_version=current_version,
+                        )
+                    )
+            except HTTPException:
+                # Input gone or inaccessible: treat as changed.
                 changed_inputs.append(
                     InputChangeInfo(
                         input_uri=input_uri,
                         old_version=old_version,
-                        new_version=current_version,
+                        new_version="<unavailable>",
                     )
                 )
-        except HTTPException:
-            # Input gone or inaccessible: treat as changed.
-            changed_inputs.append(
-                InputChangeInfo(
-                    input_uri=input_uri,
-                    old_version=old_version,
-                    new_version="<unavailable>",
-                )
-            )
 
-    is_stale = len(changed_inputs) > 0
-    stale_reason = None
-    if is_stale:
-        changes = [f"{c.input_uri}: {c.old_version} → {c.new_version}" for c in changed_inputs]
-        stale_reason = f"Rebuild needed: {', '.join(changes)}"
+        is_stale = len(changed_inputs) > 0
+        stale_reason = None
+        if is_stale:
+            changes = [f"{c.input_uri}: {c.old_version} → {c.new_version}" for c in changed_inputs]
+            stale_reason = f"Rebuild needed: {', '.join(changes)}"
 
-    return NameStatusResponse(
-        name=status.name,
-        artifact_uri=status.artifact_uri,
-        artifact_id=status.artifact_id,
-        version=status.version,
-        state=status.state,
-        updated_at=status.updated_at,
-        input_versions=status.input_versions,
-        is_stale=is_stale,
-        stale_reason=stale_reason,
-        changed_inputs=changed_inputs if changed_inputs else None,
-    )
+        return NameStatusResponse(
+            name=status.name,
+            artifact_uri=status.artifact_uri,
+            artifact_id=status.artifact_id,
+            version=status.version,
+            state=status.state,
+            updated_at=status.updated_at,
+            input_versions=status.input_versions,
+            is_stale=is_stale,
+            stale_reason=stale_reason,
+            changed_inputs=changed_inputs if changed_inputs else None,
+        )
+
+    return await anyio.to_thread.run_sync(local)
