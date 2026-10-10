@@ -1279,6 +1279,40 @@ class Person:
         assert third.execution_method == "executor"
         assert third.outputs["rendered"]["preview"] == "John:20"
 
+    def test_two_tenants_stage_inputs_of_one_notebook(self, sample_notebook, tmp_path):
+        """Two tenants running notebooks with one notebook id each stage their own copy."""
+        from strata.artifact_store import ArtifactStore
+
+        store = ArtifactStore(tmp_path / "service-store")
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "x.arrow").write_bytes(b"the same input")
+        (staging / "helper.pkl").write_bytes(b"the same injected value")
+        notebook_id = sample_notebook.notebook_state.id
+        input_specs = {
+            "x": {
+                "file": "x.arrow",
+                "content_type": "arrow/ipc",
+                "uri": f"strata://artifact/nb_{notebook_id}_cell_cell1_var_x@v=1",
+                "injected": {"helper": {"file": "helper.pkl", "content_type": "pickle/object"}},
+            }
+        }
+        executor = CellExecutor(sample_notebook)
+
+        for tenant in ("team-a", "team-b"):
+            staged, _ = executor._stage_signed_transport_inputs(
+                artifact_store=store,
+                build_id=f"build-{tenant}",
+                input_specs=input_specs,
+                output_dir=staging,
+                tenant_id=tenant,
+                principal_id=None,
+            )
+            for uri in (staged["x"]["uri"], staged["x"]["injected"]["helper"]["uri"]):
+                record = store.get_artifact(*executor._parse_artifact_uri(uri))
+                assert record is not None
+                assert record.tenant == tenant
+
     @pytest.mark.asyncio
     async def test_execute_supports_signed_http_executor_worker(
         self,
