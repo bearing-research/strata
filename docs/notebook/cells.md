@@ -882,6 +882,8 @@ else:
 
 After execution, `state` holds the final iteration's value and every intermediate iteration is queryable.
 
+The cell's display output (a figure, `display(...)`, a trailing expression) is what its final iteration displayed. It is saved like any Python cell's, so it is still there after a reopen, in `strata cell show` and in `strata export`. Earlier iterations' displays are not kept.
+
 ### Required directives
 
 | Directive            | What it does                                                                                                                                         |

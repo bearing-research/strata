@@ -674,6 +674,38 @@ async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_ses
 
 
 @pytest.mark.asyncio
+async def test_loop_cell_keeps_its_final_iterations_display(temp_notebook):
+    """The display a loop's last iteration made is saved and is still there on reopen."""
+    from strata.notebook.runtime_state import load_runtime_state
+    from strata.notebook.session import SessionManager
+
+    notebook_dir, _ = temp_notebook
+    write_cell(notebook_dir, "root", "state = 0")
+    write_cell(
+        notebook_dir,
+        "middle",
+        '# @loop max_iter=3 carry=state\nstate += 1\ndisplay(Markdown(f"step {state}"))\n',
+    )
+    write_cell(notebook_dir, "leaf", "z = 1")
+    session = open_session(notebook_dir)
+
+    fake = await _run_cell_to_terminal(session, "middle")
+    output, terminal = _terminal_frames(fake, "middle")
+    assert terminal["payload"]["status"] == "ready", output
+    [display] = output["payload"]["displays"]
+    assert display["markdown_text"] == "step 3"
+    assert display["artifact_uri"]
+
+    [persisted] = load_runtime_state(notebook_dir).cells["middle"].display_outputs
+    assert persisted["artifact_uri"] == display["artifact_uri"]
+
+    reopened = SessionManager().open_notebook(notebook_dir)
+    cell = reopened.serialize_cell(reopened.notebook_state.get_cell("middle"))
+    assert [d["markdown_text"] for d in cell["display_outputs"]] == ["step 3"]
+    assert cell["status"] == "ready"
+
+
+@pytest.mark.asyncio
 async def test_cascade_counts_only_the_cells_it_runs(temp_notebook):
     """A ready upstream is skipped: not offered in the prompt, not counted in progress."""
     notebook_dir, _ = temp_notebook

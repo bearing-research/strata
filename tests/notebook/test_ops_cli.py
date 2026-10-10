@@ -691,3 +691,30 @@ def test_cli_cell_run_saves_a_loop_cells_console(tmp_path, capsys):
 
     assert main(["cell", "show", str(nb), "loop", "--format", "json"]) == 0
     assert "iter 1" in json.loads(capsys.readouterr().out)["console_stdout"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["cell", "run", "{nb}", "loop", "--rerun", "--no-sync"], ["run", "{nb}", "--no-sync"]],
+    ids=["cell-run", "run"],
+)
+def test_cli_run_saves_a_loop_cells_final_display(tmp_path, capsys, argv):
+    """A loop cell's last iteration display survives the run: `cell show` and export see it."""
+    from strata.notebook.export import export_notebook
+    from tests.notebook.test_cli import _mk_fake_venv
+
+    loop_source = '# @loop max_iter=3 carry=state\nstate += 1\ndisplay(Markdown(f"step {state}"))\n'
+    nb = _build_notebook(
+        tmp_path,
+        cells=[("seed", "state = 0", None), ("loop", loop_source, "seed")],
+    )
+    _mk_fake_venv(nb)
+    rc = main([arg.format(nb=nb) for arg in argv])
+    assert rc == 0, capsys.readouterr()
+    capsys.readouterr()
+
+    assert main(["cell", "show", str(nb), "loop", "--format", "json"]) == 0
+    [output] = json.loads(capsys.readouterr().out)["outputs"]
+    assert output["content_type"] == "text/markdown"
+    assert output["artifact_uri"]
+    assert "step 3" in export_notebook(nb)

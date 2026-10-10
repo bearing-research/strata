@@ -885,6 +885,10 @@ class CellExecutor:
             finally:
                 self._materializing.discard(cell_id)
             # As the Python path does: a CLI run has no WS handler to persist the console.
+            if not loop_result.cache_hit:
+                self.session.persist_display_outputs(
+                    cell_id, loop_result.display_outputs if loop_result.success else None
+                )
             self.session.apply_execution_result_metadata(cell_id, loop_result)
             return loop_result
         effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
@@ -5223,10 +5227,14 @@ class CellExecutor:
         if cell is not None:
             cell.cache_hit = True
         self._set_loop_artifact_uris(cell_id, uri, consumed_vars, uris)
+        cached_displays = self.session._resolve_cached_display_outputs(
+            cell_id, cell_provenance, cell.display_outputs if cell is not None else []
+        )
         result = CellExecutionResult(
             cell_id=cell_id,
             success=True,
             outputs={},
+            display_outputs=[output.model_dump() for output in cached_displays],
             duration_ms=(time.time() - start_time) * 1000,
             cache_hit=True,
             artifact_uri=uri,
@@ -5388,6 +5396,7 @@ class CellExecutor:
         combined_stdout: list[str] = []
         combined_stderr: list[str] = []
         all_mutation_warnings: list[MutationWarning] = []
+        final_display_files: dict[str, bytes] = {}
 
         for k in range(loop.max_iter):
             with tempfile.TemporaryDirectory(prefix=f"strata_loop_iter_{k}_") as tmpdir:
@@ -5537,6 +5546,17 @@ class CellExecutor:
                             str(extra_meta.get("content_type", "pickle/object")),
                         )
 
+                if loop_state.get("until_reached") or k == loop.max_iter - 1:
+                    # The final state is the cell's result, so its displays are the cell's.
+                    final_display_files = {
+                        name: read_run_file(output_dir, name)
+                        for display in result.get("displays") or []
+                        if isinstance(display, dict)
+                        and isinstance(name := display.get("file"), str)
+                        and name
+                        and (output_dir / name).exists()
+                    }
+
                 # Chains through the previous iteration's carry bytes so identical chains are
                 # detectable.
                 prev_carry_hash = hashlib.sha256(carry_blob).hexdigest()
@@ -5668,6 +5688,28 @@ class CellExecutor:
             source_hash,
             env_hash,
         )
+        raw_displays = final_result.get("displays") if final_result else None
+        display_outputs = (
+            [d for d in raw_displays if isinstance(d, dict)]
+            if isinstance(raw_displays, list)
+            else []
+        )
+        if display_outputs:
+            # The iteration's run dir is gone; stage its display files to store them as a
+            # Python cell's are, after the outputs so no display outlives a failed finalize.
+            with tempfile.TemporaryDirectory(prefix="strata_loop_displays_") as display_dir:
+                for name, blob in final_display_files.items():
+                    (Path(display_dir) / name).write_bytes(blob)
+                display_outputs = self._store_display_outputs(
+                    cell_id,
+                    Path(display_dir),
+                    cell_provenance,
+                    prov.input_hashes,
+                    display_outputs,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                )
         # A leaf's console is its record of the run, so a cold open reads it ready.
         if not consumed_vars and not annotations.nocache:
             self._store_console_outputs(
@@ -5679,15 +5721,10 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=source,
                 env_hash=env_hash,
+                display_count=len(display_outputs),
             )
 
         duration_ms = loop_duration_ms
-        raw_displays = final_result.get("displays") if final_result else None
-        display_outputs = (
-            [d for d in raw_displays if isinstance(d, dict)]
-            if isinstance(raw_displays, list)
-            else []
-        )
 
         return CellExecutionResult(
             cell_id=cell_id,
