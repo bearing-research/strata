@@ -2189,6 +2189,13 @@ notebook REST routes and the WebSocket apply the same rule.</p>
 <p>Then register it with your agent. For Claude Code:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>--transport<span class="w"> </span>http<span class="w"> </span>strata<span class="w"> </span>http://localhost:8765/mcp
 </code></pre></div>
+<p>An agent on another machine uses the server's name or address instead
+(<code>http://devbox.lan:8765/mcp</code>). <code>/mcp</code> answers to the same <code>Host</code> names as
+the rest of the server: <code>localhost</code>, any IP literal, <code>STRATA_HOST</code> and the
+names in <code>STRATA_ALLOWED_HOSTS</code> (see
+<a href="../../deployment/modes/#personal-mode">Deployment modes</a>). Any other <code>Host</code>
+is refused. A request from a browser page must also be same-origin or come
+from an origin in <code>STRATA_CORS_ALLOW_ORIGINS</code>.</p>
 <p>The <code>[mcp]</code> extra needs <code>mcp</code> 2.2 or newer. If the flag is set but the extra is
 not installed, the server logs a warning and starts normally without the
 endpoint. With <code>mcp</code> 1 installed (another tool may pin it), <code>/mcp</code> stays off
