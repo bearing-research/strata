@@ -4297,6 +4297,7 @@ same <code>embed_frame_ancestors</code> rule decides which hosts may frame it.</
 <a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">"iter"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
 </code></pre></div>
 <p>After execution, <code>state</code> holds the final iteration's value and every intermediate iteration is queryable.</p>
+<p>The cell's display output (a figure, <code>display(...)</code>, a trailing expression) is what its final iteration displayed. It is saved like any Python cell's, so it is still there after a reopen, in <code>strata cell show</code> and in <code>strata export</code>. Earlier iterations' displays are not kept.</p>
 <h3 id="required-directives">Required directives<a class="headerlink" href="#required-directives" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
