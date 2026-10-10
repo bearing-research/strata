@@ -7,6 +7,7 @@ this module stays a leaf.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import time
 from dataclasses import asdict
@@ -23,6 +24,7 @@ from strata.api.dependencies import (
 from strata.auth import get_principal
 from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
+from strata.pool_metrics import get_pool_tracker
 from strata.tenant import get_tenant_id
 from strata.types import (
     Task,
@@ -191,12 +193,18 @@ async def warm_cache_v1(request: WarmRequest):
 
     for table_uri in request.tables:
         try:
-            plan = state.planner.plan(
+            plan_table = functools.partial(
+                state.planner.plan,
                 table_uri=table_uri,
                 snapshot_id=None,  # Current snapshot
                 columns=request.columns,
                 filters=[],
             )
+            # A plan reads the catalog and manifests; on the loop it would stall every request.
+            with get_pool_tracker().track("planning"):
+                plan = await asyncio.get_running_loop().run_in_executor(
+                    state._planning_executor, plan_table
+                )
             # As the scan path does: the catalog may resolve another identity than the URI names.
             authorize_table_access(table_uri, plan.table_identity)
 
