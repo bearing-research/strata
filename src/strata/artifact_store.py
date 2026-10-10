@@ -2549,7 +2549,7 @@ class ArtifactStore:
     ) -> None:
         """Atomically publish a blob from a prepared local file.
 
-        Blocking; call via ``asyncio.to_thread``. A build passes its ``attempt``.
+        Blocking; call via ``anyio.to_thread.run_sync``. A build passes its ``attempt``.
         """
         blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
         self.blob_store.publish_blob_from_path(blob_id, version, source_path)
