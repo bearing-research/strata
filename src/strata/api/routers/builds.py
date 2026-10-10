@@ -515,13 +515,16 @@ async def finalize_build(
     # an earlier manifest wrote somewhere else.
     attempt = lease_attempt(lease) if current is not None else None
     store = _get_artifact_store(allow_server_mode=True)
-    if not store.blob_exists(build.artifact_id, build.version, attempt):
+    # On S3, GCS or Azure each blob probe is a network round trip.
+    if not await asyncio.to_thread(store.blob_exists, build.artifact_id, build.version, attempt):
         raise HTTPException(
             status_code=400,
             detail="Blob not uploaded. Upload using the signed URL first.",
         )
 
-    byte_size = store.blob_size(build.artifact_id, build.version, attempt) or 0
+    byte_size = (
+        await asyncio.to_thread(store.blob_size, build.artifact_id, build.version, attempt) or 0
+    )
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
@@ -631,7 +634,9 @@ async def finalize_build(
         )
     except BuildLeaseLost:
         if attempt is not None:
-            store.delete_attempt_blob(build.artifact_id, build.version, attempt)
+            await asyncio.to_thread(
+                store.delete_attempt_blob, build.artifact_id, build.version, attempt
+            )
         raise HTTPException(
             status_code=409,
             detail="Build lease is no longer held by this caller; nothing was published",

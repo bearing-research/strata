@@ -209,6 +209,42 @@ class TestWarmSync:
         assert resp.status_code == 200
         assert resp.json()["tables_warmed"] == 1
 
+    async def test_warm_plans_off_the_loop(self, cache_client, warehouse_uri, monkeypatch):
+        """A plan reads the catalog and manifests, which a remote store serves over the network."""
+        import asyncio
+        import threading
+
+        from httpx import ASGITransport, AsyncClient
+
+        from strata.server import app
+
+        _, state = cache_client
+        entered, release, done = threading.Event(), threading.Event(), threading.Event()
+        plan = state.planner.plan
+
+        def gated_plan(*args, **kwargs):
+            entered.set()
+            # A guard, so a plan stuck on the loop fails the test rather than hanging it.
+            release.wait(timeout=30)
+            done.set()
+            return plan(*args, **kwargs)
+
+        monkeypatch.setattr(state.planner, "plan", gated_plan)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            warm = asyncio.ensure_future(
+                client.post("/v1/cache/warm", json={"tables": [warehouse_uri]})
+            )
+            try:
+                assert await asyncio.to_thread(entered.wait, 30), "the table was never planned"
+                ran_while_planning = not done.is_set()
+            finally:
+                release.set()
+            resp = await warm
+
+        assert resp.status_code == 200, resp.text
+        assert ran_while_planning
+        assert resp.json()["tables_warmed"] == 1
+
 
 class TestAsyncWarmerNotInitialized:
     """Without lifespan startup ``_cache_warmer`` is None: graceful 503/404/empty."""

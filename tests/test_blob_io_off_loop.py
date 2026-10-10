@@ -55,6 +55,18 @@ class GatedBlobStore(LocalBlobStore):
         self._gate("read")
         return super().open_blob_reader(artifact_id, version)
 
+    def blob_exists(self, artifact_id, version):
+        self._gate("exists")
+        return super().blob_exists(artifact_id, version)
+
+    def blob_size(self, artifact_id, version):
+        self._gate("size")
+        return super().blob_size(artifact_id, version)
+
+    def delete_blob(self, artifact_id, version):
+        self._gate("delete")
+        return super().delete_blob(artifact_id, version)
+
     @contextmanager
     def open_blob_writer(self, artifact_id, version):
         with super().open_blob_writer(artifact_id, version) as out:
@@ -189,6 +201,134 @@ async def test_finalize_hashes_the_blob_off_the_loop(served):
     assert store.get_artifact("uploaded", version).content_sha256 == (
         hashlib.sha256(ARROW).hexdigest()
     )
+
+
+@pytest.mark.parametrize("gate", ["exists", "size"])
+async def test_finalize_probes_the_blob_off_the_loop(served, gate):
+    store = served.store
+    version = store.create_artifact(artifact_id="uploaded", provenance_hash="d" * 64)
+    store.write_blob("uploaded", version, ARROW)
+    body = {"artifact_id": "uploaded", "version": version, "arrow_schema": "", "row_count": 3}
+
+    async with _client(served) as client:
+        ran, response = await _loop_ran_while_blocked(
+            served.blobs, gate, client.post("/v1/artifacts/finalize", json=body)
+        )
+
+    assert response.status_code == 200, response.text
+    assert ran
+    assert store.get_artifact("uploaded", version).state == "ready"
+
+
+async def test_a_delete_removes_its_blob_off_the_loop(served):
+    store = served.store
+    version = _ready(store, "doomed", ARROW)
+
+    async with _client(served) as client:
+        ran, response = await _loop_ran_while_blocked(
+            served.blobs, "delete", client.delete(f"/v1/artifacts/doomed/v/{version}")
+        )
+
+    assert response.status_code == 200, response.text
+    assert ran
+    assert store.get_artifact("doomed", version) is None
+    assert not store.blob_exists("doomed", version)
+
+
+async def test_an_import_retry_checks_the_held_blob_off_the_loop(served):
+    """A JSON import with nothing staged is a retry of one that went through."""
+    version = _ready(served.store, "held", ARROW)
+    record = {
+        "id": "held",
+        "version": version,
+        "provenance_hash": hashlib.sha256(b"held").hexdigest(),
+        "created_at": 1.0,
+        "content_sha256": hashlib.sha256(ARROW).hexdigest(),
+    }
+
+    async with _client(served) as client:
+        ran, response = await _loop_ran_while_blocked(
+            served.blobs, "exists", client.post("/v1/artifacts/import", json=record)
+        )
+
+    assert response.status_code == 200, response.text
+    assert ran
+    assert response.json()["id"] == "held"
+
+
+def _queued_build(store, build_store, artifact_id: str) -> tuple[str, int]:
+    version = store.create_artifact(artifact_id=artifact_id, provenance_hash="c" * 64)
+    build_id = str(uuid.uuid4())
+    build_store.create_build(
+        build_id=build_id,
+        artifact_id=artifact_id,
+        version=version,
+        executor_ref="duckdb_sql@v1",
+        input_uris=[],
+        params={},
+    )
+    return build_id, version
+
+
+@pytest.mark.parametrize("gate", ["exists", "size"])
+async def test_a_build_finalize_probes_the_blob_off_the_loop(served, gate):
+    from strata.api.dependencies import runtime_build_store
+
+    store = served.store
+    build_store = runtime_build_store()
+    build_id, version = _queued_build(store, build_store, "pulled")
+    store.write_blob("pulled", version, ARROW)
+
+    async with _client(served) as client:
+        ran, response = await _loop_ran_while_blocked(
+            served.blobs, gate, client.post(f"/v1/builds/{build_id}/finalize")
+        )
+
+    assert response.status_code == 200, response.text
+    assert ran
+    assert build_store.get_build(build_id).state == "ready"
+
+
+async def test_a_build_finalize_that_lost_its_lease_drops_its_attempt_off_the_loop(
+    served, monkeypatch
+):
+    """The lease moved on mid-finalize: the attempt's bytes go, and nothing is published."""
+    from strata.api.dependencies import runtime_build_store
+
+    store = served.store
+    build_store = runtime_build_store()
+    build_id, version = _queued_build(store, build_store, "pulled")
+    finalize_and_set_name = store.finalize_and_set_name
+
+    def reclaimed_meanwhile(*args, **kwargs):
+        conn = build_store._get_connection()
+        try:
+            conn.execute(
+                "UPDATE artifact_builds SET lease_expires_at = ? WHERE build_id = ?",
+                (time.time() - 1.0, build_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        assert build_store.reclaim_expired_build(build_id, new_lease_owner="runner-9")
+        return finalize_and_set_name(*args, **kwargs)
+
+    async with _client(served) as client:
+        manifest = (await client.get(f"/v1/builds/{build_id}/manifest")).json()
+        upload = await client.post(manifest["output"]["url"], content=ARROW)
+        assert upload.status_code == 200, upload.text
+        attempt_blobs = {p.name for p in store.blobs_dir.rglob("*.arrow")}
+        assert len(attempt_blobs) == 1
+        monkeypatch.setattr(store, "finalize_and_set_name", reclaimed_meanwhile)
+
+        ran, response = await _loop_ran_while_blocked(
+            served.blobs, "delete", client.post(manifest["finalize_url"])
+        )
+
+    assert response.status_code == 409, response.text
+    assert ran
+    assert not list(store.blobs_dir.rglob("*.arrow"))
+    assert store.get_artifact("pulled", version).state == "building"
 
 
 @pytest.mark.parametrize("suffix", ["", "/embed", "/data"])

@@ -204,7 +204,8 @@ class BuildRunner:
 
         while self._running:
             try:
-                pending = self.build_store.list_pending_builds(limit=50)
+                # Store calls can wait on a lock or the network, and this loop is the server's.
+                pending = await asyncio.to_thread(self.build_store.list_pending_builds, limit=50)
 
                 for build in pending:
                     if not _is_runner_managed_build(build):
@@ -222,10 +223,11 @@ class BuildRunner:
                     )
 
                 # Orphans: expired leases from crashed runners.
-                expired = self.build_store.list_expired_leases(limit=10)
+                expired = await asyncio.to_thread(self.build_store.list_expired_leases, limit=10)
                 for build in expired:
                     if build.build_id not in self._running_builds:
-                        if self.build_store.reclaim_expired_build(
+                        if await asyncio.to_thread(
+                            self.build_store.reclaim_expired_build,
                             build.build_id,
                             self._runner_id,
                             self.config.lease_duration_seconds,
@@ -254,11 +256,14 @@ class BuildRunner:
         while self._running:
             try:
                 for build_id in list(self._running_builds):
-                    if not self.build_store.renew_lease(
+                    renewed = await asyncio.to_thread(
+                        self.build_store.renew_lease,
                         build_id,
                         self._runner_id,
                         self.config.lease_duration_seconds,
-                    ):
+                    )
+                    # A build that finished during the renewal has no lease left to lose.
+                    if not renewed and build_id in self._running_builds:
                         # Let the task finish; completion is fenced on the lease anyway.
                         logger.warning(
                             f"Failed to renew lease for build {build_id}",
@@ -326,7 +331,8 @@ class BuildRunner:
             try:
                 # Skip claiming when already building (retry / reclaim).
                 if build.state == "pending" and not already_claimed:
-                    if not self.build_store.claim_build(
+                    if not await asyncio.to_thread(
+                        self.build_store.claim_build,
                         build_id,
                         self._runner_id,
                         self.config.lease_duration_seconds,
@@ -334,7 +340,7 @@ class BuildRunner:
                         logger.warning(f"Build {build_id} already claimed or completed")
                         return
 
-                fresh_build = self.build_store.get_build(build_id)
+                fresh_build = await asyncio.to_thread(self.build_store.get_build, build_id)
                 if fresh_build is None or fresh_build.state not in ("pending", "building"):
                     return
                 build = fresh_build
@@ -363,7 +369,9 @@ class BuildRunner:
                 if transform_defn is None:
                     raise ValueError(f"Transform not found in registry: {build.executor_ref}")
 
-                artifact = self.artifact_store.get_artifact(build.artifact_id, build.version)
+                artifact = await asyncio.to_thread(
+                    self.artifact_store.get_artifact, build.artifact_id, build.version
+                )
                 if artifact is None:
                     raise ValueError(f"Artifact not found: {build.artifact_id}@v={build.version}")
 
@@ -438,7 +446,8 @@ class BuildRunner:
                 # and writing the shared key could replace bytes already published as ready.
                 attempt = uuid.uuid4().hex
                 # Recorded first, so a crash before finalize leaves bytes the sweep can find.
-                self.build_store.record_attempt(
+                await asyncio.to_thread(
+                    self.build_store.record_attempt,
                     build_id,
                     build.artifact_id,
                     build.version,
@@ -484,8 +493,11 @@ class BuildRunner:
                         fence=_complete,
                     )
                 except BuildLeaseLost:
-                    self.artifact_store.delete_attempt_blob(
-                        build.artifact_id, build.version, attempt
+                    await asyncio.to_thread(
+                        self.artifact_store.delete_attempt_blob,
+                        build.artifact_id,
+                        build.version,
+                        attempt,
                     )
                     logger.warning(
                         f"Build {build_id} finished after its lease moved on; "
@@ -559,15 +571,20 @@ class BuildRunner:
                 # Only if this runner still holds the lease; a runner whose lease was taken
                 # over keeps executing, and failing here would fail its successor's build.
                 # The artifact row has no lease of its own, so its failure is gated on this.
-                failed = self.build_store.fail_build(
-                    build_id=build_id,
-                    error_message=error_msg,
-                    error_code=error_code,
-                    lease_owner=self._runner_id,
-                )
-                if failed:
-                    self.artifact_store.fail_artifact(build.artifact_id, build.version)
-                else:
+                # One thread call: a cancel while it runs must not fail the build alone and
+                # leave its artifact building.
+                def _fail() -> bool:
+                    failed = self.build_store.fail_build(
+                        build_id=build_id,
+                        error_message=error_msg,
+                        error_code=error_code,
+                        lease_owner=self._runner_id,
+                    )
+                    if failed:
+                        self.artifact_store.fail_artifact(build.artifact_id, build.version)
+                    return failed
+
+                if not await asyncio.to_thread(_fail):
                     logger.info(
                         f"Build {build_id} failed here after its lease moved on; "
                         "leaving it to the runner that holds it",
@@ -642,7 +659,9 @@ class BuildRunner:
             if pinned:
                 target_id, target_version = pinned.group(1), int(pinned.group(2))
             else:
-                artifact = self.artifact_store.resolve_name(name, tenant=tenant_id)
+                artifact = await asyncio.to_thread(
+                    self.artifact_store.resolve_name, name, tenant=tenant_id
+                )
                 if artifact is None:
                     raise ValueError(f"Name not found: {name}")
                 target_id, target_version = artifact.id, artifact.version
