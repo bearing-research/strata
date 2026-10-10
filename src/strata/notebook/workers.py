@@ -228,13 +228,17 @@ def get_server_managed_workers() -> list[WorkerSpec]:
     return [record.worker for record in get_server_managed_worker_records()]
 
 
-def prune_worker_health_cache() -> int:
+async def prune_worker_health_cache(records: list[ManagedWorkerRecord] | None = None) -> int:
     """Drop cached health for workers the registry no longer lists; return the count.
 
     Entries are keyed by health URL, so a moved worker already misses; this bounds
-    the entries for URLs nobody asks about any more.
+    the entries for URLs nobody asks about any more. ``records`` is the registry if the
+    caller has read it. The store read runs in a worker thread; the prune stays on the
+    loop, where health probes write the cache.
     """
-    live = {_health_url_for_worker(record.worker) for record in get_server_managed_worker_records()}
+    if records is None:
+        records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
+    live = {_health_url_for_worker(record.worker) for record in records}
     stale = [url for url in _worker_health_cache if url not in live]
     for url in stale:
         del _worker_health_cache[url]
@@ -1094,8 +1098,15 @@ async def build_worker_catalog_with_health(
 async def build_server_worker_catalog_with_health(
     *,
     force_refresh: bool = False,
+    records: list[ManagedWorkerRecord] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build the service-mode worker catalog without notebook-local entries."""
+    """Build the service-mode worker catalog without notebook-local entries.
+
+    ``records`` is the registry if the caller has read it; otherwise it is read in a
+    worker thread.
+    """
+    if records is None:
+        records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
     catalog: list[dict[str, Any]] = [
         {
             "name": "local",
@@ -1115,7 +1126,7 @@ async def build_server_worker_catalog_with_health(
         }
     ]
 
-    for record in get_server_managed_worker_records():
+    for record in records:
         worker = record.worker
         snapshot = await probe_worker_health(worker, force_refresh=force_refresh)
         health_url = _health_url_for_worker(worker)

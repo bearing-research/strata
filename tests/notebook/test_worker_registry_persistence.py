@@ -6,6 +6,7 @@ catalogue silently reverts, or a second replica refuses cells the first one acce
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -292,10 +293,95 @@ class TestHealthCachePruning:
         workers_mod._worker_health_cache[live_url] = object()
         workers_mod._worker_health_cache[retired_url] = object()
 
-        workers_mod.prune_worker_health_cache()
+        asyncio.run(workers_mod.prune_worker_health_cache())
 
         assert live_url in workers_mod._worker_health_cache
         assert retired_url not in workers_mod._worker_health_cache
+
+
+class TestAdminRegistryReadsOffTheLoop:
+    """The admin worker routes await these; the registry read must not block the loop,
+    while the health cache, which loop-side probes write, is pruned on the loop."""
+
+    @staticmethod
+    def _record_reads(monkeypatch) -> list[int]:
+        import threading
+
+        store = get_artifact_store()
+        real = store.notebook_worker_entries
+        threads: list[int] = []
+
+        def _recording():
+            threads.append(threading.get_ident())
+            return real()
+
+        monkeypatch.setattr(store, "notebook_worker_entries", _recording)
+        return threads
+
+    def test_pruning_reads_the_registry_in_a_thread(self, server, monkeypatch):
+        import threading
+
+        from strata.notebook import workers as workers_mod
+
+        replace_server_managed_worker_records([ManagedWorkerRecord(_worker("gpu-a100"), True)])
+        retired_url = "http://retired.internal:9000/health"
+        prune_threads: list[int] = []
+
+        class _Cache(dict):
+            def __delitem__(self, key):
+                prune_threads.append(threading.get_ident())
+                super().__delitem__(key)
+
+        monkeypatch.setattr(workers_mod, "_worker_health_cache", _Cache({retired_url: object()}))
+        read_threads = self._record_reads(monkeypatch)
+
+        async def _prune():
+            return threading.get_ident(), await workers_mod.prune_worker_health_cache()
+
+        loop_thread, dropped = asyncio.run(_prune())
+
+        assert dropped == 1
+        assert read_threads and loop_thread not in read_threads
+        assert prune_threads == [loop_thread]
+
+    def test_the_server_catalogue_reads_the_registry_in_a_thread(self, server, monkeypatch):
+        import threading
+
+        from strata.notebook import workers as workers_mod
+
+        async def _healthy(worker, **_kwargs):
+            return workers_mod.WorkerHealthSnapshot(checked_at=0.0, health="healthy")
+
+        monkeypatch.setattr(workers_mod, "probe_worker_health", _healthy)
+        replace_server_managed_worker_records([ManagedWorkerRecord(_worker("gpu-a100"), True)])
+        read_threads = self._record_reads(monkeypatch)
+
+        async def _catalog():
+            return (
+                threading.get_ident(),
+                await workers_mod.build_server_worker_catalog_with_health(),
+            )
+
+        loop_thread, catalog = asyncio.run(_catalog())
+
+        assert [entry["name"] for entry in catalog] == ["local", "gpu-a100"]
+        assert read_threads and loop_thread not in read_threads
+
+    def test_records_the_caller_read_are_not_read_again(self, server, monkeypatch):
+        from strata.notebook import workers as workers_mod
+
+        async def _healthy(worker, **_kwargs):
+            return workers_mod.WorkerHealthSnapshot(checked_at=0.0, health="healthy")
+
+        monkeypatch.setattr(workers_mod, "probe_worker_health", _healthy)
+        records = [ManagedWorkerRecord(_worker("gpu-a100"), True)]
+        read_threads = self._record_reads(monkeypatch)
+
+        catalog = asyncio.run(workers_mod.build_server_worker_catalog_with_health(records=records))
+        asyncio.run(workers_mod.prune_worker_health_cache(records))
+
+        assert [entry["name"] for entry in catalog] == ["local", "gpu-a100"]
+        assert read_threads == []
 
 
 class TestAStoreErrorFailsClosed:
