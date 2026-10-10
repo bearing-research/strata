@@ -16,6 +16,7 @@ import uuid
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+import anyio.to_thread
 import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -713,3 +714,42 @@ async def test_a_put_overtaken_at_finalize_names_the_artifact_that_won(served, m
     assert body["artifact_uri"] == "strata://artifact/winner@v=1"
     name = store.get_name("the-put")
     assert (name.artifact_id, name.version) == ("winner", 1)
+
+
+async def test_an_offload_borrows_a_server_thread_token_and_keeps_the_request_context(
+    served, monkeypatch
+):
+    """Route offloads count against anyio's default limiter, the one the Postgres pool is
+    sized to, and the thread still sees the request's context (its log fields)."""
+    from strata.logging import get_request_context
+
+    store = served.store
+    version = store.create_artifact(artifact_id="uploaded", provenance_hash="d" * 64)
+    store.write_blob("uploaded", version, ARROW)
+    body = {"artifact_id": "uploaded", "version": version, "arrow_schema": "", "row_count": 3}
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    seen: dict = {}
+    open_reader = served.blobs.open_blob_reader
+
+    def recording_reader(artifact_id, version):
+        seen["request_id"] = get_request_context().get("request_id")
+        return open_reader(artifact_id, version)
+
+    monkeypatch.setattr(served.blobs, "open_blob_reader", recording_reader)
+    served.blobs.gated = "read"
+
+    async with _client(served) as client:
+        task = asyncio.ensure_future(
+            client.post("/v1/artifacts/finalize", json=body, headers={"X-Request-ID": "offloaded"})
+        )
+        try:
+            # Waits in the loop's default executor, outside the limiter it inspects.
+            assert await asyncio.to_thread(served.blobs.entered.wait, 30), "no read was made"
+            borrowed = limiter.borrowed_tokens
+        finally:
+            served.blobs.release.set()
+        response = await task
+
+    assert response.status_code == 200, response.text
+    assert borrowed == 1
+    assert seen["request_id"] == "offloaded"

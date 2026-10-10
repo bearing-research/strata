@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
+import anyio.to_thread
 import httpx
 
 # Stdlib json, not orjson: executor.py is imported via ``strata.config`` and must load
@@ -3629,8 +3630,8 @@ class CellExecutor:
         for spec in sorted(dataset_specs, key=lambda item: item.name):
             try:
                 registry = registry_for(self._lake_config(), tenant)
-                resolved = await asyncio.to_thread(registry.resolve, spec)
-                dataset = await asyncio.to_thread(copy_into, registry, resolved, store)
+                resolved = await anyio.to_thread.run_sync(registry.resolve, spec)
+                dataset = await anyio.to_thread.run_sync(copy_into, registry, resolved, store)
             except DatasetError as exc:
                 error = error or str(exc)
                 fingerprint = unresolved_fingerprint(spec)

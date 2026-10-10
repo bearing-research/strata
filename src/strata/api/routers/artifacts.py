@@ -7,7 +7,7 @@ in-body; the signed-transport upload/finalize routes live in ``builds.py``.
 
 from __future__ import annotations
 
-import asyncio
+import functools
 import hashlib
 import json
 import os
@@ -18,6 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, BinaryIO, NamedTuple
 
+import anyio.to_thread
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -187,11 +188,11 @@ async def _put_artifact(
                 status_code=400,
                 detail="'data' field must be a file, not form data",
             )
-        content_sha256, byte_size = await asyncio.to_thread(
+        content_sha256, byte_size = await anyio.to_thread.run_sync(
             _spool_upload, data_file.file, data_path
         )
         try:
-            schema_json, row_count = await asyncio.to_thread(_arrow_stream_shape, data_path)
+            schema_json, row_count = await anyio.to_thread.run_sync(_arrow_stream_shape, data_path)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid Arrow IPC data: {e}")
 
@@ -303,7 +304,7 @@ async def _put_artifact(
         minted=True,
     )
 
-    await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
+    await anyio.to_thread.run_sync(store.publish_blob_from_path, artifact_id, version, data_path)
 
     # One commit: a reader never sees the upload ready without its name, and a name that cannot
     # be written fails the upload rather than leaving it ready and unnamed.
@@ -390,7 +391,7 @@ async def stage_import_blob_route(
                     f"(path {content_sha256[:12]}…, received {received[:12]}…)"
                 ),
             )
-        await asyncio.to_thread(
+        await anyio.to_thread.run_sync(
             store.stage_import_blob, tenant_id, content_sha256, staged, byte_size
         )
     return {"content_sha256": content_sha256, "byte_size": byte_size}
@@ -479,7 +480,7 @@ async def _import_artifact(
             raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
         if data_file is not None and not isinstance(data_file, str):
             blob = workdir / "blob"
-            received_digest, _ = await asyncio.to_thread(_spool_upload, data_file.file, blob)
+            received_digest, _ = await anyio.to_thread.run_sync(_spool_upload, data_file.file, blob)
 
     artifact_id = str(metadata.get("id") or "").strip()
     if not artifact_id:
@@ -539,7 +540,9 @@ async def _import_artifact(
                 detail="A JSON import names its bytes by 'content_sha256' (64 hex digits)",
             )
         copied = workdir / "blob"
-        if await asyncio.to_thread(_copy_staged_blob, store, tenant_id, declared_digest, copied):
+        if await anyio.to_thread.run_sync(
+            _copy_staged_blob, store, tenant_id, declared_digest, copied
+        ):
             # Checked against this digest when it was uploaded.
             blob = copied
     elif declared_digest and received_digest is not None:
@@ -603,7 +606,7 @@ async def _import_artifact(
         # holds with its bytes: a retry after an import that went through.
         already = store.get_artifact(record.id, record.version)
         same = store.find_by_provenance(record.provenance_hash, tenant_id)
-        complete = already is not None and await asyncio.to_thread(
+        complete = already is not None and await anyio.to_thread.run_sync(
             store.blob_exists, already.id, already.version
         )
         if not complete and same is None:
@@ -616,7 +619,7 @@ async def _import_artifact(
             )
 
     try:
-        landed = await asyncio.to_thread(store.import_artifact, record, blob)
+        landed = await anyio.to_thread.run_sync(store.import_artifact, record, blob)
     except ArtifactImportConflict as exc:
         # Another import of this id@v=N with a different computation committed
         # after the check above.
@@ -624,7 +627,7 @@ async def _import_artifact(
             status_code=409, detail=f"{exc} Retry with remap=true to import it under a fresh id."
         ) from exc
     if staged and blob is not None:
-        await asyncio.to_thread(store.release_staged_import, tenant_id, declared_digest)
+        await anyio.to_thread.run_sync(store.release_staged_import, tenant_id, declared_digest)
     return {
         "artifact_uri": f"strata://artifact/{landed.ref}",
         "id": landed.id,
@@ -698,7 +701,9 @@ async def _put_artifact_by_provenance(
             status_code=400, detail="Metadata 'row_count' must be a non-negative integer"
         )
 
-    content_sha256, byte_size = await asyncio.to_thread(_spool_upload, data_file.file, data_path)
+    content_sha256, byte_size = await anyio.to_thread.run_sync(
+        _spool_upload, data_file.file, data_path
+    )
     tenant_id = principal.tenant if principal else None
 
     # First writer wins. Returning the incumbent rather than superseding it is
@@ -747,7 +752,7 @@ async def _put_artifact_by_provenance(
         # The caller names the id, so it can name somebody else's. The store refuses
         # inside its write, where a concurrent first upload cannot slip in after the check.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
+    await anyio.to_thread.run_sync(store.publish_blob_from_path, artifact_id, version, data_path)
     finalized = store.finalize_artifact(
         artifact_id=artifact_id,
         version=version,
@@ -999,8 +1004,8 @@ async def delete_artifact(
 
     try:
         # Deletes the blob, a network call on S3, GCS or Azure.
-        deleted = await asyncio.to_thread(
-            store.delete_artifact, artifact_id, version, tenant=tenant_filter
+        deleted = await anyio.to_thread.run_sync(
+            functools.partial(store.delete_artifact, artifact_id, version, tenant=tenant_filter)
         )
     except ValueError as exc:
         # Published: withdrawing the citation is a separate, deliberate act.
@@ -1093,15 +1098,17 @@ async def export_artifact_to_table(
     # Exporting copies the bytes into a table the caller can scan, so it is a read of them.
     _authorize_artifact_read(artifact, store)
     try:
-        written = await asyncio.to_thread(
-            export_artifact,
-            store,
-            artifact,
-            request.table,
-            config=config,
-            promoted_by=principal.id if principal is not None else None,
-            alias=request.alias,
-            tenant=tenant_filter,
+        written = await anyio.to_thread.run_sync(
+            functools.partial(
+                export_artifact,
+                store,
+                artifact,
+                request.table,
+                config=config,
+                promoted_by=principal.id if principal is not None else None,
+                alias=request.alias,
+                tenant=tenant_filter,
+            )
         )
     except TableOfAnotherTenant as exc:
         if config.hide_forbidden_as_not_found:
@@ -1163,12 +1170,14 @@ async def garbage_collect_artifacts(
     if min_idle_seconds is not None:
         policy["min_idle_seconds"] = min_idle_seconds
     # A sweep unlinks a blob per version; on the loop it would stall every route.
-    return await asyncio.to_thread(
-        store.garbage_collect,
-        **policy,
-        tenant=tenant_filter,
-        collect_latest=collect_latest,
-        dry_run=dry_run,
+    return await anyio.to_thread.run_sync(
+        functools.partial(
+            store.garbage_collect,
+            **policy,
+            tenant=tenant_filter,
+            collect_latest=collect_latest,
+            dry_run=dry_run,
+        )
     )
 
 
@@ -1194,7 +1203,7 @@ async def get_artifact_data(
             detail=f"Artifact is not ready (state={artifact.state})",
         )
 
-    reader_cm = await asyncio.to_thread(store.open_blob_reader, artifact_id, version)
+    reader_cm = await anyio.to_thread.run_sync(store.open_blob_reader, artifact_id, version)
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="Artifact data not found")
 
@@ -1334,7 +1343,7 @@ async def upload_artifact_blob(
                 dst.write(chunk)
         if byte_size == 0:
             raise HTTPException(status_code=400, detail="Empty request body")
-        await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, staged)
+        await anyio.to_thread.run_sync(store.publish_blob_from_path, artifact_id, version, staged)
     finally:
         staged.unlink(missing_ok=True)
 
@@ -1345,7 +1354,7 @@ async def upload_artifact_blob(
 async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeStore):
     """Mark an uploaded artifact ready, optionally setting a name (personal mode only)."""
     # On S3, GCS or Azure each blob probe is a network round trip.
-    if not await asyncio.to_thread(store.blob_exists, request.artifact_id, request.version):
+    if not await anyio.to_thread.run_sync(store.blob_exists, request.artifact_id, request.version):
         raise HTTPException(
             status_code=400,
             detail="Blob not uploaded. Call upload endpoint first.",
@@ -1353,21 +1362,25 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
 
     # ``blob_size`` returns None both for an absent object and a failed backend call. Refuse rather
     # than mark READY a row claiming an empty blob, as build-finalize does.
-    byte_size = await asyncio.to_thread(store.blob_size, request.artifact_id, request.version) or 0
+    byte_size = (
+        await anyio.to_thread.run_sync(store.blob_size, request.artifact_id, request.version) or 0
+    )
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
     try:
         # Finalize reads the whole blob to hash it, so it runs in a thread, and the loop
         # serves requests meanwhile: the name moves in the same commit as the ready state.
-        finalized_artifact = await asyncio.to_thread(
-            store.finalize_and_set_name,
-            artifact_id=request.artifact_id,
-            version=request.version,
-            schema_json=request.arrow_schema,
-            row_count=request.row_count,
-            byte_size=byte_size,
-            name=request.name,
+        finalized_artifact = await anyio.to_thread.run_sync(
+            functools.partial(
+                store.finalize_and_set_name,
+                artifact_id=request.artifact_id,
+                version=request.version,
+                schema_json=request.arrow_schema,
+                row_count=request.row_count,
+                byte_size=byte_size,
+                name=request.name,
+            )
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

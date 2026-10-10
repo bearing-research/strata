@@ -12,6 +12,7 @@ import threading
 import uuid
 from types import SimpleNamespace
 
+import anyio.to_thread
 import pyarrow as pa
 import pytest
 
@@ -125,6 +126,24 @@ async def test_the_poll_reads_the_build_store_off_the_loop(runner, monkeypatch, 
 
     await _stopped(runner, task)
     assert ran
+
+
+async def test_the_poll_borrows_a_server_thread_token(runner, monkeypatch):
+    """The runner's store calls count against anyio's default limiter, the one the Postgres
+    pool is sized to, not the loop's separate default executor."""
+    gate = _gate(monkeypatch, runner.build_store, "list_pending_builds")
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    runner._running = True
+
+    task = asyncio.ensure_future(runner._run_loop())
+    try:
+        assert await asyncio.to_thread(gate.entered.wait, 30), "the poll never read the store"
+        borrowed = limiter.borrowed_tokens
+    finally:
+        gate.release.set()
+
+    await _stopped(runner, task)
+    assert borrowed == 1
 
 
 async def test_an_orphan_is_reclaimed_off_the_loop(runner, monkeypatch):
