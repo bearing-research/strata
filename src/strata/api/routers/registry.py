@@ -163,9 +163,7 @@ async def approve_pending(request: PendingDecisionRequest, decision: RegistryDec
     if applied.get("action") == "set":
         from strata.api.routers.names import _follow_alias_in_table
 
-        await _follow_alias_in_table(
-            store, applied["artifact_id"], applied["version"], request.alias, tenant_id
-        )
+        await _follow_alias_in_table(store, request.name, request.alias, tenant_id)
     return {"status": "approved", "applied": applied}
 
 

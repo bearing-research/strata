@@ -3,7 +3,7 @@
 Each export writes the artifact as the table's new current snapshot, whose
 summary names the source artifact version. The target table is recorded on the
 artifact as the ``strata.iceberg_table`` tag, so moving an alias can move the
-table's tag of the same name (``move_alias_tag``).
+table's tag of the same name (``follow_alias``).
 """
 
 from __future__ import annotations
@@ -114,3 +114,25 @@ def move_alias_tag(
             exc_info=True,
         )
         return None
+
+
+def follow_alias(
+    store: ArtifactStore,
+    name: str,
+    alias: str,
+    *,
+    config: Any,
+    tenant: str | None = None,
+) -> None:
+    """Move the table tag named after ``name @ alias`` to wherever the alias points now.
+
+    Re-reads the alias after each move and moves again until they agree: of two alias moves
+    that interleave, the one whose tag lands last may carry the version the alias already left.
+    """
+    tagged = None
+    while True:
+        current = store.resolve_alias(name, alias, tenant=tenant)
+        if current is None or (current.id, current.version) == tagged:
+            return
+        move_alias_tag(store, current.id, current.version, alias, config=config, tenant=tenant)
+        tagged = (current.id, current.version)

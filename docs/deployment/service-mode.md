@@ -720,7 +720,8 @@ store's configured catalog.
   cannot evolve to is refused before anything is written.
 - The alias is an Iceberg tag on the snapshot. Moving the alias later, including
   approving a protected one, moves the tag, as long as that version was written
-  to the table.
+  to the table. When two moves overlap, the tag ends on the version the alias
+  ends on.
 
 The same write is `strata artifact export --table <table> <ref>` against a local
 store (`--alias` tags the new snapshot, `--by` is recorded as

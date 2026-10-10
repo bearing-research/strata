@@ -34,26 +34,18 @@ from strata.types import (
 router = APIRouter(tags=["names"])
 
 
-async def _follow_alias_in_table(
-    store, artifact_id: str, version: int, alias: str, tenant: str | None
-) -> None:
-    """Move the table tag of the same name, if this version was written to a table."""
+async def _follow_alias_in_table(store, name: str, alias: str, tenant: str | None) -> None:
+    """Move the table tag of the same name to the alias's version, if it was written to a table."""
     import functools
 
     import anyio.to_thread
 
     from strata.server import get_state
-    from strata.table_export import move_alias_tag
+    from strata.table_export import follow_alias
 
     await anyio.to_thread.run_sync(
         functools.partial(
-            move_alias_tag,
-            store,
-            artifact_id,
-            version,
-            alias,
-            config=get_state().config,
-            tenant=tenant,
+            follow_alias, store, name, alias, config=get_state().config, tenant=tenant
         )
     )
 
@@ -135,7 +127,7 @@ async def set_alias(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if changed:
-        await _follow_alias_in_table(store, request.artifact_id, request.version, alias, tenant_id)
+        await _follow_alias_in_table(store, name, alias, tenant_id)
 
     return {
         "status": "applied" if changed else "unchanged",
