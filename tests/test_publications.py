@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import secrets
+import sqlite3
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -85,6 +88,95 @@ class TestPublicationGrants:
 
         with pytest.raises(ValueError, match="not readable"):
             store.publish_artifact("half", 1)
+
+
+def _publish_with_a_rival(store: ArtifactStore, artifact_id: str, version: int, monkeypatch):
+    """Publish, with a second publish of the same version committing in another thread
+    between this one's check for an active grant and its insert (the mint sits between).
+
+    Returns ``(this publish's result, the rival's)``.
+    """
+    real_mint = secrets.token_urlsafe
+    rival: list = []
+    started: list = []
+
+    def mint_after_a_rival_publishes(nbytes: int) -> str:
+        if not started:
+            started.append(True)
+            thread = threading.Thread(
+                target=lambda: rival.append(store.publish_artifact(artifact_id, version))
+            )
+            thread.start()
+            thread.join()
+        return real_mint(nbytes)
+
+    monkeypatch.setattr(secrets, "token_urlsafe", mint_after_a_rival_publishes)
+    publication = store.publish_artifact(artifact_id, version)
+    monkeypatch.undo()
+    assert len(rival) == 1, "the rival publish must have run inside the window"
+    return publication, rival[0]
+
+
+class TestOneActivePublication:
+    """One revocation must withdraw a version, so it can have one live link at a time."""
+
+    def test_a_publish_racing_another_returns_the_winners_grant(self, store, monkeypatch):
+        version = _ready_artifact(store, "fig", b"x")
+
+        publication, rival = _publish_with_a_rival(store, "fig", version, monkeypatch)
+
+        assert publication.id == rival.id
+        assert rival.token and publication.token == ""
+        assert [p.id for p in store.list_publications()] == [rival.id]
+        assert [e["action"] for e in store.read_events()] == ["publish"]
+
+    def test_a_withdrawn_version_can_be_published_again(self, store):
+        version = _ready_artifact(store, "fig", b"x")
+        first = store.publish_artifact("fig", version)
+        store.revoke_publication(first.token)
+
+        second = store.publish_artifact("fig", version)
+
+        assert second.id != first.id and second.token
+        assert [p.id for p in store.list_publications()] == [second.id]
+
+    def test_upgrading_keeps_the_oldest_of_duplicate_active_grants(self, store):
+        """A store an earlier release let a race write two live links into."""
+        version = _ready_artifact(store, "fig", b"x")
+        oldest = store.publish_artifact("fig", version)
+        newer_id = "b" * 64
+        conn = sqlite3.connect(store.db_path)
+        try:
+            conn.execute("DROP INDEX idx_publications_active")
+            conn.execute(
+                "INSERT INTO artifact_publications "
+                "(token, artifact_id, version, tenant, published_at) VALUES (?, ?, ?, '', ?)",
+                (newer_id, "fig", version, oldest.published_at + 1),
+            )
+            conn.execute("DELETE FROM schema_version WHERE version >= 10")
+            conn.commit()
+        finally:
+            conn.close()
+
+        reopened = ArtifactStore(store.artifact_dir)
+
+        assert [p.id for p in reopened.list_publications()] == [oldest.id]
+        revoked = {p.id: p.is_active for p in reopened.list_publications(include_revoked=True)}
+        assert revoked == {oldest.id: True, newer_id: False}
+        withdrawn = [e for e in reopened.read_events() if e["action"] == "withdraw"]
+        assert [(e["artifact_id"], e["to_version"], e["value"]) for e in withdrawn] == [
+            ("fig", version, newer_id)
+        ]
+        conn = sqlite3.connect(store.db_path)
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(
+                    "INSERT INTO artifact_publications "
+                    "(token, artifact_id, version, tenant, published_at) VALUES (?, ?, ?, '', 0)",
+                    ("c" * 64, "fig", version),
+                )
+        finally:
+            conn.close()
 
 
 def _rewind_to_raw_tokens(store: ArtifactStore, token: str) -> None:
