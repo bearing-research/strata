@@ -620,6 +620,51 @@ def seed_build_targets(
         store.close()
 
 
+def race_after_pending_read(store, competitor, first, second) -> tuple[object, object]:
+    """Run ``first(store)``, landing ``second(competitor)`` right after it reads the pending row.
+
+    ``competitor`` is a second store whose connections do not wait for a lock. One that finds it
+    held runs ``second`` again once ``first`` is done, as a second process waiting on it would.
+    Returns each call's result, or the ``ValueError`` it raised.
+    """
+    outcomes: dict[str, object] = {}
+    state = {"read": False, "locked": False}
+
+    def call(key, fn, target):
+        try:
+            outcomes[key] = fn(target)
+        except ValueError as exc:
+            outcomes[key] = exc
+
+    class Interleaved:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, attr):
+            return getattr(self._inner, attr)
+
+        def execute(self, sql, params=()):
+            if state["read"] and not state["locked"] and "second" not in outcomes:
+                try:
+                    call("second", second, competitor)
+                except competitor.dialect.operational_error:
+                    state["locked"] = True
+            cursor = self._inner.execute(sql, params)
+            if "FROM registry_pending" in sql:
+                state["read"] = True
+            return cursor
+
+    connect = store._get_connection
+    store._get_connection = lambda: Interleaved(connect())
+    try:
+        call("first", first, store)
+    finally:
+        store._get_connection = connect
+    if state["locked"]:
+        call("second", second, competitor)
+    return outcomes["first"], outcomes["second"]
+
+
 class RebindingDNS:
     """Name resolution that answers a name differently on each lookup.
 
