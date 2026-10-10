@@ -878,8 +878,11 @@ class ArtifactStore:
             private_file(self.db_path)
             for journal in ("-wal", "-shm"):
                 sibling = self.db_path.with_name(self.db_path.name + journal)
-                if sibling.exists():
+                try:
                     narrow(sibling, 0o600)
+                except FileNotFoundError:
+                    # Absent, or deleted under us as the last open connection elsewhere closed.
+                    continue
 
         # Every query goes through _get_connection, so the dialect is the one place a second backend
         # has to be taught about; see strata/sql_backend.py for what differs.
