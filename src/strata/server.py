@@ -1344,7 +1344,10 @@ async def auth_middleware(request: Request, call_next):
 
     try:
         if config.auth_mode == "api_key":
-            principal = parse_api_key_principal(dict(request.headers), config)
+            # The key lookup is a store query, made on every authenticated request.
+            principal = await anyio.to_thread.run_sync(
+                parse_api_key_principal, dict(request.headers), config
+            )
         else:
             principal = parse_principal(dict(request.headers), config)
         set_principal(principal)

@@ -14,7 +14,7 @@ router = APIRouter(tags=["metadata"])
 
 
 @router.get("/v1/metadata/stats")
-async def get_metadata_stats_v1():
+def get_metadata_stats_v1():
     """Get hit/miss counters and entry counts for the SQLite metadata store and LRU caches."""
     from strata.metadata_cache import get_metadata_store
     from strata.server import get_state
@@ -45,7 +45,7 @@ async def get_timeout_config_v1():
 
 
 @router.post("/v1/metadata/cleanup", dependencies=[require_scope("admin:cache")])
-async def cleanup_metadata_v1():
+def cleanup_metadata_v1():
     """Remove parquet metadata entries whose file is gone or has a different mtime or size.
 
     Runs on server startup too. Returns the number of entries removed. Requires

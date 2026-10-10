@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
@@ -67,6 +68,7 @@ class AdminNotebookWorkerPatchRequest(BaseModel):
 
 
 async def _serialize_admin_notebook_workers(
+    records: list[ManagedWorkerRecord],
     *,
     force_refresh: bool = False,
 ) -> dict[str, object]:
@@ -76,7 +78,7 @@ async def _serialize_admin_notebook_workers(
                 **record.worker.model_dump(mode="json"),
                 "enabled": record.enabled,
             }
-            for record in get_server_managed_worker_records()
+            for record in records
         ],
         "workers": await build_server_worker_catalog_with_health(force_refresh=force_refresh),
         "definitions_editable": False,
@@ -108,7 +110,8 @@ def _validate_admin_notebook_worker_names(
 )
 async def list_admin_notebook_workers(refresh: bool = False):
     """List the server-managed notebook worker registry."""
-    return await _serialize_admin_notebook_workers(force_refresh=refresh)
+    records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
+    return await _serialize_admin_notebook_workers(records, force_refresh=refresh)
 
 
 @router.put(
@@ -118,16 +121,17 @@ async def list_admin_notebook_workers(refresh: bool = False):
 async def update_admin_notebook_workers(request: AdminNotebookWorkersRequest):
     """Replace the server-managed notebook worker registry."""
     _validate_admin_notebook_worker_names(request.workers)
-    replace_server_managed_worker_records(
+    records = await anyio.to_thread.run_sync(
+        replace_server_managed_worker_records,
         [
             ManagedWorkerRecord(
                 worker=worker.to_worker_spec(),
                 enabled=worker.enabled,
             )
             for worker in request.workers
-        ]
+        ],
     )
-    return await _serialize_admin_notebook_workers(force_refresh=True)
+    return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 
 @router.post(
@@ -137,18 +141,19 @@ async def update_admin_notebook_workers(request: AdminNotebookWorkersRequest):
 async def create_admin_notebook_worker(request: AdminNotebookWorkerEntryRequest):
     """Create one service-managed notebook worker."""
     try:
-        create_server_managed_worker_record(
+        records = await anyio.to_thread.run_sync(
+            create_server_managed_worker_record,
             ManagedWorkerRecord(
                 worker=request.to_worker_spec(),
                 enabled=request.enabled,
-            )
+            ),
         )
     except ValueError:
         raise HTTPException(
             status_code=409,
             detail=f"Notebook worker already exists: {request.name}",
         )
-    return await _serialize_admin_notebook_workers(force_refresh=True)
+    return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 
 @router.put(
@@ -161,7 +166,8 @@ async def replace_admin_notebook_worker(
 ):
     """Replace one service-managed notebook worker definition."""
     try:
-        update_server_managed_worker_record(
+        records = await anyio.to_thread.run_sync(
+            update_server_managed_worker_record,
             worker_name,
             ManagedWorkerRecord(
                 worker=request.to_worker_spec(),
@@ -175,7 +181,7 @@ async def replace_admin_notebook_worker(
             status_code=409,
             detail=f"Notebook worker already exists: {request.name}",
         )
-    return await _serialize_admin_notebook_workers(force_refresh=True)
+    return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 
 @router.patch(
@@ -188,10 +194,12 @@ async def patch_admin_notebook_worker(
 ):
     """Patch one service-managed notebook worker."""
     try:
-        set_server_managed_worker_enabled(worker_name, request.enabled)
+        records = await anyio.to_thread.run_sync(
+            set_server_managed_worker_enabled, worker_name, request.enabled
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Notebook worker not found: {worker_name}")
-    return await _serialize_admin_notebook_workers(force_refresh=True)
+    return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 
 @router.delete(
@@ -201,10 +209,10 @@ async def patch_admin_notebook_worker(
 async def delete_admin_notebook_worker(worker_name: str):
     """Delete one service-managed notebook worker."""
     try:
-        delete_server_managed_worker_record(worker_name)
+        records = await anyio.to_thread.run_sync(delete_server_managed_worker_record, worker_name)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Notebook worker not found: {worker_name}")
-    return await _serialize_admin_notebook_workers(force_refresh=True)
+    return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 
 @router.post(
@@ -213,10 +221,10 @@ async def delete_admin_notebook_worker(worker_name: str):
 )
 async def refresh_admin_notebook_worker(worker_name: str):
     """Force-refresh health for one service-managed notebook worker."""
-    known_workers = {record.worker.name for record in get_server_managed_worker_records()}
-    if worker_name not in known_workers:
+    records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
+    if worker_name not in {record.worker.name for record in records}:
         raise HTTPException(status_code=404, detail=f"Notebook worker not found: {worker_name}")
-    return await _serialize_admin_notebook_workers(force_refresh=True)
+    return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 
 @router.post(
@@ -232,7 +240,8 @@ async def reload_admin_notebook_workers():
     from strata.notebook.workers import prune_worker_health_cache
 
     prune_worker_health_cache()
-    return await _serialize_admin_notebook_workers(force_refresh=True)
+    records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
+    return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 
 @router.get("/v1/admin/tenants", dependencies=[require_scope("admin:tenants")])

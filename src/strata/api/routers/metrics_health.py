@@ -7,6 +7,8 @@ leaf; those helpers stay in ``server.py`` because the shutdown path also uses th
 
 from __future__ import annotations
 
+from functools import partial
+
 import anyio.to_thread
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Response
@@ -55,11 +57,15 @@ async def health_dependencies():
 
     state = get_state()
 
-    report = run_health_checks(
-        cache_dir=state.config.cache_dir,
-        max_cache_size_bytes=state.config.max_cache_size_bytes,
-        planning_executor=state._planning_executor,
-        fetch_executor=state._fetch_executor,
+    # Checks the metadata store and writes a probe file to the cache dir.
+    report = await anyio.to_thread.run_sync(
+        partial(
+            run_health_checks,
+            cache_dir=state.config.cache_dir,
+            max_cache_size_bytes=state.config.max_cache_size_bytes,
+            planning_executor=state._planning_executor,
+            fetch_executor=state._fetch_executor,
+        )
     )
 
     status_code = 503 if report.status == HealthStatus.UNHEALTHY else 200
@@ -98,12 +104,15 @@ async def health_ready():
     checks["server_initialized"] = True
 
     try:
-        store = get_metadata_store()
-        store.stats()  # Quick sanity check
+        # Off the loop and bounded, like the artifact store ping below.
+        await asyncio.wait_for(
+            anyio.to_thread.run_sync(lambda: get_metadata_store().stats(), abandon_on_cancel=True),
+            ARTIFACT_STORE_PROBE_TIMEOUT_SECONDS,
+        )
         checks["metadata_store"] = True
     except Exception as e:
         # The probe is unauthenticated: name the failure, keep the message in the log.
-        logger.warning("readiness: metadata store check failed: %s", e)
+        logger.warning("readiness: metadata store check failed: %s", str(e) or type(e).__name__)
         checks["metadata_store"] = False
         checks["metadata_store_error"] = type(e).__name__
         is_ready = False
@@ -435,8 +444,7 @@ async def metrics_prometheus():
             )
 
     try:
-        store = get_metadata_store()
-        store_stats = store.stats()
+        store_stats = await anyio.to_thread.run_sync(lambda: get_metadata_store().stats())
         lines.extend(
             [
                 "",
