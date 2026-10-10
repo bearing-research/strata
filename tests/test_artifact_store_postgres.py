@@ -426,6 +426,43 @@ class TestFinalizeAndName:
         assert store.find_by_provenance("prov-1") is None
 
 
+class TestFindReadyAndSetName:
+    def _ready(self, store) -> int:
+        version = store.create_artifact("a1", "prov-1", _spec())
+        store.finalize_artifact("a1", version, "{}", 0, 0, content_sha256="d" * 64)
+        return version
+
+    def test_it_names_the_ready_version(self, store):
+        version = self._ready(store)
+
+        found = store.find_ready_and_set_name("prov-1", "the-name")
+
+        assert (found.id, found.version) == ("a1", version)
+        name = store.get_name("the-name")
+        assert (name.artifact_id, name.version) == ("a1", version)
+
+    def test_a_rebuild_between_the_lookup_and_the_name_gets_the_name(self, store, monkeypatch):
+        first = self._ready(store)
+        find = store.find_by_provenance
+        rebuilt = []
+
+        def find_then_rebuild(*args, **kwargs):
+            found = find(*args, **kwargs)
+            if not rebuilt:
+                rebuilt.append(store.create_artifact("a1", "prov-1", _spec()))
+                store.finalize_artifact("a1", rebuilt[0], "{}", 0, 0, content_sha256="e" * 64)
+            return found
+
+        monkeypatch.setattr(store, "find_by_provenance", find_then_rebuild)
+
+        found = store.find_ready_and_set_name("prov-1", "the-name")
+
+        assert (found.id, found.version, found.state) == ("a1", rebuilt[0], "ready")
+        name = store.get_name("the-name")
+        assert (name.artifact_id, name.version) == ("a1", rebuilt[0])
+        assert store.get_artifact("a1", first).state == "superseded"
+
+
 class TestGarbageCollection:
     def test_the_current_value_survives_a_rebuild_in_flight(self, store):
         # The spare-the-current-value clause is a correlated NOT EXISTS; run

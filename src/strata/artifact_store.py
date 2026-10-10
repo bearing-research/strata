@@ -2633,6 +2633,36 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def find_ready_and_set_name(
+        self, provenance_hash: str, name: str, tenant: str | None = None
+    ) -> ArtifactVersion | None:
+        """Find the ready artifact with this provenance and point ``name`` at it, in one commit.
+
+        Returns it, or ``None`` when none is ready. A refresh can supersede the found
+        version before the name moves; the conditional update below then matches no
+        row and the lookup runs again, finding the refresh's version.
+        """
+        while True:
+            found = self.find_by_provenance(provenance_hash, tenant=tenant)
+            if found is None:
+                return None
+            conn = self._get_connection()
+            try:
+                # Taken before the audit lock, as finalize takes its row locks: the other order
+                # deadlocks against a refresh. A supersede committing later waits on this row.
+                claimed = conn.execute(
+                    "UPDATE artifact_versions SET last_used_at = ? "
+                    "WHERE id = ? AND version = ? AND state = 'ready'",
+                    (time.time(), found.id, found.version),
+                )
+                if claimed.rowcount == 1:
+                    self._set_name_in_connection(conn, name, found.id, found.version, tenant)
+                    conn.commit()
+                    return found
+                conn.rollback()
+            finally:
+                conn.close()
+
     def names_for_artifact(
         self,
         artifact_id: str,

@@ -42,6 +42,7 @@ from strata.artifact_store import (
     ArtifactIdTaken,
     ArtifactImportConflict,
     ArtifactStore,
+    ArtifactVersion,
     reject_unsafe_artifact_id,
 )
 from strata.artifact_transfer import PROMOTION_TAG
@@ -235,6 +236,39 @@ async def _put_artifact(
         raise HTTPException(status_code=400, detail="Missing 'executor' in transform")
     params = transform_dict.get("params", {})
 
+    return await anyio.to_thread.run_sync(
+        functools.partial(
+            _store_put,
+            store,
+            principal,
+            inputs=inputs,
+            executor=executor,
+            params=params,
+            artifact_name=artifact_name,
+            data_path=data_path,
+            content_sha256=content_sha256,
+            byte_size=byte_size,
+            schema_json=schema_json,
+            row_count=row_count,
+        )
+    )
+
+
+def _store_put(
+    store: ArtifactStore,
+    principal: Principal | None,
+    *,
+    inputs: list[str],
+    executor: str,
+    params: dict,
+    artifact_name: str | None,
+    data_path: Path,
+    content_sha256: str,
+    byte_size: int,
+    schema_json: str,
+    row_count: int,
+) -> PutArtifactResponse:
+    """The PUT route's store work, in one thread: none of it may run on the loop."""
     # Resolve the tenant from the principal, as materialize does: get_tenant_id() defaults to
     # "_default", which the name routes (None) can never address.
     tenant_id = principal.tenant if principal else None
@@ -273,23 +307,18 @@ async def _put_artifact(
     input_hashes = [f"{uri}:{ver}" for uri, ver in sorted(input_versions.items())]
     provenance_hash = compute_provenance_hash(input_hashes, artifact_transform)
 
-    existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
-    if existing is not None and existing.state == "ready":
-        artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
-        name_uri = None
-
-        if artifact_name:
-            try:
-                store.set_name(artifact_name, existing.id, existing.version, tenant=tenant_id)
-                name_uri = f"strata://name/{artifact_name}"
-            except ValueError:
-                pass
-
+    # Found and named in one commit: a refresh superseding the hit in between cannot leave
+    # the name unwritten.
+    if artifact_name:
+        existing = store.find_ready_and_set_name(provenance_hash, artifact_name, tenant=tenant_id)
+    else:
+        existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
+    if existing is not None:
         return PutArtifactResponse(
-            artifact_uri=artifact_uri,
+            artifact_uri=f"strata://artifact/{existing.id}@v={existing.version}",
             hit=True,
             byte_size=existing.byte_size or 0,
-            name_uri=name_uri,
+            name_uri=f"strata://name/{artifact_name}" if artifact_name else None,
         )
 
     artifact_id = str(uuid.uuid4())
@@ -304,7 +333,7 @@ async def _put_artifact(
         minted=True,
     )
 
-    await anyio.to_thread.run_sync(store.publish_blob_from_path, artifact_id, version, data_path)
+    store.publish_blob_from_path(artifact_id, version, data_path)
 
     # One commit: a reader never sees the upload ready without its name, and a name that cannot
     # be written fails the upload rather than leaving it ready and unnamed.
@@ -452,8 +481,6 @@ async def _import_artifact(
     """The import route's body, with a directory to stage a copied blob in."""
     import json as json_module
 
-    from strata.artifact_store import ArtifactVersion
-
     tenant_id = principal.tenant if principal else None
     staged = request.headers.get("content-type", "").startswith("application/json")
     blob: Path | None = None
@@ -575,6 +602,33 @@ async def _import_artifact(
         content_sha256=declared_digest or received_digest,
     )
 
+    return await anyio.to_thread.run_sync(
+        functools.partial(
+            _land_import,
+            store,
+            record,
+            remap=remap,
+            staged=staged,
+            blob=blob,
+            declared_digest=declared_digest,
+        )
+    )
+
+
+def _land_import(
+    store: ArtifactStore,
+    record: ArtifactVersion,
+    *,
+    remap: bool,
+    staged: bool,
+    blob: Path | None,
+    declared_digest: str,
+) -> dict:
+    """The import route's store work, in one thread: none of it may run on the loop.
+
+    The checks here only shape the error; ``import_artifact`` repeats them inside its write.
+    """
+    artifact_id, version, tenant_id = record.id, record.version, record.tenant
     existing = store.get_artifact(artifact_id, version)
     # Two ways the id is already taken: by another tenant, and by another
     # computation. Ids are not globally unique -- a notebook's are built from
@@ -606,9 +660,7 @@ async def _import_artifact(
         # holds with its bytes: a retry after an import that went through.
         already = store.get_artifact(record.id, record.version)
         same = store.find_by_provenance(record.provenance_hash, tenant_id)
-        complete = already is not None and await anyio.to_thread.run_sync(
-            store.blob_exists, already.id, already.version
-        )
+        complete = already is not None and store.blob_exists(already.id, already.version)
         if not complete and same is None:
             raise HTTPException(
                 status_code=400,
@@ -619,7 +671,7 @@ async def _import_artifact(
             )
 
     try:
-        landed = await anyio.to_thread.run_sync(store.import_artifact, record, blob)
+        landed = store.import_artifact(record, blob)
     except ArtifactImportConflict as exc:
         # Another import of this id@v=N with a different computation committed
         # after the check above.
@@ -627,7 +679,7 @@ async def _import_artifact(
             status_code=409, detail=f"{exc} Retry with remap=true to import it under a fresh id."
         ) from exc
     if staged and blob is not None:
-        await anyio.to_thread.run_sync(store.release_staged_import, tenant_id, declared_digest)
+        store.release_staged_import(tenant_id, declared_digest)
     return {
         "artifact_uri": f"strata://artifact/{landed.ref}",
         "id": landed.id,
@@ -671,8 +723,6 @@ async def _put_artifact_by_provenance(
     """The by-provenance PUT route's body, with a path to hold the uploaded bytes."""
     import json as json_module
 
-    from strata.artifact_store import TransformSpec as ArtifactTransformSpec
-
     form = await _capped(request).form()
     metadata_file = form.get("metadata")
     data_file = form.get("data")
@@ -704,6 +754,37 @@ async def _put_artifact_by_provenance(
     content_sha256, byte_size = await anyio.to_thread.run_sync(
         _spool_upload, data_file.file, data_path
     )
+    return await anyio.to_thread.run_sync(
+        functools.partial(
+            _store_put_by_provenance,
+            store,
+            principal,
+            provenance_hash,
+            metadata=metadata,
+            content_type=content_type,
+            row_count=row_count,
+            data_path=data_path,
+            content_sha256=content_sha256,
+            byte_size=byte_size,
+        )
+    )
+
+
+def _store_put_by_provenance(
+    store: ArtifactStore,
+    principal: Principal | None,
+    provenance_hash: str,
+    *,
+    metadata: dict,
+    content_type: str,
+    row_count: int | None,
+    data_path: Path,
+    content_sha256: str,
+    byte_size: int,
+) -> PutArtifactResponse:
+    """The by-provenance PUT's store work, in one thread: none of it may run on the loop."""
+    from strata.artifact_store import TransformSpec as ArtifactTransformSpec
+
     tenant_id = principal.tenant if principal else None
 
     # First writer wins. Returning the incumbent rather than superseding it is
@@ -752,7 +833,7 @@ async def _put_artifact_by_provenance(
         # The caller names the id, so it can name somebody else's. The store refuses
         # inside its write, where a concurrent first upload cannot slip in after the check.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    await anyio.to_thread.run_sync(store.publish_blob_from_path, artifact_id, version, data_path)
+    store.publish_blob_from_path(artifact_id, version, data_path)
     finalized = store.finalize_artifact(
         artifact_id=artifact_id,
         version=version,
@@ -991,7 +1072,7 @@ def list_artifacts(
 
 
 @router.delete("/v1/artifacts/{artifact_id}/v/{version}")
-async def delete_artifact(
+def delete_artifact(
     artifact_id: str, version: int, store: PersonalModeStore, tenant_filter: CurrentTenant
 ):
     """Delete an artifact version, its blob and its name pointers (personal mode only)."""
@@ -1003,10 +1084,7 @@ async def delete_artifact(
     )
 
     try:
-        # Deletes the blob, a network call on S3, GCS or Azure.
-        deleted = await anyio.to_thread.run_sync(
-            functools.partial(store.delete_artifact, artifact_id, version, tenant=tenant_filter)
-        )
+        deleted = store.delete_artifact(artifact_id, version, tenant=tenant_filter)
     except ValueError as exc:
         # Published: withdrawing the citation is a separate, deliberate act.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1068,7 +1146,7 @@ class ExportTableRequest(BaseModel):
 
 
 @router.post("/v1/artifacts/{artifact_id}/v/{version}/export")
-async def export_artifact_to_table(
+def export_artifact_to_table(
     artifact_id: str,
     version: int,
     request: ExportTableRequest,
@@ -1098,17 +1176,14 @@ async def export_artifact_to_table(
     # Exporting copies the bytes into a table the caller can scan, so it is a read of them.
     _authorize_artifact_read(artifact, store)
     try:
-        written = await anyio.to_thread.run_sync(
-            functools.partial(
-                export_artifact,
-                store,
-                artifact,
-                request.table,
-                config=config,
-                promoted_by=principal.id if principal is not None else None,
-                alias=request.alias,
-                tenant=tenant_filter,
-            )
+        written = export_artifact(
+            store,
+            artifact,
+            request.table,
+            config=config,
+            promoted_by=principal.id if principal is not None else None,
+            alias=request.alias,
+            tenant=tenant_filter,
         )
     except TableOfAnotherTenant as exc:
         if config.hide_forbidden_as_not_found:
@@ -1182,7 +1257,7 @@ async def garbage_collect_artifacts(
 
 
 @router.get("/v1/artifacts/{artifact_id}/v/{version}/data")
-async def get_artifact_data(
+def get_artifact_data(
     artifact_id: str, version: int, store: ReadStore, tenant_filter: CurrentTenant
 ):
     """Stream an artifact's bytes as Arrow IPC.
@@ -1203,7 +1278,7 @@ async def get_artifact_data(
             detail=f"Artifact is not ready (state={artifact.state})",
         )
 
-    reader_cm = await anyio.to_thread.run_sync(store.open_blob_reader, artifact_id, version)
+    reader_cm = store.open_blob_reader(artifact_id, version)
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="Artifact data not found")
 
@@ -1322,7 +1397,7 @@ async def upload_artifact_blob(
 
     Call ``/v1/artifacts/finalize`` afterwards to complete the artifact.
     """
-    artifact = store.get_artifact(artifact_id, version)
+    artifact = await anyio.to_thread.run_sync(store.get_artifact, artifact_id, version)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
     if artifact.state != "building":

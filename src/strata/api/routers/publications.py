@@ -310,7 +310,7 @@ def read_publication_record(token: str, store: ReadStore):
 
 
 @router.get("/p/{token}", response_class=HTMLResponse)
-async def publication_page(token: str, store: ReadStore, http_request: Request):
+def publication_page(token: str, store: ReadStore, http_request: Request):
     """The page a citation points at. Unauthenticated, self-contained HTML."""
     publication, artifact = _load_published(store, token, require_active=False)
 
@@ -326,7 +326,7 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
 
     inline_png = None
     if publication.is_active and content_type == "image/png":
-        inline_png = await anyio.to_thread.run_sync(_inline_png, store, publication)
+        inline_png = _inline_png(store, publication)
 
     base = _public_base(http_request)
     page_url = quote(f"{base}/p/{token}", safe="")
@@ -388,16 +388,14 @@ def _inline_png(store, publication) -> str | None:
 
 
 @router.get("/p/{token}/data")
-async def publication_data(token: str, store: ReadStore):
+def publication_data(token: str, store: ReadStore):
     """The published bytes. Unauthenticated, and only ever this artifact's own.
 
     Ancestors are described on the page but their bytes are never served.
     """
     publication, artifact = _load_published(store, token, require_active=True)
 
-    reader_cm = await anyio.to_thread.run_sync(
-        store.open_blob_reader, publication.artifact_id, publication.version
-    )
+    reader_cm = store.open_blob_reader(publication.artifact_id, publication.version)
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="The published bytes are gone")
 
@@ -436,7 +434,9 @@ async def publication_archive(token: str, store: ReadStore):
     """
     from base64 import b64encode
 
-    publication, artifact = _load_published(store, token, require_active=True)
+    publication, artifact = await anyio.to_thread.run_sync(
+        functools.partial(_load_published, store, token, require_active=True)
+    )
     path, digest = await _built_archive(store, artifact, publication)
     return FileResponse(
         path,
@@ -461,7 +461,9 @@ async def verify_publication(
     caller holds, it also says which of the publication's files that is: the
     published bytes or the archive's Parquet copy.
     """
-    publication, artifact = _load_published(store, token, require_active=True)
+    publication, artifact = await anyio.to_thread.run_sync(
+        functools.partial(_load_published, store, token, require_active=True)
+    )
     if not publication.content_sha256:
         raise HTTPException(
             status_code=409,
@@ -534,7 +536,7 @@ def _same_host(left: str, right: str) -> bool:
 
 
 @router.get("/p/{token}/embed", response_class=HTMLResponse)
-async def publication_embed(token: str, store: ReadStore, http_request: Request):
+def publication_embed(token: str, store: ReadStore, http_request: Request):
     """A compact card, sized for an iframe in a post or a wiki."""
     publication, artifact = _load_published(store, token, require_active=True)
     lineage = ArtifactService().build_lineage(
@@ -546,11 +548,7 @@ async def publication_embed(token: str, store: ReadStore, http_request: Request)
         max_depth=PUBLICATION_MAX_DEPTH,
     )
     content_type = content_type_of(artifact)
-    image_src = (
-        await anyio.to_thread.run_sync(_inline_png, store, publication)
-        if content_type == "image/png"
-        else None
-    )
+    image_src = _inline_png(store, publication) if content_type == "image/png" else None
 
     return HTMLResponse(
         render_embed(
