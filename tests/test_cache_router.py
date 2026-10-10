@@ -245,6 +245,33 @@ class TestWarmSync:
         assert ran_while_planning
         assert resp.json()["tables_warmed"] == 1
 
+    def test_a_warm_plan_past_the_timeout_is_reported(self, cache_client, warehouse_uri):
+        """The warm plan gets the scan path's ``plan_timeout_seconds``."""
+        import threading
+
+        client, state = cache_client
+        release, done = threading.Event(), threading.Event()
+        plan = state.planner.plan
+
+        def stalled_plan(*args, **kwargs):
+            # A guard, so a plan that is never released ends with the test.
+            release.wait(timeout=30)
+            done.set()
+            return plan(*args, **kwargs)
+
+        state.config = state.config.model_copy(update={"plan_timeout_seconds": 0.05})
+        state.planner.plan = stalled_plan
+        try:
+            resp = client.post("/v1/cache/warm", json={"tables": [warehouse_uri]})
+            answered_before_the_plan_ended = not done.is_set()
+        finally:
+            release.set()
+
+        assert resp.status_code == 200, resp.text
+        assert answered_before_the_plan_ended
+        assert resp.json()["tables_warmed"] == 0
+        assert resp.json()["errors"] == [f"{warehouse_uri}: planning timed out after 0.05s"]
+
 
 class TestAsyncWarmerNotInitialized:
     """Without lifespan startup ``_cache_warmer`` is None: graceful 503/404/empty."""

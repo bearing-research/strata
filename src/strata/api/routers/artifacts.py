@@ -675,9 +675,7 @@ def _land_import(
     except ArtifactImportConflict as exc:
         # Another import of this id@v=N with a different computation committed
         # after the check above.
-        raise HTTPException(
-            status_code=409, detail=f"{exc} Retry with remap=true to import it under a fresh id."
-        ) from exc
+        raise HTTPException(status_code=409, detail=f"{exc} Retry with remap=true.") from exc
     if staged and blob is not None:
         store.release_staged_import(tenant_id, declared_digest)
     return {

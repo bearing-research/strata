@@ -985,6 +985,24 @@ async def test_an_executor_run_reads_the_worker_registry_once_off_the_loop(
     assert log == [("read", False)]
 
 
+@pytest.mark.asyncio
+async def test_a_nested_run_keeps_the_policy_its_enclosing_run_read(
+    notebook_session, registry_worker
+):
+    """A local cell's run holds no policy; a remote upstream it reaches reuses the outer read."""
+    from strata.notebook.workers import one_policy_read, read_worker_policy
+
+    log, _ = registry_worker
+    _, session = notebook_session
+    state = session.notebook_state
+
+    policy = await read_worker_policy(state, "gpu-embedded")
+    with one_policy_read(state, policy), one_policy_read(state, None):
+        assert await read_worker_policy(state, "gpu-embedded") is policy
+
+    assert log == [("read", False)]
+
+
 # --- Remote-executor consumers ---
 
 
