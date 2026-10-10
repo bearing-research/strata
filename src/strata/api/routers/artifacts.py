@@ -609,7 +609,9 @@ async def _import_artifact(
         # holds with its bytes: a retry after an import that went through.
         already = store.get_artifact(record.id, record.version)
         same = store.find_by_provenance(record.provenance_hash, tenant_id)
-        complete = already is not None and store.blob_exists(already.id, already.version)
+        complete = already is not None and await asyncio.to_thread(
+            store.blob_exists, already.id, already.version
+        )
         if not complete and same is None:
             raise HTTPException(
                 status_code=400,
@@ -1006,7 +1008,10 @@ async def delete_artifact(
     )
 
     try:
-        deleted = store.delete_artifact(artifact_id, version, tenant=tenant_filter)
+        # Deletes the blob, a network call on S3, GCS or Azure.
+        deleted = await asyncio.to_thread(
+            store.delete_artifact, artifact_id, version, tenant=tenant_filter
+        )
     except ValueError as exc:
         # Published: withdrawing the citation is a separate, deliberate act.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1349,7 +1354,8 @@ async def upload_artifact_blob(
 @router.post("/v1/artifacts/finalize", response_model=UploadFinalizeResponse)
 async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeStore):
     """Mark an uploaded artifact ready, optionally setting a name (personal mode only)."""
-    if not store.blob_exists(request.artifact_id, request.version):
+    # On S3, GCS or Azure each blob probe is a network round trip.
+    if not await asyncio.to_thread(store.blob_exists, request.artifact_id, request.version):
         raise HTTPException(
             status_code=400,
             detail="Blob not uploaded. Call upload endpoint first.",
@@ -1357,7 +1363,7 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
 
     # ``blob_size`` returns None both for an absent object and a failed backend call. Refuse rather
     # than mark READY a row claiming an empty blob, as build-finalize does.
-    byte_size = store.blob_size(request.artifact_id, request.version) or 0
+    byte_size = await asyncio.to_thread(store.blob_size, request.artifact_id, request.version) or 0
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
