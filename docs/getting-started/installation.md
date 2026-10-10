@@ -63,6 +63,9 @@ docker compose up -d --build
 
 Open [http://localhost:8765](http://localhost:8765) in your browser.
 
+Releases after 0.9.0 also publish the image as `ghcr.io/bearing-research/strata:<version>`;
+see [Docker → Prebuilt image](../deployment/docker.md#prebuilt-image).
+
 ## From Source
 
 ### 1. Install dependencies and build the Rust extension

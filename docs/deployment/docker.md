@@ -123,6 +123,22 @@ page cannot drive it.
 
 See [Configuration Reference](../reference/configuration.md) for all options.
 
+## Prebuilt image
+
+Each release after 0.9.0 publishes the image this Dockerfile builds as
+`ghcr.io/bearing-research/strata:<version>`, and `:latest` names the
+newest stable release. Pin a version for anything you deploy or build
+on. The image is linux/amd64 only; an arm64 host runs it under
+emulation, or builds its own as below.
+
+```bash
+docker run --rm -p 8765:8765 \
+  -v strata_state:/home/strata/.strata \
+  ghcr.io/bearing-research/strata:<version>
+```
+
+To extend it, start your own Dockerfile `FROM` it.
+
 ## Building the image manually
 
 ```bash

@@ -2,7 +2,8 @@ name: Release
 
 # A `v*` tag builds the frontend, the platform wheels (abi3-py312: one per
 # platform) and an sdist, publishes to TestPyPI via OIDC trusted publishing,
-# then to PyPI after manual approval on the protected `pypi` environment.
+# then to PyPI after manual approval on the protected `pypi` environment,
+# then pushes the server image to ghcr.io/bearing-research/strata.
 #
 # Trusted publishers must exist on PyPI and TestPyPI (Owner: bearing-research,
 # Repo: strata, Workflow: release.yml, Environment: testpypi / pypi).
@@ -506,6 +507,86 @@ jobs:
           # package that failed. A tag still never republishes: pre-flight
           # fails the run when any package version disagrees with the tag.
           skip-existing: true
+
+  # --- server image (ghcr.io) ----------------------------------------
+  # The Dockerfile's image, so a downstream image starts FROM a pulled base
+  # instead of building Strata. After PyPI, like the Release, so no image
+  # names a version PyPI lacks. amd64 only: the platform docker.yml tests.
+  image:
+    name: Publish server image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [preflight, pypi]
+    permissions:
+      contents: read
+      # Pushes with GITHUB_TOKEN. Scorecard flags any write; accepted, as
+      # there is no narrower scope.
+      packages: write
+    env:
+      IMAGE: ghcr.io/bearing-research/strata
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # A dispatch run would otherwise build the dispatching branch, which
+          # may have moved past the tag; rebuild the tagged source instead.
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+
+      # github.sha is the dispatching branch on a manual run, not the tag.
+      - name: Resolve the tagged commit
+        id: rev
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Build the server image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: strata:release
+          # The source label links the ghcr.io package to this repository.
+          labels: |
+            org.opencontainers.image.source=https://github.com/bearing-research/strata
+            org.opencontainers.image.version=${{ needs.preflight.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.rev.outputs.sha }}
+          cache-from: type=gha
+
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name strata-release -p 8765:8765 strata:release
+          curl -fsS --retry 30 --retry-delay 1 --retry-connrefused \
+            --retry-all-errors http://localhost:8765/health
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs strata-release || true
+
+      - name: Push to ghcr.io
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          EVENT_NAME: ${{ github.event_name }}
+          IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          # Like PyPI's skip-existing: a re-run never replaces the image a
+          # version tag already names.
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            echo "::notice::$IMAGE:$VERSION already exists; not pushing it"
+          else
+            docker tag strata:release "$IMAGE:$VERSION"
+            docker push "$IMAGE:$VERSION"
+          fi
+          # latest is the newest stable release, as pip's default is. Only a
+          # tag push moves it: a manual run may republish an older version.
+          if [ "$EVENT_NAME" = push ] && [ "$IS_PRERELEASE" = false ]; then
+            docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$VERSION"
+          fi
 
   # --- GitHub Release (release notes from CHANGELOG) -----------------
   # Only after the PyPI publish succeeds, so a Release never points at a tag
