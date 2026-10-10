@@ -553,6 +553,13 @@ executor_url = "embedded://local"
 The [executor protocol](executor-protocol.md#core-transform-executors) describes the
 other registry keys.
 
+The block's `notebook_workers` list seeds the server-managed notebook worker
+registry in either mode. Once the registry has been set it lives in the
+artifact metadata store and the list is no longer read, so to change the
+machine types a running server offers, personal or service, use
+`/v1/admin/notebook-workers*`. See
+[Server-managed workers](../notebook/workers.md#server-managed-workers).
+
 The v2-pull signed-URL routes (build manifest, signed download / upload, and
 `finalize`) have no on/off switch. They are served whenever the deployment can
 issue and honor them at all (personal mode, or service mode with transforms

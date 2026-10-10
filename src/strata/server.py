@@ -1574,27 +1574,6 @@ def _mount_mcp(application: FastAPI, mcp_app: Starlette) -> None:
 _mount_mcp_if_enabled()
 
 
-def _require_notebook_worker_admin_access() -> ServerState:
-    """Authorize access to the service-mode notebook worker registry."""
-    state = get_state()
-
-    if state.config.deployment_mode != "service":
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "The admin notebook-worker routes are for service mode; a personal "
-                "server reads its workers from [tool.strata.transforms] notebook_workers"
-            ),
-        )
-
-    if state.config.principal_auth_enabled:
-        principal = get_principal()
-        if principal is None or not principal.has_scope("admin:notebook-workers"):
-            raise HTTPException(status_code=403, detail="Insufficient scope")
-
-    return state
-
-
 # =============================================================================
 # API v1 (stable contracts)
 #

@@ -161,17 +161,6 @@ def require_scope(scope: str):
     return Depends(_require)
 
 
-def require_notebook_worker_admin() -> None:
-    """Gate the server-managed notebook worker registry.
-
-    Service mode only (409 otherwise), plus ``admin:notebook-workers`` under
-    trusted-proxy auth.
-    """
-    from strata.server import _require_notebook_worker_admin_access
-
-    _require_notebook_worker_admin_access()
-
-
 # --- Build-store / signed-transport gate ---
 # The ``Depends`` wrappers below bind the mode gate and the store resolution together.
 

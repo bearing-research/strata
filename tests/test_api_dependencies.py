@@ -81,17 +81,6 @@ def test_a_refused_artifact_route_names_only_settings_that_would_open_it(tmp_pat
     assert "STRATA_SERVICE_WRITES_ENABLED" in write_route.value.detail["message"]
 
 
-def test_the_admin_worker_routes_in_personal_mode_point_at_the_config(tmp_path):
-    """Personal mode has server-managed workers too; they come from the config table."""
-    _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
-
-    with pytest.raises(HTTPException) as exc:
-        server._require_notebook_worker_admin_access()
-
-    assert exc.value.status_code == 409
-    assert "[tool.strata.transforms] notebook_workers" in exc.value.detail
-
-
 def test_personal_mode_opens_both_gates(tmp_path):
     """Personal mode is the single operator: read and registry write both resolve."""
     _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))

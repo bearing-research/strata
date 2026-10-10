@@ -247,7 +247,7 @@ Compared to personal mode:
   `STRATA_ARTIFACT_METADATA_DSN`, otherwise `artifacts.sqlite` in the
   artifact directory) holds artifact metadata, names, aliases,
   publications, pins, API keys and the server-managed
-  [worker registry](../notebook/workers.md#server-managed-workers-service-mode).
+  [worker registry](../notebook/workers.md#server-managed-workers).
   The *blob store* holds artifact bytes: the configured bucket, or
   `blobs/` in the artifact directory with the local backend. Notebooks
   live in `STRATA_NOTEBOOK_STORAGE_DIR`. Back up those three. The
@@ -428,7 +428,7 @@ auth (`admin:*` satisfies any of them):
 |---|---|
 | `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` |
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
-| `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload); service mode only, `409` in personal mode |
+| `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload); a personal server, which has no principal auth, serves them to whoever can reach it |
 | `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
 | `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, which sweeps the whole store), reading another tenant's `GET /v1/artifacts/usage` / `stats`, the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`), per-table metrics (`GET /metrics/tables*`), and the process diagnostics under `/v1/debug/*` (latency, GC pauses, pools, connections, memory, rate limits) |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |

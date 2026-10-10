@@ -61,6 +61,7 @@ def personal_mode_config(tmp_path):
         deployment_mode="personal",
         cache_dir=tmp_path / "cache",
         artifact_dir=artifact_dir,
+        notebook_storage_dir=tmp_path,
     )
 
 
@@ -730,12 +731,65 @@ class TestNotebookWorkerAdminApi:
         assert blocked_deleted.status_code == 403
         assert "not allowed in service mode" in blocked_deleted.json()["detail"]
 
-    def test_notebook_workers_admin_requires_service_mode(self, personal_mode_app):
-        """The admin registry does not exist in personal mode."""
-        response = personal_mode_app.get("/v1/admin/notebook-workers")
+    def test_a_running_personal_server_takes_a_worker_through_the_admin_routes(
+        self,
+        personal_mode_app,
+        tmp_path,
+        monkeypatch,
+    ):
+        """A machine type enabled after the first start reaches an open notebook, no restart."""
+        monkeypatch.setattr("strata.notebook.session._uv_sync", lambda path, **kw: True)
 
-        assert response.status_code == 409
-        assert "service mode" in response.json()["detail"]
+        async def _noop_start(self):
+            del self
+
+        monkeypatch.setattr("strata.notebook.pool.WarmProcessPool.start", _noop_start)
+
+        notebook_dir = create_notebook(tmp_path, "Personal Registry")
+        opened = personal_mode_app.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+        assert opened.status_code == 200, opened.text
+        session_id = opened.json()["session_id"]
+
+        def _offered() -> dict[str, dict]:
+            response = personal_mode_app.get(f"/v1/notebooks/{session_id}/workers")
+            assert response.status_code == 200
+            return {worker["name"]: worker for worker in response.json()["workers"]}
+
+        assert "gpu-a100" not in _offered()
+
+        entry = {
+            "name": "gpu-a100",
+            "backend": "executor",
+            "runtime_id": "gpu-a100-v1",
+            "config": {"url": "https://gpu.internal/v1/execute"},
+        }
+        # The origin guard still refuses a page the owner happens to visit.
+        cross_origin = personal_mode_app.post(
+            "/v1/admin/notebook-workers",
+            json=entry,
+            headers={"Origin": "https://evil.example"},
+        )
+        assert cross_origin.status_code == 403
+        assert "gpu-a100" not in _offered()
+
+        created = personal_mode_app.post("/v1/admin/notebook-workers", json=entry)
+        assert created.status_code == 200
+        assert [w["name"] for w in created.json()["configured_workers"]] == ["gpu-a100"]
+        assert [e["name"] for e in get_artifact_store().notebook_worker_entries()] == ["gpu-a100"]
+
+        offered = _offered()["gpu-a100"]
+        assert offered["source"] == "server"
+        assert offered["allowed"] is True
+        assigned = personal_mode_app.put(
+            f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-a100"}
+        )
+        assert assigned.status_code == 200
+
+        disabled = personal_mode_app.patch(
+            "/v1/admin/notebook-workers/gpu-a100", json={"enabled": False}
+        )
+        assert disabled.status_code == 200
+        assert _offered()["gpu-a100"]["allowed"] is False
 
     def test_notebook_workers_admin_requires_scope(self, server_mode_auth_app):
         """Trusted-proxy mode requires the notebook worker admin scope."""
