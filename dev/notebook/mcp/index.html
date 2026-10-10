@@ -2156,7 +2156,7 @@ REST routes and the WebSocket:</p>
 </tr>
 <tr>
 <td><code>notebook:execute</code></td>
-<td><code>run_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>set_widget_value</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
+<td><code>run_cell</code>, <code>cancel_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>set_widget_value</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
 </tr>
 <tr>
 <td><code>artifacts:publish</code></td>
@@ -2261,6 +2261,10 @@ details stay in the server log.</p>
 <tr>
 <td><code>run_cell(session_id, cell_id, mode)</code></td>
 <td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live.</td>
+</tr>
+<tr>
+<td><code>cancel_cell(session_id, cell_id)</code></td>
+<td>Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A <code>run_cell</code> waiting on it returns <code>status: error</code> with <code>error_code: cancelled</code>. Returns <code>{cell_id, cancelled, status}</code>; <code>cancelled</code> is <code>false</code> when the cell was not running.</td>
 </tr>
 <tr>
 <td><code>set_widget_value(session_id, cell_id, values)</code></td>
