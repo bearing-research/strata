@@ -1860,13 +1860,14 @@ class ArtifactStore:
         name: str | None = None,
         tenant: str | None = None,
         *,
+        content_sha256: str | None = None,
         blob_attempt: str | None = None,
         fence: BuildFence | None = None,
     ) -> ArtifactVersion | None:
         """Finalize an artifact and set a name pointer in one transaction.
 
         On a provenance duplicate the name points at the existing artifact. ``name``
-        of None sets no name; ``blob_attempt`` and ``fence`` as for
+        of None sets no name; ``content_sha256``, ``blob_attempt`` and ``fence`` as for
         :meth:`finalize_artifact`.
 
         Raises:
@@ -1934,7 +1935,7 @@ class ArtifactStore:
                 self.blob_store.delete_blob(*duplicate_blob)
                 return existing
 
-            digest = self.blob_digest(artifact_id, version, blob_attempt)
+            digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
 
             if existing is not None and existing.version != version:
                 # Refresh rebuild: same id, older ready version with the same provenance. Supersede

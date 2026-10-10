@@ -40,7 +40,6 @@ from strata.api.served_bytes import data_headers
 from strata.artifact_store import ArtifactImportConflict, ArtifactStore, reject_unsafe_artifact_id
 from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
-from strata.logging import get_logger
 from strata.services.artifact import artifact_service
 from strata.types import (
     PROVENANCE_MISS_HEADER,
@@ -53,8 +52,6 @@ from strata.types import (
     UploadFinalizeRequest,
     UploadFinalizeResponse,
 )
-
-logger = get_logger(__name__)
 
 router = APIRouter(tags=["artifacts"])
 
@@ -303,37 +300,26 @@ async def _put_artifact(
 
     await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, data_path)
 
-    finalized_artifact = store.finalize_artifact(
+    # One commit: a reader never sees the upload ready without its name, and a name that cannot
+    # be written fails the upload rather than leaving it ready and unnamed.
+    finalized_artifact = store.finalize_and_set_name(
         artifact_id=artifact_id,
         version=version,
         schema_json=schema_json,
         row_count=row_count,
         byte_size=byte_size,
+        name=artifact_name,
+        tenant=tenant_id,
         content_sha256=content_sha256,
     )
     if finalized_artifact is None:
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
 
-    artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
-    name_uri = None
-
-    if artifact_name:
-        try:
-            store.set_name(
-                artifact_name,
-                finalized_artifact.id,
-                finalized_artifact.version,
-                tenant=tenant_id,
-            )
-            name_uri = f"strata://name/{artifact_name}"
-        except Exception as e:
-            logger.warning(f"Failed to set name {artifact_name}: {e}")
-
     return PutArtifactResponse(
-        artifact_uri=artifact_uri,
+        artifact_uri=f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}",
         hit=finalized_artifact.id != artifact_id or finalized_artifact.version != version,
         byte_size=finalized_artifact.byte_size or byte_size,
-        name_uri=name_uri,
+        name_uri=f"strata://name/{artifact_name}" if artifact_name else None,
     )
 
 

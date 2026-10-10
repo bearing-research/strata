@@ -630,3 +630,86 @@ async def test_an_uploaded_artifact_is_ready_only_with_its_name(served, monkeypa
     assert response.json()["name_uri"] == "strata://name/the-upload"
     [name] = seen_at_commit
     assert (name.artifact_id, name.version) == ("uploaded", version)
+
+
+_NAMED_PUT = {
+    "inputs": [],
+    "transform": {"executor": "local@v1", "params": {}},
+    "data": {"x": [1, 2, 3]},
+    "name": "the-put",
+}
+
+
+async def test_a_put_artifact_is_ready_only_with_its_name(served, monkeypatch):
+    """The ready state and the name commit together, so no reader sees one without the other."""
+    store = served.store
+    seen_at_commit = []
+
+    def observed(finalize):
+        def call(*args, **kwargs):
+            result = finalize(*args, **kwargs)
+            seen_at_commit.append((result.state, store.get_name("the-put")))
+            return result
+
+        return call
+
+    for method in ("finalize_artifact", "finalize_and_set_name"):
+        monkeypatch.setattr(store, method, observed(getattr(store, method)))
+
+    async with _client(served) as client:
+        response = await client.put("/v1/artifacts", json=_NAMED_PUT)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["name_uri"] == "strata://name/the-put"
+    [(state, name)] = seen_at_commit
+    assert state == "ready"
+    assert name is not None
+    uri = f"strata://artifact/{name.artifact_id}@v={name.version}"
+    assert response.json()["artifact_uri"] == uri
+
+
+async def test_a_put_whose_name_cannot_be_written_is_not_left_ready(served, monkeypatch):
+    import sqlite3
+
+    store = served.store
+
+    def name_write_fails(*args, **kwargs):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(store, "_set_name_in_connection", name_write_fails)
+    transport = ASGITransport(app=served.app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put("/v1/artifacts", json=_NAMED_PUT)
+
+    assert response.status_code == 500
+    conn = store._get_connection()
+    try:
+        states = [row["state"] for row in conn.execute("SELECT state FROM artifact_versions")]
+    finally:
+        conn.close()
+    assert states == ["building"]
+
+
+async def test_a_put_overtaken_at_finalize_names_the_artifact_that_won(served, monkeypatch):
+    """Another writer finalizes the same provenance after the PUT's lookup missed."""
+    store = served.store
+    publish = store.publish_blob_from_path
+
+    def another_writer_finishes_first(artifact_id, version, path):
+        publish(artifact_id, version, path)
+        provenance = store.get_artifact(artifact_id, version).provenance_hash
+        winner = store.create_artifact(artifact_id="winner", provenance_hash=provenance)
+        store.write_blob("winner", winner, ARROW)
+        store.finalize_artifact("winner", winner, "", row_count=3, byte_size=len(ARROW))
+
+    monkeypatch.setattr(store, "publish_blob_from_path", another_writer_finishes_first)
+
+    async with _client(served) as client:
+        response = await client.put("/v1/artifacts", json=_NAMED_PUT)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["hit"] is True
+    assert body["artifact_uri"] == "strata://artifact/winner@v=1"
+    name = store.get_name("the-put")
+    assert (name.artifact_id, name.version) == ("winner", 1)
