@@ -113,6 +113,8 @@ from strata.notebook.workers import (
     get_worker_execution_error,
     is_embedded_executor_worker,
     is_http_executor_worker,
+    one_policy_read,
+    read_worker_policy,
     resolve_worker_spec,
     worker_runtime_identity,
     worker_supports_notebook_execution,
@@ -829,13 +831,18 @@ class CellExecutor:
         earlier = scope.get(cell_id)
         if earlier is not None and (use_cache or not earlier.cache_hit):
             return earlier
-        result = await self._dispatch_cell(
-            cell_id,
-            source,
-            timeout_seconds,
-            materialize_upstreams=materialize_upstreams,
-            use_cache=use_cache,
-        )
+        # The worker registry lives in the server's store: one read per run, off the loop,
+        # serves every worker lookup in it.
+        notebook_state = self.session.notebook_state
+        worker = self._resolve_effective_worker(cell_id, parse_annotations(source).worker)
+        with one_policy_read(notebook_state, await read_worker_policy(notebook_state, worker)):
+            result = await self._dispatch_cell(
+                cell_id,
+                source,
+                timeout_seconds,
+                materialize_upstreams=materialize_upstreams,
+                use_cache=use_cache,
+            )
         if result.success:
             scope[cell_id] = result
         return result

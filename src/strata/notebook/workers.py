@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
 
+import anyio.to_thread
 import httpx
 
 from strata.notebook.models import NotebookState, WorkerBackendType, WorkerSpec
@@ -173,13 +174,38 @@ _policy_memo: ContextVar[dict[int, WorkerPolicy] | None] = ContextVar(
 
 
 @contextmanager
-def one_policy_read() -> Iterator[None]:
-    """Read the worker policy at most once per notebook inside the block (one pass)."""
-    token = _policy_memo.set({})
+def one_policy_read(
+    notebook_state: NotebookState | None = None, policy: WorkerPolicy | None = None
+) -> Iterator[None]:
+    """Read the worker policy at most once per notebook inside the block (one pass).
+
+    ``policy``, read beforehand by :func:`read_worker_policy`, serves ``notebook_state``
+    for the whole block, so the block does not read it again.
+    """
+    token = _policy_memo.set(
+        {id(notebook_state): policy} if notebook_state is not None and policy is not None else {}
+    )
     try:
         yield
     finally:
         _policy_memo.reset(token)
+
+
+async def read_worker_policy(
+    notebook_state: NotebookState, worker_name: str | None
+) -> WorkerPolicy | None:
+    """The policy a run on ``worker_name`` resolves against, off the loop.
+
+    The open block's if it has one, else read in a worker thread; ``None`` for the
+    built-in local worker, which needs none. Read per run, so a registry change applies
+    to the next run.
+    """
+    if (worker_name or "").strip() in ("", "local"):
+        return None
+    memo = _policy_memo.get()
+    if memo is not None and id(notebook_state) in memo:
+        return memo[id(notebook_state)]
+    return await anyio.to_thread.run_sync(_load_worker_policy, notebook_state)
 
 
 def _policy(notebook_state: NotebookState) -> WorkerPolicy:
