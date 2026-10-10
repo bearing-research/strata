@@ -349,6 +349,53 @@ class TestCanonicalPromotion:
         assert store.get_artifact("a1", first).state == "superseded"
 
 
+class TestFinalizeAndName:
+    def test_another_connection_never_sees_ready_without_the_name(self, store, monkeypatch):
+        version = store.create_artifact("a1", "prov-1", _spec())
+        set_name = store._set_name_in_connection
+        seen = []
+
+        def read_elsewhere_then_name(*args, **kwargs):
+            # A thread of its own: the pool hands this thread back the same connection.
+            reader = threading.Thread(
+                target=lambda: seen.append(
+                    (store.get_artifact("a1", version).state, store.get_name("the-name"))
+                )
+            )
+            reader.start()
+            reader.join()
+            set_name(*args, **kwargs)
+
+        monkeypatch.setattr(store, "_set_name_in_connection", read_elsewhere_then_name)
+
+        artifact = store.finalize_and_set_name(
+            "a1", version, "{}", 0, 0, name="the-name", content_sha256="d" * 64
+        )
+
+        assert seen == [("building", None)]
+        assert (artifact.state, artifact.content_sha256) == ("ready", "d" * 64)
+        name = store.get_name("the-name")
+        assert (name.artifact_id, name.version) == ("a1", version)
+
+    def test_a_name_that_cannot_be_written_leaves_the_artifact_building(self, store, monkeypatch):
+        import psycopg
+
+        version = store.create_artifact("a1", "prov-1", _spec())
+
+        def name_write_fails(*args, **kwargs):
+            raise psycopg.OperationalError("connection lost")
+
+        monkeypatch.setattr(store, "_set_name_in_connection", name_write_fails)
+
+        with pytest.raises(psycopg.OperationalError):
+            store.finalize_and_set_name(
+                "a1", version, "{}", 0, 0, name="the-name", content_sha256="d" * 64
+            )
+
+        assert store.get_artifact("a1", version).state == "building"
+        assert store.find_by_provenance("prov-1") is None
+
+
 class TestGarbageCollection:
     def test_the_current_value_survives_a_rebuild_in_flight(self, store):
         # The spare-the-current-value clause is a correlated NOT EXISTS; run

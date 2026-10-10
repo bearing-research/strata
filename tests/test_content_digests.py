@@ -64,6 +64,19 @@ class TestRecordedOnWrite:
 
         assert artifact.content_sha256 == declared
 
+    def test_a_caller_holding_the_bytes_is_believed_when_naming(self, store, monkeypatch):
+        blob = _ipc_bytes([1, 2, 3])
+        declared = hashlib.sha256(blob).hexdigest()
+        version = store.create_artifact("m", hashlib.sha256(b"m").hexdigest())
+        store.write_blob("m", version, blob)
+        monkeypatch.setattr(store, "blob_digest", lambda *args: pytest.fail("blob was reread"))
+
+        artifact = store.finalize_and_set_name(
+            "m", version, '{"fields": []}', 3, len(blob), name="m", content_sha256=declared
+        )
+
+        assert artifact.content_sha256 == declared
+
     def test_two_stores_agree_on_the_same_bytes(self, tmp_path):
         """Two stores compare outputs by digest without downloading each other's bytes."""
         blob = _ipc_bytes([1, 2, 3])
