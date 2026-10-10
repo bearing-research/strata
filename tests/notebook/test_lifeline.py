@@ -152,7 +152,8 @@ def test_the_harness_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
             parent.kill()
             parent.wait()
         if harness_group is not None:
-            with contextlib.suppress(ProcessLookupError):
+            # macOS answers EPERM, not ESRCH, for a group left with only zombies.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(harness_group, signal.SIGKILL)
 
 
@@ -253,7 +254,7 @@ def test_a_wrapped_child_dies_with_its_spawner(tmp_path: Path, path: str) -> Non
         if parent.poll() is None:
             parent.kill()
             parent.wait()
-        with contextlib.suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             if child_group is not None and child_group != os.getpgrp():
                 os.killpg(child_group, signal.SIGKILL)
             elif child_pid is not None:
