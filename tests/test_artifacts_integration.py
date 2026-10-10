@@ -10,7 +10,7 @@ import pyarrow.ipc as ipc
 import pytest
 from strata_client.client import StrataClient
 
-from tests.conftest import run_server_with_context, table_to_ipc_bytes
+from tests.conftest import LIVE_SERVER_TIMEOUT, run_server_with_context, table_to_ipc_bytes
 
 
 def materialize_and_upload(
@@ -71,13 +71,9 @@ def wait_for_build(base_url: str, artifact_uri: str, timeout: float = 30.0) -> N
     artifact_id, version = match.group(1), match.group(2)
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}")
-        except httpx.TimeoutException:
-            # One slow poll is not an answer: httpx's default read timeout is shorter than
-            # the deadline, so keep asking until the deadline is actually spent.
-            time.sleep(0.2)
-            continue
+        resp = httpx.get(
+            f"{base_url}/v1/artifacts/{artifact_id}/v/{version}", timeout=LIVE_SERVER_TIMEOUT
+        )
         state = resp.json().get("state")
         if state == "ready":
             return
@@ -132,6 +128,7 @@ class TestArtifactEndpoints:
                     "params": {"sql": "SELECT 1 as x"},
                 },
             },
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert response.status_code == 200
         data = response.json()
@@ -148,6 +145,7 @@ class TestArtifactEndpoints:
         response = httpx.post(
             f"{personal_mode_server['base_url']}/v1/artifacts/materialize",
             json={"inputs": [], "transform": {"executor": "nonexistent@v9", "params": {}}},
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert response.status_code == 400
         detail = response.json()["detail"]
@@ -183,7 +181,9 @@ class TestArtifactEndpoints:
         match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", data["artifact_uri"])
         artifact_id, version = match.group(1), int(match.group(2))
 
-        resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data")
+        resp = httpx.get(
+            f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data", timeout=LIVE_SERVER_TIMEOUT
+        )
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/vnd.apache.arrow.stream"
 
@@ -206,6 +206,7 @@ class TestArtifactEndpoints:
                     "params": {"sql": "SELECT 1 as x"},
                 },
             },
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         artifact_uri = resp.json()["artifact_uri"]
         wait_for_build(base_url, artifact_uri)
@@ -215,17 +216,18 @@ class TestArtifactEndpoints:
         resp = httpx.post(
             f"{base_url}/v1/names",
             json={"name": "my-artifact", "artifact_id": artifact_id, "version": version},
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.json()["name_uri"] == "strata://name/my-artifact"
 
-        resp = httpx.get(f"{base_url}/v1/names/my-artifact")
+        resp = httpx.get(f"{base_url}/v1/names/my-artifact", timeout=LIVE_SERVER_TIMEOUT)
         assert resp.json()["artifact_uri"].startswith("strata://artifact/")
 
-        resp = httpx.get(f"{base_url}/v1/names")
+        resp = httpx.get(f"{base_url}/v1/names", timeout=LIVE_SERVER_TIMEOUT)
         assert resp.json()["names"][0]["name"] == "my-artifact"
 
-        httpx.delete(f"{base_url}/v1/names/my-artifact")
-        resp = httpx.get(f"{base_url}/v1/names/my-artifact")
+        httpx.delete(f"{base_url}/v1/names/my-artifact", timeout=LIVE_SERVER_TIMEOUT)
+        resp = httpx.get(f"{base_url}/v1/names/my-artifact", timeout=LIVE_SERVER_TIMEOUT)
         assert resp.status_code == 404
 
     def test_put_then_name_after_the_fact(self, personal_mode_server):
@@ -255,6 +257,7 @@ class TestServiceModeBlocking:
             f"{service_mode_server['base_url']}/v1/artifacts/materialize",
             json={"inputs": [], "transform": {"executor": "test", "params": {}}},
             headers=service_mode_server["headers"],
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert response.status_code == 403
         assert "writes_disabled" in response.json()["detail"]["error"]
@@ -272,13 +275,24 @@ class TestServiceModeBlocking:
                 f"{base_url}/v1/names",
                 json={"name": "test", "artifact_id": "x", "version": 1},
                 headers=headers,
+                timeout=LIVE_SERVER_TIMEOUT,
             ).status_code
             == 403
         )
         # Listing and resolving names are reads, so not mode-gated; 404 here only because
         # this gateway has no store.
-        assert httpx.get(f"{base_url}/v1/names", headers=headers).status_code == 404
-        assert httpx.get(f"{base_url}/v1/names/test", headers=headers).status_code == 404
+        assert (
+            httpx.get(
+                f"{base_url}/v1/names", headers=headers, timeout=LIVE_SERVER_TIMEOUT
+            ).status_code
+            == 404
+        )
+        assert (
+            httpx.get(
+                f"{base_url}/v1/names/test", headers=headers, timeout=LIVE_SERVER_TIMEOUT
+            ).status_code
+            == 404
+        )
 
 
 class TestTheTransformsBlock:
@@ -301,6 +315,7 @@ class TestTheTransformsBlock:
             response = httpx.post(
                 f"{ctx.base_url}/v1/artifacts/materialize",
                 json={"inputs": [], "transform": self._SQL},
+                timeout=LIVE_SERVER_TIMEOUT,
             )
             assert response.status_code == 200, response.text
             wait_for_build(ctx.base_url, response.json()["artifact_uri"])
@@ -318,6 +333,7 @@ class TestTheTransformsBlock:
                 f"{ctx.base_url}/v1/artifacts/materialize",
                 json={"inputs": [], "transform": self._SQL},
                 headers={"X-Strata-Proxy-Token": "test-token", "X-Strata-Principal": "user-1"},
+                timeout=LIVE_SERVER_TIMEOUT,
             )
         assert response.status_code == 403
         assert response.json()["detail"]["error"] == "transform_not_allowed"

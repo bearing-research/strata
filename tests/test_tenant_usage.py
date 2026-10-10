@@ -13,7 +13,12 @@ import pyarrow as pa
 import pytest
 
 from strata.artifact_store import ArtifactStore
-from tests.conftest import run_server_with_context, service_auth, table_to_ipc_bytes
+from tests.conftest import (
+    LIVE_SERVER_TIMEOUT,
+    run_server_with_context,
+    service_auth,
+    table_to_ipc_bytes,
+)
 
 PROXY_TOKEN = "usage-token"
 
@@ -78,7 +83,9 @@ def _bytes_of(artifact_dir, tenant: str) -> int:
 @pytest.mark.parametrize("route", ["usage", "stats"])
 def test_a_tenant_sees_what_it_holds(team_server, route):
     response = httpx.get(
-        f"{team_server['base_url']}/v1/artifacts/{route}", headers=_headers("team-a", "alice")
+        f"{team_server['base_url']}/v1/artifacts/{route}",
+        headers=_headers("team-a", "alice"),
+        timeout=LIVE_SERVER_TIMEOUT,
     )
 
     assert response.status_code == 200, response.text
@@ -92,7 +99,9 @@ def test_a_tenant_sees_what_it_holds(team_server, route):
 def test_tenantless_rows_are_charged_to_nobody(team_server):
     """Charging them to each tenant would bill everyone for the same bytes."""
     body = httpx.get(
-        f"{team_server['base_url']}/v1/artifacts/usage", headers=_headers("team-b", "carol")
+        f"{team_server['base_url']}/v1/artifacts/usage",
+        headers=_headers("team-b", "carol"),
+        timeout=LIVE_SERVER_TIMEOUT,
     ).json()
 
     assert body["total_versions"] == 1
@@ -101,7 +110,9 @@ def test_tenantless_rows_are_charged_to_nobody(team_server):
 
 def test_no_tenant_is_refused(team_server):
     response = httpx.get(
-        f"{team_server['base_url']}/v1/artifacts/usage", headers=_headers(None, "alice")
+        f"{team_server['base_url']}/v1/artifacts/usage",
+        headers=_headers(None, "alice"),
+        timeout=LIVE_SERVER_TIMEOUT,
     )
 
     assert response.status_code == 400
@@ -112,6 +123,7 @@ def test_naming_another_tenant_is_refused(team_server):
         f"{team_server['base_url']}/v1/artifacts/usage",
         params={"tenant": "team-b"},
         headers=_headers("team-a", "alice"),
+        timeout=LIVE_SERVER_TIMEOUT,
     )
 
     assert response.status_code == 403
@@ -122,6 +134,7 @@ def test_an_admin_can_name_a_tenant(team_server):
         f"{team_server['base_url']}/v1/artifacts/usage",
         params={"tenant": "team-b"},
         headers=_headers("ops", "root", scopes="admin:*"),
+        timeout=LIVE_SERVER_TIMEOUT,
     )
 
     assert response.status_code == 200, response.text
@@ -162,8 +175,8 @@ def test_personal_mode_reports_the_whole_store(tmp_path):
         version = store.create_artifact("mine", "cd" * 32)
         store.finalize_artifact("mine", version, "{}", 4, 64)
 
-        usage = httpx.get(f"{ctx.base_url}/v1/artifacts/usage").json()
-        stats = httpx.get(f"{ctx.base_url}/v1/artifacts/stats").json()
+        usage = httpx.get(f"{ctx.base_url}/v1/artifacts/usage", timeout=LIVE_SERVER_TIMEOUT).json()
+        stats = httpx.get(f"{ctx.base_url}/v1/artifacts/stats", timeout=LIVE_SERVER_TIMEOUT).json()
 
     assert (usage["total_versions"], usage["total_bytes"]) == (1, 64)
     assert stats["total_rows"] == 4

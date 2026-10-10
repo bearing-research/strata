@@ -4,7 +4,7 @@ import httpx
 import pyarrow as pa
 import pytest
 
-from tests.conftest import run_server_with_context, table_to_ipc_bytes
+from tests.conftest import LIVE_SERVER_TIMEOUT, run_server_with_context, table_to_ipc_bytes
 
 
 @pytest.fixture
@@ -60,7 +60,8 @@ class TestArtifactLineage:
         artifact = create_artifact(base_url, inputs=[])
 
         resp = httpx.get(
-            f"{base_url}/v1/artifacts/{artifact['artifact_id']}/v/{artifact['version']}/lineage"
+            f"{base_url}/v1/artifacts/{artifact['artifact_id']}/v/{artifact['version']}/lineage",
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -84,7 +85,8 @@ class TestArtifactLineage:
         artifact = create_artifact(base_url, inputs=[table_uri])
 
         resp = httpx.get(
-            f"{base_url}/v1/artifacts/{artifact['artifact_id']}/v/{artifact['version']}/lineage"
+            f"{base_url}/v1/artifacts/{artifact['artifact_id']}/v/{artifact['version']}/lineage",
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -113,7 +115,8 @@ class TestArtifactLineage:
         )
 
         resp = httpx.get(
-            f"{base_url}/v1/artifacts/{dependent_artifact['artifact_id']}/v/{dependent_artifact['version']}/lineage"
+            f"{base_url}/v1/artifacts/{dependent_artifact['artifact_id']}/v/{dependent_artifact['version']}/lineage",
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -139,6 +142,7 @@ class TestArtifactLineage:
                 "artifact_id": base_artifact["artifact_id"],
                 "version": base_artifact["version"],
             },
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert set_name_resp.status_code == 200
 
@@ -149,7 +153,8 @@ class TestArtifactLineage:
         )
 
         resp = httpx.get(
-            f"{base_url}/v1/artifacts/{dependent_artifact['artifact_id']}/v/{dependent_artifact['version']}/lineage"
+            f"{base_url}/v1/artifacts/{dependent_artifact['artifact_id']}/v/{dependent_artifact['version']}/lineage",
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -170,6 +175,7 @@ class TestArtifactLineage:
         resp = httpx.get(
             f"{base_url}/v1/artifacts/{a3['artifact_id']}/v/{a3['version']}/lineage",
             params={"max_depth": 1},
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -180,7 +186,9 @@ class TestArtifactLineage:
     def test_lineage_not_found(self, lineage_server):
         base_url = lineage_server["base_url"]
 
-        resp = httpx.get(f"{base_url}/v1/artifacts/nonexistent-id/v/1/lineage")
+        resp = httpx.get(
+            f"{base_url}/v1/artifacts/nonexistent-id/v/1/lineage", timeout=LIVE_SERVER_TIMEOUT
+        )
         assert resp.status_code == 404
 
 
@@ -191,7 +199,8 @@ class TestArtifactDependents:
         artifact = create_artifact(base_url, inputs=[])
 
         resp = httpx.get(
-            f"{base_url}/v1/artifacts/{artifact['artifact_id']}/v/{artifact['version']}/dependents"
+            f"{base_url}/v1/artifacts/{artifact['artifact_id']}/v/{artifact['version']}/dependents",
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -213,7 +222,8 @@ class TestArtifactDependents:
         )
 
         resp = httpx.get(
-            f"{base_url}/v1/artifacts/{base_artifact['artifact_id']}/v/{base_artifact['version']}/dependents"
+            f"{base_url}/v1/artifacts/{base_artifact['artifact_id']}/v/{base_artifact['version']}/dependents",
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -241,7 +251,8 @@ class TestArtifactDependents:
         )
 
         resp = httpx.get(
-            f"{base_url}/v1/artifacts/{base_artifact['artifact_id']}/v/{base_artifact['version']}/dependents"
+            f"{base_url}/v1/artifacts/{base_artifact['artifact_id']}/v/{base_artifact['version']}/dependents",
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -268,6 +279,7 @@ class TestArtifactDependents:
         resp = httpx.get(
             f"{base_url}/v1/artifacts/{base_artifact['artifact_id']}/v/{base_artifact['version']}/dependents",
             params={"limit": 2},
+            timeout=LIVE_SERVER_TIMEOUT,
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -278,7 +290,9 @@ class TestArtifactDependents:
     def test_dependents_not_found(self, lineage_server):
         base_url = lineage_server["base_url"]
 
-        resp = httpx.get(f"{base_url}/v1/artifacts/nonexistent-id/v/1/dependents")
+        resp = httpx.get(
+            f"{base_url}/v1/artifacts/nonexistent-id/v/1/dependents", timeout=LIVE_SERVER_TIMEOUT
+        )
         assert resp.status_code == 404
 
 

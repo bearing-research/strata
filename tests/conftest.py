@@ -389,6 +389,11 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
         _reset_transform_singletons()
 
 
+# For raw httpx calls to these servers: httpx's 5 s default read timeout is shorter
+# than a cold first request on a loaded Windows runner.
+LIVE_SERVER_TIMEOUT = 30.0
+
+
 @contextmanager
 def run_server_with_context(
     cache_dir,

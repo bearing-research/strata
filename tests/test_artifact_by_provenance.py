@@ -15,7 +15,7 @@ import pytest
 from strata_client.client import StrataClient
 
 from strata.artifact_store import ArtifactStore
-from tests.conftest import run_server_with_context, table_to_ipc_bytes
+from tests.conftest import LIVE_SERVER_TIMEOUT, run_server_with_context, table_to_ipc_bytes
 
 PROXY_TOKEN = "by-provenance-token"
 # Well-formed but never computed: the shape passes the route's pattern, so a
@@ -104,7 +104,9 @@ def test_a_stored_result_is_findable_by_its_provenance_hash(personal_server):
     artifact_id, version = _ref(uri)
     provenance = _provenance_of(personal_server["artifact_dir"], uri)
 
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}")
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    )
 
     assert found.status_code == 200, found.text
     body = found.json()
@@ -117,7 +119,10 @@ def test_a_stored_result_is_findable_by_its_provenance_hash(personal_server):
 
 def test_a_hash_nobody_computed_is_a_miss_not_an_error(personal_server):
     """404 is the ordinary answer; callers branch on it every cell run."""
-    response = httpx.get(f"{personal_server['base_url']}/v1/artifacts/by-provenance/{ABSENT_HASH}")
+    response = httpx.get(
+        f"{personal_server['base_url']}/v1/artifacts/by-provenance/{ABSENT_HASH}",
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
 
     assert response.status_code == 404
 
@@ -133,7 +138,10 @@ def test_a_hash_nobody_computed_is_a_miss_not_an_error(personal_server):
 )
 def test_a_malformed_hash_is_rejected_before_the_store(personal_server, bad_hash):
     """The key reaches SQLite, so the route validates its shape at the boundary."""
-    response = httpx.get(f"{personal_server['base_url']}/v1/artifacts/by-provenance/{bad_hash}")
+    response = httpx.get(
+        f"{personal_server['base_url']}/v1/artifacts/by-provenance/{bad_hash}",
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
 
     assert response.status_code == 422
 
@@ -146,14 +154,22 @@ def test_the_match_carries_enough_to_fetch_the_bytes(team_server):
     provenance = _provenance_of(team_server["artifact_dir"], uri)
 
     bob = _headers("team-a", "bob")
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}", headers=bob)
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+        headers=bob,
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
     assert found.status_code == 200, found.text
     # Attribution: an artifact that appears with no author is indistinguishable
     # from a bug, so the store says who computed it.
     assert found.json()["principal"] == "alice"
 
     artifact_id, version = found.json()["artifact_id"], found.json()["version"]
-    data = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data", headers=bob)
+    data = httpx.get(
+        f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data",
+        headers=bob,
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
     assert data.status_code == 200
     assert ipc.open_stream(data.content).read_all().equals(dataset)
 
@@ -171,7 +187,11 @@ def test_another_teams_identical_computation_is_invisible(team_server):
 
     carol = _headers("team-b", "carol", scopes="artifacts:write")
     assert (
-        httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}", headers=carol).status_code
+        httpx.get(
+            f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+            headers=carol,
+            timeout=LIVE_SERVER_TIMEOUT,
+        ).status_code
         == 404
     )
 
@@ -181,7 +201,11 @@ def test_another_teams_identical_computation_is_invisible(team_server):
     )
     assert b_uri != a_uri
 
-    hit = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}", headers=carol)
+    hit = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+        headers=carol,
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
     assert hit.status_code == 200
     assert hit.json()["artifact_id"] == _ref(b_uri)[0]
     assert hit.json()["principal"] == "carol"
@@ -247,12 +271,16 @@ def test_a_caller_computed_key_round_trips_with_opaque_bytes(personal_server):
     assert stored.status_code == 200, stored.text
     assert stored.json()["hit"] is False
 
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}")
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    )
     assert found.status_code == 200
     assert found.json()["content_type"] == "pickle/object"
 
     artifact_id, version = found.json()["artifact_id"], found.json()["version"]
-    data = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data")
+    data = httpx.get(
+        f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data", timeout=LIVE_SERVER_TIMEOUT
+    )
     assert data.status_code == 200
     assert data.content == blob
 
@@ -305,8 +333,13 @@ def test_the_first_writer_of_a_key_wins(personal_server):
     assert second.json()["hit"] is True
     assert second.json()["artifact_uri"] == first.json()["artifact_uri"]
 
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
-    data = httpx.get(f"{base_url}/v1/artifacts/{found['artifact_id']}/v/{found['version']}/data")
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    ).json()
+    data = httpx.get(
+        f"{base_url}/v1/artifacts/{found['artifact_id']}/v/{found['version']}/data",
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
     assert data.content == b"the original"
 
     stored = ArtifactStore(personal_server["artifact_dir"])
@@ -349,7 +382,11 @@ def test_a_published_key_is_only_visible_to_its_own_team(team_server):
 
     carol = _headers("team-b", "carol")
     assert (
-        httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}", headers=carol).status_code
+        httpx.get(
+            f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+            headers=carol,
+            timeout=LIVE_SERVER_TIMEOUT,
+        ).status_code
         == 404
     )
 
@@ -397,11 +434,19 @@ def test_an_admin_hits_on_what_it_just_published(team_server):
     # being wrong, not the artifact being unreachable.
     artifact_id, version = _ref(uri)
     assert (
-        httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}", headers=admin).status_code
+        httpx.get(
+            f"{base_url}/v1/artifacts/{artifact_id}/v/{version}",
+            headers=admin,
+            timeout=LIVE_SERVER_TIMEOUT,
+        ).status_code
         == 200
     )
 
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}", headers=admin)
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+        headers=admin,
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
     assert found.status_code == 200, found.text
     assert found.json()["artifact_id"] == artifact_id
 
@@ -412,13 +457,17 @@ def test_a_miss_is_marked_so_it_cannot_be_confused_with_a_broken_store(personal_
     """
     base_url = personal_server["base_url"]
 
-    miss = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{ABSENT_HASH}")
+    miss = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{ABSENT_HASH}", timeout=LIVE_SERVER_TIMEOUT
+    )
     assert miss.status_code == 404
     assert miss.headers.get("X-Strata-Provenance-Miss") == "1"
 
     # The stand-in for every other 404 the same client can receive: a path
     # this server does not serve, exactly as an older deployment would answer.
-    unknown_route = httpx.get(f"{base_url}/v1/artifacts/by-provenance-typo/{ABSENT_HASH}")
+    unknown_route = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance-typo/{ABSENT_HASH}", timeout=LIVE_SERVER_TIMEOUT
+    )
     assert unknown_route.status_code == 404
     assert "X-Strata-Provenance-Miss" not in unknown_route.headers
 
@@ -499,7 +548,9 @@ def test_the_build_environment_travels_with_the_result(personal_server):
     )
     assert response.status_code == 200, response.text
 
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    ).json()
     assert found["build_env"] == "cpython-3.12-linux-x86_64"
     # Distinct fields, not one read twice: a shared param reader that ignored its key
     # argument would fail here.
@@ -514,7 +565,9 @@ def test_an_artifact_stored_without_a_platform_reports_an_empty_one(personal_ser
     provenance = "7" * 64
     _publish_by_provenance(base_url, provenance, b"x")
 
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    ).json()
     assert found["build_env"] == ""
 
 
@@ -542,6 +595,8 @@ def test_the_environment_identity_round_trips(personal_server):
     )
     assert response.status_code == 200, response.text
 
-    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    ).json()
     assert found["env_hash"] == "e" * 64
     assert found["build_env"] == "cpython-3.13-linux-aarch64"
