@@ -1009,6 +1009,44 @@ class TestBuildStoreSharesTheBackend:
             dialect_a.close()
             dialect_b.close()
 
+    def test_a_fail_fenced_on_a_claim_needs_that_exact_claim(self, postgres_dsn, tmp_path):
+        """The deadline read back from the row matches the one the fence sends."""
+        from strata.transforms.build_store import BuildStore
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_builds, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, "
+                "registry_audit, registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            version = ArtifactStore(tmp_path / "w", dialect=dialect).create_artifact(
+                "art-f", "prov-f", _spec()
+            )
+            store = BuildStore(tmp_path / "x.sqlite", dialect=dialect)
+            store.create_build(
+                build_id="b-f", artifact_id="art-f", version=version, executor_ref="x"
+            )
+            assert store.claim_build("b-f", "external:manifest", 60.0)
+            stale = store.get_build("b-f").lease_expires_at
+            assert store.renew_lease("b-f", "external:manifest", 120.0)
+            current = store.get_build("b-f").lease_expires_at
+
+            assert not store.fail_build(
+                "b-f", "bad", lease_owner="external:manifest", lease_expires_at=stale
+            )
+            assert store.get_build("b-f").state == "building"
+            assert store.fail_build(
+                "b-f", "bad", lease_owner="external:manifest", lease_expires_at=current
+            )
+            assert store.get_build("b-f").state == "failed"
+        finally:
+            dialect.close()
+
     def test_build_columns_survive_postgres_widths(self, postgres_dsn, tmp_path):
         # Same INTEGER/REAL traps as the artifact store: byte counts are
         # INTEGER and timestamps are REAL in the shared schema.

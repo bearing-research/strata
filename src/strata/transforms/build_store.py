@@ -738,12 +738,15 @@ class BuildStore:
         error_code: str | None = None,
         logs: str | None = None,
         lease_owner: str | None = None,
+        lease_expires_at: float | None = None,
     ) -> bool:
         """Mark a build failed (building -> failed).
 
         Args:
             lease_owner: When given, apply only if this owner still holds the lease,
                 as in ``complete_build``.
+            lease_expires_at: With ``lease_owner``, also pin the exact claim, as in
+                ``complete_within``.
 
         Returns:
             False if not found, not building, or the lease is held by someone else.
@@ -759,6 +762,9 @@ class BuildStore:
             if lease_owner is not None:
                 sql += " AND lease_owner = ?"
                 params.append(lease_owner)
+                if lease_expires_at is not None:
+                    sql += " AND lease_expires_at = ?"
+                    params.append(lease_expires_at)
             cursor = conn.execute(sql, params)
             conn.commit()
             return cursor.rowcount > 0

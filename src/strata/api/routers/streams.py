@@ -89,7 +89,7 @@ async def get_stream(stream_id: str, request: Request):
     if stream_state is None:
         # A stream's plan and task are in-process and cannot move, so in a
         # multi-node deployment redirect to the sibling that holds it.
-        owner_url = _resolve_stream_owner(state, stream_id)
+        owner_url = await anyio.to_thread.run_sync(_resolve_stream_owner, state, stream_id)
         if owner_url is not None:
             logger.info("stream_redirected", stream_id=stream_id, owner=owner_url)
             # stream_id comes from the request path; a raw '?' or '#' would
@@ -217,7 +217,9 @@ async def get_stream(stream_id: str, request: Request):
                 state.scan_builds.build_identity_artifact(state, stream_state)
             )
         await asyncio.shield(stream_state.background_task)
-        artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
+        artifact = await anyio.to_thread.run_sync(
+            store.get_artifact, stream_state.artifact_id, stream_state.artifact_version
+        )
     finally:
         await admission.release()
         stream_state.completed_at = time.time()

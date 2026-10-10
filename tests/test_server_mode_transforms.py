@@ -1,6 +1,7 @@
 """Server-mode transforms: async materialize and build polling."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,9 @@ from strata.transforms.registry import (
     reset_transform_registry,
     set_transform_registry,
 )
+
+# Table inputs are planned in the server's planning pool; these mock states share one.
+_PLANNING_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="test-planning")
 
 
 @pytest.fixture
@@ -121,7 +125,7 @@ def server_mode_app(server_mode_config):
     from strata.transforms.signed_urls import URLSigner
 
     mock_state = MagicMock()
-    mock_state._planning_executor = None  # the loop's default pool
+    mock_state._planning_executor = _PLANNING_POOL
     mock_state.config = server_mode_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
@@ -162,7 +166,7 @@ def personal_mode_app(personal_mode_config):
     from unittest.mock import MagicMock
 
     mock_state = MagicMock()
-    mock_state._planning_executor = None  # the loop's default pool
+    mock_state._planning_executor = _PLANNING_POOL
     mock_state.config = personal_mode_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
@@ -200,7 +204,7 @@ def server_mode_auth_app(server_mode_auth_config):
     from strata.transforms.signed_urls import URLSigner
 
     mock_state = MagicMock()
-    mock_state._planning_executor = None  # the loop's default pool
+    mock_state._planning_executor = _PLANNING_POOL
     mock_state.config = server_mode_auth_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
@@ -1016,7 +1020,7 @@ class TestTransformValidation:
         get_build_store(server_mode_config.artifact_dir / "artifacts.sqlite")
 
         mock_state = MagicMock()
-        mock_state._planning_executor = None  # the loop's default pool
+        mock_state._planning_executor = _PLANNING_POOL
         mock_state.config = server_mode_config
         mock_state.planner = MagicMock()
         mock_state.fetcher = MagicMock()
@@ -1340,7 +1344,7 @@ class TestMixedModeScenarios:
         (tmp_path / "artifacts").mkdir()
 
         mock_state = MagicMock()
-        mock_state._planning_executor = None  # the loop's default pool
+        mock_state._planning_executor = _PLANNING_POOL
         mock_state.config = config
 
         original_state = server_module._state
@@ -1376,7 +1380,7 @@ class TestServiceModeReviewFindings:
         """
         from fastapi import HTTPException
 
-        async def deny(*_args, **_kwargs):
+        def deny(*_args, **_kwargs):
             raise HTTPException(status_code=403, detail="Access denied")
 
         monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", deny)
@@ -1397,7 +1401,7 @@ class TestServiceModeReviewFindings:
         """A 400 from input resolution is the answer; the raw URI is never built past."""
         from fastapi import HTTPException
 
-        async def unresolvable(*_args, **_kwargs):
+        def unresolvable(*_args, **_kwargs):
             raise HTTPException(status_code=400, detail="Unknown input URI type")
 
         monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", unresolvable)
@@ -1457,7 +1461,6 @@ class TestServiceModeReviewFindings:
         """While a transform's table input plans, the server keeps answering other requests."""
         import asyncio
         import threading
-        from concurrent.futures import ThreadPoolExecutor
 
         from httpx import ASGITransport, AsyncClient
 
@@ -1505,7 +1508,6 @@ class TestServiceModeReviewFindings:
     ):
         """The transform-input plan gets the scan path's ``plan_timeout_seconds`` and 504."""
         import threading
-        from concurrent.futures import ThreadPoolExecutor
 
         from httpx import ASGITransport, AsyncClient
 

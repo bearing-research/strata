@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import anyio.to_thread
+
 if TYPE_CHECKING:
     from strata.transforms.build_qos import BuildSlot
     from strata.types import ReadPlan
@@ -78,9 +80,14 @@ class StreamRegistry:
         return list(self._streams.values())
 
     def register(self, stream_state: StreamState) -> None:
+        """Add a stream to the table; :meth:`claim` then advertises it to other nodes."""
         self._streams[stream_state.stream_id] = stream_state
+
+    async def claim(self, stream_id: str) -> None:
+        """Record this node as the one serving ``stream_id``, before its URL is handed out."""
         if self._on_claim is not None:
-            self._on_claim(stream_state.stream_id, self._ttl_seconds)
+            # A database write on a multi-node deployment.
+            await anyio.to_thread.run_sync(self._on_claim, stream_id, self._ttl_seconds)
 
     def pop(self, stream_id: str) -> StreamState | None:
         popped = self._streams.pop(stream_id, None)
@@ -122,14 +129,19 @@ class StreamRegistry:
             if scan_id is not None and self._on_expire is not None:
                 self._on_expire(scan_id)
             dropped = self._streams.pop(stream_id, None)
-            if dropped is not None and self._on_release is not None:
-                # Bypasses pop(), so release the claim here or an expired stream keeps
-                # advertising this node until its row expires.
-                self._on_release(stream_id)
-            if dropped is not None and self._on_drop is not None:
-                self._on_drop(dropped)
+            if dropped is not None:
+                # Both can write the store, so off the loop.
+                await anyio.to_thread.run_sync(self._settle_dropped, dropped)
 
         self._cleanup_tasks[stream_id] = asyncio.create_task(_cleanup())
+
+    def _settle_dropped(self, dropped: StreamState) -> None:
+        if self._on_release is not None:
+            # Bypasses pop(), so release the claim here or an expired stream keeps
+            # advertising this node until its row expires.
+            self._on_release(dropped.stream_id)
+        if self._on_drop is not None:
+            self._on_drop(dropped)
 
     def shutdown_cleanups(self) -> None:
         """Cancel and drop all pending cleanup tasks (graceful shutdown)."""

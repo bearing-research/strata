@@ -338,7 +338,7 @@ class ScanBuildManager:
             stream_state.completed = True
         except asyncio.CancelledError:
             stream_state.error_message = "Build cancelled"
-            self.mark_stream_artifact_failed(state, stream_state)
+            await anyio.to_thread.run_sync(self.mark_stream_artifact_failed, state, stream_state)
             raise
         except Exception as e:
             stream_state.error_message = str(e)
@@ -347,15 +347,15 @@ class ScanBuildManager:
                 artifact_id=stream_state.artifact_id,
                 error=str(e),
             )
-            self.mark_stream_artifact_failed(state, stream_state)
+            await anyio.to_thread.run_sync(self.mark_stream_artifact_failed, state, stream_state)
         finally:
             # The store read can raise; the slot and the cleanup must not depend on it.
             try:
                 artifact = None
                 store = get_artifact_store(state.config.artifact_dir)
                 if store is not None:
-                    artifact = store.get_artifact(
-                        stream_state.artifact_id, stream_state.artifact_version
+                    artifact = await anyio.to_thread.run_sync(
+                        store.get_artifact, stream_state.artifact_id, stream_state.artifact_version
                     )
 
                 if (
@@ -451,7 +451,9 @@ class ScanBuildManager:
                 error=str(e),
             )
             try:
-                store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
+                await anyio.to_thread.run_sync(
+                    store.fail_artifact, stream_state.artifact_id, stream_state.artifact_version
+                )
             except Exception as fail_err:
                 # Best-effort: the finalize failure is already logged; don't raise.
                 logger.debug(
