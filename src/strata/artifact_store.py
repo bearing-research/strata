@@ -583,6 +583,48 @@ def _add_notebook_workers(conn: StoreConnection, dialect: SqlDialect) -> None:
     conn.executescript(dialect.adapt_ddl(_NOTEBOOK_WORKERS_SCHEMA_SQL))
 
 
+# At most one live link per version, so one revocation withdraws it. Partial, because revoked rows
+# stay forever and a version may be published again after one.
+_ACTIVE_PUBLICATION_INDEX_SQL = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_publications_active "
+    "ON artifact_publications(artifact_id, version, tenant) WHERE revoked_at IS NULL"
+)
+
+
+def _one_active_publication(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Revoke all but the oldest active publication of each version, then index that.
+
+    Two concurrent publishes could mint two live links; the oldest is the likeliest
+    to be cited. Each revocation is audited as a ``withdraw``, as an unpublish is.
+    """
+    duplicates = conn.execute(
+        """
+        SELECT token, artifact_id, version, tenant FROM artifact_publications p
+        WHERE revoked_at IS NULL AND EXISTS (
+            SELECT 1 FROM artifact_publications q
+            WHERE q.artifact_id = p.artifact_id AND q.version = p.version
+              AND q.tenant = p.tenant AND q.revoked_at IS NULL
+              AND (q.published_at < p.published_at
+                   OR (q.published_at = p.published_at AND q.token < p.token))
+        )
+        """
+    ).fetchall()
+    if duplicates and dialect.name != "sqlite":
+        # As _serialize_audit: seq order must be commit order for a follower of the audit.
+        dialect.begin_write(conn, "registry_audit")
+    now = time.time()
+    for row in duplicates:
+        conn.execute(
+            "UPDATE artifact_publications SET revoked_at = ? WHERE token = ?", (now, row["token"])
+        )
+        conn.execute(
+            "INSERT INTO registry_audit (at, action, artifact_id, to_version, key, value, tenant) "
+            "VALUES (?, 'withdraw', ?, ?, 'token', ?, ?)",
+            (now, row["artifact_id"], row["version"], row["token"], row["tenant"]),
+        )
+    conn.execute(_ACTIVE_PUBLICATION_INDEX_SQL)
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
@@ -593,6 +635,7 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(7, "artifact_versions.superseded_by", _add_superseded_by),
     _Migration(8, "artifact_publications.token hashed", _hash_publication_tokens),
     _Migration(9, "notebook_workers", _add_notebook_workers),
+    _Migration(10, "artifact_publications: one active per version", _one_active_publication),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -946,6 +989,7 @@ class ArtifactStore:
                 conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_PUBLICATION_SCHEMA_SQL))
+                conn.execute(_ACTIVE_PUBLICATION_INDEX_SQL)
                 conn.executescript(self._dialect.adapt_ddl(_NOTEBOOK_WORKERS_SCHEMA_SQL))
                 # Created from the constants, which are the latest shape, so it
                 # is already current and must not replay migrations that would
@@ -1057,6 +1101,10 @@ class ArtifactStore:
             # Registry and publication tables: idempotent, for fresh and existing databases alike.
             conn.executescript(_REGISTRY_SCHEMA_SQL)
             conn.executescript(_PUBLICATION_SCHEMA_SQL)
+            if not table_exists:
+                # Born current, so migration 10 will not add it. An existing database may
+                # hold duplicate active rows, which that migration revokes first.
+                conn.execute(_ACTIVE_PUBLICATION_INDEX_SQL)
             conn.executescript(_NOTEBOOK_WORKERS_SCHEMA_SQL)
             cursor = conn.execute("PRAGMA table_info(registry_audit)")
             audit_columns = {row["name"] for row in cursor.fetchall()}
@@ -2815,11 +2863,12 @@ class ArtifactStore:
                 authors=_clean_entries(authors, ("name", "orcid", "affiliation")),
                 external_ids=_clean_entries(external_ids, ("scheme", "value")),
             )
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT INTO artifact_publications "
                 "(token, artifact_id, version, tenant, title, published_at, "
                 "published_by, content_sha256, authors, external_ids) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (artifact_id, version, tenant) WHERE revoked_at IS NULL DO NOTHING",
                 (
                     publication.id,
                     publication.artifact_id,
@@ -2833,6 +2882,19 @@ class ArtifactStore:
                     _json_or_none(publication.external_ids),
                 ),
             )
+            if cursor.rowcount == 0:
+                # A concurrent publish of this version committed between the check and here. Start
+                # over to return its grant; release this transaction first, as SQLite holds a lock.
+                conn.rollback()
+                return self.publish_artifact(
+                    artifact_id,
+                    version,
+                    tenant=tenant,
+                    published_by=published_by,
+                    title=title,
+                    authors=authors,
+                    external_ids=external_ids,
+                )
             # In the registry audit rather than a table of its own, so one
             # sequence orders publications and registry moves together and a
             # follower needs one cursor (``read_events``).

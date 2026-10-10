@@ -1569,3 +1569,89 @@ class TestSchemaMigrations:
             assert not store._dialect.column_exists(conn, "artifact_versions", "nope")
         finally:
             conn.close()
+
+
+class TestOneActivePublicationPerVersion:
+    """One revocation withdraws a version, so it has one live link even when publishes race."""
+
+    @staticmethod
+    def _ready(store, artifact_id: str) -> int:
+        version = store.create_artifact(artifact_id, f"prov-{artifact_id}", _spec())
+        with store.open_blob_writer(artifact_id, version) as writer:
+            writer.write(b"figure bytes")
+        store.finalize_artifact(artifact_id, version, schema_json="", row_count=1, byte_size=12)
+        return version
+
+    def test_a_publish_racing_another_returns_the_winners_grant(self, store, monkeypatch):
+        import secrets
+
+        version = self._ready(store, "fig")
+        real_mint = secrets.token_urlsafe
+        rival: list = []
+        started: list = []
+
+        def mint_after_a_rival_publishes(nbytes: int) -> str:
+            # Between this publish's check for an active grant and its insert, a rival on its
+            # own connection publishes the same version and commits.
+            if not started:
+                started.append(True)
+                thread = threading.Thread(
+                    target=lambda: rival.append(store.publish_artifact("fig", version))
+                )
+                thread.start()
+                thread.join()
+            return real_mint(nbytes)
+
+        monkeypatch.setattr(secrets, "token_urlsafe", mint_after_a_rival_publishes)
+        publication = store.publish_artifact("fig", version)
+        monkeypatch.undo()
+
+        assert len(rival) == 1
+        assert publication.id == rival[0].id and publication.token == ""
+        assert [p.id for p in store.list_publications()] == [rival[0].id]
+        assert [e["action"] for e in store.read_events()] == ["publish"]
+
+    def test_upgrading_keeps_the_oldest_of_duplicate_active_grants(
+        self, postgres_dsn, tmp_path, store
+    ):
+        version = self._ready(store, "fig")
+        oldest = store.publish_artifact("fig", version)
+        newer_id = "b" * 64
+        conn = store._get_connection()
+        try:
+            conn.execute("DROP INDEX idx_publications_active")
+            conn.execute(
+                "INSERT INTO artifact_publications "
+                "(token, artifact_id, version, tenant, published_at) VALUES (?, ?, ?, '', ?)",
+                (newer_id, "fig", version, oldest.published_at + 1),
+            )
+            conn.execute("DELETE FROM schema_version WHERE version >= 10")
+            conn.commit()
+        finally:
+            conn.close()
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+
+            assert [p.id for p in reopened.list_publications()] == [oldest.id]
+            states = {p.id: p.is_active for p in reopened.list_publications(include_revoked=True)}
+            assert states == {oldest.id: True, newer_id: False}
+            withdrawn = [e for e in reopened.read_events() if e["action"] == "withdraw"]
+            assert [(e["artifact_id"], e["to_version"], e["value"]) for e in withdrawn] == [
+                ("fig", version, newer_id)
+            ]
+            conn = reopened._get_connection()
+            try:
+                with pytest.raises(dialect.integrity_error):
+                    conn.execute(
+                        "INSERT INTO artifact_publications "
+                        "(token, artifact_id, version, tenant, published_at) "
+                        "VALUES (?, ?, ?, '', 0)",
+                        ("c" * 64, "fig", version),
+                    )
+                conn.rollback()
+            finally:
+                conn.close()
+        finally:
+            dialect.close()
