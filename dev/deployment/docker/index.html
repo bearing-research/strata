@@ -1929,6 +1929,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prebuilt-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prebuilt image
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#building-the-image-manually" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2138,6 +2149,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prebuilt-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prebuilt image
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#building-the-image-manually" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2278,21 +2300,32 @@ page cannot drive it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">STRATA_ALLOWED_HOSTS=devbox.lan</span>
 </code></pre></div>
 <p>See <a href="../../reference/configuration/">Configuration Reference</a> for all options.</p>
+<h2 id="prebuilt-image">Prebuilt image<a class="headerlink" href="#prebuilt-image" title="Permanent link">&para;</a></h2>
+<p>Each release after 0.9.0 publishes the image this Dockerfile builds as
+<code>ghcr.io/bearing-research/strata:&lt;version&gt;</code>, and <code>:latest</code> names the
+newest stable release. Pin a version for anything you deploy or build
+on. The image is linux/amd64 only; an arm64 host runs it under
+emulation, or builds its own as below.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">8765</span>:8765<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-v<span class="w"> </span>strata_state:/home/strata/.strata<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>ghcr.io/bearing-research/strata:&lt;version&gt;
+</code></pre></div>
+<p>To extend it, start your own Dockerfile <code>FROM</code> it.</p>
 <h2 id="building-the-image-manually">Building the image manually<a class="headerlink" href="#building-the-image-manually" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>strata<span class="w"> </span>.
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">8765</span>:8765<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>-v<span class="w"> </span>strata_state:/home/strata/.strata<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span>strata
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>strata<span class="w"> </span>.
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">8765</span>:8765<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>-v<span class="w"> </span>strata_state:/home/strata/.strata<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span>strata
 </code></pre></div>
 <p>The multi-stage Dockerfile:</p>
 <ol>
 <li><strong>Frontend builder</strong> (Node 26) builds the Vue.js UI</li>
 <li><strong>Backend builder</strong> (Python + Rust) builds the wheel with native extension</li>
 <li><strong>Runtime</strong>: minimal image with the wheel, the frontend dist, and
-   the <code>otel</code>, <code>postgres</code>, <code>sql</code> and <code>sql-sqlite</code> extras, so OTLP
-   tracing, a Postgres artifact store (<code>STRATA_ARTIFACT_METADATA_DSN</code>)
-   and SQL cells over DuckDB or SQLite work without building your own
-   image</li>
+   the <code>otel</code>, <code>postgres</code>, <code>sql</code>, <code>sql-sqlite</code> and <code>mcp</code> extras, so OTLP
+   tracing, a Postgres artifact store (<code>STRATA_ARTIFACT_METADATA_DSN</code>),
+   SQL cells over DuckDB or SQLite and the <code>/mcp</code> endpoint
+   (<code>STRATA_MCP_ENABLED=true</code>) work without building your own image</li>
 </ol>
 
 
