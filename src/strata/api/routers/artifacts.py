@@ -1253,30 +1253,33 @@ async def get_artifact_lineage(
             params={"max_depth": max_depth},
         )
 
-    from strata.server import _authorize_artifact_read, _ensure_artifact_access
+    def local():
+        from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
-    artifact = _ensure_artifact_access(
-        store.get_artifact(artifact_id, version),
-        tenant_filter,
-    )
-    # Same table-ACL re-check as the sibling read endpoints: the graph carries every upstream table
-    # URI, pinned snapshot and transform ref, most of what a deny rule withholds.
-    _authorize_artifact_read(artifact, store)
+        artifact = _ensure_artifact_access(
+            store.get_artifact(artifact_id, version),
+            tenant_filter,
+        )
+        # Same table-ACL re-check as the sibling read endpoints: the graph carries every upstream
+        # table URI, pinned snapshot and transform ref, most of what a deny rule withholds.
+        _authorize_artifact_read(artifact, store)
 
-    if artifact.state not in ("ready", "superseded"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Artifact is not ready (state={artifact.state})",
+        if artifact.state not in ("ready", "superseded"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Artifact is not ready (state={artifact.state})",
+            )
+
+        return artifact_service.build_lineage(
+            store,
+            artifact=artifact,
+            artifact_id=artifact_id,
+            version=version,
+            tenant_filter=tenant_filter,
+            max_depth=max_depth,
         )
 
-    return artifact_service.build_lineage(
-        store,
-        artifact=artifact,
-        artifact_id=artifact_id,
-        version=version,
-        tenant_filter=tenant_filter,
-        max_depth=max_depth,
-    )
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get(
