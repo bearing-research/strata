@@ -6,16 +6,18 @@ is proven by behaviour rather than rendered SQL. Requires Docker and the ``postg
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 
+import anyio.to_thread
 import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
 from strata.artifact_cli import _server_store as _configured_server_store
 from strata.artifact_store import ArtifactStore, TransformSpec
-from strata.sql_backend import PostgresDialect, advisory_lock_id
+from strata.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
 from tests.conftest import race_after_pending_read
 
 
@@ -708,6 +710,53 @@ class TestConnectionPool:
             assert sorted(done) == list(range(8))
         finally:
             dialect.close()
+
+    async def test_every_thread_token_and_the_loop_hold_a_connection_at_once(self, store):
+        # The server's offloads borrow from anyio's default limiter, and the event loop still
+        # calls the store inline. With every token and the loop holding a connection, none of
+        # them may be left waiting on the pool (and failing with PoolTimeout).
+        dialect = store.dialect
+        anyio.to_thread.current_default_thread_limiter().total_tokens = SERVER_THREAD_LIMIT
+        release = threading.Event()
+        all_holding = threading.Event()
+        holding: list[int] = []
+        lock = threading.Lock()
+
+        def hold_a_connection() -> None:
+            try:
+                conn = dialect.connect()
+            except Exception:
+                # Ends the wait at once; gathering the tasks raises this failure.
+                all_holding.set()
+                raise
+            try:
+                conn.execute("SELECT 1").fetchone()
+                with lock:
+                    holding.append(1)
+                    if len(holding) == SERVER_THREAD_LIMIT:
+                        all_holding.set()
+                # A guard, so a broken pool fails the test rather than hanging it.
+                release.wait(timeout=60)
+            finally:
+                conn.close()
+
+        on_the_loop = dialect.connect()
+        try:
+            on_the_loop.execute("SELECT 1").fetchone()
+            tasks = [
+                asyncio.ensure_future(anyio.to_thread.run_sync(hold_a_connection))
+                for _ in range(SERVER_THREAD_LIMIT)
+            ]
+            try:
+                # Waits in the default executor, outside the limiter the holders fill.
+                assert await asyncio.to_thread(all_holding.wait, 60), (
+                    f"only {len(holding)} of {SERVER_THREAD_LIMIT} threads got a connection"
+                )
+            finally:
+                release.set()
+                await asyncio.gather(*tasks)
+        finally:
+            on_the_loop.close()
 
     def test_releasing_after_close_does_not_resurrect_a_pool(self, postgres_dsn):
         # Releasing a still-checked-out connection after close() must not rebuild the

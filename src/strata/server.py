@@ -70,6 +70,7 @@ from strata.rate_limiter import (
     init_rate_limiter,
 )
 from strata.services.build import build_service
+from strata.sql_backend import SERVER_THREAD_LIMIT
 from strata.streaming import (
     QoSAdmission,
     ScanBuildManager,
@@ -799,6 +800,10 @@ async def lifespan(app: FastAPI):
     # Tests may inject their own state.
     if _state is None:
         _state = ServerState(config)
+
+    # The Postgres pool is sized from the same number, so a thread holding a token never
+    # waits for a connection. Set, not assumed: anyio's default could change.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = SERVER_THREAD_LIMIT
 
     # Must run before anything else creates the store singleton, or callers
     # that omit ``blob_store`` pin it to ``LocalBlobStore`` and a configured
