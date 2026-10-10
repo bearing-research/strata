@@ -17,6 +17,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import anyio.to_thread
+
 if TYPE_CHECKING:
     from strata.transforms.build_store import BuildStore
 
@@ -146,7 +148,7 @@ async def deliver(build_id: str, stream: str, seq: int, text: str) -> bool:
 async def deliver_shared(build_id: str, store: BuildStore) -> None:
     """Deliver the chunks of *build_id* that other nodes left in the shared store."""
     try:
-        chunks = await asyncio.to_thread(store.take_console_chunks, build_id)
+        chunks = await anyio.to_thread.run_sync(store.take_console_chunks, build_id)
     except Exception:
         # Console is advisory: a failed read costs live lines, never the cell.
         logger.warning("Could not read relayed console for build %s", build_id, exc_info=True)
@@ -184,7 +186,7 @@ async def relaying(
             follower.cancel()
             await asyncio.gather(follower, return_exceptions=True)
             try:
-                await asyncio.to_thread(shared_store.delete_console_chunks, build_id)
+                await anyio.to_thread.run_sync(shared_store.delete_console_chunks, build_id)
             except Exception:
                 logger.warning(
                     "Could not clear relayed console for build %s", build_id, exc_info=True

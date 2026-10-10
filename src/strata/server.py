@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import ipaddress
 import math
 import os
@@ -16,6 +17,7 @@ from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio.to_thread
 import uvicorn
 
 if TYPE_CHECKING:
@@ -68,6 +70,7 @@ from strata.rate_limiter import (
     init_rate_limiter,
 )
 from strata.services.build import build_service
+from strata.sql_backend import SERVER_THREAD_LIMIT
 from strata.streaming import (
     QoSAdmission,
     ScanBuildManager,
@@ -651,7 +654,9 @@ async def _artifact_gc_loop(store, interval_seconds: float, policy: dict[str, An
         await asyncio.sleep(delay)
         delay = interval_seconds
         try:
-            result = await asyncio.to_thread(store.garbage_collect, **policy)
+            result = await anyio.to_thread.run_sync(
+                functools.partial(store.garbage_collect, **policy)
+            )
         except Exception:
             logger.exception("artifact_gc_failed")
             continue
@@ -674,7 +679,9 @@ async def _shared_env_gc_loop(root: Path, ttl_days: float) -> None:
     while True:
         await asyncio.sleep(_SHARED_ENV_GC_INTERVAL_SECONDS)
         try:
-            result = await asyncio.to_thread(collect, root, ttl_days=ttl_days)
+            result = await anyio.to_thread.run_sync(
+                functools.partial(collect, root, ttl_days=ttl_days)
+            )
         except Exception:
             logger.exception("shared_env_gc_failed")
             continue
@@ -793,6 +800,10 @@ async def lifespan(app: FastAPI):
     # Tests may inject their own state.
     if _state is None:
         _state = ServerState(config)
+
+    # The Postgres pool is sized from the same number, so a thread holding a token never
+    # waits for a connection. Set, not assumed: anyio's default could change.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = SERVER_THREAD_LIMIT
 
     # Must run before anything else creates the store singleton, or callers
     # that omit ``blob_store`` pin it to ``LocalBlobStore`` and a configured

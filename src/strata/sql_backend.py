@@ -28,10 +28,16 @@ from typing import Any, Protocol
 _LOCK_TIMEOUT_MS = 30_000
 _CONNECT_TIMEOUT_SECONDS = 10
 
-# max_size is per process. The store nests acquisition two deep, so re-entrant sharing
-# (``PostgresDialect.connect``) keeps this from needing twice the concurrency.
+# Worker threads that may call the store at once: the server sets anyio's default thread
+# limiter to this, and every store offload and sync route borrows a token from it.
+SERVER_THREAD_LIMIT = 40
+
+# max_size is per process: one connection per thread token, plus the event loop thread, which
+# still calls the store inline. A thread then never waits for a connection, only for a token.
+# The store nests acquisition two deep; re-entrant sharing (``PostgresDialect.connect``) keeps
+# that at one connection per thread.
 _POOL_MIN_SIZE = 0
-_POOL_MAX_SIZE = 16
+_POOL_MAX_SIZE = SERVER_THREAD_LIMIT + 1
 # Without it an exhausted pool blocks forever.
 _POOL_TIMEOUT_SECONDS = 30.0
 

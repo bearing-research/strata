@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+import anyio.to_thread
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, HTTPException, Request
@@ -235,7 +236,7 @@ async def get_stream(stream_id: str, request: Request):
 
     # A reader that drops mid-send surfaces as a cancel/close; the artifact is
     # already finalized, so only count it.
-    reader_cm = await asyncio.to_thread(
+    reader_cm = await anyio.to_thread.run_sync(
         store.open_blob_reader, stream_state.artifact_id, stream_state.artifact_version
     )
 
@@ -245,7 +246,7 @@ async def get_stream(stream_id: str, request: Request):
             if reader_cm is not None:
                 with reader_cm as blob:
                     while True:
-                        chunk = await asyncio.to_thread(blob.read, BLOB_STREAM_CHUNK_BYTES)
+                        chunk = await anyio.to_thread.run_sync(blob.read, BLOB_STREAM_CHUNK_BYTES)
                         if not chunk:
                             break
                         bytes_out += len(chunk)

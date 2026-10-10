@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -29,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
 import httpx
 
 from strata.artifact_store import BuildLeaseLost
@@ -205,7 +207,9 @@ class BuildRunner:
         while self._running:
             try:
                 # Store calls can wait on a lock or the network, and this loop is the server's.
-                pending = await asyncio.to_thread(self.build_store.list_pending_builds, limit=50)
+                pending = await anyio.to_thread.run_sync(
+                    functools.partial(self.build_store.list_pending_builds, limit=50)
+                )
 
                 for build in pending:
                     if not _is_runner_managed_build(build):
@@ -218,15 +222,17 @@ class BuildRunner:
                 # Nothing waits on the space attempts free, so once a minute is enough.
                 if time.monotonic() >= self._next_sweep_at:
                     self._next_sweep_at = time.monotonic() + _SWEEP_INTERVAL_SECONDS
-                    await asyncio.to_thread(
+                    await anyio.to_thread.run_sync(
                         sweep_settled_attempts, self.build_store, self.artifact_store
                     )
 
                 # Orphans: expired leases from crashed runners.
-                expired = await asyncio.to_thread(self.build_store.list_expired_leases, limit=10)
+                expired = await anyio.to_thread.run_sync(
+                    functools.partial(self.build_store.list_expired_leases, limit=10)
+                )
                 for build in expired:
                     if build.build_id not in self._running_builds:
-                        if await asyncio.to_thread(
+                        if await anyio.to_thread.run_sync(
                             self.build_store.reclaim_expired_build,
                             build.build_id,
                             self._runner_id,
@@ -256,7 +262,7 @@ class BuildRunner:
         while self._running:
             try:
                 for build_id in list(self._running_builds):
-                    renewed = await asyncio.to_thread(
+                    renewed = await anyio.to_thread.run_sync(
                         self.build_store.renew_lease,
                         build_id,
                         self._runner_id,
@@ -331,7 +337,7 @@ class BuildRunner:
             try:
                 # Skip claiming when already building (retry / reclaim).
                 if build.state == "pending" and not already_claimed:
-                    if not await asyncio.to_thread(
+                    if not await anyio.to_thread.run_sync(
                         self.build_store.claim_build,
                         build_id,
                         self._runner_id,
@@ -340,7 +346,7 @@ class BuildRunner:
                         logger.warning(f"Build {build_id} already claimed or completed")
                         return
 
-                fresh_build = await asyncio.to_thread(self.build_store.get_build, build_id)
+                fresh_build = await anyio.to_thread.run_sync(self.build_store.get_build, build_id)
                 if fresh_build is None or fresh_build.state not in ("pending", "building"):
                     return
                 build = fresh_build
@@ -369,7 +375,7 @@ class BuildRunner:
                 if transform_defn is None:
                     raise ValueError(f"Transform not found in registry: {build.executor_ref}")
 
-                artifact = await asyncio.to_thread(
+                artifact = await anyio.to_thread.run_sync(
                     self.artifact_store.get_artifact, build.artifact_id, build.version
                 )
                 if artifact is None:
@@ -446,20 +452,24 @@ class BuildRunner:
                 # and writing the shared key could replace bytes already published as ready.
                 attempt = uuid.uuid4().hex
                 # Recorded first, so a crash before finalize leaves bytes the sweep can find.
-                await asyncio.to_thread(
-                    self.build_store.record_attempt,
-                    build_id,
-                    build.artifact_id,
-                    build.version,
-                    attempt,
-                    writable_until=time.time(),
+                await anyio.to_thread.run_sync(
+                    functools.partial(
+                        self.build_store.record_attempt,
+                        build_id,
+                        build.artifact_id,
+                        build.version,
+                        attempt,
+                        writable_until=time.time(),
+                    )
                 )
-                await asyncio.to_thread(
-                    self.artifact_store.publish_blob_from_path,
-                    build.artifact_id,
-                    build.version,
-                    output_path,
-                    attempt=attempt,
+                await anyio.to_thread.run_sync(
+                    functools.partial(
+                        self.artifact_store.publish_blob_from_path,
+                        build.artifact_id,
+                        build.version,
+                        output_path,
+                        attempt=attempt,
+                    )
                 )
 
                 # Publishing the attempt and completing the build are one transaction,
@@ -480,20 +490,22 @@ class BuildRunner:
                     # Finalize reads the attempt's bytes back to hash them. The name moves in
                     # the same commit: the loop serves requests during the thread, and a client
                     # that sees the build ready asks for the name next.
-                    finalized_artifact = await asyncio.to_thread(
-                        self.artifact_store.finalize_and_set_name,
-                        artifact_id=build.artifact_id,
-                        version=build.version,
-                        schema_json=schema_json,
-                        row_count=row_count,
-                        byte_size=output_bytes,
-                        name=build.name,
-                        tenant=build.tenant_id,
-                        blob_attempt=attempt,
-                        fence=_complete,
+                    finalized_artifact = await anyio.to_thread.run_sync(
+                        functools.partial(
+                            self.artifact_store.finalize_and_set_name,
+                            artifact_id=build.artifact_id,
+                            version=build.version,
+                            schema_json=schema_json,
+                            row_count=row_count,
+                            byte_size=output_bytes,
+                            name=build.name,
+                            tenant=build.tenant_id,
+                            blob_attempt=attempt,
+                            fence=_complete,
+                        )
                     )
                 except BuildLeaseLost:
-                    await asyncio.to_thread(
+                    await anyio.to_thread.run_sync(
                         self.artifact_store.delete_attempt_blob,
                         build.artifact_id,
                         build.version,
@@ -584,7 +596,7 @@ class BuildRunner:
                         self.artifact_store.fail_artifact(build.artifact_id, build.version)
                     return failed
 
-                if not await asyncio.to_thread(_fail):
+                if not await anyio.to_thread.run_sync(_fail):
                     logger.info(
                         f"Build {build_id} failed here after its lease moved on; "
                         "leaving it to the runner that holds it",
@@ -619,7 +631,7 @@ class BuildRunner:
             temp_file.write_bytes(blob)
             return True
 
-        return temp_file if await asyncio.to_thread(copy) else None
+        return temp_file if await anyio.to_thread.run_sync(copy) else None
 
     async def _acquire_input(
         self,
@@ -659,8 +671,8 @@ class BuildRunner:
             if pinned:
                 target_id, target_version = pinned.group(1), int(pinned.group(2))
             else:
-                artifact = await asyncio.to_thread(
-                    self.artifact_store.resolve_name, name, tenant=tenant_id
+                artifact = await anyio.to_thread.run_sync(
+                    functools.partial(self.artifact_store.resolve_name, name, tenant=tenant_id)
                 )
                 if artifact is None:
                     raise ValueError(f"Name not found: {name}")

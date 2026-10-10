@@ -38,6 +38,7 @@ dependencies = [
     # 0.35.0 adds the sans-io WebSocket protocol; server.main selects it because
     # the legacy asyncio one is deprecated and breaks on CPython 3.14+.
     "uvicorn>=0.35.0",
+    "anyio>=4.1", # Server thread offloads; abandon_on_cancel is 4.1+
     "websockets>=17.1",
     "httpx>=0.28.0",
     "duckdb>=1.5.0",

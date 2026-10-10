@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import time
 from typing import TYPE_CHECKING
 
+import anyio.to_thread
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
@@ -267,7 +269,7 @@ class ScanBuildManager:
                 else:
                     empty_stream = b""
 
-                await asyncio.to_thread(
+                await anyio.to_thread.run_sync(
                     store.write_blob,
                     stream_state.artifact_id,
                     stream_state.artifact_version,
@@ -329,7 +331,7 @@ class ScanBuildManager:
             except BaseException as exc:
                 writer.__exit__(type(exc), exc, exc.__traceback__)
                 raise
-            await asyncio.to_thread(writer.__exit__, None, None, None)
+            await anyio.to_thread.run_sync(writer.__exit__, None, None, None)
 
             await self.finalize_written_blob(state, stream_state, row_count, byte_size)
             stream_state.bytes_streamed = byte_size
@@ -410,7 +412,7 @@ class ScanBuildManager:
                     ) as blob:
                         return validate_ipc_stream_reader(blob)
 
-                readable_rows, schema_json = await asyncio.to_thread(_read_and_validate)
+                readable_rows, schema_json = await anyio.to_thread.run_sync(_read_and_validate)
             if readable_rows != row_count:
                 raise ValueError(
                     f"Artifact blob integrity check failed: stream yields "
@@ -419,15 +421,17 @@ class ScanBuildManager:
 
             # Marks ready and sets metadata and the name pointer atomically. It reads the
             # blob back to hash it, so it runs off the loop.
-            finalized_artifact = await asyncio.to_thread(
-                store.finalize_and_set_name,
-                artifact_id=stream_state.artifact_id,
-                version=stream_state.artifact_version,
-                schema_json=schema_json,
-                row_count=row_count,
-                byte_size=byte_size,
-                name=stream_state.name,
-                tenant=stream_state.tenant,
+            finalized_artifact = await anyio.to_thread.run_sync(
+                functools.partial(
+                    store.finalize_and_set_name,
+                    artifact_id=stream_state.artifact_id,
+                    version=stream_state.artifact_version,
+                    schema_json=schema_json,
+                    row_count=row_count,
+                    byte_size=byte_size,
+                    name=stream_state.name,
+                    tenant=stream_state.tenant,
+                )
             )
             if finalized_artifact is not None:
                 stream_state.artifact_id = finalized_artifact.id

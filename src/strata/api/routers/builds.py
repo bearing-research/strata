@@ -7,7 +7,7 @@ store in-body to keep their gate ordering. Server-owned helpers are lazy-importe
 
 from __future__ import annotations
 
-import asyncio
+import functools
 import os
 import tempfile
 import time
@@ -15,6 +15,7 @@ from hmac import compare_digest
 from pathlib import Path
 from typing import Any
 
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -205,17 +206,19 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
 
     try:
         # Presigning can call the cloud (role credentials, IAM signBlob, a delegation key).
-        manifest = await asyncio.to_thread(
-            build_service.assemble_manifest,
-            store,
-            signer=state.url_signer,
-            build=build,
-            base_url=base_url,
-            max_output_bytes=state.config.max_transform_output_bytes,
-            url_expiry_seconds=state.config.signed_url_expiry_seconds,
-            lease_owner=leased.lease_owner,
-            lease_expires_at=leased.lease_expires_at,
-            presign=state.config.artifact_presigned_urls,
+        manifest = await anyio.to_thread.run_sync(
+            functools.partial(
+                build_service.assemble_manifest,
+                store,
+                signer=state.url_signer,
+                build=build,
+                base_url=base_url,
+                max_output_bytes=state.config.max_transform_output_bytes,
+                url_expiry_seconds=state.config.signed_url_expiry_seconds,
+                lease_owner=leased.lease_owner,
+                lease_expires_at=leased.lease_expires_at,
+                presign=state.config.artifact_presigned_urls,
+            )
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -272,7 +275,7 @@ async def download_artifact_signed(
             detail=f"Artifact is not ready (state={artifact.state})",
         )
 
-    reader_cm = await asyncio.to_thread(store.open_blob_reader, artifact_id, version_int)
+    reader_cm = await anyio.to_thread.run_sync(store.open_blob_reader, artifact_id, version_int)
     if reader_cm is None:
         raise HTTPException(status_code=404, detail="Artifact blob not found")
 
@@ -369,7 +372,7 @@ async def upload_artifact_signed(
                 dst.write(chunk)
         if byte_size == 0:
             raise HTTPException(status_code=400, detail="Empty request body")
-        await asyncio.to_thread(
+        await anyio.to_thread.run_sync(
             store.publish_blob_from_path,
             build.artifact_id,
             build.version,
@@ -421,7 +424,7 @@ async def append_build_log(
     delivered = await console_relay.deliver(build_id, stream, seq, text)
     store = get_build_store()
     if not delivered and get_state().config.node_advertised_url and store is not None:
-        delivered = await asyncio.to_thread(
+        delivered = await anyio.to_thread.run_sync(
             store.append_console_chunk,
             build_id,
             "stderr" if stream == "stderr" else "stdout",
@@ -516,14 +519,17 @@ async def finalize_build(
     attempt = lease_attempt(lease) if current is not None else None
     store = _get_artifact_store(allow_server_mode=True)
     # On S3, GCS or Azure each blob probe is a network round trip.
-    if not await asyncio.to_thread(store.blob_exists, build.artifact_id, build.version, attempt):
+    if not await anyio.to_thread.run_sync(
+        store.blob_exists, build.artifact_id, build.version, attempt
+    ):
         raise HTTPException(
             status_code=400,
             detail="Blob not uploaded. Upload using the signed URL first.",
         )
 
     byte_size = (
-        await asyncio.to_thread(store.blob_size, build.artifact_id, build.version, attempt) or 0
+        await anyio.to_thread.run_sync(store.blob_size, build.artifact_id, build.version, attempt)
+        or 0
     )
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
@@ -567,7 +573,7 @@ async def finalize_build(
             return "", 0
 
         try:
-            schema_json, row_count = await asyncio.to_thread(_validate_notebook_bundle)
+            schema_json, row_count = await anyio.to_thread.run_sync(_validate_notebook_bundle)
         except Exception as e:
             build_store.fail_build(build_id, str(e), "INVALID_NOTEBOOK_BUNDLE")
             store.fail_artifact(build.artifact_id, build.version)
@@ -592,7 +598,7 @@ async def finalize_build(
             return schema.to_string(), row_count_inner
 
         try:
-            schema_json, row_count = await asyncio.to_thread(_parse_arrow_stream)
+            schema_json, row_count = await anyio.to_thread.run_sync(_parse_arrow_stream)
         except Exception as e:
             build_store.fail_build(build_id, str(e), "INVALID_ARROW_FORMAT")
             store.fail_artifact(build.artifact_id, build.version)
@@ -620,21 +626,23 @@ async def finalize_build(
 
     try:
         # Finalize reads the blob back to hash it.
-        finalized_artifact = await asyncio.to_thread(
-            store.finalize_and_set_name,
-            artifact_id=build.artifact_id,
-            version=build.version,
-            schema_json=schema_json,
-            row_count=row_count,
-            byte_size=byte_size,
-            name=build.name,
-            tenant=build.tenant,
-            blob_attempt=attempt,
-            fence=fence,
+        finalized_artifact = await anyio.to_thread.run_sync(
+            functools.partial(
+                store.finalize_and_set_name,
+                artifact_id=build.artifact_id,
+                version=build.version,
+                schema_json=schema_json,
+                row_count=row_count,
+                byte_size=byte_size,
+                name=build.name,
+                tenant=build.tenant,
+                blob_attempt=attempt,
+                fence=fence,
+            )
         )
     except BuildLeaseLost:
         if attempt is not None:
-            await asyncio.to_thread(
+            await anyio.to_thread.run_sync(
                 store.delete_attempt_blob, build.artifact_id, build.version, attempt
             )
         raise HTTPException(

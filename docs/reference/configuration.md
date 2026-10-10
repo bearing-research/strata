@@ -306,6 +306,14 @@ Build state follows the same backend, since build rows live in the artifact
 store's database. That is what makes a build started on one node visible to
 `GET /v1/builds/{id}` on another.
 
+**Each Strata process opens up to 41 connections.** A server makes its
+store calls on at most 40 worker threads plus its event loop, and sizes
+its connection pool to match, so a request never waits for a connection.
+Connections open on demand and close after ten minutes idle. Allow 41 per
+server process in the database's `max_connections`, plus room for
+`strata migrate` and other clients: Postgres's default of 100 fits two
+servers.
+
 The schema is created on first connection. **A DSN starts an empty store**:
 existing SQLite metadata is not carried over automatically. To move one:
 

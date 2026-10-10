@@ -38,19 +38,23 @@ async def _follow_alias_in_table(
     store, artifact_id: str, version: int, alias: str, tenant: str | None
 ) -> None:
     """Move the table tag of the same name, if this version was written to a table."""
-    import asyncio
+    import functools
+
+    import anyio.to_thread
 
     from strata.server import get_state
     from strata.table_export import move_alias_tag
 
-    await asyncio.to_thread(
-        move_alias_tag,
-        store,
-        artifact_id,
-        version,
-        alias,
-        config=get_state().config,
-        tenant=tenant,
+    await anyio.to_thread.run_sync(
+        functools.partial(
+            move_alias_tag,
+            store,
+            artifact_id,
+            version,
+            alias,
+            config=get_state().config,
+            tenant=tenant,
+        )
     )
 
 

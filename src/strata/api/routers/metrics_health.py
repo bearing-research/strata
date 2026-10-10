@@ -7,6 +7,7 @@ leaf; those helpers stay in ``server.py`` because the shutdown path also uses th
 
 from __future__ import annotations
 
+import anyio.to_thread
 import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Response
 
@@ -111,9 +112,11 @@ async def health_ready():
     artifact_store = get_artifact_store()
     if artifact_store is not None:
         try:
-            # A Postgres pool waits up to its timeout for a connection: off the loop, and bounded.
+            # A stalled database holds the ping: off the loop, and bounded. The probe must answer
+            # in time, so a ping that outlives it is abandoned rather than waited for.
             await asyncio.wait_for(
-                asyncio.to_thread(artifact_store.ping), ARTIFACT_STORE_PROBE_TIMEOUT_SECONDS
+                anyio.to_thread.run_sync(artifact_store.ping, abandon_on_cancel=True),
+                ARTIFACT_STORE_PROBE_TIMEOUT_SECONDS,
             )
             checks["artifact_store"] = True
         except Exception as e:

@@ -12,12 +12,14 @@ public.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 from html import escape
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -324,7 +326,7 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
 
     inline_png = None
     if publication.is_active and content_type == "image/png":
-        inline_png = await asyncio.to_thread(_inline_png, store, publication)
+        inline_png = await anyio.to_thread.run_sync(_inline_png, store, publication)
 
     base = _public_base(http_request)
     page_url = quote(f"{base}/p/{token}", safe="")
@@ -393,7 +395,7 @@ async def publication_data(token: str, store: ReadStore):
     """
     publication, artifact = _load_published(store, token, require_active=True)
 
-    reader_cm = await asyncio.to_thread(
+    reader_cm = await anyio.to_thread.run_sync(
         store.open_blob_reader, publication.artifact_id, publication.version
     )
     if reader_cm is None:
@@ -417,8 +419,8 @@ async def _built_archive(store, artifact, publication) -> tuple[Path, str]:
     can ask."""
     async with _archive_locks.setdefault(publication.id, asyncio.Lock()):
         try:
-            return await asyncio.to_thread(
-                cached_bundle_zip, store, artifact, publication=publication
+            return await anyio.to_thread.run_sync(
+                functools.partial(cached_bundle_zip, store, artifact, publication=publication)
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -466,7 +468,7 @@ async def verify_publication(
             detail="No digest was recorded for this publication; nothing to check against",
         )
 
-    actual = await asyncio.to_thread(
+    actual = await anyio.to_thread.run_sync(
         store.blob_digest, publication.artifact_id, publication.version
     )
     unchanged = actual == publication.content_sha256
@@ -545,7 +547,7 @@ async def publication_embed(token: str, store: ReadStore, http_request: Request)
     )
     content_type = content_type_of(artifact)
     image_src = (
-        await asyncio.to_thread(_inline_png, store, publication)
+        await anyio.to_thread.run_sync(_inline_png, store, publication)
         if content_type == "image/png"
         else None
     )
