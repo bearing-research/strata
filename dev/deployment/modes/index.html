@@ -2442,6 +2442,10 @@ the page. The prefix's first segment must not be one of Strata's own
 (<code>v1</code>, <code>p</code>, <code>assets</code>, <code>docs</code>, <code>redoc</code>, <code>openapi.json</code>, <code>health</code>, <code>metrics</code>,
 <code>oembed</code>, <code>mcp</code>), or a stripped request is read as
 already carrying it.</p>
+<p>The UI's pages send <code>Content-Security-Policy: script-src 'self'; object-src
+'none'; base-uri 'self'</code>, so a proxy that injects its own inline script (an
+analytics snippet, a login banner) has to replace that header for its script to
+run.</p>
 <p>Clients take the full URL, path included (<code>https://app.example.com/o/acme/lab</code>):
 the CLI's <code>--server</code>, the TUI and <code>strata_client</code> all append their routes to it.</p>
 

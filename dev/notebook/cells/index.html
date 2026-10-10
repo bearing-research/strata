@@ -4238,8 +4238,9 @@ its own origin (<code>Content-Security-Policy: frame-ancestors 'self'</code>). T
 another host, list its origin in <code>embed_frame_ancestors</code> (env
 <code>STRATA_EMBED_FRAME_ANCESTORS</code>), e.g. <code>https://analytics.example.com</code>, or <code>*</code> to
 allow any host. Accepts a comma-separated list or a JSON array.</p>
-<p>The app's pages also send <code>script-src 'self'; object-src 'none'; base-uri 'self'</code>,
-so only Strata's own bundled scripts run in them: markup that reaches the page
+<p>Every page of the web UI, the editor and the app view alike, also sends
+<code>script-src 'self'; object-src 'none'; base-uri 'self'</code>, so only Strata's own
+bundled scripts run in them: markup that reaches the page
 through a cell output or a markdown cell cannot execute script. A proxy that
 injects its own inline script into the page needs to replace that policy.</p>
 <h4 id="framing-the-editor">Framing the editor<a class="headerlink" href="#framing-the-editor" title="Permanent link">&para;</a></h4>

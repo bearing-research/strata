@@ -5084,6 +5084,8 @@ one.</p>
 <h3 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-92-1" name="__codelineno-92-1" href="#__codelineno-92-1"></a>GET /health
 </code></pre></div>
+<p>Readiness (<code>GET /health/ready</code>) and per-dependency checks (<code>GET /health/dependencies</code>)
+are covered in <a href="../../deployment/observability/#health-endpoints">Observability</a>.</p>
 <h3 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-93-1" name="__codelineno-93-1" href="#__codelineno-93-1"></a>GET /metrics
 <a id="__codelineno-93-2" name="__codelineno-93-2" href="#__codelineno-93-2"></a>GET /metrics/prometheus
@@ -5174,9 +5176,15 @@ by that team store, after this server's own gate.</p>
 </tr>
 <tr>
 <td><code>PUT</code></td>
+<td><code>/v1/artifacts</code></td>
+<td>write</td>
+<td>Store a locally computed result (<code>client.put</code>) under its inputs and transform, optionally naming it. The name is written in the commit that makes the version ready, so a name that cannot be written fails the request with <code>500</code> and leaves nothing ready</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
 <td><code>/v1/artifacts/by-provenance/{hash}</code></td>
 <td>write</td>
-<td>Store a result under a provenance key the caller computed</td>
+<td>Store a result under a provenance key the caller computed; an <code>artifact_id</code> another tenant holds, at any version, is a <code>409</code></td>
 </tr>
 <tr>
 <td><code>POST</code></td>

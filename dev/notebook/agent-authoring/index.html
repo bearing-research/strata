@@ -2302,7 +2302,7 @@ the same edits and print structured JSON:</p>
 </code></pre></div>
 <p>They write the same plain-text files described here, so the two approaches are
 interchangeable, and the same commands (plus <code>cell list/show</code>, <code>dag</code>, <code>status</code>,
-<code>cell run/test</code>) also drive a <em>running</em> session over <code>--server/--session</code>. See
+<code>cell run/test</code>, <code>cell cancel</code>) also drive a <em>running</em> session over <code>--server/--session</code>. See
 the <a href="../cli/">Notebook CLI</a> for the full command surface. The rest of this page
 is the file-format contract underneath both.</p>
 <h2 id="on-disk-layout">On-disk layout<a class="headerlink" href="#on-disk-layout" title="Permanent link">&para;</a></h2>
@@ -2450,7 +2450,8 @@ unknown workers, …) without calling any LLM.</p>
 </tr>
 </tbody>
 </table>
-<p><code>run --format json</code> reports per-cell <code>status</code>, <code>error</code>, and <code>cache_hit</code>,
+<p><code>run --format json</code> reports per-cell <code>status</code>, <code>error</code> (and its <code>traceback</code>
+when the cell raised), and <code>cache_hit</code>,
 and skips downstream cells when an upstream fails (<code>"reason": "upstream
 failed"</code>) - fix the first error and re-run; everything already correct is
 a cache hit.</p>

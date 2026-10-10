@@ -2304,7 +2304,7 @@
 <p>To change it later, click <strong>Requested Python</strong> in the Environment panel. Strata rewrites <code>requires-python</code>, rebuilds <code>.venv/</code> with <code>uv sync</code>, and restores the old version if the sync fails.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>The available versions come from the server's <code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code>. Unset, they are the Python versions <code>uv</code> reports as installed on the server that Strata supports, with the server's own version included.</p>
+<p>The available versions come from the server's <code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code>. Unset, they are the Python versions <code>uv</code> reports as installed on the server that Strata supports, with the server's own version included. A <code>UV_PYTHON</code> set in the server's environment does not apply to a notebook's <code>uv</code> commands; <code>requires-python</code> decides its interpreter.</p>
 </div>
 <h2 id="installing-packages">Installing Packages<a class="headerlink" href="#installing-packages" title="Permanent link">&para;</a></h2>
 <h3 id="from-the-ui">From the UI<a class="headerlink" href="#from-the-ui" title="Permanent link">&para;</a></h3>

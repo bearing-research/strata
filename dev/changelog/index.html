@@ -5211,17 +5211,17 @@ environment pinned below them has to move before it can install 0.8.0.</p>
 <h2 id="070-2026-09-06">0.7.0 - 2026-09-06<a class="headerlink" href="#070-2026-09-06" title="Permanent link">&para;</a></h2>
 <p>A result can now leave the notebook without leaving its history behind. <strong>A
 figure gets a URL</strong>: open it and you see the plot, the code that produced it,
-and the code and environment of every step behind it — no account, no install.
+and the code and environment of every step behind it, with no account and no install.
 Or <strong>a self-contained bundle</strong> to deposit with Zenodo or OSF, because a link
 printed in a paper outlives most servers.</p>
 <p>What that page claims is deliberately narrow, and it says so in words. It shows
 what was recorded when the bytes were produced, and that they have not changed
-since. It does not claim the result was reproduced — that needs a re-run, and
+since. It does not claim the result was reproduced. That needs a re-run, and
 random seeds, thread counts, floating-point order and unavailable input data
 each break it. A green check
 would be read as "someone reproduced this", and a badge that can be wrong is
 worse than no badge. There <em>is</em> a badge for a README, and it reports the size
-of the recorded chain rather than a verdict — and is deliberately not green,
+of the recorded chain rather than a verdict, and is deliberately not green,
 because green is the badge convention for "passing" and a record is not a pass.</p>
 <p>The result travels, too: paste the link somewhere that speaks oEmbed and it
 unfurls into a card, or let a repository read the chain as RO-Crate JSON-LD
@@ -5230,7 +5230,7 @@ instead of only displaying it.</p>
 do twice. <strong>Service mode runs on Postgres</strong>, so the artifact store is no longer
 one node's SQLite file. <strong>A worker pool</strong> starts machines on demand, holds them
 for a tenant, and stops paying when the work finishes. And the <strong>team cache</strong>
-lets a cell be served by a colleague's earlier run — not a named artifact
+lets a cell be served by a colleague's earlier run. Not a named artifact
 somebody chose to publish, but the expensive middle of a pipeline that nobody
 names.</p>
 <h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
@@ -5238,7 +5238,7 @@ names.</p>
 <li><strong>Publishing names where it writes.</strong> <code>--artifact-dir</code> says where to read
   from, as in every other subcommand; <code>--into</code> says where to publish, and
   defaults to the store your server serves. The destination is printed on every
-  publish rather than only when something is copied — previously it was
+  publish rather than only when something is copied. Previously it was
   resolved from configuration and never mentioned, so <code>publish --artifact-dir X</code>
   wrote somewhere the command line did not name.</li>
 <li><strong>A provenance badge for a README.</strong> <code>/p/{token}/badge.svg</code> reports the size
@@ -5249,18 +5249,18 @@ names.</p>
   badge, the iframe and the RO-Crate URL.</li>
 <li><strong>The chain is published as RO-Crate JSON-LD.</strong> Inline on the page, at
   <code>/p/{token}/ro-crate</code>, and as <code>ro-crate-metadata.json</code> in an archived
-  bundle — so a repository can index the provenance instead of only displaying
+  bundle, so a repository can index the provenance instead of only displaying
   it. Each step is a <code>CreateAction</code> whose instrument is the cell source;
   upstream steps are described but never declared as files the crate does not
   contain.</li>
 <li><strong>A published artifact embeds elsewhere.</strong> Paste its link into a wiki or CMS
-  that speaks oEmbed and it unfurls into a card — the figure, a one-line
-  summary of the chain, and a link through to the full provenance — or take the
+  that speaks oEmbed and it unfurls into a card (the figure, a one-line
+  summary of the chain, and a link through to the full provenance), or take the
   <code>/p/{token}/embed</code> iframe directly. The card is framable from any origin
   because that is the point of it; the full page keeps its restrictive default.</li>
 <li><strong>Publish an artifact so anyone with the link can check it.</strong> <code>strata artifact
   publish</code> mints a URL that resolves to a page showing the result, the code that
-  produced it, and the code and environment of every step behind it — the thing
+  produced it, and the code and environment of every step behind it. That is what
   a figure in a paper needs to be checkable by a reader with no account and no
   install. The page states what it checked in words rather than showing a badge:
   it can prove the bytes have not changed since publication (a digest is
@@ -5276,8 +5276,8 @@ names.</p>
   chain across, keeping their ids, versions, authors and timestamps, and says
   how many it copied.</li>
 <li><strong>Archive an artifact to a bundle that needs no server.</strong> <code>strata artifact
-  archive</code> writes a directory — the page, the bytes, a machine-readable
-  manifest, and a README — that opens in a browser with no server and no
+  archive</code> writes a directory (the page, the bytes, a machine-readable
+  manifest, and a README) that opens in a browser with no server and no
   external requests, for depositing with Zenodo or OSF. A hosted link resolves
   for as long as your server does; a URL printed in a paper outlives most
   servers. The bundle records the digest a reader gets from <code>sha256sum</code>, so the
@@ -5292,9 +5292,9 @@ names.</p>
   <a href="../deployment/service-mode/">Service mode</a>.</li>
 <li><strong>Migrate an existing store onto Postgres.</strong> <code>strata migrate</code> copies an
   established SQLite store across, per-row and idempotently, so an interrupted
-  run can simply be run again. It reports the rows Postgres refuses — a store
+  run can simply be run again. It reports the rows Postgres refuses (a store
   that has been collecting artifacts for months has dangling references SQLite
-  never enforced — rather than failing the whole move. Metadata only: blobs are
+  never enforced) rather than failing the whole move. Metadata only: blobs are
   configured separately and are not copied.</li>
 <li><strong>A worker pool, as its own package.</strong> <code>pip install strata-pool</code> manages
   machines you own: it starts one when no warm worker of that type is free,
@@ -5305,7 +5305,7 @@ names.</p>
   <code>pip install "strata-pool[server]"</code>. See
   <a href="../notebook/workers/">Distributed workers</a>.</li>
 <li><strong><code>strata-worker</code> is now a worker-pool worker.</strong> The pool dispatches to
-  <code>POST /execute</code>, which the worker did not serve — so a pool had no image to
+  <code>POST /execute</code>, which the worker did not serve, so a pool had no image to
   drive, and the one the docs named did not exist. The worker now answers that
   path (delegating to the same handler as <code>/v1/execute-manifest</code>, so the two
   cannot validate differently), and <code>worker.Dockerfile</code> builds the image
@@ -5318,13 +5318,13 @@ names.</p>
   does run offers its outputs back. It works because a cell's provenance key
   carries no notebook id and no cell id. The notebook shows what the cache
   actually saved, and lineage now says who computed each step, on which machine,
-  and in which environment — the questions you ask first when a result came from
+  and in which environment: the questions you ask first when a result came from
   somewhere else. See
   <a href="../deployment/service-mode/#the-team-cache-sharing-results-nobody-named">Service mode → the team cache</a>.</li>
 <li><strong>Artifacts are addressable by provenance hash</strong>, which is what makes the
   lookup above a single request rather than a scan.</li>
 <li><strong>Unknown libraries are stored as Arrow, not pickle.</strong> A value from a library
-  Strata has never heard of — a DuckDB relation, a cuDF frame — is stored as
+  Strata has never heard of (a DuckDB relation, a cuDF frame) is stored as
   Arrow if it exports <code>__arrow_c_stream__</code> or <code>__dlpack__</code>, so the artifact stays
   readable by other tools and the notebook can show its schema and row count. A
   DuckDB relation could not be stored at all before: it is not picklable.</li>
@@ -5341,7 +5341,7 @@ names.</p>
 <li><strong>A web page can no longer drive the loopback notebook API.</strong> Any origin could
   reach a personal-mode server on localhost.</li>
 <li><strong>Build manifests require trusted-proxy auth in service mode</strong>, and a build is
-  claimed when its manifest is issued — two executors could otherwise be handed
+  claimed when its manifest is issued; two executors could otherwise be handed
   capabilities for the same build.</li>
 <li><strong>Only the lease holder publishes a build's result</strong>, and ownership is checked
   <em>before</em> the artifact is committed rather than after. A fence that runs after
@@ -5360,20 +5360,20 @@ names.</p>
 <ul>
 <li><strong>A notebook artifact's lineage now walks past its first hop.</strong> Cell outputs
   recorded their inputs as bare provenance digests, which neither the lineage
-  API nor <code>strata artifact lineage</code> can resolve — so every upstream showed up
+  API nor <code>strata artifact lineage</code> can resolve, so every upstream showed up
   as an unidentifiable leaf and the walk stopped there. A chain three cells
   deep reported one node. Loop cells were worse: they recorded no inputs at
   all, leaving an empty graph for exactly the artifact a training run produces.
-  Cached results are unaffected — what is <em>hashed</em> did not change, only what is
+  Cached results are unaffected: what is <em>hashed</em> did not change, only what is
   recorded.</li>
 <li><strong>Cell outputs carry the source that produced them.</strong> An artifact recorded
   only <code>source_hash</code>, which explains nothing to a reader who does not already
   have the notebook. The source is now stored with the artifact, captured at
-  execution — so editing a cell afterwards cannot pair a cached result with
+  execution, so editing a cell afterwards cannot pair a cached result with
   code that did not produce it.</li>
 <li><strong>Reverting a cell edit is a cache hit again.</strong> Running a cell, editing it, and
-  reverting recomputed a result the store already held, immutable and valid —
-  the one loop where content addressing should never let you wait.</li>
+  reverting recomputed a result the store already held, immutable and valid.
+  That is the one loop where content addressing should never let you wait.</li>
 <li><strong>Iceberg merge-on-read tables are refused rather than silently returning
   deleted rows.</strong> Applying delete files is tracked separately; returning wrong
   rows is not a thing to leave running while it is designed.</li>
@@ -5383,14 +5383,14 @@ names.</p>
   that reference a version before removing it.</li>
 <li><strong>Garbage collection stopped deleting current values.</strong> An unnamed artifact's
   latest version is how the store resolves "the current value", and notebook cell
-  outputs are never named — a routine sweep deleted the live state of any
+  outputs are never named, so a routine sweep deleted the live state of any
   notebook older than a week.</li>
 <li><strong>Several ways a machine could keep billing unwatched</strong>: a pool that leaked
   machines it could no longer vouch for, a claimed machine nobody was watching,
   five paths where the RunPod backend could strand a billed pod, and freed fleet
   capacity with no route back to the work waiting on it.</li>
 <li><strong>The migration no longer reports copying rows it dropped.</strong> Without a per-row
-  savepoint, one rejected row rolled back every uncommitted insert in its batch —
+  savepoint, one rejected row rolled back every uncommitted insert in its batch,
   measured at 99 of 100 lost, reported as copied.</li>
 <li><strong>Resource leaks under load</strong>: a QoS slot the admission actually holds is now
   released, the fetcher's file-handle cache is synchronized and stops closing live
@@ -5418,7 +5418,7 @@ names.</p>
   of averaging away.</li>
 <li><strong><code>STRATA_GCS_CREDENTIALS_JSON</code> accepts inline JSON</strong>, which is what its name
   invites and what a container deployment usually has. <code>STRATA_GCS_PROJECT_ID</code> is
-  renamed to <code>STRATA_GCS_DEFAULT_BUCKET_LOCATION</code> — it never set a project — with
+  renamed to <code>STRATA_GCS_DEFAULT_BUCKET_LOCATION</code> (it never set a project), with
   the old name still accepted.</li>
 <li>Also: an agent's edits reach an open browser tab, the deployment-mode badge
   stops mislabelling a personal server, profiling stats survive a restart,

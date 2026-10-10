@@ -2404,7 +2404,8 @@ provisioned on container start - no importing by hand.</p>
 <li><strong>Admission &amp; QoS</strong>: interactive vs bulk slot usage, queue-wait
   times, rejections</li>
 <li><strong>Resilience</strong>: rate limiter (allowed vs rejected, active clients)</li>
-<li><strong>Multi-tenant</strong>: per-tenant scan rate and cache hit rate</li>
+<li><strong>Multi-tenant</strong>: per-tenant scan rate and cache hit rate (empty under
+  principal auth, where the scrape names no tenants)</li>
 <li><strong>Server</strong>: status / draining, stream aborts, client disconnects</li>
 </ul>
 <p>A test (<code>tests/test_observability_dashboard.py</code>) fails CI if a panel

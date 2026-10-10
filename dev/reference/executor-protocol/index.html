@@ -2756,7 +2756,8 @@ A worker that answers <code>200</code> directly needs no change.</p>
 caps the upload. Fetching a build's manifest again (<code>GET
 /v1/builds/{build_id}/manifest</code>) renews its lease and retires the upload and
 finalize URLs of every earlier manifest, so an executor still holding an old
-one can no longer publish. Each manifest's upload lands under its own key, and
+one can no longer publish. If the lease lapsed and the build runner took the
+build back, the fetch answers <code>409</code> instead. Each manifest's upload lands under its own key, and
 bytes that are never finalized are removed by the server's build runner once
 the build is over and the upload URL has expired.</p>
 <p>With <code>STRATA_ARTIFACT_PRESIGNED_URLS</code> on and a blob store the server can sign
@@ -3038,7 +3039,7 @@ and <code>params</code>. Download each input from its URL, upload the result as 
 IPC stream to <code>output.url</code>, then <code>POST {}</code> to <code>finalize_url</code>. <code>output.max_bytes</code>
 is the server-wide <code>STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT</code>, not the registry
 entry's cap. Fetching the manifest claims a pending build; a build the local
-runner already claimed answers <code>409</code>. In service mode the manifest is issued
+runner already claimed, or reclaimed after the lease lapsed, answers <code>409</code>. In service mode the manifest is issued
 only under <code>STRATA_AUTH_MODE=trusted_proxy</code>.</p>
 
 

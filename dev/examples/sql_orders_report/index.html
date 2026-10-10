@@ -2082,8 +2082,8 @@ sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
   write=true</code>: that's the per-cell escape hatch for setup
   scripts. Other cells in the notebook stay read-only.</li>
 <li><strong>Cross-language pipeline.</strong> The two SQL results flow back into the
-  <code>report</code> Python cell as pandas DataFrames (the Arrow IPC artifacts
-  decode through the standard notebook serializer).</li>
+  <code>report</code> Python cell as <code>pyarrow.Table</code>s, which it turns into pandas
+  DataFrames with <code>.to_pandas()</code>.</li>
 </ul>
 <h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
 <table>

@@ -3496,7 +3496,7 @@ the same way it does for prompt cells.</p>
 <a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
 </code></pre></div>
 <p>A downstream Python cell can then reference <code>top_customers</code> directly as a
-pandas DataFrame.</p>
+<code>pyarrow.Table</code>; call <code>.to_pandas()</code> for a pandas DataFrame.</p>
 <hr />
 <h2 id="variant-cells">Variant Cells<a class="headerlink" href="#variant-cells" title="Permanent link">&para;</a></h2>
 <p>Variant cells let you keep multiple alternative implementations of the

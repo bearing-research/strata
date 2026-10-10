@@ -2400,8 +2400,8 @@ nothing published runs script on your server's origin.</p>
 <p><code>&lt;token&gt;</code> can also be the publication's id, which <code>GET /v1/publications</code>
 lists. The store keeps only each token's SHA-256 (its id), so the token, and the
 link built from it, is shown once: in the answer to the publish that minted it.
-Publishing the same version again returns the existing publication without a
-token; keep the link when it is minted, or unpublish and publish again for a new
+A version has at most one live publication. Publishing the same version again
+returns the existing publication without a token; keep the link when it is minted, or unpublish and publish again for a new
 one.</p>
 <p>The link then reports that it was withdrawn, rather than 404ing. A reader
 chasing a footnote deserves that answer rather than one that reads like a typo.
@@ -2616,14 +2616,18 @@ tenant holds (at any version) or a version another computation holds unless
 <code>?remap=true</code> is set, and is
 idempotent: repeating a finished import writes nothing and needs no new upload.
 The same route also takes a multipart body with the record as <code>metadata</code> and
-the bytes as <code>data</code>, which holds the whole artifact in memory on both sides.</p>
+the bytes as <code>data</code>. The server copies <code>data</code> to disk as it arrives, but a
+client usually builds the whole body in memory, so large artifacts suit the
+staged route.</p>
 <p><code>publish --to</code> streams each artifact's bytes from a file to the upload route
 and sets <code>remap</code>. So a chain another tenant on the target already holds (or a
 version id a different computation took there) lands as a copy under a fresh
 id, <code>&lt;id&gt;@import=&lt;8 hex&gt;</code>, in the caller's tenant. Each copy keeps its
 provenance hash, and the CLI points every descendant's lineage edges at the
 ids its ancestors landed on, so the published page resolves every step.
-Publishing the same chain again writes nothing.</p>
+Publishing the same chain again writes nothing. The target refuses a blob
+larger than its <code>STRATA_MAX_UPLOAD_BYTES</code> with <code>413</code>; raise it there to publish
+larger artifacts.</p>
 <h2 id="http">HTTP<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

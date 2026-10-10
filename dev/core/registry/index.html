@@ -2292,7 +2292,9 @@ applying. Deleting an alias (<code>DELETE /v1/names/{name}/aliases/{alias}</code
 personal-mode route and answers 403 in service mode, so there only moves
 reach the queue. The queue is visible, and approval applies the move with the
 approver as the audit actor - atomically with the pending-consumption, so
-a crash can never swallow an approval:</p>
+a crash can never swallow an approval. An approve and a reject of the same
+change cannot both succeed: whichever commits first consumes it, and the other
+answers <code>404</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">client</span><span class="o">.</span><span class="n">list_pending_changes</span><span class="p">()</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">client</span><span class="o">.</span><span class="n">approve_alias_change</span><span class="p">(</span><span class="s2">"taxi/tip-model"</span><span class="p">,</span> <span class="s2">"champion"</span><span class="p">)</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">client</span><span class="o">.</span><span class="n">reject_alias_change</span><span class="p">(</span><span class="s2">"taxi/tip-model"</span><span class="p">,</span> <span class="s2">"champion"</span><span class="p">)</span>

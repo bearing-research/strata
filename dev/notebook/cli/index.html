@@ -2634,7 +2634,8 @@ directory. Pass <code>--server &lt;url&gt; --session &lt;id&gt;</code> in place 
 <a href="../../reference/rest-api/#open-notebook">REST API</a>). The output is identical to the local backend - both project the same wire shape - so
 a script written against a local notebook works unchanged against a live session.
 <code>cell run</code> / <code>cell test</code> and the authoring commands accept the same selector
-(see below), so the entire surface works against a live session. Remote
+(see below), so the entire surface works against a live session. <code>cell cancel</code>
+takes only this selector (see <a href="#cancelling-a-run-cell-cancel">Cancelling a run</a>). Remote
 operations target a personal-mode server (the use case is driving the session
 you're watching locally).</p>
 <p><strong>The selector decides who sees the change.</strong> Given a notebook <em>path</em>, the

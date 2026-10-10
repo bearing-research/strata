@@ -2858,8 +2858,8 @@ inputs; under a manifest the worker fetches its own inputs and uploads its own
 result, which is why job bytes never pass through the pool.</p>
 <p><strong>The notebook has no pool client.</strong> Nothing in <code>strata</code> imports <code>strata_pool</code>,
 and <code># @worker</code> cannot name a pool machine: the annotation resolves against the
-effective worker policy - notebook-scoped <code>[[workers]]</code> in personal mode, the
-server-managed registry in service mode - and a pool machine appears in
+effective worker policy (notebook-scoped <code>[[workers]]</code> plus the server-managed
+registry in personal mode, the registry alone in service mode), and a pool machine appears in
 neither. Composing the two is the job of a proxy above both, which checks the
 artifact store first and submits to the pool only on a miss. Getting that order
 wrong boots machines to recompute results that already exist.</p>
