@@ -4193,6 +4193,14 @@ from outside the frontend.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An import no longer hangs a new shared server.</strong> On a service-mode
+  server with the shared environment backend, a notebook import followed by
+  an open, before the notebook's environment was built, stopped the whole
+  server, <code>/health</code> included, for up to an hour: the import's environment job
+  held the environment's lock while <code>uv</code> installed, and the open waited for
+  that lock on the event loop, which the job needed to finish. The open now
+  waits through the environment job, and a blocking environment sync refuses
+  to run on the event loop instead of hanging it.</li>
 <li><strong>A refused run says why in the notebook.</strong> A frame the server refused for
   want of permission (an <code>error</code> frame with code <code>read_only</code> or
   <code>insufficient_scope</code>: a viewer's Run All, or a cell run behind a gateway
