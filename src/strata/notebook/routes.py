@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import io
 import json
 import logging
@@ -15,6 +16,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
+import anyio.to_thread
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
@@ -2990,7 +2992,10 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
         except HTTPException:
             published = []
         else:
-            published = registry_service.artifacts_by_tag(store, "nb_cell", tenant=None)
+            # Several queries per tagged artifact, on the server's store.
+            published = await anyio.to_thread.run_sync(
+                functools.partial(registry_service.artifacts_by_tag, store, "nb_cell", tenant=None)
+            )
 
     by_cell: dict[str, list[dict]] = {}
     for item in published:

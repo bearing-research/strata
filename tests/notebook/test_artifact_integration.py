@@ -357,6 +357,57 @@ class TestPublishedArtifactsDashboard:
         finally:
             reset_artifact_store()
 
+    def test_the_server_store_is_read_off_the_event_loop(self, tmp_path, monkeypatch):
+        """The lookup is several queries per tagged artifact: while the store is slow, the
+        loop serves others. The read is released by a coroutine that runs only on a free loop.
+        """
+        import asyncio
+        import threading
+
+        import strata.server as server_module
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.notebook.routes import list_notebook_published_artifacts
+
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir()
+        reset_artifact_store()
+        store = get_artifact_store(artifact_dir)
+        try:
+            store.create_artifact("model-1", "prov-1")
+            store.finalize_artifact("model-1", 1, '{"fields": []}', 3, 64)
+            store.set_tag("model-1", 1, "nb_cell", "c1")
+            monkeypatch.setattr(server_module, "_state", self._state(artifact_dir))
+
+            real_get = store.get_artifact
+            entered = threading.Event()
+            release = threading.Event()
+            released_by_loop: list[bool] = []
+
+            def _blocking_get(*args, **kwargs):
+                entered.set()
+                # Bounded so a regression fails the assertion instead of hanging the run.
+                released_by_loop.append(release.wait(timeout=10))
+                return real_get(*args, **kwargs)
+
+            monkeypatch.setattr(store, "get_artifact", _blocking_get)
+
+            async def _other_coroutine():
+                await asyncio.to_thread(entered.wait, 10)
+                release.set()
+
+            async def _both():
+                return await asyncio.gather(
+                    list_notebook_published_artifacts("sess-1", self._session(["c1"])),
+                    _other_coroutine(),
+                )
+
+            result, _ = asyncio.run(_both())
+
+            assert released_by_loop == [True]
+            assert [item["artifact_id"] for item in result["cells"]["c1"]] == ["model-1"]
+        finally:
+            reset_artifact_store()
+
     def test_empty_when_store_unreachable_in_service_mode(self, tmp_path, monkeypatch):
         """Service mode 403s the published-tier store; the strip degrades to an empty map rather
         than erroring.
