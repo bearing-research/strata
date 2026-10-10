@@ -1200,7 +1200,7 @@ def export_artifact_to_table(
 
 
 @router.post("/v1/artifacts/gc")
-async def garbage_collect_artifacts(
+def garbage_collect_artifacts(
     tenant_filter: CurrentTenant,
     max_idle_days: float | None = None,
     max_bytes: int | None = None,
@@ -1244,15 +1244,8 @@ async def garbage_collect_artifacts(
         policy["max_bytes"] = max_bytes
     if min_idle_seconds is not None:
         policy["min_idle_seconds"] = min_idle_seconds
-    # A sweep unlinks a blob per version; on the loop it would stall every route.
-    return await anyio.to_thread.run_sync(
-        functools.partial(
-            store.garbage_collect,
-            **policy,
-            tenant=tenant_filter,
-            collect_latest=collect_latest,
-            dry_run=dry_run,
-        )
+    return store.garbage_collect(
+        **policy, tenant=tenant_filter, collect_latest=collect_latest, dry_run=dry_run
     )
 
 
@@ -1429,10 +1422,9 @@ async def upload_artifact_blob(
 
 
 @router.post("/v1/artifacts/finalize", response_model=UploadFinalizeResponse)
-async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeStore):
+def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeStore):
     """Mark an uploaded artifact ready, optionally setting a name (personal mode only)."""
-    # On S3, GCS or Azure each blob probe is a network round trip.
-    if not await anyio.to_thread.run_sync(store.blob_exists, request.artifact_id, request.version):
+    if not store.blob_exists(request.artifact_id, request.version):
         raise HTTPException(
             status_code=400,
             detail="Blob not uploaded. Call upload endpoint first.",
@@ -1440,25 +1432,19 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
 
     # ``blob_size`` returns None both for an absent object and a failed backend call. Refuse rather
     # than mark READY a row claiming an empty blob, as build-finalize does.
-    byte_size = (
-        await anyio.to_thread.run_sync(store.blob_size, request.artifact_id, request.version) or 0
-    )
+    byte_size = store.blob_size(request.artifact_id, request.version) or 0
     if byte_size == 0:
         raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
     try:
-        # Finalize reads the whole blob to hash it, so it runs in a thread, and the loop
-        # serves requests meanwhile: the name moves in the same commit as the ready state.
-        finalized_artifact = await anyio.to_thread.run_sync(
-            functools.partial(
-                store.finalize_and_set_name,
-                artifact_id=request.artifact_id,
-                version=request.version,
-                schema_json=request.arrow_schema,
-                row_count=request.row_count,
-                byte_size=byte_size,
-                name=request.name,
-            )
+        # The name moves in the same commit as the ready state.
+        finalized_artifact = store.finalize_and_set_name(
+            artifact_id=request.artifact_id,
+            version=request.version,
+            schema_json=request.arrow_schema,
+            row_count=request.row_count,
+            byte_size=byte_size,
+            name=request.name,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

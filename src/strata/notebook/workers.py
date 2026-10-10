@@ -228,16 +228,14 @@ def get_server_managed_workers() -> list[WorkerSpec]:
     return [record.worker for record in get_server_managed_worker_records()]
 
 
-async def prune_worker_health_cache(records: list[ManagedWorkerRecord] | None = None) -> int:
-    """Drop cached health for workers the registry no longer lists; return the count.
+def prune_worker_health_cache(records: list[ManagedWorkerRecord]) -> int:
+    """Drop cached health for workers the registry (``records``) no longer lists; return
+    the count.
 
     Entries are keyed by health URL, so a moved worker already misses; this bounds
-    the entries for URLs nobody asks about any more. ``records`` is the registry if the
-    caller has read it. The store read runs in a worker thread; the prune stays on the
-    loop, where health probes write the cache.
+    the entries for URLs nobody asks about any more. Call it on the loop, where health
+    probes write the cache.
     """
-    if records is None:
-        records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
     live = {_health_url_for_worker(record.worker) for record in records}
     stale = [url for url in _worker_health_cache if url not in live]
     for url in stale:
@@ -1096,17 +1094,10 @@ async def build_worker_catalog_with_health(
 
 
 async def build_server_worker_catalog_with_health(
-    *,
-    force_refresh: bool = False,
-    records: list[ManagedWorkerRecord] | None = None,
+    records: list[ManagedWorkerRecord], *, force_refresh: bool = False
 ) -> list[dict[str, Any]]:
-    """Build the service-mode worker catalog without notebook-local entries.
-
-    ``records`` is the registry if the caller has read it; otherwise it is read in a
-    worker thread.
-    """
-    if records is None:
-        records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
+    """Build the service-mode worker catalog of the registry ``records``, without
+    notebook-local entries."""
     catalog: list[dict[str, Any]] = [
         {
             "name": "local",

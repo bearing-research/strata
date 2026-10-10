@@ -97,7 +97,9 @@ class TestTheTokenIsNotListed:
         monkeypatch.setattr(workers, "probe_worker_health", healthy)
         self._register()
 
-        catalog = await workers.build_server_worker_catalog_with_health()
+        catalog = await workers.build_server_worker_catalog_with_health(
+            workers.get_server_managed_worker_records()
+        )
 
         entry = next(e for e in catalog if e["name"] == "gpu-a100")
         assert entry["config"] == {"url": "http://gpu.internal:9000"}

@@ -5267,7 +5267,6 @@ class CellExecutor:
             artifact_uri=uri,
             execution_method="cached",
         )
-        self.session.apply_execution_result_metadata(cell_id, result)
         return result
 
     def _set_loop_artifact_uris(

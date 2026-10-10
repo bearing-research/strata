@@ -1566,134 +1566,17 @@ class ArtifactStore:
         blob_attempt: str | None = None,
         fence: BuildFence | None = None,
     ) -> ArtifactVersion | None:
-        """Mark a building artifact ready after its blob is written.
-
-        Idempotent. When a different id already holds this ``(tenant,
-        provenance_hash)`` ready, this version is marked superseded, its blob is
-        dropped for the existing one's (still readable by its own id and version), and
-        the existing one is returned. An older ready version of the same id is
-        superseded.
-
-        ``content_sha256`` saves rehashing the blob when the caller has it.
-        ``blob_attempt`` records which attempt's bytes the version reads. ``fence``
-        runs inside the transaction for a transform build and must confirm the lease
-        before anything commits.
-
-        Raises:
-            ValueError: If the artifact is not found or not in "building" state.
-            BuildLeaseLost: If ``fence`` found the lease held by another attempt.
-        """
-
-        def _commit_through_fence(conn: StoreConnection, target_id: str, target_v: int) -> None:
-            if fence is not None and not fence(conn, target_id, target_v):
-                conn.rollback()
-                raise BuildLeaseLost(
-                    f"{artifact_id}@v={version}: the build's lease is held by another attempt"
-                )
-            conn.commit()
-
-        conn = self._get_connection()
-        try:
-            cursor = conn.execute(
-                """
-                SELECT id, version, state, provenance_hash, tenant
-                FROM artifact_versions
-                WHERE id = ? AND version = ?
-                """,
-                (artifact_id, version),
-            )
-            row = cursor.fetchone()
-            if row is None:
-                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
-
-            if row["state"] == "ready":
-                # Already finalized: idempotent.
-                _commit_through_fence(conn, artifact_id, version)
-                return self.get_artifact(artifact_id, version)
-
-            if row["state"] != "building":
-                raise ValueError(
-                    f"Artifact {artifact_id}@v={version} not in building state "
-                    f"(state={row['state']})"
-                )
-
-            provenance_hash = row["provenance_hash"]
-            tenant = row["tenant"]
-
-            # Two builds with the same (tenant, provenance_hash) can complete at once.
-            existing = self.find_by_provenance(provenance_hash, tenant=tenant)
-            if existing is not None and existing.id != artifact_id:
-                duplicate_blob = self._supersede_duplicate(
-                    conn, artifact_id, version, schema_json, row_count, existing, blob_attempt
-                )
-                _commit_through_fence(conn, existing.id, existing.version)
-                self.blob_store.delete_blob(*duplicate_blob)
-                return existing
-
-            # Recorded here, not at write time: every write path (bytes, streamed writer, file,
-            # import) arrives here, and this is the moment the bytes become final.
-            digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
-
-            if existing is not None and existing.version != version:
-                # Same id, older ready version with the same provenance: a refresh rebuild.
-                # Supersede the old version so the rebuild becomes canonical, since the partial
-                # unique index allows only ONE ready row per (tenant, provenance_hash). The old
-                # version stays fetchable by explicit (id, version).
-                conn.execute(
-                    """
-                    UPDATE artifact_versions
-                    SET state = 'superseded'
-                    WHERE id = ? AND version = ? AND state = 'ready'
-                    """,
-                    (existing.id, existing.version),
-                )
-
-            try:
-                cursor = conn.execute(
-                    """
-                    UPDATE artifact_versions
-                    SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                        content_sha256 = ?, blob_attempt = ?, last_used_at = ?
-                    WHERE id = ? AND version = ? AND state = 'building'
-                    """,
-                    (
-                        schema_json,
-                        row_count,
-                        byte_size,
-                        digest,
-                        blob_attempt,
-                        # Idle time counts from now: a long build would otherwise finalize
-                        # looking idle since it started and be the first a sweep collects.
-                        time.time(),
-                        artifact_id,
-                        version,
-                    ),
-                )
-                if cursor.rowcount == 0:
-                    # Another process may have finalized it.
-                    conn.rollback()
-                    if fence is not None:
-                        raise BuildLeaseLost(
-                            f"{artifact_id}@v={version} was finalized by another attempt"
-                        )
-                    return self.get_artifact(artifact_id, version)
-                _commit_through_fence(conn, artifact_id, version)
-                return self.get_artifact(artifact_id, version)
-            except self._dialect.integrity_error:
-                # Another artifact with this (tenant, provenance_hash) was finalized first; return
-                # it.
-                conn.rollback()
-                existing = self.find_by_provenance(provenance_hash, tenant=tenant)
-                if existing is not None:
-                    duplicate_blob = self._supersede_duplicate(
-                        conn, artifact_id, version, schema_json, row_count, existing, blob_attempt
-                    )
-                    _commit_through_fence(conn, existing.id, existing.version)
-                    self.blob_store.delete_blob(*duplicate_blob)
-                    return existing
-                raise
-        finally:
-            conn.close()
+        """:meth:`finalize_and_set_name` with no name."""
+        return self.finalize_and_set_name(
+            artifact_id,
+            version,
+            schema_json,
+            row_count,
+            byte_size,
+            content_sha256=content_sha256,
+            blob_attempt=blob_attempt,
+            fence=fence,
+        )
 
     def find_version_by_provenance(
         self, artifact_id: str, provenance_hash: str, tenant: str | None = None
@@ -1933,7 +1816,7 @@ class ArtifactStore:
         artifact_id: str,
         version: int,
         schema_json: str,
-        row_count: int,
+        row_count: int | None,
         byte_size: int,
         name: str | None = None,
         tenant: str | None = None,
@@ -1942,11 +1825,19 @@ class ArtifactStore:
         blob_attempt: str | None = None,
         fence: BuildFence | None = None,
     ) -> ArtifactVersion | None:
-        """Finalize an artifact and set a name pointer in one transaction.
+        """Mark a building artifact ready after its blob is written, and set ``name`` (if
+        given) to it in the same transaction.
 
-        On a provenance duplicate the name points at the existing artifact. ``name``
-        of None sets no name; ``content_sha256``, ``blob_attempt`` and ``fence`` as for
-        :meth:`finalize_artifact`.
+        Idempotent. When a different id already holds this ``(tenant,
+        provenance_hash)`` ready, this version is marked superseded, its blob is
+        dropped for the existing one's (still readable by its own id and version), the
+        name points at the existing one, and it is returned. An older ready version of
+        the same id is superseded.
+
+        ``content_sha256`` saves rehashing the blob when the caller has it.
+        ``blob_attempt`` records which attempt's bytes the version reads. ``fence``
+        runs inside the transaction for a transform build and must confirm the lease
+        before anything commits.
 
         Raises:
             ValueError: If the artifact is not found or not in "building" state.
@@ -2000,6 +1891,7 @@ class ArtifactStore:
             if name and not self._can_assign_name_for_tenant(normalized_artifact_tenant, tenant):
                 raise ValueError(f"Artifact {artifact_id}@v={version} belongs to another tenant")
 
+            # Two builds with the same (tenant, provenance_hash) can complete at once.
             existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
             if existing is not None and existing.id != artifact_id:
                 # Another artifact has this provenance: this one is overtaken and the name points
@@ -2013,12 +1905,15 @@ class ArtifactStore:
                 self.blob_store.delete_blob(*duplicate_blob)
                 return existing
 
+            # Recorded here, not at write time: every write path (bytes, streamed writer, file,
+            # import) arrives here, and this is the moment the bytes become final.
             digest = content_sha256 or self.blob_digest(artifact_id, version, blob_attempt)
 
             if existing is not None and existing.version != version:
-                # Refresh rebuild: same id, older ready version with the same provenance. Supersede
-                # the old version (still fetchable by explicit id+version) so the rebuild becomes
-                # canonical.
+                # Same id, older ready version with the same provenance: a refresh rebuild.
+                # Supersede the old version so the rebuild becomes canonical, since the partial
+                # unique index allows only ONE ready row per (tenant, provenance_hash). The old
+                # version stays fetchable by explicit (id, version).
                 conn.execute(
                     """
                     UPDATE artifact_versions
@@ -2042,6 +1937,8 @@ class ArtifactStore:
                         byte_size,
                         digest,
                         blob_attempt,
+                        # Idle time counts from now: a long build would otherwise finalize
+                        # looking idle since it started and be the first a sweep collects.
                         time.time(),
                         artifact_id,
                         version,
