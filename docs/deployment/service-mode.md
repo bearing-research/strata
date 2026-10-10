@@ -480,6 +480,8 @@ directly - `put`, `set_name`, `set_alias`, tags - under a strict contract:
   can't target another, so teammates share a namespace and other teams are
   isolated. A name, alias or tag aimed at another tenant's artifact answers
   `404 Artifact not found`, the same as a missing artifact or a read of it.
+  An upload or import that names an artifact id another tenant already holds,
+  at any version, answers `409`.
   The publishing principal is recorded in the registry audit.
 
 ```bash

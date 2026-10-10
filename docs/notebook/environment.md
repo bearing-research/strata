@@ -27,7 +27,7 @@ At notebook creation time, you can select a Python version from the versions con
 To change it later, click **Requested Python** in the Environment panel. Strata rewrites `requires-python`, rebuilds `.venv/` with `uv sync`, and restores the old version if the sync fails.
 
 !!! note
-    The available versions come from the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS`. Unset, they are the Python versions `uv` reports as installed on the server that Strata supports, with the server's own version included.
+    The available versions come from the server's `STRATA_NOTEBOOK_PYTHON_VERSIONS`. Unset, they are the Python versions `uv` reports as installed on the server that Strata supports, with the server's own version included. A `UV_PYTHON` set in the server's environment does not apply to a notebook's `uv` commands; `requires-python` decides its interpreter.
 
 ## Installing Packages
 

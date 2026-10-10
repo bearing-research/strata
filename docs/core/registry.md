@@ -112,7 +112,9 @@ applying. Deleting an alias (`DELETE /v1/names/{name}/aliases/{alias}`) is a
 personal-mode route and answers 403 in service mode, so there only moves
 reach the queue. The queue is visible, and approval applies the move with the
 approver as the audit actor - atomically with the pending-consumption, so
-a crash can never swallow an approval:
+a crash can never swallow an approval. An approve and a reject of the same
+change cannot both succeed: whichever commits first consumes it, and the other
+answers `404`:
 
 ```python
 client.list_pending_changes()

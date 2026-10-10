@@ -239,10 +239,13 @@ Sessions live in memory, so a server restart ends all of them. A graceful stop
 (Ctrl-C, `SIGTERM`, `docker stop`) of a server started with `python -m strata`
 or `strata-notebook` sends `session_closed` with `reason: "shutdown"` first; a
 killed server sends nothing, and the next upgrade is refused. Either way the
-Python cells it was running stop with it: on Linux and macOS a Python cell's
-process group is killed when the server process that started it exits, so a long
-cell does not keep holding CPU or GPU with nobody to collect its result. R cells
-and Windows do not have this yet. A browser cannot read why an upgrade failed,
+cells it was running stop with it: on Linux and macOS a cell's process group,
+Python or R and warm-pool workers included, is killed when the process that
+started it exits, so a long cell does not keep holding CPU or GPU with nobody to
+collect its result. A cell on a `strata-worker` stops the same way when the
+worker exits, and the `ssh -L` tunnel to an
+[SSH worker](../notebook/workers.md#run-cells-on-a-machine-you-can-ssh-to)
+closes instead of holding its local port. Windows does not have this yet. A browser cannot read why an upgrade failed,
 so after a failed reconnect the web UI asks
 `GET /v1/notebooks/{session_id}/dag`: a `404` means the session is gone, and
 it reopens the notebook by path, carrying over any typing the old session never

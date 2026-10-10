@@ -402,8 +402,8 @@ result, which is why job bytes never pass through the pool.
 
 **The notebook has no pool client.** Nothing in `strata` imports `strata_pool`,
 and `# @worker` cannot name a pool machine: the annotation resolves against the
-effective worker policy - notebook-scoped `[[workers]]` in personal mode, the
-server-managed registry in service mode - and a pool machine appears in
+effective worker policy (notebook-scoped `[[workers]]` plus the server-managed
+registry in personal mode, the registry alone in service mode), and a pool machine appears in
 neither. Composing the two is the job of a proxy above both, which checks the
 artifact store first and submits to the pool only on a miss. Getting that order
 wrong boots machines to recompute results that already exist.

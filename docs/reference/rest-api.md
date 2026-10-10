@@ -1122,6 +1122,9 @@ one.
 GET /health
 ```
 
+Readiness (`GET /health/ready`) and per-dependency checks (`GET /health/dependencies`)
+are covered in [Observability](../deployment/observability.md#health-endpoints).
+
 ### Metrics
 
 ```
@@ -1168,7 +1171,8 @@ by that team store, after this server's own gate.
 | `PUT` | `/v1/artifacts/{id}/v/{n}/tags` | write | Set one key/value tag |
 | `DELETE` | `/v1/artifacts/{id}/v/{n}/tags/{key}` | write | Delete one tag |
 | `GET` | `/v1/artifacts/by-provenance/{hash}` | read | A ready artifact by provenance hash (the team-cache lookup) |
-| `PUT` | `/v1/artifacts/by-provenance/{hash}` | write | Store a result under a provenance key the caller computed |
+| `PUT` | `/v1/artifacts` | write | Store a locally computed result (`client.put`) under its inputs and transform, optionally naming it. The name is written in the commit that makes the version ready, so a name that cannot be written fails the request with `500` and leaves nothing ready |
+| `PUT` | `/v1/artifacts/by-provenance/{hash}` | write | Store a result under a provenance key the caller computed; an `artifact_id` another tenant holds, at any version, is a `409` |
 | `POST` | `/v1/artifacts/upload/{id}/v/{n}` | personal | Upload a version's Arrow IPC bytes |
 | `POST` | `/v1/artifacts/finalize` | personal | Mark an uploaded version ready, optionally naming it |
 | `POST` | `/v1/artifacts/explain-materialize` | read | Dry-run materialize: hit or miss, and why a rebuild would be needed |
