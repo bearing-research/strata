@@ -113,6 +113,7 @@ nav:
 
 exclude_docs: |
   internal/
+  assets/README.md
 
 # Versioned docs via `mike`, which maintains ``versions.json`` on ``gh-pages``
 # for Material's version picker. Aliases:

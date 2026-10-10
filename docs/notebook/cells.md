@@ -792,8 +792,9 @@ another host, list its origin in `embed_frame_ancestors` (env
 `STRATA_EMBED_FRAME_ANCESTORS`), e.g. `https://analytics.example.com`, or `*` to
 allow any host. Accepts a comma-separated list or a JSON array.
 
-The app's pages also send `script-src 'self'; object-src 'none'; base-uri 'self'`,
-so only Strata's own bundled scripts run in them: markup that reaches the page
+Every page of the web UI, the editor and the app view alike, also sends
+`script-src 'self'; object-src 'none'; base-uri 'self'`, so only Strata's own
+bundled scripts run in them: markup that reaches the page
 through a cell output or a markdown cell cannot execute script. A proxy that
 injects its own inline script into the page needs to replace that policy.
 

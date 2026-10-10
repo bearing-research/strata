@@ -40,7 +40,7 @@ strata dep add   my_analysis pandas                        # uv add
 
 They write the same plain-text files described here, so the two approaches are
 interchangeable, and the same commands (plus `cell list/show`, `dag`, `status`,
-`cell run/test`) also drive a *running* session over `--server/--session`. See
+`cell run/test`, `cell cancel`) also drive a *running* session over `--server/--session`. See
 the [Notebook CLI](cli.md) for the full command surface. The rest of this page
 is the file-format contract underneath both.
 
@@ -188,7 +188,8 @@ unknown workers, …) without calling any LLM.
 | Reference that resolves to nothing (import? typo?) | `run` (NameError) |
 | Wrong logic, missing dependency in `pyproject.toml` | `run` |
 
-`run --format json` reports per-cell `status`, `error`, and `cache_hit`,
+`run --format json` reports per-cell `status`, `error` (and its `traceback`
+when the cell raised), and `cache_hit`,
 and skips downstream cells when an upstream fails (`"reason": "upstream
 failed"`) - fix the first error and re-run; everything already correct is
 a cache hit.

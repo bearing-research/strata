@@ -1842,18 +1842,18 @@ environment pinned below them has to move before it can install 0.8.0.
 
 A result can now leave the notebook without leaving its history behind. **A
 figure gets a URL**: open it and you see the plot, the code that produced it,
-and the code and environment of every step behind it — no account, no install.
+and the code and environment of every step behind it, with no account and no install.
 Or **a self-contained bundle** to deposit with Zenodo or OSF, because a link
 printed in a paper outlives most servers.
 
 What that page claims is deliberately narrow, and it says so in words. It shows
 what was recorded when the bytes were produced, and that they have not changed
-since. It does not claim the result was reproduced — that needs a re-run, and
+since. It does not claim the result was reproduced. That needs a re-run, and
 random seeds, thread counts, floating-point order and unavailable input data
 each break it. A green check
 would be read as "someone reproduced this", and a badge that can be wrong is
 worse than no badge. There *is* a badge for a README, and it reports the size
-of the recorded chain rather than a verdict — and is deliberately not green,
+of the recorded chain rather than a verdict, and is deliberately not green,
 because green is the badge convention for "passing" and a record is not a pass.
 
 The result travels, too: paste the link somewhere that speaks oEmbed and it
@@ -1864,7 +1864,7 @@ Three more things arrived alongside it, each about work you no longer have to
 do twice. **Service mode runs on Postgres**, so the artifact store is no longer
 one node's SQLite file. **A worker pool** starts machines on demand, holds them
 for a tenant, and stops paying when the work finishes. And the **team cache**
-lets a cell be served by a colleague's earlier run — not a named artifact
+lets a cell be served by a colleague's earlier run. Not a named artifact
 somebody chose to publish, but the expensive middle of a pipeline that nobody
 names.
 
@@ -1873,7 +1873,7 @@ names.
 - **Publishing names where it writes.** `--artifact-dir` says where to read
   from, as in every other subcommand; `--into` says where to publish, and
   defaults to the store your server serves. The destination is printed on every
-  publish rather than only when something is copied — previously it was
+  publish rather than only when something is copied. Previously it was
   resolved from configuration and never mentioned, so `publish --artifact-dir X`
   wrote somewhere the command line did not name.
 - **A provenance badge for a README.** `/p/{token}/badge.svg` reports the size
@@ -1884,18 +1884,18 @@ names.
   badge, the iframe and the RO-Crate URL.
 - **The chain is published as RO-Crate JSON-LD.** Inline on the page, at
   `/p/{token}/ro-crate`, and as `ro-crate-metadata.json` in an archived
-  bundle — so a repository can index the provenance instead of only displaying
+  bundle, so a repository can index the provenance instead of only displaying
   it. Each step is a `CreateAction` whose instrument is the cell source;
   upstream steps are described but never declared as files the crate does not
   contain.
 - **A published artifact embeds elsewhere.** Paste its link into a wiki or CMS
-  that speaks oEmbed and it unfurls into a card — the figure, a one-line
-  summary of the chain, and a link through to the full provenance — or take the
+  that speaks oEmbed and it unfurls into a card (the figure, a one-line
+  summary of the chain, and a link through to the full provenance), or take the
   `/p/{token}/embed` iframe directly. The card is framable from any origin
   because that is the point of it; the full page keeps its restrictive default.
 - **Publish an artifact so anyone with the link can check it.** `strata artifact
   publish` mints a URL that resolves to a page showing the result, the code that
-  produced it, and the code and environment of every step behind it — the thing
+  produced it, and the code and environment of every step behind it. That is what
   a figure in a paper needs to be checkable by a reader with no account and no
   install. The page states what it checked in words rather than showing a badge:
   it can prove the bytes have not changed since publication (a digest is
@@ -1911,8 +1911,8 @@ names.
   chain across, keeping their ids, versions, authors and timestamps, and says
   how many it copied.
 - **Archive an artifact to a bundle that needs no server.** `strata artifact
-  archive` writes a directory — the page, the bytes, a machine-readable
-  manifest, and a README — that opens in a browser with no server and no
+  archive` writes a directory (the page, the bytes, a machine-readable
+  manifest, and a README) that opens in a browser with no server and no
   external requests, for depositing with Zenodo or OSF. A hosted link resolves
   for as long as your server does; a URL printed in a paper outlives most
   servers. The bundle records the digest a reader gets from `sha256sum`, so the
@@ -1927,9 +1927,9 @@ names.
   [Service mode](docs/deployment/service-mode.md).
 - **Migrate an existing store onto Postgres.** `strata migrate` copies an
   established SQLite store across, per-row and idempotently, so an interrupted
-  run can simply be run again. It reports the rows Postgres refuses — a store
+  run can simply be run again. It reports the rows Postgres refuses (a store
   that has been collecting artifacts for months has dangling references SQLite
-  never enforced — rather than failing the whole move. Metadata only: blobs are
+  never enforced) rather than failing the whole move. Metadata only: blobs are
   configured separately and are not copied.
 - **A worker pool, as its own package.** `pip install strata-pool` manages
   machines you own: it starts one when no warm worker of that type is free,
@@ -1940,7 +1940,7 @@ names.
   `pip install "strata-pool[server]"`. See
   [Distributed workers](docs/notebook/workers.md).
 - **`strata-worker` is now a worker-pool worker.** The pool dispatches to
-  `POST /execute`, which the worker did not serve — so a pool had no image to
+  `POST /execute`, which the worker did not serve, so a pool had no image to
   drive, and the one the docs named did not exist. The worker now answers that
   path (delegating to the same handler as `/v1/execute-manifest`, so the two
   cannot validate differently), and `worker.Dockerfile` builds the image
@@ -1953,13 +1953,13 @@ names.
   does run offers its outputs back. It works because a cell's provenance key
   carries no notebook id and no cell id. The notebook shows what the cache
   actually saved, and lineage now says who computed each step, on which machine,
-  and in which environment — the questions you ask first when a result came from
+  and in which environment: the questions you ask first when a result came from
   somewhere else. See
   [Service mode → the team cache](docs/deployment/service-mode.md#the-team-cache-sharing-results-nobody-named).
 - **Artifacts are addressable by provenance hash**, which is what makes the
   lookup above a single request rather than a scan.
 - **Unknown libraries are stored as Arrow, not pickle.** A value from a library
-  Strata has never heard of — a DuckDB relation, a cuDF frame — is stored as
+  Strata has never heard of (a DuckDB relation, a cuDF frame) is stored as
   Arrow if it exports `__arrow_c_stream__` or `__dlpack__`, so the artifact stays
   readable by other tools and the notebook can show its schema and row count. A
   DuckDB relation could not be stored at all before: it is not picklable.
@@ -1976,7 +1976,7 @@ names.
 - **A web page can no longer drive the loopback notebook API.** Any origin could
   reach a personal-mode server on localhost.
 - **Build manifests require trusted-proxy auth in service mode**, and a build is
-  claimed when its manifest is issued — two executors could otherwise be handed
+  claimed when its manifest is issued; two executors could otherwise be handed
   capabilities for the same build.
 - **Only the lease holder publishes a build's result**, and ownership is checked
   *before* the artifact is committed rather than after. A fence that runs after
@@ -1995,20 +1995,20 @@ names.
 
 - **A notebook artifact's lineage now walks past its first hop.** Cell outputs
   recorded their inputs as bare provenance digests, which neither the lineage
-  API nor `strata artifact lineage` can resolve — so every upstream showed up
+  API nor `strata artifact lineage` can resolve, so every upstream showed up
   as an unidentifiable leaf and the walk stopped there. A chain three cells
   deep reported one node. Loop cells were worse: they recorded no inputs at
   all, leaving an empty graph for exactly the artifact a training run produces.
-  Cached results are unaffected — what is *hashed* did not change, only what is
+  Cached results are unaffected: what is *hashed* did not change, only what is
   recorded.
 - **Cell outputs carry the source that produced them.** An artifact recorded
   only `source_hash`, which explains nothing to a reader who does not already
   have the notebook. The source is now stored with the artifact, captured at
-  execution — so editing a cell afterwards cannot pair a cached result with
+  execution, so editing a cell afterwards cannot pair a cached result with
   code that did not produce it.
 - **Reverting a cell edit is a cache hit again.** Running a cell, editing it, and
-  reverting recomputed a result the store already held, immutable and valid —
-  the one loop where content addressing should never let you wait.
+  reverting recomputed a result the store already held, immutable and valid.
+  That is the one loop where content addressing should never let you wait.
 - **Iceberg merge-on-read tables are refused rather than silently returning
   deleted rows.** Applying delete files is tracked separately; returning wrong
   rows is not a thing to leave running while it is designed.
@@ -2018,14 +2018,14 @@ names.
   that reference a version before removing it.
 - **Garbage collection stopped deleting current values.** An unnamed artifact's
   latest version is how the store resolves "the current value", and notebook cell
-  outputs are never named — a routine sweep deleted the live state of any
+  outputs are never named, so a routine sweep deleted the live state of any
   notebook older than a week.
 - **Several ways a machine could keep billing unwatched**: a pool that leaked
   machines it could no longer vouch for, a claimed machine nobody was watching,
   five paths where the RunPod backend could strand a billed pod, and freed fleet
   capacity with no route back to the work waiting on it.
 - **The migration no longer reports copying rows it dropped.** Without a per-row
-  savepoint, one rejected row rolled back every uncommitted insert in its batch —
+  savepoint, one rejected row rolled back every uncommitted insert in its batch,
   measured at 99 of 100 lost, reported as copied.
 - **Resource leaks under load**: a QoS slot the admission actually holds is now
   released, the fetcher's file-handle cache is synchronized and stops closing live
@@ -2053,7 +2053,7 @@ names.
   of averaging away.
 - **`STRATA_GCS_CREDENTIALS_JSON` accepts inline JSON**, which is what its name
   invites and what a container deployment usually has. `STRATA_GCS_PROJECT_ID` is
-  renamed to `STRATA_GCS_DEFAULT_BUCKET_LOCATION` — it never set a project — with
+  renamed to `STRATA_GCS_DEFAULT_BUCKET_LOCATION` (it never set a project), with
   the old name still accepted.
 - Also: an agent's edits reach an open browser tab, the deployment-mode badge
   stops mislabelling a personal server, profiling stats survive a restart,

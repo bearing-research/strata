@@ -197,5 +197,10 @@ the page. The prefix's first segment must not be one of Strata's own
 `oembed`, `mcp`), or a stripped request is read as
 already carrying it.
 
+The UI's pages send `Content-Security-Policy: script-src 'self'; object-src
+'none'; base-uri 'self'`, so a proxy that injects its own inline script (an
+analytics snippet, a login banner) has to replace that header for its script to
+run.
+
 Clients take the full URL, path included (`https://app.example.com/o/acme/lab`):
 the CLI's `--server`, the TUI and `strata_client` all append their routes to it.

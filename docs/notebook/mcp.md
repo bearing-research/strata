@@ -66,7 +66,7 @@ An agent on another machine uses the server's name or address instead
 the rest of the server: `localhost`, any IP literal, `STRATA_HOST` and the
 names in `STRATA_ALLOWED_HOSTS` (see
 [Deployment modes](../deployment/modes.md#personal-mode)). Any other `Host`
-is refused. A request from a browser page must also be same-origin or come
+is refused (in service mode, only once `STRATA_ALLOWED_HOSTS` is set). A request from a browser page must also be same-origin or come
 from an origin in `STRATA_CORS_ALLOW_ORIGINS`.
 
 The `[mcp]` extra needs `mcp` 2.2 or newer. If the flag is set but the extra is
@@ -89,7 +89,7 @@ The typical loop:
 1. You open a notebook in the browser (or with `strata`).
 2. `list_notebooks` → the agent gets the `session_id`.
 3. The agent inspects (`get_notebook` / `get_cell` / `dag` / `status`), edits
-   (`add_cell` / `edit_cell` / …), runs (`run_cell` / `run_tests`), and manages
+   (`add_cell` / `edit_cell` / …), runs (`run_cell` / `run_tests`, and `cancel_cell` to stop one), and manages
    dependencies (`add_dependency` / `remove_dependency`) - all against that
    session, while you watch it happen in the browser or the TUI.
 

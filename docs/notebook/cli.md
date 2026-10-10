@@ -250,7 +250,8 @@ strata status    --server http://localhost:8765 --session $SID
 [REST API](../reference/rest-api.md#open-notebook)). The output is identical to the local backend - both project the same wire shape - so
 a script written against a local notebook works unchanged against a live session.
 `cell run` / `cell test` and the authoring commands accept the same selector
-(see below), so the entire surface works against a live session. Remote
+(see below), so the entire surface works against a live session. `cell cancel`
+takes only this selector (see [Cancelling a run](#cancelling-a-run-cell-cancel)). Remote
 operations target a personal-mode server (the use case is driving the session
 you're watching locally).
 

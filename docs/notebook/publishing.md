@@ -141,8 +141,8 @@ strata artifact unpublish <token>
 `<token>` can also be the publication's id, which `GET /v1/publications`
 lists. The store keeps only each token's SHA-256 (its id), so the token, and the
 link built from it, is shown once: in the answer to the publish that minted it.
-Publishing the same version again returns the existing publication without a
-token; keep the link when it is minted, or unpublish and publish again for a new
+A version has at most one live publication. Publishing the same version again
+returns the existing publication without a token; keep the link when it is minted, or unpublish and publish again for a new
 one.
 
 The link then reports that it was withdrawn, rather than 404ing. A reader
@@ -422,7 +422,9 @@ tenant holds (at any version) or a version another computation holds unless
 `?remap=true` is set, and is
 idempotent: repeating a finished import writes nothing and needs no new upload.
 The same route also takes a multipart body with the record as `metadata` and
-the bytes as `data`, which holds the whole artifact in memory on both sides.
+the bytes as `data`. The server copies `data` to disk as it arrives, but a
+client usually builds the whole body in memory, so large artifacts suit the
+staged route.
 
 `publish --to` streams each artifact's bytes from a file to the upload route
 and sets `remap`. So a chain another tenant on the target already holds (or a
@@ -430,7 +432,9 @@ version id a different computation took there) lands as a copy under a fresh
 id, `<id>@import=<8 hex>`, in the caller's tenant. Each copy keeps its
 provenance hash, and the CLI points every descendant's lineage edges at the
 ids its ancestors landed on, so the published page resolves every step.
-Publishing the same chain again writes nothing.
+Publishing the same chain again writes nothing. The target refuses a blob
+larger than its `STRATA_MAX_UPLOAD_BYTES` with `413`; raise it there to publish
+larger artifacts.
 
 ## HTTP
 

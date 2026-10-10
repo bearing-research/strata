@@ -170,7 +170,8 @@ The dashboard covers the serving layer end to end:
 - **Admission & QoS**: interactive vs bulk slot usage, queue-wait
   times, rejections
 - **Resilience**: rate limiter (allowed vs rejected, active clients)
-- **Multi-tenant**: per-tenant scan rate and cache hit rate
+- **Multi-tenant**: per-tenant scan rate and cache hit rate (empty under
+  principal auth, where the scrape names no tenants)
 - **Server**: status / draining, stream aborts, client disconnects
 
 A test (`tests/test_observability_dashboard.py`) fails CI if a panel

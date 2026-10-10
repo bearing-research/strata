@@ -681,7 +681,7 @@ FROM orders GROUP BY customer ORDER BY total DESC LIMIT 5
 ```
 
 A downstream Python cell can then reference `top_customers` directly as a
-pandas DataFrame.
+`pyarrow.Table`; call `.to_pandas()` for a pandas DataFrame.
 
 ---
 

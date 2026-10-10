@@ -315,7 +315,8 @@ Each URL is a signed capability that expires at `expires_at`; `output.max_bytes`
 caps the upload. Fetching a build's manifest again (`GET
 /v1/builds/{build_id}/manifest`) renews its lease and retires the upload and
 finalize URLs of every earlier manifest, so an executor still holding an old
-one can no longer publish. Each manifest's upload lands under its own key, and
+one can no longer publish. If the lease lapsed and the build runner took the
+build back, the fetch answers `409` instead. Each manifest's upload lands under its own key, and
 bytes that are never finalized are removed by the server's build runner once
 the build is over and the upload URL has expired.
 
@@ -583,5 +584,5 @@ and `params`. Download each input from its URL, upload the result as an Arrow
 IPC stream to `output.url`, then `POST {}` to `finalize_url`. `output.max_bytes`
 is the server-wide `STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT`, not the registry
 entry's cap. Fetching the manifest claims a pending build; a build the local
-runner already claimed answers `409`. In service mode the manifest is issued
+runner already claimed, or reclaimed after the lease lapsed, answers `409`. In service mode the manifest is issued
 only under `STRATA_AUTH_MODE=trusted_proxy`.
