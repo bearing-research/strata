@@ -817,6 +817,14 @@ from outside the frontend.
 
 ### Fixed
 
+- **An import no longer hangs a new shared server.** On a service-mode
+  server with the shared environment backend, a notebook import followed by
+  an open, before the notebook's environment was built, stopped the whole
+  server, `/health` included, for up to an hour: the import's environment job
+  held the environment's lock while `uv` installed, and the open waited for
+  that lock on the event loop, which the job needed to finish. The open now
+  waits through the environment job, and a blocking environment sync refuses
+  to run on the event loop instead of hanging it.
 - **A refused run says why in the notebook.** A frame the server refused for
   want of permission (an `error` frame with code `read_only` or
   `insufficient_scope`: a viewer's Run All, or a cell run behind a gateway
