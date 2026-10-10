@@ -80,7 +80,9 @@ async def _serialize_admin_notebook_workers(
             }
             for record in records
         ],
-        "workers": await build_server_worker_catalog_with_health(force_refresh=force_refresh),
+        "workers": await build_server_worker_catalog_with_health(
+            force_refresh=force_refresh, records=records
+        ),
         "definitions_editable": False,
         "health_checked_at": int(time.time() * 1000),
     }
@@ -239,8 +241,8 @@ async def reload_admin_notebook_workers():
     """
     from strata.notebook.workers import prune_worker_health_cache
 
-    prune_worker_health_cache()
     records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
+    await prune_worker_health_cache(records)
     return await _serialize_admin_notebook_workers(records, force_refresh=True)
 
 

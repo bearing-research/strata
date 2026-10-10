@@ -860,6 +860,131 @@ def test_environment_job_submission_rejects_execution_already_accepted(monkeypat
     asyncio.run(_exercise())
 
 
+# --- Worker policy reads ---
+
+
+@pytest.fixture
+def registry_worker(tmp_path, monkeypatch):
+    """A server with an artifact store whose worker registry lists ``gpu-embedded``.
+
+    Yields a log of ``(event, on_loop_thread)``: each registry read in the store, and
+    the start (``mark_cell_running``) and result frame of each cell run.
+    """
+    import threading
+
+    from strata.artifact_store import get_artifact_store
+    from strata.notebook.models import WorkerBackendType, WorkerSpec
+    from strata.notebook.workers import ManagedWorkerRecord, replace_server_managed_worker_records
+    from tests.conftest import run_server_with_context
+
+    with run_server_with_context(tmp_path / "cache", tmp_path / "artifacts", "personal"):
+        worker = WorkerSpec(
+            name="gpu-embedded",
+            backend=WorkerBackendType.EXECUTOR,
+            runtime_id="a100",
+            config={"url": "embedded://local"},
+        )
+        replace_server_managed_worker_records([ManagedWorkerRecord(worker, True)])
+
+        log: list[tuple[str, bool]] = []
+        loop_threads: set[int] = set()
+        store = get_artifact_store()
+        real_entries = store.notebook_worker_entries
+
+        def _recording_entries():
+            log.append(("read", threading.get_ident() in loop_threads))
+            return real_entries()
+
+        monkeypatch.setattr(store, "notebook_worker_entries", _recording_entries)
+        yield log, loop_threads
+
+
+def _run_reads(log):
+    """The registry reads between each run's start and its result frame."""
+    runs: list[list[bool]] = []
+    for event, on_loop in log:
+        if event == "start":
+            runs.append([])
+        elif event == "result":
+            runs[-1].append(None)  # closes the run
+        elif event == "read" and runs and (not runs[-1] or runs[-1][-1] is not None):
+            runs[-1].append(on_loop)
+    return [[r for r in run if r is not None] for run in runs]
+
+
+@pytest.mark.asyncio
+async def test_a_cell_run_reads_the_worker_registry_once_off_the_loop(
+    notebook_session, registry_worker, monkeypatch
+):
+    """The running frame and the run (dispatch, provenance, execution) share one read,
+    made in a worker thread, and a registry change applies to the next run."""
+    import threading
+
+    import strata.notebook.ws as ws_module
+    from strata.notebook.workers import delete_server_managed_worker_record
+
+    log, loop_threads = registry_worker
+    loop_threads.add(threading.get_ident())
+    _, session = notebook_session
+    root = next(c for c in session.notebook_state.cells if c.id == "root")
+    root.worker = "gpu-embedded"
+
+    real_mark_running = session.mark_cell_running
+
+    def _mark_running(cell_id):
+        log.append(("start", False))
+        return real_mark_running(cell_id)
+
+    monkeypatch.setattr(session, "mark_cell_running", _mark_running)
+    real_broadcast = ws_module._broadcast_execution_result
+
+    async def _broadcast_result(*args, **kwargs):
+        log.append(("result", False))
+        return await real_broadcast(*args, **kwargs)
+
+    monkeypatch.setattr(ws_module, "_broadcast_execution_result", _broadcast_result)
+
+    first = await _run_cell_to_terminal(session, "root")
+    (running,) = _running_frames(first, "root")
+    output, _ = _terminal_frames(first, "root")
+
+    # The frame resolved the worker from the registry, without reading it again.
+    assert running["payload"]["remote_worker"] == "gpu-embedded"
+    assert output["type"] == "cell_output", output
+    assert _run_reads(log) == [[False]]
+
+    delete_server_managed_worker_record("gpu-embedded")
+    log.clear()
+    second = await _run_cell_to_terminal(session, "root")
+    output, _ = _terminal_frames(second, "root")
+
+    assert output["type"] == "cell_error"
+    assert "gpu-embedded" in output["payload"]["error"]
+    assert _run_reads(log) == [[False]]
+
+
+@pytest.mark.asyncio
+async def test_an_executor_run_reads_the_worker_registry_once_off_the_loop(
+    notebook_session, registry_worker
+):
+    """Without the WebSocket drive (``strata run``, MCP), the executor reads it itself."""
+    import threading
+
+    from strata.notebook.executor import CellExecutor
+
+    log, loop_threads = registry_worker
+    loop_threads.add(threading.get_ident())
+    _, session = notebook_session
+    root = next(c for c in session.notebook_state.cells if c.id == "root")
+    root.worker = "gpu-embedded"
+
+    result = await CellExecutor(session).execute_cell("root", root.source)
+
+    assert result.success, result.error
+    assert result.remote_worker == "gpu-embedded"
+    assert log == [("read", False)]
+
+
 # --- Remote-executor consumers ---
 
 

@@ -49,7 +49,13 @@ from strata.notebook.scopes import (
     session_visible_to_caller,
 )
 from strata.notebook.session import CellStateSnapshot, SessionManager
-from strata.notebook.workers import resolve_worker_spec, worker_transport
+from strata.notebook.workers import (
+    WorkerPolicy,
+    one_policy_read,
+    read_worker_policy,
+    resolve_worker_spec,
+    worker_transport,
+)
 from strata.notebook.writer import write_cell, write_cell_tests
 from strata.notebook.ws_payloads import (
     CascadeProgressPayload,
@@ -2001,21 +2007,25 @@ async def execute_cell_and_broadcast(
 
     execution_state.running_cell = cell_id
     session.mark_cell_running(cell_id)
+    policy = await _read_run_policy(session, cell_id, cell.source)
     await _broadcast_message(
         notebook_id,
         _make_message(
-            MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
+            MessageType.CELL_STATUS,
+            seq,
+            _running_payload(session, cell_id, cell.source, policy),
         ),
     )
 
     executor = _make_executor_with_progress(session, notebook_id)
     try:
-        if mode == "force":
-            result = await executor.execute_cell_force(cell_id, cell.source)
-        elif mode == "rerun":
-            result = await executor.execute_cell_rerun(cell_id, cell.source)
-        else:
-            result = await executor.execute_cell(cell_id, cell.source)
+        with one_policy_read(session.notebook_state, policy):
+            if mode == "force":
+                result = await executor.execute_cell_force(cell_id, cell.source)
+            elif mode == "rerun":
+                result = await executor.execute_cell_rerun(cell_id, cell.source)
+            else:
+                result = await executor.execute_cell(cell_id, cell.source)
 
         # Before broadcasting, so the payload carries this run's metadata.
         session.record_execution(
@@ -2160,20 +2170,22 @@ async def _execute_cascade(
                 )
 
                 session.mark_cell_running(cell_id)
+                policy = await _read_run_policy(session, cell_id, cell.source)
                 await _broadcast_message(
                     notebook_id,
                     _make_message(
                         MessageType.CELL_STATUS,
                         next_notebook_sequence(notebook_id),
-                        _running_payload(session, cell_id, cell.source),
+                        _running_payload(session, cell_id, cell.source, policy),
                     ),
                 )
 
                 try:
-                    if target_force and cell_id == plan.target_cell_id:
-                        result = await executor.execute_cell_rerun(cell_id, cell.source)
-                    else:
-                        result = await executor.execute_cell(cell_id, cell.source)
+                    with one_policy_read(session.notebook_state, policy):
+                        if target_force and cell_id == plan.target_cell_id:
+                            result = await executor.execute_cell_rerun(cell_id, cell.source)
+                        else:
+                            result = await executor.execute_cell(cell_id, cell.source)
                     session.record_execution(
                         cell_id,
                         result.duration_ms,
@@ -2627,20 +2639,22 @@ async def _run_partition_single_cell(
     cell_id = cell.id
     execution_state.running_cell = cell_id
     session.mark_cell_running(cell_id)
+    policy = await _read_run_policy(session, cell_id, cell.source)
     await _broadcast_message(
         notebook_id,
         _make_message(
             MessageType.CELL_STATUS,
             next_notebook_sequence(notebook_id),
-            _running_payload(session, cell_id, cell.source),
+            _running_payload(session, cell_id, cell.source, policy),
         ),
     )
 
     try:
-        if force:
-            result = await executor.execute_cell_rerun(cell_id, cell.source)
-        else:
-            result = await executor.execute_cell(cell_id, cell.source)
+        with one_policy_read(session.notebook_state, policy):
+            if force:
+                result = await executor.execute_cell_rerun(cell_id, cell.source)
+            else:
+                result = await executor.execute_cell(cell_id, cell.source)
 
         session.record_execution(
             cell_id,
@@ -2988,28 +3002,56 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
     )
 
 
-def _running_payload(session, cell_id: str, source: str) -> dict[str, Any]:
-    """Build the payload for a ``cell_status: running`` broadcast.
-
-    A cell bound for a remote worker adds ``remote_worker`` and ``remote_transport``
-    for the UI's dispatching badge. Uses the executor's own resolver
-    (:meth:`CellExecutor._resolve_effective_worker`) so the two cannot disagree.
+def _effective_worker_name(session, cell_id: str, source: str) -> str | None:
+    """The worker a run of the cell targets, resolved as
+    :meth:`CellExecutor._resolve_effective_worker` does; ``None`` if the source does not parse.
     """
     try:
         annotations = parse_annotations(source)
     except Exception:
-        return cell_status_payload(cell_id, "running")
+        return None
 
     cell = session.notebook_state.get_cell(cell_id)
-    effective_name = (
+    return (
         annotations.worker
         or (cell.worker if cell else None)
         or session.notebook_state.worker
         or "local"
     )
 
+
+async def _read_run_policy(session, cell_id: str, source: str) -> WorkerPolicy | None:
+    """Read the worker policy once, off the loop, for a cell's running frame and its run.
+
+    ``None`` for a local cell, or if the read fails: the run then reads it again and
+    reports the failure as the cell's error.
+    """
     try:
-        worker_spec = resolve_worker_spec(session.notebook_state, effective_name)
+        return await read_worker_policy(
+            session.notebook_state, _effective_worker_name(session, cell_id, source)
+        )
+    except Exception:
+        logger.warning("Worker policy read failed for cell %s", cell_id, exc_info=True)
+        return None
+
+
+def _running_payload(
+    session, cell_id: str, source: str, policy: WorkerPolicy | None = None
+) -> dict[str, Any]:
+    """Build the payload for a ``cell_status: running`` broadcast.
+
+    A cell bound for a remote worker adds ``remote_worker`` and ``remote_transport``
+    for the UI's dispatching badge. Uses the executor's own resolver
+    (:meth:`CellExecutor._resolve_effective_worker`) so the two cannot disagree.
+    ``policy`` is the run's, from :func:`_read_run_policy`, so the frame reads no store.
+    """
+    effective_name = _effective_worker_name(session, cell_id, source)
+    if effective_name is None:
+        return cell_status_payload(cell_id, "running")
+
+    try:
+        with one_policy_read(session.notebook_state, policy):
+            worker_spec = resolve_worker_spec(session.notebook_state, effective_name)
     except Exception:
         return cell_status_payload(cell_id, "running")
 
