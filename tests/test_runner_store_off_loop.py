@@ -35,8 +35,11 @@ def _gate(monkeypatch, obj, method: str) -> SimpleNamespace:
         gate.entered.set()
         # A guard, so a call stuck on the loop fails the test rather than hanging it.
         gate.release.wait(timeout=30)
-        gate.done.set()
-        return original(*args, **kwargs)
+        try:
+            return original(*args, **kwargs)
+        finally:
+            # After the call, so a test that waits on done sees what it wrote.
+            gate.done.set()
 
     monkeypatch.setattr(obj, method, gated)
     return gate
