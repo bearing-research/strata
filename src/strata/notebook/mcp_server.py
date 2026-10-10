@@ -1310,8 +1310,13 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         """
         return _publish(session_manager, session_id, cell_id, variable, title)
 
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    # The server's Host allowlist and origin guard already apply to /mcp; the SDK's own
+    # check (localhost only) would refuse hosts STRATA_ALLOWED_HOSTS admits.
+    security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
     # The default path would nest the endpoint at "/mcp/mcp".
-    app = mcp.streamable_http_app(streamable_http_path="/")
+    app = mcp.streamable_http_app(streamable_http_path="/", transport_security=security)
     # Lets tests read the tool list without an MCP client.
     app.state.mcp_server = mcp
     return app
