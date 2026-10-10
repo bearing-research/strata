@@ -3429,7 +3429,10 @@ class CellExecutor:
                 )
             blob_data = input_path.read_bytes()
             source_token = source_uri or f"local:{file_name}"
-            source_hash = hashlib.sha256(source_token.encode("utf-8")).hexdigest()[:16]
+            # The tenant is in the id: the store refuses an id another tenant holds, and two
+            # tenants' notebooks can share a notebook id and input URIs.
+            tenant_source = f"{tenant_id or ''}\0{source_token}"
+            source_hash = hashlib.sha256(tenant_source.encode()).hexdigest()[:16]
             artifact_id = (
                 f"nb_remote_input_{self.session.notebook_state.id}_{source_hash}_{var_name}"
             )
