@@ -330,7 +330,7 @@ async def _put_artifact(
 
 
 @router.get("/v1/artifacts/{artifact_id}/v/{version}", response_model=ArtifactInfoResponse)
-async def get_artifact_info(
+def get_artifact_info(
     artifact_id: str, version: int, store: ReadStore, tenant_filter: CurrentTenant
 ):
     """Get artifact metadata.
@@ -775,7 +775,7 @@ async def _put_artifact_by_provenance(
     "/v1/artifacts/by-provenance/{provenance_hash}",
     response_model=ArtifactProvenanceMatchResponse,
 )
-async def find_artifact_by_provenance(
+def find_artifact_by_provenance(
     store: ReadStore,
     tenant_filter: CurrentTenant,
     principal: CurrentPrincipal,
@@ -912,13 +912,13 @@ UsageScopeDep = Annotated[UsageScope, Depends(usage_scope)]
 
 
 @router.get("/v1/artifacts/stats")
-async def get_artifact_stats(scope: UsageScopeDep):
+def get_artifact_stats(scope: UsageScopeDep):
     """Get artifact store statistics: whole store in personal mode, one tenant's in service mode."""
     return scope.store.stats(tenant=scope.tenant, include_tenantless=scope.include_tenantless)
 
 
 @router.get("/v1/artifacts/usage")
-async def get_artifact_usage(scope: UsageScopeDep):
+def get_artifact_usage(scope: UsageScopeDep):
     """Get artifact store usage: bytes, artifact and version counts, unreferenced count.
 
     Whole store in personal mode; one tenant's in service mode, which is what metering reads.
@@ -927,7 +927,7 @@ async def get_artifact_usage(scope: UsageScopeDep):
 
 
 @router.get("/v1/artifacts")
-async def list_artifacts(
+def list_artifacts(
     store: PersonalModeStore,
     tenant_filter: CurrentTenant,
     # Bounded: these feed "LIMIT ? OFFSET ?", and SQLite treats a negative limit as unbounded.
@@ -1021,7 +1021,7 @@ class PinRequest(BaseModel):
 
 
 @router.post("/v1/artifacts/{artifact_id}/v/{version}/pin")
-async def pin_artifact(
+def pin_artifact(
     artifact_id: str,
     version: int,
     request: PinRequest,
@@ -1049,7 +1049,7 @@ async def pin_artifact(
 
 
 @router.delete("/v1/artifacts/{artifact_id}/v/{version}/pin")
-async def unpin_artifact(
+def unpin_artifact(
     artifact_id: str,
     version: int,
     reason: str,
@@ -1283,7 +1283,7 @@ async def get_artifact_lineage(
     "/v1/artifacts/{artifact_id}/v/{version}/dependents",
     response_model=ArtifactDependentsResponse,
 )
-async def get_artifact_dependents(
+def get_artifact_dependents(
     artifact_id: str,
     version: int,
     store: ReadStore,
