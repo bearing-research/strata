@@ -11,6 +11,9 @@ are swallowed as part of the name.
 
 from __future__ import annotations
 
+import functools
+
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -34,28 +37,12 @@ from strata.types import (
 router = APIRouter(tags=["names"])
 
 
-async def _follow_alias_in_table(
-    store, artifact_id: str, version: int, alias: str, tenant: str | None
-) -> None:
-    """Move the table tag of the same name, if this version was written to a table."""
-    import functools
-
-    import anyio.to_thread
-
+def _follow_alias_in_table(store, name: str, alias: str, tenant: str | None) -> None:
+    """Move the table tag of the same name to the alias's version, if it was written to a table."""
     from strata.server import get_state
-    from strata.table_export import move_alias_tag
+    from strata.table_export import follow_alias
 
-    await anyio.to_thread.run_sync(
-        functools.partial(
-            move_alias_tag,
-            store,
-            artifact_id,
-            version,
-            alias,
-            config=get_state().config,
-            tenant=tenant,
-        )
-    )
+    follow_alias(store, name, alias, config=get_state().config, tenant=tenant)
 
 
 class AliasSetRequest(BaseModel):
@@ -85,64 +72,67 @@ async def set_alias(
             json_body=request.model_dump(),
         )
 
-    from strata.server import get_state
+    def local():
+        from strata.server import get_state
 
-    state = get_state()
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
+        state = get_state()
+        tenant_id = principal.tenant if principal else None
+        actor = principal.id if principal else None
 
-    if alias in state.config.registry_protected_aliases:
+        if alias in state.config.registry_protected_aliases:
+            try:
+                queued = store.request_alias_change(
+                    name,
+                    alias,
+                    "set",
+                    artifact_id=request.artifact_id,
+                    version=request.version,
+                    tenant=tenant_id,
+                    actor=actor,
+                )
+            except ArtifactNotFoundError:
+                raise HTTPException(status_code=404, detail="Artifact not found")
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            if not queued:
+                # Alias already points at this version: nothing to approve, so idempotent promote
+                # cells re-run without refiling.
+                return {
+                    "status": "unchanged",
+                    "name": name,
+                    "alias": alias,
+                    "artifact_uri": f"strata://artifact/{request.artifact_id}@v={request.version}",
+                }
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "pending",
+                    "name": name,
+                    "alias": alias,
+                    "detail": f"Alias '{alias}' is protected; the change awaits approval "
+                    "(POST /v1/registry/pending/approve).",
+                },
+            )
+
         try:
-            queued = store.request_alias_change(
-                name,
-                alias,
-                "set",
-                artifact_id=request.artifact_id,
-                version=request.version,
-                tenant=tenant_id,
-                actor=actor,
+            changed = store.set_alias(
+                name, alias, request.artifact_id, request.version, tenant=tenant_id, actor=actor
             )
         except ArtifactNotFoundError:
             raise HTTPException(status_code=404, detail="Artifact not found")
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        if not queued:
-            # Alias already points at this version: nothing to approve, so idempotent promote cells
-            # re-run without refiling.
-            return {
-                "status": "unchanged",
-                "name": name,
-                "alias": alias,
-                "artifact_uri": f"strata://artifact/{request.artifact_id}@v={request.version}",
-            }
-        return JSONResponse(
-            status_code=202,
-            content={
-                "status": "pending",
-                "name": name,
-                "alias": alias,
-                "detail": f"Alias '{alias}' is protected; the change awaits approval "
-                "(POST /v1/registry/pending/approve).",
-            },
-        )
+        if changed:
+            _follow_alias_in_table(store, name, alias, tenant_id)
 
-    try:
-        changed = store.set_alias(
-            name, alias, request.artifact_id, request.version, tenant=tenant_id, actor=actor
-        )
-    except ArtifactNotFoundError:
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if changed:
-        await _follow_alias_in_table(store, request.artifact_id, request.version, alias, tenant_id)
+        return {
+            "status": "applied" if changed else "unchanged",
+            "name": name,
+            "alias": alias,
+            "artifact_uri": f"strata://artifact/{request.artifact_id}@v={request.version}",
+        }
 
-    return {
-        "status": "applied" if changed else "unchanged",
-        "name": name,
-        "alias": alias,
-        "artifact_uri": f"strata://artifact/{request.artifact_id}@v={request.version}",
-    }
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/names/{name:path}/aliases/{alias}")
@@ -154,19 +144,22 @@ async def resolve_alias(name: str, alias: str, store: ReadStore, principal: Curr
             target, "GET", f"/v1/names/{quoted(name, path=True)}/aliases/{quoted(alias)}"
         )
 
-    tenant_id = principal.tenant if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
 
-    artifact = store.resolve_alias(name, alias, tenant=tenant_id)
-    if artifact is None:
-        raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
-    return {
-        "name": name,
-        "alias": alias,
-        "artifact_uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
-        "artifact_id": artifact.id,
-        "version": artifact.version,
-        "state": artifact.state,
-    }
+        artifact = store.resolve_alias(name, alias, tenant=tenant_id)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
+        return {
+            "name": name,
+            "alias": alias,
+            "artifact_uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+            "artifact_id": artifact.id,
+            "version": artifact.version,
+            "state": artifact.state,
+        }
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.delete("/v1/names/{name:path}/aliases/{alias}")
@@ -180,24 +173,27 @@ async def delete_alias(
             target, "DELETE", f"/v1/names/{quoted(name, path=True)}/aliases/{quoted(alias)}"
         )
 
-    from strata.server import get_state
+    def local():
+        from strata.server import get_state
 
-    state = get_state()
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
+        state = get_state()
+        tenant_id = principal.tenant if principal else None
+        actor = principal.id if principal else None
 
-    if alias in state.config.registry_protected_aliases:
-        if store.resolve_alias(name, alias, tenant=tenant_id) is None:
+        if alias in state.config.registry_protected_aliases:
+            if store.resolve_alias(name, alias, tenant=tenant_id) is None:
+                raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
+            store.request_alias_change(name, alias, "delete", tenant=tenant_id, actor=actor)
+            return JSONResponse(
+                status_code=202,
+                content={"status": "pending", "name": name, "alias": alias},
+            )
+
+        if not store.delete_alias(name, alias, tenant=tenant_id, actor=actor):
             raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
-        store.request_alias_change(name, alias, "delete", tenant=tenant_id, actor=actor)
-        return JSONResponse(
-            status_code=202,
-            content={"status": "pending", "name": name, "alias": alias},
-        )
+        return {"status": "deleted", "name": name, "alias": alias}
 
-    if not store.delete_alias(name, alias, tenant=tenant_id, actor=actor):
-        raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
-    return {"status": "deleted", "name": name, "alias": alias}
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/names/{name:path}/aliases")
@@ -207,21 +203,24 @@ async def list_aliases(name: str, store: ReadStore, principal: CurrentPrincipal)
     if target is not None:
         return await relay(target, "GET", f"/v1/names/{quoted(name, path=True)}/aliases")
 
-    tenant_id = principal.tenant if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
 
-    aliases = store.list_aliases(name, tenant=tenant_id)
-    return {
-        "name": name,
-        "aliases": [
-            {
-                "alias": a.alias,
-                "artifact_id": a.artifact_id,
-                "version": a.version,
-                "updated_at": a.updated_at,
-            }
-            for a in aliases
-        ],
-    }
+        aliases = store.list_aliases(name, tenant=tenant_id)
+        return {
+            "name": name,
+            "aliases": [
+                {
+                    "alias": a.alias,
+                    "artifact_id": a.artifact_id,
+                    "version": a.version,
+                    "updated_at": a.updated_at,
+                }
+                for a in aliases
+            ],
+        }
+
+    return await anyio.to_thread.run_sync(local)
 
 
 class TagSetRequest(BaseModel):
@@ -247,18 +246,21 @@ async def set_tag(
             json_body=request.model_dump(),
         )
 
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
+        actor = principal.id if principal else None
 
-    try:
-        store.set_tag(
-            artifact_id, version, request.key, request.value, tenant=tenant_id, actor=actor
-        )
-    except ArtifactNotFoundError:
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"artifact_id": artifact_id, "version": version, request.key: request.value}
+        try:
+            store.set_tag(
+                artifact_id, version, request.key, request.value, tenant=tenant_id, actor=actor
+            )
+        except ArtifactNotFoundError:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"artifact_id": artifact_id, "version": version, request.key: request.value}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/artifacts/{artifact_id}/v/{version}/tags")
@@ -268,13 +270,16 @@ async def get_tags(artifact_id: str, version: int, store: ReadStore, principal: 
     if target is not None:
         return await relay(target, "GET", f"/v1/artifacts/{quoted(artifact_id)}/v/{version}/tags")
 
-    tenant_id = principal.tenant if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
 
-    return {
-        "artifact_id": artifact_id,
-        "version": version,
-        "tags": store.get_tags(artifact_id, version, tenant=tenant_id),
-    }
+        return {
+            "artifact_id": artifact_id,
+            "version": version,
+            "tags": store.get_tags(artifact_id, version, tenant=tenant_id),
+        }
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.delete("/v1/artifacts/{artifact_id}/v/{version}/tags/{key}")
@@ -290,12 +295,15 @@ async def delete_tag(
             f"/v1/artifacts/{quoted(artifact_id)}/v/{version}/tags/{quoted(key)}",
         )
 
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
+        actor = principal.id if principal else None
 
-    if not store.delete_tag(artifact_id, version, key, tenant=tenant_id, actor=actor):
-        raise HTTPException(status_code=404, detail=f"Tag '{key}' not found")
-    return {"status": "deleted", "artifact_id": artifact_id, "version": version, "key": key}
+        if not store.delete_tag(artifact_id, version, key, tenant=tenant_id, actor=actor):
+            raise HTTPException(status_code=404, detail=f"Tag '{key}' not found")
+        return {"status": "deleted", "artifact_id": artifact_id, "version": version, "key": key}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 # This greedy {name:path} route must stay registered AFTER the "/v1/names/{name:path}/aliases/..."
@@ -308,19 +316,22 @@ async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal)
     if target is not None:
         return await relay(target, "GET", f"/v1/names/{quoted(name, path=True)}")
 
-    tenant_id = principal.tenant if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
 
-    name_info = store.get_name(name, tenant=tenant_id)
-    if name_info is None:
-        raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
+        name_info = store.get_name(name, tenant=tenant_id)
+        if name_info is None:
+            raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
 
-    artifact_uri = f"strata://artifact/{name_info.artifact_id}@v={name_info.version}"
+        artifact_uri = f"strata://artifact/{name_info.artifact_id}@v={name_info.version}"
 
-    return NameResolveResponse(
-        artifact_uri=artifact_uri,
-        version=name_info.version,
-        updated_at=name_info.updated_at,
-    )
+        return NameResolveResponse(
+            artifact_uri=artifact_uri,
+            version=name_info.version,
+            updated_at=name_info.updated_at,
+        )
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.post("/v1/names", response_model=NameSetResponse)
@@ -330,29 +341,32 @@ async def set_name(request: NameSetRequest, store: WriteStore, principal: Curren
     if target is not None:
         return await relay(target, "POST", "/v1/names", json_body=request.model_dump())
 
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
+        actor = principal.id if principal else None
 
-    try:
-        store.set_name(
-            request.name,
-            request.artifact_id,
-            request.version,
-            tenant=tenant_id,
-            actor=actor,
+        try:
+            store.set_name(
+                request.name,
+                request.artifact_id,
+                request.version,
+                tenant=tenant_id,
+                actor=actor,
+            )
+        except ArtifactNotFoundError:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        name_uri = f"strata://name/{request.name}"
+        artifact_uri = f"strata://artifact/{request.artifact_id}@v={request.version}"
+
+        return NameSetResponse(
+            name_uri=name_uri,
+            artifact_uri=artifact_uri,
         )
-    except ArtifactNotFoundError:
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
-    name_uri = f"strata://name/{request.name}"
-    artifact_uri = f"strata://artifact/{request.artifact_id}@v={request.version}"
-
-    return NameSetResponse(
-        name_uri=name_uri,
-        artifact_uri=artifact_uri,
-    )
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.delete("/v1/names/{name:path}")
@@ -362,12 +376,15 @@ async def delete_name(name: str, store: PersonalModeStore, principal: CurrentPri
     if target is not None:
         return await relay(target, "DELETE", f"/v1/names/{quoted(name, path=True)}")
 
-    tenant_id = principal.tenant if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
 
-    if not store.delete_name(name, tenant=tenant_id):
-        raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
+        if not store.delete_name(name, tenant=tenant_id):
+            raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
 
-    return {"status": "deleted", "name": name}
+        return {"status": "deleted", "name": name}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/names")
@@ -377,19 +394,22 @@ async def list_names(store: ReadStore, principal: CurrentPrincipal):
     if target is not None:
         return await relay(target, "GET", "/v1/names")
 
-    tenant_id = principal.tenant if principal else None
+    def local():
+        tenant_id = principal.tenant if principal else None
 
-    names = store.list_names(tenant=tenant_id)
-    return {
-        "names": [
-            {
-                "name": n.name,
-                "artifact_uri": f"strata://artifact/{n.artifact_id}@v={n.version}",
-                "updated_at": n.updated_at,
-            }
-            for n in names
-        ]
-    }
+        names = store.list_names(tenant=tenant_id)
+        return {
+            "names": [
+                {
+                    "name": n.name,
+                    "artifact_uri": f"strata://artifact/{n.artifact_id}@v={n.version}",
+                    "updated_at": n.updated_at,
+                }
+                for n in names
+            ]
+        }
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/artifacts/names/{name:path}/status", response_model=NameStatusResponse)
@@ -403,7 +423,9 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
 
     tenant_id = principal.tenant if principal else None
 
-    status = store.get_name_status(name, tenant=tenant_id)
+    status = await anyio.to_thread.run_sync(
+        functools.partial(store.get_name_status, name, tenant=tenant_id)
+    )
     if status is None:
         raise HTTPException(status_code=404, detail=f"Name '{name}' not found")
 

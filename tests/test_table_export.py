@@ -316,6 +316,95 @@ def test_a_protected_alias_becomes_a_tag_when_it_is_approved(tmp_path, notebook_
         assert refs["champion"].snapshot_id == promoted.table_snapshot
 
 
+class TestInterleavedAliasMoves:
+    """Two alias moves whose table-tag steps interleave leave the tag where the alias points.
+
+    The first move's tag lands after the second move has finished, carrying the version the alias
+    has already left; the route must notice and follow the alias again.
+    """
+
+    @staticmethod
+    def _second_move_runs_inside_the_first(monkeypatch, first, second_move):
+        import strata.table_export as table_export
+
+        real = table_export.move_alias_tag
+        moved = []
+
+        def interleaved(store, artifact_id, version, alias, **kwargs):
+            if (artifact_id, version) == (first.id, first.version) and not moved:
+                moved.append(second_move())
+            return real(store, artifact_id, version, alias, **kwargs)
+
+        monkeypatch.setattr(table_export, "move_alias_tag", interleaved)
+        return moved
+
+    def test_two_alias_sets(self, tmp_path, notebook_store, team, monkeypatch):
+        warehouse = tmp_path / "wh"
+        first = _version(notebook_store, pa.table({"trip": [1]}), tag="1")
+        second = _version(notebook_store, pa.table({"trip": [2]}), tag="2")
+        TestPromotingToATable._promote(notebook_store, first, team, warehouse)
+        now = TestPromotingToATable._promote(notebook_store, second, team, warehouse)
+        url = f"{team.url}/v1/names/taxi/features/aliases/champion"
+
+        def move_back_to_second():
+            body = {"artifact_id": second.id, "version": second.version}
+            return httpx.put(url, json=body, timeout=30).status_code
+
+        moved = self._second_move_runs_inside_the_first(monkeypatch, first, move_back_to_second)
+        response = httpx.put(
+            url, json={"artifact_id": first.id, "version": first.version}, timeout=30
+        )
+
+        assert response.status_code == 200, response.text
+        assert moved == [200]
+        assert httpx.get(url, timeout=30).json()["version"] == second.version
+        refs = _catalog(warehouse).load_table("taxi.features").refs()
+        assert refs["champion"].snapshot_id == now.table_snapshot
+
+    def test_two_approvals(self, tmp_path, notebook_store, monkeypatch):
+        from strata.artifact_transfer import RemoteStore, promote_artifact
+        from tests.conftest import run_server_with_context
+
+        warehouse = tmp_path / "wh"
+        with run_server_with_context(
+            tmp_path / "cache",
+            tmp_path / "team",
+            "personal",
+            registry_protected_aliases=["champion"],
+        ) as ctx:
+            first = _version(notebook_store, pa.table({"trip": [1]}), tag="1")
+            second = _version(notebook_store, pa.table({"trip": [2]}), tag="2")
+            promoted = {}
+            for version in (second, first):
+                promoted[version.version] = promote_artifact(
+                    notebook_store.artifact_store,
+                    RemoteStore(ctx.base_url),
+                    version,
+                    name="taxi/features",
+                    alias="champion",
+                    table=f"{warehouse}#taxi.features",
+                )
+            url = f"{ctx.base_url}/v1/names/taxi/features/aliases/champion"
+            decision = {"name": "taxi/features", "alias": "champion"}
+            approve = f"{ctx.base_url}/v1/registry/pending/approve"
+
+            def request_and_approve_second():
+                body = {"artifact_id": second.id, "version": second.version}
+                assert httpx.put(url, json=body, timeout=30).status_code == 202
+                return httpx.post(approve, json=decision, timeout=30).status_code
+
+            moved = self._second_move_runs_inside_the_first(
+                monkeypatch, first, request_and_approve_second
+            )
+            response = httpx.post(approve, json=decision, timeout=30)
+
+            assert response.status_code == 200, response.text
+            assert moved == [200]
+            assert httpx.get(url, timeout=30).json()["version"] == second.version
+            refs = _catalog(warehouse).load_table("taxi.features").refs()
+            assert refs["champion"].snapshot_id == promoted[second.version].table_snapshot
+
+
 def test_the_cli_writes_a_local_artifact_into_a_table(tmp_path, notebook_store, capsys):
     import argparse
 

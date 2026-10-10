@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -39,13 +40,16 @@ async def registry_audit(
             params={"name": name, "artifact_id": artifact_id, "limit": limit},
         )
 
-    if principal is None or principal.has_scope("admin:*"):
-        entries = store.read_audit(name=name, artifact_id=artifact_id, limit=limit)
-    else:
-        entries = store.read_audit(
-            name=name, artifact_id=artifact_id, limit=limit, tenant=principal.tenant
-        )
-    return {"entries": entries}
+    def local():
+        if principal is None or principal.has_scope("admin:*"):
+            entries = store.read_audit(name=name, artifact_id=artifact_id, limit=limit)
+        else:
+            entries = store.read_audit(
+                name=name, artifact_id=artifact_id, limit=limit, tenant=principal.tenant
+            )
+        return {"entries": entries}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/events")
@@ -66,11 +70,14 @@ async def store_events(
     if target is not None:
         return await forward(target, "GET", "/v1/events", params={"since": since, "limit": limit})
 
-    if principal is None or principal.has_scope("admin:*"):
-        events = store.read_events(since=since, limit=limit)
-    else:
-        events = store.read_events(since=since, limit=limit, tenant=principal.tenant)
-    return {"events": events, "next": events[-1]["seq"] if events else since}
+    def local():
+        if principal is None or principal.has_scope("admin:*"):
+            events = store.read_events(since=since, limit=limit)
+        else:
+            events = store.read_events(since=since, limit=limit, tenant=principal.tenant)
+        return {"events": events, "next": events[-1]["seq"] if events else since}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/registry/summary")
@@ -80,9 +87,12 @@ async def registry_summary(store: ReadStore, principal: CurrentPrincipal):
     if target is not None:
         return await forward(target, "GET", "/v1/registry/summary")
 
-    if principal is None or principal.has_scope("admin:*"):
-        return {"names": registry_service.summary(store, tenant=None, all_tenants=True)}
-    return {"names": registry_service.summary(store, tenant=principal.tenant)}
+    def local():
+        if principal is None or principal.has_scope("admin:*"):
+            return {"names": registry_service.summary(store, tenant=None, all_tenants=True)}
+        return {"names": registry_service.summary(store, tenant=principal.tenant)}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.get("/v1/registry/artifacts")
@@ -104,10 +114,13 @@ async def registry_artifacts_by_tag(
             params["tag_value"] = tag_value
         return await forward(target, "GET", "/v1/registry/artifacts", params=params)
 
-    tenant = principal.tenant if principal is not None else None
-    return {
-        "artifacts": registry_service.artifacts_by_tag(store, tag_key, tag_value, tenant=tenant)
-    }
+    def local():
+        tenant = principal.tenant if principal is not None else None
+        return {
+            "artifacts": registry_service.artifacts_by_tag(store, tag_key, tag_value, tenant=tenant)
+        }
+
+    return await anyio.to_thread.run_sync(local)
 
 
 class PendingDecisionRequest(BaseModel):
@@ -122,8 +135,11 @@ async def registry_pending(store: ReadStore, principal: CurrentPrincipal):
     if target is not None:
         return await forward(target, "GET", "/v1/registry/pending")
 
-    tenant_id = principal.tenant if principal else None
-    return {"pending": store.list_pending_changes(tenant=tenant_id)}
+    def local():
+        tenant_id = principal.tenant if principal else None
+        return {"pending": store.list_pending_changes(tenant=tenant_id)}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.post("/v1/registry/pending/approve")
@@ -143,30 +159,31 @@ async def approve_pending(request: PendingDecisionRequest, decision: RegistryDec
             json_body={"name": request.name, "alias": request.alias},
         )
 
-    principal, store = decision
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
-    is_superadmin = principal is not None and principal.has_scope("admin:*")
+    def local():
+        principal, store = decision
+        tenant_id = principal.tenant if principal else None
+        actor = principal.id if principal else None
+        is_superadmin = principal is not None and principal.has_scope("admin:*")
 
-    try:
-        applied = store.approve_alias_change(
-            request.name,
-            request.alias,
-            tenant=tenant_id,
-            actor=actor,
-            require_distinct_approver=not is_superadmin,
-        )
-    except ValueError as e:
-        msg = str(e)
-        status = 403 if msg.startswith("Separation of duty") else 404
-        raise HTTPException(status_code=status, detail=msg)
-    if applied.get("action") == "set":
-        from strata.api.routers.names import _follow_alias_in_table
+        try:
+            applied = store.approve_alias_change(
+                request.name,
+                request.alias,
+                tenant=tenant_id,
+                actor=actor,
+                require_distinct_approver=not is_superadmin,
+            )
+        except ValueError as e:
+            msg = str(e)
+            status = 403 if msg.startswith("Separation of duty") else 404
+            raise HTTPException(status_code=status, detail=msg)
+        if applied.get("action") == "set":
+            from strata.api.routers.names import _follow_alias_in_table
 
-        await _follow_alias_in_table(
-            store, applied["artifact_id"], applied["version"], request.alias, tenant_id
-        )
-    return {"status": "approved", "applied": applied}
+            _follow_alias_in_table(store, request.name, request.alias, tenant_id)
+        return {"status": "approved", "applied": applied}
+
+    return await anyio.to_thread.run_sync(local)
 
 
 @router.post("/v1/registry/pending/reject")
@@ -184,14 +201,17 @@ async def reject_pending(request: PendingDecisionRequest, decision: RegistryDeci
             json_body={"name": request.name, "alias": request.alias},
         )
 
-    principal, store = decision
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
+    def local():
+        principal, store = decision
+        tenant_id = principal.tenant if principal else None
+        actor = principal.id if principal else None
 
-    try:
-        rejected = store.reject_alias_change(
-            request.name, request.alias, tenant=tenant_id, actor=actor
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return {"status": "rejected", "rejected": rejected}
+        try:
+            rejected = store.reject_alias_change(
+                request.name, request.alias, tenant=tenant_id, actor=actor
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        return {"status": "rejected", "rejected": rejected}
+
+    return await anyio.to_thread.run_sync(local)
