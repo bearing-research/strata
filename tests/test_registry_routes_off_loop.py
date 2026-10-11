@@ -7,37 +7,16 @@ route's store call on an event and checks that another request completes meanwhi
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import threading
 from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact_store import TransformSpec, get_artifact_store, reset_artifact_store
-from strata.config import StrataConfig
+from strata.artifact_store import TransformSpec, get_artifact_store
+from tests.conftest import hold, ran_while_held
 
 PROTECTED = ["gold", "silver", "bronze"]
-
-
-class Gate:
-    """Blocks one store method until ``release`` is set."""
-
-    def __init__(self):
-        self.entered = threading.Event()
-        self.release = threading.Event()
-        self.done = threading.Event()
-
-    def wrap(self, method):
-        def gated(*args, **kwargs):
-            self.entered.set()
-            # A guard, so a call stuck on the loop fails the test rather than hanging it.
-            self.release.wait(timeout=30)
-            self.done.set()
-            return method(*args, **kwargs)
-
-        return gated
 
 
 def _ready(store, artifact_id: str) -> int:
@@ -60,26 +39,11 @@ def _ready(store, artifact_id: str) -> int:
 
 
 @pytest.fixture
-def served(tmp_path):
+def served(in_process_server):
     """An in-process personal server with a name, aliases, a tag and two pending changes."""
     import strata.server as server_module
-    from strata.server import ServerState
-    from strata.tenant_registry import reset_tenant_registry
 
-    config = StrataConfig(
-        host="127.0.0.1",
-        deployment_mode="personal",
-        cache_dir=tmp_path / "cache",
-        artifact_dir=tmp_path / "artifacts",
-        metadata_db=tmp_path / "meta.sqlite",
-        rate_limit_enabled=False,
-        registry_protected_aliases=PROTECTED,
-    )
-    reset_artifact_store()
-    reset_tenant_registry()
-    original = server_module._state
-    state = ServerState(config)
-    server_module._state = state
+    config = in_process_server(registry_protected_aliases=PROTECTED).config
     store = get_artifact_store(config.artifact_dir)
     version = _ready(store, "a1")
     store.set_name("n", "a1", version)
@@ -88,15 +52,7 @@ def served(tmp_path):
     store.set_tag("a1", version, "k", "v")
     for alias in ("gold", "silver"):
         store.request_alias_change("n", alias, "set", artifact_id="a1", version=version)
-    gate = Gate()
-    try:
-        yield SimpleNamespace(store=store, gate=gate, app=server_module.app)
-    finally:
-        gate.release.set()
-        state.streams.shutdown_cleanups()
-        server_module._state = original
-        reset_artifact_store()
-        reset_tenant_registry()
+    return SimpleNamespace(store=store, app=server_module.app)
 
 
 _ROUTES = [
@@ -191,22 +147,15 @@ _ROUTES = [
 async def test_a_blocked_store_call_does_not_block_the_server(
     served, monkeypatch, method, path, body, store_method, expected
 ):
-    gate = served.gate
-    monkeypatch.setattr(served.store, store_method, gate.wrap(getattr(served.store, store_method)))
+    gate = hold(monkeypatch, served.store, store_method)
 
     async with AsyncClient(
         transport=ASGITransport(app=served.app), base_url="http://test"
     ) as client:
-        blocked = asyncio.ensure_future(client.request(method, path, json=body))
-        try:
-            assert await asyncio.to_thread(gate.entered.wait, 30), f"{store_method} was not called"
-            other = await client.get("/health")
-            answered_while_blocked = not gate.done.is_set()
-        finally:
-            gate.release.set()
-        response = await blocked
+        answered_while_blocked, response = await ran_while_held(
+            gate, client.request(method, path, json=body), client
+        )
 
-    assert other.status_code == 200
     assert answered_while_blocked
     assert response.status_code in (200, 202), response.text
     assert expected in response.text

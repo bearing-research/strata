@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import shutil
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -113,6 +114,23 @@ def manager(monkeypatch, clock, memory) -> SessionManager:
     return manager
 
 
+async def _uv_succeeds(*args, **kwargs):
+    return SimpleNamespace(
+        success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
+    )
+
+
+def _fake_rscript(tmp_path, monkeypatch) -> Path:
+    """An ``Rscript`` on PATH; ``fast_notebook_env`` keeps WarmProcessPool.start a no-op, so no
+    pool runs it."""
+    rscript = tmp_path / "bin" / "Rscript"
+    rscript.parent.mkdir()
+    rscript.write_text("#!/bin/sh\nexit 1\n")
+    rscript.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{rscript.parent}{os.pathsep}{os.environ['PATH']}")
+    return rscript
+
+
 def _notebook(tmp_path, name: str, *, environment: bool = False):
     notebook_dir = create_notebook(tmp_path, name, initialize_environment=environment)
     add_cell_to_notebook(notebook_dir, "root")
@@ -170,11 +188,6 @@ class TestWarmPoolAndTimeout:
         self, config, manager, monkeypatch, tmp_path, sync_after_open
     ):
         # The open's environment job, or a later sync route, must not block its own pool.
-        async def _uv_succeeds(*args, **kwargs):
-            return SimpleNamespace(
-                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
-            )
-
         monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
         notebook_dir = _notebook(tmp_path, "served", environment=True)
         transport = httpx.ASGITransport(app=create_test_app())
@@ -207,49 +220,33 @@ class TestWarmPoolAndTimeout:
     async def test_a_notebook_with_r_cells_opened_through_the_server_gets_an_r_pool(
         self, config, manager, monkeypatch, tmp_path
     ):
-        async def _uv_succeeds(*args, **kwargs):
-            return SimpleNamespace(
-                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
-            )
-
         monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
-        # The fixture keeps WarmProcessPool.start a no-op, so this never runs a worker.
-        rscript = tmp_path / "bin" / "Rscript"
-        rscript.parent.mkdir()
-        rscript.write_text("#!/bin/sh\nexit 1\n")
-        rscript.chmod(0o755)
-        monkeypatch.setenv("PATH", f"{rscript.parent}{os.pathsep}{os.environ['PATH']}")
+        rscript = _fake_rscript(tmp_path, monkeypatch)
         notebook_dir = _notebook(tmp_path, "served-r", environment=True)
         add_cell_to_notebook(notebook_dir, "rcell", language="r")
         write_cell(notebook_dir, "rcell", "y <- 1")
         transport = httpx.ASGITransport(app=create_test_app())
+        session = None
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                opened = await client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
 
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            opened = await client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
-
-        assert opened.status_code == 200, opened.text
-        session = manager.get_session(opened.json()["session_id"])
-        assert session is not None
-        assert session.r_warm_pool is not None
-        assert session.r_warm_pool.worker_command is not None
-        assert session.r_warm_pool.worker_command[0] == str(rscript)
+            assert opened.status_code == 200, opened.text
+            session = manager.get_session(opened.json()["session_id"])
+            assert session is not None
+            assert session.r_warm_pool is not None
+            assert session.r_warm_pool.worker_command is not None
+            assert session.r_warm_pool.worker_command[0] == str(rscript)
+        finally:
+            if session is not None:
+                await asyncio.gather(*manager.close_session(session.id))
 
     @pytest.mark.parametrize("surface", ["rest", "mcp"])
     async def test_the_first_r_cell_added_through_the_server_starts_an_r_pool(
         self, config, manager, monkeypatch, tmp_path, surface
     ):
-        async def _uv_succeeds(*args, **kwargs):
-            return SimpleNamespace(
-                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
-            )
-
         monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
-        # The fixture keeps WarmProcessPool.start a no-op, so this never runs a worker.
-        rscript = tmp_path / "bin" / "Rscript"
-        rscript.parent.mkdir()
-        rscript.write_text("#!/bin/sh\nexit 1\n")
-        rscript.chmod(0o755)
-        monkeypatch.setenv("PATH", f"{rscript.parent}{os.pathsep}{os.environ['PATH']}")
+        rscript = _fake_rscript(tmp_path, monkeypatch)
         notebook_dir = _notebook(tmp_path, "python-then-r", environment=True)
         transport = httpx.ASGITransport(app=create_test_app())
         session = None
@@ -283,11 +280,6 @@ class TestWarmPoolAndTimeout:
         self, config, manager, monkeypatch, tmp_path
     ):
         # R installed after the first R cell was added: the next sync must still start its pool.
-        async def _uv_succeeds(*args, **kwargs):
-            return SimpleNamespace(
-                success=True, error=None, operation_log=EnvironmentOperationLog(command="uv")
-            )
-
         monkeypatch.setattr("strata.notebook.dependencies.run_uv_command_streaming", _uv_succeeds)
         which = shutil.which
         monkeypatch.setattr(
@@ -313,11 +305,7 @@ class TestWarmPoolAndTimeout:
                 assert session.warm_pool is not None
                 assert session.r_warm_pool is None
 
-                rscript = tmp_path / "bin" / "Rscript"
-                rscript.parent.mkdir()
-                rscript.write_text("#!/bin/sh\nexit 1\n")
-                rscript.chmod(0o755)
-                monkeypatch.setenv("PATH", f"{rscript.parent}{os.pathsep}{os.environ['PATH']}")
+                rscript = _fake_rscript(tmp_path, monkeypatch)
                 monkeypatch.setattr(shutil, "which", which)
                 synced = await client.post(f"/v1/notebooks/{session.id}/environment/sync")
 
