@@ -20,7 +20,6 @@ from strata.notebook.models import (
     WorkerSpec,
 )
 from strata.notebook.parser import parse_notebook
-from strata.notebook.pool import WarmProcessPool
 from strata.notebook.session import NotebookSession
 
 _MINIMAL_PNG_LITERAL = (
@@ -2288,59 +2287,41 @@ def add(y):
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.warm_pool
-    async def test_execute_uses_warm_pool_when_available(self, sample_notebook):
-        sample_notebook.ensure_venv_synced()
-        pool = WarmProcessPool(
-            sample_notebook.path,
-            pool_size=1,
-            python_executable=sample_notebook.venv_python or Path("python"),
-        )
-        await pool.start()
+    async def test_execute_uses_warm_pool_when_available(self, sample_notebook, warm_pool):
+        pool = await warm_pool(sample_notebook)
+        executor = CellExecutor(sample_notebook, pool)
+        result = await executor.execute_cell("cell1", "x = 1 + 1")
 
-        try:
-            executor = CellExecutor(sample_notebook, pool)
-            result = await executor.execute_cell("cell1", "x = 1 + 1")
-
-            assert result.success is True
-            assert result.execution_method == "warm"
-            assert result.outputs["x"]["preview"] == 2
-        finally:
-            await pool.drain()
+        assert result.success is True
+        assert result.execution_method == "warm"
+        assert result.outputs["x"]["preview"] == 2
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.warm_pool
-    async def test_warm_execution_applies_env_annotations(self, sample_notebook):
+    async def test_warm_execution_applies_env_annotations(self, sample_notebook, warm_pool):
         """Warm workers should honor @env overrides the same way cold execution does."""
-        sample_notebook.ensure_venv_synced()
-        pool = WarmProcessPool(
-            sample_notebook.path,
-            pool_size=1,
-            python_executable=sample_notebook.venv_python or Path("python"),
-        )
-        await pool.start()
-
-        try:
-            executor = CellExecutor(sample_notebook, pool)
-            result = await executor.execute_cell(
-                "cell1",
-                """
+        pool = await warm_pool(sample_notebook)
+        executor = CellExecutor(sample_notebook, pool)
+        result = await executor.execute_cell(
+            "cell1",
+            """
 # @env NOTEBOOK_TOKEN=warm-secret
 import os
 token = os.getenv("NOTEBOOK_TOKEN")
 """,
-            )
+        )
 
-            assert result.success is True
-            assert result.execution_method == "warm"
-            assert result.outputs["token"]["preview"] == "warm-secret"
-        finally:
-            await pool.drain()
+        assert result.success is True
+        assert result.execution_method == "warm"
+        assert result.outputs["token"]["preview"] == "warm-secret"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.warm_pool
-    async def test_warm_execution_injects_mount_paths(self, sample_notebook, tmp_path: Path):
+    async def test_warm_execution_injects_mount_paths(
+        self, sample_notebook, tmp_path: Path, warm_pool
+    ):
         """Warm workers should inject prepared mount paths the same way cold execution does."""
         mount_dir = tmp_path / "mounted-data"
         mount_dir.mkdir()
@@ -2355,31 +2336,23 @@ token = os.getenv("NOTEBOOK_TOKEN")
             )
         ]
 
-        sample_notebook.ensure_venv_synced()
-        pool = WarmProcessPool(
-            sample_notebook.path,
-            pool_size=1,
-            python_executable=sample_notebook.venv_python or Path("python"),
+        pool = await warm_pool(sample_notebook)
+        executor = CellExecutor(sample_notebook, pool)
+        result = await executor.execute_cell(
+            "cell1",
+            'text = (raw_data / "data.txt").read_text()',
         )
-        await pool.start()
 
-        try:
-            executor = CellExecutor(sample_notebook, pool)
-            result = await executor.execute_cell(
-                "cell1",
-                'text = (raw_data / "data.txt").read_text()',
-            )
-
-            assert result.success is True
-            assert result.execution_method == "warm"
-            assert result.outputs["text"]["preview"] == "hello mount"
-        finally:
-            await pool.drain()
+        assert result.success is True
+        assert result.execution_method == "warm"
+        assert result.outputs["text"]["preview"] == "hello mount"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.warm_pool
-    async def test_warm_execution_supports_cross_cell_function_exports(self, sample_notebook):
+    async def test_warm_execution_supports_cross_cell_function_exports(
+        self, sample_notebook, warm_pool
+    ):
         """Warm workers should receive synthetic module exports as upstream inputs."""
         cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
         cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
@@ -2396,28 +2369,18 @@ def add(a, b):
         assert first.success is True
         assert first.outputs["add"]["content_type"] == "module/cell"
 
-        sample_notebook.ensure_venv_synced()
-        pool = WarmProcessPool(
-            sample_notebook.path,
-            pool_size=1,
-            python_executable=sample_notebook.venv_python or Path("python"),
-        )
-        await pool.start()
+        pool = await warm_pool(sample_notebook)
+        executor = CellExecutor(sample_notebook, pool)
+        second = await executor.execute_cell("cell2", cell2.source)
 
-        try:
-            executor = CellExecutor(sample_notebook, pool)
-            second = await executor.execute_cell("cell2", cell2.source)
-
-            assert second.success is True
-            assert second.execution_method == "warm"
-            assert second.outputs["result"]["preview"] == 5
-        finally:
-            await pool.drain()
+        assert second.success is True
+        assert second.execution_method == "warm"
+        assert second.outputs["result"]["preview"] == 5
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.warm_pool
-    async def test_warm_execution_supports_exported_class_instances(self, tmp_path):
+    async def test_warm_execution_supports_exported_class_instances(self, tmp_path, warm_pool):
         """Warm workers should deserialize instances of exported notebook classes."""
         from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
@@ -2451,28 +2414,20 @@ class Person:
         assert second.success is True
         assert second.outputs["p"]["content_type"] == "module/cell-instance"
 
-        session.ensure_venv_synced()
-        pool = WarmProcessPool(
-            session.path,
-            pool_size=1,
-            python_executable=session.venv_python or Path("python"),
-        )
-        await pool.start()
+        pool = await warm_pool(session)
+        executor = CellExecutor(session, pool)
+        third = await executor.execute_cell("cell3", session.notebook_state.cells[2].source)
 
-        try:
-            executor = CellExecutor(session, pool)
-            third = await executor.execute_cell("cell3", session.notebook_state.cells[2].source)
-
-            assert third.success is True
-            assert third.execution_method == "warm"
-            assert third.outputs["rendered"]["preview"] == "John:20"
-        finally:
-            await pool.drain()
+        assert third.success is True
+        assert third.execution_method == "warm"
+        assert third.outputs["rendered"]["preview"] == "John:20"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.warm_pool
-    async def test_warm_execution_reports_same_mutation_warnings_as_cold(self, sample_notebook):
+    async def test_warm_execution_reports_same_mutation_warnings_as_cold(
+        self, sample_notebook, warm_pool
+    ):
         """Warm workers should preserve mutation warnings emitted by cold execution."""
         cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
         cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
@@ -2486,25 +2441,15 @@ class Person:
         assert cold_result.mutation_warnings
         assert cold_result.mutation_warnings[0]["var_name"] == "x"
 
-        sample_notebook.ensure_venv_synced()
-        pool = WarmProcessPool(
-            sample_notebook.path,
-            pool_size=1,
-            python_executable=sample_notebook.venv_python or Path("python"),
+        pool = await warm_pool(sample_notebook)
+        # The cold run stored cell2's (empty) console, so a plain run would be a cache hit;
+        # rerun bypasses it so the warm path actually executes.
+        warm_result = await CellExecutor(sample_notebook, pool).execute_cell_rerun(
+            "cell2", cell2.source
         )
-        await pool.start()
-
-        try:
-            # The cold run stored cell2's (empty) console, so a plain run would be a cache hit;
-            # rerun bypasses it so the warm path actually executes.
-            warm_result = await CellExecutor(sample_notebook, pool).execute_cell_rerun(
-                "cell2", cell2.source
-            )
-            assert warm_result.success is True
-            assert warm_result.execution_method == "warm"
-            assert warm_result.mutation_warnings == cold_result.mutation_warnings
-        finally:
-            await pool.drain()
+        assert warm_result.success is True
+        assert warm_result.execution_method == "warm"
+        assert warm_result.mutation_warnings == cold_result.mutation_warnings
 
 
 class TestPromptCellExecution:

@@ -13,7 +13,13 @@ import pytest
 import uvicorn
 
 from strata.config import StrataConfig
-from tests.conftest import find_free_port, prepared_venv, service_auth, wait_for_server
+from tests.conftest import (
+    LIVE_SERVER_TIMEOUT,
+    find_free_port,
+    prepared_venv,
+    service_auth,
+    wait_for_server,
+)
 
 # R availability: central skip markers, so the skip wording and the arrow
 # package probe live in one place.
@@ -192,6 +198,35 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     monkeypatch.setattr(
         "strata.notebook.dependencies.run_uv_command_streaming", _fake_streaming_sync
     )
+
+
+@pytest.fixture
+async def warm_pool():
+    """Start a one-worker warm pool for a session, warm on return; drained at teardown.
+
+    The pool's 10s ready bound is too tight under xdist: the worker's imports outlast
+    it, the worker is killed, and the run quietly goes cold instead of failing here.
+    """
+    from strata.notebook.pool import WarmProcessPool
+
+    pools = []
+
+    async def start(session):
+        session.ensure_venv_synced()
+        pool = WarmProcessPool(
+            session.path,
+            pool_size=1,
+            python_executable=session.venv_python or Path("python"),
+            ready_timeout_seconds=LIVE_SERVER_TIMEOUT,
+        )
+        pools.append(pool)
+        await pool.start()
+        assert pool._available.qsize() == 1, "the warm worker never signalled ready"
+        return pool
+
+    yield start
+    for pool in pools:
+        await pool.drain()
 
 
 @pytest.fixture
