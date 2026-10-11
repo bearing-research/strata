@@ -180,11 +180,13 @@ def one_policy_read(
     """Read the worker policy at most once per notebook inside the block (one pass).
 
     ``policy``, read beforehand by :func:`read_worker_policy`, serves ``notebook_state``
-    for the whole block, so the block does not read it again.
+    for the whole block, so the block does not read it again. So does a policy an
+    enclosing block holds.
     """
-    token = _policy_memo.set(
-        {id(notebook_state): policy} if notebook_state is not None and policy is not None else {}
-    )
+    memo = dict(_policy_memo.get() or {})
+    if notebook_state is not None and policy is not None:
+        memo[id(notebook_state)] = policy
+    token = _policy_memo.set(memo)
     try:
         yield
     finally:

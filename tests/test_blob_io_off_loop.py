@@ -590,6 +590,10 @@ async def test_an_import_that_loses_a_race_leaves_the_winner_intact(served):
 
     assert second.status_code == 200
     assert first.status_code == 409
+    assert first.json()["detail"] == (
+        "shared@v=1 is already here, holding a different computation. "
+        "Import it under a fresh id. Retry with remap=true."
+    )
     row = served.store.get_artifact("shared", 1)
     assert row.provenance_hash == "b" * 64
     assert served.store.read_blob("shared", 1) == second_bytes

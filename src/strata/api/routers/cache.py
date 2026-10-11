@@ -202,8 +202,11 @@ async def warm_cache_v1(request: WarmRequest):
             )
             # A plan reads the catalog and manifests; on the loop it would stall every request.
             with get_pool_tracker().track("planning"):
-                plan = await asyncio.get_running_loop().run_in_executor(
-                    state._planning_executor, plan_table
+                plan = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(
+                        state._planning_executor, plan_table
+                    ),
+                    timeout=state.config.plan_timeout_seconds,
                 )
             # As the scan path does: the catalog may resolve another identity than the URI names.
             authorize_table_access(table_uri, plan.table_identity)
@@ -248,6 +251,10 @@ async def warm_cache_v1(request: WarmRequest):
 
         except HTTPException:
             raise
+        except TimeoutError:
+            errors.append(
+                f"{table_uri}: planning timed out after {state.config.plan_timeout_seconds}s"
+            )
         except Exception as e:
             errors.append(f"{table_uri}: {e!s}")
 
