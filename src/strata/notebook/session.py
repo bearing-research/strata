@@ -2770,6 +2770,19 @@ class NotebookSession:
         # Even with a Python pool: R cells can arrive after it started.
         self.start_r_pool_background(owner)
 
+    async def start_missing_warm_pools(
+        self, owner: EnvironmentJobSnapshot | str | None = None
+    ) -> None:
+        """Start any warm pool that is absent; an environment change restarts existing ones.
+
+        ``owner`` is the mutation the caller is finishing. A pool that fails to start
+        only leaves cells running cold, so the failure is logged.
+        """
+        try:
+            await self._ensure_warm_pool_started(owner)
+        except Exception:
+            logger.warning("Failed to start a warm pool for %s", self.path, exc_info=True)
+
     def _has_r_cells(self) -> bool:
         """Whether any cell in the notebook is an R cell."""
         from strata.notebook.models import CellLanguage
@@ -2833,10 +2846,7 @@ class NotebookSession:
         old_hash = compute_lockfile_hash(self.path)
         await asyncio.to_thread(self.ensure_venv_synced)
         await self._invalidate_warm_pool_for_environment_change()
-        try:
-            await self._ensure_warm_pool_started(owner)
-        except Exception:
-            logger.warning("Failed to start warm pool after sync for %s", self.path, exc_info=True)
+        await self.start_missing_warm_pools(owner)
 
         try:
             await asyncio.to_thread(update_environment_metadata, self.path)
@@ -2862,12 +2872,16 @@ class NotebookSession:
             self.environment_last_sync_duration_ms = duration_ms
 
     async def on_dependencies_changed(
-        self, *, operation_log: EnvironmentOperationLog | None = None
+        self,
+        *,
+        operation_log: EnvironmentOperationLog | None = None,
+        owner: str | None = None,
     ) -> None:
         """React to a lockfile update after ``uv add`` / ``uv remove``.
 
-        Refreshes runtime metadata, invalidates the warm pool, and recomputes the
-        lockfile hash for provenance.
+        Refreshes runtime metadata, invalidates the warm pools, recomputes the lockfile
+        hash for provenance, and starts a pool the environment now allows. ``owner`` is
+        the synchronous mutation label the caller holds.
         """
         # 1. Dependency mutation already synced .venv; reuse it instead of a second sync.
         await asyncio.to_thread(self.refresh_environment_runtime)
@@ -2887,8 +2901,15 @@ class NotebookSession:
         except Exception:
             logger.exception("Failed to update environment metadata")
 
-    async def mutate_dependency(self, package: str, *, action: str) -> DependencyMutationOutcome:
-        """Apply a dependency mutation without blocking the event loop."""
+        await self.start_missing_warm_pools(owner)
+
+    async def mutate_dependency(
+        self, package: str, *, action: str, owner: str | None = None
+    ) -> DependencyMutationOutcome:
+        """Apply a dependency mutation without blocking the event loop.
+
+        ``owner`` is the synchronous mutation label the caller holds, if any.
+        """
         from strata.notebook.dependencies import add_dependency, remove_dependency
 
         # The two functions have different keyword-only params, so a shared `op` is a
@@ -2902,7 +2923,7 @@ class NotebookSession:
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
-            await self.on_dependencies_changed(operation_log=result.operation_log)
+            await self.on_dependencies_changed(operation_log=result.operation_log, owner=owner)
             staleness_map = self.compute_staleness()
 
         return DependencyMutationOutcome(
@@ -2910,7 +2931,9 @@ class NotebookSession:
             staleness_map=staleness_map,
         )
 
-    async def import_requirements(self, requirements_text: str) -> RequirementsImportOutcome:
+    async def import_requirements(
+        self, requirements_text: str, *, owner: str | None = None
+    ) -> RequirementsImportOutcome:
         """Replace direct notebook dependencies from requirements text."""
         result = await asyncio.to_thread(
             import_requirements_text,
@@ -2920,7 +2943,7 @@ class NotebookSession:
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
-            await self.on_dependencies_changed(operation_log=result.operation_log)
+            await self.on_dependencies_changed(operation_log=result.operation_log, owner=owner)
             staleness_map = self.compute_staleness()
 
         return RequirementsImportOutcome(
@@ -2929,7 +2952,7 @@ class NotebookSession:
         )
 
     async def import_environment_yaml(
-        self, environment_yaml_text: str
+        self, environment_yaml_text: str, *, owner: str | None = None
     ) -> RequirementsImportOutcome:
         """Best-effort import of Conda-style ``environment.yaml``."""
         result = await asyncio.to_thread(
@@ -2940,7 +2963,7 @@ class NotebookSession:
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
-            await self.on_dependencies_changed(operation_log=result.operation_log)
+            await self.on_dependencies_changed(operation_log=result.operation_log, owner=owner)
             staleness_map = self.compute_staleness()
 
         return RequirementsImportOutcome(
@@ -3455,14 +3478,7 @@ class NotebookSession:
         ]
         job.phase = "starting_warm_pool"
         await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
-        try:
-            await self._ensure_warm_pool_started(job)
-        except Exception:
-            logger.warning(
-                "Failed to start warm pool after environment job for %s",
-                self.path,
-                exc_info=True,
-            )
+        await self.start_missing_warm_pools(job)
         job.lockfile_changed = lockfile_changed
         job.stale_cell_count = len(stale_cell_ids)
         job.stale_cell_ids = stale_cell_ids

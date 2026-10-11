@@ -414,6 +414,8 @@ async def _add_cell(
     view = LocalNotebookOps.from_session(session, author=author).add_cell(
         source, after=after, language=language
     )
+    # A notebook opened without R cells has no R pool yet.
+    await session.start_missing_warm_pools()
     await _sync_and_broadcast(session_id, session)
     await _agent_note(session_id, "mcp", f"added {language} cell {view.id}")
     return view.model_dump(mode="json")
