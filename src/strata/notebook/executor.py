@@ -70,6 +70,7 @@ from strata.notebook.models import (
     FetchSpec,
     MountMode,
     MountSpec,
+    NotebookState,
     TableSpec,
     WorkerBackendType,
 )
@@ -136,6 +137,18 @@ logger = logging.getLogger(__name__)
 # cells are common; a hung cell still dies here and the UI can interrupt sooner.
 # Mirrors ``StrataConfig.scan_timeout_seconds``.
 DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
+
+
+def effective_worker_name(
+    notebook_state: NotebookState, cell_id: str, annotation_worker: str | None
+) -> str:
+    """The worker a run of the cell targets: annotation, then cell, then notebook, then local."""
+    if annotation_worker:
+        return annotation_worker
+    cell = notebook_state.get_cell(cell_id)
+    if cell and cell.worker:
+        return cell.worker
+    return notebook_state.worker or "local"
 
 
 def cell_timeout_message(timeout_seconds: float, *, set_by: str | None = None) -> str:
@@ -834,7 +847,9 @@ class CellExecutor:
         # The worker registry lives in the server's store: one read per run, off the loop,
         # serves every worker lookup in it.
         notebook_state = self.session.notebook_state
-        worker = self._resolve_effective_worker(cell_id, parse_annotations(source).worker)
+        worker = effective_worker_name(
+            self.session.notebook_state, cell_id, parse_annotations(source).worker
+        )
         with one_policy_read(notebook_state, await read_worker_policy(notebook_state, worker)):
             result = await self._dispatch_cell(
                 cell_id,
@@ -900,7 +915,9 @@ class CellExecutor:
                 )
             self.session.apply_execution_result_metadata(cell_id, loop_result)
             return loop_result
-        effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
+        effective_worker = effective_worker_name(
+            self.session.notebook_state, cell_id, annotations.worker
+        )
         worker_spec = resolve_worker_spec(
             self.session.notebook_state,
             effective_worker,
@@ -947,25 +964,6 @@ class CellExecutor:
             )
         finally:
             self._materializing.discard(cell_id)
-
-    def _resolve_effective_worker(
-        self,
-        cell_id: str,
-        annotation_worker: str | None,
-    ) -> str:
-        """Resolve the effective worker with annotation precedence."""
-        if annotation_worker:
-            return annotation_worker
-
-        cell = self.session.notebook_state.get_cell(cell_id)
-        if cell and cell.worker:
-            return cell.worker
-
-        notebook_worker = self.session.notebook_state.worker
-        if notebook_worker:
-            return notebook_worker
-
-        return "local"
 
     def _remote_execution_metadata(
         self,
@@ -1062,7 +1060,9 @@ class CellExecutor:
 
         source_hash = compute_source_hash(source)
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
-        effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
+        effective_worker = effective_worker_name(
+            self.session.notebook_state, cell_id, annotations.worker
+        )
         runtime_identity = worker_runtime_identity(self.session.notebook_state, effective_worker)
         cell_state = self.session.notebook_state.get_cell(cell_id)
         declared_env_keys = set(annotations.env) | set(
@@ -5303,7 +5303,9 @@ class CellExecutor:
         output, stored with an ``@iter=k`` suffix.
         """
         annotations = parse_annotations(source)
-        effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
+        effective_worker = effective_worker_name(
+            self.session.notebook_state, cell_id, annotations.worker
+        )
         if effective_worker != "local":
             return CellExecutionResult(
                 cell_id=cell_id,

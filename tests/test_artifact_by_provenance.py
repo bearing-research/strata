@@ -45,7 +45,7 @@ def _publish(base_url: str, table: pa.Table, headers: dict | None = None) -> str
         "data": ("data.arrow", table_to_ipc_bytes(table), "application/vnd.apache.arrow.stream"),
     }
     response = httpx.put(
-        f"{base_url}/v1/artifacts", files=files, headers=headers or {}, timeout=30.0
+        f"{base_url}/v1/artifacts", files=files, headers=headers or {}, timeout=LIVE_SERVER_TIMEOUT
     )
     assert response.status_code == 200, response.text
     return response.json()["artifact_uri"]
@@ -230,7 +230,7 @@ def _publish_by_provenance(
             "data": ("data.bin", blob, "application/octet-stream"),
         },
         headers=headers or {},
-        timeout=30.0,
+        timeout=LIVE_SERVER_TIMEOUT,
     )
 
 
@@ -254,7 +254,7 @@ def test_a_named_id_is_held_by_its_tenant_from_its_first_upload(team_server, fin
             "data": ("data.bin", b"other", "application/octet-stream"),
         },
         headers=_headers("team-b", "carol", scopes="artifacts:write"),
-        timeout=30.0,
+        timeout=LIVE_SERVER_TIMEOUT,
     )
 
     assert response.status_code == 409, response.text
@@ -284,7 +284,7 @@ def test_another_teams_upload_landing_mid_request_still_holds_the_id(team_server
             "data": ("data.bin", b"other", "application/octet-stream"),
         },
         headers=_headers("team-a", "alice", scopes="artifacts:write"),
-        timeout=30.0,
+        timeout=LIVE_SERVER_TIMEOUT,
     )
 
     assert response.status_code == 409, response.text
@@ -342,7 +342,7 @@ def test_a_malformed_row_count_is_refused(personal_server):
             ),
             "data": ("data.bin", b"bytes", "application/octet-stream"),
         },
-        timeout=30.0,
+        timeout=LIVE_SERVER_TIMEOUT,
     )
     assert response.status_code == 400
     assert "row_count" in response.text
@@ -431,7 +431,7 @@ def test_a_publish_without_a_content_type_is_refused(personal_server):
             "metadata": ("metadata.json", json.dumps({"variable_name": "x"}), "application/json"),
             "data": ("data.bin", b"bytes", "application/octet-stream"),
         },
-        timeout=30.0,
+        timeout=LIVE_SERVER_TIMEOUT,
     )
     assert response.status_code == 400
     assert "content_type" in response.text
@@ -576,7 +576,7 @@ def test_the_build_environment_travels_with_the_result(personal_server):
             ),
             "data": ("data.bin", b"bytes", "application/octet-stream"),
         },
-        timeout=30.0,
+        timeout=LIVE_SERVER_TIMEOUT,
     )
     assert response.status_code == 200, response.text
 
@@ -623,7 +623,7 @@ def test_the_environment_identity_round_trips(personal_server):
             ),
             "data": ("data.bin", b"bytes", "application/octet-stream"),
         },
-        timeout=30.0,
+        timeout=LIVE_SERVER_TIMEOUT,
     )
     assert response.status_code == 200, response.text
 

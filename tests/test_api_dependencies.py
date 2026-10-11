@@ -169,7 +169,7 @@ class TestArtifactInputTenantGate:
         version = store.create_artifact(artifact_id="secret", provenance_hash="p1", tenant=tenant)
         return f"strata://artifact/secret@v={version}"
 
-    async def test_cross_tenant_artifact_input_is_refused(self, tmp_path):
+    def test_cross_tenant_artifact_input_is_refused(self, tmp_path):
         from strata.api.dependencies import resolve_input_version
 
         uri = self._seed(tmp_path, tenant="tenant-b")
@@ -177,13 +177,13 @@ class TestArtifactInputTenantGate:
             resolve_input_version(uri, tenant="tenant-a")
         assert exc.value.status_code in (403, 404)
 
-    async def test_same_tenant_artifact_input_resolves(self, tmp_path):
+    def test_same_tenant_artifact_input_resolves(self, tmp_path):
         from strata.api.dependencies import resolve_input_version
 
         uri = self._seed(tmp_path, tenant="tenant-b")
         assert resolve_input_version(uri, tenant="tenant-b") == "secret@v=1"
 
-    async def test_unknown_artifact_input_is_404(self, tmp_path):
+    def test_unknown_artifact_input_is_404(self, tmp_path):
         from strata.api.dependencies import resolve_input_version
 
         self._seed(tmp_path, tenant="tenant-b")

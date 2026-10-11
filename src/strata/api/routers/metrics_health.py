@@ -7,7 +7,7 @@ leaf; those helpers stay in ``server.py`` because the shutdown path also uses th
 
 from __future__ import annotations
 
-from functools import partial
+import functools
 
 import anyio.to_thread
 import pyarrow as pa
@@ -59,7 +59,7 @@ async def health_dependencies():
 
     # Checks the metadata store and writes a probe file to the cache dir.
     report = await anyio.to_thread.run_sync(
-        partial(
+        functools.partial(
             run_health_checks,
             cache_dir=state.config.cache_dir,
             max_cache_size_bytes=state.config.max_cache_size_bytes,

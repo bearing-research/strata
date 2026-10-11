@@ -3517,10 +3517,13 @@ async def cancel_cell(notebook_id: str, session: SessionDep, cell_id: str) -> di
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
+    from strata.notebook.ops import CancelResult
     from strata.notebook.ws import cancel_cell_run
 
     cancelled = await cancel_cell_run(session, cell_id, notebook_id)
-    return {"cell_id": cell_id, "cancelled": cancelled, "status": cell.status}
+    return CancelResult(cell_id=cell_id, cancelled=cancelled, status=cell.status).model_dump(
+        mode="json"
+    )
 
 
 @router.put("/{notebook_id}/cells/{cell_id}/tests")
