@@ -169,6 +169,14 @@ def workers_app(serve, tmp_path):
             lambda body: body["configured_workers"] == [],
             id="delete",
         ),
+        pytest.param(
+            "notebook_worker_entries",
+            "POST",
+            "/v1/admin/notebook-workers/reload",
+            {},
+            lambda body: [w["name"] for w in body["configured_workers"]] == ["gpu"],
+            id="reload",
+        ),
     ],
 )
 async def test_admin_worker_route_store_call_does_not_block_the_loop(
