@@ -266,8 +266,8 @@ async def test_add_dependency_maps_result(chain_nb, monkeypatch):
     class _Outcome:
         result = _Result()
 
-    async def _fake(package, *, action):
-        assert package == "pandas" and action == "add"
+    async def _fake(package, *, action, owner=None):
+        assert package == "pandas" and action == "add" and owner == "add pandas"
         return _Outcome()
 
     monkeypatch.setattr(ops._session, "mutate_dependency", _fake)

@@ -786,7 +786,17 @@ class LocalNotebookOps:
         return await self._mutate_dependency(package, "remove")
 
     async def _mutate_dependency(self, package: str, action: str) -> DependencyResult:
-        outcome = await self._session.mutate_dependency(package, action=action)
+        # The same reservation the REST routes take: a shared live session must not
+        # run two uv syncs on one venv, or sync while cells execute.
+        mutation = f"{action} {package}"
+        try:
+            self._session._begin_synchronous_environment_mutation(mutation)
+        except RuntimeError as exc:
+            raise NotebookOpsError(str(exc)) from exc
+        try:
+            outcome = await self._session.mutate_dependency(package, action=action, owner=mutation)
+        finally:
+            self._session._end_synchronous_environment_mutation()
         result = outcome.result
         return DependencyResult(
             package=result.package,

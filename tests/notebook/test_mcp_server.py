@@ -411,14 +411,19 @@ async def test_add_and_remove_dependency_and_broadcast(sm_with_session, monkeypa
 
     monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
 
-    async def fake_mutate(package, *, action):
+    session = sm.get_session(session_id)
+    seen = []
+
+    async def fake_mutate(package, *, action, owner=None):
+        # The REST routes' reservation is held for the duration, under this owner.
+        seen.append((owner, session._active_environment_mutation_label()))
         result = SimpleNamespace(
             package=package, action=action, success=True, lockfile_changed=True, error=None
         )
         return SimpleNamespace(result=result, staleness_map={})
 
     # No real `uv add`: stub the session's dependency mutation.
-    monkeypatch.setattr(sm.get_session(session_id), "mutate_dependency", fake_mutate)
+    monkeypatch.setattr(session, "mutate_dependency", fake_mutate)
 
     added = await _add_dependency(sm, session_id, "polars")
     assert added["package"] == "polars"
@@ -429,6 +434,50 @@ async def test_add_and_remove_dependency_and_broadcast(sm_with_session, monkeypa
     assert removed["action"] == "remove"
 
     assert broadcasts == [session_id, session_id]
+    assert seen == [("add polars", "add polars"), ("remove polars", "remove polars")]
+    assert not session.has_active_environment_mutation()
+
+
+@pytest.mark.asyncio
+async def test_dependency_refused_while_another_environment_update_runs(
+    sm_with_session, monkeypatch
+):
+    sm, session_id, _ = sm_with_session
+    session = sm.get_session(session_id)
+    calls = []
+
+    async def fake_mutate(package, *, action, owner=None):
+        calls.append(package)
+
+    monkeypatch.setattr(session, "mutate_dependency", fake_mutate)
+
+    session._begin_synchronous_environment_mutation("sync")
+    try:
+        with pytest.raises(NotebookOpsError, match="already in progress: sync"):
+            await _add_dependency(sm, session_id, "polars")
+        with pytest.raises(NotebookOpsError, match="already in progress: sync"):
+            await _remove_dependency(sm, session_id, "polars")
+        # The refused calls must not release a reservation they don't own.
+        assert session._active_environment_mutation_label() == "sync"
+    finally:
+        session._end_synchronous_environment_mutation()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_failed_dependency_mutation_releases_the_reservation(sm_with_session, monkeypatch):
+    sm, session_id, _ = sm_with_session
+    session = sm.get_session(session_id)
+
+    async def boom(package, *, action, owner=None):
+        raise RuntimeError("uv exploded")
+
+    monkeypatch.setattr(session, "mutate_dependency", boom)
+
+    with pytest.raises(RuntimeError, match="uv exploded"):
+        await _add_dependency(sm, session_id, "polars")
+    assert not session.has_active_environment_mutation()
 
 
 @pytest.mark.asyncio
