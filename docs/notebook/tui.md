@@ -152,9 +152,9 @@ in the terminal.
 | `d` | Show the notebook **DAG** (layered ASCII; `Esc`/`d`/`q` to close) |
 | `i` | Enlarge the selected cell's **image** output to full screen (`Esc`/`i`/`q` to close) |
 | `r` | Force an immediate resync (the viewer also auto-resyncs in the background); after the server closed the session, reopen it |
-| `Ctrl`+`←` / `Ctrl`+`→` | Resize the **cell-list ↔ detail** boundary |
-| `Ctrl`+`↑` / `Ctrl`+`↓` | Resize the **top ↔ bottom** detail boundary |
-| `Ctrl`+`x` | Reset the panel layout to defaults |
+| `[` / `]` | Resize the **cell-list ↔ detail** boundary (narrower / wider list) |
+| `-` / `=` | Resize the **top ↔ bottom** detail boundary (shorter / taller top) |
+| `\` | Reset the panel layout to defaults |
 | `?` | Show the keybinding reference (`Esc`/`?`/`q` to close) |
 | `q` | Quit |
 
