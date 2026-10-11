@@ -135,10 +135,12 @@ class _PythonExecutor:
         # Mirrors executor.py:is_cell_batchable: local worker, no ``# @loop``,
         # no explicit timeout and no rw mount at any level.
         from strata.notebook.annotations import parse_annotations
+        from strata.notebook.executor import effective_worker_name
 
         annotations = parse_annotations(cell.source)
 
-        if executor._resolve_effective_worker(cell.id, annotations.worker) != "local":
+        worker = effective_worker_name(executor.session.notebook_state, cell.id, annotations.worker)
+        if worker != "local":
             return False
 
         if annotations.loop is not None:

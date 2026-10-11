@@ -352,7 +352,7 @@ class TestTransformInputAclParity:
         monkeypatch.setattr(server_module, "_get_artifact_store", lambda **k: MagicMock())
         return server_module
 
-    async def test_denied_table_input_is_rejected_403(self, monkeypatch):
+    def test_denied_table_input_is_rejected_403(self, monkeypatch):
         from fastapi import HTTPException
 
         self._patch_state(monkeypatch, namespace="secret")
@@ -364,7 +364,7 @@ class TestTransformInputAclParity:
         finally:
             set_principal(None)
 
-    async def test_denied_table_input_hidden_as_404(self, monkeypatch):
+    def test_denied_table_input_hidden_as_404(self, monkeypatch):
         from fastapi import HTTPException
 
         self._patch_state(monkeypatch, namespace="secret", hide_as_404=True)
@@ -376,7 +376,7 @@ class TestTransformInputAclParity:
         finally:
             set_principal(None)
 
-    async def test_allowed_table_input_resolves(self, monkeypatch):
+    def test_allowed_table_input_resolves(self, monkeypatch):
         self._patch_state(monkeypatch, namespace="public")
         set_principal(Principal(id="analyst"))
         try:
@@ -393,9 +393,7 @@ class TestTransformInputAclParity:
             ("unplannable", False),
         ],
     )
-    async def test_a_denied_table_is_denied_before_it_is_planned(
-        self, monkeypatch, failure, hide_as_404
-    ):
+    def test_a_denied_table_is_denied_before_it_is_planned(self, monkeypatch, failure, hide_as_404):
         """The ACL decides on the URI's identity before any manifest is read, so a denied caller
         sees neither the delete-files 422 nor the unplannable 400.
         """
@@ -423,7 +421,7 @@ class TestTransformInputAclParity:
         assert "secret-bucket" not in str(exc.value.detail)
         server_module._state.planner.plan.assert_not_called()
 
-    async def test_an_allowed_table_strata_refuses_is_still_a_422(self, monkeypatch):
+    def test_an_allowed_table_strata_refuses_is_still_a_422(self, monkeypatch):
         from fastapi import HTTPException
 
         from strata.iceberg_schema import UnsupportedTableFormatError
@@ -441,7 +439,7 @@ class TestTransformInputAclParity:
 
         assert exc.value.status_code == 422
 
-    async def test_a_table_uri_the_acl_cannot_name_is_denied(self, monkeypatch):
+    def test_a_table_uri_the_acl_cannot_name_is_denied(self, monkeypatch):
         """Deny-first: with no identity, no rule allows it; the planner could not name it either."""
         from fastapi import HTTPException
 
@@ -457,7 +455,7 @@ class TestTransformInputAclParity:
         assert exc.value.status_code == 403
         server_module._state.planner.plan.assert_not_called()
 
-    async def test_scan_and_transform_share_one_gate(self, monkeypatch):
+    def test_scan_and_transform_share_one_gate(self, monkeypatch):
         # Both the scan path and the transform-input path call this one helper.
         from fastapi import HTTPException
 

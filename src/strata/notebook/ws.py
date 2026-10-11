@@ -30,6 +30,7 @@ from strata.notebook.executor import (
     BatchCellResult,
     CellExecutionResult,
     CellExecutor,
+    effective_worker_name,
     partition_batchable_runs,
 )
 from strata.notebook.harness_user import LocalExecutionRefused, resolve_harness_user
@@ -2011,16 +2012,7 @@ async def execute_cell_and_broadcast(
         return None
 
     execution_state.running_cell = cell_id
-    session.mark_cell_running(cell_id)
-    policy = await _read_run_policy(session, cell_id, cell.source)
-    await _broadcast_message(
-        notebook_id,
-        _make_message(
-            MessageType.CELL_STATUS,
-            seq,
-            _running_payload(session, cell_id, cell.source, policy),
-        ),
-    )
+    policy = await _announce_running(session, notebook_id, cell_id, cell.source, seq)
 
     executor = _make_executor_with_progress(session, notebook_id)
     try:
@@ -2129,6 +2121,21 @@ async def _execute_cascade(
     ]
     completed = 0
 
+    async def _progress(current_cell_id: str) -> None:
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CASCADE_PROGRESS,
+                next_notebook_sequence(notebook_id),
+                CascadeProgressPayload(
+                    plan_id=plan.plan_id,
+                    current_cell_id=current_cell_id,
+                    completed=completed,
+                    total=len(steps_to_run),
+                ).model_dump(mode="json"),
+            ),
+        )
+
     # So a @nocache step isn't re-executed by each later step's upstreams.
     with executor.one_run():
         try:
@@ -2159,31 +2166,8 @@ async def _execute_cascade(
                     continue
 
                 execution_state.running_cell = cell_id
-
-                await _broadcast_message(
-                    notebook_id,
-                    _make_message(
-                        MessageType.CASCADE_PROGRESS,
-                        next_notebook_sequence(notebook_id),
-                        CascadeProgressPayload(
-                            plan_id=plan.plan_id,
-                            current_cell_id=cell_id,
-                            completed=completed,
-                            total=len(steps_to_run),
-                        ).model_dump(mode="json"),
-                    ),
-                )
-
-                session.mark_cell_running(cell_id)
-                policy = await _read_run_policy(session, cell_id, cell.source)
-                await _broadcast_message(
-                    notebook_id,
-                    _make_message(
-                        MessageType.CELL_STATUS,
-                        next_notebook_sequence(notebook_id),
-                        _running_payload(session, cell_id, cell.source, policy),
-                    ),
-                )
+                await _progress(cell_id)
+                policy = await _announce_running(session, notebook_id, cell_id, cell.source)
 
                 try:
                     with one_policy_read(session.notebook_state, policy):
@@ -2258,19 +2242,7 @@ async def _execute_cascade(
                 completed += 1
             if not cascade_failed:
                 if steps_to_run:
-                    await _broadcast_message(
-                        notebook_id,
-                        _make_message(
-                            MessageType.CASCADE_PROGRESS,
-                            next_notebook_sequence(notebook_id),
-                            CascadeProgressPayload(
-                                plan_id=plan.plan_id,
-                                current_cell_id=steps_to_run[-1].cell_id,
-                                completed=completed,
-                                total=len(steps_to_run),
-                            ).model_dump(mode="json"),
-                        ),
-                    )
+                    await _progress(steps_to_run[-1].cell_id)
                 previous_snapshot = session.capture_cell_state_snapshot()
                 await _refresh_and_broadcast_changed_staleness(
                     session,
@@ -2643,16 +2615,7 @@ async def _run_partition_single_cell(
     """
     cell_id = cell.id
     execution_state.running_cell = cell_id
-    session.mark_cell_running(cell_id)
-    policy = await _read_run_policy(session, cell_id, cell.source)
-    await _broadcast_message(
-        notebook_id,
-        _make_message(
-            MessageType.CELL_STATUS,
-            next_notebook_sequence(notebook_id),
-            _running_payload(session, cell_id, cell.source, policy),
-        ),
-    )
+    policy = await _announce_running(session, notebook_id, cell_id, cell.source)
 
     try:
         with one_policy_read(session.notebook_state, policy):
@@ -3008,21 +2971,12 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
 
 
 def _effective_worker_name(session, cell_id: str, source: str) -> str | None:
-    """The worker a run of the cell targets, resolved as
-    :meth:`CellExecutor._resolve_effective_worker` does; ``None`` if the source does not parse.
-    """
+    """The worker a run of the cell targets; ``None`` if the source does not parse."""
     try:
         annotations = parse_annotations(source)
     except Exception:
         return None
-
-    cell = session.notebook_state.get_cell(cell_id)
-    return (
-        annotations.worker
-        or (cell.worker if cell else None)
-        or session.notebook_state.worker
-        or "local"
-    )
+    return effective_worker_name(session.notebook_state, cell_id, annotations.worker)
 
 
 async def _read_run_policy(session, cell_id: str, source: str) -> WorkerPolicy | None:
@@ -3040,14 +2994,34 @@ async def _read_run_policy(session, cell_id: str, source: str) -> WorkerPolicy |
         return None
 
 
+async def _announce_running(
+    session, notebook_id: str, cell_id: str, source: str, seq: int | None = None
+) -> WorkerPolicy | None:
+    """Mark the cell running and broadcast it; return the run's worker policy, read once.
+
+    ``seq`` is the frame's sequence if the caller holds one; otherwise one is allocated
+    after the read, so the frame still goes out in sequence order.
+    """
+    session.mark_cell_running(cell_id)
+    policy = await _read_run_policy(session, cell_id, source)
+    await _broadcast_message(
+        notebook_id,
+        _make_message(
+            MessageType.CELL_STATUS,
+            seq if seq is not None else next_notebook_sequence(notebook_id),
+            _running_payload(session, cell_id, source, policy),
+        ),
+    )
+    return policy
+
+
 def _running_payload(
     session, cell_id: str, source: str, policy: WorkerPolicy | None = None
 ) -> dict[str, Any]:
     """Build the payload for a ``cell_status: running`` broadcast.
 
     A cell bound for a remote worker adds ``remote_worker`` and ``remote_transport``
-    for the UI's dispatching badge. Uses the executor's own resolver
-    (:meth:`CellExecutor._resolve_effective_worker`) so the two cannot disagree.
+    for the UI's dispatching badge, resolved as the executor resolves the run's worker.
     ``policy`` is the run's, from :func:`_read_run_policy`, so the frame reads no store.
     """
     effective_name = _effective_worker_name(session, cell_id, source)
