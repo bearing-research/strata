@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import threading
 import time
 from types import SimpleNamespace
 
@@ -17,46 +16,10 @@ import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact_store import TransformSpec, get_artifact_store, reset_artifact_store
-from strata.config import StrataConfig
-from tests.conftest import table_to_ipc_bytes
+from strata.artifact_store import TransformSpec, get_artifact_store
+from tests.conftest import hold, ran_while_held, table_to_ipc_bytes
 
 ARROW = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
-
-
-def _gate(monkeypatch, obj, method: str, *, skip: int = 0) -> SimpleNamespace:
-    """Make ``obj.method`` block, after ``skip`` free calls, until ``release`` is set."""
-    gate = SimpleNamespace(
-        entered=threading.Event(), release=threading.Event(), done=threading.Event(), calls=0
-    )
-    original = getattr(obj, method)
-
-    def gated(*args, **kwargs):
-        gate.calls += 1
-        if gate.calls <= skip:
-            return original(*args, **kwargs)
-        gate.entered.set()
-        # A guard, so a call stuck on the loop fails the test rather than hanging it.
-        gate.release.wait(timeout=30)
-        try:
-            return original(*args, **kwargs)
-        finally:
-            gate.done.set()
-
-    monkeypatch.setattr(obj, method, gated)
-    return gate
-
-
-async def _served_while_blocked(client: AsyncClient, gate: SimpleNamespace, request):
-    """Run *request* with the gated call blocked: whether ``/health`` answered meanwhile."""
-    task = asyncio.ensure_future(request)
-    try:
-        assert await asyncio.to_thread(gate.entered.wait, 30), "the gated call was never made"
-        health = await client.get("/health")
-        served = health.status_code == 200 and not gate.done.is_set()
-    finally:
-        gate.release.set()
-    return served, await task
 
 
 def _on_loop_recorder(monkeypatch, obj, method: str) -> list[bool]:
@@ -77,12 +40,10 @@ def _on_loop_recorder(monkeypatch, obj, method: str) -> list[bool]:
 
 
 @pytest.fixture
-def served(tmp_path):
+def served(in_process_server):
     """An in-process personal server with the build runtime's stores."""
     import strata.server as server_module
-    from strata.server import ServerState
-    from strata.tenant_registry import reset_tenant_registry
-    from strata.transforms.build_store import get_build_store, reset_build_store
+    from strata.transforms.build_store import get_build_store
     from strata.transforms.registry import (
         TransformDefinition,
         TransformRegistry,
@@ -90,40 +51,19 @@ def served(tmp_path):
         set_transform_registry,
     )
 
-    config = StrataConfig(
-        host="127.0.0.1",
-        deployment_mode="personal",
-        cache_dir=tmp_path / "cache",
-        artifact_dir=tmp_path / "artifacts",
-        metadata_db=tmp_path / "meta.sqlite",
-        rate_limit_enabled=False,
-    )
-    reset_artifact_store()
-    reset_build_store()
-    reset_tenant_registry()
     set_transform_registry(
         TransformRegistry(
             enabled=True,
             definitions=[TransformDefinition(ref="test_sql@*", executor_url="http://executor")],
         )
     )
-    original = server_module._state
-    state = ServerState(config)
-    server_module._state = state
-    store = get_artifact_store(config.artifact_dir)
-    build_store = get_build_store(config.artifact_dir / "artifacts.sqlite", dialect=store.dialect)
-    try:
-        yield SimpleNamespace(
-            state=state, store=store, build_store=build_store, app=server_module.app
-        )
-    finally:
-        state.streams.shutdown_cleanups()
-        state._planning_executor.shutdown(wait=False)
-        server_module._state = original
-        reset_artifact_store()
-        reset_build_store()
-        reset_tenant_registry()
-        reset_transform_registry()
+    state = in_process_server()
+    store = get_artifact_store(state.config.artifact_dir)
+    build_store = get_build_store(
+        state.config.artifact_dir / "artifacts.sqlite", dialect=store.dialect
+    )
+    yield SimpleNamespace(state=state, store=store, build_store=build_store, app=server_module.app)
+    reset_transform_registry()
 
 
 def _client(served) -> AsyncClient:
@@ -167,11 +107,11 @@ def _queued_build(served, artifact_id: str = "pulled") -> tuple[str, int]:
 @pytest.mark.parametrize("method", ["get_build", "claim_build", "record_attempt"])
 async def test_a_manifest_claims_the_build_off_the_loop(served, monkeypatch, method):
     build_id, _ = _queued_build(served)
-    gate = _gate(monkeypatch, served.build_store, method)
+    gate = hold(monkeypatch, served.build_store, method)
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client, gate, client.get(f"/v1/builds/{build_id}/manifest")
+        served_meanwhile, response = await ran_while_held(
+            gate, client.get(f"/v1/builds/{build_id}/manifest"), client
         )
 
     assert served_meanwhile
@@ -184,11 +124,11 @@ async def test_a_manifest_claims_the_build_off_the_loop(served, monkeypatch, met
 async def test_a_finalize_reads_and_completes_the_build_off_the_loop(served, monkeypatch, method):
     build_id, version = _queued_build(served)
     served.store.write_blob("pulled", version, ARROW)
-    gate = _gate(monkeypatch, served.build_store, method)
+    gate = hold(monkeypatch, served.build_store, method)
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client, gate, client.post(f"/v1/builds/{build_id}/finalize")
+        served_meanwhile, response = await ran_while_held(
+            gate, client.post(f"/v1/builds/{build_id}/finalize"), client
         )
 
     assert served_meanwhile
@@ -200,11 +140,11 @@ async def test_a_finalize_reads_and_completes_the_build_off_the_loop(served, mon
 async def test_a_failing_finalize_fails_the_build_off_the_loop(served, monkeypatch):
     build_id, version = _queued_build(served)
     served.store.write_blob("pulled", version, b"not arrow")
-    gate = _gate(monkeypatch, served.build_store, "fail_build")
+    gate = hold(monkeypatch, served.build_store, "fail_build")
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client, gate, client.post(f"/v1/builds/{build_id}/finalize")
+        served_meanwhile, response = await ran_while_held(
+            gate, client.post(f"/v1/builds/{build_id}/finalize"), client
         )
 
     assert served_meanwhile
@@ -218,10 +158,10 @@ async def test_a_signed_download_reads_the_artifact_off_the_loop(served, monkeyp
     url = served.state.url_signer.generate_download_url(
         base_url="http://test", artifact_id="input", version=version, build_id="b"
     ).url
-    gate = _gate(monkeypatch, served.store, "get_artifact")
+    gate = hold(monkeypatch, served.store, "get_artifact")
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(client, gate, client.get(url))
+        served_meanwhile, response = await ran_while_held(gate, client.get(url), client)
 
     assert served_meanwhile
     assert response.status_code == 200, response.text
@@ -232,9 +172,9 @@ async def test_a_signed_upload_reads_the_build_off_the_loop(served, monkeypatch)
     build_id, version = _queued_build(served)
     async with _client(served) as client:
         manifest = (await client.get(f"/v1/builds/{build_id}/manifest")).json()
-        gate = _gate(monkeypatch, served.build_store, "get_build")
-        served_meanwhile, response = await _served_while_blocked(
-            client, gate, client.post(manifest["output"]["url"], content=ARROW)
+        gate = hold(monkeypatch, served.build_store, "get_build")
+        served_meanwhile, response = await ran_while_held(
+            gate, client.post(manifest["output"]["url"], content=ARROW), client
         )
 
     assert served_meanwhile
@@ -328,16 +268,16 @@ async def test_a_transform_materialize_uses_the_store_off_the_loop(
     served, monkeypatch, obj, method
 ):
     version = _ready(served.store, "input")
-    gate = _gate(monkeypatch, getattr(served, obj), method)
+    gate = hold(monkeypatch, getattr(served, obj), method)
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client,
+        served_meanwhile, response = await ran_while_held(
             gate,
             client.post(
                 "/v1/artifacts/materialize",
                 json=_transform_request(f"strata://artifact/input@v={version}"),
             ),
+            client,
         )
 
     assert served_meanwhile
@@ -349,16 +289,16 @@ async def test_a_transform_materialize_uses_the_store_off_the_loop(
 
 async def test_an_explain_resolves_its_inputs_off_the_loop(served, monkeypatch):
     version = _ready(served.store, "input")
-    gate = _gate(monkeypatch, served.store, "get_artifact")
+    gate = hold(monkeypatch, served.store, "get_artifact")
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client,
+        served_meanwhile, response = await ran_while_held(
             gate,
             client.post(
                 "/v1/artifacts/explain-materialize",
                 json=_transform_request(f"strata://artifact/input@v={version}"),
             ),
+            client,
         )
 
     assert served_meanwhile
@@ -411,11 +351,10 @@ async def test_a_named_hit_takes_the_refresh_that_superseded_what_it_found(serve
 async def test_a_scan_materialize_uses_the_store_off_the_loop(
     served, temp_warehouse, monkeypatch, method
 ):
-    gate = _gate(monkeypatch, served.store, method)
+    gate = hold(monkeypatch, served.store, method)
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client,
+        served_meanwhile, response = await ran_while_held(
             gate,
             client.post(
                 "/v1/materialize",
@@ -425,6 +364,7 @@ async def test_a_scan_materialize_uses_the_store_off_the_loop(
                     "mode": "stream",
                 },
             ),
+            client,
         )
 
     assert served_meanwhile
@@ -441,9 +381,9 @@ async def test_a_named_scan_hit_names_off_the_loop(served, temp_warehouse, monke
     async with _client(served) as client:
         first = (await client.post("/v1/materialize", json=body)).json()
         await served.state.streams.get(first["build_id"]).background_task
-        gate = _gate(monkeypatch, served.store, "find_ready_and_set_name")
-        served_meanwhile, response = await _served_while_blocked(
-            client, gate, client.post("/v1/materialize", json={**body, "name": "scanned"})
+        gate = hold(monkeypatch, served.store, "find_ready_and_set_name")
+        served_meanwhile, response = await ran_while_held(
+            gate, client.post("/v1/materialize", json={**body, "name": "scanned"}), client
         )
 
     assert served_meanwhile
@@ -477,10 +417,10 @@ async def test_a_stream_reads_its_artifact_off_the_loop(served, temp_warehouse, 
             state.scan_builds.build_identity_artifact(state, stream_state)
         )
         await stream_state.background_task
-        gate = _gate(monkeypatch, served.store, "get_artifact")
+        gate = hold(monkeypatch, served.store, "get_artifact")
 
-        served_meanwhile, response = await _served_while_blocked(
-            client, gate, client.get(materialized["stream_url"])
+        served_meanwhile, response = await ran_while_held(
+            gate, client.get(materialized["stream_url"]), client
         )
 
     assert served_meanwhile
@@ -510,11 +450,10 @@ def two_nodes(served, tmp_path):
 async def test_a_stream_claim_is_written_off_the_loop(
     served, two_nodes, temp_warehouse, monkeypatch
 ):
-    gate = _gate(monkeypatch, two_nodes, "claim")
+    gate = hold(monkeypatch, two_nodes, "claim")
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client,
+        served_meanwhile, response = await ran_while_held(
             gate,
             client.post(
                 "/v1/materialize",
@@ -524,6 +463,7 @@ async def test_a_stream_claim_is_written_off_the_loop(
                     "mode": "stream",
                 },
             ),
+            client,
         )
 
     assert served_meanwhile
@@ -534,11 +474,11 @@ async def test_a_stream_claim_is_written_off_the_loop(
 
 async def test_a_stream_owner_lookup_runs_off_the_loop(served, two_nodes, monkeypatch):
     two_nodes.claim("elsewhere", "http://node-b", ttl_seconds=60)
-    gate = _gate(monkeypatch, two_nodes, "resolve")
+    gate = hold(monkeypatch, two_nodes, "resolve")
 
     async with _client(served) as client:
-        served_meanwhile, response = await _served_while_blocked(
-            client, gate, client.get("/v1/streams/elsewhere", follow_redirects=False)
+        served_meanwhile, response = await ran_while_held(
+            gate, client.get("/v1/streams/elsewhere", follow_redirects=False), client
         )
 
     assert served_meanwhile

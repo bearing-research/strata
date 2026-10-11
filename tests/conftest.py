@@ -4,6 +4,7 @@ Ports and server polling, Arrow IPC conversion, test-server context managers, an
 base fixtures (temp_warehouse, strata_config, server_with_client).
 """
 
+import asyncio
 import io
 import os
 import shlex
@@ -16,7 +17,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from types import SimpleNamespace
+from typing import Any, Literal
 
 # Python 3.10 has no datetime.UTC.
 try:
@@ -663,6 +665,80 @@ def race_after_pending_read(store, competitor, first, second) -> tuple[object, o
     if state["locked"]:
         call("second", second, competitor)
     return outcomes["first"], outcomes["second"]
+
+
+def hold(monkeypatch, obj, method: str, *, first_call_only: bool = False) -> SimpleNamespace:
+    """Make ``obj.method`` block until ``release`` is set; it then runs as before.
+
+    ``entered`` is set when a call blocks and ``done`` when it returns. With
+    ``first_call_only``, later calls do not block.
+    """
+    gate = SimpleNamespace(
+        entered=threading.Event(), release=threading.Event(), done=threading.Event()
+    )
+    original = getattr(obj, method)
+
+    def held(*args, **kwargs):
+        if not (first_call_only and gate.entered.is_set()):
+            gate.entered.set()
+            # A guard, so a call stuck on the loop fails the test rather than hanging it.
+            gate.release.wait(timeout=30)
+        try:
+            return original(*args, **kwargs)
+        finally:
+            gate.done.set()
+
+    monkeypatch.setattr(obj, method, held)
+    return gate
+
+
+async def ran_while_held(gate, call, client: httpx.AsyncClient | None = None) -> tuple[bool, Any]:
+    """Run ``call`` until ``gate``'s call blocks; whether the loop ran meanwhile, and the result.
+
+    The loop ran if this coroutine resumed or, with ``client``, ``GET /health`` answered, before
+    the held call returned. A store call made on the loop fails this.
+    """
+    task = asyncio.ensure_future(call)
+    try:
+        assert await asyncio.to_thread(gate.entered.wait, 30), "the held call was never made"
+        if client is not None:
+            assert (await client.get("/health")).status_code == 200
+        ran = not gate.done.is_set()
+    finally:
+        gate.release.set()
+    return ran, await task
+
+
+@pytest.fixture
+def in_process_server(tmp_path):
+    """Install an in-process server: call it with ``StrataConfig`` overrides (personal mode by
+    default); it returns the ``ServerState``. The autouse reset removes it after the test."""
+    import strata.server as server_module
+    from strata.server import ServerState
+
+    states = []
+
+    def start(**overrides) -> ServerState:
+        config = StrataConfig(
+            **{
+                "host": "127.0.0.1",
+                "deployment_mode": "personal",
+                "cache_dir": tmp_path / "cache",
+                "artifact_dir": tmp_path / "artifacts",
+                "metadata_db": tmp_path / "meta.sqlite",
+                "rate_limit_enabled": False,
+                **overrides,
+            }
+        )
+        state = ServerState(config)
+        states.append(state)
+        server_module._state = state
+        return state
+
+    yield start
+    for state in states:
+        state._planning_executor.shutdown(wait=False)
+        state._fetch_executor.shutdown(wait=False)
 
 
 class RebindingDNS:

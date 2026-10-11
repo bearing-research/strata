@@ -16,41 +16,21 @@ import anyio.to_thread
 import pyarrow as pa
 import pytest
 
-from strata.artifact_store import TransformSpec, get_artifact_store, reset_artifact_store
-from strata.transforms.build_store import get_build_store, reset_build_store
+from strata.artifact_store import TransformSpec, get_artifact_store
+from strata.transforms.build_store import get_build_store
 from strata.transforms.registry import TransformDefinition, TransformRegistry
 from strata.transforms.runner import BuildRunner, RunnerConfig
-from tests.conftest import table_to_ipc_bytes
+from tests.conftest import hold, table_to_ipc_bytes
 
 ARROW = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
 
 
-def _gate(monkeypatch, obj, method: str) -> SimpleNamespace:
-    """Make ``obj.method`` block until ``release`` is set; it then runs as before."""
-    gate = SimpleNamespace(
-        entered=threading.Event(), release=threading.Event(), done=threading.Event()
-    )
-    original = getattr(obj, method)
-
-    def gated(*args, **kwargs):
-        gate.entered.set()
-        # A guard, so a call stuck on the loop fails the test rather than hanging it.
-        gate.release.wait(timeout=30)
-        try:
-            return original(*args, **kwargs)
-        finally:
-            # After the call, so a test that waits on done sees what it wrote.
-            gate.done.set()
-
-    monkeypatch.setattr(obj, method, gated)
-    return gate
-
-
 async def _loop_ran_while_blocked(gate: SimpleNamespace, call):
-    """Run *call* with the gated method blocked: whether this coroutine ran meanwhile."""
+    """Run *call* with the held method blocked: whether this coroutine ran meanwhile, and the
+    still-running task (the runner's loops do not return on their own)."""
     task = asyncio.ensure_future(call)
     try:
-        assert await asyncio.to_thread(gate.entered.wait, 30), "the gated call was never made"
+        assert await asyncio.to_thread(gate.entered.wait, 30), "the held call was never made"
         ran_while_blocked = not gate.done.is_set()
     finally:
         gate.release.set()
@@ -60,8 +40,6 @@ async def _loop_ran_while_blocked(gate: SimpleNamespace, call):
 @pytest.fixture
 def runner(tmp_path):
     artifact_dir = tmp_path / "artifacts"
-    reset_artifact_store()
-    reset_build_store()
     store = get_artifact_store(artifact_dir)
     registry = TransformRegistry(
         enabled=True,
@@ -74,9 +52,7 @@ def runner(tmp_path):
         transform_registry=registry,
         artifact_dir=artifact_dir,
     )
-    yield runner
-    reset_build_store()
-    reset_artifact_store()
+    return runner
 
 
 def _queue_build(runner: BuildRunner, *, name: str | None = None) -> tuple[str, int]:
@@ -119,7 +95,7 @@ async def _stopped(runner: BuildRunner, task: asyncio.Task) -> None:
 
 @pytest.mark.parametrize("method", ["list_pending_builds", "list_expired_leases"])
 async def test_the_poll_reads_the_build_store_off_the_loop(runner, monkeypatch, method):
-    gate = _gate(monkeypatch, runner.build_store, method)
+    gate = hold(monkeypatch, runner.build_store, method)
     runner._running = True
 
     ran, task = await _loop_ran_while_blocked(gate, runner._run_loop())
@@ -131,7 +107,7 @@ async def test_the_poll_reads_the_build_store_off_the_loop(runner, monkeypatch, 
 async def test_the_poll_borrows_a_server_thread_token(runner, monkeypatch):
     """The runner's store calls count against anyio's default limiter, the one the Postgres
     pool is sized to, not the loop's separate default executor."""
-    gate = _gate(monkeypatch, runner.build_store, "list_pending_builds")
+    gate = hold(monkeypatch, runner.build_store, "list_pending_builds")
     limiter = anyio.to_thread.current_default_thread_limiter()
     runner._running = True
 
@@ -151,15 +127,18 @@ async def test_an_orphan_is_reclaimed_off_the_loop(runner, monkeypatch):
     # A lease that has already lapsed: the orphan of a runner that died.
     assert runner.build_store.claim_build(build_id, "runner-dead", lease_duration_seconds=-1)
     submitted = []
-    monkeypatch.setattr(
-        runner, "_submit_build", lambda build, already_claimed=False: submitted.append(build)
-    )
-    gate = _gate(monkeypatch, runner.build_store, "reclaim_expired_build")
+    submitted_event = asyncio.Event()
+
+    def _submit_build(build, already_claimed=False):
+        submitted.append(build)
+        submitted_event.set()
+
+    monkeypatch.setattr(runner, "_submit_build", _submit_build)
+    gate = hold(monkeypatch, runner.build_store, "reclaim_expired_build")
     runner._running = True
 
     ran, task = await _loop_ran_while_blocked(gate, runner._run_loop())
-    while not submitted:
-        await asyncio.sleep(0)
+    await asyncio.wait_for(submitted_event.wait(), timeout=30)
 
     await _stopped(runner, task)
     assert ran
@@ -172,7 +151,7 @@ async def test_the_heartbeat_renews_leases_off_the_loop(runner, monkeypatch):
     assert runner.build_store.claim_build(build_id, runner._runner_id, lease_duration_seconds=1)
     before = runner.build_store.get_build(build_id).lease_expires_at
     runner._running_builds.add(build_id)
-    gate = _gate(monkeypatch, runner.build_store, "renew_lease")
+    gate = hold(monkeypatch, runner.build_store, "renew_lease")
     runner._running = True
 
     ran, task = await _loop_ran_while_blocked(gate, runner._heartbeat_loop())
@@ -226,7 +205,7 @@ async def test_a_build_reads_and_writes_the_store_off_the_loop(
     build_id, version = _queue_build(runner)
     queued = runner.build_store.get_build(build_id)
     _succeeding_executor(runner, tmp_path)
-    gate = _gate(monkeypatch, getattr(runner, store), method)
+    gate = hold(monkeypatch, getattr(runner, store), method)
 
     ran, task = await _loop_ran_while_blocked(gate, runner._execute_build(queued))
     await task
@@ -249,7 +228,7 @@ async def test_a_failed_build_is_recorded_off_the_loop(
         raise ValueError("the executor failed")
 
     runner._call_executor = executor
-    gate = _gate(monkeypatch, getattr(runner, store), method)
+    gate = hold(monkeypatch, getattr(runner, store), method)
 
     ran, task = await _loop_ran_while_blocked(
         gate, runner._execute_build(runner.build_store.get_build(build_id))
@@ -282,7 +261,7 @@ async def test_a_failure_cancelled_midway_still_fails_the_artifact(runner, monke
         failed_artifact.set()
 
     monkeypatch.setattr(runner.artifact_store, "fail_artifact", recording)
-    gate = _gate(monkeypatch, runner.build_store, "fail_build")
+    gate = hold(monkeypatch, runner.build_store, "fail_build")
     task = asyncio.ensure_future(runner._execute_build(runner.build_store.get_build(build_id)))
     try:
         assert await asyncio.to_thread(gate.entered.wait, 30), "the failure was never recorded"
@@ -325,7 +304,7 @@ async def test_a_lost_lease_drops_its_attempt_off_the_loop(runner, monkeypatch, 
         delete_attempt_blob(artifact_id, version, attempt)
 
     monkeypatch.setattr(runner.artifact_store, "delete_attempt_blob", recording)
-    gate = _gate(monkeypatch, runner.artifact_store, "delete_attempt_blob")
+    gate = hold(monkeypatch, runner.artifact_store, "delete_attempt_blob")
 
     ran, task = await _loop_ran_while_blocked(
         gate, runner._execute_build(runner.build_store.get_build(build_id))
@@ -347,7 +326,7 @@ async def test_a_name_input_is_resolved_off_the_loop(runner, monkeypatch):
         artifact_id="input", version=version, schema_json="", row_count=3, byte_size=len(ARROW)
     )
     store.set_name("the-input", "input", version)
-    gate = _gate(monkeypatch, store, "resolve_name")
+    gate = hold(monkeypatch, store, "resolve_name")
     temp_files: list = []
 
     ran, task = await _loop_ran_while_blocked(

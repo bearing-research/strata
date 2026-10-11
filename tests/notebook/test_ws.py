@@ -23,6 +23,7 @@ from strata.notebook.writer import (
     create_notebook,
     write_cell,
 )
+from tests.conftest import hold, ran_while_held
 from tests.notebook.e2e_fixtures import FakeNotebookWebSocket
 
 _MINIMAL_PNG_LITERAL = (
@@ -871,7 +872,6 @@ def registry_worker(tmp_path, monkeypatch):
     Yields a log of ``(event, on_loop_thread)``: each registry read in the store, and
     the start (``mark_cell_running``) and result frame of each cell run.
     """
-    import threading
 
     from strata.artifact_store import get_artifact_store
     from strata.notebook.models import WorkerBackendType, WorkerSpec
@@ -919,7 +919,6 @@ async def test_a_cell_run_reads_the_worker_registry_once_off_the_loop(
 ):
     """The running frame and the run (dispatch, provenance, execution) share one read,
     made in a worker thread, and a registry change applies to the next run."""
-    import threading
 
     import strata.notebook.ws as ws_module
     from strata.notebook.workers import delete_server_managed_worker_record
@@ -969,7 +968,6 @@ async def test_an_executor_run_reads_the_worker_registry_once_off_the_loop(
     notebook_session, registry_worker
 ):
     """Without the WebSocket drive (``strata run``, MCP), the executor reads it itself."""
-    import threading
 
     from strata.notebook.executor import CellExecutor
 
@@ -2853,38 +2851,6 @@ async def test_ws_broadcast_key_check_is_not_a_query_per_frame(notebook_session,
     assert calls == [key]
 
 
-def _hold_verify(monkeypatch, store) -> SimpleNamespace:
-    """Make ``store.verify`` block until ``release`` is set; it then runs as before."""
-    gate = SimpleNamespace(
-        entered=threading.Event(), release=threading.Event(), done=threading.Event()
-    )
-    verify = store.verify
-
-    def held(presented: str):
-        gate.entered.set()
-        # A guard, so a lookup stuck on the loop fails the test rather than hanging it.
-        gate.release.wait(timeout=30)
-        try:
-            return verify(presented)
-        finally:
-            gate.done.set()
-
-    monkeypatch.setattr(store, "verify", held)
-    return gate
-
-
-async def _loop_ran_while_held(gate, coro) -> bool:
-    """Run ``coro`` until its key lookup blocks; whether the loop ran meanwhile."""
-    task = asyncio.ensure_future(coro)
-    try:
-        assert await asyncio.to_thread(gate.entered.wait, 30), "the key was not looked up"
-        await asyncio.sleep(0)
-        return not gate.done.is_set()
-    finally:
-        gate.release.set()
-        await task
-
-
 @pytest.mark.asyncio
 async def test_ws_upgrade_key_lookup_does_not_block_the_loop(
     notebook_session, api_key_mode, monkeypatch
@@ -2893,12 +2859,13 @@ async def test_ws_upgrade_key_lookup_does_not_block_the_loop(
 
     _, session = notebook_session
     key, _ = api_key_mode.create_key(principal_id="alice", scopes=frozenset({"notebook:read"}))
-    gate = _hold_verify(monkeypatch, api_key_mode)
+    gate = hold(monkeypatch, api_key_mode, "verify")
     fake = FakeNotebookWebSocket(
         inbound=[_envelope("notebook_sync")], headers={"authorization": f"Bearer {key}"}
     )
 
-    assert await _loop_ran_while_held(gate, notebook_websocket(cast(WebSocket, fake), session.id))
+    ran, _ = await ran_while_held(gate, notebook_websocket(cast(WebSocket, fake), session.id))
+    assert ran
     assert fake.frames_of("notebook_state"), "the socket was refused after the lookup"
 
 
@@ -2910,12 +2877,13 @@ async def test_ws_broadcast_key_recheck_does_not_block_the_loop(
 
     _, session = notebook_session
     key, _ = api_key_mode.create_key(principal_id="alice", scopes=frozenset({"notebook:read"}))
-    gate = _hold_verify(monkeypatch, api_key_mode)
+    gate = hold(monkeypatch, api_key_mode, "verify")
     listener = FakeNotebookWebSocket(headers={"authorization": f"Bearer {key}"})
     ws_module._notebook_connections.setdefault(session.id, []).append(cast(WebSocket, listener))
     try:
         broadcast = ws_module._broadcast_message(session.id, {"type": "cell_output", "payload": {}})
-        assert await _loop_ran_while_held(gate, broadcast)
+        ran, _ = await ran_while_held(gate, broadcast)
+        assert ran
     finally:
         ws_module._notebook_connections.pop(session.id, None)
 

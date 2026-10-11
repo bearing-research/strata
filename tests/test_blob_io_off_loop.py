@@ -21,10 +21,9 @@ import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact_store import TransformSpec, get_artifact_store, reset_artifact_store
+from strata.artifact_store import TransformSpec, get_artifact_store
 from strata.blob_store import LocalBlobStore
-from strata.config import StrataConfig
-from tests.conftest import table_to_ipc_bytes
+from tests.conftest import ran_while_held, table_to_ipc_bytes
 
 ARROW = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -76,48 +75,22 @@ class GatedBlobStore(LocalBlobStore):
 
 
 async def _loop_ran_while_blocked(blobs: GatedBlobStore, gate: str, call):
-    """Run *call* with *gate* blocked: whether this coroutine ran meanwhile, and the result."""
+    """``ran_while_held`` with the blob store's *gate* call blocked."""
     blobs.gated = gate
-    task = asyncio.ensure_future(call)
-    try:
-        assert await asyncio.to_thread(blobs.entered.wait, 30), f"no {gate} call was made"
-        ran_while_blocked = not blobs.done.is_set()
-    finally:
-        blobs.release.set()
-    return ran_while_blocked, await task
+    return await ran_while_held(blobs, call)
 
 
 @pytest.fixture
-def served(tmp_path):
+def served(in_process_server):
     """An in-process personal server whose artifact store's blob calls can be blocked."""
     import strata.server as server_module
-    from strata.server import ServerState
-    from strata.tenant_registry import reset_tenant_registry
 
-    config = StrataConfig(
-        host="127.0.0.1",
-        deployment_mode="personal",
-        cache_dir=tmp_path / "cache",
-        artifact_dir=tmp_path / "artifacts",
-        metadata_db=tmp_path / "meta.sqlite",
-        rate_limit_enabled=False,
-    )
-    reset_artifact_store()
-    reset_tenant_registry()
-    original = server_module._state
-    state = ServerState(config)
-    server_module._state = state
-    store = get_artifact_store(config.artifact_dir)
+    state = in_process_server()
+    store = get_artifact_store(state.config.artifact_dir)
     blobs = GatedBlobStore(store.blobs_dir)
     store.blob_store = blobs
-    try:
-        yield SimpleNamespace(state=state, store=store, blobs=blobs, app=server_module.app)
-    finally:
-        blobs.release.set()
-        state.streams.shutdown_cleanups()
-        server_module._state = original
-        reset_artifact_store()
-        reset_tenant_registry()
+    yield SimpleNamespace(state=state, store=store, blobs=blobs, app=server_module.app)
+    blobs.release.set()
 
 
 def _client(served) -> AsyncClient:

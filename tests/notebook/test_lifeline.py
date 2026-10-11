@@ -102,6 +102,44 @@ def _gone(pid: int) -> bool:
     return state.stdout.strip().startswith("Z") or not state.stdout.strip()
 
 
+def _assert_dies_with(parent: subprocess.Popen, pid_file: Path, what: str) -> None:
+    """Wait for the child to write ``pid_file``, kill ``parent``, and check the child goes too.
+
+    Cleanup never signals this process's own group, whatever the child's group turns out to be.
+    """
+    child_pid: int | None = None
+    child_group: int | None = None
+    try:
+        deadline = time.monotonic() + _STARTUP_BOUND
+        while not pid_file.exists():
+            if parent.poll() is not None:
+                pytest.fail(f"the parent exited first: {parent.stderr.read().decode()}")
+            if time.monotonic() > deadline:
+                pytest.fail(f"the {what} never started")
+            time.sleep(0.05)
+        child_pid = int(pid_file.read_text())
+        child_group = os.getpgid(child_pid)
+        assert child_group != os.getpgrp(), f"the {what} must run in its own process group"
+
+        parent.kill()
+        parent.wait()
+
+        deadline = time.monotonic() + _EXIT_BOUND
+        while not _gone(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _gone(child_pid), f"the {what} outlived the process that spawned it"
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait()
+        # macOS answers EPERM, not ESRCH, for a group left with only zombies.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            if child_group is not None and child_group != os.getpgrp():
+                os.killpg(child_group, signal.SIGKILL)
+            elif child_pid is not None:
+                os.kill(child_pid, signal.SIGKILL)  # never our own group
+
+
 @pytest.mark.parametrize("path", sorted(_PARENTS))
 def test_the_harness_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
     extra: list[str] = []
@@ -127,34 +165,7 @@ def test_the_harness_dies_with_its_spawner(tmp_path: Path, path: str) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
-    harness_group: int | None = None
-    try:
-        deadline = time.monotonic() + _STARTUP_BOUND
-        while not pid_file.exists():
-            if parent.poll() is not None:
-                pytest.fail(f"the parent exited first: {parent.stderr.read().decode()}")
-            if time.monotonic() > deadline:
-                pytest.fail("the cell never started")
-            time.sleep(0.05)
-        harness_pid = int(pid_file.read_text())
-        harness_group = os.getpgid(harness_pid)
-        assert harness_group != os.getpgrp(), "the harness must run in its own process group"
-
-        parent.kill()
-        parent.wait()
-
-        deadline = time.monotonic() + _EXIT_BOUND
-        while not _gone(harness_pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert _gone(harness_pid), "the harness outlived the process that spawned it"
-    finally:
-        if parent.poll() is None:
-            parent.kill()
-            parent.wait()
-        if harness_group is not None:
-            # macOS answers EPERM, not ESRCH, for a group left with only zombies.
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(harness_group, signal.SIGKILL)
+    _assert_dies_with(parent, pid_file, "harness")
 
 
 # Rscript and ssh cannot watch the lifeline themselves, so they run under a wrapper
@@ -229,33 +240,4 @@ def test_a_wrapped_child_dies_with_its_spawner(tmp_path: Path, path: str) -> Non
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
-    child_pid: int | None = None
-    child_group: int | None = None
-    try:
-        deadline = time.monotonic() + _STARTUP_BOUND
-        while not pid_file.exists():
-            if parent.poll() is not None:
-                pytest.fail(f"the parent exited first: {parent.stderr.read().decode()}")
-            if time.monotonic() > deadline:
-                pytest.fail("the child never started")
-            time.sleep(0.05)
-        child_pid = int(pid_file.read_text())
-        child_group = os.getpgid(child_pid)
-        assert child_group != os.getpgrp(), "the child must run in its own process group"
-
-        parent.kill()
-        parent.wait()
-
-        deadline = time.monotonic() + _EXIT_BOUND
-        while not _gone(child_pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert _gone(child_pid), "the child outlived the process that spawned it"
-    finally:
-        if parent.poll() is None:
-            parent.kill()
-            parent.wait()
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            if child_group is not None and child_group != os.getpgrp():
-                os.killpg(child_group, signal.SIGKILL)
-            elif child_pid is not None:
-                os.kill(child_pid, signal.SIGKILL)  # never our own group
+    _assert_dies_with(parent, pid_file, "child")
