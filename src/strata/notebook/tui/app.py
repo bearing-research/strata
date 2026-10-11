@@ -189,9 +189,9 @@ class HelpScreen(ModalScreen[None]):
         ("d", "Show the notebook DAG"),
         ("i", "Enlarge the selected cell's image output"),
         ("r", "Force an immediate resync; after the server closed the session, reopen it"),
-        ("ctrl+← / ctrl+→", "Resize the cell-list ↔ detail boundary"),
-        ("ctrl+↑ / ctrl+↓", "Resize the top ↔ bottom detail boundary"),
-        ("ctrl+x", "Reset the panel layout to defaults"),
+        ("[ / ]", "Resize the cell-list ↔ detail boundary (narrower / wider list)"),
+        ("- / =", "Resize the top ↔ bottom detail boundary (shorter / taller top)"),
+        ("\\", "Reset the panel layout to defaults"),
         ("?", "Show this help"),
         ("q", "Quit"),
     ]
@@ -208,7 +208,7 @@ class HelpScreen(ModalScreen[None]):
 
 
 # Percent of column width / detail height. Textual has no splitter widget, so
-# ctrl+arrows nudge these.
+# [ ] and - = nudge these.
 _DEFAULT_CELLS_PCT = 38
 _DEFAULT_TOP_PCT = 50
 _MIN_PCT = 20
@@ -261,12 +261,13 @@ class NotebookTUI(App[None]):
         Binding("p", "table_prev", "Prev page", show=False),
         Binding("s", "table_sort", "Sort column", show=False),
         Binding("e", "table_export", "Export CSV", show=False),
-        # Resize panel boundaries.
-        Binding("ctrl+right", "resize_cells(1)", "Wider list", show=False),
-        Binding("ctrl+left", "resize_cells(-1)", "Narrower list", show=False),
-        Binding("ctrl+down", "resize_top(1)", "Taller top", show=False),
-        Binding("ctrl+up", "resize_top(-1)", "Shorter top", show=False),
-        Binding("ctrl+x", "reset_layout", "Reset layout", show=False),
+        # Resize panel boundaries. Printable keys: macOS reserves ctrl+arrows for
+        # Mission Control, so the terminal never receives them.
+        Binding("right_square_bracket", "resize_cells(1)", "Wider list", show=False),
+        Binding("left_square_bracket", "resize_cells(-1)", "Narrower list", show=False),
+        Binding("equals_sign", "resize_top(1)", "Taller top", show=False),
+        Binding("minus", "resize_top(-1)", "Shorter top", show=False),
+        Binding("backslash", "reset_layout", "Reset layout", show=False),
     ]
 
     # Tab id -> (its TabbedContent group, the scroll region to focus).
@@ -365,17 +366,17 @@ class NotebookTUI(App[None]):
         self.query_one("#detail-bottom").styles.height = f"{100 - self._top_pct}%"
 
     def action_resize_cells(self, direction: int) -> None:
-        """Move the cell-list ↔ detail boundary (ctrl+left / ctrl+right)."""
+        """Move the cell-list ↔ detail boundary ([ / ])."""
         self._cells_pct = _nudge(self._cells_pct, direction * _CELLS_STEP)
         self._apply_split()
 
     def action_resize_top(self, direction: int) -> None:
-        """Move the top ↔ bottom detail boundary (ctrl+up / ctrl+down)."""
+        """Move the top ↔ bottom detail boundary (- / =)."""
         self._top_pct = _nudge(self._top_pct, direction * _TOP_STEP)
         self._apply_split()
 
     def action_reset_layout(self) -> None:
-        """Restore the default split ratios (ctrl+x)."""
+        """Restore the default split ratios (backslash)."""
         self._cells_pct = _DEFAULT_CELLS_PCT
         self._top_pct = _DEFAULT_TOP_PCT
         self._apply_split()
