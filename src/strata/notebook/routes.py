@@ -561,16 +561,6 @@ def _raise_environment_busy(session: NotebookSession, message: str) -> None:
     )
 
 
-async def _start_missing_warm_pools(session: NotebookSession, mutation: str) -> None:
-    """Start any warm pool the mutation's invalidation left absent (it restarts existing ones)."""
-    try:
-        await session._ensure_warm_pool_started(mutation)
-    except Exception:
-        logger.warning(
-            "Failed to start warm pool after %s for %s", mutation, session.path, exc_info=True
-        )
-
-
 # --- Request/Response Models ---
 
 
@@ -1881,10 +1871,9 @@ async def import_environment_requirements(
 
     try:
         try:
-            outcome = await session.import_requirements(req.requirements)
+            outcome = await session.import_requirements(req.requirements, owner=mutation)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        await _start_missing_warm_pools(session, mutation)
     finally:
         session._end_synchronous_environment_mutation()
 
@@ -1940,10 +1929,9 @@ async def import_environment_yaml(
 
     try:
         try:
-            outcome = await session.import_environment_yaml(req.environment_yaml)
+            outcome = await session.import_environment_yaml(req.environment_yaml, owner=mutation)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        await _start_missing_warm_pools(session, mutation)
     finally:
         session._end_synchronous_environment_mutation()
 
@@ -2862,13 +2850,8 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         cell = session.notebook_state.get_cell(cell_id)
         if not cell:
             raise HTTPException(status_code=500, detail="Failed to create cell")
-        if cell.language == CellLanguage.R:
-            # A notebook opened without R cells has no R pool yet. The cell is already
-            # written, so a pool that fails to start only leaves R cells running cold.
-            try:
-                session.start_r_pool_background()
-            except Exception:
-                logger.warning("Failed to start the R pool for %s", session.path, exc_info=True)
+        # A notebook opened without R cells has no R pool yet.
+        await session.start_missing_warm_pools()
 
         await _broadcast_state(notebook_id, session)
         return session.serialize_cell(cell)
@@ -3367,8 +3350,7 @@ async def add_notebook_dependency(
         _raise_environment_busy(session, str(exc))
 
     try:
-        outcome = await session.mutate_dependency(req.package, action="add")
-        await _start_missing_warm_pools(session, mutation)
+        outcome = await session.mutate_dependency(req.package, action="add", owner=mutation)
     finally:
         session._end_synchronous_environment_mutation()
     result = outcome.result
@@ -3414,8 +3396,7 @@ async def remove_notebook_dependency(
         _raise_environment_busy(session, str(exc))
 
     try:
-        outcome = await session.mutate_dependency(package_name, action="remove")
-        await _start_missing_warm_pools(session, mutation)
+        outcome = await session.mutate_dependency(package_name, action="remove", owner=mutation)
     finally:
         session._end_synchronous_environment_mutation()
     result = outcome.result

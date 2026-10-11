@@ -15,7 +15,7 @@ import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from strata.notebook import quiesce
+from strata.notebook import mcp_server, quiesce
 from strata.notebook import routes as notebook_routes
 from strata.notebook.dependencies import EnvironmentOperationLog
 from strata.notebook.session import EnvironmentJobSnapshot, SessionManager
@@ -234,8 +234,9 @@ class TestWarmPoolAndTimeout:
         assert session.r_warm_pool.worker_command is not None
         assert session.r_warm_pool.worker_command[0] == str(rscript)
 
+    @pytest.mark.parametrize("surface", ["rest", "mcp"])
     async def test_the_first_r_cell_added_through_the_server_starts_an_r_pool(
-        self, config, manager, monkeypatch, tmp_path
+        self, config, manager, monkeypatch, tmp_path, surface
     ):
         async def _uv_succeeds(*args, **kwargs):
             return SimpleNamespace(
@@ -262,12 +263,15 @@ class TestWarmPoolAndTimeout:
                 assert session.warm_pool is not None
                 assert session.r_warm_pool is None
 
-                added = await client.post(
-                    f"/v1/notebooks/{session.id}/cells",
-                    json={"after_cell_id": "root", "language": "r"},
-                )
+                if surface == "rest":
+                    added = await client.post(
+                        f"/v1/notebooks/{session.id}/cells",
+                        json={"after_cell_id": "root", "language": "r"},
+                    )
+                    assert added.status_code == 200, added.text
+                else:
+                    await mcp_server._add_cell(manager, session.id, "x <- 1", "root", "r")
 
-            assert added.status_code == 200, added.text
             assert session.r_warm_pool is not None
             assert session.r_warm_pool.worker_command is not None
             assert session.r_warm_pool.worker_command[0] == str(rscript)
@@ -326,7 +330,7 @@ class TestWarmPoolAndTimeout:
                 await asyncio.gather(*manager.close_session(session.id))
 
     @pytest.mark.warm_pool
-    @pytest.mark.parametrize("change", ["add", "remove", "requirements"])
+    @pytest.mark.parametrize("change", ["add", "remove", "requirements", "mcp add", "mcp remove"])
     async def test_a_dependency_change_through_the_server_leaves_cells_running_warm(
         self, config, manager, monkeypatch, tmp_path, change
     ):
@@ -383,11 +387,16 @@ class TestWarmPoolAndTimeout:
                     changed = await client.post(f"{base}/dependencies", json={"package": "six"})
                 elif change == "remove":
                     changed = await client.delete(f"{base}/dependencies/six")
-                else:
+                elif change == "requirements":
                     changed = await client.post(
                         f"{base}/environment/requirements.txt", json={"requirements": "six\n"}
                     )
-                assert changed.status_code == 200, changed.text
+                elif change == "mcp add":
+                    await mcp_server._add_dependency(manager, session.id, "six")
+                else:
+                    await mcp_server._remove_dependency(manager, session.id, "six")
+                if not change.startswith("mcp"):
+                    assert changed.status_code == 200, changed.text
                 assert session.warm_pool is not None
                 await asyncio.gather(*session.warm_pool._background_tasks)
 
