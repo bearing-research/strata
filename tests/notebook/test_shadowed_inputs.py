@@ -83,22 +83,13 @@ async def test_single_cell_reads_the_wired_producer(tmp_path: Path, other: str):
 @pytest.mark.integration
 @pytest.mark.warm_pool
 @pytest.mark.parametrize("other", _OTHER)
-async def test_warm_pool_reads_the_wired_producer(tmp_path: Path, other: str):
+async def test_warm_pool_reads_the_wired_producer(tmp_path: Path, other: str, warm_pool):
     """The pool worker gets the same manifest inputs as the cold harness."""
-    from strata.notebook.pool import WarmProcessPool
-
     reader = f"out = state * 100 + {other}\nprint(out)\n"
     session = _session(tmp_path, other, "python", reader)
     await _run_upstreams(session, other)
-    session.ensure_venv_synced()
-    pool = WarmProcessPool(
-        session.path, pool_size=1, python_executable=session.venv_python or Path("python")
-    )
-    await pool.start()
-    try:
-        result = await CellExecutor(session, pool).execute_cell("c2", reader)
-    finally:
-        await pool.drain()
+    pool = await warm_pool(session)
+    result = await CellExecutor(session, pool).execute_cell("c2", reader)
     assert result.success, result.error
     assert result.execution_method == "warm"
     assert result.stdout == "210\n"
