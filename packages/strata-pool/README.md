@@ -298,17 +298,35 @@ MachineType(
 )
 ```
 
-**Verified against a live account** on 2026-09-02: the base URL, `POST /pods`
-with `imageName` / `ports` / `env` / `containerDiskInGb` / `name`, the `id` in
-the create response, the proxy endpoint, health through that proxy, and
-`DELETE /pods/{id}` including a second delete of the same pod. A CPU pod
-booted, answered, and terminated with nothing left running.
+The backend speaks RunPod's REST v2 (`https://api.runpod.io/v2`); v1 is
+retired on 2026-11-15. `POST /v2/pods` takes exactly one of `gpu` or `cpu`:
 
-**Two things that run stayed silent on**, because a CPU pod does not exercise
-them: `gpuTypeIds` + `gpuCount`, and reading a region from `machine`. Every pod
-in the account listing carried `machine: {}` with no `dataCenterId`, so `region`
-is probably always `None` today. That is harmless, being metadata, but do not
-trust it.
+- A machine type with a `gpu_type` sends `gpu: {id, count}`.
+- One without sends `cpu: {id: "cpu3g", vcpuCount}`, RunPod's general-purpose
+  flavor (4 GB RAM per vCPU), with `cpus` rounded up to the power of two
+  RunPod accepts, from 2 to 32.
+
+`provider_options` merges into `gpu` and `cpu` rather than replacing them, so a
+deployment can pin a CUDA floor or pick another CPU flavor without restating
+the rest:
+
+```python
+MachineType(
+    name="h100-80gb",
+    image="strata-worker:latest",
+    gpu_type="NVIDIA H100 80GB PCIe",
+    provider_options={"gpu": {"minCudaVersion": "12.8"}, "cloud": "SECURE"},
+)
+```
+
+A v2 create places exactly the GPU type it asks for and never falls back to
+another; a `400` means no capacity for that type. `region` is the pod's
+`dataCenterId`, which is `None` until the scheduler places it.
+
+**Verified against a live account** on 2026-10-12: a `cpu3g` pod created
+through `POST /v2/pods`, health through the proxy, and `DELETE /v2/pods/{id}`
+twice, with nothing left running. The `gpu` block has not been run live; set
+`STRATA_POOL_RUNPOD_GPU` to cover it.
 
 RunPod has moved its API surface before. Every field lives in `_create_body`
 and is asserted by a test, so a wrong one is a one-line fix; `provider_options`

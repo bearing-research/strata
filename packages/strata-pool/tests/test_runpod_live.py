@@ -8,8 +8,9 @@ still leave a pod running, so check the console afterwards.
     STRATA_POOL_RUNPOD_LIVE=1 pytest tests/test_runpod_live.py -v -s
 
 This confirms RunPod accepts what `test_runpod_backend.py` asserts we send, and
-prints the pod id for chasing failures. It uses a CPU pod; set
-`STRATA_POOL_RUNPOD_GPU` to a GPU type to cover the accelerator fields too.
+prints the pod id for chasing failures. It uses a CPU pod (the default `cpu3g`
+flavor, 2 vCPUs); set `STRATA_POOL_RUNPOD_GPU` to a GPU type to cover the
+accelerator fields too.
 """
 
 import asyncio
@@ -51,7 +52,7 @@ def _spec() -> MachineType:
         cool_down_seconds=0.0,
         disk_gb=10,
         gpu_type=os.environ.get("STRATA_POOL_RUNPOD_GPU"),
-        provider_options={"cloudType": "SECURE"},
+        provider_options={"cloud": "SECURE"},
     )
 
 

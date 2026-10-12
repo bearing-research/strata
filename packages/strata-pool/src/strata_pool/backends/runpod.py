@@ -1,8 +1,8 @@
 """Run workers as RunPod pods, published on the public internet through RunPod's proxy.
 
 The worker credential is the only thing between a public URL and remote code
-execution. `tests/test_runpod_live.py` verifies the request shapes against a live
-account, except the GPU fields and the region, which is probably always None.
+execution. Speaks RunPod's REST v2; `tests/test_runpod_live.py` checks the request
+shapes against a live account.
 """
 
 import logging
@@ -15,7 +15,10 @@ from strata_pool.types import WORKER_TOKEN_ENV, MachineType
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://rest.runpod.io/v1"
+DEFAULT_BASE_URL = "https://api.runpod.io/v2"
+# v2 requires exactly one of `gpu` or `cpu`; a machine type with no GPU gets this
+# flavor unless `provider_options` names another.
+DEFAULT_CPU_FLAVOR = "cpu3g"
 PROXY_HOST = "proxy.runpod.net"
 
 
@@ -90,10 +93,8 @@ class RunPodBackend:
             # Fail loudly rather than build an endpoint from None.
             raise _orphaned(name, f"RunPod created a pod without an id: {created.text[:200]}")
 
-        # `machine` is null until the pod is placed on a host, and `.get("machine", {})`
-        # returns None for a null, not the default.
-        machine = payload.get("machine") or {}
-        region = machine.get("dataCenterId") if isinstance(machine, dict) else None
+        # Null until the scheduler places the pod.
+        region = payload.get("dataCenterId")
 
         return ProvisionedWorker(
             backend_id=pod_id,
@@ -131,26 +132,40 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
         # Names are not unique, but one that identifies the pool makes an orphaned pod
         # findable in the console, our only backstop until the backend can list machines.
         "name": f"strata-{spec.name}-{uuid.uuid4().hex[:8]}",
-        "imageName": spec.image,
+        "image": spec.image,
         "ports": [f"{worker_port}/http"],
         "env": dict(env or {}),
     }
     if spec.gpu_type is not None:
-        body["gpuTypeIds"] = [spec.gpu_type]
-        body["gpuCount"] = spec.gpu_count
+        body["gpu"] = {"id": spec.gpu_type, "count": spec.gpu_count}
+    else:
+        body["cpu"] = {"id": DEFAULT_CPU_FLAVOR, "vcpuCount": _vcpu_count(spec.cpus)}
     if spec.disk_gb is not None:
-        body["containerDiskInGb"] = spec.disk_gb
+        body["disk"] = spec.disk_gb
     # Last, so a deployment can correct any field above (even a wrong one) without a release.
-    body.update(spec.provider_options)
+    # `gpu` and `cpu` merge, so adding `minCudaVersion` keeps the GPU type.
+    for key, value in spec.provider_options.items():
+        current = body.get(key)
+        if key in ("gpu", "cpu") and isinstance(current, dict) and isinstance(value, dict):
+            body[key] = {**current, **value}
+        else:
+            body[key] = value
     _restore_credential(body, env)
     return body
+
+
+def _vcpu_count(cpus: float | None) -> int:
+    """RunPod takes a power of two from 2 to 32; round up so a machine never gets less."""
+    count = 2
+    while count < min(cpus or 2, 32):
+        count *= 2
+    return count
 
 
 def _restore_credential(body: dict, env: dict[str, str] | None) -> None:
     """Put the worker credential back after a `provider_options` override, and nothing else.
 
-    The override's `env` stands in either encoding (a dict, or a list of
-    ``{key, value}`` as RunPod's GraphQL takes); anything else raises RunPodError.
+    v2 takes `env` only as a map; anything else raises RunPodError.
     """
     token = (env or {}).get(WORKER_TOKEN_ENV)
     if token is None:
@@ -159,13 +174,6 @@ def _restore_credential(body: dict, env: dict[str, str] | None) -> None:
     declared = body.get("env")
     if isinstance(declared, dict):
         declared[WORKER_TOKEN_ENV] = token
-        return
-    if isinstance(declared, list):
-        body["env"] = [
-            entry
-            for entry in declared
-            if not (isinstance(entry, dict) and entry.get("key") == WORKER_TOKEN_ENV)
-        ] + [{"key": WORKER_TOKEN_ENV, "value": token}]
         return
 
     raise RunPodError(
@@ -195,5 +203,9 @@ def _message(response: httpx.Response) -> str:
         return f"HTTP {response.status_code}: {response.text[:200]}"
     if not isinstance(payload, dict):
         return f"HTTP {response.status_code}: {response.text[:200]}"
-    detail = payload.get("error") or payload.get("message") or response.text[:200]
+    detail = payload.get("detail") or response.text[:200]
+    # A 422 names each rejected field here, which `detail` only summarizes.
+    errors = payload.get("errors")
+    if isinstance(errors, list) and errors:
+        detail = f"{detail} ({'; '.join(str(e) for e in errors)})"
     return f"HTTP {response.status_code}: {detail}"

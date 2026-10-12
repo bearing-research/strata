@@ -134,7 +134,7 @@ class MachineType:
 
     provider_options: dict[str, object] = field(default_factory=dict)
     """Merged into the backend's create request. The escape hatch for the
-    settings that are real but not shared: RunPod's cloudType, a region, a
+    settings that are real but not shared: RunPod's cloud tier, a region, a
     network volume. A backend ignores what it does not understand."""
 
 
