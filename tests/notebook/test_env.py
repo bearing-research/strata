@@ -50,6 +50,7 @@ def _uv_lock(
     dev: dict[str, str] | None = None,
     transitive: dict[str, tuple[str, list[str]]] | None = None,
     project: str = "probe",
+    python: str = ">=3.12",
 ) -> str:
     """Build a minimal but realistic uv.lock for a notebook whose project is *project*.
 
@@ -59,7 +60,7 @@ def _uv_lock(
     """
     dev = dev or {}
     transitive = transitive or {}
-    lines = ["version = 1", "revision = 3", 'requires-python = ">=3.12"', ""]
+    lines = ["version = 1", "revision = 3", f'requires-python = "{python}"', ""]
 
     # Root project package.
     lines.append("[[package]]")
@@ -122,6 +123,18 @@ def test_dev_dependency_does_not_change_hash(tmp_path):
         ),
     )
     assert base == bumped
+
+
+def test_a_python_version_change_changes_hash(tmp_path):
+    """Same packages, another interpreter: results computed under 3.12 are not 3.13's."""
+    for dev in (None, {"pytest": "9.1.1"}):
+        on_312 = _hash_with(
+            tmp_path, _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev=dev, python="==3.12.*")
+        )
+        on_313 = _hash_with(
+            tmp_path, _uv_lock(runtime={"cloudpickle": "3.1.2"}, dev=dev, python="==3.13.*")
+        )
+        assert on_312 != on_313
 
 
 def test_runtime_dependency_change_does_change_hash(tmp_path):

@@ -191,9 +191,10 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
     """Fingerprint a ``uv.lock``'s runtime dependency closure, or ``None``.
 
     ``None`` when the lock has no project root or cannot be parsed. Otherwise
-    folds ``name@version``, source and artifact hashes of every package reachable
-    from the root's runtime deps, so transitive runtime upgrades count but dev
-    tools do not, whether or not the lock has a dev group yet.
+    folds the lock's ``requires-python`` and the ``name@version``, source and
+    artifact hashes of every package reachable from the root's runtime deps, so
+    transitive runtime upgrades count but dev tools do not, whether or not the
+    lock has a dev group yet.
     """
     try:
         data: Any = tomllib.loads(raw_uv_lock.decode("utf-8"))
@@ -248,6 +249,12 @@ def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
                     frontier.extend(_dep_names(group))
 
     hasher = hashlib.sha256()
+    # The interpreter is part of the environment: a notebook moved from 3.12 to 3.13 keeps
+    # every pure-Python package and its hashes, and must still go stale.
+    requires_python = data.get("requires-python")
+    if isinstance(requires_python, str):
+        hasher.update(b"\0python=")
+        hasher.update(requires_python.encode("utf-8"))
     for name in sorted(seen):
         for pkg in sorted(by_name.get(name, []), key=lambda p: str(p.get("version", ""))):
             hasher.update(b"\0pkg=")
