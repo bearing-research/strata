@@ -74,7 +74,8 @@ def _environment_proxy(url: str) -> str | None:
     parsed = urlparse(url)
     proxies = urllib.request.getproxies_environment()
     proxy = proxies.get(parsed.scheme) or proxies.get("all")
-    if not proxy or urllib.request.proxy_bypass_environment(parsed.hostname or "", proxies):
+    # With a proxy variable set, ``proxy_bypass`` reads NO_PROXY rather than the OS.
+    if not proxy or urllib.request.proxy_bypass(parsed.hostname or ""):
         return None
     return proxy
 
