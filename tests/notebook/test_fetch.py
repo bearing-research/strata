@@ -7,6 +7,7 @@ import http.server
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 
@@ -442,6 +443,124 @@ class TestTheGuard:
 
         assert cache.fingerprint(spec) != cache.fingerprint(spec)
         assert origin.requests == []
+
+
+class _EgressProxy:
+    """A forward proxy that admits hosts by name, as an egress allowlist does.
+
+    An admitted plain-HTTP request is answered by the proxy itself, standing in for
+    the origin it would forward to.
+    """
+
+    _PROXY_VARIABLES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+
+    def __init__(self, monkeypatch, admits: set[str]):
+        self.body = b"zone,borough\n2,Bronx\n"
+        self.requests: list[tuple[str, str]] = []
+        proxy = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def _refuse_or_serve(self, host: str) -> None:
+                proxy.requests.append((self.command, self.path))
+                if host not in admits:
+                    self.send_response(403)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(proxy.body)))
+                self.end_headers()
+                self.wfile.write(proxy.body)
+
+            def do_CONNECT(self):  # noqa: N802
+                self._refuse_or_serve(self.path.rsplit(":", 1)[0])
+
+            def do_GET(self):  # noqa: N802
+                self._refuse_or_serve(urlparse(self.path).hostname or "")
+
+            def log_message(self, *args):
+                return None
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        for name in self._PROXY_VARIABLES:
+            monkeypatch.delenv(name, raising=False)
+            monkeypatch.delenv(name.lower(), raising=False)
+        address = f"http://127.0.0.1:{self.server.server_address[1]}"
+        monkeypatch.setenv("HTTP_PROXY", address)
+        monkeypatch.setenv("HTTPS_PROXY", address)
+
+    def close(self):
+        self.server.shutdown()
+
+
+@pytest.fixture
+def egress_proxy(monkeypatch):
+    proxies: list[_EgressProxy] = []
+
+    def start(admits: set[str]) -> _EgressProxy:
+        proxies.append(_EgressProxy(monkeypatch, admits))
+        return proxies[-1]
+
+    yield start
+    for proxy in proxies:
+        proxy.close()
+
+
+class TestThroughAnEgressProxy:
+    """Under the guard, the environment's proxy carries the fetch (Amber item 68)."""
+
+    def test_a_proxy_that_admits_the_host_serves_the_fetch(
+        self, tmp_path, egress_proxy, rebinding_dns
+    ):
+        proxy = egress_proxy(admits={"data.test"})
+        rebinding_dns.answers["data.test"] = [["93.184.216.34"]]
+
+        fetched = FetchCache(tmp_path).resolve(
+            FetchSpec(name="zones", url="http://data.test/zones.csv")
+        )
+
+        assert fetched.path.read_bytes() == proxy.body
+        # By name, so a proxy that admits hosts by name can decide.
+        assert proxy.requests == [("GET", "http://data.test/zones.csv")]
+
+    def test_a_proxy_that_refuses_the_host_fails_the_fetch(
+        self, tmp_path, egress_proxy, rebinding_dns
+    ):
+        proxy = egress_proxy(admits=set())
+        rebinding_dns.answers["blocked.test"] = [["93.184.216.34"]]
+
+        with pytest.raises(FetchError, match="403"):
+            FetchCache(tmp_path).resolve(
+                FetchSpec(name="zones", url="https://blocked.test/zones.csv")
+            )
+
+        assert proxy.requests == [("CONNECT", "blocked.test:443")]
+
+    def test_a_private_address_is_refused_before_the_proxy_is_asked(
+        self, tmp_path, egress_proxy, origin
+    ):
+        proxy = egress_proxy(admits={"127.0.0.1"})
+
+        with pytest.raises(FetchError, match="non-routable"):
+            FetchCache(tmp_path).resolve(FetchSpec(name="zones", url=origin.url()))
+
+        assert proxy.requests == []
+        assert origin.requests == []
+
+    def test_a_no_proxy_host_connects_directly(
+        self, tmp_path, egress_proxy, rebinding_dns, origin, monkeypatch
+    ):
+        proxy = egress_proxy(admits={"data.test"})
+        monkeypatch.setenv("NO_PROXY", "data.test")
+        rebinding_dns.answers["data.test"] = [["127.0.0.1"]]
+        port = origin.server.server_address[1]
+
+        fetched = FetchCache(tmp_path, allowed_hosts=("data.test",)).resolve(
+            FetchSpec(name="zones", url=f"http://data.test:{port}/zones.csv")
+        )
+
+        assert fetched.path.read_bytes() == origin.body
+        assert proxy.requests == []
 
 
 class TestInACell:

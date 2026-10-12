@@ -258,10 +258,18 @@ Only `http` and `https` are fetched. In service mode every redirect hop passes
 the same guard as a worker's URLs: no private, loopback or link-local address
 unless the host is listed in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. The
 connection goes only to an address that passed the check, so a name cannot
-pass with a public address and then connect to `127.0.0.1`; for the same
-reason service mode fetches directly and ignores `HTTPS_PROXY`. Personal
-mode allows those addresses, so `http://localhost:8000/data.csv` works on your
-own machine, and uses the proxy settings as usual. A URL that cannot be checked shows the cell as out of date, and running
+pass with a public address and then connect to `127.0.0.1`.
+
+When `HTTPS_PROXY` or `HTTP_PROXY` covers a URL, a service-mode fetch goes
+through that proxy instead. Each hop still passes the address check first, and
+the proxy is sent the host name, so an egress proxy that admits hosts by name
+decides. It also resolves the name itself, so it should refuse non-public
+addresses too. Hosts in `NO_PROXY` connect directly, held to the checked
+address.
+
+Personal mode allows private addresses, so `http://localhost:8000/data.csv`
+works on your own machine, and uses the proxy settings as usual. A URL that
+cannot be checked shows the cell as out of date, and running
 it fails with the reason. A cell with `@fetch` runs on its own in Run All rather
 than in a batch.
 
