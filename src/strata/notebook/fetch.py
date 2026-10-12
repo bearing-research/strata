@@ -16,7 +16,10 @@ pins it; bytes that no longer match fail the cell with both digests.
 
 URLs go through the same guard as a worker's manifest URLs: http(s) only, and no
 private or link-local address unless the host is in
-``notebook_fetch_allowed_hosts``.
+``notebook_fetch_allowed_hosts``. Under the guard, a fetch the environment's
+``HTTPS_PROXY`` / ``HTTP_PROXY`` covers goes through that proxy, named by host,
+so an egress proxy decides; ``NO_PROXY`` hosts connect directly to the checked
+address.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import re
 import tempfile
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -60,6 +64,19 @@ def guard_settings(config: Any) -> tuple[tuple[str, ...], bool]:
     allowed = tuple(getattr(config, "notebook_fetch_allowed_hosts", None) or ())
     personal = getattr(config, "deployment_mode", "service") == "personal"
     return allowed, personal
+
+
+def _environment_proxy(url: str) -> str | None:
+    """The proxy the environment names for *url*, or ``None`` to connect directly.
+
+    Environment variables only, as httpx reads them: never the OS's proxy settings.
+    """
+    parsed = urlparse(url)
+    proxies = urllib.request.getproxies_environment()
+    proxy = proxies.get(parsed.scheme) or proxies.get("all")
+    if not proxy or urllib.request.proxy_bypass_environment(parsed.hostname or "", proxies):
+        return None
+    return proxy
 
 
 def _safe_filename(name: str) -> str:
@@ -188,14 +205,7 @@ class FetchCache:
             if record.get("last_modified"):
                 headers["If-Modified-Since"] = record["last_modified"]
 
-        client = self._client or httpx.Client(
-            timeout=FETCH_TIMEOUT_SECONDS,
-            # The per-hop check resolves the host; this pins the connection to an
-            # address that passed the same rule.
-            transport=guarded_transport(
-                allowed_hosts=self._allowed_hosts, allow_local=self._allow_local
-            ),
-        )
+        clients: dict[str | None, httpx.Client] = {}
         partial = self.root / f".partial-{os.getpid()}-{id(spec)}"
         try:
             url = spec.url
@@ -209,6 +219,7 @@ class FetchCache:
                 )
                 if problem is not None:
                     raise FetchError(problem)
+                client = self._client_for(url, clients)
                 with client.stream("GET", url, headers=headers, follow_redirects=False) as response:
                     if response.status_code in (301, 302, 303, 307, 308):
                         location = response.headers.get("location")
@@ -239,8 +250,31 @@ class FetchCache:
             raise FetchError(f"@fetch {spec.name}: could not download {spec.url}: {exc}") from exc
         finally:
             partial.unlink(missing_ok=True)
-            if self._client is None:
+            for client in clients.values():
                 client.close()
+
+    def _client_for(self, url: str, clients: dict[str | None, httpx.Client]) -> httpx.Client:
+        """The client for one hop, built once per proxy and kept in *clients* for closing."""
+        if self._client is not None:
+            return self._client
+        # Personal mode's unguarded client reads the proxy variables itself.
+        proxy = None if self._allow_local else _environment_proxy(url)
+        if proxy not in clients:
+            if proxy is not None:
+                # The proxy is the egress control for this hop: it is sent the host name
+                # and resolves it, so a proxy that admits hosts by name can decide. The
+                # per-hop check above still refuses a private address before it is asked.
+                clients[proxy] = httpx.Client(timeout=FETCH_TIMEOUT_SECONDS, proxy=proxy)
+            else:
+                clients[proxy] = httpx.Client(
+                    timeout=FETCH_TIMEOUT_SECONDS,
+                    # The per-hop check resolves the host; this pins the connection to an
+                    # address that passed the same rule.
+                    transport=guarded_transport(
+                        allowed_hosts=self._allowed_hosts, allow_local=self._allow_local
+                    ),
+                )
+        return clients[proxy]
 
     def _stream_to(self, partial: Path, response: httpx.Response, spec: FetchSpec) -> str:
         self.root.mkdir(parents=True, exist_ok=True)
