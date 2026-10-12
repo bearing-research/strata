@@ -812,6 +812,12 @@ def _store_put_by_provenance(
 
     named_id = metadata.get("artifact_id")
     artifact_id = str(named_id or uuid.uuid4())
+    if named_id:
+        # The id becomes a blob key: ``../blobs/<theirs>`` would name another tenant's bytes.
+        try:
+            reject_unsafe_artifact_id(artifact_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         version = store.create_artifact(
             artifact_id=artifact_id,

@@ -4,7 +4,7 @@
 # Build: DOCKER_BUILDKIT=1 docker build -t strata .
 #
 # Run (the named volume keeps cache and metadata across restarts):
-#   docker run --rm -p 8765:8765 \
+#   docker run --rm -p 127.0.0.1:8765:8765 \
 #     -v strata_state:/home/strata/.strata \
 #     -v /path/to/warehouse:/data \
 #     strata

@@ -547,6 +547,37 @@ class TestThroughAnEgressProxy:
         assert proxy.requests == []
         assert origin.requests == []
 
+    def test_a_proxy_named_without_a_scheme_is_an_http_proxy(
+        self, tmp_path, egress_proxy, rebinding_dns, monkeypatch
+    ):
+        """``user:pass@host:port`` is how curl and httpx read it; refusing it broke every fetch
+        and put the password in the cell's error."""
+        proxy = egress_proxy(admits={"data.test"})
+        port = proxy.server.server_address[1]
+        monkeypatch.setenv("HTTP_PROXY", f"alice:s3cret@127.0.0.1:{port}")
+        rebinding_dns.answers["data.test"] = [["93.184.216.34"]]
+
+        fetched = FetchCache(tmp_path).resolve(
+            FetchSpec(name="zones", url="http://data.test/zones.csv")
+        )
+
+        assert fetched.path.read_bytes() == proxy.body
+        assert proxy.requests == [("GET", "http://data.test/zones.csv")]
+
+    def test_a_proxy_error_never_shows_the_proxys_credentials(
+        self, tmp_path, egress_proxy, rebinding_dns, monkeypatch
+    ):
+        egress_proxy(admits=set())
+        # A scheme httpx does not speak fails before any request, naming the proxy URL.
+        monkeypatch.setenv("HTTPS_PROXY", "ftp://alice:s3cret@127.0.0.1:1")
+        rebinding_dns.answers["data.test"] = [["93.184.216.34"]]
+
+        with pytest.raises(FetchError) as caught:
+            FetchCache(tmp_path).resolve(FetchSpec(name="zones", url="https://data.test/zones.csv"))
+
+        assert "s3cret" not in str(caught.value)
+        assert "alice" not in str(caught.value)
+
     def test_a_no_proxy_host_connects_directly(
         self, tmp_path, egress_proxy, rebinding_dns, origin, monkeypatch
     ):

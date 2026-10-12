@@ -5,6 +5,7 @@ execution. Speaks RunPod's REST v2; `tests/test_runpod_live.py` checks the reque
 shapes against a live account.
 """
 
+import copy
 import logging
 import uuid
 
@@ -143,8 +144,9 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
     if spec.disk_gb is not None:
         body["disk"] = spec.disk_gb
     # Last, so a deployment can correct any field above (even a wrong one) without a release.
-    # `gpu` and `cpu` merge, so adding `minCudaVersion` keeps the GPU type.
-    for key, value in spec.provider_options.items():
+    # `gpu` and `cpu` merge, so adding `minCudaVersion` keeps the GPU type. Copied: the
+    # credential is written into the body's `env`, which must not be the shared spec's.
+    for key, value in copy.deepcopy(spec.provider_options).items():
         current = body.get(key)
         if key in ("gpu", "cpu") and isinstance(current, dict) and isinstance(value, dict):
             body[key] = {**current, **value}

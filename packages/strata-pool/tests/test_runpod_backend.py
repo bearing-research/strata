@@ -354,6 +354,15 @@ class TestCredentialCannotBeDropped:
 
         assert fake.body()["env"]["STRATA_WORKER_TOKEN"] == "ours"
 
+    async def test_the_credential_never_lands_in_the_shared_machine_type(self):
+        """One spec serves every pod of its type and is listed by the admin API."""
+        spec = _spec(provider_options={"env": {"HF_TOKEN": "hf_abc"}, "gpu": {"count": 2}})
+        fake = FakeRunPod()
+        await _backend(fake).start(spec, {"STRATA_WORKER_TOKEN": "secret-a"})
+
+        assert spec.provider_options == {"env": {"HF_TOKEN": "hf_abc"}, "gpu": {"count": 2}}
+        assert fake.body()["env"]["STRATA_WORKER_TOKEN"] == "secret-a"
+
     async def test_an_override_can_still_correct_other_env_values(self):
         """`provider_options` overrides everything except the credential, even caller-set values."""
         fake = FakeRunPod()

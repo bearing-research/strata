@@ -112,10 +112,16 @@ moves the port inside the container: the healthcheck follows it, but the
 container side of `ports:` (and, in the service-mode demo, the nginx
 upstream) must change with it.
 
-Browsing to `localhost` or the machine's IP address works as is. To
-reach the container by a host name (`devbox.lan`), add that name:
-personal mode answers only to the names it expects, so a DNS-rebinding
-page cannot drive it.
+The port is published on `127.0.0.1` only. The image runs personal mode,
+which has no authentication: anyone who can reach the port can run code as
+the container's `strata` user. To share a server with other people, run
+[service mode](service-mode.md) with principal auth instead.
+
+To reach your own container from another machine you trust, publish the port
+on every interface (`"8765:8765"`, or `-p 8765:8765`), knowing that everyone
+on that network can then run cells. To reach it by a host name
+(`devbox.lan`), also add that name: personal mode answers only to the names
+it expects, so a DNS-rebinding page cannot drive it.
 
 ```yaml
   - STRATA_ALLOWED_HOSTS=devbox.lan
@@ -132,7 +138,7 @@ on. The image is linux/amd64 only; an arm64 host runs it under
 emulation, or builds its own as below.
 
 ```bash
-docker run --rm -p 8765:8765 \
+docker run --rm -p 127.0.0.1:8765:8765 \
   -v strata_state:/home/strata/.strata \
   ghcr.io/bearing-research/strata:<version>
 ```
@@ -143,7 +149,7 @@ To extend it, start your own Dockerfile `FROM` it.
 
 ```bash
 docker build -t strata .
-docker run --rm -p 8765:8765 \
+docker run --rm -p 127.0.0.1:8765:8765 \
   -v strata_state:/home/strata/.strata \
   strata
 ```
