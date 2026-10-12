@@ -142,6 +142,7 @@ class TestRPoolSessionGating:
         session = NotebookSession.__new__(NotebookSession)
         session.path = notebook_path
         session.r_warm_pool = None
+        session.closed = False
         session.notebook_state = NotebookState(
             id="gate-test",
             name="Gating Test",
