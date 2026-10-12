@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from strata.notebook.executor import CellExecutor
@@ -1223,6 +1224,44 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
         assert second.cache_hit is True
 
     @pytest.mark.asyncio
+    async def test_the_direct_transport_says_whether_someone_is_waiting(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        monkeypatch,
+    ):
+        sample_notebook.notebook_state.workers = [
+            WorkerSpec(
+                name="gpu-http",
+                backend=WorkerBackendType.EXECUTOR,
+                runtime_id="gpu-http-a100",
+                config={"url": notebook_executor_server["execute_url"]},
+            )
+        ]
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell1.worker = "gpu-http"
+        cell1.source = "x = 1"
+        sample_notebook.re_analyze_cell("cell1")
+
+        seen: list[dict] = []
+        real_stream = httpx.AsyncClient.stream
+
+        def capturing(self, method, url, *args, **kwargs):
+            for name, (_filename, content, _type) in kwargs.get("files") or []:
+                if name == "metadata":
+                    seen.append(json.loads(content))
+            return real_stream(self, method, url, *args, **kwargs)
+
+        monkeypatch.setattr(httpx.AsyncClient, "stream", capturing)
+        headless = CellExecutor(sample_notebook)
+        headless.origin = "run"
+
+        assert (await CellExecutor(sample_notebook).execute_cell_force("cell1", "x = 1")).success
+        assert (await headless.execute_cell_force("cell1", "x = 1")).success
+
+        assert [m["origin"] for m in seen] == ["notebook", "run"]
+
+    @pytest.mark.asyncio
     async def test_execute_supports_http_executor_worker_with_class_instances(
         self,
         tmp_path,
@@ -1720,6 +1759,38 @@ class Person:
         assert metadata["notebook_id"] == sample_notebook.notebook_state.id
         assert metadata["cell_id"] == "cell1"
         assert metadata["cell_provenance_hash"]
+
+    @pytest.mark.asyncio
+    async def test_the_manifest_says_whether_someone_is_waiting(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """A dispatcher can queue an open notebook's cells ahead of a headless run's,
+        and the origin, like identity, does not change what is cached."""
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        seen = self._capture_manifest_metadata(monkeypatch)
+        interactive = CellExecutor(sample_notebook)
+        headless = CellExecutor(sample_notebook)
+        headless.origin = "run"
+
+        first = await interactive.execute_cell_force("cell1", "x = 1")
+        second = await headless.execute_cell_force("cell1", "x = 1")
+
+        assert [m["origin"] for m in seen] == ["notebook", "run"]
+        assert "origin" not in seen[0]["params"]
+        store = notebook_build_server["artifact_store"]
+        builds = notebook_build_server["build_store"]
+        hashes = [
+            store.get_artifact(b.artifact_id, b.version).provenance_hash
+            for b in (
+                builds.get_build(first.remote_build_id),
+                builds.get_build(second.remote_build_id),
+            )
+        ]
+        assert hashes[0] == hashes[1]
 
     @pytest.mark.asyncio
     async def test_identity_does_not_change_what_is_cached(

@@ -162,6 +162,18 @@ class TestExecutionFlow:
 
         assert seen == {"c1": 999.0, "c2": 999.0}  # --timeout reaches every cell
 
+    def test_a_run_tells_a_dispatcher_no_one_is_waiting(self, notebook_with_chain):
+        origins: set[str] = set()
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=300.0):
+            origins.add(self.origin)
+            return _make_result(cell_id, success=True)
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            run_main([str(notebook_with_chain), "--no-sync"])
+
+        assert origins == {"run"}
+
     def test_mutation_warnings_surface_in_run(self, notebook_with_chain, capsys):
         from strata.notebook.executor import CellExecutionResult
 
