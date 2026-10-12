@@ -323,6 +323,11 @@ A v2 create places exactly the GPU type it asks for and never falls back to
 another; a `400` means no capacity for that type. `region` is the pod's
 `dataCenterId`, which is `None` until the scheduler places it.
 
+**Verified against a live account** on 2026-10-12: a `cpu3g` pod created
+through `POST /v2/pods`, health through the proxy, and `DELETE /v2/pods/{id}`
+twice, with nothing left running. The `gpu` block has not been run live; set
+`STRATA_POOL_RUNPOD_GPU` to cover it.
+
 RunPod has moved its API surface before. Every field lives in `_create_body`
 and is asserted by a test, so a wrong one is a one-line fix; `provider_options`
 overrides anything in the body, so a deployment can correct a field without
