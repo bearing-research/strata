@@ -21,7 +21,8 @@ services:
   strata:
     build: .
     ports:
-      - "8765:8765"
+      # Loopback only: personal mode runs cells for anyone who reaches the port.
+      - "127.0.0.1:8765:8765"
     volumes:
       - ./demo-warehouse:/data/warehouse:ro
       - strata-cache:/home/strata/.strata/cache

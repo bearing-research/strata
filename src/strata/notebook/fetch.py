@@ -32,6 +32,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -77,7 +78,20 @@ def _environment_proxy(url: str) -> str | None:
     # With a proxy variable set, ``proxy_bypass`` reads NO_PROXY rather than the OS.
     if not proxy or urllib.request.proxy_bypass(parsed.hostname or ""):
         return None
-    return proxy
+    # As httpx reads the variables: ``user:pass@host:3128`` is an http proxy.
+    return proxy if "://" in proxy else f"http://{proxy}"
+
+
+def _without_proxy_credentials(text: str, proxies: Iterable[str | None]) -> str:
+    """*text* with any proxy's user and password masked: a cell error is shown to its user."""
+    for proxy in proxies:
+        if not proxy:
+            continue
+        parsed = urlparse(proxy)
+        for secret in (parsed.password, parsed.username):
+            if secret:
+                text = text.replace(secret, "***")
+    return text
 
 
 def _safe_filename(name: str) -> str:
@@ -247,8 +261,17 @@ class FetchCache:
                 f"@fetch {spec.name}: {spec.url} redirected more than {MAX_REDIRECTS} times"
             )
         # A malformed URL (``:80a``, ``[::1``) raises InvalidURL / ValueError, not HTTPError.
-        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
-            raise FetchError(f"@fetch {spec.name}: could not download {spec.url}: {exc}") from exc
+        # ImportError: a socks proxy without httpx's socks extra.
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError, ImportError) as exc:
+            # The failing hop's proxy too: a client that failed to build is not in ``clients``.
+            try:
+                hop_proxy = _environment_proxy(url)
+            except ValueError:  # the URL itself is what failed
+                hop_proxy = None
+            reason = _without_proxy_credentials(str(exc), [*clients, hop_proxy])
+            raise FetchError(
+                f"@fetch {spec.name}: could not download {spec.url}: {reason}"
+            ) from exc
         finally:
             partial.unlink(missing_ok=True)
             for client in clients.values():

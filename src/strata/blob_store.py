@@ -205,8 +205,16 @@ class LocalBlobStore(BlobStore):
         private_dir(self.blobs_dir)
 
     def _blob_path(self, artifact_id: str, version: int) -> Path:
-        """Get filesystem path for a blob."""
-        return self.blobs_dir / self._blob_key(artifact_id, version)
+        """Get filesystem path for a blob.
+
+        Raises:
+            ValueError: the id names a path, which would read or write a file outside the
+                blob directory, another artifact's included.
+        """
+        path = self.blobs_dir / self._blob_key(artifact_id, version)
+        if path.parent != self.blobs_dir:
+            raise ValueError(f"an artifact id cannot name a path: {artifact_id!r}")
+        return path
 
     def open_blob_reader(
         self, artifact_id: str, version: int

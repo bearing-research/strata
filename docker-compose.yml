@@ -10,7 +10,8 @@ services:
   strata:
     build: .
     ports:
-      - "8765:8765"
+      # Loopback only: personal mode runs cells for anyone who reaches the port.
+      - "127.0.0.1:8765:8765"
     volumes:
       # An Iceberg warehouse to scan. Its catalog must record paths under
       # /data/warehouse: one built on the host by examples/setup_demo.py

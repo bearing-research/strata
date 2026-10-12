@@ -261,6 +261,36 @@ def test_a_named_id_is_held_by_its_tenant_from_its_first_upload(team_server, fin
     assert store.get_artifact("nb_x", version + 1) is None
 
 
+@pytest.mark.parametrize("named", ["../{blobs}/nb_x", "../../escape", "nested/id"])
+def test_a_named_id_that_names_a_path_is_refused(team_server, named):
+    """The id becomes a blob key, and the tenant check compares id strings: without this,
+    ``../blobs/nb_x`` passes as a new id and lands on team-a's bytes."""
+    store = ArtifactStore(team_server["artifact_dir"])
+    version = store.create_artifact("nb_x", "a" * 64, tenant="team-a")
+    store.write_blob("nb_x", version, b"payload")
+    store.finalize_artifact("nb_x", version, "", row_count=None, byte_size=7)
+    named = named.format(blobs=store.blob_store.blobs_dir.name)
+
+    response = httpx.put(
+        f"{team_server['base_url']}/v1/artifacts/by-provenance/{'b' * 64}",
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps({"content_type": "pickle/object", "artifact_id": named}),
+                "application/json",
+            ),
+            "data": ("data.bin", b"other", "application/octet-stream"),
+        },
+        headers=_headers("team-b", "carol", scopes="artifacts:write"),
+        timeout=LIVE_SERVER_TIMEOUT,
+    )
+
+    assert response.status_code == 400, response.text
+    assert "cannot name a path" in response.json()["detail"]
+    assert store.read_blob("nb_x", version) == b"payload"
+    assert store.get_artifact(named, 1) is None
+
+
 def test_another_teams_upload_landing_mid_request_still_holds_the_id(team_server, monkeypatch):
     """Team-b's first version of the id commits after team-a's route found the id unused."""
     other = ArtifactStore(team_server["artifact_dir"])

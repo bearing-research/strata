@@ -22,6 +22,20 @@ from strata.config import StrataConfig
 
 
 class TestLocalBlobStore:
+    @pytest.mark.parametrize("artifact_id", ["../blobs/victim", "../../outside", "a/b"])
+    def test_an_id_that_names_a_path_reaches_no_file(self, tmp_path: Path, artifact_id: str):
+        """``../blobs/victim`` would be another artifact's bytes; ``../..`` leaves the store."""
+        store = LocalBlobStore(tmp_path / "blobs")
+        store.write_blob("victim", 1, b"theirs")
+
+        with pytest.raises(ValueError, match="cannot name a path"):
+            store.write_blob(artifact_id, 1, b"mine")
+        with pytest.raises(ValueError, match="cannot name a path"):
+            store.read_blob(artifact_id, 1)
+
+        assert store.read_blob("victim", 1) == b"theirs"
+        assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == ["victim@v=1.arrow"]
+
     def test_write_and_read_blob(self, tmp_path: Path):
         store = LocalBlobStore(tmp_path / "blobs")
         data = b"test artifact data"
