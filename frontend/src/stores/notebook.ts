@@ -695,6 +695,13 @@ function applyRemoteExecutionMetadata(cell: Cell, raw: Record<string, any>) {
     cell.remoteBuildId = remoteBuildId
     cell.remoteBuildState = remoteBuildState
     cell.remoteErrorCode = remoteErrorCode
+    // Every frame restates the queue, so a frame without it clears the last one.
+    cell.remoteQueuePosition =
+      typeof raw.remote_queue_position === 'number' ? raw.remote_queue_position : null
+    cell.remoteQueueDetail =
+      typeof raw.remote_queue_detail === 'string' && raw.remote_queue_detail.trim()
+        ? raw.remote_queue_detail
+        : null
     return
   }
 

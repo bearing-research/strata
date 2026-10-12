@@ -266,6 +266,10 @@ export interface Cell {
   remoteBuildId?: string | null
   /** Last observed build state for signed remote execution */
   remoteBuildState?: string | null
+  /** A queued remote job's place in line, when its dispatcher reports one */
+  remoteQueuePosition?: number | null
+  /** A dispatcher's sentence about a queued remote job, shown on the badge */
+  remoteQueueDetail?: string | null
   /** Structured remote execution error code, when available */
   remoteErrorCode?: string | null
   /** Effective persisted worker after notebook default + cell override */

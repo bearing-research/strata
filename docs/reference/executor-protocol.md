@@ -404,6 +404,17 @@ If either deadline passes, the server cancels the job through
 cell's badge reads "starting". A worker that answers synchronously needs no
 change.
 
+A dispatcher that queues jobs may say where one stands, in either transport:
+
+```json
+{"state": "queued", "position": 3, "detail": "Behind 2 cells for a slot on team-a100."}
+```
+
+Both fields are optional. The badge shows `detail` (cut to 200 characters)
+when it is present, otherwise `queued #<position>`; `position` must be a whole
+number from 1. A report is sent to the notebook only when it changes, and a
+waiting state without either field puts the badge back to "starting".
+
 **SSRF defenses on signed URLs:** Before fetching/posting, the worker validates each URL:
 
 - **Scheme allowlist**: only `http://` and `https://`. Blocks `file://`, `data:`, `javascript:`, etc.

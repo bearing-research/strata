@@ -32,7 +32,9 @@ class _Facade:
     """Accepts the manifest with 202, walks a script of job states, one per
     status read, advancing the clock by ``step`` each read."""
 
-    def __init__(self, clock: _Clock, script: list[str], worker_url: str, step: float = 10.0):
+    def __init__(
+        self, clock: _Clock, script: list[str | dict], worker_url: str, step: float = 10.0
+    ):
         self.clock = clock
         self.script = list(script)
         self.worker_url = worker_url
@@ -66,6 +68,10 @@ class _Facade:
             def do_GET(self):  # noqa: N802
                 facade.clock.now += facade.step
                 state = facade.script.pop(0) if len(facade.script) > 1 else facade.script[0]
+                if isinstance(state, dict):
+                    # A full job body, for the fields a dispatcher may add.
+                    self._json(200, state)
+                    return
                 if state == "failed":
                     self._json(
                         200,
@@ -126,11 +132,12 @@ def run_cell(tmp_path, monkeypatch, notebook_executor_server, notebook_personal_
     clock = _Clock()
     monkeypatch.setattr(executor_module, "_monotonic", clock)
     monkeypatch.setattr(executor_module, "_JOB_POLL_SECONDS", 0)
-    phases: list[str] = []
+    phases: list[str | tuple] = []
     cancel_at: list[str] = []
 
-    async def record_phase(self, cell_id, worker_spec, phase):
-        phases.append(phase)
+    async def record_phase(self, cell_id, worker_spec, phase, *, queue=(None, None)):
+        # A plain phase, or ``(phase, position, detail)`` when the job reported its place.
+        phases.append(phase if queue == (None, None) else (phase, *queue))
         if phase in cancel_at:
             asyncio.current_task().cancel()
 
@@ -138,7 +145,7 @@ def run_cell(tmp_path, monkeypatch, notebook_executor_server, notebook_personal_
     facades: list[_Facade] = []
 
     async def _run(
-        script: list[str],
+        script: list[str | dict],
         *,
         provisioning_limit: float = 600.0,
         transport: str = "signed",
@@ -191,6 +198,46 @@ async def test_provisioning_does_not_spend_the_cells_timeout(run_cell):
     assert result.remote_build_state == "ready"
     assert phases == ["starting", "running"]
     assert facade.cancelled == []
+
+
+async def test_a_queued_jobs_place_reaches_the_badge_when_it_changes(run_cell):
+    """A dispatcher's position and sentence (Amber item 71) move the badge; an unchanged
+    report sends nothing, and a waiting state without one clears it."""
+
+    def queued(position: int) -> dict:
+        return {
+            "state": "queued",
+            "position": position,
+            "detail": f"Behind {position - 1} cells for a slot on team-a100.",
+        }
+
+    result, _, phases = await run_cell(
+        [queued(3), queued(3), queued(2), "provisioning", "running", "finished"]
+    )
+
+    assert result.success, result.error
+    assert phases == [
+        "starting",
+        ("starting", 3, "Behind 2 cells for a slot on team-a100."),
+        ("starting", 2, "Behind 1 cells for a slot on team-a100."),
+        "starting",
+        "running",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("job", "expected"),
+    [
+        ({"state": "queued"}, (None, None)),
+        ({"position": 4, "detail": "  next up  "}, (4, "next up")),
+        ({"position": True, "detail": ""}, (None, None)),
+        ({"position": 0, "detail": "   "}, (None, None)),
+        ({"position": "3", "detail": 7}, (None, None)),
+        ({"detail": "x" * 500}, (None, "x" * 200)),
+    ],
+)
+def test_a_malformed_queue_report_is_dropped_not_shown(job, expected):
+    assert executor_module._queue_report(job) == expected
 
 
 async def test_a_job_that_never_starts_fails_at_the_provisioning_deadline_and_is_cancelled(
@@ -288,17 +335,28 @@ async def test_the_remote_phase_reaches_the_sessions_sockets(tmp_path):
         config={"url": "https://pool.example/v1/execute", "transport": "signed"},
     )
     try:
-        await CellExecutor(session)._broadcast_remote_phase("c1", worker, "starting")
+        executor = CellExecutor(session)
+        await executor._broadcast_remote_phase("c1", worker, "starting")
+        await executor._broadcast_remote_phase(
+            "c1", worker, "starting", queue=(2, "Behind 1 cell for a slot on team-a100.")
+        )
     finally:
         _notebook_connections.pop(session.id, None)
         forget_notebook_execution_state(session.id)
 
+    base = {
+        "cell_id": "c1",
+        "status": "running",
+        "remote_worker": "pool",
+        "remote_transport": "signed",
+        "remote_build_state": "starting",
+    }
+    # Absent queue fields are left off the wire, so the first frame is unchanged.
     assert [frame["payload"] for frame in socket.sent] == [
+        base,
         {
-            "cell_id": "c1",
-            "status": "running",
-            "remote_worker": "pool",
-            "remote_transport": "signed",
-            "remote_build_state": "starting",
-        }
+            **base,
+            "remote_queue_position": 2,
+            "remote_queue_detail": "Behind 1 cell for a slot on team-a100.",
+        },
     ]
