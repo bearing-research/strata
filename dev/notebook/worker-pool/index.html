@@ -2559,23 +2559,38 @@ lossy translation between a user and the hardware they asked for.</p>
 <a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">cool_down_seconds</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>  <span class="c1"># an idle H100 is the expensive mistake</span>
 <a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="p">)</span>
 </code></pre></div>
-<p><strong>Verified against a live account</strong> on 2026-09-02: the base URL, <code>POST /pods</code>
-with <code>imageName</code> / <code>ports</code> / <code>env</code> / <code>containerDiskInGb</code> / <code>name</code>, the <code>id</code> in
-the create response, the proxy endpoint, health through that proxy, and
-<code>DELETE /pods/{id}</code> including a second delete of the same pod. A CPU pod
-booted, answered, and terminated with nothing left running.</p>
-<p><strong>Two things that run stayed silent on</strong>, because a CPU pod does not exercise
-them: <code>gpuTypeIds</code> + <code>gpuCount</code>, and reading a region from <code>machine</code>. Every pod
-in the account listing carried <code>machine: {}</code> with no <code>dataCenterId</code>, so <code>region</code>
-is probably always <code>None</code> today. That is harmless, being metadata, but do not
-trust it.</p>
+<p>The backend speaks RunPod's REST v2 (<code>https://api.runpod.io/v2</code>); v1 is
+retired on 2026-11-15. <code>POST /v2/pods</code> takes exactly one of <code>gpu</code> or <code>cpu</code>:</p>
+<ul>
+<li>A machine type with a <code>gpu_type</code> sends <code>gpu: {id, count}</code>.</li>
+<li>One without sends <code>cpu: {id: "cpu3g", vcpuCount}</code>, RunPod's general-purpose
+  flavor (4 GB RAM per vCPU), with <code>cpus</code> rounded up to the power of two
+  RunPod accepts, from 2 to 32.</li>
+</ul>
+<p><code>provider_options</code> merges into <code>gpu</code> and <code>cpu</code> rather than replacing them, so a
+deployment can pin a CUDA floor or pick another CPU flavor without restating
+the rest:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">MachineType</span><span class="p">(</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"h100-80gb"</span><span class="p">,</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">"strata-worker:latest"</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">gpu_type</span><span class="o">=</span><span class="s2">"NVIDIA H100 80GB PCIe"</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">provider_options</span><span class="o">=</span><span class="p">{</span><span class="s2">"gpu"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"minCudaVersion"</span><span class="p">:</span> <span class="s2">"12.8"</span><span class="p">},</span> <span class="s2">"cloud"</span><span class="p">:</span> <span class="s2">"SECURE"</span><span class="p">},</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="p">)</span>
+</code></pre></div>
+<p>A v2 create places exactly the GPU type it asks for and never falls back to
+another; a <code>400</code> means no capacity for that type. <code>region</code> is the pod's
+<code>dataCenterId</code>, which is <code>None</code> until the scheduler places it.</p>
+<p><strong>Verified against a live account</strong> on 2026-10-12: a <code>cpu3g</code> pod created
+through <code>POST /v2/pods</code>, health through the proxy, and <code>DELETE /v2/pods/{id}</code>
+twice, with nothing left running. The <code>gpu</code> block has not been run live; set
+<code>STRATA_POOL_RUNPOD_GPU</code> to cover it.</p>
 <p>RunPod has moved its API surface before. Every field lives in <code>_create_body</code>
 and is asserted by a test, so a wrong one is a one-line fix; <code>provider_options</code>
 overrides anything in the body, so a deployment can correct a field without
 waiting for a release; and <code>base_url</code> can be repointed. To re-verify, or to
 close the GPU gap with <code>STRATA_POOL_RUNPOD_GPU</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">RUNPOD_API_KEY</span><span class="o">=</span>...
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">STRATA_POOL_RUNPOD_LIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>packages/strata-pool/tests/test_runpod_live.py<span class="w"> </span>-v<span class="w"> </span>-s
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">RUNPOD_API_KEY</span><span class="o">=</span>...
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_POOL_RUNPOD_LIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>packages/strata-pool/tests/test_runpod_live.py<span class="w"> </span>-v<span class="w"> </span>-s
 </code></pre></div>
 <p>That <strong>starts a billed pod</strong>, which is why it is opt-in and never runs in CI.
 It terminates what it starts, but a crashed interpreter can still leave a pod
@@ -2589,15 +2604,15 @@ it.</p>
 only on the organization's private network, at
 <code>http://{machine_id}.vm.{app}.internal:{port}</code>, so a pool running beside its
 notebook servers on Fly hands them workers that never face the internet.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">FlyBackend</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"FLY_API_TOKEN"</span><span class="p">],</span> <span class="n">app</span><span class="o">=</span><span class="s2">"strata-workers"</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="s2">"sjc"</span><span class="p">)</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">MachineType</span><span class="p">(</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"a100"</span><span class="p">,</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">"registry.fly.io/strata-worker:latest"</span><span class="p">,</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">cpus</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">memory_mb</span><span class="o">=</span><span class="mi">65536</span><span class="p">,</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="n">gpu_type</span><span class="o">=</span><span class="s2">"a100-80gb"</span><span class="p">,</span>  <span class="c1"># Fly's own gpu_kind string</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    <span class="n">cool_down_seconds</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span>
-<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">FlyBackend</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"FLY_API_TOKEN"</span><span class="p">],</span> <span class="n">app</span><span class="o">=</span><span class="s2">"strata-workers"</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="s2">"sjc"</span><span class="p">)</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">MachineType</span><span class="p">(</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"a100"</span><span class="p">,</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">"registry.fly.io/strata-worker:latest"</span><span class="p">,</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">cpus</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">memory_mb</span><span class="o">=</span><span class="mi">65536</span><span class="p">,</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">gpu_type</span><span class="o">=</span><span class="s2">"a100-80gb"</span><span class="p">,</span>  <span class="c1"># Fly's own gpu_kind string</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="n">cool_down_seconds</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="p">)</span>
 </code></pre></div>
 <p><code>start</code> creates the machine with the worker token and the machine type's <code>env</code>
 in its environment, with restart policy <code>no</code> and <code>auto_destroy: false</code> so its
@@ -2609,8 +2624,8 @@ private address can be reused.</p>
 Machines API documentation; every field lives in <code>_create_body</code> and is asserted
 by a test, <code>provider_options</code> overrides anything in the machine <code>config</code>, and
 <code>base_url</code> can be repointed. To verify:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">FLY_API_TOKEN</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_APP</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_REGION</span><span class="o">=</span>sjc
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">STRATA_POOL_FLY_LIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>packages/strata-pool/tests/test_fly_live.py<span class="w"> </span>-v<span class="w"> </span>-s
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">FLY_API_TOKEN</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_APP</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_REGION</span><span class="o">=</span>sjc
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nv">STRATA_POOL_FLY_LIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>packages/strata-pool/tests/test_fly_live.py<span class="w"> </span>-v<span class="w"> </span>-s
 </code></pre></div>
 <p>That <strong>starts a billed machine</strong>. Off the private network it proves create,
 start and destroy; add <code>STRATA_POOL_FLY_ON_NETWORK=1</code> where the <code>.internal</code>
@@ -2622,7 +2637,7 @@ can reach every other.</p>
 <p><code>strata-worker</code>, shipped in <code>strata-notebook</code>, satisfies this contract as of
 0.7.0. Build it with the Dockerfile in the Strata repo and the pool can drive
 it unmodified:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
 </code></pre></div>
 <p>The image installs a pinned <code>strata-notebook</code> from PyPI (the <code>STRATA_VERSION</code>
 build arg), which must be <strong>the same release as the Strata server</strong> that
@@ -2697,7 +2712,7 @@ host port Docker picked. It does not care what runs inside the container.</p>
 <p>It does not pull. An image that is not on the host fails with the daemon's own
 "No such image" message.</p>
 <h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>pytest<span class="w"> </span>packages/strata-pool/tests<span class="w"> </span>-v
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>pytest<span class="w"> </span>packages/strata-pool/tests<span class="w"> </span>-v
 </code></pre></div>
 <p>The tests in <code>test_docker_live.py</code> run the whole path against real containers
 and skip when no daemon is reachable. Set <code>STRATA_POOL_DOCKER_SOCKET</code> if yours
