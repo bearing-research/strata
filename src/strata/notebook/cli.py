@@ -277,6 +277,7 @@ async def _run_notebook(args: argparse.Namespace) -> int:
     executor = CellExecutor(session)
     # The report gives every cell a digest, so a leaf keeps what it defines.
     executor.store_leaf_outputs = True
+    executor.origin = "run"
     cell_by_id = {c.id: c for c in session.notebook_state.cells}
     results: list[dict[str, Any]] = []
     failed_cells: set[str] = set()

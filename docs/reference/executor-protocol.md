@@ -154,6 +154,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 {
   "protocol_version": "v1",
   "build_id": "notebook-3f2a9c1b7e04",
+  "origin": "notebook",
   "transform": {
     "ref": "notebook_cell@v1",
     "params": {
@@ -182,6 +183,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | Field | Type | Description |
 | --- | --- | --- |
 | `protocol_version` | string (required) | Must be `"v1"`. |
+| `origin` | string | `"notebook"` for a cell run from an open notebook, `"run"` for a headless `strata run`. A dispatcher can queue interactive cells first; a worker can ignore it. |
 | `transform.ref` | string (required) | Must be `"notebook_cell@v1"` for the notebook executor. |
 | `transform.params.source` | string (required) | The cell Python source to execute. |
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
@@ -290,6 +292,7 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
     "notebook_id": "9c7e22e3-8ed7-452c-885c-49574d7aa02f",
     "cell_id": "ba3b7451",
     "cell_provenance_hash": "5f2c…",
+    "origin": "notebook",
     "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
   },
   "inputs": [
@@ -345,6 +348,11 @@ authenticated caller dispatched the cell, as on a personal server.
 computation share it. They sit outside `params` deliberately, since `params` is
 hashed into the build's transport provenance and who ran a cell must not change
 what is cached. A worker can ignore them.
+
+`origin` is `"notebook"` when the cell was run from an open notebook and `"run"`
+for a headless `strata run`, so a dispatcher that orders a shared queue can put
+the cells someone is waiting on first. Like the fields above, it sits outside
+`params` and does not change what is cached.
 
 `traceparent` and `tracestate` are the W3C trace context of the server's
 `notebook.dispatch` span, present when the server has tracing on. The same

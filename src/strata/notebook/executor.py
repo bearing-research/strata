@@ -27,7 +27,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
 import anyio.to_thread
@@ -552,6 +552,10 @@ class CellExecutor:
         # Also store the variables of a cell nothing downstream reads. Off by default: only
         # consumed variables are kept, and a leaf's result can be large.
         self.store_leaf_outputs = False
+        # What a remote dispatch reports as ``metadata.origin``: "notebook" for an open
+        # notebook, "run" for a headless ``strata run``, so a dispatcher can queue
+        # interactive cells first.
+        self.origin: Literal["notebook", "run"] = "notebook"
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
             credentials=mount_credentials,
@@ -2645,6 +2649,7 @@ class CellExecutor:
             "build_id": f"notebook-{uuid.uuid4().hex[:12]}",
             "tenant": None,
             "principal": None,
+            "origin": self.origin,
             # ``str(sorted(...))`` byte format is load-bearing: cached transport hashes key off it.
             "provenance_hash": derive_subkey(source, str(sorted(input_specs))),
             "transform": {
@@ -3002,6 +3007,7 @@ class CellExecutor:
                         "notebook_id": self.session.notebook_state.id,
                         "cell_id": cell_id,
                         "cell_provenance_hash": cell_provenance_hash,
+                        "origin": self.origin,
                         # W3C trace context, for a worker reached without the headers (a
                         # dispatcher that forwards only the body).
                         **trace_context,
