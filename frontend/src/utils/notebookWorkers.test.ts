@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import type { WorkerCatalogEntry } from '../types/notebook.ts'
 import {
+  remoteDispatchBadge,
   applyWorkerHealth,
   workerAttentionReason,
   workerNeedsAttention,
@@ -261,4 +262,30 @@ test('applyWorkerHealth updates only the targeted remote worker entry', () => {
   assert.equal(after[0].health, 'healthy')
   assert.equal(after[1].health, 'unavailable')
   assert.notEqual(after[1], before[1])
+})
+
+test("a queued remote cell shows its dispatcher's sentence, else its place in line", () => {
+  const base = { status: 'running', remoteWorkerName: 'team-a100', remoteBuildState: 'starting' }
+
+  assert.deepEqual(
+    remoteDispatchBadge({
+      ...base,
+      remoteQueuePosition: 3,
+      remoteQueueDetail: 'Behind 2 cells for a slot on team-a100.',
+    }),
+    { label: 'Behind 2 cells for a slot on team-a100.', title: 'Queued for "team-a100"' },
+  )
+  assert.deepEqual(remoteDispatchBadge({ ...base, remoteQueuePosition: 3 }), {
+    label: 'queued #3 → team-a100',
+    title: 'Queued for "team-a100"',
+  })
+  // A dispatcher that says nothing about its queue leaves the badge as it was.
+  assert.equal(remoteDispatchBadge(base)?.label, 'starting → team-a100')
+  assert.equal(
+    remoteDispatchBadge({ ...base, remoteBuildState: 'running', remoteQueueDetail: 'stale' })
+      ?.label,
+    'dispatching → team-a100',
+  )
+  assert.equal(remoteDispatchBadge({ ...base, status: 'ready' }), null)
+  assert.equal(remoteDispatchBadge({ ...base, remoteWorkerName: null }), null)
 })

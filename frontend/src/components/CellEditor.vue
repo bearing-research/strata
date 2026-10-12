@@ -7,6 +7,7 @@ import DataTable from './DataTable.vue'
 import WidgetCell from './WidgetCell.vue'
 import type { Cell, CellOutput, StalenessReason } from '../types/notebook'
 import {
+  remoteDispatchBadge,
   resolveEffectiveWorkerEntry,
   summarizeRemoteExecutionState,
   summarizeRemoteExecutionIssue,
@@ -216,15 +217,17 @@ watch(
 const statusClass = computed(() => `status-${props.cell.status}`)
 
 // Live badge for a remote cell in flight. An async worker reports "starting"
-// while its machine is provisioned, before the cell's timeout begins.
-const dispatchLabel = computed(() => {
-  if (props.cell.status !== 'running') return null
-  const worker = props.cell.remoteWorkerName
-  if (!worker) return null
-  return props.cell.remoteBuildState === 'starting'
-    ? `starting → ${worker}`
-    : `dispatching → ${worker}`
-})
+// while its machine is provisioned, before the cell's timeout begins, and a
+// dispatcher may say where a queued job stands.
+const dispatchBadge = computed(() =>
+  remoteDispatchBadge({
+    status: props.cell.status,
+    remoteWorkerName: props.cell.remoteWorkerName,
+    remoteBuildState: props.cell.remoteBuildState,
+    remoteQueuePosition: props.cell.remoteQueuePosition,
+    remoteQueueDetail: props.cell.remoteQueueDetail,
+  }),
+)
 
 const statusLabel = computed(() => {
   switch (props.cell.status) {
@@ -881,12 +884,8 @@ function outputKey(output: CellOutput, index: number): string {
           >
             {{ who }}
           </span>
-          <span
-            v-if="dispatchLabel"
-            class="dispatch-badge"
-            :title="'Cell is executing on a remote worker'"
-          >
-            {{ dispatchLabel }}
+          <span v-if="dispatchBadge" class="dispatch-badge" :title="dispatchBadge.title">
+            {{ dispatchBadge.label }}
           </span>
           <span
             v-if="effectiveWorkerTransportLabel"

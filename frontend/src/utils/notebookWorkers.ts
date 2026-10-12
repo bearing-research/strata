@@ -194,6 +194,32 @@ export function summarizeRemoteExecutionIssue(
   return `Remote execution failed on "${workerLabel}"`
 }
 
+/**
+ * The badge on a remote cell in flight: where it is dispatched, and, while a
+ * dispatcher queues it, the dispatcher's own sentence or its place in line.
+ */
+export function remoteDispatchBadge(params: {
+  status: string
+  remoteWorkerName?: string | null
+  remoteBuildState?: string | null
+  remoteQueuePosition?: number | null
+  remoteQueueDetail?: string | null
+}): { label: string; title: string } | null {
+  const { status, remoteWorkerName: worker, remoteBuildState } = params
+  if (status !== 'running' || !worker) return null
+  if (remoteBuildState === 'starting') {
+    const { remoteQueuePosition: position, remoteQueueDetail: detail } = params
+    if (detail) {
+      return { label: detail, title: `Queued for "${worker}"` }
+    }
+    if (position) {
+      return { label: `queued #${position} → ${worker}`, title: `Queued for "${worker}"` }
+    }
+    return { label: `starting → ${worker}`, title: 'Cell is executing on a remote worker' }
+  }
+  return { label: `dispatching → ${worker}`, title: 'Cell is executing on a remote worker' }
+}
+
 export function summarizeRemoteExecutionState(params: {
   executionMethod?: string | null
   remoteWorkerName?: string | null

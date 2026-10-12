@@ -488,6 +488,22 @@ _JOB_POLL_SECONDS = 1.0
 # Patchable for the same reason.
 _monotonic = time.monotonic
 
+# A dispatcher's sentence goes on a badge; anything longer is cut.
+_QUEUE_DETAIL_MAX_CHARS = 200
+
+
+def _queue_report(job: dict[str, Any]) -> tuple[int | None, str | None]:
+    """A waiting job's optional ``(position, detail)``; whatever is malformed is dropped."""
+    position = job.get("position")
+    if isinstance(position, bool) or not isinstance(position, int) or position < 1:
+        position = None
+    detail = job.get("detail")
+    if not isinstance(detail, str) or not detail.strip():
+        detail = None
+    else:
+        detail = detail.strip()[:_QUEUE_DETAIL_MAX_CHARS]
+    return position, detail
+
 
 class RemoteExecutionError(RuntimeError):
     """Execution failure with structured remote metadata for notebook UX."""
@@ -3300,6 +3316,7 @@ class CellExecutor:
         await self._broadcast_remote_phase(cell_id, worker_spec, "starting")
         started = _monotonic()
         running_since: float | None = None
+        queue_shown: tuple[int | None, str | None] = (None, None)
         async with httpx.AsyncClient(timeout=30.0) as client:
             while True:
                 try:
@@ -3354,22 +3371,35 @@ class CellExecutor:
                             remote_build_state="failed",
                             remote_error_code="TIMEOUT",
                         )
-                elif now - started > provisioning_limit:
-                    await cancel()
-                    raise RemoteExecutionError(
-                        f"Remote executor '{worker_spec.name}' did not start the job within "
-                        f"{provisioning_limit:g}s (last state: {state or 'unknown'}); set "
-                        "STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS, or keep a machine warm",
-                        remote_build_state="failed",
-                        remote_error_code="PROVISIONING_TIMEOUT",
-                    )
+                else:
+                    queue = _queue_report(job)
+                    if queue != queue_shown:
+                        queue_shown = queue
+                        await self._broadcast_remote_phase(
+                            cell_id, worker_spec, "starting", queue=queue
+                        )
+                    if now - started > provisioning_limit:
+                        await cancel()
+                        raise RemoteExecutionError(
+                            f"Remote executor '{worker_spec.name}' did not start the job within "
+                            f"{provisioning_limit:g}s (last state: {state or 'unknown'}); set "
+                            "STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS, or keep a machine warm",
+                            remote_build_state="failed",
+                            remote_error_code="PROVISIONING_TIMEOUT",
+                        )
                 await asyncio.sleep(_JOB_POLL_SECONDS)
 
     async def _broadcast_remote_phase(
-        self, cell_id: str | None, worker_spec: Any, phase: str
+        self,
+        cell_id: str | None,
+        worker_spec: Any,
+        phase: str,
+        *,
+        queue: tuple[int | None, str | None] = (None, None),
     ) -> None:
         """Move the cell's badge between ``starting`` (provisioning) and ``running``.
 
+        *queue* is the job's ``(position, detail)`` while it waits, for the badge.
         Best effort: a failed broadcast must not fail the run.
         """
         if not cell_id:
@@ -3392,6 +3422,8 @@ class CellExecutor:
                         remote_worker=worker_spec.name,
                         remote_transport=worker_transport(worker_spec),
                         remote_build_state=phase,
+                        remote_queue_position=queue[0],
+                        remote_queue_detail=queue[1],
                     ),
                 ),
             )
