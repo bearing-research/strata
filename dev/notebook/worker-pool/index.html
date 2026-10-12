@@ -2599,6 +2599,13 @@ orphan is findable.</p>
 <p>A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
 it.</p>
+<p><strong>A job on a RunPod worker must finish within 100 seconds.</strong> RunPod's proxy
+ends any request after 100 seconds with a <code>524</code>, and the pool's call to a
+worker (<code>POST {endpoint}/execute</code>) lasts the whole job, so a longer cell fails
+however high <code>job_timeout_seconds</code> is set. Run long cells on the Docker or Fly
+backend. Reaching the worker on a mapped TCP port would lift the limit, but
+that link is plain HTTP, which would send the worker credential unencrypted,
+so the backend does not do it yet.</p>
 <h2 id="the-fly-machines-backend">The Fly Machines backend<a class="headerlink" href="#the-fly-machines-backend" title="Permanent link">&para;</a></h2>
 <p>Boots workers as machines in one Fly app and region. A machine is reachable
 only on the organization's private network, at
