@@ -157,6 +157,10 @@ class WarmProcessPool:
             except TimeoutError:
                 logger.warning("Warm process startup timed out, killing process")
                 await terminate_subprocess_tree(process)
+            except asyncio.CancelledError:
+                # drain() cancels a spawn waiting for "ready"; the worker it started is ours.
+                await terminate_subprocess_tree(process)
+                raise
 
         except Exception as e:
             logger.error(f"Failed to spawn warm process: {e}")

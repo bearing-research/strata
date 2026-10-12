@@ -710,3 +710,24 @@ class TestServiceModeReuse:
 
         config.deployment_mode = "personal"
         assert notebook_routes._reuse_open_session_by_path() == (True, None)
+
+
+@pytest.mark.asyncio
+async def test_an_environment_job_finishing_after_close_starts_no_pool(tmp_path, monkeypatch):
+    """The job's finalize starts missing pools; on a closed session nothing would drain them."""
+    from strata.notebook.pool import WarmProcessPool
+
+    async def _no_spawn(self):
+        return None
+
+    monkeypatch.setattr(WarmProcessPool, "start", _no_spawn)
+    manager = SessionManager()
+    notebook = create_notebook(tmp_path, "Closed", initialize_environment=False)
+    session = manager.open_notebook(notebook, defer_initial_venv_sync=True)
+    session.environment_sync_state = "ready"
+    assert session._should_start_warm_pool()
+
+    await asyncio.gather(*manager.close_session(session.id))
+    await session.start_missing_warm_pools()
+
+    assert session.warm_pool is None

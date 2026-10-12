@@ -294,6 +294,9 @@ class NotebookSession:
         self._staleness_lock = threading.RLock()
 
         self.warm_pool: WarmProcessPool | None = None
+        # Set by SessionManager.close_session; an environment job outliving the session must
+        # not start pools that nothing will drain.
+        self.closed = False
         self.r_warm_pool: WarmProcessPool | None = None
 
         # The manager swaps in its own clock, so tests can age a session.
@@ -2744,7 +2747,7 @@ class NotebookSession:
 
         ``owner`` is the mutation the caller is finishing: its own venv work is done.
         """
-        if _session_setting("notebook_warm_pool_size") == 0:
+        if self.closed or _session_setting("notebook_warm_pool_size") == 0:
             return False
         if self.has_active_environment_mutation(besides=owner):
             return False
@@ -3961,6 +3964,7 @@ class SessionManager:
         session = self._sessions.pop(session_id, None)
         if session is None:
             return []
+        session.closed = True
         # Local import: ws imports this.
         from strata.notebook.ws import end_session_clients, forget_notebook_execution_state
 

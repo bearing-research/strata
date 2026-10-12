@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 
 import pytest
 
@@ -97,3 +99,38 @@ class TestWarmProcessPool:
 
         warm_proc = await pool.acquire()
         assert warm_proc is None
+
+
+@pytest.mark.asyncio
+async def test_draining_while_a_worker_boots_stops_that_worker(notebook_dir, tmp_path):
+    """drain() cancels a spawn still waiting for "ready"; the worker it started must go too,
+    not live on until the server exits."""
+    pid_file = tmp_path / "worker.pid"
+    script = (
+        "import os, pathlib, time\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
+        "time.sleep(600)\n"
+    )
+    pool = WarmProcessPool(notebook_dir, pool_size=1, worker_command=[sys.executable, "-c", script])
+    pool.track_background_task(asyncio.create_task(pool._spawn_warm_process()))
+    for _ in range(600):
+        if pid_file.exists() and pid_file.read_text():
+            break
+        await asyncio.sleep(0.05)
+    pid = int(pid_file.read_text())
+
+    try:
+        await pool.drain()
+        for _ in range(600):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail(f"the booting worker {pid} outlived drain()")
+    finally:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass

@@ -2012,10 +2012,11 @@ async def execute_cell_and_broadcast(
         return None
 
     execution_state.running_cell = cell_id
-    policy = await _announce_running(session, notebook_id, cell_id, cell.source, seq)
-
     executor = _make_executor_with_progress(session, notebook_id)
     try:
+        # Inside the try: the announce marks the cell running and then awaits, so a cancel
+        # landing there must reach the handler that sets it idle again.
+        policy = await _announce_running(session, notebook_id, cell_id, cell.source, seq)
         with one_policy_read(session.notebook_state, policy):
             if mode == "force":
                 result = await executor.execute_cell_force(cell_id, cell.source)
@@ -2167,9 +2168,10 @@ async def _execute_cascade(
 
                 execution_state.running_cell = cell_id
                 await _progress(cell_id)
-                policy = await _announce_running(session, notebook_id, cell_id, cell.source)
 
                 try:
+                    # Inside the try, as in execute_cell_and_broadcast.
+                    policy = await _announce_running(session, notebook_id, cell_id, cell.source)
                     with one_policy_read(session.notebook_state, policy):
                         if target_force and cell_id == plan.target_cell_id:
                             result = await executor.execute_cell_rerun(cell_id, cell.source)
@@ -2615,9 +2617,10 @@ async def _run_partition_single_cell(
     """
     cell_id = cell.id
     execution_state.running_cell = cell_id
-    policy = await _announce_running(session, notebook_id, cell_id, cell.source)
 
     try:
+        # Inside the try, as in execute_cell_and_broadcast.
+        policy = await _announce_running(session, notebook_id, cell_id, cell.source)
         with one_policy_read(session.notebook_state, policy):
             if force:
                 result = await executor.execute_cell_rerun(cell_id, cell.source)
