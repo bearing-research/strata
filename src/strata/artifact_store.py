@@ -4073,7 +4073,18 @@ class ArtifactStore:
             ).fetchall()
             for pointer in held_pointers:
                 self._reclaim_blob(pointer["id"], pointer["version"])
-            # Before the first write, so the lock is never awaited while holding a name row.
+            # Lock order is version rows, then the audit lock, then name rows: a cache hit
+            # naming this version holds its row and then waits for the audit lock, so
+            # taking the audit lock first here deadlocked against it on Postgres.
+            for row_id, row_version in sorted(
+                {(artifact_id, version)} | {(p["id"], p["version"]) for p in held_pointers}
+            ):
+                conn.execute(
+                    "UPDATE artifact_versions SET last_used_at = last_used_at "
+                    "WHERE id = ? AND version = ?",
+                    (row_id, row_version),
+                )
+            # Before the first name write, so the lock is never awaited while holding a name row.
             self._serialize_audit(conn)
             for pointer in held_pointers:
                 conn.execute(

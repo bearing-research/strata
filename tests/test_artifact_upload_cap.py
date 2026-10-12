@@ -189,3 +189,22 @@ def test_an_oversized_staged_import_body_is_a_413(default_cap):
 
     assert response.status_code == 413, response.text
     assert "metadata" in response.json()["detail"]
+
+
+def test_a_json_put_body_is_held_to_the_metadata_limit(default_cap):
+    """The legacy JSON body is parsed whole in memory, so ``max_upload_bytes`` (10 GiB by
+    default) is no bound for it; Arrow IPC over multipart is the route for large data."""
+    body = {**_PUT_METADATA, "data": {"x": ["y" * 1024] * (17 * 1024)}}
+
+    response = httpx.put(f"{default_cap}/v1/artifacts", json=body, timeout=30)
+
+    assert response.status_code == 413, response.text
+    assert "metadata" in response.json()["detail"]
+
+
+def test_a_json_put_body_under_the_limit_still_stores(default_cap):
+    body = {**_PUT_METADATA, "data": {"x": [1, 2, 3]}}
+
+    response = httpx.put(f"{default_cap}/v1/artifacts", json=body, timeout=30)
+
+    assert response.status_code == 200, response.text

@@ -79,10 +79,12 @@ def _capped(request: Request, *, metadata_only: bool = False) -> Request:
     """
     from strata.server import get_state
 
-    if metadata_only:
+    max_upload = get_state().config.max_upload_bytes
+    # Whichever is lower: an operator's small max_upload_bytes still binds metadata.
+    if metadata_only and _MAX_METADATA_BYTES < max_upload:
         limit, what = _MAX_METADATA_BYTES, "the metadata limit"
     else:
-        limit, what = get_state().config.max_upload_bytes, "max_upload_bytes"
+        limit, what = max_upload, "max_upload_bytes"
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > limit:
         raise _upload_too_large(limit, what)
@@ -148,6 +150,36 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         return await _put_artifact(request, store, principal, Path(workdir) / "data")
 
 
+def _json_data_to_arrow_file(data: object, data_path: Path) -> tuple[str, int, str, int]:
+    """Write a JSON body's ``data`` to *data_path* as Arrow IPC.
+
+    Returns ``(content_sha256, byte_size, schema_json, row_count)``; off the loop, since the
+    conversion and encode are as slow as the body is large.
+    """
+    import json as json_module
+
+    try:
+        if isinstance(data, dict) and all(isinstance(v, list) for v in data.values()):
+            table = pa.Table.from_pydict(data)
+        else:
+            # Non-columnar: store as a single JSON column.
+            table = pa.Table.from_pydict({"data": [json_module.dumps(data)]})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to convert data to Arrow: {e}")
+
+    sink = pa.BufferOutputStream()
+    with ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    arrow_bytes = sink.getvalue().to_pybytes()
+    data_path.write_bytes(arrow_bytes)
+    return (
+        hashlib.sha256(arrow_bytes).hexdigest(),
+        len(arrow_bytes),
+        table.schema.to_string(),
+        table.num_rows,
+    )
+
+
 async def _put_artifact(
     request: Request, store: ArtifactStore, principal: Principal | None, data_path: Path
 ) -> PutArtifactResponse:
@@ -198,9 +230,10 @@ async def _put_artifact(
             raise HTTPException(status_code=400, detail=f"Invalid Arrow IPC data: {e}")
 
     else:
-        # JSON body (legacy format)
+        # JSON body (legacy format). Parsed whole in memory, so held to the metadata limit;
+        # larger data goes as multipart Arrow IPC, which streams to disk.
         try:
-            body = await _capped(request).json()
+            body = await _capped(request, metadata_only=True).json()
         except json_module.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
@@ -212,24 +245,9 @@ async def _put_artifact(
         if data is None:
             raise HTTPException(status_code=400, detail="Missing 'data' field")
 
-        try:
-            if isinstance(data, dict) and all(isinstance(v, list) for v in data.values()):
-                table = pa.Table.from_pydict(data)
-            else:
-                # Non-columnar: store as a single JSON column.
-                json_str = json_module.dumps(data)
-                table = pa.Table.from_pydict({"data": [json_str]})
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to convert data to Arrow: {e}")
-
-        sink = pa.BufferOutputStream()
-        with ipc.new_stream(sink, table.schema) as writer:
-            writer.write_table(table)
-        arrow_bytes = sink.getvalue().to_pybytes()
-        data_path.write_bytes(arrow_bytes)
-        content_sha256 = hashlib.sha256(arrow_bytes).hexdigest()
-        byte_size = len(arrow_bytes)
-        schema_json, row_count = table.schema.to_string(), table.num_rows
+        content_sha256, byte_size, schema_json, row_count = await anyio.to_thread.run_sync(
+            _json_data_to_arrow_file, data, data_path
+        )
 
     executor = transform_dict.get("executor")
     if not executor:

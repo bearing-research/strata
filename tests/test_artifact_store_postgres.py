@@ -1386,6 +1386,60 @@ class TestWriterSerialization:
         assert errors == []
         assert store.get_artifact("d1", version) is None
 
+    def test_deleting_a_version_while_a_hit_names_it_does_not_deadlock(self, store, monkeypatch):
+        """A hit holds the version's row and then takes the audit lock to name it; delete took
+        the audit lock and then the row. Each waited on the other and Postgres aborted one."""
+        version = store.create_artifact("h1", "prov-h1", _spec())
+        store.finalize_artifact("h1", version, "{}", row_count=0, byte_size=0)
+
+        holding_row, release = threading.Event(), threading.Event()
+        errors: list[BaseException] = []
+        set_name = store._set_name_in_connection
+
+        def naming_after_the_row_lock(conn, *args, **kwargs):
+            holding_row.set()
+            assert release.wait(30)
+            return set_name(conn, *args, **kwargs)
+
+        monkeypatch.setattr(store, "_set_name_in_connection", naming_after_the_row_lock)
+
+        def hit() -> None:
+            try:
+                store.find_ready_and_set_name("prov-h1", "latest")
+            except BaseException as exc:
+                errors.append(exc)
+
+        def delete() -> None:
+            try:
+                store.delete_artifact("h1", version)
+            except BaseException as exc:
+                errors.append(exc)
+
+        hitting = threading.Thread(target=hit)
+        hitting.start()
+        assert holding_row.wait(30)
+        deleting = threading.Thread(target=delete)
+        deleting.start()
+        probe = store._get_connection()
+        try:
+            # Until the delete waits on a lock the hit holds.
+            while deleting.is_alive():
+                row = probe.execute(
+                    "SELECT count(*) AS n FROM pg_locks WHERE NOT granted"
+                ).fetchone()
+                probe.commit()
+                if row["n"]:
+                    break
+                deleting.join(timeout=0.05)
+        finally:
+            probe.close()
+        release.set()
+        hitting.join()
+        deleting.join()
+
+        assert errors == []
+        assert store.get_artifact("h1", version) is None
+
     def test_duplicate_provenance_finalize_is_idempotent(self, store):
         # Exercises the dialect's integrity_error: the partial unique index on
         # (tenant, provenance_hash) rejects the second ready row, and the store
