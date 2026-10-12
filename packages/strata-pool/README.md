@@ -348,6 +348,14 @@ A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
 it.
 
+**A job on a RunPod worker must finish within 100 seconds.** RunPod's proxy
+ends any request after 100 seconds with a `524`, and the pool's call to a
+worker (`POST {endpoint}/execute`) lasts the whole job, so a longer cell fails
+however high `job_timeout_seconds` is set. Run long cells on the Docker or Fly
+backend. Reaching the worker on a mapped TCP port would lift the limit, but
+that link is plain HTTP, which would send the worker credential unencrypted,
+so the backend does not do it yet.
+
 ## The Fly Machines backend
 
 Boots workers as machines in one Fly app and region. A machine is reachable
