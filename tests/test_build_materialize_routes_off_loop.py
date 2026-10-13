@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import threading
 import time
 from types import SimpleNamespace
 
+import anyio.to_thread
 import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -306,6 +308,54 @@ async def test_an_explain_resolves_its_inputs_off_the_loop(served, monkeypatch):
     assert response.json()["resolved_input_versions"] == {
         f"strata://artifact/input@v={version}": f"input@v={version}"
     }
+
+
+_TABLE = "file:///wh#public.events"
+
+
+@pytest.mark.parametrize("route", ["explain", "materialize", "status"])
+async def test_a_slow_table_plan_holds_no_worker_thread(served, monkeypatch, route):
+    """A table input plans in the planning pool, and waiting for a slow catalog must not
+    occupy one of the worker threads every sync route and store call shares."""
+    planning, release = threading.Event(), threading.Event()
+    plan = SimpleNamespace(snapshot_id=7, schema_id=0, table_identity=None)
+
+    def slow_plan(**kwargs):
+        planning.set()
+        assert release.wait(30)
+        return plan
+
+    monkeypatch.setattr(served.state.planner, "plan", slow_plan)
+    if route == "status":
+        store = served.store
+        version = store.create_artifact(
+            artifact_id="built",
+            provenance_hash="b" * 64,
+            transform_spec=TransformSpec(executor="test_sql@v1", params={}, inputs=[_TABLE]),
+            input_versions={_TABLE: "6:0"},
+        )
+        store.write_blob("built", version, ARROW)
+        store.finalize_artifact("built", version, "", row_count=1, byte_size=len(ARROW))
+        store.set_name("built", "built", version)
+    # One worker thread, so a request holding it while it waits starves everything else.
+    monkeypatch.setattr(anyio.to_thread.current_default_thread_limiter(), "total_tokens", 1)
+
+    async with _client(served) as client:
+        if route == "status":
+            request = client.get("/v1/artifacts/names/built/status")
+        else:
+            path = "explain-materialize" if route == "explain" else "materialize"
+            request = client.post(f"/v1/artifacts/{path}", json=_transform_request(_TABLE))
+        task = asyncio.ensure_future(request)
+        try:
+            assert await asyncio.to_thread(planning.wait, 30), "the plan never started"
+            freed = await asyncio.wait_for(anyio.to_thread.run_sync(lambda: True), timeout=10)
+            assert freed
+        finally:
+            release.set()
+        response = await task
+
+    assert response.status_code == 200, response.text
 
 
 async def test_a_named_hit_takes_the_refresh_that_superseded_what_it_found(served, monkeypatch):
