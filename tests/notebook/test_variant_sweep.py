@@ -10,6 +10,8 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+import pytest
+
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.models import CellState, NotebookState, VariantGroupConfig
 from strata.notebook.parser import parse_notebook
@@ -871,6 +873,41 @@ class TestFanoutBaseProvenance:
             )
         )
         return executor, session, src, result
+
+    @pytest.mark.parametrize(("hits", "expected"), [((True, True), True), ((True, False), False)])
+    def test_a_fanout_is_cached_only_when_every_instance_was(self, tmp_path, hits, expected):
+        import asyncio
+
+        from strata.notebook.executor import CellExecutionResult, CellExecutor
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        src = "# @per_variant\nscore = 1\n"
+        nb = create_notebook(tmp_path, "FanoutHits", initialize_environment=False)
+        add_cell_to_notebook(nb, "ev", None, language="python")
+        write_cell(nb, "ev", src)
+        executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+        instance_hits = iter(hits)
+
+        async def fake_run(self, cell_id, source, *args, **kwargs):
+            return CellExecutionResult(cell_id=cell_id, success=True, cache_hit=next(instance_hits))
+
+        executor._execute_python_cell = fake_run.__get__(executor, CellExecutor)
+        result = asyncio.run(
+            executor._execute_fanout_cell(
+                "ev",
+                src,
+                10.0,
+                0.0,
+                materialize_upstreams=False,
+                use_cache=True,
+                group="model",
+                variant_names=("logreg", "rf"),
+            )
+        )
+
+        assert result.success is True
+        assert result.cache_hit is expected
 
     def test_successful_fanout_records_base_hash(self, tmp_path):
         import asyncio

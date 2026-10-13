@@ -257,6 +257,15 @@ class EnvironmentJobSnapshot:
     error: str | None = None
 
 
+def _directory_identity(path: Path) -> tuple[int, int] | None:
+    """``(device, inode)`` of *path*, or ``None`` if it is gone."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino
+
+
 class NotebookSession:
     """Holds state for one open notebook."""
 
@@ -282,6 +291,8 @@ class NotebookSession:
         # The harness user passes through to its per-run directories and the
         # fetched and mounted inputs here; what else is here is the server's.
         private_dir(path / ".strata", PASS_THROUGH_DIR)
+        # The directory this session opened, to tell it from one later put at the same path.
+        self._directory_identity = _directory_identity(path)
         self.artifact_manager = NotebookArtifactManager(
             notebook_id=notebook_state.id,
             artifact_dir=path / ".strata" / "artifacts",
@@ -447,6 +458,13 @@ class NotebookSession:
         )
         self.environment_last_synced_at = None
         self.environment_last_sync_duration_ms = None
+
+    def owns_its_directory(self) -> bool:
+        """Whether this session's path is still the directory it opened, store and all."""
+        return (
+            _directory_identity(self.path) == self._directory_identity
+            and self.artifact_manager.artifact_dir.is_dir()
+        )
 
     def touch(self) -> None:
         """Record user activity (an edit, a run, a focus) for idle accounting."""
@@ -3726,6 +3744,11 @@ class SessionManager:
 
         if reuse_existing:
             existing = self._find_session_by_path(Path(directory), opened_by)
+            if existing is not None and not existing.owns_its_directory():
+                # The notebook was deleted and put back (a re-clone, a re-import): the
+                # session's store is gone, and reloading it fails every open of the path.
+                self.close_session(existing.id, reason="deleted")
+                existing = None
             if existing is not None:
                 if existing._has_active_execution():
                     existing.touch()
