@@ -435,6 +435,28 @@ waiting state without either field puts the badge back to "starting".
 
 Stops the harness running `build_id`, and every process it started, if it is still running. A cancel that arrives while the worker is still fetching inputs or building the locked environment stops the run before the harness starts; that execution then answers 409. Answers `{"build_id": "...", "cancelled": true}`, or `"cancelled": false` when nothing by that id is running, which is a normal answer rather than an error: the cell may have finished before the cancel arrived. The server calls it when a remote cell is cancelled or times out, and `strata-pool` calls it with the machine's token when a running job is cancelled through `POST /v1/jobs/{id}/cancel`.
 
+## `POST /v1/hints` (optional, for dispatchers)
+
+A worker never needs this route. A dispatcher in front of machines that boot on
+demand (a pool, or a platform in front of one) can serve it to start a machine
+before the run that needs it. The notebook sends a hint when a cell bound to the
+worker gains focus, when the worker becomes the notebook's default, and when a
+cascade or Run All is about to dispatch to it. The URL is the worker's execute URL
+with its `/v1/execute` (or `/v1/notebook-execute`, `/v1/execute-manifest`,
+`/execute`) ending replaced by `/v1/hints`, with the same `Authorization` and
+`X-Strata-Executor-Protocol` headers as a dispatch.
+
+```json
+{"worker": "gpu", "runtime_id": "gpu-a100", "notebook_id": "...", "reason": "focus"}
+```
+
+`reason` is `focus`, `select`, `cascade` or `run_all`. Any 2xx counts as taken.
+Every other answer, a 404 from a plain `strata-worker` included, is ignored and
+changes nothing. The notebook sends at most one hint per session and worker a
+minute, and only for a worker its policy lets the notebook use.
+`strata-pool`'s own `POST /v1/hints` takes a `machine_type` instead, so a
+dispatcher maps the worker to one.
+
 ## `POST /execute` (worker-pool alias)
 
 The same handler as `/v1/execute-manifest`, at the path `strata-pool` dispatches to. The pool forwards the job body verbatim with no content type, and a build manifest is self-describing, so a manifest that arrives through the pool and one pushed directly are validated identically.
