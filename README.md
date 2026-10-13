@@ -95,6 +95,7 @@ whether an un-primed session uses the notebook at all. See
 - **distributed:** `# @worker gpu-fly` dispatches a cell to a remote box; bring your own compute
 - **worker pool** (separate package, `pip install strata-pool`)**:** machines (Fly, Docker or RunPod) start on demand, are held for a tenant, hand out GPUs per cell, and stop when the work does
 - **the same environment, elsewhere:** a remote cell runs in the notebook's own locked environment rather than whatever the worker image holds
+- **the machine starts before the run:** focusing a cell bound to a pooled worker, or starting Run All, asks the pool to bring up a machine while you are still reading the code
 - **remote cells over SSH:** hand an agent an SSH target and it provisions a worker there, tunnels to it, and routes heavy cells over, cached like everything else
 - **workers behind NAT:** `strata-worker --connect` dials out to a relay, so a machine with no open port serves cells
 - **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
@@ -118,6 +119,7 @@ whether an un-primed session uses the notebook at all. See
 **Surfaces**
 
 - **terminal viewer:** `strata watch` renders a running notebook live in the terminal, read-only, over SSH or beside your editor
+- **stop a run from anywhere:** cancel a running cell from the browser, `strata cell cancel`, REST or MCP, and on Linux and macOS a cell stops when the server that started it does
 - **app view:** open a notebook as a read-only app, embed it as an `<iframe>`, or export a self-contained snapshot
 - **data viewer:** DataFrame outputs render in a grid you can page, sort, filter and search, backed by the full artifact rather than a preview
 - **also a library:** `pip install strata-client` talks to the store from any pipeline or service, with no server install
@@ -133,6 +135,10 @@ proxy auth. For multi-tenant or hosted deployments, see
 # Docker. docker-compose.yml sets personal mode for you.
 docker compose up -d --build
 # Then open http://localhost:8765
+
+# Or the prebuilt image (linux/amd64), published with each release.
+docker run --rm -p 127.0.0.1:8765:8765 -v strata_state:/home/strata/.strata \
+  ghcr.io/bearing-research/strata:0.10.0
 
 # Or install via uv (recommended). Puts the CLI on PATH in a uv-managed
 # tool env. `pip install` is not supported; see Requirements below.
