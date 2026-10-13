@@ -731,3 +731,27 @@ async def test_an_environment_job_finishing_after_close_starts_no_pool(tmp_path,
     await session.start_missing_warm_pools()
 
     assert session.warm_pool is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("removed", ["notebook", "runtime_state"])
+async def test_a_notebook_put_back_under_an_open_session_reopens_fresh(tmp_path, removed):
+    """Deleting a notebook (or its .strata) and putting it back used to fail every open of the
+    path with a 500 until a restart: the reused session's store was gone."""
+    manager = SessionManager()
+    notebook = create_notebook(tmp_path, "Again", initialize_environment=False)
+    first = manager.open_notebook(notebook, reuse_existing=True, defer_initial_venv_sync=True)
+
+    if removed == "notebook":
+        shutil.rmtree(notebook)
+        assert create_notebook(tmp_path, "Again", initialize_environment=False) == notebook
+    else:
+        shutil.rmtree(notebook / ".strata")
+
+    second = manager.open_notebook(notebook, reuse_existing=True, defer_initial_venv_sync=True)
+
+    assert second.id != first.id
+    assert manager.get_session(first.id) is None
+    # The fresh session is the one reused from now on.
+    third = manager.open_notebook(notebook, reuse_existing=True, defer_initial_venv_sync=True)
+    assert third.id == second.id

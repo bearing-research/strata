@@ -1971,6 +1971,8 @@ class CellExecutor:
                 stdout=stdout,
                 stderr=stderr,
                 duration_ms=duration_ms,
+                # Cached only when no instance ran: one recompute makes the cell a run.
+                cache_hit=bool(results) and all(r.cache_hit for _, r in results),
                 execution_method="fanout",
             )
             # Record the BASE provenance: compute_staleness recomputes the base hash, so a
