@@ -2444,6 +2444,10 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 <td>Cancel a job that has not finished; body <code>{"build_id": "..."}</code>. 200 with the job, 409 if it finished another way, 404 for another tenant's job</td>
 </tr>
 <tr>
+<td><code>POST /v1/hints</code></td>
+<td>Jobs are near: start a machine for the caller's tenant now; body <code>{"machine_type": "..."}</code>. 202 with <code>{"started", "reason"}</code></td>
+</tr>
+<tr>
 <td><code>GET /v1/machine-types</code></td>
 <td>What a caller may ask for: the catalogue an annotation resolves against. <code>env</code> and <code>provider_options</code> values read <code>&lt;redacted&gt;</code> without the admin token</td>
 </tr>
@@ -2472,6 +2476,14 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 <code>wait_seconds</code> (default 300), which bounds the wait and not the job, and is cut to
 the type's <code>boot_timeout_seconds</code> plus <code>job_timeout_seconds</code>. Both times must be
 positive and finite; anything else is a 422 and no job is queued.</p>
+<p>A hint starts one machine of the type for the caller's tenant unless one is
+already warm or starting, so its boot overlaps the user's typing instead of
+their first run. Send one when a user opens a notebook that names the type, or
+picks it. Repeating a hint is free: <code>started</code> is false and <code>reason</code> is
+<code>no_demand</code> while a machine is warm or starting. A hint is held to the type's
+<code>max_workers</code> and the fleet's <code>max_workers_total</code> like a job's machine
+(<code>reason</code> <code>tenant_cap</code> or <code>fleet_cap</code>), and a machine no job reaches is stopped
+after the type's <code>cool_down_seconds</code>, like any idle one.</p>
 <p>The <code>PUT</code> body is the whole catalogue: a JSON list of machine types, each with
 <code>MachineType</code>'s fields (only <code>name</code> and <code>image</code> are required), the shape <code>GET</code>
 returns:</p>
