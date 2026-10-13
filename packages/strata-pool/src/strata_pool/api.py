@@ -207,6 +207,22 @@ def create_app(
             return JSONResponse(_job_json(latest), status_code=202)
         return _terminal_response(done)
 
+    @app.post("/v1/hints", status_code=202, dependencies=guard)
+    async def hint(
+        tenant_id: Annotated[str, Depends(tenant)],
+        machine_type: Annotated[str, Body(embed=True)],
+    ) -> dict:
+        """Say jobs of *machine_type* are near: start a machine now unless one is warm or starting.
+
+        ``started`` is whether this hint started one; ``reason`` is why not otherwise
+        (``no_demand``: one is warm or starting already; ``tenant_cap``, ``fleet_cap``).
+        """
+        try:
+            outcome = await pool.prewarm(tenant_id, machine_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"started": outcome == "reserved", "reason": outcome}
+
     def tenant_job(job_id: str, tenant_id: str) -> Job:
         job = pool.store.get_job(job_id)
         # Another tenant's job is a 404, not a 403, so an id does not confirm it exists.

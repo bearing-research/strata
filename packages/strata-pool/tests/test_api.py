@@ -165,6 +165,46 @@ async def test_the_tenant_header_decides_who_the_machine_belongs_to(api):
     assert [w.tenant_id for w in api.pool.store.list_workers()] == ["globex"]
 
 
+class TestHints:
+    async def test_a_hint_starts_a_machine_and_a_repeat_starts_none(self, api):
+        first = await api.post("/v1/hints", json={"machine_type": "cpu"}, headers=AUTH)
+        second = await api.post("/v1/hints", json={"machine_type": "cpu"}, headers=AUTH)
+
+        assert first.status_code == 202
+        assert first.json() == {"started": True, "reason": "reserved"}
+        assert second.json() == {"started": False, "reason": "no_demand"}
+        assert len(api.pool.store.list_workers()) == 1
+
+    async def test_a_hint_warms_a_machine_for_the_callers_tenant(self, api):
+        await api.post(
+            "/v1/hints",
+            json={"machine_type": "cpu"},
+            headers={"Authorization": f"Bearer {TOKEN}", "X-Strata-Tenant": "globex"},
+        )
+        assert [w.tenant_id for w in api.pool.store.list_workers()] == ["globex"]
+
+    async def test_an_unknown_machine_type_is_a_400(self, api):
+        response = await api.post("/v1/hints", json={"machine_type": "h100"}, headers=AUTH)
+
+        assert response.status_code == 400
+        assert "unknown machine type" in response.json()["detail"]
+        assert api.pool.store.list_workers() == []
+
+    async def test_a_hint_needs_the_token_and_a_tenant(self, api):
+        no_token = await api.post(
+            "/v1/hints", json={"machine_type": "cpu"}, headers={"X-Strata-Tenant": "acme"}
+        )
+        no_tenant = await api.post(
+            "/v1/hints",
+            json={"machine_type": "cpu"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
+        assert no_token.status_code == 401
+        assert no_tenant.status_code == 400
+        assert api.pool.store.list_workers() == []
+
+
 class TestJobReadsAreTenantScoped:
     async def _finished_job(self, api) -> str:
         accepted = await api.post("/v1/jobs?machine_type=cpu", content=b"work", headers=AUTH)
