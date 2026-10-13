@@ -2159,9 +2159,11 @@ producing artifacts that flow through an auto-built DAG.</p>
 <li><strong>isolated envs:</strong> every notebook gets its own uv-managed <code>.venv/</code>, locked and reproducible</li>
 <li><strong>auto-install:</strong> missing import in a cell? one click adds the package via uv; run the cell again to use it</li>
 <li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution - same DAG, same cache</li>
+<li><strong>stop a run from anywhere:</strong> cancel a running cell from the browser, <code>strata cell cancel</code>, REST or MCP, and on Linux and macOS a cell stops when the server that started it does</li>
 <li><strong>every input recorded:</strong> <code># @fetch</code> makes bytes from a URL an input and <code># @dataset</code> makes a registry name one, both content-addressed like everything else</li>
 <li><strong>lake-aware SQL:</strong> read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records</li>
 <li><strong>the same environment, elsewhere:</strong> a remote cell runs in the notebook's own locked environment rather than whatever the worker image happens to hold</li>
+<li><strong>the machine starts before the run:</strong> focusing a cell bound to a pooled worker, or starting Run All, asks the pool to bring up a machine while you are still reading the code</li>
 <li><strong>workers behind NAT:</strong> <code>strata-worker --connect</code> dials out to a relay, so a machine with no open port serves cells</li>
 <li><strong>Iceberg as other engines write it:</strong> scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly</li>
 <li><strong>a figure gets a URL:</strong> publish an artifact and anyone with the link sees the plot, the code behind it, and the environment of every step - no account, no install</li>
@@ -2239,11 +2241,15 @@ Plain <code>pip install</code> is not supported.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
 </code></pre></div>
 <p>Then open <a href="http://localhost:8765">http://localhost:8765</a>.</p>
+<p>Or run the prebuilt image (linux/amd64), published with each release:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:8765:8765<span class="w"> </span>-v<span class="w"> </span>strata_state:/home/strata/.strata<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>ghcr.io/bearing-research/strata:0.10.0
+</code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>sync
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>sync
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Then open <a href="http://localhost:8765">http://localhost:8765</a>.</p>
 </div>
