@@ -19,6 +19,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyio.to_thread
+
 from strata.file_modes import PASS_THROUGH_DIR, private_dir, private_file
 from strata.notebook import console_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
@@ -821,9 +823,11 @@ class NotebookSession:
         Staleness reads the outside world (``@fetch``, ``@dataset``, ``@table``) with
         blocking calls, and runs on every debounced source flush; on the event loop one
         unreachable host would stall every socket and route. Calls are serialized
-        because the work mutates the cells it walks.
+        because the work mutates the cells it walks. On anyio's limiter, not asyncio's:
+        a worker-annotated cell reads the server store's registry, and the store's pool is
+        sized to that limiter.
         """
-        return await asyncio.to_thread(self.compute_staleness, executing)
+        return await anyio.to_thread.run_sync(self.compute_staleness, executing)
 
     def compute_staleness(self, executing: str | None = None) -> dict[str, CellStaleness]:
         """Compute staleness for all cells, updating ``cell.staleness`` and causality chains.
@@ -2858,7 +2862,7 @@ class NotebookSession:
 
         new_hash = compute_lockfile_hash(self.path)
         if new_hash != old_hash:
-            return self.compute_staleness()
+            return await self.compute_staleness_async()
         return {}
 
     def _record_dependency_install(self, duration_ms: int | None) -> None:
@@ -2927,7 +2931,7 @@ class NotebookSession:
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
             await self.on_dependencies_changed(operation_log=result.operation_log, owner=owner)
-            staleness_map = self.compute_staleness()
+            staleness_map = await self.compute_staleness_async()
 
         return DependencyMutationOutcome(
             result=result,
@@ -2947,7 +2951,7 @@ class NotebookSession:
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
             await self.on_dependencies_changed(operation_log=result.operation_log, owner=owner)
-            staleness_map = self.compute_staleness()
+            staleness_map = await self.compute_staleness_async()
 
         return RequirementsImportOutcome(
             result=result,
@@ -2967,7 +2971,7 @@ class NotebookSession:
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
             await self.on_dependencies_changed(operation_log=result.operation_log, owner=owner)
-            staleness_map = self.compute_staleness()
+            staleness_map = await self.compute_staleness_async()
 
         return RequirementsImportOutcome(
             result=result,
@@ -3473,7 +3477,7 @@ class NotebookSession:
         except Exception:
             logger.exception("Failed to update environment metadata")
 
-        staleness_map = self.compute_staleness()
+        staleness_map = await self.compute_staleness_async()
         stale_cell_ids = [
             cell_id
             for cell_id, staleness in staleness_map.items()
