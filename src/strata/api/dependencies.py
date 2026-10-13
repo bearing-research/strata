@@ -7,9 +7,11 @@ imported lazily: server imports this module at load time, so the import stays on
 
 from __future__ import annotations
 
+import asyncio
 import functools
 from typing import Annotated, NamedTuple
 
+import anyio.to_thread
 from fastapi import Depends, HTTPException
 
 # Imported at runtime, not under TYPE_CHECKING: the aliases below embed these in ``Annotated[...]``,
@@ -274,31 +276,18 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
         raise HTTPException(status_code=403, detail="Access denied")
 
 
-def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
-    """Resolve an input URI to its current version, enforcing table ACL and artifact access.
+def _input_resolution(input_uri: str, tenant: str | None):
+    """The store, resolver and plan timeout for *input_uri*, after the pre-plan table ACL.
 
-    A table input is planned in the planning pool under ``plan_timeout_seconds``, as a scan is.
-    Side effect: records a use of an artifact input for retention. It queries the store, so an
-    async caller runs it in a worker thread, never on the loop.
-
-    Raises:
-        HTTPException: 400/404 for an unresolvable URI; 401/403/404 for a denied input; 504 for a
-            table plan that timed out.
+    Authorizes a table input on the identity its URI names before planning, as the scan path
+    does: planning first would answer a denied caller with the plan's failure (naming the table
+    and its delete files). The check after resolution stays, for a catalog that resolves the
+    table to another identity.
     """
-    from strata.server import (
-        _authorize_artifact_read,
-        _ensure_artifact_access,
-        _get_artifact_store,
-        _table_identity_from_uri,
-        get_state,
-    )
-    from strata.services.materialize import InputResolutionError, materialize_service
+    from strata.server import _get_artifact_store, _table_identity_from_uri, get_state
+    from strata.services.materialize import materialize_service
 
     store = _get_artifact_store(allow_server_mode=True)
-    # Authorize a table input before planning, on the identity its URI names, as the scan path does.
-    # Planning first would answer a denied caller with the plan's failure (naming the table and its
-    # delete files). The check after resolution stays, for a catalog that resolves the table to
-    # another identity.
     if not input_uri.startswith("strata://"):
         authorize_table_access(input_uri, _table_identity_from_uri(input_uri))
     state = get_state()
@@ -309,26 +298,12 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
         planner=state.planner,
         tenant=tenant,
     )
-    plan_timeout = state.config.plan_timeout_seconds
-    try:
-        if input_uri.startswith("strata://"):
-            resolved = resolve()
-        else:
-            # Planning has its own pool, sized for catalog and manifest reads.
-            with get_pool_tracker().track("planning"):
-                planned = state._planning_executor.submit(resolve)
-                try:
-                    resolved = planned.result(timeout=plan_timeout)
-                except TimeoutError:
-                    # Drops a plan still queued; one already running finishes unread.
-                    planned.cancel()
-                    raise
-    except TimeoutError as e:
-        raise HTTPException(
-            status_code=504, detail=f"Planning timed out after {plan_timeout}s."
-        ) from e
-    except InputResolutionError as e:
-        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    return store, resolve, state.config.plan_timeout_seconds
+
+
+def _checked_input_version(resolved, input_uri: str, tenant: str | None, store) -> str:
+    """*resolved*'s version, after the ACL and tenant checks; records an artifact input's use."""
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
     # Same ACL as the direct scan path, so a transform input cannot bypass it. Runs after resolution
     # (outside the error mapping) so a 401/403/404 isn't rewritten into a 400.
@@ -345,6 +320,73 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
         if store is not None:
             store.record_use(resolved.artifact.id, resolved.artifact.version)
     return resolved.version
+
+
+def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
+    """Resolve an input URI to its current version, enforcing table ACL and artifact access.
+
+    A table input is planned in the planning pool under ``plan_timeout_seconds``, as a scan is,
+    and this thread waits for it: an async caller uses :func:`resolve_input_version_async`.
+    Side effect: records a use of an artifact input for retention.
+
+    Raises:
+        HTTPException: 400/404 for an unresolvable URI; 401/403/404 for a denied input; 504 for a
+            table plan that timed out.
+    """
+    from strata.server import get_state
+    from strata.services.materialize import InputResolutionError
+
+    store, resolve, plan_timeout = _input_resolution(input_uri, tenant)
+    try:
+        if input_uri.startswith("strata://"):
+            resolved = resolve()
+        else:
+            # Planning has its own pool, sized for catalog and manifest reads.
+            with get_pool_tracker().track("planning"):
+                planned = get_state()._planning_executor.submit(resolve)
+                try:
+                    resolved = planned.result(timeout=plan_timeout)
+                except TimeoutError:
+                    # Drops a plan still queued; one already running finishes unread.
+                    planned.cancel()
+                    raise
+    except TimeoutError as e:
+        raise HTTPException(
+            status_code=504, detail=f"Planning timed out after {plan_timeout}s."
+        ) from e
+    except InputResolutionError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    return _checked_input_version(resolved, input_uri, tenant, store)
+
+
+async def resolve_input_version_async(input_uri: str, tenant: str | None = None) -> str:
+    """:func:`resolve_input_version` for an async caller.
+
+    A table's plan is awaited on the loop, as a scan's is, so a slow catalog holds no worker
+    thread: those are shared by every sync route and store call. An artifact input reads the
+    store, so it resolves in one.
+    """
+    from strata.server import get_state
+    from strata.services.materialize import InputResolutionError
+
+    if input_uri.startswith("strata://"):
+        return await anyio.to_thread.run_sync(resolve_input_version, input_uri, tenant)
+    store, resolve, plan_timeout = _input_resolution(input_uri, tenant)
+    try:
+        with get_pool_tracker().track("planning"):
+            resolved = await asyncio.wait_for(
+                asyncio.get_running_loop().run_in_executor(get_state()._planning_executor, resolve),
+                timeout=plan_timeout,
+            )
+    except TimeoutError as e:
+        raise HTTPException(
+            status_code=504, detail=f"Planning timed out after {plan_timeout}s."
+        ) from e
+    except InputResolutionError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    return await anyio.to_thread.run_sync(
+        _checked_input_version, resolved, input_uri, tenant, store
+    )
 
 
 def table_identity_or_400(table_uri: str) -> TableIdentity:

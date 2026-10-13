@@ -20,7 +20,7 @@ from strata.api.dependencies import (
     CurrentPrincipal,
     ReadStore,
     authorize_table_access,
-    resolve_input_version,
+    resolve_input_version_async,
     table_identity_or_400,
 )
 from strata.iceberg import CatalogUriRequired, SnapshotNotFound, WarehouseNotFound
@@ -48,7 +48,7 @@ router = APIRouter(tags=["materialize"])
 
 
 @router.post("/v1/artifacts/explain-materialize", response_model=ExplainMaterializeResponse)
-def explain_materialize(
+async def explain_materialize(
     request: ExplainMaterializeRequest, store: ReadStore, principal: CurrentPrincipal
 ):
     """Dry-run materialize: report hit or miss and why a rebuild would be needed."""
@@ -61,12 +61,20 @@ def explain_materialize(
     resolved_versions: dict[str, str] = {}
     for input_uri in request.inputs:
         try:
-            resolved_versions[input_uri] = resolve_input_version(input_uri, tenant=tenant_id)
+            resolved_versions[input_uri] = await resolve_input_version_async(
+                input_uri, tenant=tenant_id
+            )
         except HTTPException as e:
             resolved_versions[input_uri] = f"<error: {e.detail}>"
 
-    return materialize_service.explain(
-        store, request=request, tenant=tenant_id, resolved_versions=resolved_versions
+    return await anyio.to_thread.run_sync(
+        functools.partial(
+            materialize_service.explain,
+            store,
+            request=request,
+            tenant=tenant_id,
+            resolved_versions=resolved_versions,
+        )
     )
 
 
@@ -209,22 +217,19 @@ async def materialize_artifact(request: MaterializeRequest):
 
     from strata.services.materialize import materialize_service
 
-    def resolve_and_find() -> tuple[dict[str, str], str, ArtifactVersion | None]:
-        # Versions feed both the hash and staleness tracking. An input that does not resolve
-        # (denied, missing, unreadable, or a plan that failed) refuses the request: building
-        # past it would record a snapshot-less version and dedup later runs onto the result.
-        input_versions = {
-            input_uri: resolve_input_version(input_uri, tenant=tenant_id)
-            for input_uri in request.inputs
-        }
-        provenance_hash = materialize_service.compute_provenance(transform_spec, input_versions)
-        return (
-            input_versions,
-            provenance_hash,
-            _find_existing(store, provenance_hash, request, tenant_id),
-        )
+    # Versions feed both the hash and staleness tracking. An input that does not resolve
+    # (denied, missing, unreadable, or a plan that failed) refuses the request: building
+    # past it would record a snapshot-less version and dedup later runs onto the result.
+    input_versions = {
+        input_uri: await resolve_input_version_async(input_uri, tenant=tenant_id)
+        for input_uri in request.inputs
+    }
 
-    input_versions, provenance_hash, existing = await anyio.to_thread.run_sync(resolve_and_find)
+    def find() -> tuple[str, ArtifactVersion | None]:
+        provenance_hash = materialize_service.compute_provenance(transform_spec, input_versions)
+        return provenance_hash, _find_existing(store, provenance_hash, request, tenant_id)
+
+    provenance_hash, existing = await anyio.to_thread.run_sync(find)
     if existing is not None and not request.refresh:
         artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
 

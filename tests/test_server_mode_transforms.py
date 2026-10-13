@@ -1380,10 +1380,10 @@ class TestServiceModeReviewFindings:
         """
         from fastapi import HTTPException
 
-        def deny(*_args, **_kwargs):
+        async def deny(*_args, **_kwargs):
             raise HTTPException(status_code=403, detail="Access denied")
 
-        monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", deny)
+        monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version_async", deny)
 
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
@@ -1401,10 +1401,12 @@ class TestServiceModeReviewFindings:
         """A 400 from input resolution is the answer; the raw URI is never built past."""
         from fastapi import HTTPException
 
-        def unresolvable(*_args, **_kwargs):
+        async def unresolvable(*_args, **_kwargs):
             raise HTTPException(status_code=400, detail="Unknown input URI type")
 
-        monkeypatch.setattr("strata.api.routers.materialize.resolve_input_version", unresolvable)
+        monkeypatch.setattr(
+            "strata.api.routers.materialize.resolve_input_version_async", unresolvable
+        )
 
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
