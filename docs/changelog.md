@@ -7,7 +7,7 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## 0.10.0 - 2026-10-21
+## 0.10.0 - 2026-10-13
 
 A hardening release. The server stops doing store and blob work on its event
 loop, so one slow database call or object-store read no longer stalls every
