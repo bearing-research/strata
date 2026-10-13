@@ -47,9 +47,11 @@ producing artifacts that flow through an auto-built DAG.
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
 - **auto-install:** missing import in a cell? one click adds the package via uv; run the cell again to use it
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution - same DAG, same cache
+- **stop a run from anywhere:** cancel a running cell from the browser, `strata cell cancel`, REST or MCP, and on Linux and macOS a cell stops when the server that started it does
 - **every input recorded:** `# @fetch` makes bytes from a URL an input and `# @dataset` makes a registry name one, both content-addressed like everything else
 - **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
 - **the same environment, elsewhere:** a remote cell runs in the notebook's own locked environment rather than whatever the worker image happens to hold
+- **the machine starts before the run:** focusing a cell bound to a pooled worker, or starting Run All, asks the pool to bring up a machine while you are still reading the code
 - **workers behind NAT:** `strata-worker --connect` dials out to a relay, so a machine with no open port serves cells
 - **Iceberg as other engines write it:** scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly
 - **a figure gets a URL:** publish an artifact and anyone with the link sees the plot, the code behind it, and the environment of every step - no account, no install
@@ -123,6 +125,13 @@ store. The client talks to a running Strata server.
     ```
 
     Then open [http://localhost:8765](http://localhost:8765).
+
+    Or run the prebuilt image (linux/amd64), published with each release:
+
+    ```bash
+    docker run --rm -p 127.0.0.1:8765:8765 -v strata_state:/home/strata/.strata \
+      ghcr.io/bearing-research/strata:0.10.0
+    ```
 
 === "From source"
 

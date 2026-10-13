@@ -5,6 +5,284 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
+## 0.10.0 - 2026-10-21
+
+A hardening release. The server stops doing store and blob work on its event
+loop, so one slow database call or object-store read no longer stalls every
+other request. Uploads have a size limit, cells stop when the server that
+started them dies and can be cancelled from the CLI, REST and MCP, and several
+races between concurrent writers are closed in the database itself. The server
+image is now published per release.
+
+**One slow call no longer stalls the server.** Route handlers, the embedded
+build runner, API-key checks, health probes and notebook cell runs now make
+their metadata-store and blob calls on worker threads. Those threads share one
+limit of 40, and the Postgres pool is sized to match, so a request waits for a
+thread, never 30 seconds for a connection.
+
+**Uploads are bounded.** Every artifact upload route counts the body as it
+arrives against `STRATA_MAX_UPLOAD_BYTES` (10 GiB by default) and streams it to
+disk instead of holding it in memory. Metadata parts and JSON bodies have a
+16 MiB limit of their own.
+
+**Cells stop with the server, and on request.** A cell subprocess, an R cell, a
+warm-pool worker and an ssh tunnel now die when the server process that started
+them dies, instead of holding CPU, GPU and memory with nobody to read the
+result. A running cell can be cancelled through
+`POST /v1/notebooks/{id}/cells/{cell_id}/cancel`, `strata cell cancel` and the
+MCP `cancel_cell` tool, not only from the WebSocket.
+
+**Concurrent writers agree.** A named upload becomes ready in the same commit
+as its name, an alias approval and a rejection of one change cannot both
+succeed, a version has at most one live publication, and one tenant holds an
+artifact id, checked inside the write. These hold across processes sharing one
+store, such as several servers on one Postgres.
+
+**Easier to deploy.** The server image, with the `mcp` extra, is pushed to
+`ghcr.io/bearing-research/strata:<version>` with each release. A personal
+server's worker registry can now be edited through the admin routes, and the
+strata-pool RunPod backend moves to RunPod's REST v2 ahead of v1's retirement.
+
+**Upgrading from 0.9.0:**
+
+- Back up first. The artifact store's metadata migrates on first start (schema
+  version 10), one way, and 0.9.0 refuses to open a store this release has
+  migrated. A notebook's own store migrates the first time a command opens it.
+  The migration keeps the oldest active publication of any version that had
+  several and revokes the rest, recording each as a `withdraw` event, so a
+  duplicate link handed out before the upgrade answers 410. (#1117)
+- Every cached notebook cell runs once more after upgrading, then caches as
+  before: a cell's environment hash now always uses the lock's runtime
+  packages and their sources, and now includes the lock's `requires-python`.
+  (#1097, #1144)
+- A SQL cell's result now always reaches downstream cells as a
+  `pyarrow.Table`. Before, it arrived as a pandas DataFrame whenever pandas was
+  installed. Code that used it as a DataFrame needs `.to_pandas()`. (#1098)
+- On Postgres, each server process can open up to 41 connections (was 16).
+  Size `max_connections` for that times the number of nodes. (#1119)
+- New upload limit, `STRATA_MAX_UPLOAD_BYTES` (10 GiB by default), on
+  `PUT /v1/artifacts`, `PUT /v1/artifacts/by-provenance`,
+  `POST /v1/artifacts/import`, `PUT /v1/artifacts/import/blobs/{content_sha256}`
+  and `POST /v1/artifacts/upload/{artifact_id}/v/{version}`. A larger body,
+  including a chunked one with no `Content-Length`, gets a 413. (#1089)
+- A form's metadata part, a staged import's JSON body, and the whole JSON body
+  of `PUT /v1/artifacts` are held to 16 MiB (or `STRATA_MAX_UPLOAD_BYTES`, if
+  lower), with a 413 that names the metadata limit. Send large data to
+  `PUT /v1/artifacts` as multipart Arrow, which streams to disk. (#1095, #1145)
+- `PUT /v1/artifacts/by-provenance` refuses an `artifact_id` that names a path
+  (one containing `/` or `\`, or a `..` segment) with a 400, and the local blob
+  store refuses any key whose file would leave its directory. (#1142)
+- A named `PUT /v1/artifacts` whose name cannot be written now fails with a 500
+  and leaves the version building. Before, it returned success with no name.
+  (#1115)
+- The Docker docs, the `Dockerfile` example and both compose files publish the
+  port on `127.0.0.1` only, since the image runs personal mode, which runs
+  cells for anyone who reaches it. To reach your own container from another
+  machine, publish it on every interface yourself (`-p 8765:8765`). (#1142)
+- The server image is published to `ghcr.io/bearing-research/strata:<version>`
+  (linux/amd64) with each release, and `latest` follows stable releases. It now
+  includes the `mcp` extra, so `STRATA_MCP_ENABLED=true` mounts `/mcp` in a
+  container. (#1113)
+- A personal server's worker registry now changes through
+  `/v1/admin/notebook-workers`, which no longer answers 409 outside service
+  mode. `notebook_workers.json` is still read only on first start. (#1112)
+- strata-pool's RunPod backend calls RunPod's REST v2 at
+  `https://api.runpod.io/v2` (REST v1 retires on 2026-11-15). A machine type
+  with no GPU now gets the `cpu3g` CPU flavor, with its CPU count rounded up to
+  a power of two from 2 to 32. A `gpu` or `cpu` block in `provider_options` is
+  merged into the one Strata builds instead of replacing it, and an `env` in
+  `provider_options` must be a map. RunPod's v2 refuses fields it does not
+  know with a 422, so rename v1 fields in `provider_options` (`cloudType` is
+  now `cloud`, `imageName` is `image`, `containerDiskInGb` is `disk`, and
+  `gpuTypeIds` plus `gpuCount` become `gpu: {id, count}`). (#1137)
+- A cell on a RunPod worker must finish within 100 seconds: RunPod's HTTP proxy
+  ends the request after that with a 524, whatever `job_timeout_seconds` says.
+  Use the Docker or Fly backend for longer cells. (#1141)
+- Service mode: a guarded `@fetch` now goes through `HTTPS_PROXY`,
+  `HTTP_PROXY` or `ALL_PROXY` when one covers the URL and `NO_PROXY` does not
+  exempt the host. The address check still runs first. A proxy value with no
+  scheme is treated as an http proxy. (#1138, #1142)
+- The web app's pages now send a script policy
+  (`script-src 'self'; object-src 'none'; base-uri 'self'`). A proxy or
+  extension that injects inline or third-party script into the UI is blocked.
+  (#1086)
+- Under principal auth, the open `/metrics/prometheus` scrape leaves out the
+  `strata_tenant_*` and `strata_build_tenant_*` series and the tenant label on
+  `strata_ai_*`, which become per-model totals. Per-tenant numbers are on
+  `GET /v1/admin/tenants` (`admin:tenants`). Dashboards built on those series
+  go empty. (#1087)
+- WebSocket clients: a socket whose API key is revoked or expires is closed
+  with code 1008 even if it only listens. `cascade_prompt.cells_to_run` lists
+  only the cells that will run, and `cascade_progress.completed` counts only
+  finished cells that run, ending at `total` when the cascade succeeds.
+  (#1087, #1098)
+- A REST or MCP cell run that is cancelled returns a failed result with
+  `error_code` `"cancelled"`, instead of a 500 (REST) or a "could not be
+  executed" error (MCP). (#1101)
+- The TUI's panel resize keys are now `[` and `]` (cell list width), `-` and
+  `=` (top detail height) and `\` (reset), in place of ctrl+arrows and ctrl+x,
+  which macOS never passes to the terminal. (#1136)
+- New minimum: anyio 4.1, now a declared dependency. (#1119)
+
+### Added
+
+- **Cancel a cell's run from the CLI, REST and MCP.**
+  `POST /v1/notebooks/{id}/cells/{cell_id}/cancel` (needs `notebook:execute`)
+  returns `{cell_id, cancelled, status}`. `strata cell cancel --server URL
+  --session ID <cell_id>` exits 0 when a run was cancelled and 1 when the cell
+  was not running. The MCP `cancel_cell` tool does the same. (#1101)
+- **The server image is published per release** to
+  `ghcr.io/bearing-research/strata`, with the `mcp` extra installed. (#1113)
+- **A personal server's worker registry can be edited** through the
+  `/v1/admin/notebook-workers` routes, so a machine type enabled later reaches
+  a running personal server. (#1112)
+- **A queued remote cell's badge says where it stands.** A worker or
+  dispatcher that answers `{"state": "queued"}` can add `position` and
+  `detail`. They reach the `cell_status` frame as `remote_queue_position` and
+  `remote_queue_detail`, and the badge shows the detail, else
+  "queued #N -> worker". (#1140)
+- **A dispatch says whether a person is waiting.** Both executor transports
+  send `metadata.origin`: `"notebook"` for a cell run from an open notebook,
+  `"run"` for `strata run`. It does not change a cell's provenance. (#1139)
+- **A remote worker can start a machine before a cell needs it.** The notebook
+  sends `POST {worker url}/v1/hints` with `{worker, runtime_id, notebook_id,
+  reason}` when a cell bound to that worker is focused or selected, and before
+  a cascade or Run All, at most once a minute per session and worker. A
+  worker that does not know the route answers 404, which is ignored. The
+  strata-pool dispatcher answers a hint for a machine type by keeping one
+  machine of it warm until cool-down reaps it. (#1147, #1148)
+
+### Changed
+
+- **Store and blob calls run off the event loop.** Artifact, build, publication,
+  name, alias, registry, materialize, stream, metadata, admin worker and health
+  routes, API-key checks over HTTP and WebSocket, the embedded build runner,
+  staleness checks and notebook cell runs on signed-transport workers no longer
+  make store or blob calls on the event loop, so a SQLite lock wait, a Postgres
+  round trip or an S3 read no longer stalls other requests. A table input's
+  plan is awaited without holding a server thread. (#1089, #1094, #1109,
+  #1119, #1120, #1121, #1122, #1123, #1124, #1125, #1128, #1145, #1146)
+- **One thread limit for the server.** Store and blob work shares anyio's
+  thread limiter, set to 40, and the Postgres pool holds up to 41 connections
+  per process (was 16). (#1119)
+- **Cells die with the server.** A cell subprocess (cold, Run All batch, warm
+  pool, or started by `strata-worker`), an R cell, an R warm-pool worker and an
+  ssh tunnel are killed when the process that spawned them dies. Windows keeps
+  the old behavior. (#1088, #1091)
+- **Cascade frames count only the cells that run.** `cascade_progress` no
+  longer reports counts such as 5/4, and a successful cascade ends with a frame
+  where `completed` equals `total`. `cascade_prompt.cells_to_run` leaves out
+  ready upstreams that are skipped. (#1098)
+- **`/health/ready` bounds its metadata-store check** by the same 5 second
+  limit as the artifact-store check, and reports not ready when it runs past
+  it. (#1124)
+- **`POST /v1/cache/warm` plans tables in the planning pool** under
+  `plan_timeout_seconds`. A plan past it is reported in `errors` ("planning
+  timed out after Ns"). (#1109, #1129)
+- **A remote cell run reads the worker registry once**, so a registry change
+  applies from the next run. (#1125)
+- **strata-pool's RunPod backend speaks REST v2.** A 422 from RunPod now names
+  the field it refused, and the region is the pod's data center. (#1137)
+
+### Security
+
+- **Artifact ids cannot name a path.** On the local blob store,
+  `PUT /v1/artifacts/by-provenance` used a caller's id as a blob key, so
+  `../blobs/<id>` reached another tenant's bytes and `../../x` wrote outside
+  the store. Such an id is now a 400, and the local blob store refuses any key
+  that leaves its directory. (#1142)
+- **One tenant holds an artifact id.** `PUT /v1/artifacts/by-provenance` and
+  `POST /v1/artifacts/import` refuse an id another tenant holds at any
+  version, checked inside the store's write transaction, so two tenants racing
+  on one id, or an import of a new version under a held id, can no longer add
+  a version to the other tenant's id. (#1095, #1118)
+- **Upload bodies are capped.** See `STRATA_MAX_UPLOAD_BYTES` and the 16 MiB
+  metadata limit above. Before, the artifact write routes had no limit and
+  several read the whole body into memory. A build log chunk is trimmed to its
+  last 256 KiB as it arrives instead of after the whole body is read.
+  (#1089, #1092, #1095, #1145)
+- **A revoked API key closes a listening WebSocket.** The key was rechecked
+  only on frames that edit or run something, so a socket that never wrote kept
+  receiving cell outputs and console after revocation. (#1087)
+- **The open Prometheus scrape names no tenant** under principal auth. (#1087)
+- **The web app runs only its own scripts.** Pages served by the UI send a
+  `script-src 'self'` policy, so script injected through markdown cells or
+  Markdown outputs does not run. (#1086)
+- **A guarded `@fetch` respects the egress proxy.** In service mode a fetch
+  connected straight to the checked address and ignored `HTTPS_PROXY`, so on a
+  server whose egress is kept by a proxy it reached any host. (#1138)
+- **Proxy credentials stay out of fetch errors.** The proxy's user and
+  password are masked in any fetch error, and a socks proxy without httpx's
+  socks extra is a fetch error rather than an `ImportError`. (#1142)
+- **The RunPod worker credential stays out of the machine catalogue.**
+  strata-pool wrote it into the shared machine type, which the admin
+  machine-types view lists. (#1142)
+
+### Fixed
+
+- **Warm pools start.** A notebook opened through the server never started its
+  Python or R warm pool, so every cell ran cold. An R pool now also starts when
+  an R cell is added, and a missing pool starts after a dependency change,
+  over REST and MCP alike. (#1096, #1100, #1131)
+- **The first dev dependency no longer invalidates every cached cell**
+  (for example the pytest that the first `strata cell test` adds), and
+  re-pinning a git dependency to another commit still does. (#1097)
+- **Moving a notebook to another Python version re-runs its cells.** Results
+  computed under 3.12 were served as cache hits under 3.13 when the packages'
+  hashes did not change. (#1144)
+- **A loop cell keeps its final iteration's display** after reopening, in
+  `cell show` and in `strata export`. (#1102)
+- **A loop cell's console is its iterations' output as written**, and
+  `strata cell run` on a loop cell now records it for `cell show` and
+  `strata export`. (#1098)
+- **`strata run --format json` gives a failed cell's `traceback`.** (#1098)
+- **Clearer errors**: a cell whose `worker` names an undefined worker fails as
+  unknown, not "not implemented yet", and a timeout error names the setting
+  the limit came from (annotation, `notebook.toml`, or the flag and default).
+  (#1098)
+- **A notebook's uv commands ignore the server's `UV_PYTHON`**, which made a
+  notebook pinned to another Python fail to run any cell. (#1105)
+- **A cancel no longer leaves a cell stuck running.** A cancel just as a run
+  started left the cell running, and every environment change was refused
+  until it ran again. Closing a session also stops a warm worker still
+  booting, and a session closed before its environment job finished starts no
+  warm pools. (#1143)
+- **MCP dependency edits take the environment reservation**, as the REST
+  routes do, so they cannot interleave with a sync or another edit. (#1134)
+- **A named upload or cache hit names the right version.** A named
+  `PUT /v1/artifacts` becomes ready in the same commit as its name, and a named
+  PUT or materialize hit racing a refresh names the refreshed version instead
+  of returning no name or a 500. (#1115, #1121, #1123)
+- **An alias approval and a rejection of one change cannot both succeed**, and
+  an approval can no longer apply a stale request while discarding a newer one.
+  The loser answers 404. (#1116)
+- **Two overlapping moves of one alias** no longer leave the table's Iceberg
+  tag on the version the alias left. (#1122)
+- **Two publishes of one version** can no longer mint two live links. (#1117)
+- **An import that loses a race** answers 409 instead of a 500, and can no
+  longer overwrite the winner's bytes. (#1093)
+- **A stale pull-model executor cannot fail a newer claim's build.** Its
+  finalize answers 409 and leaves the build to the newer holder, and a
+  manifest re-fetch after the runner reclaimed the lease answers 409. (#1123)
+- **No more `PoolTimeout` under load** on Postgres, where the pool was smaller
+  than the threads using it. (#1119)
+- **`/mcp` answers to the hosts the server answers to.** A client addressing
+  the server by name or IP got 421 even when `STRATA_ALLOWED_HOSTS` named the
+  host. (#1114)
+- **A table id with an empty namespace or table name** is a 400 on materialize
+  and both cache-warm routes, not a 500 or 404. (#1085)
+- **Opening an artifact store another process is using** no longer fails with
+  `FileNotFoundError`. (#1108)
+- **Staged remote-worker inputs are named per tenant**, so two tenants running
+  notebooks with the same notebook id no longer stage an input under one id.
+  (#1127)
+- **A notebook deleted and put back at the same path opens again.** Re-cloning
+  or re-importing a notebook under an open session made every later open of
+  that path fail with a 500 until a restart; the stale session is now closed
+  and a fresh one opened. (#1150)
+- **A fan-out cell reports a cache hit** when every variant instance was one,
+  instead of always reporting a run. (#1150)
+
 ## 0.9.0 - 2026-10-07
 
 Strata becomes something a platform can host for many people. Notebook routes
