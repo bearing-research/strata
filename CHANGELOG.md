@@ -5,6 +5,8 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
+## Unreleased
+
 ## 0.10.0 - 2026-10-13
 
 A hardening release. The server stops doing store and blob work on its event
