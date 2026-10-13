@@ -3969,6 +3969,9 @@ class SessionManager:
         if session is None:
             return []
         session.closed = True
+        from strata.notebook import prewarm
+
+        prewarm.forget_session(session_id)
         # Local import: ws imports this.
         from strata.notebook.ws import end_session_clients, forget_notebook_execution_state
 

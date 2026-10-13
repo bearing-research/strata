@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from strata.file_modes import PASS_THROUGH_DIR, private_dir
+from strata.notebook import prewarm
 from strata.notebook.authorship import MAX_AUTHOR_LENGTH, resolve_author
 from strata.notebook.dependencies import (
     export_requirements_text,
@@ -2468,6 +2469,8 @@ async def update_notebook_worker_endpoint(
     try:
         update_notebook_worker(session.path, req.worker)
         session.reload()
+        # A worker just picked is about to be used: a pool can boot its machine now.
+        prewarm.hint_in_background(session, [session.notebook_state.worker], "select")
         return {
             "worker": session.notebook_state.worker,
             **await _serialize_worker_catalog(session),

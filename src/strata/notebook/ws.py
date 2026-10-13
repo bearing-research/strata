@@ -12,7 +12,7 @@ import json
 import logging
 import time
 import weakref
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from functools import cache
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import anyio.to_thread
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from strata.notebook import console_relay
+from strata.notebook import console_relay, prewarm
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.authorship import resolve_author
 from strata.notebook.cascade import CascadePlanner
@@ -2121,6 +2121,9 @@ async def _execute_cascade(
         s for s in plan.steps if not s.skip or (target_force and s.cell_id == plan.target_cell_id)
     ]
     completed = 0
+    prewarm.hint_in_background(
+        session, _step_workers(session, (s.cell_id for s in steps_to_run)), "cascade"
+    )
 
     async def _progress(current_cell_id: str) -> None:
         await _broadcast_message(
@@ -2284,6 +2287,7 @@ async def _execute_run_all(
         if cell.id in requested_ids and cell.source.strip()
     ]
     partition = partition_batchable_runs(executor, runnable)
+    prewarm.hint_in_background(session, _step_workers(session, (c.id for c in runnable)), "run_all")
     batching_allowed = True
     try:
         resolve_harness_user()
@@ -2982,6 +2986,16 @@ def _effective_worker_name(session, cell_id: str, source: str) -> str | None:
     return effective_worker_name(session.notebook_state, cell_id, annotations.worker)
 
 
+def _step_workers(session, cell_ids: Iterable[str]) -> list[str | None]:
+    """The worker each of *cell_ids* would run on, for pre-warm hints."""
+    workers: list[str | None] = []
+    for cell_id in cell_ids:
+        cell = session.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            workers.append(_effective_worker_name(session, cell_id, cell.source))
+    return workers
+
+
 async def _read_run_policy(session, cell_id: str, source: str) -> WorkerPolicy | None:
     """Read the worker policy once, off the loop, for a cell's running frame and its run.
 
@@ -3246,6 +3260,12 @@ async def _handle_cell_focus(
     author = resolve_author(payload.get("author"))
     if session.presence.focus(websocket, author, cell_id):
         await broadcast_presence(notebook_id, session)
+    cell = session.notebook_state.get_cell(str(cell_id)) if cell_id is not None else None
+    if cell is not None:
+        # A cell on a remote worker is likely to run soon: a pool can boot its machine now.
+        prewarm.hint_in_background(
+            session, [_effective_worker_name(session, cell.id, cell.source)], "focus"
+        )
 
 
 async def _closed_if_revoked(connections: list[WebSocket], websocket: WebSocket) -> bool:
