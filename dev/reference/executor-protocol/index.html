@@ -1649,6 +1649,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#post-v1hints-optional-for-dispatchers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /v1/hints (optional, for dispatchers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#post-execute-worker-pool-alias" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2276,6 +2287,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#post-v1hints-optional-for-dispatchers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /v1/hints (optional, for dispatchers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#post-execute-worker-pool-alias" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2881,38 +2903,55 @@ waiting state without either field puts the badge back to "starting".</p>
 <p><code>STRATA_WORKER_ALLOWED_HOSTS</code> names hosts that pass the IP check anyway (comma-separated; a leading dot is a suffix), for a server on a private address. Set <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS=1</code> to bypass the IP check for every host (tests and local-dev with 127.0.0.1 servers only).</p>
 <h2 id="post-v1executionsbuild_idcancel"><code>POST /v1/executions/{build_id}/cancel</code><a class="headerlink" href="#post-v1executionsbuild_idcancel" title="Permanent link">&para;</a></h2>
 <p>Stops the harness running <code>build_id</code>, and every process it started, if it is still running. A cancel that arrives while the worker is still fetching inputs or building the locked environment stops the run before the harness starts; that execution then answers 409. Answers <code>{"build_id": "...", "cancelled": true}</code>, or <code>"cancelled": false</code> when nothing by that id is running, which is a normal answer rather than an error: the cell may have finished before the cancel arrived. The server calls it when a remote cell is cancelled or times out, and <code>strata-pool</code> calls it with the machine's token when a running job is cancelled through <code>POST /v1/jobs/{id}/cancel</code>.</p>
+<h2 id="post-v1hints-optional-for-dispatchers"><code>POST /v1/hints</code> (optional, for dispatchers)<a class="headerlink" href="#post-v1hints-optional-for-dispatchers" title="Permanent link">&para;</a></h2>
+<p>A worker never needs this route. A dispatcher in front of machines that boot on
+demand (a pool, or a platform in front of one) can serve it to start a machine
+before the run that needs it. The notebook sends a hint when a cell bound to the
+worker gains focus, when the worker becomes the notebook's default, and when a
+cascade or Run All is about to dispatch to it. The URL is the worker's execute URL
+with its <code>/v1/execute</code> (or <code>/v1/notebook-execute</code>, <code>/v1/execute-manifest</code>,
+<code>/execute</code>) ending replaced by <code>/v1/hints</code>, with the same <code>Authorization</code> and
+<code>X-Strata-Executor-Protocol</code> headers as a dispatch.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span><span class="nt">"worker"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gpu"</span><span class="p">,</span><span class="w"> </span><span class="nt">"runtime_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gpu-a100"</span><span class="p">,</span><span class="w"> </span><span class="nt">"notebook_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"focus"</span><span class="p">}</span>
+</code></pre></div>
+<p><code>reason</code> is <code>focus</code>, <code>select</code>, <code>cascade</code> or <code>run_all</code>. Any 2xx counts as taken.
+Every other answer, a 404 from a plain <code>strata-worker</code> included, is ignored and
+changes nothing. The notebook sends at most one hint per session and worker a
+minute, and only for a worker its policy lets the notebook use.
+<code>strata-pool</code>'s own <code>POST /v1/hints</code> takes a <code>machine_type</code> instead, so a
+dispatcher maps the worker to one.</p>
 <h2 id="post-execute-worker-pool-alias"><code>POST /execute</code> (worker-pool alias)<a class="headerlink" href="#post-execute-worker-pool-alias" title="Permanent link">&para;</a></h2>
 <p>The same handler as <code>/v1/execute-manifest</code>, at the path <code>strata-pool</code> dispatches to. The pool forwards the job body verbatim with no content type, and a build manifest is self-describing, so a manifest that arrives through the pool and one pushed directly are validated identically.</p>
 <h2 id="output-bundle-notebook-output-bundlev1">Output bundle (<code>notebook-output-bundle@v1</code>)<a class="headerlink" href="#output-bundle-notebook-output-bundlev1" title="Permanent link">&para;</a></h2>
 <p>An uncompressed tar archive containing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>manifest.json           - execution result + index of the files below
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>stdout.txt              - the cell's stdout
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>stderr.txt              - the cell's stderr
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>files/                  - one file per serialized variable
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  result.arrow
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  log.json
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  __display__0.png      - the cell's last display, as variable "_"
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>manifest.json           - execution result + index of the files below
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>stdout.txt              - the cell's stdout
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>stderr.txt              - the cell's stderr
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>files/                  - one file per serialized variable
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>  result.arrow
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>  log.json
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>  __display__0.png      - the cell's last display, as variable "_"
 </code></pre></div>
 <p><strong><code>manifest.json</code>:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"notebook-output-bundle@v1"</span><span class="p">,</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">"variables"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"arrow/ipc"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/result.arrow"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">},</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">    </span><span class="nt">"log"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"json/object"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/log.json"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">},</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">    </span><span class="nt">"_"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"image/png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/__display__0.png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span><span class="nt">"displays"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">    </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"image/png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/__display__0.png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}</span>
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">  </span><span class="p">],</span>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">  </span><span class="nt">"stdout_file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"stdout.txt"</span><span class="p">,</span>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">  </span><span class="nt">"stderr_file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"stderr.txt"</span><span class="p">,</span>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">  </span><span class="nt">"mutation_warnings"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
-<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">  </span><span class="nt">"traceback"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
-<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">  </span><span class="nt">"build_env"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cpython-3.13-linux-x86_64"</span><span class="p">,</span>
-<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">  </span><span class="nt">"hardware"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"cpus"</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span><span class="p">,</span><span class="w"> </span><span class="nt">"memory_mb"</span><span class="p">:</span><span class="w"> </span><span class="mi">257000</span><span class="p">,</span><span class="w"> </span><span class="nt">"accelerators"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"..."</span><span class="p">],</span><span class="w"> </span><span class="nt">"cuda"</span><span class="p">:</span><span class="w"> </span><span class="s2">"12.2"</span><span class="p">}</span>
-<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">"schema_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"notebook-output-bundle@v1"</span><span class="p">,</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span><span class="nt">"variables"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"arrow/ipc"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/result.arrow"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">},</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">    </span><span class="nt">"log"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"json/object"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/log.json"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">},</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="nt">"_"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"image/png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/__display__0.png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">  </span><span class="nt">"displays"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">    </span><span class="p">{</span><span class="nt">"content_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"image/png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"files/__display__0.png"</span><span class="p">,</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">}</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="w">  </span><span class="nt">"stdout_file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"stdout.txt"</span><span class="p">,</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="w">  </span><span class="nt">"stderr_file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"stderr.txt"</span><span class="p">,</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="w">  </span><span class="nt">"mutation_warnings"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="w">  </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="w">  </span><span class="nt">"traceback"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a><span class="w">  </span><span class="nt">"build_env"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cpython-3.13-linux-x86_64"</span><span class="p">,</span>
+<a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a><span class="w">  </span><span class="nt">"hardware"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"cpus"</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span><span class="p">,</span><span class="w"> </span><span class="nt">"memory_mb"</span><span class="p">:</span><span class="w"> </span><span class="mi">257000</span><span class="p">,</span><span class="w"> </span><span class="nt">"accelerators"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"..."</span><span class="p">],</span><span class="w"> </span><span class="nt">"cuda"</span><span class="p">:</span><span class="w"> </span><span class="s2">"12.2"</span><span class="p">}</span>
+<a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a><span class="p">}</span>
 </code></pre></div>
 <p>Each entry in <code>variables</code> is the serializer's metadata for that value, with
 <code>file</code> pointing inside the bundle. A variable that could not be serialized has
@@ -2925,10 +2964,10 @@ be a list, possibly empty.</p>
 <code>error</code> and <code>traceback</code> set, and <code>variables</code> usually empty.</p>
 <h2 id="error-envelope">Error envelope<a class="headerlink" href="#error-envelope" title="Permanent link">&para;</a></h2>
 <p>Protocol and transport failures (<code>400</code>, <code>401</code>, <code>413</code>, <code>502</code>, <code>503</code>) use FastAPI's JSON shape:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;human-readable error message&gt;"</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="p">{</span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;human-readable error message&gt;"</span><span class="p">}</span>
 </code></pre></div>
 <p>A failure to run the cell at all (<code>408</code>, <code>409</code>, <code>500</code>, and <code>400</code> for an unknown language) answers:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="p">{</span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;human-readable error message&gt;"</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p">{</span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;human-readable error message&gt;"</span><span class="p">}</span>
 </code></pre></div>
 <p>Workers do not return structured error codes - the HTTP status is the machine-readable signal. Production deployments behind an authenticating proxy should not surface worker error messages to end users verbatim, since they may include path fragments or internal hostnames.</p>
 <h2 id="implementing-a-custom-worker">Implementing a custom worker<a class="headerlink" href="#implementing-a-custom-worker" title="Permanent link">&para;</a></h2>
@@ -2940,16 +2979,16 @@ be a list, possibly empty.</p>
 executes <code>POST /v1/materialize</code> transforms other than <code>scan@v1</code>, uses a simpler
 one. Each transform ref is matched against the registry in
 <code>[tool.strata.transforms]</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">[tool.strata.transforms]</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="k">[[tool.strata.transforms.registry]]</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"pandas_script@*"</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="n">executor_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://executor:8080"</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">300</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="n">max_output_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1073741824</span>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="n">max_input_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="n">requires_scope</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"transforms:pandas"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="k">[tool.strata.transforms]</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="k">[[tool.strata.transforms.registry]]</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="n">ref</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"pandas_script@*"</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="n">executor_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"http://executor:8080"</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">300</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="n">max_output_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1073741824</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="n">max_input_bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="n">requires_scope</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"transforms:pandas"</span>
 </code></pre></div>
 <table>
 <thead>
@@ -3027,25 +3066,25 @@ sends no credentials, so keep the executor where only Strata can reach it.</p>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">{</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">"protocol_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v1"</span><span class="p">,</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span><span class="nt">"build_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">  </span><span class="nt">"tenant"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team-a"</span><span class="p">,</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="nt">"principal"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">  </span><span class="nt">"provenance_hash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">  </span><span class="nt">"transform"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">    </span><span class="nt">"ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pandas_script@v1"</span><span class="p">,</span>
-<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="w">    </span><span class="nt">"code_hash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;first 16 hex of sha256 of the transform spec&gt;"</span><span class="p">,</span>
-<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">    </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span>
-<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="w">  </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input0"</span><span class="p">,</span><span class="w"> </span><span class="nt">"format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"arrow_ipc_stream"</span><span class="p">}]</span>
-<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span><span class="nt">"protocol_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v1"</span><span class="p">,</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span><span class="nt">"build_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="w">  </span><span class="nt">"tenant"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team-a"</span><span class="p">,</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="w">  </span><span class="nt">"principal"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="w">  </span><span class="nt">"provenance_hash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">  </span><span class="nt">"transform"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="w">    </span><span class="nt">"ref"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pandas_script@v1"</span><span class="p">,</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="w">    </span><span class="nt">"code_hash"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;first 16 hex of sha256 of the transform spec&gt;"</span><span class="p">,</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="w">    </span><span class="nt">"params"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="w">  </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"input0"</span><span class="p">,</span><span class="w"> </span><span class="nt">"format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"arrow_ipc_stream"</span><span class="p">}]</span>
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>tenant</code> and <code>principal</code> come from the caller's principal, and are <code>null</code> without principal auth.</p>
 <p>A success is <code>200</code> with an Arrow IPC stream as the body, which becomes the
 artifact. An optional <code>X-Strata-Logs</code> header carries the executor's logs,
 base64-encoded. A failure is a <code>4xx</code> or <code>5xx</code> with a JSON body:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="p">{</span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="p">{</span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">}</span>
 </code></pre></div>
 <p>Any error status fails the build, and the build's error carries <code>error_message</code> (or <code>detail</code>, or the raw body), cut to 500 characters.</p>
 <h3 id="pull-model">Pull model<a class="headerlink" href="#pull-model" title="Permanent link">&para;</a></h3>
