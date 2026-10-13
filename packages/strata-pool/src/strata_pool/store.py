@@ -209,7 +209,12 @@ class Store(Protocol):
     def count_all_workers(self, states: Iterable[WorkerState]) -> int: ...
 
     def reserve_worker(
-        self, worker: Worker, *, max_workers: int, max_workers_total: int | None
+        self,
+        worker: Worker,
+        *,
+        max_workers: int,
+        max_workers_total: int | None,
+        at_least: int = 0,
     ) -> Reservation: ...
 
     def record_provisioned(self, worker: Worker, owner: str, now: float) -> bool: ...
@@ -466,18 +471,24 @@ class _SqlStore:
         )["n"]
 
     def reserve_worker(
-        self, worker: Worker, *, max_workers: int, max_workers_total: int | None
+        self,
+        worker: Worker,
+        *,
+        max_workers: int,
+        max_workers_total: int | None,
+        at_least: int = 0,
     ) -> Reservation:
         """Insert *worker*, a machine about to start, if the queue needs it.
 
         One serialized transaction, so no two processes or tenants spend the same slot.
+        ``at_least`` is demand the queue does not show yet: a pre-warm hint is one.
         """
         live = [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
         # A machine mid-stop still bills at the provider until the call returns, so the
         # fleet counts it; the tenant's own cap does not (below).
         allocated = [*live, WorkerState.STOPPING]
         with self._transaction():
-            queued = self.count_queued(worker.machine_type, worker.tenant_id)
+            queued = max(self.count_queued(worker.machine_type, worker.tenant_id), at_least)
             # Stale machines (another image) take no new jobs, so counting them would hold work
             # back. They still count against the global fleet cap.
             absorbing = self.count_workers(

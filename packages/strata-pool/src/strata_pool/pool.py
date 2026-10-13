@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 from strata_pool.backend import Backend
-from strata_pool.store import Store
+from strata_pool.store import Reservation, Store
 from strata_pool.types import (
     TERMINAL_JOB_STATES,
     WORKER_TOKEN_ENV,
@@ -366,18 +366,7 @@ class Pool:
         # tenant or process can start one while the backend call awaits. Bounded by the queue,
         # so a backend that fails every start cannot spin here.
         for _ in range(max(queued, 0)):
-            worker = Worker(
-                id=new_id("worker"),
-                machine_type=spec.name,
-                tenant_id=tenant_id,
-                backend=self.backend.name,
-                state=WorkerState.STARTING,
-                created_at=self._wall(),
-                auth_token=new_auth_token(),
-                image=spec.image,
-                lease_owner=self.instance_id,
-                lease_expires_at=self._wall() + self.lease_seconds,
-            )
+            worker = self._starting_worker(spec, tenant_id)
             outcome = self.store.reserve_worker(
                 worker, max_workers=spec.max_workers, max_workers_total=self.max_workers_total
             )
@@ -399,6 +388,46 @@ class Pool:
             await self._start_worker(
                 spec, worker, self.store.next_queued_job(machine_type, tenant_id)
             )
+
+    async def prewarm(self, tenant_id: str, machine_type: str) -> Reservation:
+        """Start a machine for *tenant_id*'s coming jobs, unless one is warm or starting.
+
+        A hint that work is near (a notebook opened, a worker picked), so the boot overlaps
+        the user's typing instead of their first run. Held to the same caps as a job's
+        machine, and reaped by the type's ``cool_down_seconds`` if no job comes. The start
+        runs in the background; the result says whether one was started, and if not, why.
+
+        Raises ValueError for an unknown machine type.
+        """
+        await self.sync_catalogue()
+        spec = self.machine_types.get(machine_type)
+        if spec is None:
+            raise ValueError(f"unknown machine type: {machine_type!r}")
+        worker = self._starting_worker(spec, tenant_id)
+        outcome = self.store.reserve_worker(
+            worker,
+            max_workers=spec.max_workers,
+            max_workers_total=self.max_workers_total,
+            at_least=1,
+        )
+        if outcome == "reserved":
+            self._spawn(self._start_worker(spec, worker, None))
+        return outcome
+
+    def _starting_worker(self, spec: MachineType, tenant_id: str) -> Worker:
+        """The row of a machine this process is about to start, leased to it."""
+        return Worker(
+            id=new_id("worker"),
+            machine_type=spec.name,
+            tenant_id=tenant_id,
+            backend=self.backend.name,
+            state=WorkerState.STARTING,
+            created_at=self._wall(),
+            auth_token=new_auth_token(),
+            image=spec.image,
+            lease_owner=self.instance_id,
+            lease_expires_at=self._wall() + self.lease_seconds,
+        )
 
     async def _offer_freed_capacity(self) -> None:
         """Hand freed headroom to any tenant waiting on it.

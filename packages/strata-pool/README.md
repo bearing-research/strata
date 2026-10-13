@@ -183,6 +183,7 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `GET /v1/jobs/{id}` | Status, without the payload or result; 404 for another tenant's job |
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished, 404 for another tenant's job |
 | `POST /v1/jobs/{id}/cancel` | Cancel a job that has not finished; body `{"build_id": "..."}`. 200 with the job, 409 if it finished another way, 404 for another tenant's job |
+| `POST /v1/hints` | Jobs are near: start a machine for the caller's tenant now; body `{"machine_type": "..."}`. 202 with `{"started", "reason"}` |
 | `GET /v1/machine-types` | What a caller may ask for: the catalogue an annotation resolves against. `env` and `provider_options` values read `<redacted>` without the admin token |
 | `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it. Admin token only |
 | `GET /v1/workers` | The caller's tenant's machines, without their credentials; the admin token sees the whole fleet, or one tenant with `?tenant_id=` |
@@ -196,6 +197,15 @@ Both job submit routes take their options as query parameters: `machine_type`
 `wait_seconds` (default 300), which bounds the wait and not the job, and is cut to
 the type's `boot_timeout_seconds` plus `job_timeout_seconds`. Both times must be
 positive and finite; anything else is a 422 and no job is queued.
+
+A hint starts one machine of the type for the caller's tenant unless one is
+already warm or starting, so its boot overlaps the user's typing instead of
+their first run. Send one when a user opens a notebook that names the type, or
+picks it. Repeating a hint is free: `started` is false and `reason` is
+`no_demand` while a machine is warm or starting. A hint is held to the type's
+`max_workers` and the fleet's `max_workers_total` like a job's machine
+(`reason` `tenant_cap` or `fleet_cap`), and a machine no job reaches is stopped
+after the type's `cool_down_seconds`, like any idle one.
 
 The `PUT` body is the whole catalogue: a JSON list of machine types, each with
 `MachineType`'s fields (only `name` and `image` are required), the shape `GET`
