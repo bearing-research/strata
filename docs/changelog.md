@@ -19,6 +19,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **Streams nobody reads no longer pile up in memory.** A `mode="stream"`
+  materialize fetches its first row group ahead of the `GET`, and that chunk
+  waited up to the stream's five-minute lifetime, with no limit on how many,
+  so a client posting without reading could hold any amount. Prefetched data
+  waiting for a `GET` is now held to 256 MiB in all; past it the `GET` reads
+  the first row group itself. (#1169)
 - **Behind a proxy, each caller gets their own scan slots.** The per-client
   limits (`STRATA_PER_CLIENT_INTERACTIVE`, `STRATA_PER_CLIENT_BULK`) were
   keyed on the connecting address, which behind a proxy is the proxy's for
