@@ -15,6 +15,8 @@ from urllib.parse import unquote, urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from strata.filters import serialize_filter_value
+
 if TYPE_CHECKING:
     import pyarrow.fs as pafs
 
@@ -457,6 +459,33 @@ def deserialize_arrow_schema(schema_bytes: bytes) -> pa.Schema:
     return reader.schema
 
 
+def persisted_column_stats(stats: Any) -> dict[str, object]:
+    """A column chunk's statistics as JSON that reads back as the same types.
+
+    Min/max use the filter-value encoding (``__datetime__:...``), so a restored stat
+    compares with a filter as the live one does; ``typed`` marks the encoding. A value
+    it cannot encode is left out, and missing stats never prune.
+    """
+    stat_dict: dict[str, object] = {}
+    if getattr(stats, "has_min_max", False):
+        try:
+            low = serialize_filter_value(_as_py(stats.min))
+            high = serialize_filter_value(_as_py(stats.max))
+        except TypeError:
+            pass
+        else:
+            stat_dict.update(min=low, max=high, typed=True)
+    null_count = getattr(stats, "null_count", None)
+    if null_count is not None:
+        stat_dict["null_count"] = null_count
+    return stat_dict
+
+
+def _as_py(value: Any) -> Any:
+    as_py = getattr(value, "as_py", None)
+    return as_py() if callable(as_py) else value
+
+
 def extract_parquet_meta(
     file_path: str, s3_filesystem: "pafs.S3FileSystem | None" = None
 ) -> PersistedParquetMeta:
@@ -487,31 +516,7 @@ def extract_parquet_meta(
             col_name = metadata.schema.column(j).path
 
             if col.is_stats_set:
-                stats = col.statistics
-                stat_dict = {}
-                if stats.has_min_max:
-                    min_val = stats.min
-                    max_val = stats.max
-                    if hasattr(min_val, "as_py"):
-                        min_val = min_val.as_py()
-                    if hasattr(max_val, "as_py"):
-                        max_val = max_val.as_py()
-
-                    try:
-                        json.dumps(min_val)
-                        stat_dict["min"] = min_val
-                    except (TypeError, ValueError):
-                        stat_dict["min"] = str(min_val)
-
-                    try:
-                        json.dumps(max_val)
-                        stat_dict["max"] = max_val
-                    except (TypeError, ValueError):
-                        stat_dict["max"] = str(max_val)
-
-                if stats.null_count is not None:
-                    stat_dict["null_count"] = stats.null_count
-
+                stat_dict = persisted_column_stats(col.statistics)
                 if stat_dict:
                     column_stats[col_name] = stat_dict
 

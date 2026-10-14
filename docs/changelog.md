@@ -11,6 +11,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A filter no longer drops rows after a restart.** Parquet min/max statistics
+  that are not plain JSON (timestamps, dates, Decimals, bytes) were saved as
+  text, so once a server had restarted, a filter such as
+  `ts = "2024-01-01T12:00:00"` compared them as text and skipped row groups
+  that held matching rows. Statistics now keep their types, and footers saved
+  the old way are read again. (#1165)
 - **Cells longer than 125 seconds run on RunPod workers.** RunPod's proxy ends
   a request that sends nothing for 125 seconds (not 100, as 0.10.0 said), and
   the pool's call to a worker lasts the whole job. strata-pool's RunPod

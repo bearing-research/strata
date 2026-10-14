@@ -4,7 +4,6 @@
 Each is an in-memory LRU over an optional SQLite store that persists across restarts.
 """
 
-import json
 import logging
 import sqlite3
 from collections import OrderedDict
@@ -16,6 +15,8 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, overload
 
 import pyarrow as pa
+
+from strata.filters import deserialize_filter_value
 
 logger = logging.getLogger(__name__)
 
@@ -289,18 +290,6 @@ class ManifestResolution:
     data_files: list[ManifestEntry]
 
 
-def _json_safe_stat_value(value: object) -> object:
-    """Convert a statistics value to a JSON-serializable representation."""
-    as_py = getattr(value, "as_py", None)
-    if callable(as_py):
-        value = as_py()
-    try:
-        json.dumps(value)
-        return value
-    except (TypeError, ValueError):
-        return str(value)
-
-
 # What converting a footer's statistics can raise (a value pyarrow cannot box, a date out of range).
 _UNPERSISTABLE = (pa.ArrowException, ValueError, OverflowError)
 
@@ -310,6 +299,7 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
     from strata.metadata_store import (
         PersistedParquetMeta,
         PersistedRowGroupMeta,
+        persisted_column_stats,
         serialize_arrow_schema,
     )
 
@@ -329,14 +319,7 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
             if not column_meta.is_stats_set or column_meta.statistics is None:
                 continue
 
-            stats = column_meta.statistics
-            stat_dict: dict[str, object] = {}
-            if getattr(stats, "has_min_max", False):
-                stat_dict["min"] = _json_safe_stat_value(stats.min)
-                stat_dict["max"] = _json_safe_stat_value(stats.max)
-            null_count = getattr(stats, "null_count", None)
-            if null_count is not None:
-                stat_dict["null_count"] = null_count
+            stat_dict = persisted_column_stats(column_meta.statistics)
             if stat_dict:
                 column_stats[column_name] = stat_dict
 
@@ -366,6 +349,26 @@ def _persisted_meta_is_legacy_leaf_named(persisted: "PersistedParquetMeta") -> b
     """
     names = persisted.column_names
     return len(set(names)) != len(names)
+
+
+def _persisted_stats_are_untyped(persisted: "PersistedParquetMeta") -> bool:
+    """True when a persisted row stored a min/max as ``str(value)`` rather than typed.
+
+    A timestamp, Decimal or bytes stat then compared as text against a filter and pruned
+    row groups that matched. Numbers were stored exactly, so only a row with a string
+    stat and no ``typed`` mark is treated as a miss and re-read.
+    """
+    return any(
+        not stats.get("typed")
+        and (isinstance(stats.get("min"), str) or isinstance(stats.get("max"), str))
+        for row_group in persisted.row_groups
+        for stats in row_group.column_stats.values()
+    )
+
+
+def _restored_stat(value: Any) -> Any:
+    """A persisted min/max back as the type it was written from."""
+    return None if value is None else deserialize_filter_value(value)
 
 
 class ParquetMetadataCache:
@@ -509,7 +512,9 @@ class ParquetMetadataCache:
         """Convert persisted metadata to ParquetMetadata."""
         from strata.metadata_store import deserialize_arrow_schema
 
-        if _persisted_meta_is_legacy_leaf_named(persisted):
+        if _persisted_meta_is_legacy_leaf_named(persisted) or _persisted_stats_are_untyped(
+            persisted
+        ):
             return None
 
         try:
@@ -523,8 +528,8 @@ class ParquetMetadataCache:
                         stats_dict = rg.column_stats[col_name]
                         stats = ColumnStatistics(
                             has_min_max="min" in stats_dict and "max" in stats_dict,
-                            min=stats_dict.get("min"),
-                            max=stats_dict.get("max"),
+                            min=_restored_stat(stats_dict.get("min")),
+                            max=_restored_stat(stats_dict.get("max")),
                             null_count=stats_dict.get("null_count"),
                         )
                         columns[idx] = ColumnChunkMeta(
@@ -566,7 +571,9 @@ class ParquetMetadataCache:
         if persisted is None:
             return None
 
-        if _persisted_meta_is_legacy_leaf_named(persisted):
+        if _persisted_meta_is_legacy_leaf_named(persisted) or _persisted_stats_are_untyped(
+            persisted
+        ):
             return None
 
         try:
@@ -581,8 +588,8 @@ class ParquetMetadataCache:
                         stats_dict = rg.column_stats[col_name]
                         stats = ColumnStatistics(
                             has_min_max="min" in stats_dict and "max" in stats_dict,
-                            min=stats_dict.get("min"),
-                            max=stats_dict.get("max"),
+                            min=_restored_stat(stats_dict.get("min")),
+                            max=_restored_stat(stats_dict.get("max")),
                             null_count=stats_dict.get("null_count"),
                         )
                         columns[idx] = ColumnChunkMeta(
