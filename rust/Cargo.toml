@@ -11,9 +11,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py312"] }
-arrow = { version = "60", features = ["ipc"] }
 memmap2 = "0.9"
-thiserror = "2.0"
 
 [profile.release]
 lto = true

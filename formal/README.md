@@ -694,8 +694,7 @@ finding 12):
 | **Table naming for ACLs** (`TableRef`, `table_identity_for`, `named_catalog`) | Property test over URI forms | Finding 12 generalised: for every configured catalog shape, a deny on any URI form that loads a table should refuse every other form that loads it. The fix covers the `catalog_properties` shape by construction; the property would check the rest. |
 
 Not worth it: the data plane's streaming and memory bounds (better
-covered by benchmarks and fuzzing) and the Rust IPC concat
-(better covered by `cargo fuzz` or Kani if it grows).
+covered by benchmarks and fuzzing).
 
 ## Keeping models honest
 

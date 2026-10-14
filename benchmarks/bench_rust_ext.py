@@ -1,8 +1,7 @@
-"""A/B benchmark of the Rust extension (`_strata_core`) against its Python fallbacks.
+"""A/B benchmark of the Rust extension (`_strata_core`) against its Python fallback.
 
-Covers ``read_file_bytes`` (mmap read vs ``Path.read_bytes()``) and
-``concat_ipc_streams`` (byte-splice concat vs PyArrow parse/reserialize). Unlike
-``bench_hot_path.py``, each implementation is forced, and each pair is checked
+Covers ``read_file_bytes`` (mmap read vs ``Path.read_bytes()``). Unlike
+``bench_hot_path.py``, each implementation is forced, and the pair is checked
 for equivalent output before it is timed.
 
 Run with: uv run python benchmarks/bench_rust_ext.py
@@ -17,8 +16,6 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
-
-from strata import fast_io
 
 try:
     from strata import _strata_core
@@ -56,11 +53,6 @@ def _make_stream(num_rows: int, num_cols: int = 10) -> bytes:
     writer.write_batch(batch)
     writer.close()
     return sink.getvalue().to_pybytes()
-
-
-def _stream_rows(data: bytes) -> int:
-    reader = ipc.open_stream(pa.BufferReader(data))
-    return sum(b.num_rows for b in reader)
 
 
 def _fmt(name: str, r: dict) -> str:
@@ -108,44 +100,6 @@ def bench_read(tmpdir: Path) -> None:
             print("    Rust unavailable — skipped")
 
 
-# --------------------------------------------------------------------------
-# 2. IPC concat: Rust byte-splice vs PyArrow parse/reserialize
-# --------------------------------------------------------------------------
-
-
-def bench_concat(tmpdir: Path) -> None:
-    print()
-    print("-" * 68)
-    print("2. IPC concat: Rust byte-splice vs PyArrow parse/reserialize")
-    print("-" * 68)
-    configs = [
-        (10, 10_000, "10 segments x 10K rows"),
-        (100, 10_000, "100 segments x 10K rows"),
-        (1_000, 1_000, "1000 segments x 1K rows"),
-    ]
-    for num_seg, rows_each, label in configs:
-        segments = [_make_stream(rows_each) for _ in range(num_seg)]
-        total_mb = sum(len(s) for s in segments) / (1024 * 1024)
-
-        expected_rows = num_seg * rows_each
-        pyarrow_out = fast_io._concat_stream_bytes_pyarrow(segments)
-        assert _stream_rows(pyarrow_out) == expected_rows, "pyarrow concat lost rows"
-        if RUST is not None:
-            rust_out = fast_io._concat_stream_bytes_rust(segments)
-            assert _stream_rows(rust_out) == expected_rows, "rust concat lost rows"
-
-        iters = 30
-        print(f"\n  {label}  ({total_mb:.1f} MB in)")
-        py_r = _timeit(lambda s=segments: fast_io._concat_stream_bytes_pyarrow(s), iters)
-        print(_fmt("PyArrow parse+reserialize", py_r))
-        if RUST is not None:
-            rs_r = _timeit(lambda s=segments: fast_io._concat_stream_bytes_rust(s), iters)
-            print(_fmt("Rust byte-splice", rs_r))
-            print(f"    -> speedup {py_r['median_ms'] / rs_r['median_ms']:.2f}x")
-        else:
-            print("    Rust unavailable — skipped")
-
-
 def main() -> None:
     print("=" * 68)
     print("Existing Rust extension — head-to-head A/B")
@@ -154,7 +108,6 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmpdir = Path(td)
         bench_read(tmpdir)
-        bench_concat(tmpdir)
     print()
     print("=" * 68)
     print("Done. Speedup >1 means Rust is faster.")

@@ -9,6 +9,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
+### Removed
+
+- **The Rust IPC concat and `STRATA_FAST_CONCAT`.** Nothing has called
+  `fast_io.concat_stream_bytes` since artifact builds started writing each
+  merged row group straight to the blob (bounded memory, 0.3.0); scans merge
+  incrementally through PyArrow. The extension now holds only the mmap cache
+  read, and no longer builds the `arrow` crate. `STRATA_FAST_CONCAT` is gone
+  with it. (#1173)
+
 ### Security
 
 - **`GET /v1/cache/stats` needs `admin:cache`.** Its counts per table and
