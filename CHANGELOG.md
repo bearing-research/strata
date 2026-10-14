@@ -15,7 +15,7 @@ exhaustive commit history.
   each merged row group straight to the blob; its mmap cache read measured no
   faster than a plain read on Linux and slower above 32 MB, so cache entries
   are read with `Path.read_bytes()`. `STRATA_FAST_CONCAT` and
-  `STRATA_MMAP_MIN_BYTES` are gone with it. (#1173, #PR)
+  `STRATA_MMAP_MIN_BYTES` are gone with it. (#1173, #1174)
 
 ### Security
 
