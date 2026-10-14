@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 keywords = [
     "notebook",
     "materialization",
@@ -196,8 +197,8 @@ Issues = "https://github.com/bearing-research/strata/issues"
 Changelog = "https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
 
 [tool.uv]
 python-preference = "only-managed"
@@ -212,15 +213,11 @@ members = ["packages/strata-client", "packages/strata-pool"]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/strata"]
-# The bundled frontend is gitignored (release CI copies frontend/dist/ to
-# src/strata/_frontend/ before building), so it is declared as an artifact.
-artifacts = ["src/strata/_frontend/**"]
-
-[tool.hatch.build.targets.sdist]
-include = ["src/strata", "README.md", "LICENSE"]
-artifacts = ["src/strata/_frontend/**"]
+[tool.uv.build-backend]
+# The distribution is strata-notebook; the import package is strata, under src/.
+# Release CI copies frontend/dist/ to src/strata/_frontend/ before building;
+# the backend packages it like any other file there (it ignores .gitignore).
+module-name = "strata"
 
 [tool.ruff]
 line-length = 100
