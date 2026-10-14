@@ -290,6 +290,28 @@ class LocalBlobStore(BlobStore):
         return removed
 
 
+def _upload_to_arrow_fs(fs: Any, key: str, source_path: Path) -> None:
+    """Stream *source_path* to *key* on a PyArrow object-store filesystem, all or nothing.
+
+    Leaving the stream's ``with`` completes the upload even when the copy raised, so a
+    failure would leave a truncated object at the final key, which ``blob_exists`` then
+    reports as present and an import retry skips rewriting. The object is deleted instead.
+    """
+    try:
+        with open(source_path, "rb") as src, fs.open_output_stream(key) as dst:
+            while True:
+                chunk = src.read(BLOB_STREAM_CHUNK_BYTES)
+                if not chunk:
+                    break
+                dst.write(chunk)
+    except BaseException:
+        try:
+            fs.delete_file(key)
+        except OSError as exc:
+            logger.warning("Could not remove the partial upload at %s: %s", key, exc)
+        raise
+
+
 class S3BlobStore(BlobStore):
     """S3 or S3-compatible (MinIO, LocalStack) blob storage via PyArrow's S3FileSystem.
 
@@ -485,12 +507,7 @@ class S3BlobStore(BlobStore):
 
     def _upload_from_path(self, key: str, source_path: Path) -> None:
         """Stream a local file to ``key`` via the PyArrow S3 filesystem."""
-        with open(source_path, "rb") as src, self._fs.open_output_stream(key) as dst:
-            while True:
-                chunk = src.read(BLOB_STREAM_CHUNK_BYTES)
-                if not chunk:
-                    break
-                dst.write(chunk)
+        _upload_to_arrow_fs(self._fs, key, source_path)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
         """Open a streaming writer for an S3 blob, staged locally so failed writes never upload."""
@@ -761,12 +778,7 @@ class GCSBlobStore(BlobStore):
 
     def _upload_from_path(self, key: str, source_path: Path) -> None:
         """Stream a local file to ``key`` via the PyArrow GCS filesystem."""
-        with open(source_path, "rb") as src, self._fs.open_output_stream(key) as dst:
-            while True:
-                chunk = src.read(BLOB_STREAM_CHUNK_BYTES)
-                if not chunk:
-                    break
-                dst.write(chunk)
+        _upload_to_arrow_fs(self._fs, key, source_path)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
         """Open a streaming writer for a GCS blob, staged locally so failed writes never upload."""
