@@ -16,7 +16,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   merged row group straight to the blob (bounded memory, 0.3.0); scans merge
   incrementally through PyArrow. The extension now holds only the mmap cache
   read, and no longer builds the `arrow` crate. `STRATA_FAST_CONCAT` is gone
-  with it. (#PR)
+  with it. (#1173)
 
 ### Security
 
