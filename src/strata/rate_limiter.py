@@ -18,10 +18,11 @@ class Clock(Protocol):
 
 
 class SystemClock:
-    """Default clock using system time."""
+    """Default clock: monotonic, since every reading is a difference. A wall clock stepped back
+    made elapsed time negative, draining buckets until it caught up."""
 
     def time(self) -> float:
-        return time.time()
+        return time.monotonic()
 
 
 @dataclass

@@ -1209,11 +1209,16 @@ async def rate_limit_middleware(request: Request, call_next):
     ):
         return await call_next(request)
 
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = request.client.host if request.client else "unknown"
+    # The caller, not a header it wrote: the first X-Forwarded-For entry is the client's own
+    # when a proxy appends. uvicorn already reads that header from trusted proxies
+    # (FORWARDED_ALLOW_IPS) into the peer address.
+    principal = get_principal()
+    if principal is not None:
+        client_id = f"principal:{principal.tenant or ''}:{principal.id}"
+    else:
+        client_id = request.client.host if request.client else "unknown"
 
-    result = rate_limiter.check(client_id=client_ip, endpoint=path)
+    result = rate_limiter.check(client_id=client_id, endpoint=path)
 
     if not result.allowed:
         retry_after = _retry_after_header(result.retry_after_seconds, 1.0)

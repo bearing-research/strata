@@ -428,8 +428,8 @@ class TestRateLimiterIntegration:
 class TestClientBucketGrowthIsBounded:
     """The per-client bucket tables must not grow without bound.
 
-    The client id comes from ``X-Forwarded-For``, which a caller may control, so a distinct address
-    per request would mint a bucket each time: unbounded memory and a limit that never limits.
+    A caller with many addresses would mint a bucket for each: unbounded memory and a limit
+    that never limits.
     """
 
     def test_idle_buckets_are_reclaimed_without_an_explicit_call(self):
@@ -561,3 +561,56 @@ class TestRetryAfterIsNeverZero:
             server_module._state._fetch_executor.shutdown(wait=False)
             server_module._state = None
             reset_rate_limiter()
+
+
+def test_a_wall_clock_stepped_back_does_not_drain_a_bucket(monkeypatch):
+    """The default clock is monotonic: elapsed time from a wall clock set back an hour was
+    negative, and the bucket went 3600 tokens into debt, refusing everything for an hour."""
+    import time as time_module
+
+    from strata.rate_limiter import TokenBucket
+
+    wall = iter(range(10_000_000, 0, -3600))
+    monkeypatch.setattr(time_module, "time", lambda: float(next(wall)))
+    bucket = TokenBucket(capacity=1.0, refill_rate=1.0)
+
+    assert bucket.acquire()
+    assert bucket.tokens_available() >= 0
+
+
+@pytest.mark.asyncio
+async def test_a_forwarded_for_header_does_not_buy_a_fresh_bucket(tmp_path):
+    """The first X-Forwarded-For entry is whatever the caller sent when a proxy appends;
+    keyed on it, a new value per request was never limited."""
+    from httpx import ASGITransport, AsyncClient
+
+    import strata.server as server_module
+    from strata.config import StrataConfig
+    from strata.pool_metrics import reset_metrics
+    from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
+    from strata.server import ServerState, app
+
+    reset_metrics()
+    reset_rate_limiter()
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    server_module._state = ServerState(StrataConfig(cache_dir=cache_dir))
+    init_rate_limiter(
+        RateLimitConfig(client_requests_per_second=1.0, client_burst=1.0),
+        clock=_SteppableClock(),
+    )
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            first = await client.get(
+                "/v1/debug/rate-limits", headers={"X-Forwarded-For": "203.0.113.1"}
+            )
+            second = await client.get(
+                "/v1/debug/rate-limits", headers={"X-Forwarded-For": "203.0.113.2"}
+            )
+        assert first.status_code == 200
+        assert second.status_code == 429
+    finally:
+        server_module._state._planning_executor.shutdown(wait=False)
+        server_module._state._fetch_executor.shutdown(wait=False)
+        server_module._state = None
+        reset_rate_limiter()
