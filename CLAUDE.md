@@ -155,11 +155,11 @@ gates); per-domain routers in `api/routers/` (`materialize`, `streams`,
 mode/auth/tenant gates in `api/dependencies.py`;
 pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
 Data plane: `types.py`, `planner.py`, `cache.py`, `fetcher.py`, `metadata_*.py`,
-`fast_io.py` (+ `rust/src/lib.rs`).
+`fast_io.py`.
 Artifact / build: `artifact_store.py`, `blob_store.py`, `transforms/`.
 Auth / tenancy: `auth.py`, `tenant.py`, `tenant_registry.py`.
-Observability: `tracing.py`, `logging.py`, `health.py`, `circuit_breaker.py`,
-`rate_limiter.py`, `cache_metrics.py`, `cache_stats.py`, `pool_metrics.py`.
+Observability: `tracing.py`, `logging.py`, `health.py`, `rate_limiter.py`,
+`cache_metrics.py`, `cache_stats.py`, `pool_metrics.py`.
 
 ## Configuration
 
