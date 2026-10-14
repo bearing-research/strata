@@ -14,7 +14,7 @@ exhaustive commit history.
   text, so once a server had restarted, a filter such as
   `ts = "2024-01-01T12:00:00"` compared them as text and skipped row groups
   that held matching rows. Statistics now keep their types, and footers saved
-  the old way are read again. (#PR)
+  the old way are read again. (#1165)
 - **Cells longer than 125 seconds run on RunPod workers.** RunPod's proxy ends
   a request that sends nothing for 125 seconds (not 100, as 0.10.0 said), and
   the pool's call to a worker lasts the whole job. strata-pool's RunPod
