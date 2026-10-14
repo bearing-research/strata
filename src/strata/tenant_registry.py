@@ -154,8 +154,8 @@ class TenantRegistry:
         """Check whether a tenant may make requests: unknown tenants are allowed."""
         config = self._configs.get(tenant_id)
         if config is None:
-            # Unknown tenants are allowed by default; the server config can require
-            # pre-registration.
+            # Unknown tenants are allowed. Callers cannot mint them: multi-tenancy requires
+            # principal auth, so a tenant comes from the trusted proxy or an API key's binding.
             return True
         return config.enabled
 

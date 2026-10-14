@@ -1510,6 +1510,37 @@ class TestListArtifactsSortAndSince:
         assert store.names_for_artifact("nope", 1) == []
 
 
+def _as_legacy_nullable_tenant_table(conn) -> None:
+    """Rebuild ``artifact_versions`` in the pre-tenant shape: a nullable ``tenant`` and no
+    uniqueness index, as stores written before tenants were normalized have."""
+    conn.executescript(
+        """
+        DROP INDEX IF EXISTS idx_tenant_provenance_unique;
+        ALTER TABLE artifact_versions RENAME TO _av_old;
+        CREATE TABLE artifact_versions (
+            id TEXT NOT NULL, version INTEGER NOT NULL,
+            state TEXT NOT NULL DEFAULT 'building', provenance_hash TEXT NOT NULL,
+            schema_json TEXT, row_count INTEGER, byte_size INTEGER,
+            created_at REAL NOT NULL, transform_spec TEXT, input_versions TEXT,
+            tenant TEXT, principal TEXT, PRIMARY KEY (id, version)
+        );
+        -- Columns named, not ``SELECT *``: this table is deliberately the
+        -- legacy shape, so every column added to the current schema would
+        -- otherwise break the copy and this test would fail on each new
+        -- migration for a reason that has nothing to do with tenants.
+        INSERT INTO artifact_versions
+            (id, version, state, provenance_hash, schema_json, row_count,
+             byte_size, created_at, transform_spec, input_versions,
+             tenant, principal)
+        SELECT id, version, state, provenance_hash, schema_json, row_count,
+               byte_size, created_at, transform_spec, input_versions,
+               tenant, principal
+        FROM _av_old;
+        DROP TABLE _av_old;
+        """
+    )
+
+
 class TestTenantNormalization:
     """Tenant is stored as '' (never NULL) for tenantless rows, and the isolation and uniqueness
     guarantees that depend on it.
@@ -1684,32 +1715,7 @@ class TestTenantNormalization:
         # tenants and a second ready row with the same provenance (the duplicate the old
         # NULL-distinct index permitted).
         conn = sqlite3.connect(str(store.db_path))
-        conn.executescript(
-            """
-            DROP INDEX IF EXISTS idx_tenant_provenance_unique;
-            ALTER TABLE artifact_versions RENAME TO _av_old;
-            CREATE TABLE artifact_versions (
-                id TEXT NOT NULL, version INTEGER NOT NULL,
-                state TEXT NOT NULL DEFAULT 'building', provenance_hash TEXT NOT NULL,
-                schema_json TEXT, row_count INTEGER, byte_size INTEGER,
-                created_at REAL NOT NULL, transform_spec TEXT, input_versions TEXT,
-                tenant TEXT, principal TEXT, PRIMARY KEY (id, version)
-            );
-            -- Columns named, not ``SELECT *``: this table is deliberately the
-            -- legacy shape, so every column added to the current schema would
-            -- otherwise break the copy and this test would fail on each new
-            -- migration for a reason that has nothing to do with tenants.
-            INSERT INTO artifact_versions
-                (id, version, state, provenance_hash, schema_json, row_count,
-                 byte_size, created_at, transform_spec, input_versions,
-                 tenant, principal)
-            SELECT id, version, state, provenance_hash, schema_json, row_count,
-                   byte_size, created_at, transform_spec, input_versions,
-                   tenant, principal
-            FROM _av_old;
-            DROP TABLE _av_old;
-            """
-        )
+        _as_legacy_nullable_tenant_table(conn)
         conn.execute("UPDATE artifact_versions SET tenant = NULL")
         conn.execute(
             "INSERT INTO artifact_versions "
@@ -1732,6 +1738,46 @@ class TestTenantNormalization:
         conn.close()
         assert n_null == 0  # all normalized to ''
         assert n_ready == 1  # duplicate collapsed
+
+    def test_a_tenant_migration_that_fails_part_way_keeps_the_old_index(self, artifact_dir):
+        """DROP INDEX used to commit on its own, so a failure later in the rebuild left the
+        store with no uniqueness index at all (and two upgrading processes could interleave)."""
+        import sqlite3
+
+        store = ArtifactStore(artifact_dir)
+        store.create_artifact("a1", "h")
+        store.finalize_artifact("a1", 1, "{}", 1, 10)
+        conn = sqlite3.connect(str(store.db_path))
+        _as_legacy_nullable_tenant_table(conn)
+        conn.executescript(
+            """
+            CREATE UNIQUE INDEX idx_tenant_provenance_unique
+                ON artifact_versions(tenant, provenance_hash) WHERE state = 'ready';
+            UPDATE artifact_versions SET tenant = NULL;
+            INSERT INTO artifact_versions (id, version, state, provenance_hash, created_at, tenant)
+                VALUES ('a2', 1, 'ready', 'h', 1.0, NULL);
+            -- The rebuild supersedes the duplicate ready row; fail it there.
+            CREATE TRIGGER fail_the_rebuild BEFORE UPDATE OF state ON artifact_versions
+                WHEN NEW.state = 'superseded'
+                BEGIN SELECT RAISE(ABORT, 'rebuild failed'); END;
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(sqlite3.DatabaseError, match="rebuild failed"):
+            ArtifactStore(artifact_dir)
+
+        conn = sqlite3.connect(str(store.db_path))
+        index = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_tenant_provenance_unique'"
+        ).fetchone()
+        nulls = conn.execute(
+            "SELECT COUNT(*) FROM artifact_versions WHERE tenant IS NULL"
+        ).fetchone()[0]
+        conn.close()
+        assert index is not None
+        assert nulls == 2  # nothing of the half-done rebuild was kept
 
 
 class TestGcSparesCurrentValues:
