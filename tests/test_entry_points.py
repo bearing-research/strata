@@ -6,6 +6,8 @@ Both print help from any Python; every real command is refused outside a uv-mana
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 
 import pytest
 
@@ -89,3 +91,40 @@ def test_importing_the_server_with_a_refused_config_does_not_raise(refused_confi
     monkeypatch.setattr(server, "_state", None)
 
     server._mount_mcp_if_enabled()
+
+
+def test_importing_the_server_with_mcp_enabled_logs_nothing(tmp_path):
+    """The CLI imports the server module to ask whether it runs inside one, so the import's
+    MCP mount must not print a server log line into a command's output."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("STRATA_")}
+    env |= {"HOME": str(tmp_path), "STRATA_MCP_ENABLED": "true"}
+    result = subprocess.run(
+        [sys.executable, "-c", "import strata.server as s; assert s._mcp_app is not None"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "mcp_endpoint" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("mounted", "message"),
+    [(True, "mcp_endpoint_mounted"), (False, "mcp_enabled_without_extra")],
+)
+def test_the_server_start_logs_the_mcp_mount(monkeypatch, caplog, mounted, message):
+    from fastapi.testclient import TestClient
+
+    from strata import config as strata_config
+    from strata.notebook.mcp_server import build_mcp_app
+    from strata.notebook.session import SessionManager
+
+    monkeypatch.setattr(strata_config, "_load_from_pyproject", dict)
+    monkeypatch.setattr(server, "_mcp_app", build_mcp_app(SessionManager()) if mounted else None)
+    monkeypatch.setattr(server, "_mcp_extra_missing", not mounted)
+
+    with caplog.at_level("INFO", logger="strata.server"), TestClient(server.app):
+        pass
+
+    assert message in caplog.text

@@ -7,6 +7,13 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Fixed
+
+- **CLI commands stay quiet with MCP enabled.** With `STRATA_MCP_ENABLED` set,
+  `strata dag`, `strata run` and other commands that open a notebook printed
+  the server's `mcp_endpoint_mounted` log line to stderr. The server now logs
+  it when it starts serving. (#1163)
+
 ## 0.10.0 - 2026-10-13
 
 A hardening release. The server stops doing store and blob work on its event
