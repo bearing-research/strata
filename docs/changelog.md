@@ -15,7 +15,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   snapshot cover every tenant's cached data, like `/v1/cache/entries`, which
   already needed the scope; under principal auth any caller could read them.
   It also no longer walks the cache directory on the event loop. Personal mode
-  is unchanged. (#PR)
+  is unchanged. (#1167)
 
 ### Fixed
 
