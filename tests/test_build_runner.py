@@ -1288,3 +1288,34 @@ class TestV1PushMemoryBounds:
 
         _name, handle, _ctype = captured["files"]["input0"]
         assert hasattr(handle, "read"), "input should be a file object, not bytes"
+
+
+async def test_a_build_waiting_for_its_tenant_holds_no_global_slot(build_runner, monkeypatch):
+    """With a global slot free, another tenant's build starts while one tenant queues."""
+    from types import SimpleNamespace
+
+    build_runner._global_sem = asyncio.Semaphore(2)
+    build_runner.config.max_builds_per_tenant = 1
+    entered = {name: asyncio.Event() for name in ("a1", "a2", "b1")}
+    release = asyncio.Event()
+
+    async def execute(build, already_claimed=False):
+        entered[build.build_id].set()
+        await release.wait()
+
+    monkeypatch.setattr(build_runner, "_execute_build", execute)
+    tasks = [
+        asyncio.create_task(
+            build_runner._execute_build_with_semaphores(
+                SimpleNamespace(build_id=build_id, tenant_id=tenant)
+            )
+        )
+        for build_id, tenant in (("a1", "a"), ("a2", "a"), ("b1", "b"))
+    ]
+    try:
+        await asyncio.wait_for(entered["b1"].wait(), timeout=5.0)
+        assert entered["a1"].is_set()
+        assert not entered["a2"].is_set()
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)

@@ -192,6 +192,11 @@ def _row_to_build_state(row: Any) -> BuildState:
     )
 
 
+# How create_build's json.dumps writes the mark a notebook puts on a build its own
+# worker runs (see the notebook executor's signed transport).
+_EXTERNAL_DISPATCH_JSON = json.dumps({"_dispatch_mode": "external"})[1:-1]
+
+
 class BuildStore:
     """Build state store sharing the artifact store's dialect and database.
 
@@ -771,8 +776,14 @@ class BuildStore:
         finally:
             conn.close()
 
-    def list_pending_builds(self, limit: int = 100) -> list[BuildState]:
-        """List pending builds, oldest first."""
+    def list_runnable_builds(self, limit: int, per_tenant: int) -> list[BuildState]:
+        """Pending builds the runner executes: the oldest ``per_tenant`` of each tenant,
+        oldest first.
+
+        Per tenant, so one tenant's backlog cannot fill the window and hide every other
+        tenant's builds. Builds a notebook dispatches to its own worker are left out:
+        nothing here runs them, and they would hold their tenant's places.
+        """
         conn = self._get_connection()
         try:
             cursor = conn.execute(
@@ -783,12 +794,18 @@ class BuildStore:
                        input_byte_count, output_byte_count,
                        lease_owner, lease_expires_at,
                        input_uris, params, name, logs
-                FROM artifact_builds
-                WHERE state = 'pending'
+                FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY tenant_id ORDER BY created_at ASC
+                    ) AS tenant_rank
+                    FROM artifact_builds
+                    WHERE state = 'pending' AND (params IS NULL OR params NOT LIKE ?)
+                ) ranked
+                WHERE tenant_rank <= ?
                 ORDER BY created_at ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (f"%{_EXTERNAL_DISPATCH_JSON}%", per_tenant, limit),
             )
 
             return [_row_to_build_state(row) for row in cursor.fetchall()]

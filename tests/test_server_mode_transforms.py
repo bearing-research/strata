@@ -892,6 +892,22 @@ class TestTransformValidation:
         # In server mode the server executes, so there is no build_spec.
         assert data["build_spec"] is None
 
+    def test_a_reserved_param_is_refused(self, server_mode_app):
+        """`_dispatch_mode: external` from a client would park its build where nothing runs it."""
+        response = server_mode_app.post(
+            "/v1/artifacts/materialize",
+            json={
+                "inputs": ["file:///fake/wh#db.events"],
+                "transform": {
+                    "executor": "local://duckdb_sql@v1",
+                    "params": {"sql": "SELECT 1", "_dispatch_mode": "external"},
+                },
+            },
+        )
+
+        assert response.status_code == 400
+        assert "_dispatch_mode" in response.json()["detail"]
+
     def test_unregistered_transform_rejected(self, server_mode_app):
         """An unregistered transform returns 403."""
         response = server_mode_app.post(

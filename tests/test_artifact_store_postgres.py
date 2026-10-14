@@ -1009,6 +1009,49 @@ class TestBuildStoreSharesTheBackend:
             dialect_a.close()
             dialect_b.close()
 
+    def test_the_runner_picks_a_fair_share_per_tenant(self, postgres_dsn, tmp_path):
+        """The window query runs on Postgres too: per tenant, without external builds."""
+        from strata.transforms.build_store import BuildStore
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_builds, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, "
+                "registry_audit, registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            artifacts = ArtifactStore(tmp_path / "a", dialect=dialect)
+            created = iter(range(1000, 2000))
+            builds = BuildStore(
+                tmp_path / "x.sqlite", dialect=dialect, clock=lambda: float(next(created))
+            )
+
+            def queue(build_id, tenant, params=None):
+                version = artifacts.create_artifact(build_id, f"prov-{build_id}", _spec())
+                builds.create_build(
+                    build_id=build_id,
+                    artifact_id=build_id,
+                    version=version,
+                    executor_ref="x",
+                    tenant_id=tenant,
+                    params=params,
+                )
+
+            queue("external", "busy", params={"_dispatch_mode": "external"})
+            for i in range(4):
+                queue(f"busy-{i}", "busy")
+            queue("quiet-0", "quiet")
+
+            listed = builds.list_runnable_builds(limit=50, per_tenant=2)
+
+            assert [b.build_id for b in listed] == ["busy-0", "busy-1", "quiet-0"]
+        finally:
+            dialect.close()
+
     def test_a_fail_fenced_on_a_claim_needs_that_exact_claim(self, postgres_dsn, tmp_path):
         """The deadline read back from the row matches the one the fence sends."""
         from strata.transforms.build_store import BuildStore
