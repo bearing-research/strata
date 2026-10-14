@@ -4008,6 +4008,7 @@ without a URL or a config, to find the server. The server does not read
 </tr>
 </tbody>
 </table>
+<p>A client is the authenticated caller (tenant and principal) under principal auth, otherwise the connecting address. A header such as <code>X-Forwarded-For</code> is not trusted for this, since a caller can write it. Behind a proxy without principal auth every request comes from the proxy's address, so set uvicorn's <code>FORWARDED_ALLOW_IPS</code> to the proxy's address: uvicorn then takes the client's address from that proxy's <code>X-Forwarded-For</code>.</p>
 <h2 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h2>
 <table>
 <thead>

@@ -3601,6 +3601,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The rate limiter counts the caller, on a clock that cannot go back.</strong> The
+  per-client limit was keyed on the first <code>X-Forwarded-For</code> entry, which the
+  caller writes when a proxy appends, so a new value per request was never
+  limited. It now counts the authenticated caller, or else the connecting
+  address; behind a proxy, set <code>FORWARDED_ALLOW_IPS</code> to the proxy's address.
+  The buckets also run on a monotonic clock: a wall clock set back an hour
+  refused every request for that hour. (#1170)</li>
 <li><strong>Streams nobody reads no longer pile up in memory.</strong> A <code>mode="stream"</code>
   materialize fetches its first row group ahead of the <code>GET</code>, and that chunk
   waited up to the stream's five-minute lifetime, with no limit on how many,
