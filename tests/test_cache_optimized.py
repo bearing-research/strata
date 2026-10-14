@@ -1,10 +1,11 @@
-"""Tests for optimized cache methods and Rust acceleration."""
+"""Tests for the cache's unparsed read path and entry lifecycle."""
+
+from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from strata import fast_io
 from strata.cache import CACHE_META_EXTENSION, CACHE_VERSION, CachedFetcher, DiskCache
 from strata.config import StrataConfig
 from strata.types import CacheKey, TableIdentity
@@ -94,7 +95,7 @@ class TestDiskCacheGetAsStreamBytes:
             raise OSError(errno.EMFILE, "Too many open files")
 
         with monkeypatch.context() as patched:
-            patched.setattr(fast_io, "read_file_mmap", out_of_handles)
+            patched.setattr(Path, "read_bytes", out_of_handles)
             assert cache.get_as_stream_bytes(cache_key) is None
 
         assert cache.get_as_stream_bytes(cache_key) is not None
@@ -240,95 +241,6 @@ class TestCachedFetcherFetchAsStreamBytes:
         batches = list(reader)
         assert len(batches) == 1
         assert batches[0].num_rows == sample_batch.num_rows
-
-
-class TestRustAccelerationIntegration:
-    def test_rust_path_produces_valid_output(self, strata_config, cache_key, sample_batch):
-        cache = DiskCache(strata_config)
-        cache.put(cache_key, sample_batch)
-
-        stream_bytes = cache.get_as_stream_bytes(cache_key)
-
-        assert stream_bytes is not None
-
-        reader = ipc.open_stream(pa.BufferReader(stream_bytes))
-        result_batch = list(reader)[0]
-
-        assert result_batch.num_rows == sample_batch.num_rows
-        assert result_batch.column("id").to_pylist() == sample_batch.column("id").to_pylist()
-
-    def test_rust_availability_is_reported(self):
-        is_available = fast_io.is_rust_available()
-        assert isinstance(is_available, bool)
-
-        # Informational only; the test passes either way.
-        print(f"Rust acceleration available: {is_available}")
-
-
-class TestMmapFileReading:
-    def test_read_file_mmap_returns_bytes(self, tmp_path):
-        test_file = tmp_path / "test.txt"
-        test_data = b"Hello, memory-mapped world!"
-        test_file.write_bytes(test_data)
-
-        result = fast_io.read_file_mmap(str(test_file))
-
-        assert result == test_data
-
-    def test_read_file_mmap_with_binary_data(self, tmp_path):
-        test_file = tmp_path / "binary.bin"
-        test_data = bytes(range(256)) * 10
-        test_file.write_bytes(test_data)
-
-        result = fast_io.read_file_mmap(str(test_file))
-
-        assert result == test_data
-        assert len(result) == 2560
-
-    def test_read_file_mmap_large_file(self, tmp_path):
-        test_file = tmp_path / "large.bin"
-        test_data = b"x" * (1024 * 1024)
-        test_file.write_bytes(test_data)
-
-        result = fast_io.read_file_mmap(str(test_file))
-
-        assert result == test_data
-        assert len(result) == 1024 * 1024
-
-    def test_read_file_mmap_arrow_stream(self, strata_config, cache_key, sample_batch):
-        cache = DiskCache(strata_config)
-        cache.put(cache_key, sample_batch)
-
-        path = cache.get_path(cache_key)
-        assert path is not None
-
-        stream_bytes = fast_io.read_file_mmap(str(path))
-
-        reader = ipc.open_stream(pa.BufferReader(stream_bytes))
-        result_batch = list(reader)[0]
-
-        assert result_batch.num_rows == sample_batch.num_rows
-        assert result_batch.column("id").to_pylist() == sample_batch.column("id").to_pylist()
-
-    def test_read_file_mmap_matches_read_bytes(self, strata_config, cache_key, sample_batch):
-        """read_file_mmap matches Path.read_bytes()."""
-        cache = DiskCache(strata_config)
-        cache.put(cache_key, sample_batch)
-
-        path = cache.get_path(cache_key)
-        assert path is not None
-
-        mmap_result = fast_io.read_file_mmap(str(path))
-        read_bytes_result = path.read_bytes()
-
-        assert mmap_result == read_bytes_result
-
-    def test_read_file_mmap_nonexistent_file(self, tmp_path):
-        nonexistent = tmp_path / "does_not_exist.txt"
-
-        # IOError from Rust or FileNotFoundError from Python.
-        with pytest.raises(Exception):
-            fast_io.read_file_mmap(str(nonexistent))
 
 
 class TestDamagedEntriesSelfHeal:

@@ -319,8 +319,8 @@ modal token new   # one-time browser auth
 ```python
 import modal
 
-# Modal's pip_install pulls wheels from PyPI. strata-notebook ships
-# pre-built abi3-py312 wheels so no Rust toolchain is needed, and the
+# Modal's pip_install pulls wheels from PyPI. strata-notebook is a pure
+# Python wheel, so nothing is compiled, and the
 # worker entry isn't gated by the runtime guard (strata and strata-notebook
 # are) so Modal's standard image stack works. uv is installed alongside so the
 # worker can run cells in the notebook's locked environment.

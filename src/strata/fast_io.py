@@ -4,7 +4,6 @@ Segments are merged incrementally (:func:`stream_concat_ipc_segments`,
 :class:`IncrementalIpcMerger`), so memory stays O(segment), not O(response).
 """
 
-import os
 import time
 from collections.abc import Iterable, Iterator
 
@@ -12,47 +11,6 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 
 type _BytesLike = bytes | bytearray | memoryview
-
-_RUST_AVAILABLE = False
-_rust_module = None
-
-try:
-    from strata import _strata_core
-
-    _rust_module = _strata_core
-    _RUST_AVAILABLE = True
-except ImportError:
-    pass
-
-
-def is_rust_available() -> bool:
-    """Check if Rust acceleration module is available."""
-    return _RUST_AVAILABLE
-
-
-# Below this size, Python's read_bytes() beats the Rust mmap path: mmap syscall + FFI + PyBytes copy
-# overhead is not amortized. Measured crossover is ~4-6 MB (benchmarks/bench_rust_ext.py). Override
-# with STRATA_MMAP_MIN_BYTES (0 forces mmap always).
-MMAP_MIN_BYTES = int(os.environ.get("STRATA_MMAP_MIN_BYTES", 4 * 1024 * 1024))
-
-
-def read_file_mmap(path: str) -> bytes:
-    """Read a file, via Rust mmap at or above ``MMAP_MIN_BYTES``.
-
-    Smaller files and any mmap error fall back to ``Path.read_bytes()``.
-    """
-    if _RUST_AVAILABLE and _rust_module is not None:
-        try:
-            if os.stat(path).st_size >= MMAP_MIN_BYTES:
-                return bytes(_rust_module.read_file_bytes(path))
-        except Exception:
-            # Small file, missing file, or mmap failure: fall through to the
-            # plain read below, which reproduces the real error if there is one.
-            pass
-
-    from pathlib import Path
-
-    return Path(path).read_bytes()
 
 
 class _StreamingBuffer:

@@ -3,7 +3,7 @@
 .gitignore
 
 # Python. The ** patterns reach into src/: a bare *.so or __pycache__
-# matches only at the context root, and maturin packages what it finds there.
+# matches only at the context root, and the build packages what it finds there.
 **/__pycache__
 **/*.py[cod]
 .Python
@@ -15,9 +15,6 @@ env
 *.egg-info
 dist
 build
-
-# Rust
-rust/target
 
 # IDE
 .idea

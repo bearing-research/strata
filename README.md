@@ -171,9 +171,8 @@ existing data and environments untouched.
 
 Windows: `uv tool install strata-notebook` works directly.
 
-Building Strata itself from a git clone also needs a
-[Rust toolchain](https://rustup.rs/) for the native extension and
-[Node 26+](https://nodejs.org/) for the frontend. PyPI wheels ship both
+Building Strata itself from a git clone also needs
+[Node 26+](https://nodejs.org/) for the frontend. The PyPI wheel ships it
 prebuilt, so this applies only if you are modifying Strata. Source builds work
 on Windows via WSL2 or natively.
 
@@ -374,7 +373,7 @@ executor. Core decides whether results already exist and persists them.
 ## Development
 
 ```bash
-uv sync --all-extras                   # Install deps + build Rust extension (matches CI)
+uv sync --all-extras                   # Install deps (matches CI)
 uv run pytest                          # Run all tests
 uv run pre-commit run --all-files      # Lint + format
 cd frontend && npm run dev             # Frontend dev server (hot reload)

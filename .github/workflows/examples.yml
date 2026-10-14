@@ -12,20 +12,16 @@ on:
     branches: [main]
     paths:
       - 'src/**'
-      - 'rust/**'
       - 'examples/**'
       - 'pyproject.toml'
-      - 'Cargo.toml'
       - 'uv.lock'
       - '.github/workflows/examples.yml'
   pull_request:
     branches: [main]
     paths:
       - 'src/**'
-      - 'rust/**'
       - 'examples/**'
       - 'pyproject.toml'
-      - 'Cargo.toml'
       - 'uv.lock'
       - '.github/workflows/examples.yml'
 
@@ -36,9 +32,6 @@ concurrency:
 
 permissions:
   contents: read
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
   # One job: per-example jobs each paid a minute of setup for seconds of run.
@@ -61,20 +54,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
-        with:
-          toolchain: stable
-          cache-workspaces: rust
-
-      - name: Verify Rust toolchain
-        shell: bash
-        run: |
-          rustup default stable
-          rustup show active-toolchain
-          cargo --version
-          rustc --version
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
@@ -104,7 +83,7 @@ jobs:
             }
           }
 
-      - name: Build Strata (and the Rust extension)
+      - name: Install Strata
         run: uv sync --all-extras
 
       # Every example runs even after one fails (a flaky public S3 read must

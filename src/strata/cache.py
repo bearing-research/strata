@@ -234,19 +234,13 @@ class DiskCache:
             return None
 
     def get_as_stream_bytes(self, key: CacheKey) -> bytes | None:
-        """Return cached Arrow IPC stream bytes with no parsing, or ``None`` on a miss/read failure.
-
-        Uses the Rust mmap reader when available.
-        """
+        """Return cached Arrow IPC stream bytes, unparsed, or ``None`` on a miss or read failure."""
         path = self._key_path(key)
         if not path.exists():
             return None
 
         try:
-            # mmap for large files and OS page-cache reuse on repeated access.
-            from strata import fast_io
-
-            data = fast_io.read_file_mmap(str(path))
+            data = path.read_bytes()
         except OSError:
             # A miss, but keep the entry: the error may be the process's (out of file handles)
             # rather than the file's. Damage is caught below by the markers, and a refetch's

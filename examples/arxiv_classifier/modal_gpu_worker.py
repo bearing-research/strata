@@ -52,14 +52,7 @@ MAX_CONTAINERS = 1  # cell execution is exclusive; don't pipeline
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("curl", "build-essential", "git", "ca-certificates")
-    # Rust toolchain, required to build Strata's native extension
-    .run_commands(
-        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs "
-        "| sh -s -- -y --profile minimal",
-    )
-    .env({"PATH": "/root/.cargo/bin:/usr/local/bin:/usr/bin:/bin"})
-    .pip_install("maturin>=1.5")
+    .apt_install("git", "ca-certificates")
     .pip_install(PROJECT_GIT_URL, *WORKLOAD_DEPS)
 )
 

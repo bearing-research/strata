@@ -1,7 +1,7 @@
 """The agent scratchpad skill ships inside the package and is well-formed.
 
 Agents discover it under ``<site-packages>/strata/.agents/skills/``, so it must be
-in the maturin ``include`` list and carry model-invocable frontmatter.
+in the built wheel and carry model-invocable frontmatter.
 """
 
 from __future__ import annotations

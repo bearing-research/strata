@@ -157,7 +157,7 @@ docker run --rm -p 127.0.0.1:8765:8765 \
 The multi-stage Dockerfile:
 
 1. **Frontend builder** (Node 26) builds the Vue.js UI
-2. **Backend builder** (Python + Rust) builds the wheel with native extension
+2. **Backend builder** (uv) builds the pure-Python wheel
 3. **Runtime**: minimal image with the wheel, the frontend dist, and
    the `otel`, `postgres`, `sql`, `sql-sqlite` and `mcp` extras, so OTLP
    tracing, a Postgres artifact store (`STRATA_ARTIFACT_METADATA_DSN`),

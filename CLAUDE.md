@@ -48,14 +48,13 @@ Strata        → decides whether it already exists, and persists it
 Strata also provides snapshot-aware Iceberg scanning. Parquet row groups are
 cached as Arrow IPC keyed by immutable snapshot IDs (no cache invalidation).
 Streaming is bounded-memory; two-tier QoS prevents bulk queries from starving
-dashboards. A small Rust extension (`rust/`) accelerates one hot path: mmap'd
-reads of large cache entries. Storage backends:
+dashboards. Storage backends:
 local, S3, GCS, Azure.
 
 ## Build & Development
 
 ```bash
-uv sync --all-extras                      # install + build Rust ext (matches CI)
+uv sync --all-extras                      # install (matches CI)
 uv run pytest                             # all tests
 uv run pytest tests/test_smoke.py -v      # one file
 uv run pre-commit run --all-files         # format + lint
