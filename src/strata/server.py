@@ -576,6 +576,8 @@ async def _graceful_shutdown(state: ServerState) -> None:
 # None when the endpoint is disabled or the [mcp] extra is absent.
 # Set at import by ``_mount_mcp_if_enabled``; read by lifespan.
 _mcp_app: Starlette | None = None
+# MCP was enabled but the [mcp] extra is absent: warned about at startup, not at import.
+_mcp_extra_missing = False
 
 
 def _init_configured_artifact_store(config: StrataConfig) -> None:
@@ -1004,9 +1006,19 @@ async def lifespan(app: FastAPI):
         build_qos_enabled=build_qos is not None,
     )
 
+    # Logged here, not at import: the CLI imports this module without serving it.
+    if _mcp_extra_missing:
+        logger.warning(
+            "mcp_enabled_without_extra",
+            detail=(
+                "mcp_enabled=True but the [mcp] extra is not installed; the /mcp "
+                "endpoint was not mounted. Install strata-notebook[mcp]."
+            ),
+        )
     # The parent does not start a mounted sub-app's lifespan, and the MCP
     # session manager must run for the life of the server.
     if _mcp_app is not None:
+        logger.info("mcp_endpoint_mounted", path="/mcp")
         async with _mcp_app.router.lifespan_context(_mcp_app):
             yield
     else:
@@ -1528,7 +1540,7 @@ def _mount_mcp_if_enabled() -> None:
     (defense in depth over ``validate_mode_coherence``), and the ``[mcp]`` extra; without the
     extra the server still boots.
     """
-    global _mcp_app
+    global _mcp_app, _mcp_extra_missing
 
     try:
         config = _state.config if _state is not None else StrataConfig.load()
@@ -1546,18 +1558,11 @@ def _mount_mcp_if_enabled() -> None:
 
     mcp_app = build_mcp_app(get_session_manager())
     if mcp_app is None:
-        logger.warning(
-            "mcp_enabled_without_extra",
-            detail=(
-                "mcp_enabled=True but the [mcp] extra is not installed; the /mcp "
-                "endpoint was not mounted. Install strata-notebook[mcp]."
-            ),
-        )
+        _mcp_extra_missing = True
         return
 
     _mount_mcp(app, mcp_app)
     _mcp_app = mcp_app
-    logger.info("mcp_endpoint_mounted", path="/mcp")
 
 
 class _AsSlashedPath:
