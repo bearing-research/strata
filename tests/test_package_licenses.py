@@ -14,7 +14,8 @@ def test_each_sub_package_ships_the_root_license(package):
     with open(package_dir / "pyproject.toml", "rb") as f:
         project = tomllib.load(f)
 
+    # uv_build puts license-files in both the wheel and the sdist.
+    assert project["build-system"]["build-backend"] == "uv_build"
     assert project["project"]["license-files"] == ["LICENSE"]
-    assert "LICENSE" in project["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
     # A copy, since a build backend cannot reach outside the project; it must not drift.
     assert (package_dir / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
