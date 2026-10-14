@@ -107,3 +107,50 @@ def test_start_prefetch_skips_empty_plan():
 
     m.start_prefetch(state, plan)
     assert m._prefetch_futures == {}
+
+
+def _fetching_state(fetched: list):
+    def fetch(task):
+        fetched.append(task)
+        return b"first row group"
+
+    return SimpleNamespace(
+        _draining=False, _fetch_executor=None, fetcher=SimpleNamespace(fetch_as_stream_bytes=fetch)
+    )
+
+
+async def _prefetch(m: ScanBuildManager, state, plan) -> None:
+    m.register_scan(plan)
+    m.start_prefetch(state, plan)
+    await m._prefetch_futures[plan.scan_id]
+
+
+async def test_prefetch_holds_at_most_its_budget_for_streams_nobody_has_read():
+    """A POST in stream mode prefetches its first row group, and nothing reads it until a GET
+    that may never come; past the budget the POST skips it and the GET fetches it."""
+    m = ScanBuildManager(max_held_prefetch_bytes=10)
+    fetched: list = []
+    state = _fetching_state(fetched)
+    m.register_scan(_plan("unread", prefetched=b"x" * 10))
+
+    skipped = _plan("next")
+    await _prefetch(m, state, skipped)
+
+    assert skipped.prefetched_first is None
+    assert fetched == []
+    assert m.prefetch_metrics()["skipped"] == 1
+
+
+async def test_prefetch_resumes_once_held_bytes_are_streamed():
+    m = ScanBuildManager(max_held_prefetch_bytes=10)
+    fetched: list = []
+    state = _fetching_state(fetched)
+    unread = _plan("unread", prefetched=b"x" * 10)
+    m.register_scan(unread)
+    await m.consume_prefetched_first(unread, "unread")
+
+    plan = _plan("next")
+    await _prefetch(m, state, plan)
+
+    assert plan.prefetched_first == b"first row group"
+    assert fetched == [1]

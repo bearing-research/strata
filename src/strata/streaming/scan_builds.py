@@ -82,16 +82,26 @@ def record_scan_complete(
     )
 
 
+# First row groups fetched ahead and not yet streamed. One waits up to the stream's TTL for
+# a GET that may never come, so past this a POST skips the prefetch and its GET reads it.
+MAX_HELD_PREFETCH_BYTES = 256 * 1024 * 1024
+
+
 class ScanBuildManager:
     """The active scan table plus opportunistic first-row-group prefetch."""
 
-    def __init__(self, prefetch_concurrency: int = 4) -> None:
+    def __init__(
+        self,
+        prefetch_concurrency: int = 4,
+        max_held_prefetch_bytes: int = MAX_HELD_PREFETCH_BYTES,
+    ) -> None:
         # Registered when a client will stream
         self.scans: dict[str, ReadPlan] = {}
 
         # Separate from streaming concurrency, so clients spamming POST /scan without
         # consuming can't exhaust resources.
         self._prefetch_semaphore = asyncio.Semaphore(prefetch_concurrency)
+        self._max_held_prefetch_bytes = max_held_prefetch_bytes
         self._prefetch_futures: dict[str, asyncio.Task[None]] = {}
         self._started = 0
         self._used = 0  # Consumed by streaming
@@ -144,8 +154,11 @@ class ScanBuildManager:
             if state._draining:
                 return
 
-            # Prefetch is opportunistic; skip instead of queueing behind work.
-            if getattr(self._prefetch_semaphore, "_value", 0) <= 0:
+            # Prefetch is opportunistic; skip instead of queueing behind work, or holding more.
+            if (
+                getattr(self._prefetch_semaphore, "_value", 0) <= 0
+                or self._held_prefetch_bytes() >= self._max_held_prefetch_bytes
+            ):
                 self._skipped += 1
                 return
 
@@ -176,6 +189,13 @@ class ScanBuildManager:
                 self._prefetch_futures.pop(plan.scan_id, None)
 
         task.add_done_callback(_cleanup_prefetch)
+
+    def _held_prefetch_bytes(self) -> int:
+        return sum(
+            len(plan.prefetched_first)
+            for plan in self.scans.values()
+            if plan.prefetched_first is not None
+        )
 
     async def consume_prefetched_first(self, plan: ReadPlan, scan_id: str) -> bytes | None:
         """Return the prefetched first row group if one is (or becomes) warm, else None.
