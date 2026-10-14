@@ -95,7 +95,7 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_INTERACTIVE_MAX_COLUMNS` | `10`               | Max columns for interactive classification |
 | `STRATA_INTERACTIVE_QUEUE_TIMEOUT` | `10.0`           | Queue wait for an interactive slot (seconds); exceeding it returns 429 with `Retry-After` |
 | `STRATA_BULK_QUEUE_TIMEOUT`      | `30.0`             | Queue wait for a bulk slot (seconds); exceeding it returns 429 with `Retry-After` |
-| `STRATA_PER_CLIENT_INTERACTIVE`  | `2`                | Per-client interactive slots; `0` disables per-client caps |
+| `STRATA_PER_CLIENT_INTERACTIVE`  | `2`                | Per-client interactive slots; `0` disables per-client caps. A client is the authenticated caller (tenant and principal) under principal auth, otherwise the connecting address |
 | `STRATA_PER_CLIENT_BULK`         | `1`                | Per-client bulk slots; `0` disables per-client caps |
 
 ### Adaptive concurrency
