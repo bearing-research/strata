@@ -12,7 +12,7 @@ import uuid
 import httpx
 
 from strata_pool.backend import ProvisionedWorker
-from strata_pool.types import WORKER_TOKEN_ENV, MachineType
+from strata_pool.types import WORKER_HEARTBEAT_ENV, WORKER_TOKEN_ENV, MachineType
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,9 @@ DEFAULT_BASE_URL = "https://api.runpod.io/v2"
 # flavor unless `provider_options` names another.
 DEFAULT_CPU_FLAVOR = "cpu3g"
 PROXY_HOST = "proxy.runpod.net"
+# The proxy ends a request that sends nothing for 125 s (measured 2026-10); a worker
+# sending a byte this often keeps a long job's request open.
+HEARTBEAT_SECONDS = 30
 
 
 class RunPodError(RuntimeError):
@@ -153,6 +156,9 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
         else:
             body[key] = value
     _restore_credential(body, env)
+    # After the override, which replaces `env` whole: without it a long job fails at the proxy.
+    if isinstance(body.get("env"), dict):
+        body["env"].setdefault(WORKER_HEARTBEAT_ENV, str(HEARTBEAT_SECONDS))
     return body
 
 

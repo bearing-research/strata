@@ -62,6 +62,19 @@ that lets an operator override the environment has to be able to put the
 credential back.
 """
 
+WORKER_HEARTBEAT_ENV = "STRATA_WORKER_HEARTBEAT_SECONDS"
+"""Environment variable asking a worker to keep a long /execute answer sending.
+
+Set by a backend whose proxy ends a request that sends nothing for a while.
+"""
+
+STATUS_IN_BODY_HEADER = "X-Strata-Status-In-Body"
+"""Response header of an /execute answer that streamed before it knew its status.
+
+The body is then spaces, then ``{"status_code": int, "content": str}``: the
+status and body the worker would otherwise have answered with.
+"""
+
 
 def new_id(prefix: str) -> str:
     """Pool-assigned identifier. Callers never invent these."""

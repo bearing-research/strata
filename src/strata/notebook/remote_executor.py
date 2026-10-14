@@ -14,13 +14,13 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
@@ -312,6 +312,63 @@ def _positive_int_env(name: str) -> int | None:
     return value
 
 
+def _positive_float_env(name: str) -> float | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    value = float(raw)
+    if not value > 0:
+        raise ValueError(f"{name} must be a positive number, got {raw!r}")
+    return value
+
+
+# strata-pool's contract: an /execute answer that streamed before it knew its status.
+STATUS_IN_BODY_HEADER = "X-Strata-Status-In-Body"
+
+# Executions whose caller left mid-stream: still running, as they would without the stream.
+_orphaned_executions: set[asyncio.Task] = set()
+
+
+async def _with_heartbeat(work: Awaitable[Response], interval: float) -> Response:
+    """*work*'s response if it is ready within *interval*; otherwise a 200 that sends a space
+    every *interval*, then ``{"status_code", "content"}`` holding the response it became.
+
+    For a proxy that ends a request sending nothing (RunPod's, at 125 s). An answer ready
+    in time, a quick refusal included, keeps its own status.
+    """
+    task = asyncio.ensure_future(work)
+    done, _ = await asyncio.wait({task}, timeout=interval)
+    if done:
+        return task.result()
+
+    async def body() -> AsyncIterator[bytes]:
+        try:
+            while not (await asyncio.wait({task}, timeout=interval))[0]:
+                yield b" "
+        except (asyncio.CancelledError, GeneratorExit):
+            _orphaned_executions.add(task)
+            task.add_done_callback(_orphaned_executions.discard)
+            raise
+        status, content = _response_parts(task)
+        yield json.dumps({"status_code": status, "content": content}).encode()
+
+    return StreamingResponse(
+        body(), media_type="application/json", headers={STATUS_IN_BODY_HEADER: "1"}
+    )
+
+
+def _response_parts(task: asyncio.Task) -> tuple[int, str]:
+    """The status and body FastAPI would have sent for *task*'s outcome."""
+    try:
+        response = task.result()
+    except HTTPException as exc:
+        return exc.status_code, json.dumps({"detail": exc.detail})
+    except Exception:
+        logger.exception("Pool execution failed after its answer started streaming")
+        return 500, json.dumps({"detail": "Internal Server Error"})
+    return response.status_code, bytes(response.body).decode()
+
+
 # Never handed to a cell: the bearer token (a cell holding it could dispatch
 # as the server) and the credentials mounts and connections resolve against.
 _WORKER_SECRETS = (
@@ -459,6 +516,8 @@ def create_notebook_executor_app(
         max_concurrent = _positive_int_env("STRATA_WORKER_MAX_CONCURRENT")
     if gpu_slots is None:
         gpu_slots = _positive_int_env("STRATA_WORKER_GPU_SLOTS")
+    # Set by a pool backend whose proxy ends a silent request; see _with_heartbeat.
+    heartbeat_seconds = _positive_float_env("STRATA_WORKER_HEARTBEAT_SECONDS")
     free_gpus: list[int] = list(range(gpu_slots or 0))
 
     def _admit() -> int | None:
@@ -1306,7 +1365,11 @@ def create_notebook_executor_app(
         out the multipart ``/v1/*`` endpoints. Sharing one handler keeps a pooled
         manifest and a pushed one from diverging in what they accept.
         """
-        return await execute_manifest(http_request)
+        if heartbeat_seconds is None:
+            return await execute_manifest(http_request)
+        # Read before a stream can start; the handler parses it from the request's cache.
+        await http_request.body()
+        return await _with_heartbeat(execute_manifest(http_request), heartbeat_seconds)
 
     return app
 

@@ -332,6 +332,38 @@ class TestResponseShapes:
             await _backend(fake).stop("pod123")
 
 
+class TestHeartbeat:
+    """RunPod's proxy ends a request silent for 125 s, so its workers stream long answers."""
+
+    async def test_a_pod_asks_its_worker_to_keep_long_answers_sending(self):
+        fake = FakeRunPod()
+        await _backend(fake).start(_spec(), {"STRATA_WORKER_TOKEN": "t"})
+
+        assert fake.body()["env"]["STRATA_WORKER_HEARTBEAT_SECONDS"] == "30"
+
+    async def test_an_env_override_does_not_drop_it(self):
+        fake = FakeRunPod()
+        await _backend(fake).start(
+            _spec(provider_options={"env": {"HF_TOKEN": "hf_abc"}}),
+            {"STRATA_WORKER_TOKEN": "t"},
+        )
+
+        assert fake.body()["env"]["STRATA_WORKER_HEARTBEAT_SECONDS"] == "30"
+
+    @pytest.mark.parametrize("where", ["machine_env", "provider_options"])
+    async def test_an_operator_can_set_another_interval(self, where):
+        fake = FakeRunPod()
+        interval = {"STRATA_WORKER_HEARTBEAT_SECONDS": "10"}
+        if where == "provider_options":
+            await _backend(fake).start(
+                _spec(provider_options={"env": interval}), {"STRATA_WORKER_TOKEN": "t"}
+            )
+        else:
+            await _backend(fake).start(_spec(), {"STRATA_WORKER_TOKEN": "t", **interval})
+
+        assert fake.body()["env"]["STRATA_WORKER_HEARTBEAT_SECONDS"] == "10"
+
+
 class TestCredentialCannotBeDropped:
     async def test_adding_an_env_var_does_not_delete_the_worker_credential(self):
         """Overriding env (say, to add HF_TOKEN) must not drop the worker token."""
