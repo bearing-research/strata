@@ -4240,7 +4240,7 @@
 <td><code>artifacts:write</code></td>
 </tr>
 <tr>
-<td><code>GET /v1/cache/entries</code>, <code>GET /v1/cache/histogram</code>, <code>GET /v1/debug/cache/inspect</code>, <code>POST /v1/metadata/cleanup</code></td>
+<td><code>GET /v1/cache/entries</code>, <code>GET /v1/cache/histogram</code>, <code>GET /v1/cache/stats</code>, <code>GET /v1/debug/cache/inspect</code>, <code>POST /v1/metadata/cleanup</code></td>
 <td><code>admin:cache</code></td>
 </tr>
 <tr>
@@ -5285,8 +5285,8 @@ by that team store, after this server's own gate.</p>
 <tr>
 <td><code>GET</code></td>
 <td><code>/v1/cache/stats</code></td>
-<td>open</td>
-<td>Disk cache statistics</td>
+<td><code>admin:cache</code></td>
+<td>Disk cache statistics, with counts per table and snapshot across tenants</td>
 </tr>
 <tr>
 <td><code>GET</code></td>
