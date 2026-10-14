@@ -14,7 +14,7 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -302,21 +302,11 @@ async def _run_harness(
 RETRY_AFTER_SECONDS = 5
 
 
-def _positive_int_env(name: str) -> int | None:
+def _positive_env[T: (int, float)](name: str, parse: Callable[[str], T]) -> T | None:
     raw = os.environ.get(name, "").strip()
     if not raw:
         return None
-    value = int(raw)
-    if value < 1:
-        raise ValueError(f"{name} must be a positive integer, got {raw!r}")
-    return value
-
-
-def _positive_float_env(name: str) -> float | None:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return None
-    value = float(raw)
+    value = parse(raw)
     if not value > 0:
         raise ValueError(f"{name} must be a positive number, got {raw!r}")
     return value
@@ -325,19 +315,24 @@ def _positive_float_env(name: str) -> float | None:
 # strata-pool's contract: an /execute answer that streamed before it knew its status.
 STATUS_IN_BODY_HEADER = "X-Strata-Status-In-Body"
 
-# Executions whose caller left mid-stream: still running, as they would without the stream.
-_orphaned_executions: set[asyncio.Task] = set()
 
-
-async def _with_heartbeat(work: Awaitable[Response], interval: float) -> Response:
+async def _with_heartbeat(
+    work: Awaitable[Response], interval: float, orphans: set[asyncio.Task]
+) -> Response:
     """*work*'s response if it is ready within *interval*; otherwise a 200 that sends a space
     every *interval*, then ``{"status_code", "content"}`` holding the response it became.
 
     For a proxy that ends a request sending nothing (RunPod's, at 125 s). An answer ready
-    in time, a quick refusal included, keeps its own status.
+    in time, a quick refusal included, keeps its own status. A caller leaving mid-stream
+    leaves *work* running in *orphans*, as a disconnect would without the stream.
     """
     task = asyncio.ensure_future(work)
-    done, _ = await asyncio.wait({task}, timeout=interval)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=interval)
+    except asyncio.CancelledError:
+        # Without the heartbeat the work is this coroutine, so it would stop too.
+        task.cancel()
+        raise
     if done:
         return task.result()
 
@@ -346,8 +341,8 @@ async def _with_heartbeat(work: Awaitable[Response], interval: float) -> Respons
             while not (await asyncio.wait({task}, timeout=interval))[0]:
                 yield b" "
         except (asyncio.CancelledError, GeneratorExit):
-            _orphaned_executions.add(task)
-            task.add_done_callback(_orphaned_executions.discard)
+            orphans.add(task)
+            task.add_done_callback(lambda finished: _orphan_finished(finished, orphans))
             raise
         status, content = _response_parts(task)
         yield json.dumps({"status_code": status, "content": content}).encode()
@@ -355,6 +350,13 @@ async def _with_heartbeat(work: Awaitable[Response], interval: float) -> Respons
     return StreamingResponse(
         body(), media_type="application/json", headers={STATUS_IN_BODY_HEADER: "1"}
     )
+
+
+def _orphan_finished(task: asyncio.Task, orphans: set[asyncio.Task]) -> None:
+    """Drop *task*, logging a failure nobody is left to receive."""
+    orphans.discard(task)
+    if not task.cancelled() and (error := task.exception()) is not None:
+        logger.error("Pool execution failed after its caller left", exc_info=error)
 
 
 def _response_parts(task: asyncio.Task) -> tuple[int, str]:
@@ -513,11 +515,13 @@ def create_notebook_executor_app(
     launch_id = os.environ.get("STRATA_WORKER_LAUNCH_ID") or None
     active_executions = 0
     if max_concurrent is None:
-        max_concurrent = _positive_int_env("STRATA_WORKER_MAX_CONCURRENT")
+        max_concurrent = _positive_env("STRATA_WORKER_MAX_CONCURRENT", int)
     if gpu_slots is None:
-        gpu_slots = _positive_int_env("STRATA_WORKER_GPU_SLOTS")
+        gpu_slots = _positive_env("STRATA_WORKER_GPU_SLOTS", int)
     # Set by a pool backend whose proxy ends a silent request; see _with_heartbeat.
-    heartbeat_seconds = _positive_float_env("STRATA_WORKER_HEARTBEAT_SECONDS")
+    heartbeat_seconds = _positive_env("STRATA_WORKER_HEARTBEAT_SECONDS", float)
+    # Per app, like in_flight: executions whose caller left mid-stream, still running.
+    orphaned_executions: set[asyncio.Task] = set()
     free_gpus: list[int] = list(range(gpu_slots or 0))
 
     def _admit() -> int | None:
@@ -1369,7 +1373,9 @@ def create_notebook_executor_app(
             return await execute_manifest(http_request)
         # Read before a stream can start; the handler parses it from the request's cache.
         await http_request.body()
-        return await _with_heartbeat(execute_manifest(http_request), heartbeat_seconds)
+        return await _with_heartbeat(
+            execute_manifest(http_request), heartbeat_seconds, orphaned_executions
+        )
 
     return app
 
