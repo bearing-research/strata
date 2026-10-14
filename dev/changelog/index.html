@@ -3601,6 +3601,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Streams nobody reads no longer pile up in memory.</strong> A <code>mode="stream"</code>
+  materialize fetches its first row group ahead of the <code>GET</code>, and that chunk
+  waited up to the stream's five-minute lifetime, with no limit on how many,
+  so a client posting without reading could hold any amount. Prefetched data
+  waiting for a <code>GET</code> is now held to 256 MiB in all; past it the <code>GET</code> reads
+  the first row group itself. (#1169)</li>
 <li><strong>Behind a proxy, each caller gets their own scan slots.</strong> The per-client
   limits (<code>STRATA_PER_CLIENT_INTERACTIVE</code>, <code>STRATA_PER_CLIENT_BULK</code>) were
   keyed on the connecting address, which behind a proxy is the proxy's for
