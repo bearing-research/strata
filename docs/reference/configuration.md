@@ -683,6 +683,8 @@ The worker's input downloads, result uploads and log forwarding connect only to 
 | `STRATA_RATE_LIMIT_GLOBAL_BURST` | `100.0` | Global token-bucket burst     |
 | `STRATA_RATE_LIMIT_CLIENT_BURST` | `20.0` | Per-client token-bucket burst  |
 
+A client is the authenticated caller (tenant and principal) under principal auth, otherwise the connecting address. A header such as `X-Forwarded-For` is not trusted for this, since a caller can write it. Behind a proxy without principal auth every request comes from the proxy's address, so set uvicorn's `FORWARDED_ALLOW_IPS` to the proxy's address: uvicorn then takes the client's address from that proxy's `X-Forwarded-For`.
+
 ## Observability
 
 | Variable                      | Default  | Description             |

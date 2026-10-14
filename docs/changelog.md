@@ -19,6 +19,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **The rate limiter counts the caller, on a clock that cannot go back.** The
+  per-client limit was keyed on the first `X-Forwarded-For` entry, which the
+  caller writes when a proxy appends, so a new value per request was never
+  limited. It now counts the authenticated caller, or else the connecting
+  address; behind a proxy, set `FORWARDED_ALLOW_IPS` to the proxy's address.
+  The buckets also run on a monotonic clock: a wall clock set back an hour
+  refused every request for that hour. (#1170)
 - **Streams nobody reads no longer pile up in memory.** A `mode="stream"`
   materialize fetches its first row group ahead of the `GET`, and that chunk
   waited up to the stream's five-minute lifetime, with no limit on how many,

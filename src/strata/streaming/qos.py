@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from strata.adaptive_concurrency import ResizableLimiter
-from strata.auth import get_principal
+from strata.auth import caller_key
 from strata.tenant import get_tenant_id
 from strata.tenant_registry import get_tenant_registry
 
@@ -169,7 +169,7 @@ class QoSAdmission:
         else:
             queue_timeout = self._config.bulk_queue_timeout
 
-        client_id = _client_key(request)
+        client_id = caller_key(request)
         client_semaphore = self._get_client_semaphore(client_id, tier)
         client_semaphore_acquired = False
 
@@ -327,15 +327,3 @@ class QoSAdmission:
             "tracked_clients": len(self._client_interactive_semaphores),
             "per_tenant": per_tenant_qos,
         }
-
-
-def _client_key(request: Request) -> str:
-    """Who the per-client cap counts: the authenticated caller, else the peer address.
-
-    Behind a proxy every request's peer is the proxy, so keyed on the address alone every
-    user would share one cap: 2 interactive and 1 bulk scan for the whole service.
-    """
-    principal = get_principal()
-    if principal is not None:
-        return f"principal:{principal.tenant or ''}:{principal.id}"
-    return request.client.host if request.client else "unknown"

@@ -25,6 +25,8 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from starlette.requests import HTTPConnection
+
     from strata.config import AclConfig, AclRule, StrataConfig
     from strata.types import Principal, TableRef
 
@@ -37,6 +39,19 @@ _principal_ctx: ContextVar[Principal | None] = ContextVar("principal", default=N
 def get_principal() -> Principal | None:
     """Return the current request's principal, or None if auth is disabled or unauthenticated."""
     return _principal_ctx.get()
+
+
+def caller_key(conn: HTTPConnection) -> str:
+    """Who a per-caller limit counts: the authenticated caller, else the connecting address.
+
+    Never a header the caller wrote. Behind a proxy the address is the proxy's unless
+    uvicorn trusts it (``FORWARDED_ALLOW_IPS``), so an address key alone would put every
+    user under one limit.
+    """
+    principal = get_principal()
+    if principal is not None:
+        return f"principal:{principal.tenant or ''}:{principal.id}"
+    return conn.client.host if conn.client else "unknown"
 
 
 _FORWARDED_PRINCIPAL = "X-Strata-Principal"

@@ -44,6 +44,7 @@ from strata.api.dependencies import authorize_table_access
 from strata.artifact_uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
 from strata.auth import (
     AuthError,
+    caller_key,
     get_principal,
     parse_api_key_principal,
     parse_principal,
@@ -1209,11 +1210,8 @@ async def rate_limit_middleware(request: Request, call_next):
     ):
         return await call_next(request)
 
-    client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if not client_ip:
-        client_ip = request.client.host if request.client else "unknown"
-
-    result = rate_limiter.check(client_id=client_ip, endpoint=path)
+    # Not the first X-Forwarded-For entry: when a proxy appends, the caller wrote it.
+    result = rate_limiter.check(client_id=caller_key(request), endpoint=path)
 
     if not result.allowed:
         retry_after = _retry_after_header(result.retry_after_seconds, 1.0)
