@@ -81,7 +81,8 @@ EXPECTED_ROUTES = [
     ("/v1/cache/entries", "GET", 1),
     ("/v1/cache/evictions", "GET", 0),
     ("/v1/cache/histogram", "GET", 1),
-    ("/v1/cache/stats", "GET", 0),
+    # 1 dependency: require_scope("admin:cache"); counts per table and snapshot span tenants.
+    ("/v1/cache/stats", "GET", 1),
     ("/v1/cache/warm", "POST", 0),
     ("/v1/cache/warm/async", "POST", 0),
     ("/v1/cache/warm/jobs", "GET", 0),

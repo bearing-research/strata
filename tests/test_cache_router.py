@@ -639,6 +639,7 @@ class TestCachePlaneInformationDisclosure:
     # metadata store: operator-only under principal auth.
     OPERATOR_ROUTES = [
         ("GET", "/v1/cache/histogram", "admin:cache"),
+        ("GET", "/v1/cache/stats", "admin:cache"),
         ("POST", "/v1/metadata/cleanup", "admin:cache"),
         ("GET", "/metrics/tables", "admin:*"),
         ("GET", "/metrics/tables/strata.ns.t", "admin:*"),

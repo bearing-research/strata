@@ -7,6 +7,14 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Security
+
+- **`GET /v1/cache/stats` needs `admin:cache`.** Its counts per table and
+  snapshot cover every tenant's cached data, like `/v1/cache/entries`, which
+  already needed the scope; under principal auth any caller could read them.
+  It also no longer walks the cache directory on the event loop. Personal mode
+  is unchanged. (#1167)
+
 ### Fixed
 
 - **One tenant's builds can no longer hold up everyone else's.** The build
