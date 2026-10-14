@@ -15,7 +15,7 @@ exhaustive commit history.
   backend now sets `STRATA_WORKER_HEARTBEAT_SECONDS=30` on its pods, and
   `strata-worker` keeps a long answer sending, with the status and body at the
   end, which the pool reads as the answer. Docker and Fly workers are
-  unchanged. (#PR)
+  unchanged. (#1164)
 - **CLI commands stay quiet with MCP enabled.** With `STRATA_MCP_ENABLED` set,
   `strata dag`, `strata run` and other commands that open a notebook printed
   the server's `mcp_endpoint_mounted` log line to stderr. The server now logs
