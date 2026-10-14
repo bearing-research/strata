@@ -3571,6 +3571,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Cells longer than 125 seconds run on RunPod workers.</strong> RunPod's proxy ends
+  a request that sends nothing for 125 seconds (not 100, as 0.10.0 said), and
+  the pool's call to a worker lasts the whole job. strata-pool's RunPod
+  backend now sets <code>STRATA_WORKER_HEARTBEAT_SECONDS=30</code> on its pods, and
+  <code>strata-worker</code> keeps a long answer sending, with the status and body at the
+  end, which the pool reads as the answer. Docker and Fly workers are
+  unchanged. (#1164)</li>
 <li><strong>CLI commands stay quiet with MCP enabled.</strong> With <code>STRATA_MCP_ENABLED</code> set,
   <code>strata dag</code>, <code>strata run</code> and other commands that open a notebook printed
   the server's <code>mcp_endpoint_mounted</code> log line to stderr. The server now logs

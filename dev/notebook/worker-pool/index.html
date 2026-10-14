@@ -2611,13 +2611,15 @@ orphan is findable.</p>
 <p>A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
 it.</p>
-<p><strong>A job on a RunPod worker must finish within 100 seconds.</strong> RunPod's proxy
-ends any request after 100 seconds with a <code>524</code>, and the pool's call to a
-worker (<code>POST {endpoint}/execute</code>) lasts the whole job, so a longer cell fails
-however high <code>job_timeout_seconds</code> is set. Run long cells on the Docker or Fly
-backend. Reaching the worker on a mapped TCP port would lift the limit, but
-that link is plain HTTP, which would send the worker credential unencrypted,
-so the backend does not do it yet.</p>
+<p><strong>A long job keeps its request sending.</strong> RunPod's proxy ends a request that
+sends nothing for 125 seconds with a <code>524</code>, and the pool's call to a worker
+(<code>POST {endpoint}/execute</code>) lasts the whole job. So the backend sets
+<code>STRATA_WORKER_HEARTBEAT_SECONDS=30</code> on every pod: <code>strata-worker</code> then answers
+a job still running after 30 seconds with a space every 30 seconds and the
+result at the end, which the proxy lets run (tested to 15 minutes). A machine
+type's <code>env</code>, or <code>provider_options</code>, can set another interval. A worker image
+that is not <code>strata-worker</code> has to do the same to run jobs past 125 seconds;
+see the contract below.</p>
 <h2 id="the-fly-machines-backend">The Fly Machines backend<a class="headerlink" href="#the-fly-machines-backend" title="Permanent link">&para;</a></h2>
 <p>Boots workers as machines in one Fly app and region. A machine is reachable
 only on the organization's private network, at
@@ -2714,6 +2716,13 @@ be self-describing: the pool forwards it verbatim and sets no content type.</p>
 </tr>
 </tbody>
 </table>
+<p>A worker that cannot answer within a proxy's idle limit can keep the request
+sending instead. When <code>STRATA_WORKER_HEARTBEAT_SECONDS</code> is in its environment,
+it answers 200 with the <code>X-Strata-Status-In-Body</code> header, sends a space every
+that many seconds, and ends with <code>{"status_code": &lt;int&gt;, "content": "&lt;body&gt;"}</code>:
+the status and body it would have answered with. The pool reads those as the
+answer, so a 4xx or 5xx inside fails the job as usual. <code>strata-worker</code> does
+this only for an answer not ready within one interval.</p>
 <p>A worker that also serves <code>POST /v1/executions/{build_id}/cancel</code> behind the
 same token, as <code>strata-worker</code> does, can have a running job cancelled without
 losing the machine. One that does not answers the cancel with an error, and

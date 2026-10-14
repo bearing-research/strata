@@ -3944,6 +3944,11 @@ without a URL or a config, to find the server. The server does not read
 <td>GPUs to hand out, one per execution: the worker sets <code>CUDA_VISIBLE_DEVICES</code> for each cell itself. Same as <code>--gpu-slots</code>, which wins.</td>
 </tr>
 <tr>
+<td><code>STRATA_WORKER_HEARTBEAT_SECONDS</code></td>
+<td>none</td>
+<td>For a worker behind a proxy that ends a request sending nothing for a while (RunPod's ends one at 125 s; strata-pool's RunPod backend sets 30). An answer on the pool route <code>POST /execute</code> not ready within this many seconds is sent as 200 with the <code>X-Strata-Status-In-Body</code> header: a space every interval, then <code>{"status_code", "content"}</code> holding the status and body it would have had, which strata-pool unwraps. An answer ready sooner keeps its own status.</td>
+</tr>
+<tr>
 <td><code>STRATA_WORKER_ENV_ROOT</code></td>
 <td><code>~/.strata/worker-envs</code></td>
 <td>Where the worker keeps one locked environment per notebook <code>uv.lock</code> and interpreter build, and under <code>r/</code> one R library per <code>renv.lock</code> and R build. See <a href="../executor-protocol/#the-environment-block">the <code>environment</code> block</a>.</td>
