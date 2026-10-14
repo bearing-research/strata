@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from pyiceberg.exceptions import NoSuchTableError
 
 from strata.artifact_store import TransformSpec, compute_provenance_hash
-from strata.iceberg import WarehouseNotFound
+from strata.iceberg import WarehouseNotFound, object_store_unreachable
 from strata.iceberg_schema import UnsupportedTableFormatError
 from strata.types import (
     ExplainMaterializeRequest,
@@ -130,6 +130,11 @@ class MaterializeService:
         except WarehouseNotFound as e:
             raise InputResolutionError(404, str(e)) from e
         except Exception as e:
+            if object_store_unreachable(e):
+                raise InputResolutionError(
+                    503,
+                    f"The object store holding {input_uri} could not be reached; retry shortly.",
+                ) from e
             raise InputResolutionError(400, f"Could not resolve table {input_uri}: {str(e)}") from e
         return ResolvedInput(table_input_version(plan), table_identity=plan.table_identity)
 
