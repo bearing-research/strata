@@ -63,7 +63,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | `POST /v1/cache/clear` | `admin:cache` |
 | `GET /v1/logs`, `GET /v1/logs/stream` (the ring buffer holds every tenant's records) | `admin:*` |
 | Artifact and registry writes, including `name` on `POST /v1/materialize` | `artifacts:write` |
-| `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` | `admin:cache` |
+| `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/cache/stats`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` | `admin:cache` |
 | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) | `artifacts:publish` |
 | Pinning and unpinning a version (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) | `artifacts:pin` |
 | `GET /v1/admin/tenants`, `GET /v1/admin/tenants/{tenant_id}` | `admin:tenants` |
@@ -1189,7 +1189,7 @@ by that team store, after this server's own gate.
 | `DELETE` | `/v1/names/{name}/aliases/{alias}` | personal | Delete an alias; a protected alias answers `202` and queues |
 | `GET` | `/v1/registry/artifacts` | read | Ready artifacts carrying one tag (`tag_key`, optional `tag_value`) |
 | `GET` | `/v1/registry/pending` | read | Protected-alias changes awaiting approval |
-| `GET` | `/v1/cache/stats` | open | Disk cache statistics |
+| `GET` | `/v1/cache/stats` | `admin:cache` | Disk cache statistics, with counts per table and snapshot across tenants |
 | `GET` | `/v1/cache/evictions` | open | Eviction rate and pressure level; `include_events=true` adds recent events |
 | `POST` | `/v1/cache/warm` | table ACL | Warm the cache for some tables and wait until every row group is fetched |
 | `GET` | `/v1/cache/warm/jobs/{job_id}` | caller's tenant | A warming job's progress |

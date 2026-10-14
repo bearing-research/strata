@@ -41,9 +41,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cache"])
 
 
-@router.get("/v1/cache/stats")
-async def get_cache_stats_v1():
-    """Get disk cache statistics."""
+@router.get("/v1/cache/stats", dependencies=[require_scope("admin:cache")])
+def get_cache_stats_v1():
+    """Disk cache statistics (requires ``admin:cache``).
+
+    Counts per table and snapshot cover every tenant, and the totals come from walking the
+    cache directory, so this is an operator route and a ``def`` (off the event loop).
+    """
     from strata.cache import DiskCache
     from strata.server import get_state
 

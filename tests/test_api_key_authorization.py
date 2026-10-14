@@ -120,7 +120,7 @@ class TestTenantIsolation:
 
             def tenant_context(key):
                 resp = client.get(
-                    "/v1/cache/stats",
+                    "/v1/cache/evictions",
                     headers={"Authorization": f"Bearer {key}", "X-Tenant-ID": "team-b"},
                 )
                 assert resp.status_code == 200
