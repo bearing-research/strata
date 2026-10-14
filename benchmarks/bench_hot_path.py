@@ -1,4 +1,4 @@
-"""Benchmark the cache-hit hot path: file read, mmap read and IPC concat.
+"""Benchmark the cache-hit hot path: file read and mmap read.
 
 The cache stores Arrow IPC stream bytes, so a hit is a plain file read with no
 Arrow parsing.
@@ -106,24 +106,6 @@ def benchmark_parse_and_serve(file_path: Path, num_iterations: int = 100) -> dic
     }
 
 
-def benchmark_concat_stream_bytes(segments: list[bytes], num_iterations: int = 100) -> dict:
-    """Benchmark concat_stream_bytes."""
-    times = []
-    for _ in range(num_iterations):
-        start = time.perf_counter()
-        _ = fast_io.concat_stream_bytes(segments)
-        elapsed = time.perf_counter() - start
-        times.append(elapsed * 1000)
-
-    return {
-        "mean_ms": statistics.mean(times),
-        "median_ms": statistics.median(times),
-        "stdev_ms": statistics.stdev(times) if len(times) > 1 else 0,
-        "min_ms": min(times),
-        "max_ms": max(times),
-    }
-
-
 def format_results(name: str, results: dict) -> str:
     """Format benchmark results for display."""
     return (
@@ -195,33 +177,6 @@ def main():
             speedup = parse_serve["mean_ms"] / mmap_read["mean_ms"]
             print(f"  Mmap vs parse+serialize: {speedup:.1f}x faster")
             print()
-
-        print("-" * 60)
-        print("Benchmarking: Concat Multiple Segments")
-        print("-" * 60)
-
-        num_segments = 10
-        segments = []
-        for i in range(num_segments):
-            batch = create_test_data(10_000, 10)
-            file_path = tmpdir / f"segment_{i}.arrowstream"
-            create_stream_file(file_path, batch)
-            segments.append(file_path.read_bytes())
-
-        total_size_mb = sum(len(s) for s in segments) / (1024 * 1024)
-        print(f"Total segments: {num_segments}, Total size: {total_size_mb:.2f} MB")
-        print()
-
-        # Warm up
-        for _ in range(5):
-            fast_io.concat_stream_bytes(segments)
-
-        num_iterations = 50
-
-        print("Concat Stream Bytes:")
-        concat_results = benchmark_concat_stream_bytes(segments, num_iterations)
-        print(format_results("  PyArrow C++ concat", concat_results))
-        print()
 
     print("=" * 60)
     print("Benchmark complete")

@@ -48,8 +48,8 @@ Strata        → decides whether it already exists, and persists it
 Strata also provides snapshot-aware Iceberg scanning. Parquet row groups are
 cached as Arrow IPC keyed by immutable snapshot IDs (no cache invalidation).
 Streaming is bounded-memory; two-tier QoS prevents bulk queries from starving
-dashboards. A small Rust extension (`rust/`) accelerates two hot paths only:
-mmap'd cache reads and byte-level Arrow IPC concatenation. Storage backends:
+dashboards. A small Rust extension (`rust/`) accelerates one hot path: mmap'd
+reads of large cache entries. Storage backends:
 local, S3, GCS, Azure.
 
 ## Build & Development

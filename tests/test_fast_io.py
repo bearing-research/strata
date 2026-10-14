@@ -26,9 +26,8 @@ class TestFastIoAvailability:
         if fast_io.is_rust_available():
             from strata import _strata_core
 
-            # Only two live entry points; see rust/src/lib.rs.
+            # The one live entry point; see rust/src/lib.rs.
             assert hasattr(_strata_core, "read_file_bytes")
-            assert hasattr(_strata_core, "concat_ipc_streams")
 
 
 class TestReadFileMmapThreshold:
@@ -67,215 +66,6 @@ class TestReadFileMmapThreshold:
         # The size check must not swallow a genuinely missing file.
         with pytest.raises(FileNotFoundError):
             fast_io.read_file_mmap(str(tmp_path / "nope"))
-
-
-class TestConcatStreamBytes:
-    def test_concat_empty_list(self):
-        result = fast_io.concat_stream_bytes([])
-        assert result == b""
-
-    def test_concat_single_segment(self):
-        batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
-        stream_bytes = create_stream_bytes(batch)
-
-        result = fast_io.concat_stream_bytes([stream_bytes])
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 1
-        assert batches[0].num_rows == 3
-
-    def test_concat_multiple_segments(self):
-        segments = []
-        total_rows = 0
-        for i in range(3):
-            num_rows = 10 + i * 5
-            batch = pa.RecordBatch.from_pydict({"id": list(range(num_rows))})
-            segments.append(create_stream_bytes(batch))
-            total_rows += num_rows
-
-        result = fast_io.concat_stream_bytes(segments)
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 3
-        assert sum(b.num_rows for b in batches) == total_rows
-
-    def test_concat_preserves_schema(self):
-        batch = pa.RecordBatch.from_pydict(
-            {
-                "id": [1, 2, 3],
-                "value": [1.0, 2.0, 3.0],
-                "name": ["a", "b", "c"],
-            }
-        )
-        segments = [create_stream_bytes(batch) for _ in range(2)]
-
-        result = fast_io.concat_stream_bytes(segments)
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        assert reader.schema == batch.schema
-
-    def test_concat_with_empty_segment(self):
-        batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
-        stream_bytes = create_stream_bytes(batch)
-
-        result = fast_io.concat_stream_bytes([stream_bytes, b"", stream_bytes])
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 2
-        assert sum(b.num_rows for b in batches) == 6
-
-    def test_concat_all_empty_segments(self):
-        result = fast_io.concat_stream_bytes([b"", b"", b""])
-        assert result == b""
-
-    def test_concat_accepts_bytearray_segments(self):
-        batch1 = pa.RecordBatch.from_pydict({"id": [1, 2]})
-        batch2 = pa.RecordBatch.from_pydict({"id": [3, 4]})
-
-        segments = [
-            bytearray(create_stream_bytes(batch1)),
-            bytearray(create_stream_bytes(batch2)),
-        ]
-
-        result = fast_io.concat_stream_bytes(segments)
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 2
-        assert batches[0].column("id").to_pylist() == [1, 2]
-        assert batches[1].column("id").to_pylist() == [3, 4]
-
-    def test_concat_accepts_memoryview_segments(self):
-        batch1 = pa.RecordBatch.from_pydict({"id": [10]})
-        batch2 = pa.RecordBatch.from_pydict({"id": [20, 30]})
-
-        segments = [
-            memoryview(create_stream_bytes(batch1)),
-            memoryview(create_stream_bytes(batch2)),
-        ]
-
-        result = fast_io.concat_stream_bytes(segments)
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 2
-        assert batches[0].column("id").to_pylist() == [10]
-        assert batches[1].column("id").to_pylist() == [20, 30]
-
-    def test_concat_accepts_mixed_bytes_like_segments(self):
-        batch1 = pa.RecordBatch.from_pydict({"id": [1]})
-        batch2 = pa.RecordBatch.from_pydict({"id": [2, 3]})
-        batch3 = pa.RecordBatch.from_pydict({"id": [4, 5, 6]})
-
-        segments = [
-            create_stream_bytes(batch1),
-            bytearray(create_stream_bytes(batch2)),
-            memoryview(create_stream_bytes(batch3)),
-        ]
-
-        result = fast_io.concat_stream_bytes(segments)
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert [b.column("id").to_pylist() for b in batches] == [[1], [2, 3], [4, 5, 6]]
-
-    def test_concat_accepts_non_contiguous_memoryview_segments(self):
-        """Non-contiguous memoryviews copy through the fallback path."""
-        batch = pa.RecordBatch.from_pydict({"id": [7, 8, 9]})
-        original = create_stream_bytes(batch)
-
-        doubled = bytearray()
-        for value in original:
-            doubled.extend((value, value))
-        non_contiguous = memoryview(doubled)[::2]
-
-        result = fast_io.concat_stream_bytes([non_contiguous, original])
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 2
-        assert batches[0].column("id").to_pylist() == [7, 8, 9]
-        assert batches[1].column("id").to_pylist() == [7, 8, 9]
-
-    def test_concat_single_memoryview_returns_bytes(self):
-        """The single-segment fast path still normalizes to bytes."""
-        batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
-        segment = memoryview(create_stream_bytes(batch))
-
-        result = fast_io.concat_stream_bytes([segment])
-
-        assert isinstance(result, bytes)
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 1
-        assert batches[0].column("id").to_pylist() == [1, 2, 3]
-
-    def test_concat_preserves_data_values(self):
-        batch1 = pa.RecordBatch.from_pydict({"id": [1, 2], "value": ["a", "b"]})
-        batch2 = pa.RecordBatch.from_pydict({"id": [3, 4], "value": ["c", "d"]})
-        batch3 = pa.RecordBatch.from_pydict({"id": [5], "value": ["e"]})
-
-        segments = [
-            create_stream_bytes(batch1),
-            create_stream_bytes(batch2),
-            create_stream_bytes(batch3),
-        ]
-
-        result = fast_io.concat_stream_bytes(segments)
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-
-        all_ids = []
-        all_values = []
-        for batch in batches:
-            all_ids.extend(batch.column("id").to_pylist())
-            all_values.extend(batch.column("value").to_pylist())
-
-        assert all_ids == [1, 2, 3, 4, 5]
-        assert all_values == ["a", "b", "c", "d", "e"]
-
-    def test_concat_with_multiple_batches_per_segment(self):
-        sink = pa.BufferOutputStream()
-        schema = pa.schema([("id", pa.int64())])
-        writer = ipc.new_stream(sink, schema)
-        writer.write_batch(pa.RecordBatch.from_pydict({"id": [1, 2]}))
-        writer.write_batch(pa.RecordBatch.from_pydict({"id": [3, 4]}))
-        writer.close()
-        multi_batch_segment = sink.getvalue().to_pybytes()
-
-        single_batch = pa.RecordBatch.from_pydict({"id": [5]})
-        single_segment = create_stream_bytes(single_batch)
-
-        result = fast_io.concat_stream_bytes([multi_batch_segment, single_segment])
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-
-        # 2 from the first segment + 1 from the second
-        assert len(batches) == 3
-        all_ids = []
-        for batch in batches:
-            all_ids.extend(batch.column("id").to_pylist())
-        assert all_ids == [1, 2, 3, 4, 5]
-
-    def test_concat_large_number_of_segments(self):
-        segments = []
-        expected_total = 0
-        for i in range(100):
-            batch = pa.RecordBatch.from_pydict({"id": [i]})
-            segments.append(create_stream_bytes(batch))
-            expected_total += 1
-
-        result = fast_io.concat_stream_bytes(segments)
-
-        reader = ipc.open_stream(pa.BufferReader(result))
-        batches = list(reader)
-        assert len(batches) == 100
-        assert sum(b.num_rows for b in batches) == expected_total
 
 
 class TestStreamConcatIpcSegments:
@@ -405,18 +195,6 @@ class TestStreamConcatIpcSegments:
         list(gen)
         assert fetch_count == 3
 
-    def test_stream_vs_concat_produce_same_result(self):
-        segments = []
-        for i in range(5):
-            batch = pa.RecordBatch.from_pydict({"id": [i * 100 + j for j in range(10)]})
-            segments.append(create_stream_bytes(batch))
-
-        buffered_result = fast_io.concat_stream_bytes(segments.copy())
-
-        streaming_result = b"".join(fast_io.stream_concat_ipc_segments(iter(segments)))
-
-        assert buffered_result == streaming_result
-
     def test_stream_emits_single_schema_multiple_batches(self):
         """The IPC stream contract: one schema, then every batch, then EOS."""
         schema = pa.schema([("id", pa.int64()), ("value", pa.float64())])
@@ -500,9 +278,6 @@ class TestStreamConcatIpcSegments:
             "B",
             "B",  # batch 3
         ]
-
-        buffered = fast_io.concat_stream_bytes(segments)
-        assert combined == buffered
 
     def test_stream_respects_min_chunk_size(self):
         """Small batches are buffered into fewer chunks of at least min_chunk_size."""
@@ -796,7 +571,8 @@ class TestIncrementalIpcMerger:
         assert streams == 1
         assert total_rows == 3
 
-    def test_matches_concat_stream_bytes(self):
+    def test_matches_stream_concat_ipc_segments(self):
+        """The push merger (streaming responses) and the pull generator agree."""
         segments = []
         for i in range(3):
             batch = pa.RecordBatch.from_pydict({"id": [i, i + 100]})
@@ -806,10 +582,10 @@ class TestIncrementalIpcMerger:
         pieces = [merger.feed(s) for s in segments]
         pieces.append(merger.finish())
         incremental = b"".join(pieces)
-        buffered = fast_io.concat_stream_bytes(segments)
+        generated = b"".join(fast_io.stream_concat_ipc_segments(iter(segments)))
 
         t1 = ipc.open_stream(pa.BufferReader(incremental)).read_all()
-        t2 = ipc.open_stream(pa.BufferReader(buffered)).read_all()
+        t2 = ipc.open_stream(pa.BufferReader(generated)).read_all()
         assert t1.equals(t2)
 
     def test_schema_mismatch_raises(self):
@@ -898,11 +674,11 @@ class TestValidateIpcStreamReader:
         assert rows == fast_io.validate_ipc_stream(data)
 
 
-class TestConcatRefusesDamagedSegments:
+class TestMergeRefusesDamagedSegments:
     """A damaged segment must fail loudly, never silently shorten the result.
 
     The disk cache validates only a segment's head and tail markers, so a segment damaged in the
-    middle reaches concat, whose fast path reads the schema-message length.
+    middle reaches the merge, which every multi-row-group scan goes through.
     """
 
     @staticmethod
@@ -911,6 +687,13 @@ class TestConcatRefusesDamagedSegments:
         damaged = bytearray(segment)
         damaged[4:8] = (0xFFFFFF00).to_bytes(4, "little")
         return bytes(damaged)
+
+    @staticmethod
+    def _merge(segments: list[bytes]) -> bytes:
+        merger = fast_io.IncrementalIpcMerger()
+        pieces = [merger.feed(s) for s in segments]
+        pieces.append(merger.finish())
+        return b"".join(pieces)
 
     def test_a_damaged_segment_raises_instead_of_dropping_its_rows(self):
         good = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1, 2, 3]}))
@@ -922,19 +705,20 @@ class TestConcatRefusesDamagedSegments:
         assert damaged[-8:] == b"\xff\xff\xff\xff\x00\x00\x00\x00"
 
         with pytest.raises((OSError, ValueError)):
-            fast_io.concat_stream_bytes([good, damaged])
+            self._merge([good, damaged])
+        with pytest.raises((OSError, ValueError)):
+            b"".join(fast_io.stream_concat_ipc_segments(iter([good, damaged])))
 
     def test_a_segment_too_small_for_an_eos_marker_raises(self):
         good = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1, 2, 3]}))
         with pytest.raises((OSError, ValueError)):
-            fast_io.concat_stream_bytes([good, b"\xff\xff\xff\xff"])
+            self._merge([good, b"\xff\xff\xff\xff"])
 
     def test_well_formed_segments_are_unaffected(self):
-        """The guard leaves the ordinary multi-segment path alone."""
         first = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1, 2, 3]}))
         second = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [4, 5]}))
 
-        result = fast_io.concat_stream_bytes([first, b"", second])
+        result = self._merge([first, b"", second])
 
         table = ipc.open_stream(pa.BufferReader(result)).read_all()
         assert table.column("id").to_pylist() == [1, 2, 3, 4, 5]

@@ -1,8 +1,7 @@
-"""Arrow IPC stream I/O: cache reads, concatenation and validation.
+"""Arrow IPC stream I/O: cache reads, merging and validation.
 
-Prefer :func:`stream_concat_ipc_segments` for large responses: memory stays
-O(segment), not O(response). ``STRATA_FAST_CONCAT`` picks the buffered concat
-backend: ``rust`` (zero-parse, default when the extension is built) or ``pyarrow``.
+Segments are merged incrementally (:func:`stream_concat_ipc_segments`,
+:class:`IncrementalIpcMerger`), so memory stays O(segment), not O(response).
 """
 
 import os
@@ -25,20 +24,10 @@ try:
 except ImportError:
     pass
 
-# Concat implementation selection via environment variable
-# "rust" = use Rust byte manipulation (zero-parse, fastest)
-# "pyarrow" = use PyArrow parsing (slower but handles edge cases)
-_FAST_CONCAT_MODE = os.environ.get("STRATA_FAST_CONCAT", "rust" if _RUST_AVAILABLE else "pyarrow")
-
 
 def is_rust_available() -> bool:
     """Check if Rust acceleration module is available."""
     return _RUST_AVAILABLE
-
-
-def get_concat_mode() -> str:
-    """Return current concat mode ('rust' or 'pyarrow')."""
-    return _FAST_CONCAT_MODE
 
 
 # Below this size, Python's read_bytes() beats the Rust mmap path: mmap syscall + FFI + PyBytes copy
@@ -64,61 +53,6 @@ def read_file_mmap(path: str) -> bytes:
     from pathlib import Path
 
     return Path(path).read_bytes()
-
-
-def _concat_stream_bytes_pyarrow(segments: list[_BytesLike]) -> bytes:
-    """Concatenate by parsing and re-serializing batches; slower but handles every case."""
-    # Single pass straight to the output buffer; an intermediate list would add ~1x memory.
-    sink = pa.BufferOutputStream()
-    writer = None
-
-    for segment in segments:
-        if not segment:
-            continue
-        reader = ipc.open_stream(pa.BufferReader(segment))
-        if writer is None:
-            writer = ipc.new_stream(sink, reader.schema)
-        for batch in reader:
-            writer.write_batch(batch)
-
-    if writer is None:
-        return b""
-
-    writer.close()
-    return sink.getvalue().to_pybytes()
-
-
-def _concat_stream_bytes_rust(segments: list[_BytesLike]) -> bytes:
-    """Concatenate at the byte level without parsing Arrow data.
-
-    Takes C-contiguous bytes-like segments to avoid a ``bytes()`` copy. Falls back
-    to PyArrow if the extension is missing or errors.
-    """
-    if not _RUST_AVAILABLE or _rust_module is None:
-        return _concat_stream_bytes_pyarrow(segments)
-
-    try:
-        return bytes(_rust_module.concat_ipc_streams(segments))
-    except Exception:
-        return _concat_stream_bytes_pyarrow(segments)
-
-
-def concat_stream_bytes(segments: Iterable[_BytesLike]) -> bytes:
-    """Concatenate Arrow IPC stream segments into one buffered stream.
-
-    Empty segments are skipped; the backend follows ``STRATA_FAST_CONCAT``.
-    """
-    segment_list = [s for s in segments if s]
-    if not segment_list:
-        return b""
-
-    if len(segment_list) == 1:
-        return bytes(segment_list[0])
-
-    if _FAST_CONCAT_MODE == "rust":
-        return _concat_stream_bytes_rust(segment_list)
-    else:
-        return _concat_stream_bytes_pyarrow(segment_list)
 
 
 class _StreamingBuffer:
