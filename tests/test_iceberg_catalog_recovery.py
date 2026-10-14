@@ -87,3 +87,30 @@ class TestCatalogRebuiltAfterIoError:
         assert catalog.load_table("db.events") is sentinel
         assert catalog.load_table("db.events") is sentinel
         assert healthy.calls == 2
+
+
+# What pyarrow raised in a real run with the S3 endpoint down (MinIO stopped), and the
+# refusals that must not read as an outage.
+_REFUSED = (
+    "When reading information for key 'warehouse/ns/events/metadata/00024.metadata.json' in "
+    "bucket 'e608': AWS Error NETWORK_CONNECTION during HeadObject operation: curlCode: 7, "
+    "Couldn't connect to server"
+)
+
+
+@pytest.mark.parametrize(
+    ("exc", "unreachable"),
+    [
+        (OSError(_REFUSED), True),
+        (OSError("AWS Error SERVICE_UNAVAILABLE during GetObject operation: Please reduce"), True),
+        (ConnectionRefusedError(61, "Connection refused"), True),
+        (OSError("AWS Error ACCESS_DENIED during GetObject operation: Access Denied"), False),
+        (FileNotFoundError("metadata.json"), False),
+        (ValueError("NETWORK_CONNECTION"), False),
+    ],
+    ids=["refused", "s3-503", "socket-refused", "access-denied", "missing-file", "not-io"],
+)
+def test_an_unreachable_object_store_is_told_from_a_refusal(exc, unreachable):
+    from strata.iceberg import object_store_unreachable
+
+    assert object_store_unreachable(exc) is unreachable

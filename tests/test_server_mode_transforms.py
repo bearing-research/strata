@@ -1560,6 +1560,42 @@ class TestServiceModeReviewFindings:
         assert answered_before_the_plan_ended
         assert get_artifact_store().stats()["total_versions"] == 0
 
+    @pytest.mark.parametrize(
+        ("path", "transform"),
+        [
+            ("/v1/materialize", {"executor": "scan@v1", "params": {}}),
+            (
+                "/v1/artifacts/materialize",
+                {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT 1"}},
+            ),
+        ],
+        ids=["scan", "transform-input"],
+    )
+    def test_an_unreachable_object_store_while_planning_is_a_503(
+        self, server_mode_app, path, transform
+    ):
+        """Planning reads table metadata from the object store, cached scan or not, so an
+        outage came back as a bare 500 (a scan) or as the caller's 400 (a transform input)."""
+        import strata.server as server_module
+
+        server_module._state._draining = False  # a MagicMock attribute is truthy
+        server_module._state.planner.plan.side_effect = OSError(
+            "When reading information for key 'wh/taxi/trips/metadata/00001.metadata.json' in "
+            "bucket 'lake': AWS Error NETWORK_CONNECTION during HeadObject operation: "
+            "curlCode: 7, Couldn't connect to server"
+        )
+
+        response = server_mode_app.post(
+            path,
+            json={"inputs": ["s3://lake/wh#taxi.trips"], "transform": transform},
+            headers=_auth_headers(scopes="admin:*"),
+        )
+
+        assert response.status_code == 503, response.text
+        assert response.headers["Retry-After"] == "5"
+        assert "could not be reached" in response.json()["detail"]
+        assert "00001.metadata.json" not in response.text
+
     def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_auth_app):
         """The build carries input_uris and params, so the pull-model manifest is not empty."""
         # Artifact inputs resolve through the store (tenant-gated), so a fictional id is a

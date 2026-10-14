@@ -29,6 +29,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **An unreachable object store is a 503, not a 500.** Planning reads a
+  table's metadata from the object store on every scan, cached data or not, so
+  with the store down a scan failed with a bare 500 (or a dropped connection)
+  and a transform over a table blamed the caller with a 400 that showed the
+  bucket key. Both now answer 503 with `Retry-After`. Access denied and missing
+  files are not reported this way. (#PR)
 - **Smaller fixes from the core data-plane review.** A disk-cache read that hits
   an I/O error (such as running out of file handles) is a miss that keeps the
   entry, instead of deleting a valid one. Stopping cache warming waits for the
