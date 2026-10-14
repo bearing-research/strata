@@ -17,6 +17,12 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Smaller fixes from the core data-plane review.** A disk-cache read that hits
+  an I/O error (such as running out of file handles) is a miss that keeps the
+  entry, instead of deleting a valid one. Stopping cache warming waits for the
+  jobs it cancels. A legacy SQLite store's tenant normalization runs in one
+  write transaction, so a failure part way keeps the old uniqueness index and
+  two processes upgrading together cannot interleave. (#1172)
 - **A failed upload to S3 or GCS no longer leaves a truncated blob.** PyArrow
   completes an object-store upload when its stream closes, even after an error,
   so a copy that failed midway left part of the blob at its final key. An

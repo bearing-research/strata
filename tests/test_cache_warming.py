@@ -724,3 +724,32 @@ class TestAsyncWarmDoesNotReportFailuresAsSuccess:
         assert job.row_groups_cached == 3
         assert job.bytes_written == 30
         assert job.errors == []
+
+
+@pytest.mark.asyncio
+async def test_stop_waits_for_the_jobs_it_cancels():
+    """Cancelling without waiting returned while a job was still cleaning up, so shutdown
+    could close the fetcher under it."""
+    from strata.cache_warmer import CacheWarmer
+    from strata.types import WarmAsyncRequest
+
+    warmer = CacheWarmer(planner=None, fetcher=None, metrics=None)
+    started = asyncio.Event()
+    finished: list[str] = []
+
+    async def run(job):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)  # cleanup that takes a turn of the loop
+            finished.append(job.job_id)
+
+    warmer._run_job = run
+    await warmer.start()
+    job_id = await warmer.start_job(WarmAsyncRequest(tables=["file:///wh#ns.t"]))
+    await started.wait()
+
+    await warmer.stop()
+
+    assert finished == [job_id]

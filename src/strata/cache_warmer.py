@@ -115,11 +115,16 @@ class CacheWarmer:
             except asyncio.CancelledError:
                 pass
 
+        cancelled: list[asyncio.Task] = []
         async with self._lock:
             for job in self._jobs.values():
-                if job._task and not job._task.done():
+                task = job._task
+                if task is not None and not task.done():
                     job.cancelled = True
-                    job._task.cancel()
+                    task.cancel()
+                    cancelled.append(task)
+        # Wait them out, so none is still fetching after shutdown moves on.
+        await asyncio.gather(*cancelled, return_exceptions=True)
 
     async def start_job(
         self,

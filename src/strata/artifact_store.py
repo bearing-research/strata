@@ -1029,7 +1029,10 @@ class ArtifactStore:
                 # be '' (not NULL): SQLite treats NULLs as distinct, so the (tenant,
                 # provenance_hash) uniqueness would not hold. Drop the index, normalize NULL -> '',
                 # collapse duplicate ready rows, rebuild. Idempotent: skips once no NULL tenants
-                # remain and the index exists.
+                # remain and the index exists. One write transaction for the check and the
+                # rebuild: DROP INDEX alone would commit by itself, so a failure part way left no
+                # index, and two processes upgrading together could interleave.
+                self._dialect.begin_write(conn, "__schema__")
                 has_null_tenant = (
                     conn.execute(
                         "SELECT 1 FROM artifact_versions WHERE tenant IS NULL LIMIT 1"
@@ -1066,7 +1069,7 @@ class ArtifactStore:
                         WHERE state = 'ready'
                         """
                     )
-                    conn.commit()
+                conn.commit()
 
                 cursor = conn.execute("PRAGMA table_info(artifact_names)")
                 name_columns = {row["name"] for row in cursor.fetchall()}

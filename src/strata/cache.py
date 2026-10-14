@@ -248,9 +248,9 @@ class DiskCache:
 
             data = fast_io.read_file_mmap(str(path))
         except OSError:
-            # Vanished or unreadable (an I/O error, not Arrow corruption, since this returns raw
-            # bytes): drop the entry and treat it as a miss.
-            self._delete_entry_files(path)
+            # A miss, but keep the entry: the error may be the process's (out of file handles)
+            # rather than the file's. Damage is caught below by the markers, and a refetch's
+            # put replaces the file anyway.
             return None
 
         # This path does not parse Arrow, and keys are never invalidated, so a damaged entry would

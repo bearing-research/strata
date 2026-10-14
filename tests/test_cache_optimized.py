@@ -80,6 +80,25 @@ class TestDiskCacheGetAsStreamBytes:
         assert result_batch.column("value").to_pylist() == [1.0, 2.0, 3.0, 4.0, 5.0]
         assert result_batch.column("name").to_pylist() == ["a", "b", "c", "d", "e"]
 
+    def test_a_read_error_is_a_miss_that_keeps_the_entry(
+        self, strata_config, cache_key, sample_batch, monkeypatch
+    ):
+        """Out of file handles is the process's problem, not the entry's: deleting a valid
+        entry on any OSError made the next read refetch it."""
+        import errno
+
+        cache = DiskCache(strata_config)
+        cache.put(cache_key, sample_batch)
+
+        def out_of_handles(path):
+            raise OSError(errno.EMFILE, "Too many open files")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(fast_io, "read_file_mmap", out_of_handles)
+            assert cache.get_as_stream_bytes(cache_key) is None
+
+        assert cache.get_as_stream_bytes(cache_key) is not None
+
 
 class TestDiskCacheGetPath:
     def test_returns_none_for_missing_key(self, strata_config, cache_key):
