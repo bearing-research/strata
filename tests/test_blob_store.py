@@ -370,9 +370,20 @@ class TestS3BackendAtomicity:
     """Writer atomicity for S3BlobStore over a fake PyArrow filesystem."""
 
     class _FakeOutputStream:
-        def __init__(self, sink: Path, record: list[str], *, fail_on_open: bool = False):
+        """Completes on exit even after an error, as PyArrow's object-store streams do."""
+
+        def __init__(
+            self,
+            sink: Path,
+            record: list[str],
+            *,
+            fail_on_open: bool = False,
+            fail_on_write: int | None = None,
+        ):
             self._sink = sink
             self._record = record
+            self._writes = 0
+            self._fail_on_write = fail_on_write
             if fail_on_open:
                 self._record.append("open_failed")
                 raise OSError("simulated s3 open failure")
@@ -387,6 +398,9 @@ class TestS3BackendAtomicity:
             self._record.append("close")
 
         def write(self, data: bytes) -> None:
+            self._writes += 1
+            if self._writes == self._fail_on_write:
+                raise OSError("simulated s3 write failure")
             self._handle.write(data)
 
     class _FakeS3FileSystem:
@@ -396,8 +410,10 @@ class TestS3BackendAtomicity:
             *,
             open_fails: bool = False,
             open_raises_on_call: int | None = None,
+            fail_on_write: int | None = None,
         ):
             self.root = root
+            self._fail_on_write = fail_on_write
             self._record: list[str] = []
             self.open_fails = open_fails
             self._open_raises_on_call = open_raises_on_call
@@ -410,7 +426,16 @@ class TestS3BackendAtomicity:
                 return TestS3BackendAtomicity._FakeOutputStream(
                     sink, self._record, fail_on_open=True
                 )
-            return TestS3BackendAtomicity._FakeOutputStream(sink, self._record)
+            return TestS3BackendAtomicity._FakeOutputStream(
+                sink, self._record, fail_on_write=self._fail_on_write
+            )
+
+        def delete_file(self, key: str) -> None:
+            self._record.append("delete")
+            sink = self.root / key.replace("/", "_")
+            if not sink.exists():
+                raise FileNotFoundError(key)
+            sink.unlink()
 
     def _build_store_with_fake_fs(self, fake_fs, prefix: str = "artifacts") -> S3BlobStore:
         store = S3BlobStore.__new__(S3BlobStore)
@@ -472,7 +497,21 @@ class TestS3BackendAtomicity:
                 writer.write(b"payload")
 
         assert captured_tmp and not captured_tmp[0].exists()
-        assert fake_fs._record == ["open_failed"]
+        assert fake_fs._record == ["open_failed", "delete"]
+
+    def test_a_failed_upload_leaves_no_object_at_the_key(self, tmp_path: Path):
+        """Leaving the stream completes the upload, so a copy that failed midway used to leave
+        a truncated object, which blob_exists reported and an import retry then kept."""
+        fake_fs = self._FakeS3FileSystem(tmp_path, fail_on_write=2)
+        store = self._build_store_with_fake_fs(fake_fs)
+        source = tmp_path / "incoming.bin"
+        source.write_bytes(b"x" * (3 * blob_store_module.BLOB_STREAM_CHUNK_BYTES))
+
+        with pytest.raises(OSError, match="simulated s3 write failure"):
+            store.publish_blob_from_path("artifact-1", 1, source)
+
+        assert not (tmp_path / "fake-bucket_artifacts_artifact-1@v=1.arrow").exists()
+        assert fake_fs._record[-2:] == ["close", "delete"]
 
     def test_publish_from_path_skips_double_staging(self, tmp_path: Path, monkeypatch):
         """publish_blob_from_path uploads the source directly, without mkstemp."""

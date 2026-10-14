@@ -17,6 +17,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A failed upload to S3 or GCS no longer leaves a truncated blob.** PyArrow
+  completes an object-store upload when its stream closes, even after an error,
+  so a copy that failed midway left part of the blob at its final key. An
+  import retried after that saw the blob as present and kept it. The partial
+  object is now deleted when an upload fails. (#PR)
 - **The rate limiter counts the caller, on a clock that cannot go back.** The
   per-client limit was keyed on the first `X-Forwarded-For` entry, which the
   caller writes when a proxy appends, so a new value per request was never
