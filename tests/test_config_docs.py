@@ -24,7 +24,7 @@ _CLIENT_SRC = _REPO / "packages" / "strata-client" / "src"
 # Read straight from ``os.environ``, not declared on StrataConfig: logging and
 # tracing initialize before config exists, and ``strata-worker`` has no StrataConfig.
 _ENV_LOOKUP = re.compile(
-    r"""(?:os\.environ(?:\.get)?[(\[]|os\.getenv\(|_positive_int_env\()\s*["'](STRATA_[A-Z0-9_]+)["']"""
+    r"""(?:os\.environ(?:\.get)?[(\[]|os\.getenv\(|_positive_env\()\s*["'](STRATA_[A-Z0-9_]+)["']"""
 )
 _DOCUMENTED = re.compile(r"`(STRATA_[A-Z0-9_]+)`")
 

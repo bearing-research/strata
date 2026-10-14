@@ -16,6 +16,7 @@ on; a dead process's leases expire and the others take over.
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
@@ -29,6 +30,7 @@ import httpx
 from strata_pool.backend import Backend
 from strata_pool.store import Reservation, Store
 from strata_pool.types import (
+    STATUS_IN_BODY_HEADER,
     TERMINAL_JOB_STATES,
     WORKER_TOKEN_ENV,
     Job,
@@ -578,6 +580,7 @@ class Pool:
                         },
                         timeout=timeout,
                     )
+                    status, content = _worker_answer(response)
         except (httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
             # Timeouts that never reached the worker. A machine black-holing packets looks like
             # this, and treating it as a slow job would hand the next job to a dead machine.
@@ -603,12 +606,12 @@ class Pool:
             job.error = f"pool failed to run the job: {exc!r}"
         else:
             keep_worker = True
-            if response.status_code >= 400:
+            if status >= 400:
                 job.state = JobState.FAILED
-                job.error = f"worker returned {response.status_code}: {response.text[:500]}"
+                job.error = f"worker returned {status}: {content.decode(errors='replace')[:500]}"
             else:
                 job.state = JobState.COMPLETED
-                job.result = response.content
+                job.result = content
 
         duration_ms = (self._monotonic() - started_at_mono) * 1000
         job.completed_at = self._wall()
@@ -1094,3 +1097,15 @@ class Pool:
         error = task.exception()
         if error is not None:
             logger.error("pool background task failed", exc_info=error)
+
+
+def _worker_answer(response: httpx.Response) -> tuple[int, bytes]:
+    """The status and body the worker answered with.
+
+    A worker that streamed spaces to keep a proxy from ending the request sends both in
+    its body (``STATUS_IN_BODY_HEADER``); leading spaces are JSON whitespace.
+    """
+    if STATUS_IN_BODY_HEADER not in response.headers:
+        return response.status_code, response.content
+    answer = json.loads(response.content)
+    return int(answer["status_code"]), str(answer["content"]).encode()

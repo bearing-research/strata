@@ -1,11 +1,14 @@
 """What the pool does with each way a job can end."""
 
 import asyncio
+import json
 import sqlite3
 
 import httpx
+import pytest
 from conftest import FakeBackend, FakeWorkers
 from strata_pool import JobState, MachineType, WorkerState
+from strata_pool.types import STATUS_IN_BODY_HEADER
 
 
 async def test_the_payload_reaches_the_worker_verbatim(make_pool):
@@ -32,6 +35,54 @@ async def test_a_worker_error_fails_the_job_and_keeps_the_machine(make_pool):
     assert "500" in done.error
     assert backend.stopped == [], "a job that fails on a healthy machine is not the machine's fault"
     assert pool.store.get_worker(done.worker_id).state is WorkerState.WARM
+
+
+def _streamed(status_code: int, content: str) -> httpx.Response:
+    """What a heartbeat worker answers: 200, spaces, then the real status and body."""
+    body = b"   " + json.dumps({"status_code": status_code, "content": content}).encode()
+    return httpx.Response(200, content=body, headers={STATUS_IN_BODY_HEADER: "1"})
+
+
+async def test_a_streamed_answer_completes_with_the_body_inside(make_pool):
+    workers = FakeWorkers(lambda request: _streamed(200, '{"success": true}'))
+    pool = make_pool(workers=workers)
+
+    job = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+    done = await pool.wait(job.id)
+
+    assert done.state is JobState.COMPLETED
+    assert done.result == b'{"success": true}'
+
+
+async def test_a_streamed_failure_fails_the_job_and_keeps_the_machine(make_pool):
+    """The worker sent 200 to keep the proxy open; the status inside is what counts."""
+    backend = FakeBackend()
+    workers = FakeWorkers(lambda request: _streamed(502, '{"detail": "upload failed"}'))
+    pool = make_pool(backend=backend, workers=workers)
+
+    job = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+    done = await pool.wait(job.id)
+
+    assert done.state is JobState.FAILED
+    assert done.error == 'worker returned 502: {"detail": "upload failed"}'
+    assert backend.stopped == []
+    assert pool.store.get_worker(done.worker_id).state is WorkerState.WARM
+
+
+@pytest.mark.parametrize("body", [b"   not json", b'  {"content": "no status"}'])
+async def test_a_malformed_streamed_answer_fails_the_job_and_retires_the_machine(make_pool, body):
+    backend = FakeBackend()
+    workers = FakeWorkers(
+        lambda request: httpx.Response(200, content=body, headers={STATUS_IN_BODY_HEADER: "1"})
+    )
+    pool = make_pool(backend=backend, workers=workers)
+
+    job = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+    done = await pool.wait(job.id)
+
+    assert done.state is JobState.FAILED
+    assert "pool failed to run the job" in done.error
+    assert backend.stopped == ["machine-1"]
 
 
 async def test_an_unreachable_worker_is_stopped_and_forgotten(make_pool):

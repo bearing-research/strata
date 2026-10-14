@@ -358,13 +358,15 @@ A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
 it.
 
-**A job on a RunPod worker must finish within 100 seconds.** RunPod's proxy
-ends any request after 100 seconds with a `524`, and the pool's call to a
-worker (`POST {endpoint}/execute`) lasts the whole job, so a longer cell fails
-however high `job_timeout_seconds` is set. Run long cells on the Docker or Fly
-backend. Reaching the worker on a mapped TCP port would lift the limit, but
-that link is plain HTTP, which would send the worker credential unencrypted,
-so the backend does not do it yet.
+**A long job keeps its request sending.** RunPod's proxy ends a request that
+sends nothing for 125 seconds with a `524`, and the pool's call to a worker
+(`POST {endpoint}/execute`) lasts the whole job. So the backend sets
+`STRATA_WORKER_HEARTBEAT_SECONDS=30` on every pod: `strata-worker` then answers
+a job still running after 30 seconds with a space every 30 seconds and the
+result at the end, which the proxy lets run (tested to 15 minutes). A machine
+type's `env`, or `provider_options`, can set another interval. A worker image
+that is not `strata-worker` has to do the same to run jobs past 125 seconds;
+see the contract below.
 
 ## The Fly Machines backend
 
@@ -461,6 +463,14 @@ The pool remains image-agnostic. Anything holding up these four points works:
 | `GET /health` → 200 when ready | No auth. It is polled before the machine is trusted with anything, and it reveals nothing secret (`strata-worker` reports its capabilities and hardware) |
 | `POST /execute` → 200 with the result body | The request body is the job payload, opaque to the pool |
 | Require `Authorization: Bearer $STRATA_WORKER_TOKEN` on `/execute` | Reject anything else with 401 |
+
+A worker that cannot answer within a proxy's idle limit can keep the request
+sending instead. When `STRATA_WORKER_HEARTBEAT_SECONDS` is in its environment,
+it answers 200 with the `X-Strata-Status-In-Body` header, sends a space every
+that many seconds, and ends with `{"status_code": <int>, "content": "<body>"}`:
+the status and body it would have answered with. The pool reads those as the
+answer, so a 4xx or 5xx inside fails the job as usual. `strata-worker` does
+this only for an answer not ready within one interval.
 
 A worker that also serves `POST /v1/executions/{build_id}/cancel` behind the
 same token, as `strata-worker` does, can have a running job cancelled without
