@@ -26,9 +26,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   frontend:
     name: Frontend Checks
@@ -176,12 +173,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
-        with:
-          toolchain: stable
-          cache-workspaces: rust
-
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
@@ -189,7 +180,7 @@ jobs:
           version: "latest"
           save-cache: false
 
-      - name: Install dependencies and build Rust extension
+      - name: Install dependencies
         run: uv sync --all-extras
 
       - name: Type-check shipped code
@@ -213,7 +204,6 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
 
     env:
-      RUSTUP_TOOLCHAIN: stable
       # The unit run, through diffcone in the steps below (Windows skips the
       # notebook subsystem).
       UNIT_TEST_ARGS: >-
@@ -247,27 +237,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      # macOS images ship Homebrew's rust + rustup (RUSTUP_HOME under
-      # /opt/homebrew). setup-rust-toolchain then skips installing rustup and
-      # does not put ~/.cargo/bin on PATH, so the toolchain lands in ~/.rustup
-      # while cargo still reads Homebrew's home and maturin's cargo-metadata
-      # call fails. Removing Homebrew's rust forces the action's curl install.
-      - name: Remove Homebrew rust on macOS
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew list --formula 2>/dev/null | grep -E '^(rust|rustup-init|rustup)$' \
-            | xargs -I {} brew uninstall --force --ignore-dependencies {} \
-            || true
-          rm -rf /opt/homebrew/etc/.rustup
-          which rustup 2>/dev/null || echo "rustup removed"
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
-        with:
-          toolchain: stable
-          cache-workspaces: rust
-
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
@@ -278,7 +247,7 @@ jobs:
           # on 3.13 (--all-extras, a superset). Every other setup-uv restores only.
           save-cache: ${{ matrix.python-version == '3.13' }}
 
-      - name: Install dependencies and build Rust extension
+      - name: Install dependencies
         shell: bash
         run: uv sync --all-extras
 
@@ -351,24 +320,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
-        with:
-          toolchain: stable
-          cache-workspaces: rust
-
-      - name: Verify Rust toolchain
-        # macOS runners sometimes leave the rustup proxy half-configured, and
-        # cargo from a child shell (maturin under uv sync) resolves to
-        # rustup-init ("unexpected argument 'metadata'"). Setting the default
-        # fixes dispatch and fails fast with diagnostics if it is still broken.
-        shell: bash
-        run: |
-          rustup default stable
-          rustup show active-toolchain
-          cargo --version
-          rustc --version
-
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
@@ -376,7 +327,7 @@ jobs:
           version: "latest"
           save-cache: false
 
-      - name: Install dependencies and build Rust extension
+      - name: Install dependencies
         run: uv sync --all-extras
 
       # diffcone, as in the unit tests: the full run recorded and checked on
@@ -432,7 +383,6 @@ jobs:
             r: oldrel-1
 
     env:
-      RUSTUP_TOOLCHAIN: stable
       R_TEST_ARGS: >-
         tests/notebook/test_r_cells.py
         tests/notebook/test_language_r_executor.py
@@ -444,23 +394,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      # Same Homebrew rust eviction as the unit-tests job.
-      - name: Remove Homebrew rust on macOS
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew list --formula 2>/dev/null | grep -E '^(rust|rustup-init|rustup)$' \
-            | xargs -I {} brew uninstall --force --ignore-dependencies {} \
-            || true
-          rm -rf /opt/homebrew/etc/.rustup
-          which rustup 2>/dev/null || echo "rustup removed"
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
-        with:
-          toolchain: stable
-          cache-workspaces: rust
-
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
@@ -468,7 +401,7 @@ jobs:
           version: "latest"
           save-cache: false
 
-      - name: Install dependencies and build Rust extension
+      - name: Install dependencies
         run: uv sync --all-extras
 
       # use-public-rspm points install.packages() at posit's prebuilt Linux
@@ -539,24 +472,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
-        with:
-          toolchain: stable
-          cache-workspaces: rust
-
-      - name: Verify Rust toolchain
-        # macOS runners sometimes leave the rustup proxy half-configured, and
-        # cargo from a child shell (maturin under uv sync) resolves to
-        # rustup-init ("unexpected argument 'metadata'"). Setting the default
-        # fixes dispatch and fails fast with diagnostics if it is still broken.
-        shell: bash
-        run: |
-          rustup default stable
-          rustup show active-toolchain
-          cargo --version
-          rustc --version
-
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
@@ -564,7 +479,7 @@ jobs:
           version: "latest"
           save-cache: false
 
-      - name: Install backend dependencies and build Rust extension
+      - name: Install backend dependencies
         run: uv sync --all-extras
 
       - name: Set up Node.js

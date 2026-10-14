@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 keywords = [
     "notebook",
     "materialization",
@@ -196,8 +197,8 @@ Issues = "https://github.com/bearing-research/strata/issues"
 Changelog = "https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"
 
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
-build-backend = "maturin"
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
 
 [tool.uv]
 python-preference = "only-managed"
@@ -212,22 +213,11 @@ members = ["packages/strata-client", "packages/strata-pool"]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
 
-[tool.maturin]
-manifest-path = "rust/Cargo.toml"
-python-source = "src"
-module-name = "strata._strata_core"
-features = ["pyo3/extension-module"]
-# The bundled frontend is not Python, so include it explicitly. Release CI
-# copies frontend/dist/ to src/strata/_frontend/ before building.
-include = [
-    { path = "src/strata/_frontend/**/*", format = ["sdist", "wheel"] },
-    # Coding-agent skill, discovered from `<site-packages>/strata/.agents/skills/`.
-    { path = "src/strata/.agents/skills/**/*", format = ["sdist", "wheel"] },
-    # Maturin's sdist is rooted at ``rust/``. Without these, ``License-File:
-    # LICENSE`` points at a missing file and PyPI rejects the upload.
-    { path = "LICENSE", format = ["sdist"] },
-    { path = "README.md", format = ["sdist"] },
-]
+[tool.uv.build-backend]
+# The distribution is strata-notebook; the import package is strata, under src/.
+# Release CI copies frontend/dist/ to src/strata/_frontend/ before building;
+# the backend packages it like any other file there (it ignores .gitignore).
+module-name = "strata"
 
 [tool.ruff]
 line-length = 100
@@ -248,7 +238,7 @@ python = ".venv"
 include = ["src", "packages/strata-client/src", "packages/strata-pool/src"]
 
 [tool.ty.rules]
-# Optional deps (Rust ext, ADBC drivers) use guarded imports
+# Optional deps (ADBC drivers) use guarded imports
 unresolved-import = "warn"
 
 [tool.pytest.ini_options]
@@ -278,8 +268,6 @@ branch = true
 # coverage is wired in.
 parallel = false
 omit = [
-    # Rust extension: imported, never executed from Python.
-    "*/strata/_strata_core/*",
     # Re-export shim only.
     "*/strata/__init__.py",
 ]

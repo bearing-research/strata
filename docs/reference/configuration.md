@@ -69,7 +69,6 @@ proxy_token = "…"           # or STRATA_PROXY_TOKEN
 | `STRATA_FETCH_PARALLELISM`     | `4`     | Max concurrent fetches per scan |
 | `STRATA_MAX_FETCH_WORKERS`     | `32`    | Max threads in fetch pool       |
 | `STRATA_FETCH_TIMEOUT_SECONDS` | `60.0`  | Per-fetch timeout               |
-| `STRATA_MMAP_MIN_BYTES`        | `4194304` (4 MiB) | Cache reads at or above this size go through the Rust mmap path; `0` forces it always. Environment only |
 
 ## Resource Limits
 

@@ -168,9 +168,9 @@ suspicion from reading code that hasn't been confirmed.
    the scan with filters equals the scan without filters, filtered in
    Python.
 6. **Disk cache eviction vs concurrent readers (lead).** `cache.py`
-   evicts to a size limit, and the Rust extension (`rust/src/lib.rs`)
-   mmaps cache files. A small TLA+ model of write (temp file + rename),
-   evict (unlink) and read (open, then mmap) would settle whether a
+   evicts to a size limit while readers read cache files whole. A small
+   TLA+ model of write (temp file + rename), evict (unlink) and read
+   (open, then read) would settle whether a
    reader can see a partial or deleted file. Replay any violation with
    threads.
 7. **Stream lifecycle.** `QoSAdmission._release`'s docstring says

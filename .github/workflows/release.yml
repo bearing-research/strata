@@ -1,7 +1,7 @@
 name: Release
 
-# A `v*` tag builds the frontend, the platform wheels (abi3-py312: one per
-# platform) and an sdist, publishes to TestPyPI via OIDC trusted publishing,
+# A `v*` tag builds the frontend, one pure-Python wheel and an sdist per
+# package, publishes to TestPyPI via OIDC trusted publishing,
 # then to PyPI after manual approval on the protected `pypi` environment,
 # then pushes the server image to ghcr.io/bearing-research/strata.
 #
@@ -32,7 +32,7 @@ env:
 jobs:
   # --- pre-flight ----------------------------------------------------
   # Fails before any wheel build if the tag disagrees with the pyproject
-  # versions or CHANGELOG.md has no section for this version. maturin builds
+  # versions or CHANGELOG.md has no section for this version. The build uses
   # whatever pyproject.toml says, regardless of the tag.
   preflight:
     name: Pre-flight checks
@@ -119,8 +119,8 @@ jobs:
           PY
 
   # --- frontend bundling ---------------------------------------------
-  # Built once and shared as an artifact; each wheel job stages it into
-  # src/strata/_frontend before maturin runs.
+  # Built once and shared as an artifact; the wheel job stages it into
+  # src/strata/_frontend before building.
   frontend:
     name: Build frontend
     runs-on: ubuntu-latest
@@ -152,15 +152,13 @@ jobs:
           path: frontend/dist
           if-no-files-found: error
 
-  # --- linux wheels (x86_64 + aarch64) -------------------------------
-  linux:
-    name: wheel · linux ${{ matrix.target }}
+  # --- strata-notebook wheel + sdist ---------------------------------
+  # Pure Python (py3-none-any): one wheel serves every platform and 3.12+.
+  wheel:
+    name: wheel · strata-notebook
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     needs: frontend
-    strategy:
-      matrix:
-        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -168,98 +166,28 @@ jobs:
           # may have moved past the tag; rebuild the tagged source instead.
           ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
 
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: frontend-dist
           path: src/strata/_frontend
 
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b  # v1
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          target: ${{ matrix.target }}
-          # Linux x86_64 also builds the one sdist.
-          args: >-
-            --release --out dist
-            ${{ matrix.target == 'x86_64' && '--sdist' || '' }}
-          sccache: 'true'
-          manylinux: auto
+          python-version: "3.12"
+          version: "latest"
+
+      - name: Build the strata-notebook wheel + sdist
+        run: uv build --package strata-notebook --out-dir dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: dist-linux-${{ matrix.target }}
-          path: dist
-          if-no-files-found: error
-
-  # --- macos wheels (intel + apple silicon) --------------------------
-  macos:
-    name: wheel · macos ${{ matrix.target }}
-    runs-on: macos-latest
-    timeout-minutes: 30
-    needs: frontend
-    strategy:
-      matrix:
-        target: [x86_64, aarch64]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          # A dispatch run would otherwise build the dispatching branch, which
-          # may have moved past the tag; rebuild the tagged source instead.
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
-
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
-        with:
-          name: frontend-dist
-          path: src/strata/_frontend
-
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b  # v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist
-          sccache: 'true'
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: dist-macos-${{ matrix.target }}
-          path: dist
-          if-no-files-found: error
-
-  # --- windows wheels ------------------------------------------------
-  windows:
-    name: wheel · windows ${{ matrix.target }}
-    runs-on: windows-latest
-    timeout-minutes: 45
-    needs: frontend
-    strategy:
-      matrix:
-        target: [x64]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          # A dispatch run would otherwise build the dispatching branch, which
-          # may have moved past the tag; rebuild the tagged source instead.
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
-
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
-        with:
-          name: frontend-dist
-          path: src/strata/_frontend
-
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b  # v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist
-          sccache: 'true'
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: dist-windows-${{ matrix.target }}
+          name: dist-notebook
           path: dist
           if-no-files-found: error
 
   # --- strata-client wheel (pure-Python, independent distribution) ---
-  # One py3-none-any wheel + sdist, no frontend or Rust. Uploaded as a dist-*
+  # One py3-none-any wheel + sdist, no frontend. Uploaded as a dist-*
   # artifact so the publish jobs pick it up by pattern.
   client-wheel:
     name: wheel · strata-client
@@ -357,26 +285,24 @@ jobs:
           if-no-files-found: error
 
   # --- wheel smoke test ----------------------------------------------
-  # Installs the Linux x86_64 wheel in a fresh venv and checks imports,
-  # console scripts, /health and the frontend bundle, so a missing dep,
-  # broken entry point or unloadable extension fails before it takes a PyPI
-  # version slot. The other wheels are cross-built and cannot run here; they
-  # share the Python sources.
+  # Installs the wheel in a fresh venv and checks imports, console scripts,
+  # /health and the frontend bundle, so a missing dep or broken entry point
+  # fails before it takes a PyPI version slot.
   wheel-test:
-    name: Smoke-test linux x86_64 wheel · python ${{ matrix.python }}
+    name: Smoke-test the wheel · python ${{ matrix.python }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [linux, macos, windows]
+    needs: wheel
     strategy:
-      # Checks the abi3-py312 claim (one wheel for every 3.12+) on each
-      # interpreter, not just setup-uv's default.
+      # One wheel for every 3.12+: checked on each interpreter, not just
+      # setup-uv's default.
       fail-fast: false
       matrix:
         python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
-          name: dist-linux-x86_64
+          name: dist-notebook
           path: dist
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
@@ -390,7 +316,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          WHEEL=$(ls dist/strata_notebook-*-cp312-abi3-manylinux*x86_64*.whl | head -1)
+          WHEEL=$(ls dist/strata_notebook-*-py3-none-any.whl | head -1)
           echo "::notice::Testing wheel ${WHEEL}"
 
           # Strata's runtime guard requires a uv-managed venv (the `uv =`
@@ -458,7 +384,7 @@ jobs:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [linux, macos, windows, client-wheel, pool-wheel, wheel-test]
+    needs: [wheel, client-wheel, pool-wheel, wheel-test]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/strata-notebook

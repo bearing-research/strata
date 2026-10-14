@@ -70,21 +70,6 @@ updates:
       prefix: deps
       include: scope
 
-  - package-ecosystem: cargo
-    directory: /rust
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: America/Los_Angeles
-    open-pull-requests-limit: 3
-    groups:
-      rust:
-        patterns: ["*"]
-    commit-message:
-      prefix: deps
-      include: scope
-
   - package-ecosystem: npm
     directory: /frontend
     schedule:

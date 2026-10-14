@@ -55,10 +55,10 @@ The pipeline below is the one in that screenshot.
 
 === "From source (one-time setup)"
 
-    Clone the repo, then build the Rust extension and the frontend:
+    Clone the repo, then install it and build the frontend:
 
     ```bash
-    uv sync                      # Python deps + Rust extension
+    uv sync                      # Python deps + Strata, editable
     cd frontend && npm ci && npm run build && cd ..
     ```
 

@@ -17,57 +17,6 @@ def create_stream_bytes(batch: pa.RecordBatch) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
-class TestFastIoAvailability:
-    def test_is_rust_available(self):
-        result = fast_io.is_rust_available()
-        assert isinstance(result, bool)
-
-    def test_rust_module_has_expected_functions(self):
-        if fast_io.is_rust_available():
-            from strata import _strata_core
-
-            # The one live entry point; see rust/src/lib.rs.
-            assert hasattr(_strata_core, "read_file_bytes")
-
-
-class TestReadFileMmapThreshold:
-    """The mmap read routes only large files through Rust (small ones regress)."""
-
-    def _spy_rust(self, monkeypatch):
-        """Replace the Rust reader with a spy that records whether it was called."""
-        if not fast_io.is_rust_available():
-            pytest.skip("Rust module not available")
-        calls: list[str] = []
-        real = fast_io._rust_module.read_file_bytes
-
-        def spy(path):
-            calls.append(path)
-            return real(path)
-
-        monkeypatch.setattr(fast_io._rust_module, "read_file_bytes", spy)
-        return calls
-
-    def test_small_file_skips_rust(self, tmp_path, monkeypatch):
-        calls = self._spy_rust(monkeypatch)
-        path = tmp_path / "small"
-        path.write_bytes(b"x" * 1024)  # 1 KB, well under the threshold
-        assert fast_io.read_file_mmap(str(path)) == b"x" * 1024
-        assert calls == []  # Rust path not taken
-
-    def test_large_file_uses_rust(self, tmp_path, monkeypatch):
-        calls = self._spy_rust(monkeypatch)
-        path = tmp_path / "big"
-        data = b"y" * (fast_io.MMAP_MIN_BYTES + 1)
-        path.write_bytes(data)
-        assert fast_io.read_file_mmap(str(path)) == data
-        assert calls == [str(path)]  # Rust path taken exactly once
-
-    def test_nonexistent_still_raises(self, tmp_path):
-        # The size check must not swallow a genuinely missing file.
-        with pytest.raises(FileNotFoundError):
-            fast_io.read_file_mmap(str(tmp_path / "nope"))
-
-
 class TestStreamConcatIpcSegments:
     def test_stream_empty_iterator(self):
         chunks = list(fast_io.stream_concat_ipc_segments(iter([])))

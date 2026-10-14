@@ -8,15 +8,11 @@
   PowerShell installer on Windows). uv fetches a compatible Python
   automatically, so you don't need Python 3.12+ pre-installed. Strata
   refuses to start outside a uv-managed env.
-- **[Rust toolchain](https://rustup.rs/)** (`rustup`) - only for
-  source builds (not Docker or `uv add`). Needed by `maturin` to
-  compile the native Arrow IPC extension; `cargo` and `rustc` must
-  be on `PATH` when you run `uv sync`.
 - **[Node.js 26+](https://nodejs.org/)** - only if building the
   frontend from source.
 
 Windows: source builds work via WSL2 (smoother) or native Windows
-(uv + rustup + Node have Windows installers). Day-to-day dev is on
+(uv and Node have Windows installers). Day-to-day dev is on
 macOS/Linux; WSL2 is the better-trodden path.
 
 ## From PyPI (recommended)
@@ -28,7 +24,7 @@ strata-notebook
 
 This puts `strata-notebook`, `strata`, `strata-notebook-tui` and
 `strata-worker` on `PATH` in a uv-managed tool environment. The wheel
-ships the Rust extension and the frontend prebuilt. Plain `pip install`
+is pure Python and ships the frontend prebuilt. Plain `pip install`
 is not supported; see the uv requirement above.
 
 Add extras in brackets, for example
@@ -68,13 +64,13 @@ see [Docker → Prebuilt image](../deployment/docker.md#prebuilt-image).
 
 ## From Source
 
-### 1. Install dependencies and build the Rust extension
+### 1. Install dependencies
 
 ```bash
 uv sync
 ```
 
-This installs all Python dependencies and compiles the Rust extension via maturin.
+This installs all Python dependencies and Strata itself, editable.
 
 ### 2. Build the frontend (optional)
 

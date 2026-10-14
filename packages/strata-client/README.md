@@ -2,7 +2,7 @@
 
 A lightweight Python client for a [Strata](https://github.com/bearing-research/strata)
 server. Depends only on `httpx` + `pyarrow`, none of the server's stack
-(no pyiceberg / fastapi / duckdb / pydantic, no Rust extension), so it drops
+(no pyiceberg / fastapi / duckdb / pydantic), so it drops
 into any analysis venv, training image, CI job, or notebook without dragging
 the deployable service along.
 

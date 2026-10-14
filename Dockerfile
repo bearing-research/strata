@@ -29,28 +29,15 @@ COPY frontend/ ./
 RUN npm run build
 
 # =============================================================================
-# Stage 1b: Backend Builder (uv + Rust)
+# Stage 1b: Backend Builder (uv)
 # =============================================================================
 FROM ${UV_IMAGE} AS builder
 ENV UV_PYTHON=3.13
-ENV CARGO_TARGET_DIR=/root/.cargo-target
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    build-essential \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-ARG RUST_VERSION=1.92.0
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION}
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Copy only what the backend wheel needs, so frontend edits keep the
-# Python/Rust build cache.
+# Copy only what the backend wheel needs, so frontend edits keep the build cache.
 WORKDIR /build
 COPY LICENSE README.md pyproject.toml uv.lock ./
 COPY src ./src
-COPY rust ./rust
 # strata-client is a workspace member, not a server dependency; copied only so
 # the workspace resolves during `uv export` / `uv build`.
 COPY packages ./packages
@@ -83,13 +70,9 @@ RUN mkdir -p dist && \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 
-# Build only the root package. Pin the interpreter so maturin emits a cp313
-# wheel that matches the runtime image.
+# Build only the root package (pure Python, one py3-none-any wheel).
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
-    --mount=type=cache,target=/root/.cargo-target \
-    uv build --wheel --python 3.13 --out-dir dist
+    uv build --wheel --out-dir dist
 
 # =============================================================================
 # Stage 2: Runtime
