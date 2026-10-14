@@ -2763,8 +2763,8 @@ shorter path:</p>
 <p><strong>1. Create <code>worker.py</code>:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">modal</span>
 <a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="c1"># Modal's pip_install pulls wheels from PyPI. strata-notebook ships</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># pre-built abi3-py312 wheels so no Rust toolchain is needed, and the</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="c1"># Modal's pip_install pulls wheels from PyPI. strata-notebook is a pure</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># Python wheel, so nothing is compiled, and the</span>
 <a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="c1"># worker entry isn't gated by the runtime guard (strata and strata-notebook</span>
 <a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="c1"># are) so Modal's standard image stack works. uv is installed alongside so the</span>
 <a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="c1"># worker can run cells in the notebook's locked environment.</span>

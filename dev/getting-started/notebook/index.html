@@ -2384,8 +2384,8 @@ writes enabled). See <a href="../../deployment/docker/">Docker deployment</a>
 for details.</p>
 </div>
 <div class="tabbed-block">
-<p>Clone the repo, then build the Rust extension and the frontend:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>sync<span class="w">                      </span><span class="c1"># Python deps + Rust extension</span>
+<p>Clone the repo, then install it and build the frontend:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>sync<span class="w">                      </span><span class="c1"># Python deps + Strata, editable</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
 </code></pre></div>
 <p>Run the server (this is the command you'll re-run on subsequent

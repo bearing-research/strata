@@ -2325,7 +2325,7 @@ emulation, or builds its own as below.</p>
 <p>The multi-stage Dockerfile:</p>
 <ol>
 <li><strong>Frontend builder</strong> (Node 26) builds the Vue.js UI</li>
-<li><strong>Backend builder</strong> (Python + Rust) builds the wheel with native extension</li>
+<li><strong>Backend builder</strong> (uv) builds the pure-Python wheel</li>
 <li><strong>Runtime</strong>: minimal image with the wheel, the frontend dist, and
    the <code>otel</code>, <code>postgres</code>, <code>sql</code>, <code>sql-sqlite</code> and <code>mcp</code> extras, so OTLP
    tracing, a Postgres artifact store (<code>STRATA_ARTIFACT_METADATA_DSN</code>),

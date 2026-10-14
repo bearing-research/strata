@@ -3615,12 +3615,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="removed">Removed<a class="headerlink" href="#removed" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>The Rust IPC concat and <code>STRATA_FAST_CONCAT</code>.</strong> Nothing has called
-  <code>fast_io.concat_stream_bytes</code> since artifact builds started writing each
-  merged row group straight to the blob (bounded memory, 0.3.0); scans merge
-  incrementally through PyArrow. The extension now holds only the mmap cache
-  read, and no longer builds the <code>arrow</code> crate. <code>STRATA_FAST_CONCAT</code> is gone
-  with it. (#1173)</li>
+<li><strong>The Rust extension: Strata is pure Python.</strong> One wheel now serves every
+  platform, and building from source needs no Rust toolchain. The extension's
+  IPC concat had no caller since 0.3.0, when artifact builds started writing
+  each merged row group straight to the blob; its mmap cache read measured no
+  faster than a plain read on Linux and slower above 32 MB, so cache entries
+  are read with <code>Path.read_bytes()</code>. <code>STRATA_FAST_CONCAT</code> and
+  <code>STRATA_MMAP_MIN_BYTES</code> are gone with it. (#1173, #1174)</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>

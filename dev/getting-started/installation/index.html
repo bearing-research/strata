@@ -1745,10 +1745,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-install-dependencies-and-build-the-rust-extension" class="md-nav__link">
+  <a href="#1-install-dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Install dependencies and build the Rust extension
+        1. Install dependencies
       
     </span>
   </a>
@@ -2183,10 +2183,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-install-dependencies-and-build-the-rust-extension" class="md-nav__link">
+  <a href="#1-install-dependencies" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Install dependencies and build the Rust extension
+        1. Install dependencies
       
     </span>
   </a>
@@ -2299,15 +2299,11 @@
   PowerShell installer on Windows). uv fetches a compatible Python
   automatically, so you don't need Python 3.12+ pre-installed. Strata
   refuses to start outside a uv-managed env.</li>
-<li><strong><a href="https://rustup.rs/">Rust toolchain</a></strong> (<code>rustup</code>) - only for
-  source builds (not Docker or <code>uv add</code>). Needed by <code>maturin</code> to
-  compile the native Arrow IPC extension; <code>cargo</code> and <code>rustc</code> must
-  be on <code>PATH</code> when you run <code>uv sync</code>.</li>
 <li><strong><a href="https://nodejs.org/">Node.js 26+</a></strong> - only if building the
   frontend from source.</li>
 </ul>
 <p>Windows: source builds work via WSL2 (smoother) or native Windows
-(uv + rustup + Node have Windows installers). Day-to-day dev is on
+(uv and Node have Windows installers). Day-to-day dev is on
 macOS/Linux; WSL2 is the better-trodden path.</p>
 <h2 id="from-pypi-recommended">From PyPI (recommended)<a class="headerlink" href="#from-pypi-recommended" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>strata-notebook
@@ -2315,7 +2311,7 @@ macOS/Linux; WSL2 is the better-trodden path.</p>
 </code></pre></div>
 <p>This puts <code>strata-notebook</code>, <code>strata</code>, <code>strata-notebook-tui</code> and
 <code>strata-worker</code> on <code>PATH</code> in a uv-managed tool environment. The wheel
-ships the Rust extension and the frontend prebuilt. Plain <code>pip install</code>
+is pure Python and ships the frontend prebuilt. Plain <code>pip install</code>
 is not supported; see the uv requirement above.</p>
 <p>Add extras in brackets, for example
 <code>uv tool install "strata-notebook[mcp,tui]"</code> for <code>strata agent</code>:</p>
@@ -2378,10 +2374,10 @@ the devcontainer provisions.</p>
 <p>Releases after 0.9.0 also publish the image as <code>ghcr.io/bearing-research/strata:&lt;version&gt;</code>;
 see <a href="../../deployment/docker/#prebuilt-image">Docker → Prebuilt image</a>.</p>
 <h2 id="from-source">From Source<a class="headerlink" href="#from-source" title="Permanent link">&para;</a></h2>
-<h3 id="1-install-dependencies-and-build-the-rust-extension">1. Install dependencies and build the Rust extension<a class="headerlink" href="#1-install-dependencies-and-build-the-rust-extension" title="Permanent link">&para;</a></h3>
+<h3 id="1-install-dependencies">1. Install dependencies<a class="headerlink" href="#1-install-dependencies" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>sync
 </code></pre></div>
-<p>This installs all Python dependencies and compiles the Rust extension via maturin.</p>
+<p>This installs all Python dependencies and Strata itself, editable.</p>
 <h3 id="2-build-the-frontend-optional">2. Build the frontend (optional)<a class="headerlink" href="#2-build-the-frontend-optional" title="Permanent link">&para;</a></h3>
 <p>If you want the notebook UI served by the backend:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">cd</span><span class="w"> </span>frontend
