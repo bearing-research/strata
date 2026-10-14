@@ -2786,11 +2786,6 @@ authentication. This is a startup error, not a warning:</p>
 <td>Per-fetch timeout</td>
 </tr>
 <tr>
-<td><code>STRATA_FAST_CONCAT</code></td>
-<td><code>rust</code> when the extension is built, else <code>pyarrow</code></td>
-<td>Arrow IPC concat implementation. <code>pyarrow</code> parses (slower, handles more edge cases). Environment only</td>
-</tr>
-<tr>
 <td><code>STRATA_MMAP_MIN_BYTES</code></td>
 <td><code>4194304</code> (4 MiB)</td>
 <td>Cache reads at or above this size go through the Rust mmap path; <code>0</code> forces it always. Environment only</td>
