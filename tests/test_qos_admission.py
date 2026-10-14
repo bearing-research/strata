@@ -368,3 +368,45 @@ async def test_admit_acquires_the_limiter_the_registry_counts(monkeypatch):
     interactive_in_use, _, _, _ = registry.aggregate_limiter_usage()
     assert interactive_in_use == 1
     await admission.release()
+
+
+def _request_from(host: str):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(client=SimpleNamespace(host=host))
+
+
+@pytest.mark.asyncio
+async def test_two_callers_behind_one_proxy_each_get_their_own_cap(monkeypatch):
+    """Behind a proxy every request comes from the proxy's address; keyed on that, the whole
+    service shared one caller's cap."""
+    from strata.auth import principal_context
+    from strata.types import Principal
+
+    _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig(per_client_interactive=1))
+
+    with principal_context(Principal(id="alice", tenant="t")):
+        alice = await qos.admit(_FakePlan(), _request_from("10.0.0.5"), "scan-a")
+    with principal_context(Principal(id="bob", tenant="t")):
+        bob = await qos.admit(_FakePlan(), _request_from("10.0.0.5"), "scan-b")
+
+    await alice.release()
+    await bob.release()
+
+
+@pytest.mark.asyncio
+async def test_one_caller_from_two_addresses_still_has_one_cap(monkeypatch):
+    from strata.auth import principal_context
+    from strata.types import Principal
+
+    _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig(per_client_interactive=1))
+
+    with principal_context(Principal(id="alice", tenant="t")):
+        first = await qos.admit(_FakePlan(), _request_from("10.0.0.5"), "scan-a")
+        with pytest.raises(QoSRejected) as excinfo:
+            await qos.admit(_FakePlan(), _request_from("10.0.0.6"), "scan-b")
+
+    assert excinfo.value.error == "per_client_limit"
+    await first.release()

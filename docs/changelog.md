@@ -19,6 +19,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **Behind a proxy, each caller gets their own scan slots.** The per-client
+  limits (`STRATA_PER_CLIENT_INTERACTIVE`, `STRATA_PER_CLIENT_BULK`) were
+  keyed on the connecting address, which behind a proxy is the proxy's for
+  every request, so by default the whole service ran 2 interactive and 1 bulk
+  scan at a time. Under principal auth they now count per tenant and
+  principal. (#1168)
 - **One tenant's builds can no longer hold up everyone else's.** The build
   runner read the 50 oldest pending builds, so one tenant's backlog hid every
   other tenant's, and a build waiting for its tenant's turn held a global slot
