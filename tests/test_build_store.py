@@ -207,7 +207,7 @@ class TestBuildStore:
         state = build_store.get_build(build_id)
         assert state.state == "failed"
 
-    def test_list_pending_builds(self, build_store):
+    def test_list_runnable_builds(self, build_store):
         """Pending builds are listed in order."""
         ids = []
         for i in range(3):
@@ -223,7 +223,7 @@ class TestBuildStore:
 
         build_store.start_build(ids[1])
 
-        pending = build_store.list_pending_builds()
+        pending = build_store.list_runnable_builds(limit=50, per_tenant=10)
         assert len(pending) == 2
         assert pending[0].build_id == ids[0]
         assert pending[1].build_id == ids[2]
@@ -453,3 +453,42 @@ class TestCompletionIsLeaseChecked:
 
         assert build_store.complete_build(build_id) is True
         assert build_store.get_build(build_id).state == "ready"
+
+
+class TestRunnableBuilds:
+    """What the runner picks up: a fair share per tenant, never another dispatcher's builds."""
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        seed_build_targets(tmp_path)
+        created = iter(range(1000, 2000))
+        return BuildStore(tmp_path / "artifacts.sqlite", clock=lambda: float(next(created)))
+
+    def _queue(self, store, tenant, *, version=1, params=None) -> str:
+        build_id = str(uuid.uuid4())
+        store.create_build(
+            build_id=build_id,
+            artifact_id="art-0",
+            version=version,
+            executor_ref="duckdb_sql@v1",
+            tenant_id=tenant,
+            params=params,
+        )
+        return build_id
+
+    def test_a_busy_tenant_does_not_hide_another_tenants_build(self, store):
+        busy = [self._queue(store, "busy", version=v) for v in range(1, 6)]
+        quiet = self._queue(store, "quiet")
+
+        runnable = store.list_runnable_builds(limit=3, per_tenant=2)
+
+        assert [b.build_id for b in runnable] == [busy[0], busy[1], quiet]
+
+    def test_a_build_a_notebook_dispatches_itself_is_never_picked_up(self, store):
+        """Nor does it take its tenant's place, or one stuck row would block the tenant."""
+        self._queue(store, "t", params={"source": "x", "_dispatch_mode": "external"})
+        runnable = [self._queue(store, "t", version=v) for v in (2, 3)]
+
+        listed = store.list_runnable_builds(limit=50, per_tenant=2)
+
+        assert [b.build_id for b in listed] == runnable

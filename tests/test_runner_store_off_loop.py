@@ -93,7 +93,7 @@ async def _stopped(runner: BuildRunner, task: asyncio.Task) -> None:
         await task
 
 
-@pytest.mark.parametrize("method", ["list_pending_builds", "list_expired_leases"])
+@pytest.mark.parametrize("method", ["list_runnable_builds", "list_expired_leases"])
 async def test_the_poll_reads_the_build_store_off_the_loop(runner, monkeypatch, method):
     gate = hold(monkeypatch, runner.build_store, method)
     runner._running = True
@@ -107,7 +107,7 @@ async def test_the_poll_reads_the_build_store_off_the_loop(runner, monkeypatch, 
 async def test_the_poll_borrows_a_server_thread_token(runner, monkeypatch):
     """The runner's store calls count against anyio's default limiter, the one the Postgres
     pool is sized to, not the loop's separate default executor."""
-    gate = hold(monkeypatch, runner.build_store, "list_pending_builds")
+    gate = hold(monkeypatch, runner.build_store, "list_runnable_builds")
     limiter = anyio.to_thread.current_default_thread_limiter()
     runner._running = True
 

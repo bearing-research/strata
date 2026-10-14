@@ -202,6 +202,13 @@ async def materialize_artifact(request: MaterializeRequest):
 
     transform = request.transform
     executor_ref = transform.executor
+    # The server's own marks, such as the notebook's `_dispatch_mode`, which takes a build
+    # away from the runner: from a client it would park the build forever.
+    reserved = sorted(key for key in transform.params if key.startswith("_"))
+    if reserved:
+        raise HTTPException(
+            status_code=400, detail=f"Transform params starting with '_' are reserved: {reserved}"
+        )
 
     transform_defn = _validate_transform_allowed(executor_ref, principal=principal)
     if request.name:

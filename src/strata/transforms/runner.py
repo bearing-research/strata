@@ -60,14 +60,6 @@ def _admitted_table_version(version: str | None) -> tuple[int | None, int | None
     return int(snapshot), int(schema) if schema else None
 
 
-def _is_runner_managed_build(build: BuildState) -> bool:
-    """Return whether the generic build runner should execute this build."""
-    params = build.params or {}
-    if not isinstance(params, dict):
-        return True
-    return params.get("_dispatch_mode") != "external"
-
-
 @dataclass
 class RunnerConfig:
     """Configuration for the build runner.
@@ -208,12 +200,14 @@ class BuildRunner:
             try:
                 # Store calls can wait on a lock or the network, and this loop is the server's.
                 pending = await anyio.to_thread.run_sync(
-                    functools.partial(self.build_store.list_pending_builds, limit=50)
+                    functools.partial(
+                        self.build_store.list_runnable_builds,
+                        limit=50,
+                        per_tenant=self.config.max_builds_per_tenant,
+                    )
                 )
 
                 for build in pending:
-                    if not _is_runner_managed_build(build):
-                        continue
                     if build.build_id in self._running_builds:
                         continue
 
@@ -310,8 +304,10 @@ class BuildRunner:
 
         tenant_sem = self._tenant_sems[tenant_id]
 
-        async with self._global_sem:
-            async with tenant_sem:
+        # Tenant first: a build waiting for its tenant's turn must not hold a global slot,
+        # or one tenant's queue fills them all and every other tenant waits.
+        async with tenant_sem:
+            async with self._global_sem:
                 await self._execute_build(build, already_claimed)
 
     async def _execute_build(self, build: BuildState, already_claimed: bool = False) -> None:
