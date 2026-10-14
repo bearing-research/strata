@@ -1271,3 +1271,121 @@ class TestGlobalStoreDoesNotLeakBetweenTests:
         import strata.metadata_cache as metadata_cache
 
         assert metadata_cache._metadata_store is None
+
+
+class TestPersistedStatsKeepTheirTypes:
+    """A persisted min/max reads back as the type it was written from.
+
+    A timestamp, Decimal or bytes stat used to be stored as ``str(value)``. After a restart it
+    compared as text against a string filter and pruned a row group that matched, where the
+    same comparison on live metadata raises, which never prunes.
+    """
+
+    def _file(self, tmp_path: Path) -> Path:
+        from datetime import datetime
+        from decimal import Decimal
+
+        fp = tmp_path / "typed.parquet"
+        pq.write_table(
+            pa.table(
+                {
+                    "ts": pa.array([datetime(2024, 1, 1, 12)], type=pa.timestamp("us")),
+                    "b": pa.array([b"zebra"]),
+                    "amount": pa.array([Decimal("1.50")], type=pa.decimal128(5, 2)),
+                }
+            ),
+            fp,
+        )
+        return fp
+
+    def _after_restart(self, tmp_path: Path, monkeypatch):
+        """The file's metadata as a fresh process gets it: from the store, not the footer."""
+        from strata.metadata_cache import ParquetMetadataCache
+        from strata.metadata_store import MetadataStore
+
+        fp = str(self._file(tmp_path))
+        store = MetadataStore(tmp_path / "meta.sqlite")
+        ParquetMetadataCache(store=store).get_or_load(fp)
+
+        restarted = ParquetMetadataCache(store=store)
+
+        def no_footer_read(path):
+            raise AssertionError("served from the footer, not the store")
+
+        monkeypatch.setattr(restarted, "_load_metadata", no_footer_read)
+        return restarted.get_or_load(fp)
+
+    def _prunes(self, meta, flt) -> bool:
+        from strata.planner import ReadPlanner, _build_column_index_map
+
+        planner = ReadPlanner.__new__(ReadPlanner)  # the method only uses _convert_stats
+        col_idx = _build_column_index_map(meta.parquet_schema)[flt.column]
+        return planner._should_prune_row_group(meta.row_group_metadata[0], [(col_idx, flt)])
+
+    @pytest.mark.parametrize(
+        ("column", "value"),
+        [("ts", "2024-01-01T12:00:00"), ("b", "zebra"), ("amount", "1.5")],
+    )
+    def test_a_string_filter_does_not_prune_a_matching_row_group(
+        self, tmp_path, monkeypatch, column, value
+    ):
+        from strata.filters import Filter, FilterOp
+
+        meta = self._after_restart(tmp_path, monkeypatch)
+
+        assert not self._prunes(meta, Filter(column, FilterOp.EQ, value))
+
+    def test_a_typed_filter_still_prunes_after_a_restart(self, tmp_path, monkeypatch):
+        """Pruning is kept, not switched off: the stat comes back as a datetime."""
+        from datetime import datetime
+
+        from strata.filters import Filter, FilterOp
+
+        meta = self._after_restart(tmp_path, monkeypatch)
+
+        assert self._prunes(meta, Filter("ts", FilterOp.GT, datetime(2025, 1, 1)))
+        assert not self._prunes(meta, Filter("ts", FilterOp.EQ, datetime(2024, 1, 1, 12)))
+
+    @pytest.mark.parametrize(
+        ("stats", "untyped"),
+        [
+            ({"ts": {"min": "2024-01-01 12:00:00", "max": "2024-01-01 12:00:00"}}, True),
+            ({"id": {"min": 1, "max": 3}}, False),
+            ({"name": {"min": "a", "max": "z", "typed": True}}, False),
+        ],
+        ids=["string-stat-from-before", "numbers-only", "typed"],
+    )
+    def test_a_row_from_before_typed_stats_is_re_read(self, stats, untyped):
+        from strata.metadata_cache import _persisted_stats_are_untyped
+        from strata.metadata_store import PersistedParquetMeta, PersistedRowGroupMeta
+
+        persisted = PersistedParquetMeta(
+            arrow_schema_bytes=b"",
+            num_row_groups=1,
+            row_groups=[PersistedRowGroupMeta(num_rows=1, total_byte_size=1, column_stats=stats)],
+            column_names=list(stats),
+        )
+
+        assert _persisted_stats_are_untyped(persisted) is untyped
+
+    def test_a_stored_row_from_before_is_re_read_from_the_footer(self, tmp_path):
+        """An old row's text timestamp is not served: the footer is read again."""
+        from datetime import datetime
+
+        from strata.metadata_cache import ParquetMetadataCache
+        from strata.metadata_store import MetadataStore, extract_parquet_meta
+
+        fp = str(self._file(tmp_path))
+        store = MetadataStore(tmp_path / "meta.sqlite")
+        old = extract_parquet_meta(fp)
+        for stats in old.row_groups[0].column_stats.values():
+            stats.pop("typed", None)
+        old.row_groups[0].column_stats["ts"].update(
+            min="2024-01-01 12:00:00", max="2024-01-01 12:00:00"
+        )
+        store.put_parquet_meta(fp, old)
+
+        meta = ParquetMetadataCache(store=store).get_or_load(fp)
+
+        col_idx = list(meta.arrow_schema.names).index("ts")
+        assert meta.row_group_metadata[0].column(col_idx).statistics.min == datetime(2024, 1, 1, 12)
