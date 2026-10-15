@@ -20,7 +20,7 @@ exhaustive commit history.
   `FilterOp`, `FilterValue`, `StrataConfig`, `CacheKey`, `ReadPlan` and `Task`
   were left over from when the HTTP client lived in this package; import them
   from `strata.filters`, `strata.config` and `strata.types`. Importing any
-  `strata` submodule no longer loads the filter module first. (#PR)
+  `strata` submodule no longer loads the filter module first. (#1185)
 - **The `dependency_changed` WebSocket frame.** It repeated, for package
   add and remove, what `environment_job_finished` already sends; a client
   reads the job's action, package and status from that frame's
