@@ -9,6 +9,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
+### Added
+
+- **`STRATA_NOTEBOOK_WORKERS_PANEL=hidden`** leaves the Workers panel off the
+  notebook page, for a host that offers its own machine choice. A cell's worker
+  badge, `# @worker` and the default-worker API are unchanged. (#1194)
+
 ### Changed
 
 - **Observability code lives in the `strata.observability` package.**

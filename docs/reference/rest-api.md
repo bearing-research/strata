@@ -947,7 +947,9 @@ GET /v1/notebooks/config
 ```
 
 Returns deployment mode, available Python versions, and default paths for the
-server as a whole. Not notebook-scoped.
+server as a whole. Not notebook-scoped. `workers_panel` is `shown` or `hidden`
+(`STRATA_NOTEBOOK_WORKERS_PANEL`); the open and create responses carry the same
+keys.
 
 ### Update Notebook Default Timeout
 

@@ -361,6 +361,9 @@ class StrataConfig(BaseSettings):
     notebook_env_backend: Literal["uv", "shared"] = "uv"
     notebook_shared_env_dir: Path | None = None
     notebook_shared_env_ttl_days: Annotated[float, Field(ge=0)] = 7.0
+    # "hidden" leaves the Workers panel off the notebook page, for a host that presents its own
+    # machine choice. A cell's worker badge, `# @worker` and the default-worker API are unchanged.
+    notebook_workers_panel: Literal["shown", "hidden"] = "shown"
 
     # Point the ambient `strata` client in notebook cells at a REMOTE shared store instead of this
     # server. `notebook_remote_store_headers` carries the auth it needs (proxy identity/token or a

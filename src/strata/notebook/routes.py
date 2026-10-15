@@ -429,6 +429,7 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
     default_parent_path = Path.home() / ".strata" / "notebooks"
     available_python_versions = [current_python_minor()]
     team_store_configured = False
+    workers_panel = "shown"
 
     try:
         from strata.server import get_state
@@ -436,6 +437,7 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
         state = get_state()
         deployment_mode = getattr(state.config, "deployment_mode", deployment_mode)
         team_store_configured = bool(getattr(state.config, "notebook_remote_store_url", None))
+        workers_panel = getattr(state.config, "notebook_workers_panel", workers_panel)
         caller_root = _get_caller_storage_root(request)
         if caller_root is not None:
             default_parent_path = caller_root
@@ -462,6 +464,8 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
         "registry_enabled": True,
         # Without a team store the promote route answers 409, so the strip hides it.
         "team_store_configured": team_store_configured,
+        # "hidden" when the host offers its own machine choice in place of the Workers panel.
+        "workers_panel": workers_panel,
     }
 
 
