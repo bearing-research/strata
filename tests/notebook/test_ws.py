@@ -873,7 +873,7 @@ def registry_worker(tmp_path, monkeypatch):
     the start (``mark_cell_running``) and result frame of each cell run.
     """
 
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
     from strata.notebook.models import WorkerBackendType, WorkerSpec
     from strata.notebook.workers import ManagedWorkerRecord, replace_server_managed_worker_records
     from tests.conftest import run_server_with_context

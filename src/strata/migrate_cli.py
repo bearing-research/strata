@@ -64,7 +64,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
         # Only for a real run: ArtifactStore's schema init upgrades a legacy
         # source in place (columns, indexes, WAL), which --dry-run must not do.
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
 
         ArtifactStore(artifact_dir)
 

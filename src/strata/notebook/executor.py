@@ -33,12 +33,13 @@ from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 import anyio.to_thread
 import httpx
 
+from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+
 # Stdlib json, not orjson: executor.py is imported via ``strata.config`` and must load
 # with core deps only (orjson is in the ``[notebook]`` extra, absent from the Docker
 # image). Batch frames are small dicts.
-from strata.artifact_store import ArtifactVersion, StagedVersion, get_artifact_store
-from strata.artifact_store import TransformSpec as ArtifactTransformSpec
-from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.store import ArtifactVersion, StagedVersion, get_artifact_store
+from strata.artifact.store import TransformSpec as ArtifactTransformSpec
 from strata.notebook import console_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations

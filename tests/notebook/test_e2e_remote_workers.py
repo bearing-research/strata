@@ -22,7 +22,7 @@ from tests.notebook.e2e_fixtures import (
 def service_mode_notebook_client(tmp_path):
     """Create a core service-mode app client with notebook routes enabled."""
     import strata.server as server_module
-    from strata.artifact_store import get_artifact_store, reset_artifact_store
+    from strata.artifact.store import get_artifact_store, reset_artifact_store
     from strata.notebook.routes import get_session_manager
     from strata.notebook.ws import _notebook_connections, _notebook_execution_state
     from strata.server import ServerState, app

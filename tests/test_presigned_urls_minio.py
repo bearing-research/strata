@@ -9,7 +9,7 @@ import docker
 import httpx
 import pytest
 
-from strata.blob_store import S3BlobStore
+from strata.artifact.blob_store import S3BlobStore
 
 
 def _docker_daemon_reachable() -> bool:

@@ -12,7 +12,7 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from strata.artifact_store import IMPORT_STAGING_TTL_SECONDS, ArtifactStore
+from strata.artifact.store import IMPORT_STAGING_TTL_SECONDS, ArtifactStore
 
 PROXY_TOKEN = "import-proxy-token"
 BLOB = b"the bytes of a figure"
@@ -290,7 +290,7 @@ def _chain(directory):
 def _publish_to(base: str, local, ref: str, tenant: str | None = None) -> int:
     import argparse
 
-    from strata.artifact_cli import cmd_publish
+    from strata.artifact.cli import cmd_publish
 
     scopes = "artifacts:write artifacts:publish"
     headers = [f"{k}: {v}" for k, v in _headers(tenant, scopes=scopes).items()] if tenant else None

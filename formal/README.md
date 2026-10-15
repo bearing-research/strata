@@ -106,7 +106,7 @@ Invariants checked:
 
 `garbage_collect` protects "the latest version of its id" as
 `MAX(version)` over rows in **any** state
-(`artifact_store.py`, `garbage_collect`). A rebuild creates a
+(`artifact/store.py`, `garbage_collect`). A rebuild creates a
 `building` row first, so while it runs, the previous `ready` version
 is no longer the maximum and can be collected. TLC trace (5 steps):
 
@@ -701,7 +701,7 @@ covered by benchmarks and fuzzing).
 A model helps only while it matches the code. Suggested practice:
 
 - Keep each model next to this README and name the Python functions each
-  action mirrors, as both specs do, so a review of `artifact_store.py`
+  action mirrors, as both specs do, so a review of `artifact/store.py`
   or `transforms/runner.py` knows to look here.
 - Run the `*_Patched.cfg` configs in CI once the fixes land.
   `Artifact_Patched` takes about 2 minutes. With `MaxVer = 2` it runs in

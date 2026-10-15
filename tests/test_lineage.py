@@ -298,7 +298,7 @@ class TestArtifactDependents:
 
 class TestArtifactStoreLineageMethods:
     def test_find_dependents_method(self, tmp_path):
-        from strata.artifact_store import ArtifactStore, TransformSpec
+        from strata.artifact.store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)
 
@@ -341,7 +341,7 @@ class TestArtifactStoreLineageMethods:
 
     def test_find_dependents_uses_exact_artifact_match(self, tmp_path):
         """Artifact IDs sharing a prefix must not confuse reverse lookups."""
-        from strata.artifact_store import ArtifactStore, TransformSpec
+        from strata.artifact.store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)
         table = pa.table({"x": [1]})
@@ -385,7 +385,7 @@ class TestArtifactStoreLineageMethods:
 
     def test_find_dependents_treats_an_underscore_in_the_id_literally(self, tmp_path):
         """``_`` is a LIKE wildcard; ``nb_a`` must not find what read ``nbXa``."""
-        from strata.artifact_store import ArtifactStore, TransformSpec
+        from strata.artifact.store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)
         spec = TransformSpec(executor="dep_executor", params={}, inputs=[])
@@ -401,7 +401,7 @@ class TestArtifactStoreLineageMethods:
         assert [a.id for a, _ in store.find_dependents("nbXa", 1)] == ["dep"]
 
     def test_list_name_reads_lists_ready_reads_in_the_tenant(self, tmp_path):
-        from strata.artifact_store import ArtifactStore, TransformSpec
+        from strata.artifact.store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)
         blob = table_to_ipc_bytes(pa.table({"x": [1]}))
@@ -432,7 +432,7 @@ class TestArtifactStoreLineageMethods:
         ]
 
     def test_get_name_for_artifact_method(self, tmp_path):
-        from strata.artifact_store import ArtifactStore, TransformSpec
+        from strata.artifact.store import ArtifactStore, TransformSpec
 
         store = ArtifactStore(tmp_path)
 

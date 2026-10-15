@@ -269,7 +269,7 @@ def notebook_executor_server(monkeypatch):
 def notebook_build_server(tmp_path: Path):
     """Run a real service-mode Strata server for signed notebook build tests."""
     import strata.server as server_module
-    from strata.artifact_store import get_artifact_store, reset_artifact_store
+    from strata.artifact.store import get_artifact_store, reset_artifact_store
     from strata.server import ServerState, app
     from strata.transforms.build_store import get_build_store, reset_build_store
 
@@ -325,7 +325,7 @@ def notebook_build_server(tmp_path: Path):
 def notebook_personal_server(tmp_path: Path):
     """Run a real personal-mode Strata server for signed notebook transport tests."""
     import strata.server as server_module
-    from strata.artifact_store import get_artifact_store, reset_artifact_store
+    from strata.artifact.store import get_artifact_store, reset_artifact_store
     from strata.server import ServerState, app
     from strata.transforms.build_store import get_build_store, reset_build_store
 

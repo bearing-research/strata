@@ -18,7 +18,7 @@ import pyarrow.ipc as ipc
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream
 from strata.logging import get_logger
 from strata.pool_metrics import get_pool_tracker
@@ -141,7 +141,7 @@ async def get_stream(stream_id: str, request: Request):
             headers={"Retry-After": str(exc.retry_after)},
         )
 
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     try:
         store = get_artifact_store(state.config.artifact_dir)

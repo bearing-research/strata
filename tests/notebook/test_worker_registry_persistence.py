@@ -11,7 +11,7 @@ import logging
 
 import pytest
 
-from strata.artifact_store import ArtifactStore, get_artifact_store
+from strata.artifact.store import ArtifactStore, get_artifact_store
 from strata.notebook.models import WorkerBackendType, WorkerSpec
 from strata.notebook.workers import (
     ManagedWorkerRecord,

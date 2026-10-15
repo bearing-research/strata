@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact_store import get_artifact_store
+from strata.artifact.store import get_artifact_store
 from tests.conftest import hold, ran_while_held
 
 

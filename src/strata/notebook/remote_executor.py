@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.hardware import hardware_report
 from strata.notebook.models import MountSpec

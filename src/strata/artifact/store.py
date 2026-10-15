@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
-    from strata.blob_store import BlobStore
+    from strata.artifact.blob_store import BlobStore
 
 logger = logging.getLogger(__name__)
 
@@ -911,14 +911,14 @@ class ArtifactStore:
         private_dir(artifact_dir)
 
         if blob_store is None:
-            from strata.blob_store import LocalBlobStore
+            from strata.artifact.blob_store import LocalBlobStore
 
             self.blobs_dir = artifact_dir / "blobs"
             self.blob_store: BlobStore = LocalBlobStore(self.blobs_dir)
         else:
             self.blob_store = blob_store
             # Back-compat attribute, set for the local store only.
-            from strata.blob_store import LocalBlobStore
+            from strata.artifact.blob_store import LocalBlobStore
 
             if isinstance(blob_store, LocalBlobStore):
                 self.blobs_dir = blob_store.blobs_dir
@@ -1683,7 +1683,7 @@ class ArtifactStore:
         # Streamed, not read_blob/write_blob: an artifact can be a multi-GB frame, and pulling it
         # through process memory (a full download and re-upload on object stores) to re-point a
         # pointer would cost more than the run this avoids.
-        from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         copied = 0
         with (
@@ -1738,7 +1738,7 @@ class ArtifactStore:
             raise ValueError(
                 f"{artifact_id}@v={version} reads {row['superseded_by']}, whose blob is gone"
             )
-        from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         with reader_cm as src, self.blob_store.open_blob_writer(artifact_id, version) as dst:
             while chunk := src.read(BLOB_STREAM_CHUNK_BYTES):

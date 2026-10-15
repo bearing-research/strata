@@ -21,8 +21,8 @@ import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact_store import TransformSpec, get_artifact_store
-from strata.blob_store import LocalBlobStore
+from strata.artifact.blob_store import LocalBlobStore
+from strata.artifact.store import TransformSpec, get_artifact_store
 from tests.conftest import ran_while_held, table_to_ipc_bytes
 
 ARROW = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))

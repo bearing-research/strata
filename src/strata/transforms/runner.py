@@ -33,10 +33,10 @@ from typing import TYPE_CHECKING, Any
 import anyio.to_thread
 import httpx
 
-from strata.artifact_store import BuildLeaseLost
+from strata.artifact.store import BuildLeaseLost
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact.store import ArtifactStore
     from strata.cache.disk import CachedFetcher
     from strata.config import StrataConfig
     from strata.planner import ReadPlanner

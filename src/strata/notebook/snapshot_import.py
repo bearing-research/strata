@@ -22,8 +22,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from strata.artifact_store import ArtifactStore, ArtifactVersion
-from strata.artifact_transfer import RECORD_FIELDS, remap_input_versions
+from strata.artifact.store import ArtifactStore, ArtifactVersion
+from strata.artifact.transfer import RECORD_FIELDS, remap_input_versions
 from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
 
 _ARTIFACT_URI_PREFIX = "strata://artifact/"

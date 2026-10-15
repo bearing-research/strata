@@ -13,7 +13,7 @@ import threading
 import pytest
 from fastapi import HTTPException
 
-from strata.artifact_store import ArtifactStore
+from strata.artifact.store import ArtifactStore
 
 
 @pytest.fixture

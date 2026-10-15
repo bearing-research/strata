@@ -45,7 +45,7 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore, ArtifactVersion
+    from strata.artifact.store import ArtifactStore, ArtifactVersion
     from strata.server import ServerState
 
 logger = get_logger(__name__)
@@ -198,7 +198,7 @@ async def materialize_artifact(request: MaterializeRequest):
     """
     import uuid
 
-    from strata.artifact_store import TransformSpec
+    from strata.artifact.store import TransformSpec
     from strata.auth import get_principal
     from strata.server import _get_artifact_store, _retry_after_header, get_state
 
@@ -278,7 +278,7 @@ async def materialize_artifact(request: MaterializeRequest):
 
     # Queue a build record for the build runner.
     if state.config.transforms_runtime_enabled:
-        from strata.artifact_store import get_artifact_store
+        from strata.artifact.store import get_artifact_store
         from strata.transforms.build_qos import (
             BuildQoSError,
             get_build_qos,
@@ -421,8 +421,8 @@ async def _handle_identity_materialize(
     """
     import uuid
 
-    from strata.artifact_store import TransformSpec as ArtifactTransformSpec
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import TransformSpec as ArtifactTransformSpec
+    from strata.artifact.store import get_artifact_store
     from strata.auth import get_principal
     from strata.server import _retry_after_header, get_state
 

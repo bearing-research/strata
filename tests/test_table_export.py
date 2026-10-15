@@ -11,9 +11,9 @@ import pyarrow as pa
 import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 
-from strata.artifact_store import ArtifactStore
+from strata.artifact.store import ArtifactStore
+from strata.artifact.table_export import EXPORT_TAG, export_artifact
 from strata.notebook.artifact_integration import NotebookArtifactManager
-from strata.table_export import EXPORT_TAG, export_artifact
 
 # Same reason as the ``temp_warehouse`` fixture: pyiceberg's local FileIO cannot
 # resolve a Windows warehouse path, so Iceberg warehouses are not tested there.
@@ -199,7 +199,7 @@ class TestPromotingToATable:
 
     @staticmethod
     def _promote(notebook_store, artifact, team, warehouse):
-        from strata.artifact_transfer import RemoteStore, promote_artifact
+        from strata.artifact.transfer import RemoteStore, promote_artifact
 
         return promote_artifact(
             notebook_store.artifact_store,
@@ -283,7 +283,7 @@ class TestPromotingToATable:
 
 
 def test_a_protected_alias_becomes_a_tag_when_it_is_approved(tmp_path, notebook_store):
-    from strata.artifact_transfer import RemoteStore, promote_artifact
+    from strata.artifact.transfer import RemoteStore, promote_artifact
     from tests.conftest import run_server_with_context
 
     warehouse = tmp_path / "wh"
@@ -325,7 +325,7 @@ class TestInterleavedAliasMoves:
 
     @staticmethod
     def _second_move_runs_inside_the_first(monkeypatch, first, second_move):
-        import strata.table_export as table_export
+        from strata.artifact import table_export as table_export
 
         real = table_export.move_alias_tag
         moved = []
@@ -362,7 +362,7 @@ class TestInterleavedAliasMoves:
         assert refs["champion"].snapshot_id == now.table_snapshot
 
     def test_two_approvals(self, tmp_path, notebook_store, monkeypatch):
-        from strata.artifact_transfer import RemoteStore, promote_artifact
+        from strata.artifact.transfer import RemoteStore, promote_artifact
         from tests.conftest import run_server_with_context
 
         warehouse = tmp_path / "wh"
@@ -408,7 +408,7 @@ class TestInterleavedAliasMoves:
 def test_the_cli_writes_a_local_artifact_into_a_table(tmp_path, notebook_store, capsys):
     import argparse
 
-    from strata.artifact_cli import cmd_export_table
+    from strata.artifact.cli import cmd_export_table
 
     artifact = _version(notebook_store, pa.table({"trip": [1, 2]}))
     status = cmd_export_table(
@@ -436,7 +436,7 @@ class TestWhoMayExport:
         from fastapi.testclient import TestClient
 
         import strata.server as server_module
-        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import ServerState, app
 
@@ -459,7 +459,7 @@ class TestWhoMayExport:
         """A ready tabular version, stamped with a tenant as a notebook write-back is."""
         import hashlib
 
-        from strata.artifact_store import TransformSpec
+        from strata.artifact.store import TransformSpec
 
         version = store.create_artifact(
             artifact_id,
@@ -552,7 +552,7 @@ class TestWhoMayExport:
 
     def test_an_artifact_read_from_a_denied_table_is_not_exported(self, tmp_path, monkeypatch):
         """Exporting copies the bytes into a table the caller can scan, so it is a read of them."""
-        from strata.artifact_store import get_artifact_store
+        from strata.artifact.store import get_artifact_store
 
         client, _ = self._service(
             monkeypatch,
@@ -584,7 +584,7 @@ class TestWhoMayExport:
 
     def test_another_tenants_table_is_not_overwritten(self, tmp_path, monkeypatch):
         """The table ACL has no write verb, so the tenant that exported a table owns it."""
-        from strata.artifact_store import get_artifact_store
+        from strata.artifact.store import get_artifact_store
 
         client, _ = self._service(monkeypatch, tmp_path, service_writes_enabled=True)
         store = get_artifact_store(tmp_path / "service-artifacts")
@@ -639,8 +639,8 @@ def test_a_tenant_scoped_export_refuses_a_table_written_for_another(tmp_path, no
 
 def test_a_named_catalogs_table_is_written_in_that_catalog(tmp_path, notebook_store):
     """``lake:taxi.features`` is the catalog's table, not one named that in the default catalog."""
+    from strata.artifact.table_export import export_artifact
     from strata.iceberg import PyIcebergCatalog
-    from strata.table_export import export_artifact
 
     warehouse = tmp_path / "lake-wh"
     warehouse.mkdir()

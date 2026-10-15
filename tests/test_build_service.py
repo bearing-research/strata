@@ -89,7 +89,7 @@ def test_assemble_manifest_reads_a_name_at_the_version_admission_recorded(
     captured_manifest, tmp_path
 ):
     """A name moved after admission: the executor still gets the bytes the provenance hashed."""
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact.store import ArtifactStore
 
     store = ArtifactStore(tmp_path / "artifacts")
     for version in (1, 2):

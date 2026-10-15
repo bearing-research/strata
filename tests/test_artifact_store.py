@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from strata.artifact_store import (
+from strata.artifact.store import (
     ArtifactNotFoundError,
     ArtifactStore,
     TransformSpec,
@@ -645,7 +645,7 @@ class TestVersionPromotion:
     def test_promotion_copies_a_blob_larger_than_one_stream_chunk(self, store):
         # The copy is streamed rather than read into memory; a payload spanning
         # several chunks is what tells a chunk-boundary bug from a working one.
-        from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         payload = bytes(range(256)) * ((BLOB_STREAM_CHUNK_BYTES * 2) // 256 + 3)
         self._ready(store, "art-1", "prov-a", payload)
@@ -673,7 +673,7 @@ class TestVersionPromotion:
 
     def test_promotion_keeps_its_own_bytes_when_another_id_holds_the_provenance(self, store):
         """A non-deterministic cell's twin holds other bytes; the reverted cell gets its own."""
-        from strata.artifact_store import StagedVersion
+        from strata.artifact.store import StagedVersion
 
         self._ready(store, "art-1", "prov-a", b"mine-bytes")
         self._ready(store, "art-1", "prov-b", b"second")
@@ -902,7 +902,7 @@ class TestArtifactVerifyCli:
     def _run(self, artifact_dir, fmt="human"):
         import argparse
 
-        from strata.artifact_cli import cmd_verify
+        from strata.artifact.cli import cmd_verify
 
         args = argparse.Namespace(artifact_dir=str(artifact_dir), format=fmt)
         return cmd_verify(args)
@@ -935,8 +935,8 @@ class TestArtifactVerifyCli:
 
     def test_a_remote_store_is_named_by_its_dsn_and_bucket(self, tmp_path):
         """The artifact dir is not what a Postgres + S3 store verifies."""
-        from strata.artifact_cli import _store_location
-        from strata.blob_store import S3BlobStore
+        from strata.artifact.blob_store import S3BlobStore
+        from strata.artifact.cli import _store_location
         from strata.sql_backend import PostgresDialect
 
         remote = ArtifactStore.__new__(ArtifactStore)
@@ -1583,7 +1583,7 @@ class TestTenantNormalization:
     @staticmethod
     def _staged_over_a_ready_equal(store, provenance):
         """``canonical`` staged with the provenance ``equiv`` already holds ready, in team-a."""
-        from strata.artifact_store import StagedVersion
+        from strata.artifact.store import StagedVersion
 
         store.create_artifact("equiv", provenance, tenant="team-a")
         store.write_blob("equiv", 1, b"x" * 10)
@@ -1909,7 +1909,7 @@ class TestAnIdTwoComputationsClaim:
 
     @staticmethod
     def _record(provenance: str):
-        from strata.artifact_store import ArtifactVersion
+        from strata.artifact.store import ArtifactVersion
 
         return ArtifactVersion(
             id="nb_shared_cell_c1_var_rows",
@@ -1938,7 +1938,7 @@ class TestAnIdTwoComputationsClaim:
         """Keeping the existing row would leave the caller's name, tags and descendants on someone
         else's bytes.
         """
-        from strata.artifact_store import ArtifactImportConflict
+        from strata.artifact.store import ArtifactImportConflict
 
         store.import_artifact(self._record("a" * 64), b"ALICE")
 
@@ -1956,7 +1956,7 @@ class TestAnIdIsHeldByOneTenant:
 
     @pytest.mark.parametrize("holder,caller", [("team-b", "team-a"), ("team-b", None), (None, "a")])
     def test_create_refuses_an_id_another_tenant_holds(self, store, holder, caller):
-        from strata.artifact_store import ArtifactIdTaken
+        from strata.artifact.store import ArtifactIdTaken
 
         store.create_artifact("nb_x", "a" * 64, tenant=holder)
 
@@ -1974,7 +1974,7 @@ class TestAnIdIsHeldByOneTenant:
     @pytest.mark.parametrize("version", [1, 2])
     def test_import_refuses_an_id_another_tenant_holds(self, store, version):
         """Version 1 is the same computation, which used to resolve onto the other tenant's row."""
-        from strata.artifact_store import ArtifactImportConflict, ArtifactVersion
+        from strata.artifact.store import ArtifactImportConflict, ArtifactVersion
 
         held = store.create_artifact("nb_x", "a" * 64, tenant="team-b")
         store.write_blob("nb_x", held, b"TEAMB")
@@ -2016,7 +2016,7 @@ class TestTwoIdsOneComputation:
     def _both_finalized(self, store):
         import hashlib
 
-        from strata.artifact_store import StagedVersion
+        from strata.artifact.store import StagedVersion
 
         _make_ready_artifact(store, self.A, "same-prov")
         vb = store.create_artifact(self.B, "same-prov")
@@ -2058,7 +2058,7 @@ class TestFinalizeTogether:
 
     @staticmethod
     def _staged(store, artifact_id: str, provenance: str):
-        from strata.artifact_store import StagedVersion
+        from strata.artifact.store import StagedVersion
 
         version = store.create_artifact(artifact_id, provenance)
         store.write_blob(artifact_id, version, b"x")

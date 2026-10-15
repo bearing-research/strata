@@ -87,7 +87,7 @@ async def health_ready():
     import asyncio
     import json
 
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
     from strata.cache.metadata import get_metadata_store
     from strata.server import _check_readiness, _get_active_scan_count, _get_qos_metrics, get_state
 

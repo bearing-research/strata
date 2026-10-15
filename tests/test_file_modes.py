@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from strata.artifact_store import ArtifactStore
+from strata.artifact.store import ArtifactStore
 from strata.file_modes import PASS_THROUGH_DIR, narrow, private_dir
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes do not apply")

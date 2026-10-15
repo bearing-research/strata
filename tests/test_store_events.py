@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from strata.api.dependencies import current_principal, read_store
 from strata.api.routers.registry import router
-from strata.artifact_store import ArtifactStore
+from strata.artifact.store import ArtifactStore
 from strata.types import Principal
 
 

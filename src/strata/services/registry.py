@@ -9,7 +9,7 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact.store import ArtifactStore
 
 # A notebook cell's output id; cell ids carry no underscore.
 _CELL_ARTIFACT_ID = re.compile(r"^nb_(?P<notebook_id>.+?)_cell_(?P<cell_id>[^_]+)_var_")

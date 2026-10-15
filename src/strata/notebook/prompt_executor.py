@@ -420,7 +420,7 @@ async def execute_prompt_cell(
     blob = json.dumps(content, indent=2, default=str).encode()
 
     try:
-        from strata.artifact_store import StagedVersion, TransformSpec
+        from strata.artifact.store import StagedVersion, TransformSpec
         from strata.notebook.artifact_integration import caller_principal_id
 
         version = artifact_mgr.artifact_store.create_artifact(

@@ -17,13 +17,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from strata.artifact_store import (
+from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.store import (
     ArtifactStore,
     ArtifactVersion,
     ImportedArtifact,
     Publication,
 )
-from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 
 if TYPE_CHECKING:
     from strata.types import ArtifactLineageResponse, LineageNode
@@ -99,7 +99,7 @@ class RemoteStore:
         """
         import httpx
 
-        from strata.artifact_store import ImportedArtifact
+        from strata.artifact.store import ImportedArtifact
 
         metadata = record_metadata(record)
         params = {"remap": "true"} if self._remap else None

@@ -16,7 +16,7 @@ from strata.api.dependencies import (
     require_build_transport_store,
     runtime_build_store,
 )
-from strata.artifact_store import reset_artifact_store
+from strata.artifact.store import reset_artifact_store
 from strata.auth import principal_context
 from strata.config import StrataConfig
 from strata.server import ServerState
@@ -148,7 +148,7 @@ class TestArtifactInputTenantGate:
     """
 
     def _seed(self, tmp_path, *, tenant):
-        from strata.artifact_store import get_artifact_store
+        from strata.artifact.store import get_artifact_store
 
         artifact_dir = tmp_path / "artifacts"
         artifact_dir.mkdir(exist_ok=True)
@@ -213,7 +213,7 @@ class TestArtifactListPaginationIsBounded:
         """Callers are handed superseded versions, so they can list them."""
         from fastapi.testclient import TestClient
 
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
         from strata.server import app
 
         _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
@@ -236,7 +236,7 @@ class TestArtifactListPaginationIsBounded:
         """The Artifacts page shows the superseded count beside the other states."""
         from fastapi.testclient import TestClient
 
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
         from strata.server import app
 
         _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))

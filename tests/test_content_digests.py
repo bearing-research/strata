@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from strata.artifact_store import ArtifactStore
+from strata.artifact.store import ArtifactStore
 from tests.conftest import prepared_venv
 
 

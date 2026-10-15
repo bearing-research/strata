@@ -135,7 +135,7 @@ Artifacts deduplicate by provenance hash, chain into DAG pipelines, and carry
 human-readable name pointers. SQLite metadata + pluggable blob backends
 (`LocalBlobStore`, `S3BlobStore`, `GCSBlobStore`, `AzureBlobStore`). Configure
 via `STRATA_ARTIFACT_BLOB_BACKEND` plus backend-specific env vars (see
-`blob_store.py`, `config.py`).
+`artifact/blob_store.py`, `config.py`).
 
 Two executor protocols:
 - **v1 push**: Strata POSTs multipart (`metadata` + `inputN`) to executor;
@@ -157,7 +157,8 @@ pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
 Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`.
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
-Artifact / build: `artifact_store.py`, `blob_store.py`, `transforms/`.
+Artifact / build: `artifact/` (`store`, `blob_store`, `transfer`, `uris`,
+`table_export`, `cli`), `transforms/`.
 Auth / tenancy: `auth.py`, `tenant.py`, `tenant_registry.py`.
 Observability: `tracing.py`, `logging.py`, `health.py`, `rate_limiter.py`,
 `pool_metrics.py`.

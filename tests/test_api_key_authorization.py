@@ -79,7 +79,7 @@ class TestTenantIsolation:
 
         with TestClient(app) as client:
             from strata.api_keys import get_api_key_store
-            from strata.artifact_store import get_artifact_store
+            from strata.artifact.store import get_artifact_store
 
             keys = get_api_key_store()
             owner, _ = keys.create_key(principal_id="alice", tenant="team-a")

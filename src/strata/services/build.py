@@ -12,7 +12,7 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact.store import ArtifactStore
     from strata.transforms.build_store import BuildState
     from strata.transforms.signed_urls import URLSigner
 

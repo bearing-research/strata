@@ -234,7 +234,7 @@ def write_snapshot(
             "widget_values": dict(cell_runtime.widget_values) if cell_runtime else {},
         }
 
-    from strata.artifact_transfer import record_metadata
+    from strata.artifact.transfer import record_metadata
 
     written = []
     records: dict[str, Any] = {}

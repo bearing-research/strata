@@ -25,7 +25,7 @@ from strata.api.dependencies import (
     WriteStore,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
-from strata.artifact_store import ArtifactNotFoundError
+from strata.artifact.store import ArtifactNotFoundError
 from strata.types import (
     InputChangeInfo,
     NameResolveResponse,
@@ -39,8 +39,8 @@ router = APIRouter(tags=["names"])
 
 def _follow_alias_in_table(store, name: str, alias: str, tenant: str | None) -> None:
     """Move the table tag of the same name to the alias's version, if it was written to a table."""
+    from strata.artifact.table_export import follow_alias
     from strata.server import get_state
-    from strata.table_export import follow_alias
 
     follow_alias(store, name, alias, config=get_state().config, tenant=tenant)
 

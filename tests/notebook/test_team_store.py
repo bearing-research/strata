@@ -11,7 +11,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from strata.artifact_store import ArtifactStore, TransformSpec
+from strata.artifact.store import ArtifactStore, TransformSpec
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.provenance import derive_subkey
 from strata.notebook.team_store import TeamStore, pull_cell_outputs
@@ -1176,7 +1176,7 @@ async def test_under_the_promoted_policy_a_cell_run_offers_nothing(
     On a personal server, offering every intermediate would share everything a researcher computes.
     Pulls are unchanged, so Bob is checked for a miss.
     """
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact.store import ArtifactStore
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook

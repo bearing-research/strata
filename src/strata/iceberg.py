@@ -19,7 +19,7 @@ from pyiceberg.schema import Schema
 from pyiceberg.table import Table
 from pyiceberg.table.snapshots import Operation, Snapshot
 
-from strata.blob_store import _resolve_gcs_credentials, azure_account_url
+from strata.artifact.blob_store import _resolve_gcs_credentials, azure_account_url
 from strata.config import StrataConfig
 from strata.lake_files import _AZURE_SCHEMES
 from strata.types import ACL_STORE_NAMES, TableIdentity

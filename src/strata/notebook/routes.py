@@ -3012,7 +3012,7 @@ async def promote_notebook_artifact(
     every step behind it. Under the ``promoted`` publish policy, this is the only
     way a result reaches the team.
     """
-    from strata.artifact_transfer import RemoteStore, promote_artifact
+    from strata.artifact.transfer import RemoteStore, promote_artifact
     from strata.server import get_state
 
     config = get_state().config
