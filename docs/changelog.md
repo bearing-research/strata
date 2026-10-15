@@ -15,7 +15,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   packages.** `strata.auth` (now `strata.auth.principal`), `strata.api_keys`
   (`strata.auth.api_keys`), `strata.api_key_cli` (`strata.auth.api_key_cli`),
   `strata.tenant` (`strata.tenancy.tenant`) and `strata.tenant_registry`
-  (`strata.tenancy.registry`) moved; the old module paths are gone. (#PR)
+  (`strata.tenancy.registry`) moved; the old module paths are gone. (#1191)
 - **Iceberg code lives in the `strata.iceberg` package.** `strata.iceberg`
   (now `strata.iceberg.catalog`), `strata.iceberg_schema`
   (`strata.iceberg.schema`), `strata.iceberg_deletes` (`strata.iceberg.deletes`),
