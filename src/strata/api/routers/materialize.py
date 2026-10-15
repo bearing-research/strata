@@ -30,11 +30,11 @@ from strata.iceberg.catalog import (
     WarehouseNotFound,
     object_store_unreachable,
 )
-from strata.logging import get_logger
+from strata.observability.logging import get_logger
+from strata.observability.pool_metrics import get_pool_tracker
+from strata.observability.tracing import trace_span
 from strata.planner import ColumnNotFound, UnsupportedTableFormatError
-from strata.pool_metrics import get_pool_tracker
 from strata.streaming import StreamState
-from strata.tracing import trace_span
 from strata.types import (
     BuildSpec,
     ExplainMaterializeRequest,

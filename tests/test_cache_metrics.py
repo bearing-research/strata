@@ -265,7 +265,7 @@ class TestCacheEvictionIntegration:
         import strata.server as server_module
         from strata.cache.metrics import reset_eviction_tracker
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
         from strata.server import ServerState, app
 
@@ -305,7 +305,7 @@ class TestCacheEvictionIntegration:
         import strata.server as server_module
         from strata.cache.metrics import get_eviction_tracker, reset_eviction_tracker
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
         from strata.server import ServerState, app
 

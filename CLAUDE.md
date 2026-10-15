@@ -162,8 +162,8 @@ Artifact / build: `artifact/` (`store`, `blob_store`, `transfer`, `uris`,
 `table_export`, `cli`), `transforms/`.
 Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
 `api_key_cli`), `tenancy/` (`tenant` config and context, `registry`).
-Observability: `tracing.py`, `logging.py`, `health.py`, `rate_limiter.py`,
-`pool_metrics.py`.
+Observability: `observability/` (`tracing`, `logging`, `log_buffer`, `health`, `metrics`,
+`pool_metrics`, `gc_tracker`, `memory_profiler`, `slow_ops`); `rate_limiter.py`.
 
 ## Configuration
 

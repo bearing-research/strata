@@ -23,8 +23,8 @@ from strata.fast_io import (
     validate_ipc_stream,
     validate_ipc_stream_reader,
 )
-from strata.logging import get_logger
-from strata.pool_metrics import get_pool_tracker
+from strata.observability.logging import get_logger
+from strata.observability.pool_metrics import get_pool_tracker
 
 if TYPE_CHECKING:
     from strata.server import ServerState
@@ -47,7 +47,7 @@ def record_scan_complete(
     *artifact_bytes* marks a scan answered from a stored artifact: every row group
     counts as a cache hit. Otherwise the plan's tasks say how each row group was read.
     """
-    from strata.metrics import ScanMetrics
+    from strata.observability.metrics import ScanMetrics
     from strata.tenancy.registry import get_tenant_registry
     from strata.tenancy.tenant import get_tenant_id
 

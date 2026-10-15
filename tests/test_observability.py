@@ -11,7 +11,7 @@ class TestGCTracker:
     """GC pause duration tracking."""
 
     def test_tracker_install_and_uninstall(self):
-        from strata.gc_tracker import GCTracker
+        from strata.observability.gc_tracker import GCTracker
 
         tracker = GCTracker()
         assert not tracker._installed
@@ -26,7 +26,7 @@ class TestGCTracker:
 
     def test_tracker_install_idempotent(self):
         """Installing more than once is safe."""
-        from strata.gc_tracker import GCTracker
+        from strata.observability.gc_tracker import GCTracker
 
         tracker = GCTracker()
         tracker.install()
@@ -35,7 +35,7 @@ class TestGCTracker:
         tracker.uninstall()
 
     def test_tracker_records_gc_pauses(self):
-        from strata.gc_tracker import GCTracker
+        from strata.observability.gc_tracker import GCTracker
 
         tracker = GCTracker()
         tracker.install()
@@ -61,7 +61,7 @@ class TestGCTracker:
         a blocking acquire would self-deadlock (the py3.12/macOS ``/metrics`` hang). It skips the
         sample.
         """
-        from strata.gc_tracker import GCTracker
+        from strata.observability.gc_tracker import GCTracker
 
         tracker = GCTracker()
         tracker._gc_callback("start", {"generation": 0})
@@ -87,7 +87,7 @@ class TestGCTracker:
             tracker._lock.release()
 
     def test_tracker_get_recent_pauses(self):
-        from strata.gc_tracker import GCTracker
+        from strata.observability.gc_tracker import GCTracker
 
         tracker = GCTracker(max_recent=10)
         tracker.install()
@@ -107,7 +107,7 @@ class TestGCTracker:
             tracker.uninstall()
 
     def test_tracker_reset(self):
-        from strata.gc_tracker import GCTracker
+        from strata.observability.gc_tracker import GCTracker
 
         tracker = GCTracker()
         tracker.install()
@@ -125,7 +125,7 @@ class TestGCTracker:
             tracker.uninstall()
 
     def test_gc_stats_to_dict(self):
-        from strata.gc_tracker import GCPause, GCStats
+        from strata.observability.gc_tracker import GCPause, GCStats
 
         stats = GCStats(
             recent_pauses=[GCPause(time.time(), 0, 1.5) for _ in range(15)],
@@ -153,7 +153,7 @@ class TestGCTracker:
 
     def test_global_functions(self):
         """Module-level convenience functions."""
-        from strata.gc_tracker import (
+        from strata.observability.gc_tracker import (
             get_gc_stats,
             get_recent_gc_pauses,
             install_gc_tracker,
@@ -181,7 +181,7 @@ class TestSlowOps:
     """Slow operation logging and latency histograms."""
 
     def test_latency_histogram_record(self):
-        from strata.slow_ops import LatencyHistogram
+        from strata.observability.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
 
@@ -202,7 +202,7 @@ class TestSlowOps:
 
     def test_latency_histogram_empty_stage(self):
         """Stats for a stage with no data."""
-        from strata.slow_ops import LatencyHistogram
+        from strata.observability.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
         stats = hist.get_histogram("nonexistent")
@@ -211,7 +211,7 @@ class TestSlowOps:
 
     def test_latency_histogram_all_buckets(self):
         """Every histogram bucket is populated correctly."""
-        from strata.slow_ops import LatencyHistogram
+        from strata.observability.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
 
@@ -234,7 +234,7 @@ class TestSlowOps:
             assert stats["buckets"][expected_bucket] >= 1, f"Bucket {expected_bucket} not populated"
 
     def test_slow_op_tracker_basic(self):
-        from strata.slow_ops import SlowOpTracker
+        from strata.observability.slow_ops import SlowOpTracker
 
         tracker = SlowOpTracker()
         tracker.start(scan_id="test-123", table_id="db.schema.table")
@@ -252,7 +252,7 @@ class TestSlowOps:
         assert timings.rows_streamed == 100
 
     def test_slow_op_tracker_multiple_stages(self):
-        from strata.slow_ops import SlowOpTracker
+        from strata.observability.slow_ops import SlowOpTracker
 
         tracker = SlowOpTracker()
         tracker.start(scan_id="test", table_id="test.table")
@@ -275,7 +275,7 @@ class TestSlowOps:
 
     def test_global_latency_functions(self):
         """Module-level latency functions."""
-        from strata.slow_ops import (
+        from strata.observability.slow_ops import (
             get_latency_stats,
             record_latency,
             reset_latency_stats,
@@ -299,7 +299,7 @@ class TestSlowOps:
 
     def test_get_latency_percentiles(self):
         """Percentile estimation from the histogram."""
-        from strata.slow_ops import (
+        from strata.observability.slow_ops import (
             get_latency_percentiles,
             record_latency,
             reset_latency_stats,
@@ -323,7 +323,7 @@ class TestPoolMetrics:
     """Thread pool metrics tracking."""
 
     def test_pool_tracker_register(self):
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="test")
@@ -343,7 +343,7 @@ class TestPoolMetrics:
         Callers wrap the handoff in ``tracker.track(...)``; a bare ``executor.submit`` is invisible
         by design.
         """
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=4)
@@ -359,7 +359,7 @@ class TestPoolMetrics:
 
     def test_pool_tracker_queue_depth(self):
         """Queue depth while the pool is saturated."""
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=2)
@@ -380,7 +380,7 @@ class TestPoolMetrics:
         executor.shutdown(wait=True)
 
     def test_pool_tracker_get_all_stats(self):
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor1 = ThreadPoolExecutor(max_workers=4)
@@ -400,7 +400,7 @@ class TestPoolMetrics:
 
     def test_pool_tracker_get_summary(self):
         """The summary for the metrics endpoint."""
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=4)
@@ -415,7 +415,7 @@ class TestPoolMetrics:
         executor.shutdown(wait=False)
 
     def test_pool_stats_to_dict(self):
-        from strata.pool_metrics import ThreadPoolStats
+        from strata.observability.pool_metrics import ThreadPoolStats
 
         stats = ThreadPoolStats(
             name="test",
@@ -436,7 +436,7 @@ class TestPoolMetrics:
 
     def test_connection_metrics_tracking(self):
         """HTTP connection metrics."""
-        from strata.pool_metrics import ConnectionMetrics
+        from strata.observability.pool_metrics import ConnectionMetrics
 
         metrics = ConnectionMetrics()
 
@@ -458,7 +458,7 @@ class TestPoolMetrics:
         assert stats["total_requests"] == 3  # Total does not decrease.
 
     def test_connection_metrics_reset(self):
-        from strata.pool_metrics import ConnectionMetrics
+        from strata.observability.pool_metrics import ConnectionMetrics
 
         metrics = ConnectionMetrics()
         metrics.request_started()
@@ -472,7 +472,7 @@ class TestPoolMetrics:
 
     def test_global_pool_functions(self):
         """Module-level convenience functions."""
-        from strata.pool_metrics import (
+        from strata.observability.pool_metrics import (
             get_connection_metrics,
             get_pool_tracker,
             reset_metrics,
@@ -492,7 +492,7 @@ class TestPoolMetrics:
 
 class TestMemoryProfiler:
     def test_memory_snapshot(self):
-        from strata.memory_profiler import get_memory_snapshot
+        from strata.observability.memory_profiler import get_memory_snapshot
 
         snapshot = get_memory_snapshot()
 
@@ -503,7 +503,7 @@ class TestMemoryProfiler:
         assert len(snapshot.python_gc_objects_by_gen) == 3
 
     def test_memory_snapshot_to_dict(self):
-        from strata.memory_profiler import get_memory_snapshot
+        from strata.observability.memory_profiler import get_memory_snapshot
 
         snapshot = get_memory_snapshot()
         d = snapshot.to_dict()
@@ -520,7 +520,7 @@ class TestMemoryProfiler:
         assert "gc_objects_by_gen" in d["python"]
 
     def test_get_arrow_allocations(self):
-        from strata.memory_profiler import get_arrow_allocations
+        from strata.observability.memory_profiler import get_arrow_allocations
 
         allocs = get_arrow_allocations()
 
@@ -530,7 +530,7 @@ class TestMemoryProfiler:
         assert "available_pools" in allocs
 
     def test_get_python_memory_stats(self):
-        from strata.memory_profiler import get_python_memory_stats
+        from strata.observability.memory_profiler import get_python_memory_stats
 
         stats = get_python_memory_stats()
 
@@ -544,7 +544,7 @@ class TestMemoryProfiler:
         assert len(stats["top_object_types"]) <= 20
 
     def test_get_detailed_memory_report(self):
-        from strata.memory_profiler import get_detailed_memory_report
+        from strata.observability.memory_profiler import get_detailed_memory_report
 
         report = get_detailed_memory_report()
 
@@ -558,7 +558,7 @@ class TestMemoryProfiler:
 
     def test_memory_recommendations_healthy(self):
         """A healthy memory state gets the matching recommendation."""
-        from strata.memory_profiler import MemorySnapshot, _get_memory_recommendations
+        from strata.observability.memory_profiler import MemorySnapshot, _get_memory_recommendations
 
         snapshot = MemorySnapshot(
             arrow_bytes_allocated=100 * 1024 * 1024,  # 100MB
@@ -576,7 +576,7 @@ class TestMemoryProfiler:
         assert "healthy" in recs[0].lower()
 
     def test_memory_recommendations_high_arrow(self):
-        from strata.memory_profiler import MemorySnapshot, _get_memory_recommendations
+        from strata.observability.memory_profiler import MemorySnapshot, _get_memory_recommendations
 
         snapshot = MemorySnapshot(
             arrow_bytes_allocated=2 * 1024**3,  # 2GB
@@ -605,9 +605,9 @@ class TestDebugEndpoints:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
+        from strata.observability.slow_ops import reset_latency_stats
         from strata.server import ServerState, app
-        from strata.slow_ops import reset_latency_stats
 
         reset_metrics()
         reset_latency_stats()
@@ -630,7 +630,7 @@ class TestDebugEndpoints:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -660,7 +660,7 @@ class TestDebugEndpoints:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -689,7 +689,7 @@ class TestDebugEndpoints:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -726,9 +726,9 @@ class TestDebugEndpoints:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
+        from strata.observability.slow_ops import record_latency, reset_latency_stats
         from strata.server import ServerState, app
-        from strata.slow_ops import record_latency, reset_latency_stats
 
         reset_metrics()
         reset_latency_stats()
@@ -761,8 +761,8 @@ class TestDebugEndpoints:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.gc_tracker import install_gc_tracker
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.gc_tracker import install_gc_tracker
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -794,7 +794,7 @@ class TestDebugEndpoints:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -826,7 +826,7 @@ class TestPercentilesUseNearestRank:
     """
 
     def test_a_lone_slow_sample_is_not_reported_as_the_fastest_bucket(self):
-        from strata.slow_ops import LatencyHistogram
+        from strata.observability.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
         hist.record("scan", 9000.0)
@@ -838,7 +838,7 @@ class TestPercentilesUseNearestRank:
         }
 
     def test_a_lone_fast_sample_is_still_fast(self):
-        from strata.slow_ops import LatencyHistogram
+        from strata.observability.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
         hist.record("scan", 3.0)
@@ -846,7 +846,7 @@ class TestPercentilesUseNearestRank:
         assert hist.get_percentiles("scan") == {"p50_ms": 5, "p95_ms": 5, "p99_ms": 5}
 
     def test_a_split_distribution_separates_p50_from_the_tail(self):
-        from strata.slow_ops import LatencyHistogram
+        from strata.observability.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
         for _ in range(50):
@@ -860,7 +860,7 @@ class TestPercentilesUseNearestRank:
         assert stats["p99_ms"] == 7500
 
     def test_no_samples_still_reports_zeros(self):
-        from strata.slow_ops import LatencyHistogram
+        from strata.observability.slow_ops import LatencyHistogram
 
         hist = LatencyHistogram()
         assert hist.get_percentiles("scan") == {"p50_ms": 0, "p95_ms": 0, "p99_ms": 0}
@@ -874,7 +874,7 @@ class TestPoolUtilizationFallsBackToZero:
     """
 
     def test_utilization_returns_to_zero_when_work_finishes(self):
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=4)
@@ -896,8 +896,8 @@ class TestPoolUtilizationFallsBackToZero:
         executor.shutdown(wait=True)
 
     def test_health_check_recovers_after_a_burst(self):
-        from strata.health import HealthStatus, check_thread_pools
-        from strata.pool_metrics import get_pool_tracker, reset_metrics
+        from strata.observability.health import HealthStatus, check_thread_pools
+        from strata.observability.pool_metrics import get_pool_tracker, reset_metrics
 
         reset_metrics()
         tracker = get_pool_tracker()
@@ -929,7 +929,7 @@ class TestPoolUtilizationFallsBackToZero:
 
     def test_in_flight_is_capped_so_utilization_stays_a_percentage(self):
         """Queued work counts as in-flight; ``queue_depth`` reports the backlog."""
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=2)
@@ -949,7 +949,7 @@ class TestPoolUtilizationFallsBackToZero:
 
     def test_task_counters_are_no_longer_dead(self):
         """``track()`` feeds the task counters, so /v1/debug/pools is not a constant 0."""
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=2)
@@ -966,7 +966,7 @@ class TestPoolUtilizationFallsBackToZero:
         executor.shutdown(wait=True)
 
     def test_the_counter_is_released_when_the_body_raises(self):
-        from strata.pool_metrics import PoolMetricsTracker
+        from strata.observability.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=2)

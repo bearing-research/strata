@@ -20,9 +20,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from strata.logging import get_logger
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.provenance import derive_subkey
+from strata.observability.logging import get_logger
 from strata.types import PROVENANCE_MISS_HEADER
 
 logger = get_logger(__name__)

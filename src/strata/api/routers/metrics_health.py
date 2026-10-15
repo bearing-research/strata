@@ -15,10 +15,10 @@ from fastapi import APIRouter, HTTPException, Response
 
 from strata.api.dependencies import require_scope
 from strata.cache.metrics import get_eviction_tracker
-from strata.gc_tracker import get_gc_stats
-from strata.health import HealthStatus, run_health_checks
-from strata.logging import get_logger
-from strata.pool_metrics import get_connection_metrics, get_pool_tracker
+from strata.observability.gc_tracker import get_gc_stats
+from strata.observability.health import HealthStatus, run_health_checks
+from strata.observability.logging import get_logger
+from strata.observability.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import get_rate_limiter
 from strata.tenancy.registry import get_tenant_registry
 

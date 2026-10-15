@@ -123,7 +123,7 @@ from strata.notebook.workers import (
     worker_transport,
 )
 from strata.notebook.writer import drop_blanked_secrets
-from strata.tracing import current_trace_context, trace_span
+from strata.observability.tracing import current_trace_context, trace_span
 from strata.transforms.build_store import get_build_store
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 

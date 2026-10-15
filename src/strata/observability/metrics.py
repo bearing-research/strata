@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from threading import Event, Lock, Thread
 from typing import Any, TextIO
 
-from strata.logging import log_format
+from strata.observability.logging import log_format
 
 # Logs are dropped when the queue is full rather than block.
 DEFAULT_LOG_QUEUE_SIZE = 1000

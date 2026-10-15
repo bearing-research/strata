@@ -24,7 +24,7 @@ _STREAM_POLL_SECONDS = 0.5
 def _read(
     since: int, level: str | None, notebook: str | None, regex: str | None, limit: int
 ) -> dict[str, Any]:
-    from strata.log_buffer import get_log_ring_buffer
+    from strata.observability.log_buffer import get_log_ring_buffer
 
     ring = get_log_ring_buffer()
     if ring is None:

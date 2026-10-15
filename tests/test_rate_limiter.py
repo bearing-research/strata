@@ -299,7 +299,7 @@ class TestRateLimiterIntegration:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
         from strata.server import ServerState, app
 
@@ -338,7 +338,7 @@ class TestRateLimiterIntegration:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
         from strata.server import ServerState, app
 
@@ -376,7 +376,7 @@ class TestRateLimiterIntegration:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
         from strata.server import ServerState, app
 
@@ -524,7 +524,7 @@ class TestRetryAfterIsNeverZero:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
         from strata.server import ServerState, app
 
@@ -586,7 +586,7 @@ async def test_a_forwarded_for_header_does_not_buy_a_fresh_bucket(tmp_path):
 
     import strata.server as server_module
     from strata.config import StrataConfig
-    from strata.pool_metrics import reset_metrics
+    from strata.observability.pool_metrics import reset_metrics
     from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
     from strata.server import ServerState, app
 

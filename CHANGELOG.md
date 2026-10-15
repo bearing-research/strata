@@ -9,6 +9,13 @@ exhaustive commit history.
 
 ### Changed
 
+- **Observability code lives in the `strata.observability` package.**
+  `strata.tracing`, `logging`, `log_buffer`, `health`, `metrics`,
+  `pool_metrics`, `gc_tracker`, `memory_profiler` and `slow_ops` are now
+  `strata.observability.<name>`; the old module paths are gone. Loggers named
+  after their module move with it (`strata.health` is now
+  `strata.observability.health`, still under the `strata` logger); the
+  `strata.slow_ops` logger keeps its name. (#PR)
 - **Auth and tenancy code lives in the `strata.auth` and `strata.tenancy`
   packages.** `strata.auth` (now `strata.auth.principal`), `strata.api_keys`
   (`strata.auth.api_keys`), `strata.api_key_cli` (`strata.auth.api_key_cli`),

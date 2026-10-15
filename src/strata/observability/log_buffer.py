@@ -2,7 +2,7 @@
 
 Each entry carries a monotonic ``cursor`` so ``GET /v1/logs`` can page (``?since=``) and
 ``GET /v1/logs/stream`` can tail. Thread-safe: logging also emits from executor threads.
-Leaf module: imports only ``strata.logging`` and stdlib.
+Leaf module: imports only ``strata.observability.logging`` and stdlib.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import threading
 from collections import deque
 from typing import Any
 
-from strata.logging import StructuredFormatter
+from strata.observability.logging import StructuredFormatter
 
 # Older entries remain on stderr / disk.
 DEFAULT_CAPACITY = 10_000

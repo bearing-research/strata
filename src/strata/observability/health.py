@@ -249,7 +249,7 @@ def check_thread_pools(planning_executor, fetch_executor) -> DependencyCheck:
     start = time.perf_counter()
 
     try:
-        from strata.pool_metrics import get_pool_tracker
+        from strata.observability.pool_metrics import get_pool_tracker
 
         tracker = get_pool_tracker()
         summary = tracker.get_summary()

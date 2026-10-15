@@ -7,13 +7,13 @@ class TestTracingModule:
     """The tracing module when OTel is not installed."""
 
     def test_is_tracing_available_returns_bool(self):
-        from strata.tracing import is_tracing_available
+        from strata.observability.tracing import is_tracing_available
 
         result = is_tracing_available()
         assert isinstance(result, bool)
 
     def test_is_tracing_enabled_returns_bool(self):
-        from strata.tracing import is_tracing_enabled
+        from strata.observability.tracing import is_tracing_enabled
 
         result = is_tracing_enabled()
         assert isinstance(result, bool)
@@ -21,12 +21,12 @@ class TestTracingModule:
     def test_get_tracer_returns_none_when_disabled(self, monkeypatch):
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
-        from strata.tracing import get_tracer
+        from strata.observability.tracing import get_tracer
 
         result = get_tracer()
         assert result is None
@@ -34,12 +34,12 @@ class TestTracingModule:
     def test_trace_span_yields_noop_span_when_disabled(self, monkeypatch):
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
-        from strata.tracing import NoOpSpan, trace_span
+        from strata.observability.tracing import NoOpSpan, trace_span
 
         with trace_span("test_operation", attr1="value1") as span:
             assert isinstance(span, NoOpSpan)
@@ -50,7 +50,7 @@ class TestTracingModule:
 
     def test_noop_span_methods_are_silent(self):
         """NoOpSpan methods do not raise."""
-        from strata.tracing import NoOpSpan
+        from strata.observability.tracing import NoOpSpan
 
         span = NoOpSpan()
         span.set_attribute("key", "value")
@@ -63,12 +63,12 @@ class TestTracingModule:
     def test_init_tracing_returns_false_when_disabled(self, monkeypatch):
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
-        from strata.tracing import init_tracing
+        from strata.observability.tracing import init_tracing
 
         result = init_tracing()
         assert result is False
@@ -78,7 +78,7 @@ class TestTracingModule:
 
         from fastapi import FastAPI
 
-        from strata.tracing import instrument_fastapi
+        from strata.observability.tracing import instrument_fastapi
 
         app = FastAPI()
         instrument_fastapi(app)
@@ -90,12 +90,12 @@ class TestTracingContextManager:
     def test_trace_span_propagates_exceptions(self, monkeypatch):
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
-        from strata.tracing import trace_span
+        from strata.observability.tracing import trace_span
 
         with pytest.raises(ValueError, match="test error"):
             with trace_span("failing_operation"):
@@ -104,12 +104,12 @@ class TestTracingContextManager:
     def test_trace_span_with_attributes(self, monkeypatch):
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
-        from strata.tracing import NoOpSpan, trace_span
+        from strata.observability.tracing import NoOpSpan, trace_span
 
         with trace_span(
             "operation",
@@ -136,34 +136,34 @@ class TestTracingWithOTelEnabled:
     @pytest.fixture
     def reset_tracing(self, monkeypatch):
         """Reset tracing state and enable tracing."""
-        import strata.tracing
+        from strata.observability import tracing
 
-        original_tracer = strata.tracing._tracer
-        original_initialized = strata.tracing._initialized
+        original_tracer = tracing._tracer
+        original_initialized = tracing._initialized
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "true")
 
         yield
 
-        strata.tracing._tracer = original_tracer
-        strata.tracing._initialized = original_initialized
+        tracing._tracer = original_tracer
+        tracing._initialized = original_initialized
 
     def test_is_tracing_available_returns_true(self):
-        from strata.tracing import is_tracing_available
+        from strata.observability.tracing import is_tracing_available
 
         # OTel is installed in the test environment with extras.
         assert is_tracing_available() is True
 
     def test_is_tracing_enabled_returns_true_when_enabled(self, reset_tracing):
-        from strata.tracing import is_tracing_enabled
+        from strata.observability.tracing import is_tracing_enabled
 
         assert is_tracing_enabled() is True
 
     def test_init_tracing_returns_true(self, reset_tracing):
-        from strata.tracing import init_tracing
+        from strata.observability.tracing import init_tracing
 
         result = init_tracing()
         assert result is True
@@ -171,7 +171,7 @@ class TestTracingWithOTelEnabled:
     def test_get_tracer_returns_tracer(self, reset_tracing):
         from opentelemetry.trace import Tracer
 
-        from strata.tracing import get_tracer, init_tracing
+        from strata.observability.tracing import get_tracer, init_tracing
 
         init_tracing()
         tracer = get_tracer()
@@ -181,7 +181,7 @@ class TestTracingWithOTelEnabled:
     def test_trace_span_yields_real_span(self, reset_tracing):
         from opentelemetry.trace import Span
 
-        from strata.tracing import NoOpSpan, init_tracing, trace_span
+        from strata.observability.tracing import NoOpSpan, init_tracing, trace_span
 
         init_tracing()
 
@@ -192,7 +192,7 @@ class TestTracingWithOTelEnabled:
             span.add_event("test_event", {"event_key": "event_value"})
 
     def test_trace_span_records_exception_on_error(self, reset_tracing):
-        from strata.tracing import init_tracing, trace_span
+        from strata.observability.tracing import init_tracing, trace_span
 
         init_tracing()
 
@@ -208,10 +208,10 @@ class TestTracingWithOTelEnabled:
             InMemorySpanExporter,
         )
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "true")
 
         # In-memory exporter with a fresh provider.
@@ -222,10 +222,10 @@ class TestTracingWithOTelEnabled:
         # Tracer straight from this provider, not the global one.
         tracer = provider.get_tracer("strata", "0.1.0")
 
-        strata.tracing._tracer = tracer
-        strata.tracing._initialized = True
+        tracing._tracer = tracer
+        tracing._initialized = True
 
-        from strata.tracing import trace_span
+        from strata.observability.tracing import trace_span
 
         with trace_span("test_operation", table_id="ns.table") as span:
             span.set_attribute("rows_count", 100)
@@ -239,7 +239,7 @@ class TestTracingWithOTelEnabled:
     def test_instrument_fastapi_works_when_enabled(self, reset_tracing):
         from fastapi import FastAPI
 
-        from strata.tracing import init_tracing, instrument_fastapi
+        from strata.observability.tracing import init_tracing, instrument_fastapi
 
         init_tracing()
         app = FastAPI()

@@ -29,7 +29,7 @@ from strata.notebook.hardware import hardware_report
 from strata.notebook.models import MountSpec
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
-from strata.tracing import trace_span_from
+from strata.observability.tracing import trace_span_from
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 from strata.url_safety import guarded_async_transport, host_is_allowlisted, url_safety_problem
 

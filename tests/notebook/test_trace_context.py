@@ -20,7 +20,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (  # noqa: E4
     InMemorySpanExporter,
 )
 
-import strata.tracing as tracing  # noqa: E402
+from strata.observability import tracing  # noqa: E402
 
 
 @pytest.fixture
