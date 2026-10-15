@@ -4,6 +4,11 @@
 //   uv run python scripts/generate_ws_types.py
 // CI fails if this file is out of date with the models.
 
+export interface AgentNotePayload {
+  source: 'mcp' | 'agent'
+  text: string
+}
+
 export interface CascadeProgressPayload {
   plan_id: string
   current_cell_id: string
@@ -196,6 +201,17 @@ export interface ImpactPreviewPayload {
   estimated_ms: number
 }
 
+export interface InspectResultPayload {
+  cell_id: string
+  action: 'open' | 'eval' | 'close'
+  ok: boolean
+  result?: string | null
+  type?: string | null
+  stdout?: string | null
+  error?: string | null
+  expr?: string | null
+}
+
 export interface ModuleExportModel {
   name: string
   kind: string
@@ -232,6 +248,7 @@ export interface SessionClosedPayload {
 
 /** Frames whose payload shape is generated. Anything absent stays `unknown`. */
 export interface WsServerPayloadMap {
+  agent_note: AgentNotePayload
   cascade_progress: CascadeProgressPayload
   cascade_prompt: CascadePromptPayload
   cell_console: CellConsolePayload
@@ -246,6 +263,7 @@ export interface WsServerPayloadMap {
   environment_job_started: EnvironmentJobEventPayload
   error: ErrorPayload
   impact_preview: ImpactPreviewPayload
+  inspect_result: InspectResultPayload
   presence: PresencePayload
   profiling_summary: ProfilingSummaryPayload
   session_closed: SessionClosedPayload
