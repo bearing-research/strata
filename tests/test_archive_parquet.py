@@ -16,8 +16,8 @@ import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 import pytest
 
-from strata.artifact_cli import cmd_archive
-from strata.artifact_store import ArtifactStore
+from strata.artifact.cli import cmd_archive
+from strata.artifact.store import ArtifactStore
 
 TABLE = pa.table({"id": [1, 2, 3], "value": [0.1, 0.2, 0.3], "name": ["a", "b", "c"]})
 

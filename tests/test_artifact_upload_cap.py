@@ -14,7 +14,7 @@ import httpx
 import pyarrow as pa
 import pytest
 
-from strata.artifact_store import ArtifactStore, TransformSpec
+from strata.artifact.store import ArtifactStore, TransformSpec
 from tests.conftest import run_server_with_context, table_to_ipc_bytes
 
 CAP = 4096

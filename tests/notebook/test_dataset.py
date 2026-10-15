@@ -10,7 +10,7 @@ import types
 import pyarrow as pa
 import pytest
 
-from strata.artifact_store import TransformSpec
+from strata.artifact.store import TransformSpec
 from strata.notebook import datasets as datasets_module
 from strata.notebook.annotations import parse_annotations
 
@@ -296,7 +296,7 @@ class TestLineage:
     async def test_downstream_lineage_reaches_the_named_version(
         self, notebook, notebook_personal_server
     ):
-        from strata.artifact_cli import _walk_lineage
+        from strata.artifact.cli import _walk_lineage
         from strata.notebook.executor import CellExecutor
         from strata.services.artifact import ArtifactService
 
@@ -335,7 +335,7 @@ class TestLineage:
     async def test_lineage_reaches_the_steps_behind_the_dataset(
         self, notebook, notebook_personal_server
     ):
-        from strata.artifact_cli import _walk_lineage
+        from strata.artifact.cli import _walk_lineage
         from strata.notebook.executor import CellExecutor
         from strata.services.artifact import ArtifactService
 
@@ -371,8 +371,8 @@ class TestLineage:
         ]
 
     def test_an_ancestor_the_notebook_already_holds_is_reused(self, tmp_path):
-        from strata.artifact_cli import _walk_lineage
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.cli import _walk_lineage
+        from strata.artifact.store import ArtifactStore
         from strata.notebook.models import DatasetSpec
 
         registry = ArtifactStore(tmp_path / "registry")
@@ -421,7 +421,7 @@ class TestSameIdOtherBytes:
         return downloads
 
     def test_a_local_row_with_the_id_but_another_computation_is_not_bound(self, tmp_path):
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
         from strata.notebook.models import DatasetSpec
 
         registry_store = ArtifactStore(tmp_path / "registry")
@@ -482,7 +482,7 @@ class TestSameIdOtherBytes:
         assert out.outputs["score"]["preview"] == 999
 
     def test_a_local_row_with_the_id_and_the_computation_is_reused(self, tmp_path):
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
         from strata.notebook.models import DatasetSpec
 
         registry_store = ArtifactStore(tmp_path / "registry")
@@ -504,7 +504,7 @@ class TestTenant:
     """On a multi-tenant server, a session resolves names as its own tenant."""
 
     def test_names_resolve_in_the_sessions_tenant(self, tmp_path):
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
         from strata.notebook.models import DatasetSpec
 
         store = ArtifactStore(tmp_path / "registry")
@@ -523,7 +523,7 @@ class TestTenant:
             )
 
     def test_another_tenants_version_is_not_handed_over(self, tmp_path):
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
 
         store = ArtifactStore(tmp_path / "registry")
         _store_version(store, b"{}", content_type="json/object", artifact_id="m", tenant="acme")
@@ -571,7 +571,7 @@ class TestReaders:
     ):
         import httpx
 
-        from strata.artifact_transfer import copy_chain
+        from strata.artifact.transfer import copy_chain
         from strata.notebook.executor import CellExecutor
         from strata.notebook.routes import list_notebook_published_artifacts
 
@@ -636,7 +636,7 @@ class TestARemoteRegistry:
     async def test_the_chain_behind_the_dataset_is_copied_over_http(
         self, notebook, notebook_personal_server, monkeypatch
     ):
-        from strata.artifact_cli import _walk_lineage
+        from strata.artifact.cli import _walk_lineage
         from strata.notebook.executor import CellExecutor
 
         _model_with_history(notebook_personal_server["artifact_store"])

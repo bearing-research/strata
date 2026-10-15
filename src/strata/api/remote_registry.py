@@ -15,7 +15,7 @@ import httpx
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from strata.artifact_transfer import detail_of
+from strata.artifact.transfer import detail_of
 from strata.logging import get_logger
 
 logger = get_logger(__name__)

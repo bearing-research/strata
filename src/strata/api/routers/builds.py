@@ -24,8 +24,8 @@ from strata.api.dependencies import (
     build_transport_available,
     runtime_build_store,
 )
-from strata.artifact_store import BuildLeaseLost
-from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.store import BuildLeaseLost
 from strata.services.build import build_service
 from strata.transforms.signed_urls import lease_attempt, lease_token
 from strata.types import BuildStatusResponse

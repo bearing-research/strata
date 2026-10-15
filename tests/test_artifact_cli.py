@@ -9,8 +9,8 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from strata.artifact_cli import cmd_lineage, cmd_list, cmd_pull, cmd_show
-from strata.artifact_store import ArtifactStore, TransformSpec, reset_artifact_store
+from strata.artifact.cli import cmd_lineage, cmd_list, cmd_pull, cmd_show
+from strata.artifact.store import ArtifactStore, TransformSpec, reset_artifact_store
 
 
 def _ipc_bytes(num_rows: int) -> bytes:
@@ -194,8 +194,8 @@ class TestWhichStoreACommandReads:
         """With server settings in the shell, --artifact-dir must not pair a local store's rows with
         the team bucket's bytes.
         """
-        from strata.artifact_cli import _open_store
-        from strata.blob_store import LocalBlobStore
+        from strata.artifact.blob_store import LocalBlobStore
+        from strata.artifact.cli import _open_store
 
         monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "s3")
         monkeypatch.setenv("STRATA_ARTIFACT_S3_BUCKET", "team-bucket")
@@ -208,7 +208,7 @@ class TestWhichStoreACommandReads:
     def test_artifact_dir_opens_even_when_the_environment_is_incoherent(
         self, chain_store, monkeypatch
     ):
-        from strata.artifact_cli import _open_store
+        from strata.artifact.cli import _open_store
 
         monkeypatch.setenv("STRATA_MULTI_TENANT_ENABLED", "true")  # personal mode refuses it
 
@@ -218,7 +218,7 @@ class TestWhichStoreACommandReads:
         self, chain_store, tmp_path, monkeypatch
     ):
         """The CLI reads [tool.strata] like the server, not only the environment."""
-        from strata.artifact_cli import _open_store
+        from strata.artifact.cli import _open_store
 
         project = tmp_path / "project"
         project.mkdir()
@@ -237,7 +237,7 @@ class TestWhichStoreACommandReads:
         """Loading config creates a personal-mode artifact_dir, so a typo must not leave an empty
         store.
         """
-        from strata.artifact_cli import _open_store
+        from strata.artifact.cli import _open_store
 
         typo = tmp_path / "artifcats"
         monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(typo))
@@ -319,7 +319,7 @@ class TestAliasRefsAndAudit:
         assert "demo/model@champion" in out  # rendered in aliases line
 
     def test_audit_renders_moves(self, chain_store, capsys):
-        from strata.artifact_cli import cmd_audit
+        from strata.artifact.cli import cmd_audit
 
         store = chain_store["store"]
         store.set_alias("demo/model", "champion", "feat-1", 1)
@@ -336,7 +336,7 @@ class TestAliasRefsAndAudit:
         assert "feat-1@v1 -> model-1@v1" in out
 
     def test_audit_json(self, chain_store, capsys):
-        from strata.artifact_cli import cmd_audit
+        from strata.artifact.cli import cmd_audit
 
         store = chain_store["store"]
         store.set_tag("model-1", 1, "auc", "0.9")
@@ -356,7 +356,7 @@ class TestPublish:
 
         Upstream cell source can name private dataset paths.
         """
-        from strata.artifact_cli import cmd_publish
+        from strata.artifact.cli import cmd_publish
 
         rc = cmd_publish(
             _args(
@@ -392,7 +392,7 @@ class TestPublish:
         self, chain_store, capsys, monkeypatch, env, prefix
     ):
         """The link must resolve where the server is reached, as the page's own links do."""
-        from strata.artifact_cli import cmd_publish
+        from strata.artifact.cli import cmd_publish
 
         for name, value in env.items():
             monkeypatch.setenv(name, value)
@@ -410,7 +410,7 @@ class TestPublish:
         ``_walk_lineage`` renders a tree, so a shared step appears expanded and again as a bare
         leaf; the disclosure must be the actual set of steps.
         """
-        from strata.artifact_cli import cmd_publish
+        from strata.artifact.cli import cmd_publish
 
         store = chain_store["store"]
         # Make it a diamond: the model reads the scan directly as well as
@@ -449,7 +449,7 @@ class TestPublish:
         assert "scan-1@v=1" in listed
 
     def test_unpublish_withdraws_and_is_not_repeatable(self, chain_store, capsys):
-        from strata.artifact_cli import cmd_publish, cmd_unpublish
+        from strata.artifact.cli import cmd_publish, cmd_unpublish
 
         cmd_publish(
             _args(
@@ -473,7 +473,7 @@ class TestPublishAuthor:
         """Publishing is idempotent, so a later --author is dropped and must not be reported as
         applied.
         """
-        from strata.artifact_cli import cmd_publish
+        from strata.artifact.cli import cmd_publish
 
         base = {
             "ref": "demo/model",
@@ -496,7 +496,7 @@ class TestArchive:
 
     @staticmethod
     def _archive(chain_store, tmp_path, **overrides):
-        from strata.artifact_cli import cmd_archive
+        from strata.artifact.cli import cmd_archive
 
         dest = tmp_path / "bundle"
         args = {
@@ -571,7 +571,7 @@ class TestArchive:
 
     def test_it_refuses_a_non_empty_destination(self, chain_store, tmp_path):
         """`--to .` must not clobber someone's README."""
-        from strata.artifact_cli import cmd_archive
+        from strata.artifact.cli import cmd_archive
 
         dest = tmp_path / "occupied"
         dest.mkdir()
@@ -593,7 +593,7 @@ class TestArchive:
 
     def test_an_unfinished_artifact_is_not_archivable(self, chain_store, tmp_path):
         """A half-written blob digests like any other, so it must not become a deposit record."""
-        from strata.artifact_cli import cmd_archive
+        from strata.artifact.cli import cmd_archive
 
         store = chain_store["store"]
         store.create_artifact("halfway", "f" * 64)
@@ -663,7 +663,7 @@ class TestReadOnlyCommandsDoNotMigrate:
     def test_an_older_store_is_refused_and_left_at_its_version(
         self, old_store, capsys, command, extra
     ):
-        import strata.artifact_cli as artifact_cli
+        from strata.artifact import cli as artifact_cli
 
         artifact_dir, db_path = old_store
 
@@ -676,8 +676,8 @@ class TestReadOnlyCommandsDoNotMigrate:
         assert "start this release's server on it once" in err
 
     def test_a_write_command_still_migrates(self, old_store):
-        from strata.artifact_cli import _open_store
-        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+        from strata.artifact.cli import _open_store
+        from strata.artifact.store import _LATEST_SCHEMA_VERSION
 
         artifact_dir, db_path = old_store
 

@@ -16,8 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.artifact_store import ArtifactStore, ArtifactVersion, StoreSchemaMismatch
-from strata.artifact_transfer import (
+from strata.artifact.store import ArtifactStore, ArtifactVersion, StoreSchemaMismatch
+from strata.artifact.transfer import (
     PublicationTarget,
     RemoteStore,
     copy_chain,
@@ -534,8 +534,8 @@ def cmd_promote(args: argparse.Namespace) -> int:
 
 def cmd_export_table(args: argparse.Namespace) -> int:
     """``strata artifact export``: write a tabular artifact into an Iceberg table."""
+    from strata.artifact.table_export import export_artifact
     from strata.config import StrataConfig
-    from strata.table_export import export_artifact
 
     store = _open_store(args.artifact_dir)
     if store is None:
@@ -715,7 +715,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     open, and whether writing into an occupied directory is a mistake.
     """
     from strata.api.publication_bundle import PUBLICATION_MAX_DEPTH, bundle_zip, write_bundle
-    from strata.artifact_store import Publication
+    from strata.artifact.store import Publication
 
     token = getattr(args, "token", None)
     if (token is None) == (args.ref is None):
@@ -866,7 +866,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
 
 def _store_location(store: ArtifactStore) -> tuple[str, str]:
     """Where *store* keeps its metadata and its blobs, printable (no password)."""
-    from strata.blob_store import AzureBlobStore, GCSBlobStore, LocalBlobStore, S3BlobStore
+    from strata.artifact.blob_store import AzureBlobStore, GCSBlobStore, LocalBlobStore, S3BlobStore
     from strata.migrate_cli import _redact
     from strata.sql_backend import PostgresDialect
 

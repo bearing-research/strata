@@ -41,7 +41,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
 from strata.api.dependencies import authorize_table_access
-from strata.artifact_uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
+from strata.artifact.uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
 from strata.auth import (
     AuthError,
     caller_key,
@@ -371,7 +371,7 @@ def _authorize_build_access(
 
 def _identity_build_status(stream_state: StreamState) -> BuildStatusResponse:
     """Project an identity stream/background build onto the build-status contract."""
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     state = get_state()
     artifact_uri = f"strata://artifact/{stream_state.artifact_id}@v={stream_state.artifact_version}"
@@ -589,7 +589,7 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     fatal: silently degrading to local disk hides the misconfiguration and loses every
     artifact when the pod is replaced.
     """
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     backend = (config.artifact_blob_backend or "local").lower()
     blob_store = None
@@ -881,7 +881,7 @@ async def lifespan(app: FastAPI):
     # to failed so they surface instead of lingering forever.
     if config.writes_enabled or config.server_transforms_enabled:
         try:
-            from strata.artifact_store import get_artifact_store as _get_store_for_sweep
+            from strata.artifact.store import get_artifact_store as _get_store_for_sweep
 
             sweep_store = _get_store_for_sweep(config.artifact_dir)
             if sweep_store is not None:
@@ -908,7 +908,7 @@ async def lifespan(app: FastAPI):
     # roots as roots.
     gc_task: asyncio.Task | None = None
     if config.artifact_gc_interval_seconds and config.artifact_dir is not None:
-        from strata.artifact_store import get_artifact_store as _get_store_for_gc
+        from strata.artifact.store import get_artifact_store as _get_store_for_gc
 
         gc_store = _get_store_for_gc(config.artifact_dir)
         if gc_store is not None:
@@ -946,7 +946,7 @@ async def lifespan(app: FastAPI):
     # runs embedded transforms so artifacts work out of the box.
     build_runner = None
     if config.transforms_runtime_enabled:
-        from strata.artifact_store import get_artifact_store
+        from strata.artifact.store import get_artifact_store
         from strata.transforms.build_store import get_build_store
         from strata.transforms.registry import get_transform_registry
         from strata.transforms.runner import (
@@ -1617,7 +1617,7 @@ def _get_artifact_store(
     ``allow_write`` permits service-mode writes when ``service_writes_enabled``; the caller
     MUST then gate with ``_authorize_artifact_write``.
     """
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     state = get_state()
 
@@ -1732,7 +1732,7 @@ def _authorize_spec_tables(spec_json: str | None) -> None:
     if not spec_json:
         return
 
-    from strata.artifact_store import TransformSpec
+    from strata.artifact.store import TransformSpec
 
     try:
         spec = TransformSpec.from_json(spec_json)
@@ -1822,7 +1822,7 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
     Accepts ``strata://artifact/{id}@v={version}``, ``strata://artifact/{id}`` (latest) and
     ``strata://name/{name}``.
     """
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     state = get_state()
     if not state.config.writes_enabled:

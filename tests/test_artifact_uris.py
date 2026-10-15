@@ -1,6 +1,6 @@
-"""Unit tests for the pure artifact/name URI parsers in ``strata.artifact_uris``."""
+"""Unit tests for the pure artifact/name URI parsers in ``strata.artifact.uris``."""
 
-from strata.artifact_uris import (
+from strata.artifact.uris import (
     LATEST_VERSION,
     parse_artifact_uri,
     parse_name_uri,

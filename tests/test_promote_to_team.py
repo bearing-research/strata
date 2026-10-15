@@ -13,8 +13,8 @@ import json
 import httpx
 import pytest
 
-from strata.artifact_store import ArtifactStore
-from strata.artifact_transfer import PROMOTION_TAG
+from strata.artifact.store import ArtifactStore
+from strata.artifact.transfer import PROMOTION_TAG
 from strata.notebook.artifact_integration import NotebookArtifactManager
 
 
@@ -63,7 +63,7 @@ def _store_chain(tmp_path):
 
 
 def _promote(chain, url, **overrides):
-    from strata.artifact_cli import cmd_promote
+    from strata.artifact.cli import cmd_promote
 
     args = {
         "ref": chain["figure"].id,
@@ -291,7 +291,7 @@ class TestAHitSaysWhichPromotionItCameFrom:
 
     def test_a_row_the_store_already_held_is_not_claimed(self, team_store, team_dir, chain):
         """A row that arrived some other way is not restamped as this promotion's."""
-        from strata.artifact_transfer import RemoteStore
+        from strata.artifact.transfer import RemoteStore
 
         manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
         upstream = chain["upstream"]
@@ -316,7 +316,7 @@ class TestAHitSaysWhichPromotionItCameFrom:
         assert "nb_promotion" not in row["tags"]
 
     def test_a_pull_reports_the_promotion(self, team_store, tmp_path):
-        from strata.artifact_transfer import RemoteStore, promote_artifact
+        from strata.artifact.transfer import RemoteStore, promote_artifact
         from strata.notebook.provenance import derive_subkey
         from strata.notebook.team_store import TeamStore, pull_cell_outputs
 
@@ -387,7 +387,7 @@ class TestPromotionAfterAPartialFailure:
 
     def test_a_refused_name_still_leaves_the_chain_stamped(self, team_store, team_dir, chain):
         """The retry finds every row present and writes nothing, so stamps land before naming."""
-        from strata.artifact_transfer import RemoteStore
+        from strata.artifact.transfer import RemoteStore
 
         real = RemoteStore.set_name
         calls = []
@@ -416,7 +416,7 @@ class TestPromotionAfterAPartialFailure:
 
         Their own tags stay theirs; other tags still apply.
         """
-        from strata.artifact_transfer import RemoteStore, promote_artifact
+        from strata.artifact.transfer import RemoteStore, promote_artifact
 
         manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
         figure = chain["figure"]
@@ -446,7 +446,7 @@ class TestRefusals:
 
     def test_an_unreadable_artifact_is_refused(self, team_store, tmp_path):
         """A half-written blob has a provenance hash like any other."""
-        from strata.artifact_cli import cmd_promote
+        from strata.artifact.cli import cmd_promote
 
         store = ArtifactStore(tmp_path / "local")
         store.create_artifact("building", "c3" * 32)

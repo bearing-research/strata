@@ -1,6 +1,6 @@
 """SQL dialect seam for the artifact store: SQLite (personal mode) or Postgres.
 
-What differs between the two lives here, so ``artifact_store.py`` keeps one
+What differs between the two lives here, so ``artifact/store.py`` keeps one
 copy of its SQL: placeholder style (``?`` vs ``%s``), autoincrement, numeric
 widths (Postgres ``REAL`` is single precision and ``INTEGER`` 32-bit, which
 would truncate timestamps and overflow ``byte_size`` at 2 GiB), writer

@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from strata.artifact_store import (
+from strata.artifact.store import (
     _BASELINE_SCHEMA_VERSION,
     _LATEST_SCHEMA_VERSION,
     _MIGRATIONS,

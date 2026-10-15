@@ -698,7 +698,7 @@ def _promote(
     tags: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Copy a cell's output and its chain to the team store, and name it there."""
-    from strata.artifact_transfer import RemoteStore, promote_artifact
+    from strata.artifact.transfer import RemoteStore, promote_artifact
 
     config = _server_config()
     base_url = getattr(config, "notebook_remote_store_url", None)
@@ -757,7 +757,7 @@ def _publish(
     title: str | None = None,
 ) -> dict[str, Any]:
     """Mint the public link, after copying the chain to the store that serves it."""
-    from strata.artifact_transfer import copy_chain
+    from strata.artifact.transfer import copy_chain
 
     store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
     served = _served_store()
@@ -806,7 +806,7 @@ def _served_store():
 
     The server's own instance, with its configured metadata DSN and blob backend.
     """
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     return get_artifact_store()
 

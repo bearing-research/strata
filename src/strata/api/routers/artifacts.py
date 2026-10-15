@@ -38,15 +38,15 @@ from strata.api.dependencies import (
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.api.served_bytes import data_headers
-from strata.artifact_store import (
+from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.store import (
     ArtifactIdTaken,
     ArtifactImportConflict,
     ArtifactStore,
     ArtifactVersion,
     reject_unsafe_artifact_id,
 )
-from strata.artifact_transfer import PROMOTION_TAG
-from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.transfer import PROMOTION_TAG
 from strata.services.artifact import artifact_service
 from strata.types import (
     PROVENANCE_MISS_HEADER,
@@ -313,8 +313,8 @@ def _store_put(
         except Exception:
             input_versions[input_uri] = input_uri
 
-    from strata.artifact_store import TransformSpec as ArtifactTransformSpec
-    from strata.artifact_store import compute_provenance_hash
+    from strata.artifact.store import TransformSpec as ArtifactTransformSpec
+    from strata.artifact.store import compute_provenance_hash
 
     artifact_transform = ArtifactTransformSpec(
         executor=executor,
@@ -799,7 +799,7 @@ def _store_put_by_provenance(
     byte_size: int,
 ) -> PutArtifactResponse:
     """The by-provenance PUT's store work, in one thread: none of it may run on the loop."""
-    from strata.artifact_store import TransformSpec as ArtifactTransformSpec
+    from strata.artifact.store import TransformSpec as ArtifactTransformSpec
 
     tenant_id = principal.tenant if principal else None
 
@@ -1182,9 +1182,9 @@ def export_artifact_to_table(
     ``table`` is a ``<warehouse>#ns.table`` URI or ``ns.table`` in the configured catalog.
     """
     from strata.api.dependencies import authorize_table_access
+    from strata.artifact.table_export import export_artifact
     from strata.iceberg import TableOfAnotherTenant, table_identity_for
     from strata.server import _authorize_artifact_read, _ensure_artifact_access, get_state
-    from strata.table_export import export_artifact
 
     config = get_state().config
     # The table this writes is authorized like any table a scan reads, so a

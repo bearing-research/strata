@@ -25,7 +25,7 @@ SERVICE = {
 @pytest.fixture
 def scrape(tmp_path):
     import strata.server as server_module
-    from strata.artifact_store import reset_artifact_store
+    from strata.artifact.store import reset_artifact_store
     from strata.config import StrataConfig
     from strata.server import ServerState, app
 

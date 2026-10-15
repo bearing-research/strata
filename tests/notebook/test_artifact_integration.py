@@ -269,7 +269,7 @@ class TestAVersionOvertakenByADuplicate:
     """A version dedup overtook keeps no bytes and reads its canonical's through the store."""
 
     def _overtaken(self, manager, artifact_id: str) -> int:
-        from strata.artifact_store import TransformSpec
+        from strata.artifact.store import TransformSpec
 
         store = manager.artifact_store
         spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
@@ -324,7 +324,7 @@ class TestPublishedArtifactsDashboard:
         import asyncio
 
         import strata.server as server_module
-        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.notebook.routes import list_notebook_published_artifacts
 
         artifact_dir = tmp_path / "artifacts"
@@ -365,7 +365,7 @@ class TestPublishedArtifactsDashboard:
         import threading
 
         import strata.server as server_module
-        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.notebook.routes import list_notebook_published_artifacts
 
         artifact_dir = tmp_path / "artifacts"
@@ -656,7 +656,7 @@ class TestOneRunsOutputsTogether:
     def test_a_crash_between_two_outputs_leaves_the_earlier_run_current(
         self, tmp_path, monkeypatch
     ):
-        from strata.blob_store import LocalBlobStore
+        from strata.artifact.blob_store import LocalBlobStore
         from strata.notebook.executor import CellExecutor
 
         session = self._session(tmp_path)

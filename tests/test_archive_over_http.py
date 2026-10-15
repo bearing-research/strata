@@ -18,7 +18,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from strata.artifact_store import ArtifactStore, TransformSpec
+from strata.artifact.store import ArtifactStore, TransformSpec
 
 TABLE = pa.table({"id": [1, 2, 3], "value": [0.1, 0.2, 0.3]})
 
@@ -95,7 +95,7 @@ class TestTheBundle:
         """Two implementations of mutually describing files would drift silently, so both must
         match.
         """
-        from strata.artifact_cli import cmd_archive
+        from strata.artifact.cli import cmd_archive
 
         base_url, publication, artifact_dir = served
 
@@ -152,7 +152,7 @@ class TestTheBundle:
 
 def _archive(artifact_dir, to, **overrides):
     """Run ``strata artifact archive`` in-process."""
-    from strata.artifact_cli import cmd_archive
+    from strata.artifact.cli import cmd_archive
 
     args = dict(
         ref=None,

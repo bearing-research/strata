@@ -131,7 +131,7 @@ def _never_publish_into_the_real_store(monkeypatch):
     With ``None``, ``cmd_publish`` mints in the store the test opened rather than the
     server's ``~/.strata/artifacts``. The bridge test overrides this.
     """
-    monkeypatch.setattr("strata.artifact_cli._server_store", lambda: None)
+    monkeypatch.setattr("strata.artifact.cli._server_store", lambda: None)
 
 
 @pytest.fixture(autouse=True)
@@ -160,7 +160,7 @@ def _reset_process_globals():
             streams.shutdown_cleanups()
 
     server_module._state = None
-    from strata.artifact_store import reset_artifact_store
+    from strata.artifact.store import reset_artifact_store
     from strata.cache.metadata import reset_caches
     from strata.rate_limiter import reset_rate_limiter
     from strata.tenant_registry import reset_tenant_registry
@@ -335,7 +335,7 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     server does not answer /health within 20 seconds.
     """
     import strata.server as server_module
-    from strata.artifact_store import reset_artifact_store
+    from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
 
     if reset_caches:
@@ -409,7 +409,7 @@ def run_server_with_context(
     cleanup. Raises RuntimeError if the server fails to start.
     """
     from strata import server
-    from strata.artifact_store import reset_artifact_store
+    from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
 
     port = find_free_port()
@@ -609,7 +609,7 @@ def seed_build_targets(
     creates the version first. Opening the artifact store also creates ``artifact_versions``
     in the shared database, without which the key cannot resolve.
     """
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact.store import ArtifactStore
 
     store = ArtifactStore(artifact_dir)
     try:

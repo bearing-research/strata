@@ -479,7 +479,7 @@ class TestArtifactReadAcl:
 
     @pytest.fixture
     def store(self, tmp_path):
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
 
         return ArtifactStore(tmp_path / "artifacts")
 
@@ -487,7 +487,7 @@ class TestArtifactReadAcl:
     def _artifact(table_uri):
         from unittest.mock import MagicMock
 
-        from strata.artifact_store import TransformSpec
+        from strata.artifact.store import TransformSpec
 
         art = MagicMock()
         art.transform_spec = TransformSpec(
@@ -548,7 +548,7 @@ class TestArtifactReadAcl:
         # scoping is the gate.
         from unittest.mock import MagicMock
 
-        from strata.artifact_store import TransformSpec
+        from strata.artifact.store import TransformSpec
 
         server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
         art = MagicMock()
@@ -590,7 +590,7 @@ class TestDerivedResultsInheritTheAcl:
         from fastapi.testclient import TestClient
 
         import strata.server as server_module
-        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.server import ServerState, app
 
         artifact_dir = tmp_path / "artifacts"
@@ -615,7 +615,7 @@ class TestDerivedResultsInheritTheAcl:
 
         import pyarrow as pa
 
-        from strata.artifact_store import TransformSpec
+        from strata.artifact.store import TransformSpec
 
         version = store.create_artifact(
             artifact_id,
@@ -689,7 +689,7 @@ class TestDerivedResultsInheritTheAcl:
 
     def test_the_chain_is_read_one_level_at_a_time(self, tmp_path):
         """The walk costs a query per level of the lineage, not one per ancestor."""
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
 
         store = ArtifactStore(tmp_path / "artifacts")
         parents = []

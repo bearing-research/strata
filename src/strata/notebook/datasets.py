@@ -20,8 +20,8 @@ from urllib.parse import quote
 
 import httpx
 
-from strata.artifact_store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
-from strata.artifact_transfer import remap_input_versions
+from strata.artifact.store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
+from strata.artifact.transfer import remap_input_versions
 from strata.notebook.models import DatasetSpec
 
 STALE_CHECK_SECONDS = 60.0
@@ -244,7 +244,7 @@ def registry_for(config: Any, tenant: str | None = None) -> Registry:
         from strata.auth import remote_store_headers
 
         return RemoteRegistry(str(remote), remote_store_headers(config))
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     store = get_artifact_store(getattr(config, "artifact_dir", None))
     if store is None:

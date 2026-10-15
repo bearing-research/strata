@@ -798,7 +798,7 @@ class TestPromoteReaches:
         import httpx
 
         import strata.notebook.mcp_server as mcp_module
-        from strata.artifact_store import ArtifactStore
+        from strata.artifact.store import ArtifactStore
         from strata.notebook.mcp_server import _promote
 
         sm, session_id, _ = sm_with_a_stored_output
@@ -832,7 +832,7 @@ class TestPublish:
 
         The page route reads only the server's store, so a link minted elsewhere is dead.
         """
-        from strata.artifact_store import get_artifact_store
+        from strata.artifact.store import get_artifact_store
         from strata.notebook.mcp_server import _publish
 
         sm, session_id, _ = sm_with_a_stored_output
@@ -854,8 +854,8 @@ class TestPublish:
         from types import SimpleNamespace
 
         import strata.server as server_module
-        from strata.artifact_store import get_artifact_store
-        from strata.blob_store import LocalBlobStore
+        from strata.artifact.blob_store import LocalBlobStore
+        from strata.artifact.store import get_artifact_store
         from strata.notebook.mcp_server import _publish
 
         sm, session_id, _ = sm_with_a_stored_output
@@ -879,7 +879,7 @@ class TestPublish:
 @pytest.mark.asyncio
 async def test_publish_records_who_published_it_and_whose_it_is(sm_with_a_stored_output, tmp_path):
     """Without the caller stamped, the audit row names nobody (REST and CLI stamp it too)."""
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
     from strata.auth import principal_context
     from strata.notebook.mcp_server import _publish
     from strata.types import Principal

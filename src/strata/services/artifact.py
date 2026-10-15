@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, NamedTuple
 
-from strata.artifact_store import TransformSpec
+from strata.artifact.store import TransformSpec
 from strata.types import (
     ArtifactDependentsResponse,
     ArtifactLineageResponse,
@@ -19,7 +19,7 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore, ArtifactVersion
+    from strata.artifact.store import ArtifactStore, ArtifactVersion
 
 
 def _input_version_to_artifact_ref(

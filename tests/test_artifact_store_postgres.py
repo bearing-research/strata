@@ -15,8 +15,8 @@ import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
-from strata.artifact_cli import _server_store as _configured_server_store
-from strata.artifact_store import ArtifactStore, TransformSpec
+from strata.artifact.cli import _server_store as _configured_server_store
+from strata.artifact.store import ArtifactStore, TransformSpec
 from strata.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
 from tests.conftest import race_after_pending_read
 
@@ -128,7 +128,7 @@ class TestRoundTrip:
         assert store.id_tenant("held") == "team-a"
 
     def test_another_tenant_cannot_create_under_a_held_id(self, store):
-        from strata.artifact_store import ArtifactIdTaken
+        from strata.artifact.store import ArtifactIdTaken
 
         store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
 
@@ -141,7 +141,7 @@ class TestRoundTrip:
     def test_another_tenant_cannot_import_under_a_held_id(self, store):
         from dataclasses import replace
 
-        from strata.artifact_store import ArtifactImportConflict
+        from strata.artifact.store import ArtifactImportConflict
 
         version = store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
         store.write_blob("held", version, b"payload")
@@ -358,7 +358,7 @@ class TestConnectionLimits:
 
 class TestCanonicalPromotion:
     def test_a_runs_outputs_finalize_together_or_not_at_all(self, store):
-        from strata.artifact_store import StagedVersion
+        from strata.artifact.store import StagedVersion
 
         first = store.create_artifact("a1", "shared-prov", _spec())
         store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
@@ -860,7 +860,7 @@ class TestConfigurationSelectsTheBackend:
     """The wiring end to end: a DSN in config produces a Postgres-backed store."""
 
     def test_a_configured_dsn_produces_a_postgres_backed_store(self, postgres_dsn, tmp_path):
-        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import _init_configured_artifact_store
 
@@ -892,7 +892,7 @@ class TestConfigurationSelectsTheBackend:
             reset_artifact_store()
 
     def test_no_dsn_still_produces_a_sqlite_store(self, tmp_path):
-        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import _init_configured_artifact_store
 
@@ -1191,7 +1191,7 @@ class TestTheCliOnAPostgresStore:
         import argparse
 
         from strata.api.publication_bundle import bundle_zip
-        from strata.artifact_cli import cmd_archive
+        from strata.artifact.cli import cmd_archive
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1243,7 +1243,7 @@ class TestTheCliOnAPostgresStore:
         """
         import argparse
 
-        from strata.artifact_cli import cmd_publish
+        from strata.artifact.cli import cmd_publish
 
         version = store.create_artifact("fig", "prov-fig", _spec())
         with store.open_blob_writer("fig", version) as writer:
@@ -1253,7 +1253,7 @@ class TestTheCliOnAPostgresStore:
         monkeypatch.setenv("STRATA_ARTIFACT_METADATA_DSN", postgres_dsn)
         monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
         # The suite stubs this out so no test publishes into a developer's own store.
-        monkeypatch.setattr("strata.artifact_cli._server_store", _configured_server_store)
+        monkeypatch.setattr("strata.artifact.cli._server_store", _configured_server_store)
         args = argparse.Namespace(
             ref=f"fig@v={version}",
             artifact_dir=None,
@@ -1651,7 +1651,7 @@ class TestSchemaMigrations:
     """
 
     def test_a_fresh_database_is_stamped_and_complete(self, store):
-        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+        from strata.artifact.store import _LATEST_SCHEMA_VERSION
 
         conn = store._get_connection()
         try:
@@ -1668,7 +1668,7 @@ class TestSchemaMigrations:
 
     def test_an_existing_database_is_carried_forward(self, postgres_dsn, tmp_path, store):
         """A new column reaches a store that already has rows."""
-        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+        from strata.artifact.store import _LATEST_SCHEMA_VERSION
         from strata.sql_backend import PostgresDialect
 
         version = store.create_artifact("keeper", "prov-keep", _spec())
@@ -1708,7 +1708,7 @@ class TestSchemaMigrations:
     def test_existing_publication_tokens_are_hashed_and_still_resolve(
         self, postgres_dsn, tmp_path, store
     ):
-        from strata.artifact_store import publication_id
+        from strata.artifact.store import publication_id
         from strata.sql_backend import PostgresDialect
 
         version = store.create_artifact("fig", "prov-fig", _spec())
@@ -1757,7 +1757,7 @@ class TestSchemaMigrations:
 
     def test_a_read_only_open_leaves_an_older_database_alone(self, postgres_dsn, tmp_path, store):
         """A shared database older nodes still serve: inspecting it must not migrate it."""
-        from strata.artifact_store import StoreSchemaMismatch
+        from strata.artifact.store import StoreSchemaMismatch
 
         conn = store._get_connection()
         try:
@@ -1784,7 +1784,7 @@ class TestSchemaMigrations:
             dialect.close()
 
     def test_an_existing_database_gains_the_worker_registry(self, postgres_dsn, tmp_path, store):
-        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+        from strata.artifact.store import _LATEST_SCHEMA_VERSION
 
         conn = store._get_connection()
         try:

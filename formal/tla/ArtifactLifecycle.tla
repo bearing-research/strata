@@ -1,7 +1,7 @@
 --------------------------- MODULE ArtifactLifecycle ---------------------------
 (***************************************************************************)
 (* Model of the artifact_versions state machine in                        *)
-(* src/strata/artifact_store.py.                                          *)
+(* src/strata/artifact/store.py.                                          *)
 (*                                                                         *)
 (* Each SQL transaction is one atomic action. The notebook write path      *)
 (* (artifact_integration.store_cell_output) is two transactions,           *)

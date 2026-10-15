@@ -22,7 +22,7 @@ from strata.notebook.models import NotebookState, WorkerBackendType, WorkerSpec
 from strata.notebook.remote_executor import NOTEBOOK_EXECUTOR_TRANSFORM_REF
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact.store import ArtifactStore
 
 logger = logging.getLogger(__name__)
 
@@ -264,7 +264,7 @@ def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
     node sharing that store shows up here at once. Until the registry is first set, the
     ``[tool.strata.transforms]`` table applies; after that, editing it has no effect.
     """
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     store = get_artifact_store()
     if store is not None:
@@ -281,7 +281,7 @@ def _change_server_managed_worker_records(
 
     Without an artifact store (a scan-only service server) the registry lives in memory.
     """
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
 
     store = get_artifact_store()
     if store is None:

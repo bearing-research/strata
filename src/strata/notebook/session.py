@@ -102,7 +102,7 @@ from strata.notebook.ws_payloads import (
 )
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactVersion
+    from strata.artifact.store import ArtifactVersion
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.secret_manager import SecretFetchResult

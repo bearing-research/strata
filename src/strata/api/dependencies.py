@@ -17,7 +17,7 @@ from fastapi import Depends, HTTPException
 # Imported at runtime, not under TYPE_CHECKING: the aliases below embed these in ``Annotated[...]``,
 # and FastAPI resolves hints against the router module's globals, where a string forward ref would
 # not resolve.
-from strata.artifact_store import ArtifactStore
+from strata.artifact.store import ArtifactStore
 from strata.pool_metrics import get_pool_tracker
 from strata.transforms.build_store import BuildStore
 from strata.types import Principal, TableIdentity
@@ -176,7 +176,7 @@ def build_transport_available() -> bool:
 
 def runtime_build_store() -> BuildStore | None:
     """Resolve the runtime build store, or ``None`` when no ``artifact_dir`` is set."""
-    from strata.artifact_store import get_artifact_store
+    from strata.artifact.store import get_artifact_store
     from strata.server import get_state
     from strata.transforms.build_store import get_build_store
 

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from pyiceberg.exceptions import NoSuchTableError
 
-from strata.artifact_store import TransformSpec, compute_provenance_hash
+from strata.artifact.store import TransformSpec, compute_provenance_hash
 from strata.iceberg import WarehouseNotFound, object_store_unreachable
 from strata.iceberg_schema import UnsupportedTableFormatError
 from strata.types import (
@@ -24,7 +24,7 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore, ArtifactVersion
+    from strata.artifact.store import ArtifactStore, ArtifactVersion
 
 
 def table_input_version(plan: ReadPlan) -> str:

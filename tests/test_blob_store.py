@@ -10,8 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from strata import blob_store as blob_store_module
-from strata.blob_store import (
+from strata.artifact import blob_store as blob_store_module
+from strata.artifact.blob_store import (
     BlobStore,
     GCSBlobStore,
     LocalBlobStore,
@@ -266,7 +266,7 @@ class TestStagedLocalWriter:
     def test_tempfile_discarded_on_exception(self, tmp_path: Path, monkeypatch):
         """The staged tempfile is removed even when commit never runs."""
         captured_path: list[Path] = []
-        import strata.blob_store as blob_store_module
+        from strata.artifact import blob_store as blob_store_module
 
         real_mkstemp = blob_store_module.tempfile.mkstemp
 
@@ -291,7 +291,7 @@ class TestStagedLocalWriter:
     def test_commit_exception_propagates_and_cleans_up(self, tmp_path: Path, monkeypatch):
         """If commit raises, the tempfile is still removed."""
         captured_path: list[Path] = []
-        import strata.blob_store as blob_store_module
+        from strata.artifact import blob_store as blob_store_module
 
         real_mkstemp = blob_store_module.tempfile.mkstemp
 
@@ -480,7 +480,7 @@ class TestS3BackendAtomicity:
         fake_fs = self._FakeS3FileSystem(tmp_path, open_fails=True)
         store = self._build_store_with_fake_fs(fake_fs)
 
-        import strata.blob_store as blob_store_module
+        from strata.artifact import blob_store as blob_store_module
 
         captured_tmp: list[Path] = []
         real_mkstemp = blob_store_module.tempfile.mkstemp
@@ -518,7 +518,7 @@ class TestS3BackendAtomicity:
         fake_fs = self._FakeS3FileSystem(tmp_path)
         store = self._build_store_with_fake_fs(fake_fs)
 
-        import strata.blob_store as blob_store_module
+        from strata.artifact import blob_store as blob_store_module
 
         mkstemp_calls: list[str] = []
         real_mkstemp = blob_store_module.tempfile.mkstemp
@@ -648,7 +648,7 @@ class TestGCSCredentialResolution:
         reason="Windows has no Unix mode bits; chmod only toggles the read-only flag",
     )
     def test_inline_key_material_is_written_to_a_private_file(self, tmp_path):
-        from strata.blob_store import _resolve_gcs_credentials
+        from strata.artifact.blob_store import _resolve_gcs_credentials
 
         key = '{"type": "service_account", "project_id": "p", "private_key": "k"}'
 
@@ -664,7 +664,7 @@ class TestGCSCredentialResolution:
         # atexit does not run on SIGKILL or an OOM kill, so a random filename
         # would leave one private key behind per hard-killed process. The name
         # is derived from the key, so a restart rewrites the same file.
-        from strata.blob_store import _resolve_gcs_credentials
+        from strata.artifact.blob_store import _resolve_gcs_credentials
 
         key = '{"type": "service_account", "private_key": "k"}'
 
@@ -682,7 +682,7 @@ class TestGCSCredentialResolution:
     def test_a_file_left_world_readable_is_tightened(self):
         # A leftover from a previous run, or a temp dir with a permissive
         # umask: the mode has to be fixed rather than assumed.
-        from strata.blob_store import _resolve_gcs_credentials
+        from strata.artifact.blob_store import _resolve_gcs_credentials
 
         key = '{"type": "service_account", "private_key": "loose"}'
         path = Path(_resolve_gcs_credentials(key))
@@ -693,7 +693,7 @@ class TestGCSCredentialResolution:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     def test_a_path_is_passed_through_untouched(self):
-        from strata.blob_store import _resolve_gcs_credentials
+        from strata.artifact.blob_store import _resolve_gcs_credentials
 
         assert _resolve_gcs_credentials("/etc/strata/gcs-key.json") == "/etc/strata/gcs-key.json"
 
@@ -701,7 +701,7 @@ class TestGCSCredentialResolution:
         # Parsed rather than sniffed for a leading brace, but a bare JSON
         # scalar still parses. A relative filename must not be mistaken for
         # key material just because json.loads accepts it.
-        from strata.blob_store import _resolve_gcs_credentials
+        from strata.artifact.blob_store import _resolve_gcs_credentials
 
         assert _resolve_gcs_credentials("123") == "123"
 
@@ -819,7 +819,7 @@ class TestAzureDownloadReader:
                 start += size
 
     def _raw(self):
-        from strata.blob_store import _AzureDownloadReader
+        from strata.artifact.blob_store import _AzureDownloadReader
 
         return _AzureDownloadReader(self.Downloader(self.DATA, self.CHUNK_SIZES))
 
@@ -876,7 +876,7 @@ class TestAzureBlobStore:
     def test_azure_key_format_with_prefix(self):
         """The Azure key includes the prefix."""
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         # A fake connection string: key generation needs no real connection.
         store = AzureBlobStore(
@@ -892,7 +892,7 @@ class TestAzureBlobStore:
 
     def test_azure_key_format_without_prefix(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="testaccount",
@@ -907,7 +907,7 @@ class TestAzureBlobStore:
 
     def test_blob_key_format(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="testaccount",
@@ -923,7 +923,7 @@ class TestAzureBlobStore:
     def test_requires_auth_method(self):
         """The Azure store raises without an auth method."""
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         with pytest.raises(ValueError, match="requires one of"):
             AzureBlobStore(
@@ -936,7 +936,7 @@ class TestAzureBlobStore:
     def test_endpoint_url_is_the_host_and_the_account_is_its_first_path_segment(self):
         """The documented meaning of ``STRATA_AZURE_ENDPOINT_URL``, shared with the lake path."""
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="devstoreaccount1",
@@ -951,7 +951,7 @@ class TestAzureBlobStore:
 
     def test_endpoint_url_already_naming_the_account_is_not_doubled(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="devstoreaccount1",
@@ -965,7 +965,7 @@ class TestAzureBlobStore:
 
     def test_endpoint_url_without_an_account_name_is_used_as_given(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="",
@@ -989,7 +989,7 @@ class TestAzureBlobStore:
         import os
 
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         connection_string = os.environ.get("STRATA_AZURE_CONNECTION_STRING")
         if not connection_string:
@@ -1105,7 +1105,7 @@ class TestCreateBlobStore:
 
     def test_creates_azure_store_from_env(self, tmp_path: Path, monkeypatch):
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "azure")
         monkeypatch.setenv("STRATA_ARTIFACT_AZURE_CONTAINER", "my-container")
@@ -1212,7 +1212,7 @@ class TestConfigCreateBlobStore:
 
     def test_creates_azure_store(self, tmp_path: Path):
         pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
+        from strata.artifact.blob_store import AzureBlobStore
 
         config = StrataConfig(
             deployment_mode="personal",
@@ -1249,13 +1249,13 @@ class TestConfiguredBackendIsActuallyWired:
     """
 
     def _init(self, config):
-        from strata.artifact_store import reset_artifact_store
+        from strata.artifact.store import reset_artifact_store
         from strata.server import _init_configured_artifact_store
 
         reset_artifact_store()
         try:
             _init_configured_artifact_store(config)
-            from strata.artifact_store import get_artifact_store
+            from strata.artifact.store import get_artifact_store
 
             return get_artifact_store(config.artifact_dir)
         finally:
@@ -1266,7 +1266,7 @@ class TestConfiguredBackendIsActuallyWired:
         import boto3
         from moto import mock_aws
 
-        from strata.artifact_store import reset_artifact_store
+        from strata.artifact.store import reset_artifact_store
 
         with mock_aws():
             boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="wired-bucket")
@@ -1285,7 +1285,7 @@ class TestConfiguredBackendIsActuallyWired:
                 reset_artifact_store()
 
     def test_local_backend_is_unchanged(self, tmp_path: Path):
-        from strata.artifact_store import reset_artifact_store
+        from strata.artifact.store import reset_artifact_store
 
         config = StrataConfig(
             deployment_mode="personal",
@@ -1302,7 +1302,7 @@ class TestConfiguredBackendIsActuallyWired:
         """Falling back to local disk hid the misconfiguration and lost artifacts with the pod, so
         startup fails instead.
         """
-        from strata.artifact_store import reset_artifact_store
+        from strata.artifact.store import reset_artifact_store
 
         config = StrataConfig(
             deployment_mode="personal",

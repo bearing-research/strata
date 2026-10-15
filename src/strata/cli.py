@@ -733,7 +733,7 @@ def _dispatch_artifact(command: str):
     """Build a dispatcher that lazily imports the artifact CLI module."""
 
     def _dispatch(args: argparse.Namespace) -> int:
-        from strata import artifact_cli
+        from strata.artifact import cli as artifact_cli
 
         return getattr(artifact_cli, command)(args)
 
