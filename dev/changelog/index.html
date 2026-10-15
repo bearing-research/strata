@@ -3644,6 +3644,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="removed">Removed<a class="headerlink" href="#removed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Names exported from the <code>strata</code> package root.</strong> <code>strata.Filter</code>,
+  <code>FilterOp</code>, <code>FilterValue</code>, <code>StrataConfig</code>, <code>CacheKey</code>, <code>ReadPlan</code> and <code>Task</code>
+  were left over from when the HTTP client lived in this package; import them
+  from <code>strata.filters</code>, <code>strata.config</code> and <code>strata.types</code>. Importing any
+  <code>strata</code> submodule no longer loads the filter module first. (#1185)</li>
 <li><strong>The <code>dependency_changed</code> WebSocket frame.</strong> It repeated, for package
   add and remove, what <code>environment_job_finished</code> already sends; a client
   reads the job's action, package and status from that frame's
