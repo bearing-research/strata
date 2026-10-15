@@ -17,7 +17,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (`strata.artifact.transfer`), `strata.artifact_uris` (`strata.artifact.uris`),
   `strata.table_export` (`strata.artifact.table_export`) and
   `strata.artifact_cli` (`strata.artifact.cli`) moved; the old module paths are
-  gone. (#PR)
+  gone. (#1189)
 - **The scan caches live in the `strata.cache` package.** `strata.cache`
   (now `strata.cache.disk`), `strata.metadata_cache` (`strata.cache.metadata`),
   `strata.metadata_store` (`strata.cache.metadata_store`), `strata.cache_warmer`
