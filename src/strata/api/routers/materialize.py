@@ -23,7 +23,13 @@ from strata.api.dependencies import (
     resolve_input_version_async,
     table_identity_or_400,
 )
-from strata.iceberg import CatalogUriRequired, SnapshotNotFound, WarehouseNotFound
+from strata.iceberg import (
+    OBJECT_STORE_RETRY_AFTER_SECONDS,
+    CatalogUriRequired,
+    SnapshotNotFound,
+    WarehouseNotFound,
+    object_store_unreachable,
+)
 from strata.logging import get_logger
 from strata.planner import ColumnNotFound, UnsupportedTableFormatError
 from strata.pool_metrics import get_pool_tracker
@@ -505,6 +511,16 @@ async def _handle_identity_materialize(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except NoSuchTableError as e:
         raise HTTPException(status_code=404, detail=f"Table not found: {table_uri}") from e
+    except OSError as e:
+        # Planning reads table metadata and manifests from the object store, cache hit or not.
+        if not object_store_unreachable(e):
+            raise
+        logger.warning("object_store_unreachable_while_planning", table_uri=table_uri, error=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail=f"The object store holding {table_uri} could not be reached; retry shortly.",
+            headers={"Retry-After": str(OBJECT_STORE_RETRY_AFTER_SECONDS)},
+        ) from e
 
     max_tasks = state.config.max_tasks_per_scan
     if len(plan.tasks) > max_tasks:

@@ -411,6 +411,40 @@ def session_closed_payload(reason: SessionClosedReason) -> dict[str, Any]:
     )
 
 
+class InspectResultPayload(WsPayload):
+    """``inspect_result``: the answer to ``inspect_open``, ``inspect_eval`` or ``inspect_close``.
+
+    ``open`` and ``close`` carry ``ok`` and a ``result`` message. ``eval`` echoes
+    ``expr`` and adds the REPL's answer: ``result`` and ``type`` (and ``stdout`` when
+    the expression printed) on success, ``error`` on failure. Unset fields are dropped.
+    """
+
+    cell_id: str
+    action: Literal["open", "eval", "close"]
+    ok: bool
+    result: str | None = None
+    type: str | None = None
+    stdout: str | None = None
+    error: str | None = None
+    expr: str | None = None
+
+
+def inspect_result_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    """Validate an ``inspect_result`` dict, including the REPL's own answer, for the wire."""
+    return InspectResultPayload.model_validate(raw).model_dump(mode="json", exclude_none=True)
+
+
+class AgentNotePayload(WsPayload):
+    """``agent_note``: one line for a terminal viewer's Agent tab.
+
+    ``source`` is ``"mcp"`` for a narrated tool action and ``"agent"`` for a note the
+    agent wrote itself.
+    """
+
+    source: Literal["mcp", "agent"]
+    text: str
+
+
 # Typed so a mistyped code at an emit site is a type error, not a silent frontend miss.
 ErrorCode = Literal[
     "ENVIRONMENT_BUSY",
@@ -461,6 +495,7 @@ def error_payload(
 # hand-built dicts and a client gets ``unknown`` for them. Generated TypeScript
 # derives from this map; a drift test asserts every payload model is registered.
 FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
+    MessageType.AGENT_NOTE: AgentNotePayload,
     MessageType.CASCADE_PROGRESS: CascadeProgressPayload,
     MessageType.CASCADE_PROMPT: CascadePromptPayload,
     MessageType.CELL_CONSOLE: CellConsolePayload,
@@ -475,6 +510,7 @@ FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.ENVIRONMENT_JOB_STARTED: EnvironmentJobEventPayload,
     MessageType.ERROR: ErrorPayload,
     MessageType.IMPACT_PREVIEW: ImpactPreviewPayload,
+    MessageType.INSPECT_RESULT: InspectResultPayload,
     MessageType.PRESENCE: PresencePayload,
     MessageType.PROFILING_SUMMARY: ProfilingSummaryPayload,
     MessageType.SESSION_CLOSED: SessionClosedPayload,

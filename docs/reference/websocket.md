@@ -142,7 +142,7 @@ A cell run as an upstream inside another cell's run may get its console and resu
 
 | Type             | Payload                                                           | Description |
 | ---------------- | ----------------------------------------------------------------- | ----------- |
-| `inspect_result` | `{ "cell_id": "...", "action": "eval", "expr": "...", "ok": true, "result": "42", "type": "int" }` | REPL result. `action` is `open`, `eval` or `close`; a failed eval carries `error` |
+| `inspect_result` | `{ "cell_id": "...", "action": "eval", "expr": "...", "ok": true, "result": "42", "type": "int" }` | REPL result. `action` is `open`, `eval` or `close`; a failed eval carries `error`, and an expression that printed carries `stdout` |
 
 ### Dependencies
 

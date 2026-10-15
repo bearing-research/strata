@@ -386,3 +386,37 @@ class TestErrorPayload:
         # client, so the TUI and the Vue store cannot silently diverge.
         with _pytest.raises(ValidationError):
             ErrorPayload(error="boom", retry_after=5)
+
+
+class TestInspectResultPayload:
+    def test_unset_fields_stay_off_the_wire(self):
+        from strata.notebook.ws_payloads import inspect_result_payload
+
+        assert inspect_result_payload({"cell_id": "c1", "action": "close", "ok": True}) == {
+            "cell_id": "c1",
+            "action": "close",
+            "ok": True,
+        }
+
+    def test_an_unmodelled_repl_key_is_refused(self):
+        from strata.notebook.ws_payloads import inspect_result_payload
+
+        # The eval answer spreads the REPL's own dict, so a key the harness starts
+        # sending has to be modelled before it reaches a client.
+        with pytest.raises(ValidationError):
+            inspect_result_payload(
+                {"cell_id": "c1", "action": "eval", "ok": True, "result": "1", "shape": [1]}
+            )
+
+    def test_an_unknown_action_is_refused(self):
+        from strata.notebook.ws_payloads import inspect_result_payload
+
+        with pytest.raises(ValidationError):
+            inspect_result_payload({"cell_id": "c1", "action": "reset", "ok": True})
+
+
+def test_agent_note_refuses_an_unknown_source():
+    from strata.notebook.ws_payloads import AgentNotePayload
+
+    with pytest.raises(ValidationError):
+        AgentNotePayload.model_validate({"source": "human", "text": "hi"})
