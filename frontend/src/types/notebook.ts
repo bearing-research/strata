@@ -783,6 +783,7 @@ export type WsServerMessageType =
   | 'environment_job_progress' // Background env job emitted logs or phase changes
   | 'environment_job_finished' // Background env job completed or failed
   | 'error' // Protocol-level error (auth, not found, etc.)
+  | 'agent_note' // An MCP agent's action or note (the terminal viewer shows these)
 
 export type WsMessageType = WsClientMessageType | WsServerMessageType
 

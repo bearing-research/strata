@@ -172,6 +172,23 @@ def _is_connection_io_error(exc: BaseException) -> bool:
     return "disk i/o error" in text or "sqlite_ioerr" in text or "adbcstatement" in text
 
 
+# How pyarrow names an object store it could not reach (the AWS error in its OSError text).
+_UNREACHABLE_STORE_MARKERS = ("NETWORK_CONNECTION", "SERVICE_UNAVAILABLE")
+
+# What a 503 for an unreachable object store asks the caller to wait.
+OBJECT_STORE_RETRY_AFTER_SECONDS = 5
+
+
+def object_store_unreachable(exc: BaseException) -> bool:
+    """Return whether planning failed because the object store could not be reached.
+
+    Worth a retry, unlike access denied or a missing file, which fail the same way again.
+    """
+    if isinstance(exc, ConnectionError):
+        return True
+    return isinstance(exc, OSError) and any(m in str(exc) for m in _UNREACHABLE_STORE_MARKERS)
+
+
 class PyIcebergCatalog:
     """Default catalog provider backed by pyiceberg.
 
