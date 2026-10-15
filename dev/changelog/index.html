@@ -3637,6 +3637,11 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Iceberg code lives in the <code>strata.iceberg</code> package.</strong> <code>strata.iceberg</code>
+  (now <code>strata.iceberg.catalog</code>), <code>strata.iceberg_schema</code>
+  (<code>strata.iceberg.schema</code>), <code>strata.iceberg_deletes</code> (<code>strata.iceberg.deletes</code>),
+  <code>strata.iceberg_equality</code> (<code>strata.iceberg.equality</code>) and <code>strata.lake_files</code>
+  (<code>strata.iceberg.lake_files</code>) moved; the old module paths are gone. (#1190)</li>
 <li><strong>Artifact code lives in the <code>strata.artifact</code> package.</strong>
   <code>strata.artifact_store</code> (now <code>strata.artifact.store</code>), <code>strata.blob_store</code>
   (<code>strata.artifact.blob_store</code>), <code>strata.artifact_transfer</code>
