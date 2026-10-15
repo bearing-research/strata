@@ -12,6 +12,18 @@ from pyiceberg.transforms import IdentityTransform
 from pyiceberg.types import IcebergType
 
 from strata import lake_files
+from strata.cache.metadata import (
+    DeleteFileEntry,
+    EqualityDeleteEntry,
+    LRUCache,
+    ManifestCache,
+    ManifestEntry,
+    ManifestResolution,
+    ParquetMetadataCache,
+    RowGroupMeta,
+    get_manifest_cache,
+    get_parquet_cache,
+)
 from strata.config import StrataConfig
 from strata.iceberg import (
     CatalogProvider,
@@ -27,18 +39,6 @@ from strata.iceberg_schema import (
     file_columns,
     snapshot_arrow_schema,
     stored_columns,
-)
-from strata.metadata_cache import (
-    DeleteFileEntry,
-    EqualityDeleteEntry,
-    LRUCache,
-    ManifestCache,
-    ManifestEntry,
-    ManifestResolution,
-    ParquetMetadataCache,
-    RowGroupMeta,
-    get_manifest_cache,
-    get_parquet_cache,
 )
 from strata.tenant import get_tenant_id
 from strata.timing import elapsed_ms

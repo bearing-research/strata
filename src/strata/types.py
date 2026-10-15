@@ -25,8 +25,8 @@ from strata.filters import (  # noqa: F401
 if TYPE_CHECKING:
     import pyarrow as pa
 
+    from strata.cache.metadata import EqualityDeleteEntry
     from strata.iceberg_schema import Column
-    from strata.metadata_cache import EqualityDeleteEntry
 
 
 # --- Authentication / Authorization Types ---

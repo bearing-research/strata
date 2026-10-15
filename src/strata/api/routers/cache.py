@@ -22,8 +22,8 @@ from strata.api.dependencies import (
     table_identity_or_400,
 )
 from strata.auth import get_principal
-from strata.cache_metrics import get_eviction_tracker
-from strata.cache_stats import get_cache_histogram
+from strata.cache.metrics import get_eviction_tracker
+from strata.cache.stats import get_cache_histogram
 from strata.pool_metrics import get_pool_tracker
 from strata.tenant import get_tenant_id
 from strata.types import (
@@ -48,7 +48,7 @@ def get_cache_stats_v1():
     Counts per table and snapshot cover every tenant, and the totals come from walking the
     cache directory, so this is an operator route and a ``def`` (off the event loop).
     """
-    from strata.cache import DiskCache
+    from strata.cache.disk import DiskCache
     from strata.server import get_state
 
     state = get_state()
@@ -102,7 +102,7 @@ async def list_cache_entries_v1():
     Cache-wide across tenants (table identity, snapshot, projection, on-disk path), so it is
     operator introspection gated like ``/v1/cache/clear``.
     """
-    from strata.cache import DiskCache
+    from strata.cache.disk import DiskCache
     from strata.server import get_state
 
     state = get_state()

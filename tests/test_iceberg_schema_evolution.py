@@ -21,7 +21,7 @@ from pyiceberg.types import (
     StructType,
 )
 
-from strata.cache import CachedFetcher
+from strata.cache.disk import CachedFetcher
 from strata.config import StrataConfig
 from strata.fast_io import IncrementalIpcMerger
 from strata.planner import ReadPlanner

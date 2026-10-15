@@ -14,8 +14,8 @@ from typing import Protocol
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
-from strata.cache_metrics import get_eviction_tracker
-from strata.cache_stats import get_cache_histogram
+from strata.cache.metrics import get_eviction_tracker
+from strata.cache.stats import get_cache_histogram
 from strata.config import StrataConfig
 from strata.fetcher import Fetcher, create_fetcher
 from strata.file_modes import private_dir

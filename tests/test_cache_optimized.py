@@ -6,7 +6,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from strata.cache import CACHE_META_EXTENSION, CACHE_VERSION, CachedFetcher, DiskCache
+from strata.cache.disk import CACHE_META_EXTENSION, CACHE_VERSION, CachedFetcher, DiskCache
 from strata.config import StrataConfig
 from strata.types import CacheKey, TableIdentity
 
@@ -172,7 +172,7 @@ class TestDiskCacheStatsAndCleanup:
         (cache_dir / "v2").write_text("a file, not a cache directory")
         (cache_dir / "metadata.sqlite").write_bytes(b"")
 
-        with caplog.at_level("INFO", logger="strata.cache"):
+        with caplog.at_level("INFO", logger="strata.cache.disk"):
             cache = DiskCache(strata_config)
 
         assert sorted(p.name for p in cache_dir.iterdir()) == sorted(
@@ -202,7 +202,7 @@ class TestDiskCacheStatsAndCleanup:
         readme = cache_dir / "v3" / "README"
         readme.write_text("mine")
 
-        with caplog.at_level("WARNING", logger="strata.cache"):
+        with caplog.at_level("WARNING", logger="strata.cache.disk"):
             DiskCache(strata_config)
 
         assert notes.read_text() == "user data"
@@ -286,7 +286,7 @@ class TestDamagedEntriesSelfHeal:
     ):
         # os.replace is atomic for observers but not durable: without the flush
         # a crash can apply the rename and lose the data blocks behind it.
-        import strata.cache as cache_module
+        import strata.cache.disk as cache_module
 
         synced = []
         real_fsync = cache_module.os.fsync
@@ -311,7 +311,7 @@ class TestClearPreservesTheMetadataDatabase:
     def _live_store(self, cache_dir):
         import sqlite3
 
-        from strata.metadata_store import MetadataStore
+        from strata.cache.metadata_store import MetadataStore
 
         db = cache_dir / "metadata.sqlite"
         store = MetadataStore(db)

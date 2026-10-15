@@ -118,7 +118,12 @@ async def inspect_cache_v1(
     """
     import json as json_module
 
-    from strata.cache import CACHE_FILE_EXTENSION, CACHE_META_EXTENSION, CACHE_VERSION, DiskCache
+    from strata.cache.disk import (
+        CACHE_FILE_EXTENSION,
+        CACHE_META_EXTENSION,
+        CACHE_VERSION,
+        DiskCache,
+    )
     from strata.server import get_state
 
     state = get_state()

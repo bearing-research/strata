@@ -24,8 +24,8 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from strata.cache.metadata import ColumnChunkMeta, ColumnStatistics, RowGroupMeta
 from strata.filters import Filter, FilterOp
-from strata.metadata_cache import ColumnChunkMeta, ColumnStatistics, RowGroupMeta
 from strata.planner import ReadPlanner, _build_column_index_map, _compile_filters
 
 ROWS_PER_GROUP = 1_000

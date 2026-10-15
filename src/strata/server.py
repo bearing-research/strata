@@ -51,8 +51,8 @@ from strata.auth import (
     set_principal,
     verify_proxy_token,
 )
-from strata.cache import CachedFetcher
-from strata.cache_warmer import CacheWarmer
+from strata.cache.disk import CachedFetcher
+from strata.cache.warmer import CacheWarmer
 from strata.config import StrataConfig, describe_config_error
 from strata.gc_tracker import install_gc_tracker
 from strata.health import _package_version
@@ -135,7 +135,7 @@ def _eager_warmup(config: StrataConfig) -> dict:
 
     sqlite_start = time.perf_counter()
     try:
-        from strata.metadata_cache import get_metadata_store
+        from strata.cache.metadata import get_metadata_store
 
         store = get_metadata_store(config.cache_dir)
         # A cheap query warms the SQLite page cache and WAL.
@@ -147,7 +147,7 @@ def _eager_warmup(config: StrataConfig) -> dict:
         warmup_times["sqlite_error"] = True
 
     cache_start = time.perf_counter()
-    from strata.metadata_cache import get_manifest_cache, get_parquet_cache
+    from strata.cache.metadata import get_manifest_cache, get_parquet_cache
 
     get_parquet_cache(cache_dir=config.cache_dir)
     get_manifest_cache(cache_dir=config.cache_dir)
@@ -438,7 +438,7 @@ def _get_qos_metrics(state: ServerState) -> dict:
 
 def _get_cache_size_bytes(state: ServerState) -> int:
     """Get current cache size in bytes."""
-    from strata.cache import DiskCache
+    from strata.cache.disk import DiskCache
 
     cache = state.fetcher.cache
     if isinstance(cache, DiskCache):
@@ -448,7 +448,7 @@ def _get_cache_size_bytes(state: ServerState) -> int:
 
 def _get_cache_entry_count(state: ServerState) -> int:
     """Get current number of cache entries."""
-    from strata.cache import DiskCache
+    from strata.cache.disk import DiskCache
 
     cache = state.fetcher.cache
     if isinstance(cache, DiskCache):
@@ -870,7 +870,7 @@ async def lifespan(app: FastAPI):
 
     stale_removed = 0
     try:
-        from strata.metadata_cache import get_metadata_store
+        from strata.cache.metadata import get_metadata_store
 
         store = get_metadata_store(config.cache_dir)
         stale_removed = store.cleanup_stale_parquet_meta()
@@ -1597,7 +1597,7 @@ _mount_mcp_if_enabled()
 # - Arrow IPC streams via /v1/streams/{stream_id}
 # - Error codes: 400, 404, 413 (too large), 429 (with Retry-After),
 #   503 (draining/unhealthy), 504 (timeout)
-# - Cache key format is versioned (CACHE_VERSION in cache.py)
+# - Cache key format is versioned (CACHE_VERSION in cache/disk.py)
 # =============================================================================
 
 

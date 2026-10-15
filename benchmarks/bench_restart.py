@@ -354,7 +354,7 @@ def run_single_benchmark(
     """Run cold, warm and post-restart scans; return the three results in that order."""
     from strata_client import StrataClient
 
-    from strata.cache import CACHE_FILE_EXTENSION
+    from strata.cache.disk import CACHE_FILE_EXTENSION
 
     if port is None:
         port = find_free_port()

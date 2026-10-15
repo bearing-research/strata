@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pyarrow as pa
 import pytest
 
-from strata.cache import CachedFetcher
+from strata.cache.disk import CachedFetcher
 from strata.config import StrataConfig
 from strata.types import CacheKey, TableIdentity, Task
 

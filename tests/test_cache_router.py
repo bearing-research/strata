@@ -481,7 +481,7 @@ class TestWarmTakesTheScanIdentity:
 
         from httpx import ASGITransport, AsyncClient
 
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.server import app
         from strata.types import TableIdentity
 
@@ -556,7 +556,7 @@ class TestWarmJobsAreTenantScoped:
 
         from httpx import ASGITransport, AsyncClient
 
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.server import app
         from strata.types import TableIdentity
 
@@ -671,7 +671,7 @@ class TestDebugInspectPrefixLayout:
     def test_prefix_search_finds_a_real_entry(self, cache_client, tmp_path):
         import hashlib
 
-        from strata.cache import CACHE_VERSION
+        from strata.cache.disk import CACHE_VERSION
 
         client, state = cache_client
         cache = state.fetcher.cache

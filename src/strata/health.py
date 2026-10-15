@@ -180,7 +180,7 @@ def check_metadata_store(cache_dir: Path) -> DependencyCheck:
     start = time.perf_counter()
 
     try:
-        from strata.metadata_cache import get_metadata_store
+        from strata.cache.metadata import get_metadata_store
 
         store = get_metadata_store(cache_dir)
         stats = store.stats()
@@ -367,7 +367,7 @@ def check_cache_evictions() -> DependencyCheck:
     start = time.perf_counter()
 
     try:
-        from strata.cache_metrics import get_eviction_tracker
+        from strata.cache.metrics import get_eviction_tracker
 
         tracker = get_eviction_tracker()
         stats = tracker.get_stats()

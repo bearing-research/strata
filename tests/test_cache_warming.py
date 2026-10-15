@@ -14,7 +14,7 @@ from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 
 class TestCacheWarmer:
     def test_warming_job_creation(self):
-        from strata.cache_warmer import WarmingJob
+        from strata.cache.warmer import WarmingJob
         from strata.types import WarmAsyncRequest, WarmJobStatus
 
         request = WarmAsyncRequest(
@@ -36,7 +36,7 @@ class TestCacheWarmer:
         assert job.tables_completed == 0
 
     def test_warming_job_to_progress(self):
-        from strata.cache_warmer import WarmingJob
+        from strata.cache.warmer import WarmingJob
         from strata.types import WarmAsyncRequest, WarmJobStatus
 
         request = WarmAsyncRequest(tables=["table1"])
@@ -127,7 +127,7 @@ class TestCacheWarmerIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -185,7 +185,7 @@ class TestCacheWarmerIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -231,7 +231,7 @@ class TestCacheWarmerIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -265,7 +265,7 @@ class TestCacheWarmerIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -385,7 +385,7 @@ class TestCacheWarmingRealTables:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -439,7 +439,7 @@ class TestCacheWarmingRealTables:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -506,7 +506,7 @@ class TestCacheWarmingRealTables:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -580,7 +580,7 @@ class TestCacheWarmingRealTables:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.server import ServerState, app
@@ -653,7 +653,7 @@ class TestAsyncWarmDoesNotReportFailuresAsSuccess:
     def _warmer_with(self, fetch_impl, task_count=3):
         from types import SimpleNamespace
 
-        from strata.cache_warmer import CacheWarmer
+        from strata.cache.warmer import CacheWarmer
 
         tasks = [
             SimpleNamespace(
@@ -667,7 +667,7 @@ class TestAsyncWarmDoesNotReportFailuresAsSuccess:
         return CacheWarmer(planner=planner, fetcher=fetcher, metrics=metrics)
 
     def _job(self, warmer):
-        from strata.cache_warmer import WarmingJob
+        from strata.cache.warmer import WarmingJob
         from strata.types import WarmAsyncRequest
 
         return WarmingJob(
@@ -730,7 +730,7 @@ class TestAsyncWarmDoesNotReportFailuresAsSuccess:
 async def test_stop_waits_for_the_jobs_it_cancels():
     """Cancelling without waiting returned while a job was still cleaning up, so shutdown
     could close the fetcher under it."""
-    from strata.cache_warmer import CacheWarmer
+    from strata.cache.warmer import CacheWarmer
     from strata.types import WarmAsyncRequest
 
     warmer = CacheWarmer(planner=None, fetcher=None, metrics=None)

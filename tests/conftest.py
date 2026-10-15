@@ -161,7 +161,7 @@ def _reset_process_globals():
 
     server_module._state = None
     from strata.artifact_store import reset_artifact_store
-    from strata.metadata_cache import reset_caches
+    from strata.cache.metadata import reset_caches
     from strata.rate_limiter import reset_rate_limiter
     from strata.tenant_registry import reset_tenant_registry
 
@@ -339,7 +339,7 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     from strata.server import ServerState, app
 
     if reset_caches:
-        from strata.metadata_cache import reset_caches as do_reset_caches
+        from strata.cache.metadata import reset_caches as do_reset_caches
 
         do_reset_caches()
 

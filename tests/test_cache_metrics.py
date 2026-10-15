@@ -5,7 +5,7 @@ import pytest
 
 class TestEvictionEvent:
     def test_eviction_event_creation(self):
-        from strata.cache_metrics import EvictionEvent
+        from strata.cache.metrics import EvictionEvent
 
         event = EvictionEvent(
             timestamp=1234567890.0,
@@ -28,7 +28,7 @@ class TestEvictionStats:
     def test_asdict(self):
         from dataclasses import asdict
 
-        from strata.cache_metrics import EvictionStats
+        from strata.cache.metrics import EvictionStats
 
         stats = EvictionStats(
             total_evictions=100,
@@ -53,7 +53,7 @@ class TestEvictionStats:
 
 class TestCacheEvictionTracker:
     def test_initial_state(self):
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
         stats = tracker.get_stats()
@@ -64,7 +64,7 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "low"
 
     def test_record_eviction(self):
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
         tracker.record_eviction(
@@ -80,7 +80,7 @@ class TestCacheEvictionTracker:
         assert stats.total_bytes_evicted == 1024 * 1024
 
     def test_multiple_evictions(self):
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
         for i in range(5):
@@ -98,7 +98,7 @@ class TestCacheEvictionTracker:
 
     def test_pressure_levels(self):
         """Pressure level follows the eviction rate."""
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
 
@@ -123,7 +123,7 @@ class TestCacheEvictionTracker:
         A server up 90 seconds with 50 evictions must report CRITICAL, not divide by an hour it has
         not lived and report LOW.
         """
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         now = [1000.0]
         tracker = CacheEvictionTracker(clock=lambda: now[0])
@@ -140,7 +140,7 @@ class TestCacheEvictionTracker:
 
     def test_a_steady_hour_is_unchanged(self):
         """Once an hour has passed the rate equals the hourly mean."""
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         now = [1000.0]
         tracker = CacheEvictionTracker(clock=lambda: now[0])
@@ -157,7 +157,7 @@ class TestCacheEvictionTracker:
         """An hourly mean cannot tell a thrash from a trickle; a late burst must still raise the
         band.
         """
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         now = [1000.0]
         tracker = CacheEvictionTracker(clock=lambda: now[0])
@@ -173,7 +173,7 @@ class TestCacheEvictionTracker:
 
     def test_the_first_seconds_do_not_extrapolate_into_a_crisis(self):
         """Floored at a minute, so one eviction one second in is not reported as 60/min."""
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         now = [1000.0]
         tracker = CacheEvictionTracker(clock=lambda: now[0])
@@ -186,7 +186,7 @@ class TestCacheEvictionTracker:
         assert stats.pressure_level == "medium"
 
     def test_recent_events(self):
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
 
@@ -206,7 +206,7 @@ class TestCacheEvictionTracker:
         assert events[2]["reason"] == "reason_2"
 
     def test_max_events_limit(self):
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker(max_events=5)
 
@@ -222,7 +222,7 @@ class TestCacheEvictionTracker:
         assert len(events) == 5
 
     def test_reset(self):
-        from strata.cache_metrics import CacheEvictionTracker
+        from strata.cache.metrics import CacheEvictionTracker
 
         tracker = CacheEvictionTracker()
         tracker.record_eviction(
@@ -240,7 +240,7 @@ class TestCacheEvictionTracker:
 
 class TestGlobalTracker:
     def test_get_and_reset(self):
-        from strata.cache_metrics import (
+        from strata.cache.metrics import (
             get_eviction_tracker,
             reset_eviction_tracker,
         )
@@ -263,7 +263,7 @@ class TestCacheEvictionIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_metrics import reset_eviction_tracker
+        from strata.cache.metrics import reset_eviction_tracker
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
@@ -303,7 +303,7 @@ class TestCacheEvictionIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_metrics import get_eviction_tracker, reset_eviction_tracker
+        from strata.cache.metrics import get_eviction_tracker, reset_eviction_tracker
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter

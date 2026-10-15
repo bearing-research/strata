@@ -68,7 +68,7 @@ class TestTimeoutEndpointIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_metrics import reset_eviction_tracker
+        from strata.cache.metrics import reset_eviction_tracker
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
@@ -125,7 +125,7 @@ class TestTimeoutEndpointIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_metrics import reset_eviction_tracker
+        from strata.cache.metrics import reset_eviction_tracker
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter

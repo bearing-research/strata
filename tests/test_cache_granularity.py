@@ -5,7 +5,7 @@ import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 import pytest
 
-from strata.cache import CachedFetcher, DiskCache
+from strata.cache.disk import CachedFetcher, DiskCache
 from strata.config import StrataConfig
 from strata.types import CacheGranularity, CacheKey, TableIdentity, Task
 

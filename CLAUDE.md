@@ -81,7 +81,7 @@ dev interpreter, so the dev env needs the `[notebook]` extra
 1. Client `POST /v1/materialize` with inputs (table URIs) + transform (e.g. `scan@v1`).
 2. Server checks artifact cache by provenance hash → return on hit.
 3. `planner.py` resolves Iceberg snapshot → `ReadPlan` with row-group `Task`s.
-4. `cache.py` checks disk cache, reads Parquet on miss, writes Arrow IPC.
+4. `cache/disk.py` checks disk cache, reads Parquet on miss, writes Arrow IPC.
 5. Server streams Arrow IPC via `GET /v1/streams/{stream_id}` while persisting.
 6. Artifact finalized for future cache hits.
 
@@ -154,12 +154,13 @@ gates); per-domain routers in `api/routers/` (`materialize`, `streams`,
 `names`, `builds`, `logs`, `metadata`, `publications`); typed
 mode/auth/tenant gates in `api/dependencies.py`;
 pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
-Data plane: `types.py`, `planner.py`, `cache.py`, `fetcher.py`, `metadata_*.py`,
-`fast_io.py`.
+Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`.
+Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
+metadata, `warmer`, `metrics` evictions, `stats` hit rates).
 Artifact / build: `artifact_store.py`, `blob_store.py`, `transforms/`.
 Auth / tenancy: `auth.py`, `tenant.py`, `tenant_registry.py`.
 Observability: `tracing.py`, `logging.py`, `health.py`, `rate_limiter.py`,
-`cache_metrics.py`, `cache_stats.py`, `pool_metrics.py`.
+`pool_metrics.py`.
 
 ## Configuration
 
