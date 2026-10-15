@@ -15,7 +15,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (now `strata.iceberg.catalog`), `strata.iceberg_schema`
   (`strata.iceberg.schema`), `strata.iceberg_deletes` (`strata.iceberg.deletes`),
   `strata.iceberg_equality` (`strata.iceberg.equality`) and `strata.lake_files`
-  (`strata.iceberg.lake_files`) moved; the old module paths are gone. (#PR)
+  (`strata.iceberg.lake_files`) moved; the old module paths are gone. (#1190)
 - **Artifact code lives in the `strata.artifact` package.**
   `strata.artifact_store` (now `strata.artifact.store`), `strata.blob_store`
   (`strata.artifact.blob_store`), `strata.artifact_transfer`
