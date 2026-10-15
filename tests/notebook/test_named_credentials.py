@@ -325,3 +325,148 @@ async def test_a_cell_whose_mount_credential_is_missing_fails_naming_it(tmp_path
 
     assert result.success is False
     assert result.error is not None and "'lab-bucket'" in result.error
+
+
+class TestCredentialPaths:
+    """A server hosting several projects keeps a project's data source to that project."""
+
+    def _resolver(self, notebook: Path | None, root: Path) -> CredentialResolver:
+        return CredentialResolver(
+            {"lab-a": {"key": "a"}, "org": {"key": "o"}},
+            restricted={"lab-a": [str(root / "lab-a")]},
+            notebook=notebook,
+        )
+
+    def test_a_notebook_under_the_directory_resolves_it(self, tmp_path):
+        nb = tmp_path / "lab-a" / "study" / "nb"
+        nb.mkdir(parents=True)
+        assert self._resolver(nb, tmp_path).resolve("lab-a") == {"key": "a"}
+
+    @pytest.mark.parametrize("where", ["lab-b/nb", "lab-ab/nb"])
+    def test_a_notebook_elsewhere_is_refused_by_name(self, tmp_path, where):
+        """``lab-ab`` shares the string prefix, not the directory."""
+        nb = tmp_path / where
+        nb.mkdir(parents=True)
+        with pytest.raises(CredentialError, match="'lab-a' is not available") as excinfo:
+            self._resolver(nb, tmp_path).resolve("lab-a")
+        assert "key" not in str(excinfo.value)
+
+    def test_a_use_with_no_notebook_is_refused(self, tmp_path):
+        with pytest.raises(CredentialError, match="'lab-a'"):
+            self._resolver(None, tmp_path).resolve("lab-a")
+
+    def test_an_unlisted_name_stays_open(self, tmp_path):
+        assert self._resolver(None, tmp_path).resolve("org") == {"key": "o"}
+
+    def test_a_symlinked_notebook_is_judged_where_it_lives(self, tmp_path):
+        (tmp_path / "lab-a").mkdir()
+        elsewhere = tmp_path / "lab-b"
+        elsewhere.mkdir()
+        (tmp_path / "lab-a" / "link").symlink_to(elsewhere)
+        with pytest.raises(CredentialError, match="'lab-a'"):
+            self._resolver(tmp_path / "lab-a" / "link", tmp_path).resolve("lab-a")
+
+    def test_config_reads_the_env_var_and_wants_absolute_directories(self, monkeypatch):
+        from pydantic import ValidationError
+
+        from strata.config import StrataConfig
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIAL_PATHS", '{"lab-a": ["/srv/lab-a"]}')
+        assert StrataConfig().notebook_credential_paths == {"lab-a": ["/srv/lab-a"]}
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIAL_PATHS", '{"lab-a": ["lab-a"]}')
+        with pytest.raises(ValidationError, match="not an absolute path"):
+            StrataConfig()
+
+
+class TestTwoNotebooksOneServer:
+    """The upstream "done when": one notebook may use ``lab-a`` and mounts with it; the
+    other fails naming it."""
+
+    SOURCE = "# @mount raw s3://lab/raw ro credential=lab-a\nx = 1"
+
+    @pytest.fixture
+    def server(self, tmp_path, monkeypatch):
+        import fsspec
+
+        from strata.config import StrataConfig
+        from strata.notebook.session import NotebookSession
+
+        config = StrataConfig(
+            notebook_credentials={"lab-a": {"key": "lab-a-key"}},
+            notebook_credential_paths={"lab-a": [str(tmp_path / "lab-a")]},
+        )
+        from strata.notebook.executor import CellExecutor
+
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+        fetched: list[dict] = []
+
+        def _filesystem(protocol, **options):
+            fetched.append(options)
+            raise RuntimeError("stop before any network")
+
+        monkeypatch.setattr(fsspec, "filesystem", _filesystem)
+        return fetched
+
+    @staticmethod
+    def _session(parent: Path, source: str, worker_url: str | None = None):
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import (
+            add_cell_to_notebook,
+            create_notebook,
+            update_notebook_workers,
+            write_cell,
+        )
+
+        parent.mkdir(parents=True, exist_ok=True)
+        nb = create_notebook(parent, "nb")
+        if worker_url:
+            update_notebook_workers(
+                nb,
+                [
+                    WorkerSpec(
+                        name="gpu", backend=WorkerBackendType.EXECUTOR, config={"url": worker_url}
+                    )
+                ],
+            )
+            source = f"# @worker gpu\n{source}"
+        add_cell_to_notebook(nb, "c1", None)
+        write_cell(nb, "c1", source)
+        return NotebookSession(parse_notebook(nb), nb), source
+
+    async def test_the_allowed_notebook_mounts_with_it(self, tmp_path, server):
+        from strata.notebook.executor import CellExecutor
+
+        session, source = self._session(tmp_path / "lab-a", self.SOURCE)
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        # The fetch was attempted with the credential's values.
+        assert server and server[-1]["key"] == "lab-a-key"
+        assert "stop before any network" in (result.error or "")
+
+    async def test_the_other_notebook_fails_naming_it(self, tmp_path, server):
+        from strata.notebook.executor import CellExecutor
+
+        session, source = self._session(tmp_path / "lab-b", self.SOURCE)
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success is False
+        assert "'lab-a' is not available to this notebook" in (result.error or "")
+        assert server == []
+
+    async def test_a_remote_worker_is_never_asked(self, tmp_path, server):
+        """A worker resolves names from its own registry, so the server checks the name
+        before dispatch. Nothing listens at the worker's URL: reaching it would fail
+        differently."""
+        from strata.notebook.executor import CellExecutor
+
+        session, source = self._session(
+            tmp_path / "lab-b", self.SOURCE, worker_url="http://127.0.0.1:9/v1/execute"
+        )
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success is False
+        assert "'lab-a' is not available to this notebook" in (result.error or "")

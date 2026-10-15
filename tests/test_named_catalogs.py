@@ -344,3 +344,26 @@ class TestAclNamesTheCatalog:
 
         assert AclEvaluator(acl).authorize(principal, self._ref("/data/wh#taxi.trips")) is True
         assert AclEvaluator(acl).authorize(principal, self._ref("lake:taxi.trips")) is False
+
+
+@windows
+class TestARestrictedCatalogCredential:
+    """``notebook_credential_paths``: a project's catalog only for that project's notebooks."""
+
+    def test_an_at_table_resolves_only_under_the_directory(self, tmp_path, monkeypatch):
+        from strata.notebook.models import TableSpec
+        from strata.notebook.tables import resolve_table_snapshot
+
+        config, uri = TestANamedCredential._configured(tmp_path, {"north-db": {"uri": "${NORTH}"}})
+        config = config.model_copy(
+            update={"notebook_credential_paths": {"north-db": [str(tmp_path / "lab-a")]}}
+        )
+        monkeypatch.setenv("NORTH", uri)
+        spec = TableSpec(name="trips", uri="north:taxi.trips")
+        allowed, other = tmp_path / "lab-a" / "nb", tmp_path / "lab-b" / "nb"
+        allowed.mkdir(parents=True)
+        other.mkdir(parents=True)
+
+        assert resolve_table_snapshot(spec, config, notebook=allowed) is not None
+        with pytest.raises(ValueError, match="'north-db' is not available to this notebook"):
+            resolve_table_snapshot(spec, config, notebook=other)

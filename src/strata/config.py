@@ -425,6 +425,12 @@ class StrataConfig(BaseSettings):
     # mounts that name none, so the organization's primary store works without
     # any notebook change.
     notebook_mount_credentials: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
+    # Credential names only some notebooks may use: ``{name: [directory, ...]}``. A listed
+    # name resolves only for a notebook under one of its directories, so a server hosting
+    # several projects keeps a project's data source to that project. Unlisted names are open.
+    notebook_credential_paths: Annotated[dict[str, list[str]], NoDecode] = Field(
+        default_factory=dict
+    )
 
     # Hosts ``@fetch``, and a prompt cell's ``[ai] base_url`` from
     # notebook.toml, may reach even on a private address, e.g. an internal data
@@ -616,7 +622,12 @@ class StrataConfig(BaseSettings):
             raise ValueError("notebook_harness_env_allowlist must be a list")
         return [str(item) for item in v]
 
-    @field_validator("notebook_credentials", "notebook_mount_credentials", mode="before")
+    @field_validator(
+        "notebook_credentials",
+        "notebook_mount_credentials",
+        "notebook_credential_paths",
+        mode="before",
+    )
     @classmethod
     def parse_credential_maps(cls, v: Any, info: Any) -> dict:
         """Accept a dict or a JSON object string (the env-var form)."""
@@ -628,6 +639,18 @@ class StrataConfig(BaseSettings):
             v = json.loads(v)
         if not isinstance(v, dict):
             raise ValueError(f"{info.field_name} must be a JSON object")
+        return v
+
+    @field_validator("notebook_credential_paths")
+    @classmethod
+    def credential_paths_are_absolute(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
+        """A relative directory would match against the server's working directory."""
+        for name, prefixes in v.items():
+            for prefix in prefixes:
+                if not Path(prefix).expanduser().is_absolute():
+                    raise ValueError(
+                        f"notebook_credential_paths[{name!r}]: {prefix!r} is not an absolute path"
+                    )
         return v
 
     @field_validator("notebook_fetch_allowed_hosts", "allowed_hosts", mode="before")

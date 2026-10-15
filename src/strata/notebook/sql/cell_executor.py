@@ -763,7 +763,7 @@ def _synthesize_write_result_table(stats: dict[str, Any]) -> Any:
 def _credentials(session: NotebookSession) -> CredentialResolver:
     """Named credentials as this notebook sees them, secret-manager values included."""
     return CredentialResolver.from_config(
-        session._lake_config(), env=dict(session.notebook_state.env)
+        session._lake_config(), env=dict(session.notebook_state.env), notebook=session.path
     )
 
 
