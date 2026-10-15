@@ -36,7 +36,11 @@ def _no_uv_sync(monkeypatch):
     # The session-state endpoint RemoteNotebookOps reads is personal-mode only.
     monkeypatch.setattr(
         "strata.server._state",
-        SimpleNamespace(config=SimpleNamespace(transforms_config={}, deployment_mode="personal")),
+        SimpleNamespace(
+            config=SimpleNamespace(
+                transforms_config={}, deployment_mode="personal", notebook_workers_editable=True
+            )
+        ),
     )
 
 

@@ -254,7 +254,9 @@ def test_a_staleness_pass_reads_the_worker_registry_once(tmp_path, monkeypatch):
         "strata.server._state",
         SimpleNamespace(
             config=SimpleNamespace(
-                deployment_mode="personal", transforms_config={"notebook_workers": catalog}
+                deployment_mode="personal",
+                transforms_config={"notebook_workers": catalog},
+                notebook_workers_editable=True,
             )
         ),
     )

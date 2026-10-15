@@ -38,13 +38,14 @@ def establish_ssh_worker(
     """Provision and tunnel a remote worker, register it in ``notebook.toml``; return the tunnel.
 
     Raises :class:`PermissionError` before provisioning if worker definitions
-    are not editable (service mode). A failed registration tears the tunnel down.
+    are not editable (service mode, or ``notebook_workers_editable`` off). A failed
+    registration tears the tunnel down.
     """
     from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
     from strata.notebook.workers import notebook_worker_definitions_editable
 
     if not notebook_worker_definitions_editable(session.notebook_state):
-        raise PermissionError("worker definitions are managed by the server in service mode")
+        raise PermissionError("worker definitions are managed by the server")
 
     worker_name = name or default_worker_name(ssh_target)
     record = supervisor.establish(

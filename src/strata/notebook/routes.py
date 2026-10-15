@@ -2351,7 +2351,7 @@ async def update_notebook_workers_endpoint(
     if not notebook_worker_definitions_editable(session.notebook_state):
         raise HTTPException(
             status_code=403,
-            detail="Notebook worker definitions are managed by the server in service mode",
+            detail="Notebook worker definitions are managed by the server",
         )
 
     # Resolution returns the built-in first, so a "local" entry would never run.

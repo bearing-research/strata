@@ -214,6 +214,7 @@ atexit.register(lambda: os.symlink({str(secret)!r}, os.path.join(_out, "f.cell_m
                 config=SimpleNamespace(
                     deployment_mode="personal",
                     notebook_harness_user=None,
+                    notebook_workers_editable=True,
                     transforms_config={
                         "notebook_workers": [
                             {
@@ -254,6 +255,7 @@ atexit.register(lambda: os.symlink({str(secret)!r}, os.path.join(_out, "f.cell_m
                 config=SimpleNamespace(
                     deployment_mode="personal",
                     notebook_harness_user=None,
+                    notebook_workers_editable=True,
                     transforms_config={
                         "notebook_workers": [
                             {

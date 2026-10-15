@@ -364,6 +364,10 @@ class StrataConfig(BaseSettings):
     # "hidden" leaves the Workers panel off the notebook page, for a host that presents its own
     # machine choice. A cell's worker badge, `# @worker` and the default-worker API are unchanged.
     notebook_workers_panel: Literal["shown", "hidden"] = "shown"
+    # False: a personal server runs remote cells only on its registry's workers and ignores a
+    # notebook's own [[workers]], so every remote run is admitted, placed and metered by the
+    # host. Service mode is always registry-only.
+    notebook_workers_editable: bool = True
 
     # Point the ambient `strata` client in notebook cells at a REMOTE shared store instead of this
     # server. `notebook_remote_store_headers` carries the auth it needs (proxy identity/token or a

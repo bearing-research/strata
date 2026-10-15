@@ -96,7 +96,7 @@ class TestWorkerAgainstServerCatalog:
     """The check uses the catalog execution resolves against, not only notebook.toml."""
 
     @staticmethod
-    def _server(monkeypatch, mode: str) -> None:
+    def _server(monkeypatch, mode: str, *, notebook_workers_editable: bool = True) -> None:
         from types import SimpleNamespace
 
         catalog = [
@@ -112,7 +112,9 @@ class TestWorkerAgainstServerCatalog:
             "strata.server._state",
             SimpleNamespace(
                 config=SimpleNamespace(
-                    deployment_mode=mode, transforms_config={"notebook_workers": catalog}
+                    deployment_mode=mode,
+                    transforms_config={"notebook_workers": catalog},
+                    notebook_workers_editable=notebook_workers_editable,
                 )
             ),
         )
@@ -131,6 +133,18 @@ class TestWorkerAgainstServerCatalog:
         self._server(monkeypatch, "service")
         nb = _nb(workers=[WorkerSpec(name="mine", backend=WorkerBackendType.EXECUTOR)])
         assert _codes(_cell("# @worker mine\nx = 1"), nb) == ["worker_unknown"]
+
+    def test_a_notebook_worker_the_server_ignores_says_why(self, monkeypatch):
+        """With notebook workers off the entry is right there in notebook.toml, so "not a
+        worker this notebook can use" would read as a bug."""
+        self._server(monkeypatch, "personal", notebook_workers_editable=False)
+        nb = _nb(workers=[WorkerSpec(name="mine", backend=WorkerBackendType.EXECUTOR)])
+
+        (diagnostic,) = validate_cell_annotations(_cell("# @worker mine\nx = 1"), nb)
+
+        assert diagnostic.code == "worker_unknown"
+        assert "defined in notebook.toml" in diagnostic.message
+        assert "registry" in diagnostic.message
 
 
 class TestMountUriUnsupported:

@@ -59,6 +59,7 @@ const {
   environmentMutationActive,
   workerDefinitionsEditable,
   workerModeKnown,
+  serviceMode,
   openBySessionId,
   openNotebook,
   updateNotebookNameAction,
@@ -223,13 +224,11 @@ function isServiceModeSessionRestriction(message: string | null | undefined): bo
   )
 }
 
-const notebookModeLabel = computed(() =>
-  workerDefinitionsEditable.value ? 'Personal mode' : 'Service mode',
-)
+const notebookModeLabel = computed(() => (serviceMode.value ? 'Service mode' : 'Personal mode'))
 const notebookModeTitle = computed(() =>
   workerDefinitionsEditable.value
     ? 'Notebook owns its worker catalog and local write flows.'
-    : 'Workers and execution policy are controlled by the shared server.',
+    : 'Workers and execution policy are controlled by the server.',
 )
 const serviceReconnectBlocked = computed(() =>
   isServiceModeSessionRestriction(reconnectError.value),

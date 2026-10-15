@@ -585,7 +585,13 @@ changes. They appear in the Workers panel with `source: server`.
 A notebook's own `[[workers]]` still win: define `gpu-a100` in your
 `notebook.toml` and that is what `@worker gpu-a100` resolves to, the same
 precedence annotations have over persisted config. Your notebook's worker
-definitions stay editable either way.
+definitions stay editable either way, unless the server turns them off.
+
+**A host can keep every remote run behind its registry.** With
+`STRATA_NOTEBOOK_WORKERS_EDITABLE=false`, a personal server runs remote cells
+only on the registry's workers, as service mode does. A notebook's own
+`[[workers]]` entries are listed as not allowed, a cell that names one is
+flagged and fails if run, and the panel offers no editor for them.
 
 **A host with its own machine picker can hide the panel.** Set
 `STRATA_NOTEBOOK_WORKERS_PANEL=hidden` and the notebook page leaves the Workers
