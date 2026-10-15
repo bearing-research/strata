@@ -1436,6 +1436,27 @@ async def test_inspect_repl_round_trip(notebook_session):
     assert evaluated["result"] == "2"
     assert evaluated["type"] == "int"
 
+    # Every answer shape the REPL has passes the typed payload: printed output,
+    # a statement, and a failure.
+    async def evaluate(expr: str) -> dict:
+        await _handle_inspect_eval(
+            cast(WebSocket, fake),
+            session,
+            {"cell_id": middle_cell.id, "expr": expr},
+            execution_state,
+            session.id,
+        )
+        return fake.frames_of("inspect_result")[-1]["payload"]
+
+    printed = await evaluate("print('hi') or x")
+    assert (printed["ok"], printed["result"], printed["stdout"]) == (True, "1", "hi\n")
+    statement = await evaluate("y = x")
+    assert (statement["ok"], statement["type"]) == (True, "None")
+    failed = await evaluate("1 / 0")
+    assert failed["ok"] is False
+    assert "ZeroDivisionError" in failed["error"]
+    assert "result" not in failed
+
     await _handle_inspect_close(
         cast(WebSocket, fake),
         session,

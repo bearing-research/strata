@@ -45,6 +45,7 @@ import type {
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
 import type {
+  InspectResultPayload,
   PresenceEntryModel,
   PresencePayload,
   SessionClosedPayload,
@@ -2329,10 +2330,9 @@ function initializeWebSocket() {
     })
 
     wsInstance.onMessage('inspect_result', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
-      const action = p.action as string
-      const cellId = p.cell_id as CellId | undefined
-      if (!cellId) return
+      const p = msg.payload as InspectResultPayload
+      const action = p.action
+      const cellId = p.cell_id as CellId
 
       if (action === 'open') {
         if (inspectPendingOpens.value.has(cellId)) {
@@ -2362,10 +2362,10 @@ function initializeWebSocket() {
         const entries = [...(nextHistory.get(cellId) ?? [])]
         entries.push({
           expr: p.expr || '',
-          result: p.ok ? p.result : undefined,
-          error: p.ok ? undefined : p.error,
-          type: p.type,
-          stdout: p.stdout,
+          result: p.ok ? (p.result ?? undefined) : undefined,
+          error: p.ok ? undefined : (p.error ?? undefined),
+          type: p.type ?? undefined,
+          stdout: p.stdout ?? undefined,
         })
         nextHistory.set(cellId, entries)
         inspectHistoryMap.value = nextHistory

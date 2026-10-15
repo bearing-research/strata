@@ -73,6 +73,7 @@ from strata.notebook.ws_payloads import (
     dag_update_payload,
     error_payload,
     impact_preview_payload,
+    inspect_result_payload,
     profiling_summary_payload,
     session_closed_payload,
 )
@@ -2719,13 +2720,15 @@ async def _handle_inspect_open(
             _make_message(
                 MessageType.INSPECT_RESULT,
                 seq,
-                {
-                    "cell_id": cell_id,
-                    "action": "open",
-                    "ok": inspect_session.ready,
-                    "result": status,
-                    "type": "str",
-                },
+                inspect_result_payload(
+                    {
+                        "cell_id": cell_id,
+                        "action": "open",
+                        "ok": inspect_session.ready,
+                        "result": status,
+                        "type": "str",
+                    }
+                ),
             )
         )
     )
@@ -2755,12 +2758,14 @@ async def _handle_inspect_eval(
                 _make_message(
                     MessageType.INSPECT_RESULT,
                     seq,
-                    {
-                        "cell_id": cell_id,
-                        "action": "eval",
-                        "ok": False,
-                        "error": "No inspect session open for this cell",
-                    },
+                    inspect_result_payload(
+                        {
+                            "cell_id": cell_id,
+                            "action": "eval",
+                            "ok": False,
+                            "error": "No inspect session open for this cell",
+                        }
+                    ),
                 )
             )
         )
@@ -2773,12 +2778,14 @@ async def _handle_inspect_eval(
             _make_message(
                 MessageType.INSPECT_RESULT,
                 seq,
-                {
-                    "cell_id": cell_id,
-                    "action": "eval",
-                    "expr": expr,
-                    **result,
-                },
+                inspect_result_payload(
+                    {
+                        "cell_id": cell_id,
+                        "action": "eval",
+                        "expr": expr,
+                        **result,
+                    }
+                ),
             )
         )
     )
@@ -2806,12 +2813,14 @@ async def _handle_inspect_close(
             _make_message(
                 MessageType.INSPECT_RESULT,
                 seq,
-                {
-                    "cell_id": cell_id,
-                    "action": "close",
-                    "ok": True,
-                    "result": "closed",
-                },
+                inspect_result_payload(
+                    {
+                        "cell_id": cell_id,
+                        "action": "close",
+                        "ok": True,
+                        "result": "closed",
+                    }
+                ),
             )
         )
     )
