@@ -3032,7 +3032,12 @@ changes. They appear in the Workers panel with <code>source: server</code>.</p>
 <p>A notebook's own <code>[[workers]]</code> still win: define <code>gpu-a100</code> in your
 <code>notebook.toml</code> and that is what <code>@worker gpu-a100</code> resolves to, the same
 precedence annotations have over persisted config. Your notebook's worker
-definitions stay editable either way.</p>
+definitions stay editable either way, unless the server turns them off.</p>
+<p><strong>A host can keep every remote run behind its registry.</strong> With
+<code>STRATA_NOTEBOOK_WORKERS_EDITABLE=false</code>, a personal server runs remote cells
+only on the registry's workers, as service mode does. A notebook's own
+<code>[[workers]]</code> entries are listed as not allowed, a cell that names one is
+flagged and fails if run, and the panel offers no editor for them.</p>
 <p><strong>A host with its own machine picker can hide the panel.</strong> Set
 <code>STRATA_NOTEBOOK_WORKERS_PANEL=hidden</code> and the notebook page leaves the Workers
 panel out. Cells still show their worker badge and health, <code># @worker</code> still

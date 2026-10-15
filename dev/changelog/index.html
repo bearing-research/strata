@@ -3662,6 +3662,12 @@ exhaustive commit history.</p>
 <li><strong><code>STRATA_NOTEBOOK_WORKERS_PANEL=hidden</code></strong> leaves the Workers panel off the
   notebook page, for a host that offers its own machine choice. A cell's worker
   badge, <code># @worker</code> and the default-worker API are unchanged. (#1194)</li>
+<li><strong><code>STRATA_NOTEBOOK_WORKERS_EDITABLE=false</code></strong> keeps a personal server's remote
+  cells on its server-managed workers, as service mode does: a notebook's own
+  <code>[[workers]]</code> are ignored and shown as not allowed, a cell that names one is
+  flagged and fails, and the Workers panel offers no editor for them. The mode
+  badges now show the deployment mode rather than whether workers are editable.
+  (#1195)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
