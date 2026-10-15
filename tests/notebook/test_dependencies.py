@@ -873,37 +873,39 @@ class TestDependencyWebSocket:
             yield client, Path(tmpdir)
 
     def test_dependency_add_via_ws(self, setup):
-        """dependency_add message → dependency_changed broadcast."""
+        """dependency_add message → environment_job_finished broadcast."""
         client, tmp = setup
         nb = NotebookBuilder(tmp)
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 ws.send("dependency_add", {"package": "six"})
-                msg = ws.receive_until("dependency_changed")
+                msg = ws.receive_until("environment_job_finished")
 
-                assert msg["payload"]["action"] == "add"
-                assert msg["payload"]["package"] == "six"
-                assert msg["payload"]["success"] is True
+                job = msg["payload"]["environment_job"]
+                assert (job["action"], job["package"], job["status"]) == ("add", "six", "completed")
                 assert msg["payload"]["lockfile_changed"] is True
 
     def test_dependency_remove_via_ws(self, setup):
-        """dependency_remove message → dependency_changed broadcast."""
+        """dependency_remove message → environment_job_finished broadcast."""
         client, tmp = setup
         nb = NotebookBuilder(tmp)
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 ws.send("dependency_add", {"package": "six"})
-                ws.receive_until("dependency_changed")
+                ws.receive_until("environment_job_finished")
                 ws.clear()
 
                 ws.send("dependency_remove", {"package": "six"})
-                msg = ws.receive_until("dependency_changed")
+                msg = ws.receive_until("environment_job_finished")
 
-                assert msg["payload"]["action"] == "remove"
-                assert msg["payload"]["package"] == "six"
-                assert msg["payload"]["success"] is True
+                job = msg["payload"]["environment_job"]
+                assert (job["action"], job["package"], job["status"]) == (
+                    "remove",
+                    "six",
+                    "completed",
+                )
 
     def test_dependency_add_missing_package(self, setup):
         """dependency_add without package field → error."""
@@ -916,15 +918,15 @@ class TestDependencyWebSocket:
                 msg = ws.receive_until("error")
                 assert "package" in msg["payload"]["error"].lower()
 
-    def test_dependency_changed_includes_dep_list(self, setup):
-        """dependency_changed includes updated dependency list."""
+    def test_a_finished_dependency_job_includes_the_dep_list(self, setup):
+        """environment_job_finished includes the updated dependency list."""
         client, tmp = setup
         nb = NotebookBuilder(tmp)
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 ws.send("dependency_add", {"package": "six"})
-                msg = ws.receive_until("dependency_changed")
+                msg = ws.receive_until("environment_job_finished")
 
                 deps = msg["payload"]["dependencies"]
                 assert isinstance(deps, list)
@@ -965,9 +967,9 @@ class TestDependencyWebSocket:
 
             with ws_connect(client, sid) as ws:
                 ws.send("dependency_add", {"package": "six"})
-                changed = ws.receive_until("dependency_changed")
+                changed = ws.receive_until("environment_job_finished")
                 assert changed["payload"]["lockfile_changed"] is True
-                assert changed["payload"]["package"] == "six"
+                assert changed["payload"]["environment_job"]["package"] == "six"
                 assert "cells" in changed["payload"]
                 assert changed["payload"]["stale_cell_count"] == 2
                 assert "environment" in changed["payload"]

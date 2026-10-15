@@ -151,7 +151,6 @@ A cell run as an upstream inside another cell's run may get its console and resu
 | `environment_job_started`  | `{ "environment_job": {...} }`                            | Background environment job accepted              |
 | `environment_job_progress` | `{ "environment_job": {...} }`                            | Background environment job phase/log update      |
 | `environment_job_finished` | `{ "environment_job": {...}, "environment_job_history": [...], "cells": [...], "lockfile_changed": false, "stale_cell_count": 0, "stale_cell_ids": [...], "environment": {...}, "r_environment": {...}, "dependencies": [...], "resolved_dependencies": [...] }` | Background environment job completed or failed. The environment and dependency fields are present only on success; an import job adds `warnings` and `imported_count` |
-| `dependency_changed`       | `{ "package": "...", "action": "add", "success": true, "error": null, "lockfile_changed": true, "stale_cell_count": 0, "cells": [...] }` | Legacy compatibility event after add/remove jobs. On success it also carries `environment`, `dependencies` and `resolved_dependencies` |
 
 ### Agent
 
