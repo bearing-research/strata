@@ -355,7 +355,7 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
             status_code=504, detail=f"Planning timed out after {plan_timeout}s."
         ) from e
     except InputResolutionError as e:
-        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+        raise _input_resolution_http_error(e.status_code, e.detail) from e
     return _checked_input_version(resolved, input_uri, tenant, store)
 
 
@@ -383,10 +383,18 @@ async def resolve_input_version_async(input_uri: str, tenant: str | None = None)
             status_code=504, detail=f"Planning timed out after {plan_timeout}s."
         ) from e
     except InputResolutionError as e:
-        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+        raise _input_resolution_http_error(e.status_code, e.detail) from e
     return await anyio.to_thread.run_sync(
         _checked_input_version, resolved, input_uri, tenant, store
     )
+
+
+def _input_resolution_http_error(status_code: int, detail: str) -> HTTPException:
+    """The HTTP error for an unresolvable input; an unreachable object store says when to retry."""
+    from strata.iceberg import OBJECT_STORE_RETRY_AFTER_SECONDS
+
+    retry = {"Retry-After": str(OBJECT_STORE_RETRY_AFTER_SECONDS)} if status_code == 503 else None
+    return HTTPException(status_code=status_code, detail=detail, headers=retry)
 
 
 def table_identity_or_400(table_uri: str) -> TableIdentity:
