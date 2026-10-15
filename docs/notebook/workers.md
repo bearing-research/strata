@@ -587,6 +587,12 @@ A notebook's own `[[workers]]` still win: define `gpu-a100` in your
 precedence annotations have over persisted config. Your notebook's worker
 definitions stay editable either way.
 
+**A host with its own machine picker can hide the panel.** Set
+`STRATA_NOTEBOOK_WORKERS_PANEL=hidden` and the notebook page leaves the Workers
+panel out. Cells still show their worker badge and health, `# @worker` still
+routes, and the host sets a notebook's default worker with
+`PUT /v1/notebooks/{id}/worker`.
+
 ## Authentication
 
 By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.

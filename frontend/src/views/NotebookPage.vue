@@ -74,6 +74,7 @@ const {
   cleanupWebSocket,
   ensureWorkersLoaded,
   registryEnabled,
+  workersPanelShown,
   toasts,
   dismissToast,
   pushToast,
@@ -819,7 +820,7 @@ function goHome() {
           <MountsPanel />
           <ConnectionsPanel />
           <SchemaPanel />
-          <WorkersPanel />
+          <WorkersPanel v-if="workersPanelShown" />
           <RuntimePanel />
           <EnvironmentPanel />
         </aside>

@@ -67,6 +67,7 @@ interface NotebookRuntimeConfigResponse {
   python_selection_fixed?: boolean
   registry_enabled?: boolean
   team_store_configured?: boolean
+  workers_panel?: 'shown' | 'hidden'
 }
 
 interface CellUpdateResponse {

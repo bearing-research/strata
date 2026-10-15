@@ -1295,6 +1295,7 @@ function loadNotebookStateFromBackend(data: any) {
   notebook.env = parseEnvMap(data.env)
   registryEnabled.value = data?.registry_enabled === true
   teamStoreConfigured.value = data?.team_store_configured === true
+  workersPanelShown.value = data?.workers_panel !== 'hidden'
   scheduleRegistryRefresh()
   applyEnvSources(data)
   notebook.workers = Array.isArray(data.workers) ? data.workers.map(parseWorkerSpec) : []
@@ -1625,6 +1626,8 @@ const workerModeKnown = ref(false)
 // Fail closed: the dashboard stays hidden until the backend enables it.
 const registryEnabled = ref(false)
 const teamStoreConfigured = ref(false)
+// A host that offers its own machine choice hides the Workers panel.
+const workersPanelShown = ref(true)
 const workerHealthLoading = ref(false)
 const workerHealthCheckedAt = ref<number | null>(null)
 
@@ -3534,6 +3537,7 @@ export function useNotebook() {
     setAliasAction,
     promoteToTeamAction,
     teamStoreConfigured,
+    workersPanelShown,
     approvePendingAction,
     rejectPendingAction,
     fetchLineageAction,

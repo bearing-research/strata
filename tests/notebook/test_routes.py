@@ -757,6 +757,7 @@ def test_get_notebook_runtime_config_endpoint(client, monkeypatch):
         "python_selection_fixed": False,
         "registry_enabled": True,
         "team_store_configured": False,
+        "workers_panel": "shown",
     }
 
 
@@ -2838,6 +2839,36 @@ class TestRuntimeConfigRegistryFlag:
             ),
         )
         assert _serialize_notebook_runtime_config()["team_store_configured"] is offered
+
+
+class TestWorkersPanelSetting:
+    """A host that presents its own machine choice hides the Workers panel."""
+
+    def test_the_setting_is_read_from_the_environment(self, monkeypatch):
+        from strata.config import StrataConfig
+
+        assert StrataConfig().notebook_workers_panel == "shown"
+        monkeypatch.setenv("STRATA_NOTEBOOK_WORKERS_PANEL", "hidden")
+        assert StrataConfig().notebook_workers_panel == "hidden"
+
+    def test_an_unknown_value_is_refused(self, monkeypatch):
+        from pydantic import ValidationError
+
+        from strata.config import StrataConfig
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_WORKERS_PANEL", "off")
+        with pytest.raises(ValidationError, match="notebook_workers_panel"):
+            StrataConfig()
+
+    def test_the_notebook_page_learns_it_when_it_opens(self, client, monkeypatch, tmp_path):
+        """The page renders from the open payload, so the setting has to be in it."""
+        set_server_state(monkeypatch, deployment_mode="personal", notebook_workers_panel="hidden")
+        notebook_dir = create_notebook(tmp_path, "Hidden Panel", initialize_environment=False)
+
+        response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["workers_panel"] == "hidden"
 
 
 # Cell tests endpoint (REST twin of WS cell_run_tests)
