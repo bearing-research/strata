@@ -18,7 +18,7 @@ from strata.cache.disk import CachedFetcher
 from strata.cache.metadata import DeleteFileEntry, ManifestCache
 from strata.cache.metadata_store import MetadataStore
 from strata.config import StrataConfig
-from strata.iceberg_deletes import DeletedRows, _read, in_row_group
+from strata.iceberg.deletes import DeletedRows, _read, in_row_group
 from strata.planner import ReadPlanner, UnsupportedTableFormatError
 from strata.types import Filter, FilterOp
 

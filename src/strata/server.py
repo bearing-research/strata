@@ -1754,7 +1754,7 @@ def _table_identity_from_uri(table_uri: str):
     Lets the ACL run before manifest work, so a denied caller learns nothing about the table.
     ``None`` when the URI does not parse; the caller then falls back to the post-plan check.
     """
-    from strata.iceberg import table_identity_for
+    from strata.iceberg.catalog import table_identity_for
 
     if "#" not in table_uri and ":" not in table_uri and "." not in table_uri:
         return None

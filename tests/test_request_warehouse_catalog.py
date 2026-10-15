@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from strata.config import StrataConfig
-from strata.iceberg import CatalogUriRequired, PyIcebergCatalog
+from strata.iceberg.catalog import CatalogUriRequired, PyIcebergCatalog
 from tests.conftest import SERVICE_CALLER, service_auth
 
 OBJECT_STORE = ["s3://lake/wh", "gs://lake/wh", "az://lake/wh", "abfs://c@acct/wh"]
@@ -267,7 +267,7 @@ class TestTheRequestsWarehouseIsTheOneWritten:
         """``uri`` comes from the configuration, the warehouse from the request."""
         import pyarrow as pa
 
-        from strata.iceberg import IcebergWriter
+        from strata.iceberg.catalog import IcebergWriter
 
         configured, requested = tmp_path / "configured", tmp_path / "requested"
         configured.mkdir()
@@ -334,10 +334,10 @@ class TestBarePostgresqlCatalogUri:
     def _built_uris(self, tmp_path, monkeypatch) -> list[str]:
         built: list[str] = []
         monkeypatch.setattr(
-            "strata.iceberg.SqlCatalog", lambda name, **props: built.append(props["uri"])
+            "strata.iceberg.catalog.SqlCatalog", lambda name, **props: built.append(props["uri"])
         )
         monkeypatch.setattr(
-            "strata.iceberg.load_catalog", lambda name, **props: built.append(props["uri"])
+            "strata.iceberg.catalog.load_catalog", lambda name, **props: built.append(props["uri"])
         )
         config = _config(
             tmp_path,

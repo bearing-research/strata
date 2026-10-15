@@ -46,7 +46,7 @@ def resolve_table_snapshot(
     if spec.snapshot_pin is not None:
         return spec.snapshot_pin
 
-    from strata.iceberg import PyIcebergCatalog
+    from strata.iceberg.catalog import PyIcebergCatalog
 
     try:
         # A provider per call: its catalog cache holds this notebook's secrets.

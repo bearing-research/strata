@@ -13,10 +13,10 @@ import pyarrow as pa
 import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 
-from strata import lake_files
 from strata.config import StrataConfig
 from strata.fetcher import create_fetcher
-from strata.iceberg import named_catalog
+from strata.iceberg import lake_files
+from strata.iceberg.catalog import named_catalog
 from strata.planner import ReadPlanner
 
 windows = pytest.mark.skipif(
@@ -141,7 +141,7 @@ class TestScanningByName:
         catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())])).append(
             pa.table({"id": [1]})
         )
-        from strata.iceberg import PyIcebergCatalog
+        from strata.iceberg.catalog import PyIcebergCatalog
 
         config = _config(tmp_path, {"north": props})
         calls = []
@@ -316,7 +316,7 @@ class TestAclNamesTheCatalog:
     @staticmethod
     def _ref(uri: str):
         from strata.config import StrataConfig
-        from strata.iceberg import named_catalog, table_identity_for
+        from strata.iceberg.catalog import named_catalog, table_identity_for
         from strata.types import TableRef
 
         config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})

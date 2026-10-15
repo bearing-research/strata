@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from strata.config import StrataConfig
-from strata.iceberg import PyIcebergCatalog, _is_connection_io_error
+from strata.iceberg.catalog import PyIcebergCatalog, _is_connection_io_error
 
 
 class _Catalog:
@@ -111,6 +111,6 @@ _REFUSED = (
     ids=["refused", "s3-503", "socket-refused", "access-denied", "missing-file", "not-io"],
 )
 def test_an_unreachable_object_store_is_told_from_a_refusal(exc, unreachable):
-    from strata.iceberg import object_store_unreachable
+    from strata.iceberg.catalog import object_store_unreachable
 
     assert object_store_unreachable(exc) is unreachable

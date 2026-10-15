@@ -23,7 +23,7 @@ from strata.api.dependencies import (
     resolve_input_version_async,
     table_identity_or_400,
 )
-from strata.iceberg import (
+from strata.iceberg.catalog import (
     OBJECT_STORE_RETRY_AFTER_SECONDS,
     CatalogUriRequired,
     SnapshotNotFound,

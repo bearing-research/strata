@@ -176,7 +176,7 @@ def _reset_process_globals():
     reset_rate_limiter()
     # Vended lake credentials are registered per table location by whichever
     # test planned against a named catalog; a later test must not read with them.
-    from strata.lake_files import reset as reset_lake_files
+    from strata.iceberg.lake_files import reset as reset_lake_files
 
     reset_lake_files()
     # The build runner's heartbeat task is bound to the loop that started it; a

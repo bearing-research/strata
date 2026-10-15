@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from strata.artifact.store import TransformSpec as ArtifactTransformSpec
-from strata.iceberg_schema import UnsupportedTableFormatError
+from strata.iceberg.schema import UnsupportedTableFormatError
 from strata.services.materialize import InputResolutionError, MaterializeService
 from strata.types import ExplainMaterializeRequest, TransformSpec
 

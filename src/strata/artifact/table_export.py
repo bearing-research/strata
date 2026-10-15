@@ -14,7 +14,7 @@ from typing import Any
 import pyarrow as pa
 
 from strata.artifact.store import ArtifactStore, ArtifactVersion
-from strata.iceberg import IcebergWriter, PyIcebergCatalog, TableWrite
+from strata.iceberg.catalog import IcebergWriter, PyIcebergCatalog, TableWrite
 from strata.logging import get_logger
 
 logger = get_logger(__name__)

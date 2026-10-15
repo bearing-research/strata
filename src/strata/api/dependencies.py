@@ -242,7 +242,7 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
         ``hide_forbidden_as_not_found``, if the ACL denies the table.
     """
     from strata.auth import AclEvaluator, get_principal
-    from strata.iceberg import named_catalog, shared_catalog_stores
+    from strata.iceberg.catalog import named_catalog, shared_catalog_stores
     from strata.server import get_state
     from strata.types import TableRef
 
@@ -391,7 +391,7 @@ async def resolve_input_version_async(input_uri: str, tenant: str | None = None)
 
 def _input_resolution_http_error(status_code: int, detail: str) -> HTTPException:
     """The HTTP error for an unresolvable input; an unreachable object store says when to retry."""
-    from strata.iceberg import OBJECT_STORE_RETRY_AFTER_SECONDS
+    from strata.iceberg.catalog import OBJECT_STORE_RETRY_AFTER_SECONDS
 
     retry = {"Retry-After": str(OBJECT_STORE_RETRY_AFTER_SECONDS)} if status_code == 503 else None
     return HTTPException(status_code=status_code, detail=detail, headers=retry)
@@ -399,7 +399,7 @@ def _input_resolution_http_error(status_code: int, detail: str) -> HTTPException
 
 def table_identity_or_400(table_uri: str) -> TableIdentity:
     """Resolve a request's table URI to its identity; a URI that names no table is a 400."""
-    from strata.iceberg import table_identity_for
+    from strata.iceberg.catalog import table_identity_for
     from strata.server import get_state
 
     try:
@@ -410,7 +410,11 @@ def table_identity_or_400(table_uri: str) -> TableIdentity:
 
 def refuse_unconfigured_warehouses(table_uris: list[str]) -> None:
     """Refuse with a 400 a request naming a warehouse this server has no catalog for."""
-    from strata.iceberg import CatalogUriRequired, PyIcebergCatalog, refuse_unconfigured_warehouse
+    from strata.iceberg.catalog import (
+        CatalogUriRequired,
+        PyIcebergCatalog,
+        refuse_unconfigured_warehouse,
+    )
     from strata.server import get_state
 
     for table_uri in table_uris:

@@ -399,7 +399,7 @@ class TestTransformInputAclParity:
         """
         from fastapi import HTTPException
 
-        from strata.iceberg_schema import UnsupportedTableFormatError
+        from strata.iceberg.schema import UnsupportedTableFormatError
 
         server_module = self._patch_state(monkeypatch, namespace="secret", hide_as_404=hide_as_404)
         server_module._state.planner.plan.side_effect = (
@@ -424,7 +424,7 @@ class TestTransformInputAclParity:
     def test_an_allowed_table_strata_refuses_is_still_a_422(self, monkeypatch):
         from fastapi import HTTPException
 
-        from strata.iceberg_schema import UnsupportedTableFormatError
+        from strata.iceberg.schema import UnsupportedTableFormatError
 
         server_module = self._patch_state(monkeypatch, namespace="public")
         server_module._state.planner.plan.side_effect = UnsupportedTableFormatError(
@@ -868,7 +868,7 @@ class TestReadingACachedScanIsGatedWhereverTheTableLives:
         one.
         """
         from strata.config import StrataConfig
-        from strata.iceberg import table_identity_for
+        from strata.iceberg.catalog import table_identity_for
 
         config = StrataConfig(catalogs={"prod": {"type": "rest", "uri": "http://catalog"}})
 
@@ -908,7 +908,7 @@ class TestADenyForEveryPrefixCoversEveryAddress:
 
         import strata.server as server_module
         from strata.api.dependencies import authorize_table_access
-        from strata.iceberg import table_identity_for
+        from strata.iceberg.catalog import table_identity_for
 
         config = StrataConfig(
             deployment_mode="service",
@@ -959,7 +959,7 @@ class TestADenyOnOneAddressCoversTheTable:
 
         import strata.server as server_module
         from strata.api.dependencies import authorize_table_access
-        from strata.iceberg import table_identity_for
+        from strata.iceberg.catalog import table_identity_for
 
         config = StrataConfig(
             deployment_mode="service",
@@ -992,7 +992,7 @@ class TestADenyOnOneAddressCoversTheTable:
     def test_a_deny_on_the_s3_name_refuses_every_address(
         self, temp_warehouse, tmp_path, monkeypatch
     ):
-        from strata.iceberg import PyIcebergCatalog
+        from strata.iceberg.catalog import PyIcebergCatalog
 
         overrides = self._shared_catalog(temp_warehouse)
         allowed = self._check(

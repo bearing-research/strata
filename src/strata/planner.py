@@ -11,7 +11,6 @@ from pyiceberg.conversions import from_bytes, to_bytes
 from pyiceberg.transforms import IdentityTransform
 from pyiceberg.types import IcebergType
 
-from strata import lake_files
 from strata.cache.metadata import (
     DeleteFileEntry,
     EqualityDeleteEntry,
@@ -25,15 +24,16 @@ from strata.cache.metadata import (
     get_parquet_cache,
 )
 from strata.config import StrataConfig
-from strata.iceberg import (
+from strata.iceberg import lake_files
+from strata.iceberg.catalog import (
     CatalogProvider,
     PyIcebergCatalog,
     named_catalog,
     table_identity_for,
 )
-from strata.iceberg_deletes import READABLE_FORMATS, DeletedRows, in_row_group
-from strata.iceberg_equality import encode_bound, may_apply, plan_files
-from strata.iceberg_schema import (
+from strata.iceberg.deletes import READABLE_FORMATS, DeletedRows, in_row_group
+from strata.iceberg.equality import encode_bound, may_apply, plan_files
+from strata.iceberg.schema import (
     Column,
     UnsupportedTableFormatError,
     file_columns,
