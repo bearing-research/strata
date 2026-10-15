@@ -209,8 +209,7 @@ class EnvironmentJobModel(WsPayload):
 class EnvironmentJobEventPayload(WsPayload):
     """``environment_job_started`` / ``environment_job_progress``: one job snapshot.
 
-    ``environment_job_finished`` and ``dependency_changed`` carry heavier aggregate
-    payloads and are not typed here.
+    ``environment_job_finished`` carries a heavier aggregate payload and is not typed here.
     """
 
     environment_job: EnvironmentJobModel

@@ -81,9 +81,6 @@ class MessageType(StrEnum):
     ENVIRONMENT_JOB_STARTED = "environment_job_started"
     ENVIRONMENT_JOB_PROGRESS = "environment_job_progress"
     ENVIRONMENT_JOB_FINISHED = "environment_job_finished"
-    # Legacy alias sent alongside ENVIRONMENT_JOB_FINISHED for add/remove so existing
-    # dependency_changed listeners keep working.
-    DEPENDENCY_CHANGED = "dependency_changed"
 
     # Server → Client (external agent)
     # An MCP/CLI agent's tool actions (source="mcp") or explicit narration

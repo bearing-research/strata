@@ -778,7 +778,6 @@ export type WsServerMessageType =
   | 'inspect_result' // Result of an inspect REPL evaluation
   | 'notebook_status' // Batch status update (e.g., after open or env change)
   | 'notebook_state' // Full state sync (reconnection)
-  | 'dependency_changed' // Dependency added/removed: updated list
   | 'environment_job_started' // Background env job accepted and started
   | 'environment_job_progress' // Background env job emitted logs or phase changes
   | 'environment_job_finished' // Background env job completed or failed

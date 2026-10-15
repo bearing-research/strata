@@ -2380,30 +2380,6 @@ function initializeWebSocket() {
       }
     })
 
-    wsInstance.onMessage('dependency_changed', (msg: WsMessage) => {
-      const p = msg.payload as Record<string, any>
-      syncEnvironmentPayloadFromBackend(p)
-      if (p.cells && Array.isArray(p.cells)) {
-        syncCellsFromBackend(p.cells)
-      }
-      if (p.action === 'add' || p.action === 'remove') {
-        setEnvironmentActionSummary({
-          action: p.action,
-          packageName: typeof p.package === 'string' ? p.package : null,
-          lockfileChanged: p.lockfile_changed === true,
-          staleCellCount: Number(p.stale_cell_count ?? 0),
-        })
-      }
-      if (!p.success && p.error) {
-        dependencyError.value = p.error
-      } else {
-        dependencyError.value = null
-        environmentError.value = null
-        environmentWarnings.value = []
-      }
-      dependencyLoading.value = false
-    })
-
     function handleEnvironmentJobMessage(payload: Record<string, any>) {
       syncEnvironmentPayloadFromBackend(payload)
       if (payload.cells && Array.isArray(payload.cells)) {
