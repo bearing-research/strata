@@ -4,7 +4,14 @@ import asyncio
 
 import pytest
 
-from strata.tenant import (
+from strata.tenancy.registry import (
+    MAX_TRACKED_TENANTS,
+    TenantRegistry,
+    get_tenant_registry,
+    init_tenant_registry,
+    reset_tenant_registry,
+)
+from strata.tenancy.tenant import (
     DEFAULT_TENANT_ID,
     MAX_TENANT_ID_LENGTH,
     TenantConfig,
@@ -14,13 +21,6 @@ from strata.tenant import (
     reset_tenant_id,
     set_tenant_id,
     validate_tenant_id,
-)
-from strata.tenant_registry import (
-    MAX_TRACKED_TENANTS,
-    TenantRegistry,
-    get_tenant_registry,
-    init_tenant_registry,
-    reset_tenant_registry,
 )
 from strata.types import CacheKey, TableIdentity
 

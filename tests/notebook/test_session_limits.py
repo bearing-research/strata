@@ -696,7 +696,7 @@ class TestServiceModeReuse:
         assert bob is not first
 
     def test_service_mode_reuses_by_principal_and_never_anonymously(self, config):
-        from strata.auth import set_principal
+        from strata.auth.principal import set_principal
         from strata.types import Principal
 
         config.deployment_mode = "service"

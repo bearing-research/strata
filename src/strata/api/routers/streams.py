@@ -109,7 +109,7 @@ async def get_stream(stream_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
 
     if state.config.principal_auth_enabled:
-        from strata.auth import get_principal
+        from strata.auth.principal import get_principal
 
         principal = get_principal()
         if principal is None:

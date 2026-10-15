@@ -420,7 +420,7 @@ def test_create_notebook_endpoint(client, tmp_path):
 @pytest.mark.parametrize("route", ["create", "import"])
 def test_a_new_notebooks_session_records_its_creators_tenant(app, monkeypatch, tmp_path, route):
     """MCP hides a session from other tenants by the tenant recorded here."""
-    from strata.auth import principal_context
+    from strata.auth.principal import principal_context
     from strata.types import Principal
 
     set_server_state(monkeypatch, deployment_mode="service", notebook_storage_dir=tmp_path)

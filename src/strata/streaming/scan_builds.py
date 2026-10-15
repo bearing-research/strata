@@ -48,8 +48,8 @@ def record_scan_complete(
     counts as a cache hit. Otherwise the plan's tasks say how each row group was read.
     """
     from strata.metrics import ScanMetrics
-    from strata.tenant import get_tenant_id
-    from strata.tenant_registry import get_tenant_registry
+    from strata.tenancy.registry import get_tenant_registry
+    from strata.tenancy.tenant import get_tenant_id
 
     tasks = plan.tasks
     if artifact_bytes is not None:

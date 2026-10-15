@@ -259,7 +259,7 @@ async def test_no_schema_means_no_retries(tmp_path):
 
 @pytest.mark.asyncio
 async def test_the_response_is_stored_under_the_member_who_ran_it(tmp_path):
-    from strata.auth import principal_context
+    from strata.auth.principal import principal_context
     from strata.notebook.llm import LlmConfig
     from strata.notebook.prompt_executor import execute_prompt_cell
     from strata.types import Principal

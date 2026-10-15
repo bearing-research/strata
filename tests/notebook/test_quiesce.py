@@ -224,7 +224,7 @@ def test_service_mode_needs_the_admin_scope(client, tmp_path, monkeypatch):
         SimpleNamespace(config=SimpleNamespace(principal_auth_enabled=True)),
     )
     monkeypatch.setattr(
-        "strata.auth.get_principal",
+        "strata.auth.principal.get_principal",
         # Past the notebook scope every mutation needs, so the refusal is the
         # route's own admin check.
         lambda: SimpleNamespace(

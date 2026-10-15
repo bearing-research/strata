@@ -40,7 +40,7 @@ class TestResolving:
         be claiming an identity rather than presenting one."""
         from types import SimpleNamespace
 
-        import strata.auth as auth_module
+        from strata.auth import principal as auth_module
 
         monkeypatch.setattr(auth_module, "get_principal", lambda: SimpleNamespace(id="alice"))
 

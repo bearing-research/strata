@@ -38,7 +38,7 @@ def remote_registry() -> tuple[str, dict[str, str]] | None:
     url = getattr(config, "notebook_remote_store_url", None)
     if not url:
         return None
-    from strata.auth import remote_store_headers
+    from strata.auth.principal import remote_store_headers
 
     return str(url).rstrip("/"), remote_store_headers(config)
 

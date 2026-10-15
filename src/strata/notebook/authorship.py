@@ -42,7 +42,7 @@ def clean_author(declared: str | None) -> str | None:
 def _current_principal() -> str | None:
     """The authenticated caller's id, when the request carried one."""
     try:
-        from strata.auth import get_principal
+        from strata.auth.principal import get_principal
     except ImportError:
         return None
     principal = get_principal()

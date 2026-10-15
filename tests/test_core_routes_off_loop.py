@@ -30,7 +30,7 @@ async def _blocked_while_health_answers(app, gate, method, path, **kwargs):
 @pytest.fixture
 def serve(in_process_server):
     """Install a server built from ``StrataConfig(**overrides)``; return the app."""
-    from strata.api_keys import reset_api_key_store
+    from strata.auth.api_keys import reset_api_key_store
     from strata.server import app
 
     reset_api_key_store()
@@ -44,7 +44,7 @@ def serve(in_process_server):
 
 
 async def test_api_key_verify_does_not_block_the_loop(serve, tmp_path, monkeypatch):
-    from strata.api_keys import get_api_key_store
+    from strata.auth.api_keys import get_api_key_store
 
     app = serve(deployment_mode="service", auth_mode="api_key")
     keys = get_api_key_store(tmp_path / "keys.sqlite")
@@ -60,7 +60,7 @@ async def test_api_key_verify_does_not_block_the_loop(serve, tmp_path, monkeypat
 
 
 async def test_a_revoked_key_is_refused_after_the_offload(serve, tmp_path):
-    from strata.api_keys import get_api_key_store
+    from strata.auth.api_keys import get_api_key_store
 
     app = serve(deployment_mode="service", auth_mode="api_key")
     keys = get_api_key_store(tmp_path / "keys.sqlite")

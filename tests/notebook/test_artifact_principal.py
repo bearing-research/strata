@@ -13,7 +13,7 @@ from typing import cast
 import pytest
 from fastapi import WebSocket, WebSocketDisconnect
 
-from strata.auth import principal_context
+from strata.auth.principal import principal_context
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 from strata.types import Principal

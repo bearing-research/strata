@@ -133,7 +133,7 @@ class TestAclNormalization:
         # The parse above, carried through to the decision it exists to make.
         import json
 
-        from strata.auth import AclEvaluator
+        from strata.auth.principal import AclEvaluator
         from strata.types import Principal, TableRef
 
         _pyproject(

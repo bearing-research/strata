@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from strata.tenant import DEFAULT_TENANT_ID, TenantConfig, TenantQuotas
+from strata.tenancy.tenant import DEFAULT_TENANT_ID, TenantConfig, TenantQuotas
 
 if TYPE_CHECKING:
     from strata.adaptive_concurrency import ResizableLimiter

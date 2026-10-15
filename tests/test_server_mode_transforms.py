@@ -1023,7 +1023,7 @@ class TestTransformValidation:
 
         import strata.server as server_module
         from strata.api.routers.materialize import materialize_artifact
-        from strata.auth import principal_context
+        from strata.auth.principal import principal_context
         from strata.types import MaterializeRequest, Principal
 
         reset_artifact_store()

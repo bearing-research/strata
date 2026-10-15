@@ -115,7 +115,7 @@ member (sharing results through a service-mode store) or one service-mode server
 
 Multi-tenant: `X-Tenant-ID` header (validated 1–64 alphanumeric+`_-`); tenant
 hashed into cache keys + dirs; per-tenant QoS limiters and metrics; tenant
-registry is LRU-bounded. See `tenant.py`, `tenant_registry.py`.
+registry is LRU-bounded. See `tenancy/tenant.py`, `tenancy/registry.py`.
 
 Auth: trusted-proxy model. Strata does not authenticate, only the proxy can
 reach it (network-layer enforced). Proxy injects `X-Strata-Principal`,
@@ -124,7 +124,7 @@ reach it (network-layer enforced). Proxy injects `X-Strata-Principal`,
 is **deny-first** (deny rules → allow rules → default). Enforcement points:
 `POST /v1/materialize` (table/artifact), `GET /v1/streams/{id}` (stream
 ownership), `POST /v1/cache/clear` (`admin:cache` scope). Table ACL lives in
-`auth.py` (`AclEvaluator`); tenant scoping of a concrete record is the
+`auth/principal.py` (`AclEvaluator`); tenant scoping of a concrete record is the
 `CurrentTenant` dependency plus `_ensure_artifact_access` in `server.py`.
 **Cache stays shared across principals**: ACL gates request admission and
 result retrieval, not cache contents.
@@ -160,7 +160,8 @@ Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
 Artifact / build: `artifact/` (`store`, `blob_store`, `transfer`, `uris`,
 `table_export`, `cli`), `transforms/`.
-Auth / tenancy: `auth.py`, `tenant.py`, `tenant_registry.py`.
+Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
+`api_key_cli`), `tenancy/` (`tenant` config and context, `registry`).
 Observability: `tracing.py`, `logging.py`, `health.py`, `rate_limiter.py`,
 `pool_metrics.py`.
 

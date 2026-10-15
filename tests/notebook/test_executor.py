@@ -1466,7 +1466,7 @@ class Person:
         self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
         seen = self._capture_manifest_metadata(monkeypatch)
         monkeypatch.setattr(
-            "strata.auth.get_principal", lambda: Principal(id="alice", tenant="team-a")
+            "strata.auth.principal.get_principal", lambda: Principal(id="alice", tenant="team-a")
         )
 
         result = await CellExecutor(sample_notebook).execute_cell("cell1", "x = 1")
@@ -1809,9 +1809,9 @@ class Person:
         seen = self._capture_manifest_metadata(monkeypatch)
         executor = CellExecutor(sample_notebook)
 
-        monkeypatch.setattr("strata.auth.get_principal", lambda: Principal(id="alice"))
+        monkeypatch.setattr("strata.auth.principal.get_principal", lambda: Principal(id="alice"))
         first = await executor.execute_cell_force("cell1", "x = 1")
-        monkeypatch.setattr("strata.auth.get_principal", lambda: Principal(id="bob"))
+        monkeypatch.setattr("strata.auth.principal.get_principal", lambda: Principal(id="bob"))
         second = await executor.execute_cell_force("cell1", "x = 1")
 
         assert [m["principal"] for m in seen] == ["alice", "bob"]

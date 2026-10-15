@@ -415,7 +415,7 @@ def in_process(tmp_path):
     import strata.server as server_module
     from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
-    from strata.tenant_registry import reset_tenant_registry
+    from strata.tenancy.registry import reset_tenant_registry
 
     config = StrataConfig(
         host="127.0.0.1",
@@ -493,7 +493,7 @@ class TestAStreamFetchThatFailsReleasesEverything:
         self, in_process, temp_warehouse, monkeypatch
     ):
         from strata.artifact.store import ArtifactStore
-        from strata.tenant_registry import get_tenant_registry
+        from strata.tenancy.registry import get_tenant_registry
 
         client, state = in_process
         body = client.post(
@@ -521,7 +521,7 @@ class TestAStreamFetchThatFailsReleasesEverything:
 
         from strata.api.routers.streams import get_stream
         from strata.artifact import store as artifact_store_module
-        from strata.tenant_registry import get_tenant_registry
+        from strata.tenancy.registry import get_tenant_registry
 
         client, state = in_process
         body = client.post(
@@ -552,7 +552,7 @@ class TestAStreamFetchThatFailsReleasesEverything:
         self, in_process, temp_warehouse, monkeypatch, failing
     ):
         from strata.artifact import store as artifact_store_module
-        from strata.tenant_registry import get_tenant_registry
+        from strata.tenancy.registry import get_tenant_registry
 
         client, state = in_process
         body = client.post(

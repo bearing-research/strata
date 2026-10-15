@@ -12,7 +12,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from strata.api_keys import ApiKeyStore
+from strata.auth.api_keys import ApiKeyStore
 from strata.file_modes import private_dir, private_file
 
 _SECONDS_PER_DAY = 86400.0

@@ -2750,7 +2750,7 @@ async def test_ws_upgrade_rejected_without_principal(notebook_session, trusted_p
 @pytest.fixture
 def api_key_mode(_server_state, tmp_path):
     """Put the server in api_key mode with a fresh key store; yields the store."""
-    from strata.api_keys import get_api_key_store, reset_api_key_store
+    from strata.auth.api_keys import get_api_key_store, reset_api_key_store
 
     _server_state.auth_mode = "api_key"
     reset_api_key_store()

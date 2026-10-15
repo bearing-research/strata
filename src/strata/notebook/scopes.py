@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from strata.auth import get_principal
+from strata.auth.principal import get_principal
 from strata.notebook.protocol import MessageType
-from strata.tenant import DEFAULT_TENANT_ID
+from strata.tenancy.tenant import DEFAULT_TENANT_ID
 
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession

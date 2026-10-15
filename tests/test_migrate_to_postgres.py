@@ -361,7 +361,7 @@ class TestMigration:
         # A table added to the store without an entry here is silently left behind.
         import sqlite3
 
-        from strata.api_keys import ApiKeyStore
+        from strata.auth.api_keys import ApiKeyStore
         from strata.streaming.ownership import StreamOwnershipStore
         from strata.transforms.build_store import BuildStore
 

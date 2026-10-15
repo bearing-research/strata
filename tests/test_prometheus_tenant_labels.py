@@ -25,7 +25,7 @@ def scrape(tmp_path):
     from strata.artifact.store import reset_artifact_store
     from strata.config import StrataConfig
     from strata.server import ServerState, app
-    from strata.tenant_registry import get_tenant_registry, reset_tenant_registry
+    from strata.tenancy.registry import get_tenant_registry, reset_tenant_registry
     from strata.transforms.build_metrics import init_build_metrics, reset_build_metrics
 
     original = server_module._state

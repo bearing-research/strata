@@ -24,7 +24,7 @@ from strata.notebook.workers import (
     set_server_managed_worker_enabled,
     update_server_managed_worker_record,
 )
-from strata.tenant_registry import get_tenant_registry
+from strata.tenancy.registry import get_tenant_registry
 
 router = APIRouter(tags=["admin"])
 

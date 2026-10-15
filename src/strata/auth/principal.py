@@ -152,7 +152,7 @@ def parse_api_key_principal(headers: dict[str, str], config: StrataConfig) -> Pr
         If the header is absent or the key does not resolve; one message for both,
         so a caller cannot tell malformed, unknown, revoked or expired keys apart.
     """
-    from strata.api_keys import get_api_key_store
+    from strata.auth.api_keys import get_api_key_store
 
     def _header(name: str) -> str | None:
         return headers.get(name) or headers.get(name.lower())

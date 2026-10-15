@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from strata.auth import set_principal
+from strata.auth.principal import set_principal
 from strata.notebook.llm.usage import record_llm_usage, reset_llm_usage
 from strata.types import Principal
 

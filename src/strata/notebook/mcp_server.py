@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from strata.auth import get_principal, principal_context
+from strata.auth.principal import get_principal, principal_context
 from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
 from strata.notebook.scopes import required_scope_for_tool, session_visible_to_caller
 
@@ -709,7 +709,7 @@ def _promote(
         )
 
     store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
-    from strata.auth import remote_store_headers
+    from strata.auth.principal import remote_store_headers
 
     target = RemoteStore(str(base_url), remote_store_headers(config))
     promotion = promote_artifact(
@@ -817,7 +817,12 @@ def _caller(context: Any) -> Principal | None:
     Parsed as the HTTP auth middleware does; the middleware has already refused a
     request without valid credentials.
     """
-    from strata.auth import AuthError, parse_api_key_principal, parse_principal, verify_proxy_token
+    from strata.auth.principal import (
+        AuthError,
+        parse_api_key_principal,
+        parse_principal,
+        verify_proxy_token,
+    )
 
     config = _server_config()
     if not getattr(config, "principal_auth_enabled", False):

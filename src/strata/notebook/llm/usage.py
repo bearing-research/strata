@@ -2,7 +2,7 @@
 
 Recorded where each provider response is read and exported as counters on
 ``/metrics/prometheus``. The caller is whoever is in the request context
-(``strata.auth``), or no one in personal mode; agent runs and prompt cells
+(``strata.auth.principal``), or no one in personal mode; agent runs and prompt cells
 run in tasks that copy that context.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import threading
 from typing import NamedTuple
 
-from strata.auth import get_principal
+from strata.auth.principal import get_principal
 
 
 class UsageRow(NamedTuple):

@@ -140,7 +140,7 @@ class TestIntoACentralStore:
 
     def test_each_step_keeps_the_member_who_computed_it(self, central, tmp_path):
         """Bob ran the cells on a shared server; Alice promoting them does not make them hers."""
-        from strata.auth import principal_context
+        from strata.auth.principal import principal_context
         from strata.types import Principal
 
         with principal_context(Principal(id="bob")):

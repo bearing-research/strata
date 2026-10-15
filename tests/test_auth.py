@@ -10,7 +10,7 @@ from concurrent.futures import Future
 import pytest
 
 from strata.api.dependencies import resolve_input_version
-from strata.auth import (
+from strata.auth.principal import (
     AclEvaluator,
     get_principal,
     parse_principal,
@@ -45,7 +45,7 @@ class TestProxyTokenVerification:
 
 class TestPrincipalParsing:
     def test_missing_principal_raises_auth_error(self):
-        from strata.auth import AuthError
+        from strata.auth.principal import AuthError
 
         config = StrataConfig.load(
             deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
@@ -741,7 +741,7 @@ class TestAclRuleMatchingFailsClosed:
 
     def test_wildcard_principal_pattern_now_matches(self):
         """``principal`` is a pattern like tables, so ``svc-*`` must fire."""
-        from strata.auth import AclEvaluator
+        from strata.auth.principal import AclEvaluator
         from strata.config import AclConfig, AclRule
 
         acl = AclConfig(
@@ -755,7 +755,7 @@ class TestAclRuleMatchingFailsClosed:
         assert evaluator.authorize(self._principal("analyst"), self._ref()) is True
 
     def test_plain_star_principal_still_matches_everyone(self):
-        from strata.auth import AclEvaluator
+        from strata.auth.principal import AclEvaluator
         from strata.config import AclConfig, AclRule
 
         evaluator = AclEvaluator(
@@ -764,7 +764,7 @@ class TestAclRuleMatchingFailsClosed:
         assert evaluator.authorize(self._principal("anyone"), self._ref()) is False
 
     def test_exact_principal_still_matches_only_itself(self):
-        from strata.auth import AclEvaluator
+        from strata.auth.principal import AclEvaluator
         from strata.config import AclConfig, AclRule
 
         evaluator = AclEvaluator(

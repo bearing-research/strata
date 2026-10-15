@@ -439,8 +439,8 @@ class TestQoSConfiguration:
         )
 
         with run_server(config):
-            from strata.tenant import DEFAULT_TENANT_ID
-            from strata.tenant_registry import get_tenant_registry
+            from strata.tenancy.registry import get_tenant_registry
+            from strata.tenancy.tenant import DEFAULT_TENANT_ID
 
             interactive, bulk = get_tenant_registry().get_or_create_limiters(DEFAULT_TENANT_ID)
             assert interactive.capacity == 7

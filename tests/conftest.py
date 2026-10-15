@@ -163,7 +163,7 @@ def _reset_process_globals():
     from strata.artifact.store import reset_artifact_store
     from strata.cache.metadata import reset_caches
     from strata.rate_limiter import reset_rate_limiter
-    from strata.tenant_registry import reset_tenant_registry
+    from strata.tenancy.registry import reset_tenant_registry
 
     reset_artifact_store()
     reset_tenant_registry()

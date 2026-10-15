@@ -880,7 +880,7 @@ class TestPublish:
 async def test_publish_records_who_published_it_and_whose_it_is(sm_with_a_stored_output, tmp_path):
     """Without the caller stamped, the audit row names nobody (REST and CLI stamp it too)."""
     from strata.artifact.store import get_artifact_store
-    from strata.auth import principal_context
+    from strata.auth.principal import principal_context
     from strata.notebook.mcp_server import _publish
     from strata.types import Principal
 
