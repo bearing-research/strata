@@ -504,6 +504,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#removed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -565,7 +576,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed" class="md-nav__link">
+  <a href="#changed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -626,7 +637,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_1" class="md-nav__link">
+  <a href="#changed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -687,7 +698,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_2" class="md-nav__link">
+  <a href="#changed_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -898,7 +909,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_3" class="md-nav__link">
+  <a href="#changed_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -970,7 +981,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_4" class="md-nav__link">
+  <a href="#changed_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -1092,7 +1103,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_5" class="md-nav__link">
+  <a href="#changed_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -1225,7 +1236,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_6" class="md-nav__link">
+  <a href="#changed_7" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2796,6 +2807,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#removed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2857,7 +2879,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed" class="md-nav__link">
+  <a href="#changed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2918,7 +2940,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_1" class="md-nav__link">
+  <a href="#changed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2979,7 +3001,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_2" class="md-nav__link">
+  <a href="#changed_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -3190,7 +3212,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_3" class="md-nav__link">
+  <a href="#changed_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -3262,7 +3284,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_4" class="md-nav__link">
+  <a href="#changed_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -3384,7 +3406,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_5" class="md-nav__link">
+  <a href="#changed_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -3517,7 +3539,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_6" class="md-nav__link">
+  <a href="#changed_7" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -3613,6 +3635,13 @@
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>inspect_result</code> and <code>agent_note</code> frames have typed payloads.</strong> Both are
+  validated against a model at the emit site and appear in the generated
+  TypeScript, so the inspect panel reads a typed payload instead of an untyped
+  dict. (#1182)</li>
+</ul>
 <h3 id="removed">Removed<a class="headerlink" href="#removed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>The Rust extension: Strata is pure Python.</strong> One wheel now serves every
@@ -3834,7 +3863,7 @@ strata-pool RunPod backend moves to RunPod's REST v2 ahead of v1's retirement.</
   strata-pool dispatcher answers a hint for a machine type by keeping one
   machine of it warm until cool-down reaps it. (#1147, #1148)</li>
 </ul>
-<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Store and blob calls run off the event loop.</strong> Artifact, build, publication,
   name, alias, registry, materialize, stream, metadata, admin worker and health
@@ -4416,7 +4445,7 @@ from outside the frontend.</p>
   blob endpoint (Strata derives the connection string adlfs needs).</li>
 <li><code>strata cell add --language widget</code> adds a widget cell.</li>
 </ul>
-<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
+<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>An unnamed result is a cache entry.</strong> In personal mode a <code>materialize</code>
   result nobody has used for 30 days, or the least recently used ones once the
@@ -5355,7 +5384,7 @@ from it as a zip that is the same bytes on every fetch.</p>
 <li><strong>A new notebook directory is ready for git</strong>, and a store's schema can be
   evolved after it already holds data.</li>
 </ul>
-<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
+<h3 id="changed_3">Changed<a class="headerlink" href="#changed_3" title="Permanent link">&para;</a></h3>
 <p>Upgrading changes some behaviour that was previously silent. Each of these was
 a case of the server reporting more confidence than it had:</p>
 <ul>
@@ -6378,7 +6407,7 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   changes appear live without a manual refresh.</p>
 </li>
 </ul>
-<h3 id="changed_3">Changed<a class="headerlink" href="#changed_3" title="Permanent link">&para;</a></h3>
+<h3 id="changed_4">Changed<a class="headerlink" href="#changed_4" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong>Server internals decomposed (gates-first).</strong> <code>server.py</code> went from a
@@ -6712,7 +6741,7 @@ scan ← table @ snapshot</code> - answering "which snapshot trained this
   also prints the active notebook location on startup.</p>
 </li>
 </ul>
-<h3 id="changed_4">Changed<a class="headerlink" href="#changed_4" title="Permanent link">&para;</a></h3>
+<h3 id="changed_5">Changed<a class="headerlink" href="#changed_5" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong>Registry name resolution works in service mode</strong> (shared-store groundwork):
@@ -6996,7 +7025,7 @@ rw</code> opt out automatically.</li>
   release) or a pinned version (<code>0.2.0</code>, <code>0.1.0</code>, ...). Pre-release
   preview lives under <code>dev</code>.</li>
 </ul>
-<h3 id="changed_5">Changed<a class="headerlink" href="#changed_5" title="Permanent link">&para;</a></h3>
+<h3 id="changed_6">Changed<a class="headerlink" href="#changed_6" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Docs site builds + deploys via <code>mike</code> instead of <code>mkdocs gh-deploy</code>.
   PRs that touch <code>docs/</code> still validate <code>--strict</code> without touching
@@ -7178,7 +7207,7 @@ startup guard. The notebook app boots via <code>strata-notebook</code> (or
   matrix against Python 3.12 / 3.13 / 3.14 - packaging bugs fail
   the run before the artifact reaches the index</li>
 </ul>
-<h3 id="changed_6">Changed<a class="headerlink" href="#changed_6" title="Permanent link">&para;</a></h3>
+<h3 id="changed_7">Changed<a class="headerlink" href="#changed_7" title="Permanent link">&para;</a></h3>
 <ul>
 <li>markdown rendering uses <code>markdown-it</code> + <code>DOMPurify</code> rather than a
   hand-rolled renderer, with consistent output between in-place cell
