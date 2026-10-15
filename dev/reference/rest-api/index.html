@@ -4959,7 +4959,9 @@ without its URL.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-79-1" name="__codelineno-79-1" href="#__codelineno-79-1"></a>GET /v1/notebooks/config
 </code></pre></div>
 <p>Returns deployment mode, available Python versions, and default paths for the
-server as a whole. Not notebook-scoped.</p>
+server as a whole. Not notebook-scoped. <code>workers_panel</code> is <code>shown</code> or <code>hidden</code>
+(<code>STRATA_NOTEBOOK_WORKERS_PANEL</code>); the open and create responses carry the same
+keys.</p>
 <h3 id="update-notebook-default-timeout">Update Notebook Default Timeout<a class="headerlink" href="#update-notebook-default-timeout" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-80-1" name="__codelineno-80-1" href="#__codelineno-80-1"></a>PUT /v1/notebooks/{session_id}/timeout
 </code></pre></div>
