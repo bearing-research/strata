@@ -738,12 +738,12 @@ class TestEagerWarmup:
         assert "sqlite_entries" in warmup_times
 
     def test_warmup_initializes_metadata_store(self, tmp_path):
-        import strata.cache.metadata
+        from strata.cache import metadata as metadata_cache
         from strata.cache.metadata import get_metadata_store
         from strata.config import StrataConfig
         from strata.server import _eager_warmup
 
-        strata.cache.metadata._metadata_store = None
+        metadata_cache._metadata_store = None
 
         config = StrataConfig(cache_dir=tmp_path / "cache")
         _eager_warmup(config)

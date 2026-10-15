@@ -260,7 +260,7 @@ class TestParquetMetadataCache:
         self, sample_parquet_file, tmp_path, monkeypatch
     ):
         """Batch loads persist from the loaded metadata instead of reopening the file."""
-        import strata.cache.metadata_store as metadata_store
+        from strata.cache import metadata_store as metadata_store
 
         store = metadata_store.MetadataStore(tmp_path / "metadata.sqlite")
         cache = ParquetMetadataCache(max_size=10, store=store)
@@ -312,8 +312,8 @@ class TestParquetMetadataCache:
         """A statistics value pyarrow cannot box skips persistence, not the load."""
         import logging
 
-        import strata.cache.metadata as metadata_cache
-        import strata.cache.metadata_store as metadata_store
+        from strata.cache import metadata as metadata_cache
+        from strata.cache import metadata_store as metadata_store
 
         def unboxable(metadata):
             raise pa.ArrowNotImplementedError("unsupported logical type")
@@ -1218,7 +1218,7 @@ class TestNoArgLookupKeepsTheConfiguredStore:
 
     @pytest.fixture(autouse=True)
     def _isolate_singleton(self, monkeypatch, tmp_path):
-        import strata.cache.metadata as metadata_cache
+        from strata.cache import metadata as metadata_cache
 
         monkeypatch.setattr(metadata_cache, "_metadata_store", None)
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
@@ -1261,14 +1261,14 @@ class TestGlobalStoreDoesNotLeakBetweenTests:
     """
 
     def test_a_installs_a_store(self, tmp_path):
-        import strata.cache.metadata as metadata_cache
+        from strata.cache import metadata as metadata_cache
 
         metadata_cache.get_metadata_store(tmp_path / "leaky")
 
         assert metadata_cache._metadata_store is not None
 
     def test_b_starts_with_no_store(self):
-        import strata.cache.metadata as metadata_cache
+        from strata.cache import metadata as metadata_cache
 
         assert metadata_cache._metadata_store is None
 

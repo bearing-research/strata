@@ -286,7 +286,7 @@ class TestDamagedEntriesSelfHeal:
     ):
         # os.replace is atomic for observers but not durable: without the flush
         # a crash can apply the rename and lose the data blocks behind it.
-        import strata.cache.disk as cache_module
+        from strata.cache import disk as cache_module
 
         synced = []
         real_fsync = cache_module.os.fsync
