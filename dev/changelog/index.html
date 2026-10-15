@@ -3644,6 +3644,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="removed">Removed<a class="headerlink" href="#removed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The <code>dependency_changed</code> WebSocket frame.</strong> It repeated, for package
+  add and remove, what <code>environment_job_finished</code> already sends; a client
+  reads the job's action, package and status from that frame's
+  <code>environment_job</code>. (#1183)</li>
 <li><strong>The Rust extension: Strata is pure Python.</strong> One wheel now serves every
   platform, and building from source needs no Rust toolchain. The extension's
   IPC concat had no caller since 0.3.0, when artifact builds started writing
