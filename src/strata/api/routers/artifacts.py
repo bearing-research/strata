@@ -1183,7 +1183,7 @@ def export_artifact_to_table(
     """
     from strata.api.dependencies import authorize_table_access
     from strata.artifact.table_export import export_artifact
-    from strata.iceberg import TableOfAnotherTenant, table_identity_for
+    from strata.iceberg.catalog import TableOfAnotherTenant, table_identity_for
     from strata.server import _authorize_artifact_read, _ensure_artifact_access, get_state
 
     config = get_state().config

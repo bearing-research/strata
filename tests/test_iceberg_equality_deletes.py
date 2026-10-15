@@ -156,7 +156,7 @@ def test_a_null_key_of_any_type_deletes_the_null_rows(tmp_path, key_type, values
 def test_extension_keys_and_keys_null_on_both_sides_match_null_safely():
     import uuid
 
-    from strata.iceberg_equality import _matching_rows
+    from strata.iceberg.equality import _matching_rows
 
     a, b = uuid.uuid4().bytes, uuid.uuid4().bytes
     data = pa.table(
@@ -303,7 +303,7 @@ def test_keys_of_one_type_in_another_arrow_form_match():
     import uuid
 
     from strata.cache.metadata import EqualityDeleteEntry
-    from strata.iceberg_equality import deleted_mask
+    from strata.iceberg.equality import deleted_mask
 
     a, b = uuid.uuid4().bytes, uuid.uuid4().bytes
     delete = EqualityDeleteEntry(file_path="d", actual_path="d", equality_ids=(1,), record_count=1)
@@ -459,8 +459,8 @@ def test_a_delete_whose_key_range_misses_a_row_group_is_not_applied_to_it(people
 
 def test_parsed_delete_files_are_held_to_the_row_limit(people, monkeypatch):
     """The fetcher keeps delete keys parsed, but no more rows than the limit."""
-    from strata import lake_files
-    from strata.iceberg_equality import EqualityDeleteSets
+    from strata.iceberg import lake_files
+    from strata.iceberg.equality import EqualityDeleteSets
 
     catalog, uri, config = people
     _delete(catalog, id=pa.array([1, 2], pa.int64()))
@@ -557,7 +557,7 @@ def test_a_scan_artifact_counts_the_rows_left_and_a_refusal_says_why(people, tmp
 def test_a_key_the_file_predates_matches_on_its_v3_initial_default():
     """A file predating its key column holds the initial-default, not nulls."""
     from strata.cache.metadata import EqualityDeleteEntry
-    from strata.iceberg_equality import deleted_mask
+    from strata.iceberg.equality import deleted_mask
 
     table = pa.table({"name": ["a", "b"]})
     delete = EqualityDeleteEntry(file_path="d", actual_path="d", equality_ids=(3,), record_count=1)

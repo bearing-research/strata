@@ -12,8 +12,8 @@ import pyarrow as pa
 import pyarrow.compute as _pc
 import pyarrow.parquet as pq
 
-from strata.iceberg_equality import EqualityDeleteSets, deleted_mask
-from strata.iceberg_schema import read_as_snapshot, source_columns
+from strata.iceberg.equality import EqualityDeleteSets, deleted_mask
+from strata.iceberg.schema import read_as_snapshot, source_columns
 from strata.metrics import MetricsCollector
 from strata.types import Task
 
@@ -69,7 +69,7 @@ class PyArrowFetcher:
 
     def _open(self, file_path: str) -> pq.ParquetFile:
         """Return a handle on *file_path* for one read, opened with its cached footer."""
-        from strata.lake_files import open_parquet
+        from strata.iceberg.lake_files import open_parquet
 
         with self._file_cache_lock:
             metadata = self._file_cache.get(file_path)

@@ -36,7 +36,7 @@ def _table_uri_malformed(uri: str) -> bool:
     (``db.sch.events``). The named-catalog split is skipped: a catalog name holds
     no dot, so the check passes or fails the same either way.
     """
-    from strata.iceberg import PyIcebergCatalog
+    from strata.iceberg.catalog import PyIcebergCatalog
 
     _warehouse, table_id = PyIcebergCatalog.parse_table_uri(uri)
     parts = table_id.split(".")

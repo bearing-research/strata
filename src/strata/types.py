@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
     from strata.cache.metadata import EqualityDeleteEntry
-    from strata.iceberg_schema import Column
+    from strata.iceberg.schema import Column
 
 
 # --- Authentication / Authorization Types ---

@@ -616,7 +616,7 @@ def test_a_tenant_scoped_export_refuses_a_table_written_for_another(tmp_path, no
     """Scoped writes replace only their own tenant's table; an unscoped one (personal, admin)
     is not checked.
     """
-    from strata.iceberg import TableOfAnotherTenant
+    from strata.iceberg.catalog import TableOfAnotherTenant
 
     store = notebook_store.artifact_store
     uri = f"{tmp_path / 'wh'}#taxi.features"
@@ -640,7 +640,7 @@ def test_a_tenant_scoped_export_refuses_a_table_written_for_another(tmp_path, no
 def test_a_named_catalogs_table_is_written_in_that_catalog(tmp_path, notebook_store):
     """``lake:taxi.features`` is the catalog's table, not one named that in the default catalog."""
     from strata.artifact.table_export import export_artifact
-    from strata.iceberg import PyIcebergCatalog
+    from strata.iceberg.catalog import PyIcebergCatalog
 
     warehouse = tmp_path / "lake-wh"
     warehouse.mkdir()

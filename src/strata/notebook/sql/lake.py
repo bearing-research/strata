@@ -265,7 +265,7 @@ def _table_location(table_spec: TableSpec, config: Any, env: dict[str, str]) -> 
     Files outside it (a ``write.data.path`` elsewhere) are refused to a
     confined handle, and the query fails naming the file.
     """
-    from strata.iceberg import PyIcebergCatalog
+    from strata.iceberg.catalog import PyIcebergCatalog
 
     try:
         location = PyIcebergCatalog(config, env).load_table(table_spec.uri).location()

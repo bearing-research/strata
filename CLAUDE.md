@@ -154,7 +154,8 @@ gates); per-domain routers in `api/routers/` (`materialize`, `streams`,
 `names`, `builds`, `logs`, `metadata`, `publications`); typed
 mode/auth/tenant gates in `api/dependencies.py`;
 pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
-Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`.
+Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`, `iceberg/` (`catalog`,
+`schema` evolution, position `deletes`, `equality` deletes, `lake_files`).
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
 Artifact / build: `artifact/` (`store`, `blob_store`, `transfer`, `uris`,

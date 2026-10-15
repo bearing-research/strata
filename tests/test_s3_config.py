@@ -174,7 +174,7 @@ class TestS3URIParsing:
     """S3 URI parsing in the iceberg module."""
 
     def test_parse_s3_table_uri(self):
-        from strata.iceberg import PyIcebergCatalog
+        from strata.iceberg.catalog import PyIcebergCatalog
 
         warehouse, table_id = PyIcebergCatalog.parse_table_uri("s3://my-bucket/warehouse#db.table")
         assert warehouse == "s3://my-bucket/warehouse"
@@ -182,7 +182,7 @@ class TestS3URIParsing:
 
     def test_parse_s3_uri_preserves_prefix(self):
         """The S3 prefix is preserved, unlike file://."""
-        from strata.iceberg import PyIcebergCatalog
+        from strata.iceberg.catalog import PyIcebergCatalog
 
         warehouse, table_id = PyIcebergCatalog.parse_table_uri(
             "s3://bucket/path/to/warehouse#namespace.table"
@@ -192,7 +192,7 @@ class TestS3URIParsing:
         assert warehouse == "s3://bucket/path/to/warehouse"
 
     def test_parse_local_uri_strips_file_prefix(self):
-        from strata.iceberg import PyIcebergCatalog
+        from strata.iceberg.catalog import PyIcebergCatalog
 
         warehouse, table_id = PyIcebergCatalog.parse_table_uri("file:///path/to/warehouse#db.table")
         assert warehouse == "/path/to/warehouse"

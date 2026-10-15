@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, NamedTuple
 from pyiceberg.exceptions import NoSuchTableError
 
 from strata.artifact.store import TransformSpec, compute_provenance_hash
-from strata.iceberg import WarehouseNotFound, object_store_unreachable
-from strata.iceberg_schema import UnsupportedTableFormatError
+from strata.iceberg.catalog import WarehouseNotFound, object_store_unreachable
+from strata.iceberg.schema import UnsupportedTableFormatError
 from strata.types import (
     ExplainMaterializeRequest,
     ExplainMaterializeResponse,

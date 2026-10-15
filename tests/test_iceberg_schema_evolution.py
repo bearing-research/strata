@@ -370,7 +370,7 @@ def test_a_sliced_nested_array_is_rebuilt_from_its_own_rows():
     """Row groups arrive sliced (a delete filter, a chunk boundary): offsets count."""
     from pyiceberg.types import IntegerType, ListType, MapType, NestedField, StructType
 
-    from strata.iceberg_schema import _reshape
+    from strata.iceberg.schema import _reshape
 
     file_type = ListType(3, StructType(NestedField(4, "a", IntegerType(), required=False)))
     table_type = ListType(
@@ -414,7 +414,7 @@ def test_a_sliced_nested_array_is_rebuilt_from_its_own_rows():
 def test_a_nested_type_iceberg_cannot_read_is_refused():
     from pyiceberg.types import ListType, NestedField, StructType
 
-    from strata.iceberg_schema import _unreadable
+    from strata.iceberg.schema import _unreadable
 
     struct = StructType(NestedField(4, "a", LongType(), required=False))
     listed = ListType(3, LongType())
@@ -675,7 +675,7 @@ def test_a_column_older_files_predate_reads_its_v3_initial_default(tmp_path):
     from pyiceberg.table import Table
     from pyiceberg.types import NestedField
 
-    from strata.iceberg import PyIcebergCatalog
+    from strata.iceberg.catalog import PyIcebergCatalog
 
     catalog, uri = _catalog(tmp_path)
     schema = pa.schema([("id", pa.int64())])

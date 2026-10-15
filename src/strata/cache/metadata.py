@@ -639,7 +639,7 @@ class ParquetMetadataCache:
 
     def _load_metadata(self, file_path: str) -> ParquetMetadata:
         """Load metadata from a Parquet file."""
-        from strata.lake_files import open_parquet
+        from strata.iceberg.lake_files import open_parquet
 
         pq_file = open_parquet(file_path, self._s3_filesystem)
 

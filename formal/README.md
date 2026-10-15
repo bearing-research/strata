@@ -277,7 +277,7 @@ deny rules. fnmatch lets `*` match any prefix, which covers every alias.
 **Fixed**, with the names kept. Renaming every alias to one name would
 have turned a working `s3:finance.*` deny into a rule that matches nothing,
 so instead a deny is checked against every name the table answers to.
-`shared_catalog_stores` (in `iceberg.py`) lists them: with
+`shared_catalog_stores` (in `iceberg/catalog.py`) lists them: with
 `catalog_properties["uri"]` set, every warehouse URI's `s3:`, `gs:`, `az:`
 and `file:` names, and the bare form's too when `catalog_name` is `strata`.
 Allow rules still match only the name requested, so an alias never grants
