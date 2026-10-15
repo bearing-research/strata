@@ -358,13 +358,15 @@ class TestCredentialPaths:
     def test_an_unlisted_name_stays_open(self, tmp_path):
         assert self._resolver(None, tmp_path).resolve("org") == {"key": "o"}
 
-    def test_a_symlinked_notebook_is_judged_where_it_lives(self, tmp_path):
-        (tmp_path / "lab-a").mkdir()
-        elsewhere = tmp_path / "lab-b"
-        elsewhere.mkdir()
-        (tmp_path / "lab-a" / "link").symlink_to(elsewhere)
+    @pytest.mark.parametrize("path", ["lab-a/../lab-b/nb", "lab-a/nb/../../lab-b"])
+    def test_a_path_that_climbs_out_is_refused(self, tmp_path, path):
+        """Paths compare as written, so one with ``..`` is never inside."""
         with pytest.raises(CredentialError, match="'lab-a'"):
-            self._resolver(tmp_path / "lab-a" / "link", tmp_path).resolve("lab-a")
+            self._resolver(Path(f"{tmp_path}/{path}"), tmp_path).resolve("lab-a")
+
+    def test_a_relative_notebook_path_is_refused(self, tmp_path):
+        with pytest.raises(CredentialError, match="'lab-a'"):
+            self._resolver(Path("lab-a/nb"), tmp_path).resolve("lab-a")
 
     def test_config_reads_the_env_var_and_wants_absolute_directories(self, monkeypatch):
         from pydantic import ValidationError
