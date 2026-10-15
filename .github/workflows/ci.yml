@@ -260,7 +260,7 @@ jobs:
       - name: Run unit tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
-        uses: bearing-research/diffcone/actions/record@3b1a53388f0d31e987aeee73d5b5a586c2bd0125  # v0.3.0
+        uses: bearing-research/diffcone/actions/record@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
         with:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
@@ -271,7 +271,7 @@ jobs:
 
       - name: Run the affected unit tests (diffcone, pull request)
         if: github.event_name == 'pull_request'
-        uses: bearing-research/diffcone/actions/run@3b1a53388f0d31e987aeee73d5b5a586c2bd0125  # v0.3.0
+        uses: bearing-research/diffcone/actions/run@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
         with:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
@@ -335,7 +335,7 @@ jobs:
       - name: Run E2E tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
-        uses: bearing-research/diffcone/actions/record@3b1a53388f0d31e987aeee73d5b5a586c2bd0125  # v0.3.0
+        uses: bearing-research/diffcone/actions/record@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
         with:
           key-prefix: diffcone-e2e
           command: uv run pytest
@@ -346,7 +346,7 @@ jobs:
 
       - name: Run the affected E2E tests (diffcone, pull request)
         if: github.event_name == 'pull_request'
-        uses: bearing-research/diffcone/actions/run@3b1a53388f0d31e987aeee73d5b5a586c2bd0125  # v0.3.0
+        uses: bearing-research/diffcone/actions/run@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
         with:
           key-prefix: diffcone-e2e
           command: uv run pytest
@@ -437,7 +437,7 @@ jobs:
       - name: Run R tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
-        uses: bearing-research/diffcone/actions/record@3b1a53388f0d31e987aeee73d5b5a586c2bd0125  # v0.3.0
+        uses: bearing-research/diffcone/actions/record@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
         with:
           key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
           command: uv run pytest
@@ -449,7 +449,7 @@ jobs:
 
       - name: Run the affected R tests (diffcone, pull request)
         if: github.event_name == 'pull_request'
-        uses: bearing-research/diffcone/actions/run@3b1a53388f0d31e987aeee73d5b5a586c2bd0125  # v0.3.0
+        uses: bearing-research/diffcone/actions/run@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
         with:
           key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
           command: uv run pytest
