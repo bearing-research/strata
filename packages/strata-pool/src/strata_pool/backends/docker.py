@@ -124,7 +124,11 @@ class DockerBackend:
                 extra={"container_id": backend_id, "detail": _message(stopped)},
             )
 
-        removed = await self._api.delete(f"/containers/{backend_id}", params={"force": "true"})
+        # v=true drops the container's anonymous volumes (an image's VOLUME dirs), which
+        # otherwise outlive every worker; named volumes a deployment mounts are kept.
+        removed = await self._api.delete(
+            f"/containers/{backend_id}", params={"force": "true", "v": "true"}
+        )
         if removed.status_code >= 400 and removed.status_code != 404:
             raise DockerError(f"could not remove {backend_id}: {_message(removed)}")
 

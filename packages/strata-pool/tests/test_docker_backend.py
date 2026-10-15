@@ -148,6 +148,16 @@ async def test_stop_removes_the_container_too():
     ]
 
 
+async def test_removal_takes_the_containers_anonymous_volumes_with_it():
+    """A worker image's VOLUME dirs would otherwise be left behind by every stopped worker."""
+    daemon = FakeDaemon()
+    await _backend(daemon).stop("c0ffee")
+
+    (removal,) = [r for r in daemon.requests if r.method == "DELETE"]
+    assert removal.url.params["v"] == "true"
+    assert removal.url.params["force"] == "true"
+
+
 async def test_stopping_a_container_that_is_already_gone_is_not_an_error():
     daemon = FakeDaemon(
         **{
