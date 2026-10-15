@@ -12,7 +12,7 @@ exhaustive commit history.
 - **`inspect_result` and `agent_note` frames have typed payloads.** Both are
   validated against a model at the emit site and appear in the generated
   TypeScript, so the inspect panel reads a typed payload instead of an untyped
-  dict. (#PR)
+  dict. (#1182)
 
 ### Removed
 
