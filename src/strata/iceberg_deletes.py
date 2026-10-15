@@ -20,7 +20,7 @@ from pyiceberg.io import FileIO
 from pyiceberg.table.deletion_vector import deletion_vectors_from_puffin_file
 from pyiceberg.table.puffin import PuffinFile
 
-from strata.metadata_cache import DeleteFileEntry, LRUCache
+from strata.cache.metadata import DeleteFileEntry, LRUCache
 
 # pyarrow.compute registers its kernels at import time, so ty does not know
 # members like ``is_in``/``unique``. Cast through Any.

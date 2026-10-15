@@ -6,7 +6,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from strata.metadata_cache import (
+from strata.cache.metadata import (
     LRUCache,
     ManifestCache,
     ManifestEntry,
@@ -260,7 +260,7 @@ class TestParquetMetadataCache:
         self, sample_parquet_file, tmp_path, monkeypatch
     ):
         """Batch loads persist from the loaded metadata instead of reopening the file."""
-        import strata.metadata_store as metadata_store
+        from strata.cache import metadata_store as metadata_store
 
         store = metadata_store.MetadataStore(tmp_path / "metadata.sqlite")
         cache = ParquetMetadataCache(max_size=10, store=store)
@@ -294,7 +294,7 @@ class TestParquetMetadataCache:
                 raise sqlite3.OperationalError("database is locked")
 
         cache = ParquetMetadataCache(max_size=10, store=_LockedStore())
-        with caplog.at_level(logging.DEBUG, logger="strata.metadata_cache"):
+        with caplog.at_level(logging.DEBUG, logger="strata.cache.metadata"):
             loaded = cache.get_or_load(sample_parquet_file)
             cache.clear()
             many = cache.get_or_load_many([sample_parquet_file])
@@ -312,8 +312,8 @@ class TestParquetMetadataCache:
         """A statistics value pyarrow cannot box skips persistence, not the load."""
         import logging
 
-        import strata.metadata_cache as metadata_cache
-        import strata.metadata_store as metadata_store
+        from strata.cache import metadata as metadata_cache
+        from strata.cache import metadata_store as metadata_store
 
         def unboxable(metadata):
             raise pa.ArrowNotImplementedError("unsupported logical type")
@@ -321,7 +321,7 @@ class TestParquetMetadataCache:
         monkeypatch.setattr(metadata_cache, "_persisted_parquet_meta_from_loaded", unboxable)
         store = metadata_store.MetadataStore(tmp_path / "metadata.sqlite")
         cache = ParquetMetadataCache(max_size=10, store=store)
-        with caplog.at_level(logging.DEBUG, logger="strata.metadata_cache"):
+        with caplog.at_level(logging.DEBUG, logger="strata.cache.metadata"):
             loaded = cache.get_or_load(sample_parquet_file)
             cache.clear()
             many = cache.get_or_load_many([sample_parquet_file])
@@ -375,7 +375,7 @@ class TestManifestCache:
         resolution = ManifestResolution(
             data_files=[ManifestEntry(file_path="/data/f.parquet", actual_path="/abs/f.parquet")]
         )
-        with caplog.at_level(logging.DEBUG, logger="strata.metadata_cache"):
+        with caplog.at_level(logging.DEBUG, logger="strata.cache.metadata"):
             cache.put("default", "strata.ns.table", 123, resolution)
 
         assert cache.get("default", "strata.ns.table", 123) is resolution
@@ -442,7 +442,7 @@ class TestManifestCache:
 
     def test_filtered_queries_fall_back_to_persisted_unfiltered(self, tmp_path):
         """After a restart, filtered lookups use the persisted unfiltered result."""
-        from strata.metadata_store import MetadataStore
+        from strata.cache.metadata_store import MetadataStore
 
         store = MetadataStore(tmp_path / "metadata.sqlite")
         cache = ManifestCache(max_size=10, store=store)
@@ -704,7 +704,7 @@ class TestMetadataStore:
     @pytest.fixture
     def store(self, tmp_path):
         """A MetadataStore on a temp database."""
-        from strata.metadata_store import MetadataStore
+        from strata.cache.metadata_store import MetadataStore
 
         db_path = tmp_path / "test_metadata.sqlite"
         return MetadataStore(db_path)
@@ -729,7 +729,7 @@ class TestMetadataStore:
         """``with conn:`` only commits; a connection left open waits on garbage collection."""
         import sqlite3
 
-        from strata.metadata_store import MetadataStore, extract_parquet_meta
+        from strata.cache.metadata_store import MetadataStore, extract_parquet_meta
 
         opened = []
         real_connect = sqlite3.connect
@@ -781,7 +781,7 @@ class TestMetadataStore:
         assert store.manifest_hits == 1
 
     def test_parquet_meta_put_and_get(self, store, sample_parquet_files):
-        from strata.metadata_store import (
+        from strata.cache.metadata_store import (
             extract_parquet_meta,
         )
 
@@ -799,7 +799,7 @@ class TestMetadataStore:
         """Stale entries are detected."""
         import time
 
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         file_path = tmp_path / "stale_test.parquet"
         table = pa.table({"x": [1, 2, 3]})
@@ -822,7 +822,7 @@ class TestMetadataStore:
         assert store.stale_invalidations == initial_stale + 1
 
     def test_get_parquet_meta_many(self, store, sample_parquet_files):
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         for file_path in sample_parquet_files:
             meta = extract_parquet_meta(file_path)
@@ -836,7 +836,7 @@ class TestMetadataStore:
             assert result[file_path].num_row_groups >= 1
 
     def test_get_parquet_meta_many_partial(self, store, sample_parquet_files):
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         meta = extract_parquet_meta(sample_parquet_files[0])
         store.put_parquet_meta(sample_parquet_files[0], meta)
@@ -851,7 +851,7 @@ class TestMetadataStore:
         assert result == {}
 
     def test_put_parquet_meta_many(self, store, sample_parquet_files):
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         items = [(fp, extract_parquet_meta(fp)) for fp in sample_parquet_files]
 
@@ -865,7 +865,7 @@ class TestMetadataStore:
         store.put_parquet_meta_many([])
 
     def test_stats_includes_counters(self, store, sample_parquet_files):
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         store.get_manifest("default", "ns.table", 1)  # miss
         store.put_manifest("default", "ns.table", 1, [])
@@ -887,7 +887,7 @@ class TestMetadataStore:
 
     def test_cleanup_stale_parquet_meta(self, store, tmp_path):
         """Stale entries are cleaned up."""
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         file_path = tmp_path / "cleanup_test.parquet"
         table = pa.table({"x": [1, 2, 3]})
@@ -906,7 +906,7 @@ class TestMetadataStore:
 
     def test_remote_parquet_meta_is_not_treated_as_stale(self, store, tmp_path):
         """Remote parquet metadata survives lookup and stale cleanup."""
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         source_file = tmp_path / "remote_source.parquet"
         table = pa.table({"x": [1, 2, 3]})
@@ -925,7 +925,7 @@ class TestMetadataStore:
         """Old databases migrate to the current schema."""
         import sqlite3
 
-        from strata.metadata_store import MetadataStore
+        from strata.cache.metadata_store import MetadataStore
 
         db_path = tmp_path / "old_schema.sqlite"
 
@@ -978,13 +978,13 @@ class TestNestedColumnStatsUsePaths:
         return fp
 
     def test_persisted_column_names_are_unique_paths(self, tmp_path):
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
         assert persisted.column_names == ["id", "user.id"]
 
     def test_top_level_stats_survive_a_nested_name_collision(self, tmp_path):
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata_store import extract_parquet_meta
 
         persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
         stats = persisted.row_groups[0].column_stats
@@ -993,8 +993,8 @@ class TestNestedColumnStatsUsePaths:
         assert stats["user.id"]["min"] == 100 and stats["user.id"]["max"] == 300
 
     def test_restored_schema_excludes_nested_from_the_column_map(self, tmp_path):
-        from strata.metadata_cache import ParquetSchema
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata import ParquetSchema
+        from strata.cache.metadata_store import extract_parquet_meta
         from strata.planner import _build_column_index_map
 
         persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
@@ -1004,8 +1004,8 @@ class TestNestedColumnStatsUsePaths:
 
     def test_restored_stats_do_not_prune_a_matching_row_group(self, tmp_path):
         """The end-to-end symptom: `id = 2` must not prune a group holding 1-3."""
-        from strata.metadata_cache import ParquetSchema
-        from strata.metadata_store import extract_parquet_meta
+        from strata.cache.metadata import ParquetSchema
+        from strata.cache.metadata_store import extract_parquet_meta
         from strata.planner import _build_column_index_map
 
         persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
@@ -1014,7 +1014,7 @@ class TestNestedColumnStatsUsePaths:
         assert stats["min"] <= 2 <= stats["max"]
 
     def test_schema_shim_splits_name_from_path(self):
-        from strata.metadata_cache import ParquetSchema
+        from strata.cache.metadata import ParquetSchema
 
         col = ParquetSchema(_column_names=["id", "user.id"]).column(1)
         assert col.path == "user.id"
@@ -1025,8 +1025,8 @@ class TestNestedColumnStatsUsePaths:
 
         Flat-schema rows, with no duplicates, stay valid.
         """
-        from strata.metadata_cache import _persisted_meta_is_legacy_leaf_named
-        from strata.metadata_store import PersistedParquetMeta
+        from strata.cache.metadata import _persisted_meta_is_legacy_leaf_named
+        from strata.cache.metadata_store import PersistedParquetMeta
 
         def _meta(names):
             return PersistedParquetMeta(
@@ -1059,7 +1059,7 @@ class TestPreflightSizeRespectsProjection:
 
     def test_the_estimate_still_covers_the_real_response(self, temp_warehouse, tmp_path):
         """Over-estimating is safe for a guard; under-estimating is not."""
-        from strata.cache import CachedFetcher
+        from strata.cache.disk import CachedFetcher
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
 
@@ -1118,7 +1118,7 @@ class TestRowGroupEstimateFallsBack:
     """
 
     def _rg(self, sizes):
-        from strata.metadata_cache import ColumnChunkMeta, RowGroupMeta
+        from strata.cache.metadata import ColumnChunkMeta, RowGroupMeta
 
         return RowGroupMeta(
             num_rows=10,
@@ -1159,7 +1159,7 @@ class TestPersistedColumnSizes:
     """Sizes ride along in the row-group JSON, so old rows stay readable."""
 
     def test_round_trips(self, tmp_path):
-        from strata.metadata_store import (
+        from strata.cache.metadata_store import (
             MetadataStore,
             PersistedParquetMeta,
             PersistedRowGroupMeta,
@@ -1189,7 +1189,7 @@ class TestPersistedColumnSizes:
     def test_a_row_written_without_sizes_still_loads(self, tmp_path):
         import json
 
-        from strata.metadata_store import MetadataStore
+        from strata.cache.metadata_store import MetadataStore
 
         store = MetadataStore(tmp_path / "meta.sqlite")
         target = tmp_path / "legacy.parquet"
@@ -1218,7 +1218,7 @@ class TestNoArgLookupKeepsTheConfiguredStore:
 
     @pytest.fixture(autouse=True)
     def _isolate_singleton(self, monkeypatch, tmp_path):
-        import strata.metadata_cache as metadata_cache
+        from strata.cache import metadata as metadata_cache
 
         monkeypatch.setattr(metadata_cache, "_metadata_store", None)
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
@@ -1226,7 +1226,7 @@ class TestNoArgLookupKeepsTheConfiguredStore:
         metadata_cache._metadata_store = None
 
     def test_no_arg_returns_the_configured_store(self, tmp_path):
-        from strata.metadata_cache import get_metadata_store
+        from strata.cache.metadata import get_metadata_store
 
         configured = tmp_path / "configured"
         served = get_metadata_store(configured)
@@ -1237,7 +1237,7 @@ class TestNoArgLookupKeepsTheConfiguredStore:
         assert get_metadata_store(configured) is served
 
     def test_no_arg_does_not_create_a_home_cache_dir(self, tmp_path):
-        from strata.metadata_cache import get_metadata_store
+        from strata.cache.metadata import get_metadata_store
 
         get_metadata_store(tmp_path / "configured")
         get_metadata_store()
@@ -1246,7 +1246,7 @@ class TestNoArgLookupKeepsTheConfiguredStore:
 
     def test_no_arg_still_falls_back_when_nothing_is_initialized(self, tmp_path):
         """With no server-initialized store, callers keep the home default."""
-        from strata.metadata_cache import get_metadata_store
+        from strata.cache.metadata import get_metadata_store
 
         store = get_metadata_store()
 
@@ -1261,14 +1261,14 @@ class TestGlobalStoreDoesNotLeakBetweenTests:
     """
 
     def test_a_installs_a_store(self, tmp_path):
-        import strata.metadata_cache as metadata_cache
+        from strata.cache import metadata as metadata_cache
 
         metadata_cache.get_metadata_store(tmp_path / "leaky")
 
         assert metadata_cache._metadata_store is not None
 
     def test_b_starts_with_no_store(self):
-        import strata.metadata_cache as metadata_cache
+        from strata.cache import metadata as metadata_cache
 
         assert metadata_cache._metadata_store is None
 
@@ -1300,8 +1300,8 @@ class TestPersistedStatsKeepTheirTypes:
 
     def _after_restart(self, tmp_path: Path, monkeypatch):
         """The file's metadata as a fresh process gets it: from the store, not the footer."""
-        from strata.metadata_cache import ParquetMetadataCache
-        from strata.metadata_store import MetadataStore
+        from strata.cache.metadata import ParquetMetadataCache
+        from strata.cache.metadata_store import MetadataStore
 
         fp = str(self._file(tmp_path))
         store = MetadataStore(tmp_path / "meta.sqlite")
@@ -1356,8 +1356,8 @@ class TestPersistedStatsKeepTheirTypes:
         ids=["string-stat-from-before", "numbers-only", "typed"],
     )
     def test_a_row_from_before_typed_stats_is_re_read(self, stats, untyped):
-        from strata.metadata_cache import _persisted_stats_are_untyped
-        from strata.metadata_store import PersistedParquetMeta, PersistedRowGroupMeta
+        from strata.cache.metadata import _persisted_stats_are_untyped
+        from strata.cache.metadata_store import PersistedParquetMeta, PersistedRowGroupMeta
 
         persisted = PersistedParquetMeta(
             arrow_schema_bytes=b"",
@@ -1372,8 +1372,8 @@ class TestPersistedStatsKeepTheirTypes:
         """An old row's text timestamp is not served: the footer is read again."""
         from datetime import datetime
 
-        from strata.metadata_cache import ParquetMetadataCache
-        from strata.metadata_store import MetadataStore, extract_parquet_meta
+        from strata.cache.metadata import ParquetMetadataCache
+        from strata.cache.metadata_store import MetadataStore, extract_parquet_meta
 
         fp = str(self._file(tmp_path))
         store = MetadataStore(tmp_path / "meta.sqlite")

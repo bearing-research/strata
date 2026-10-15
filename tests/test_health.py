@@ -186,7 +186,7 @@ class TestRateLimiterCheck:
 
 class TestCacheEvictionsCheck:
     def test_no_evictions(self):
-        from strata.cache_metrics import reset_eviction_tracker
+        from strata.cache.metrics import reset_eviction_tracker
         from strata.health import HealthStatus, check_cache_evictions
 
         reset_eviction_tracker()
@@ -201,7 +201,7 @@ class TestCacheEvictionsCheck:
 class TestRunHealthChecks:
     def test_all_healthy(self, tmp_path):
         """May report degraded when the disk is full."""
-        from strata.cache_metrics import reset_eviction_tracker
+        from strata.cache.metrics import reset_eviction_tracker
         from strata.health import HealthStatus, run_health_checks
         from strata.pool_metrics import get_pool_tracker, reset_metrics
         from strata.rate_limiter import reset_rate_limiter
@@ -244,7 +244,7 @@ class TestHealthEndpointIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_metrics import reset_eviction_tracker
+        from strata.cache.metrics import reset_eviction_tracker
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter

@@ -7,10 +7,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from strata.cache.metadata import ParquetMetadataCache, reset_caches
+from strata.cache.metadata_store import MetadataStore, extract_parquet_meta
 from strata.config import StrataConfig
 from strata.fetcher import PyArrowFetcher, create_fetcher
-from strata.metadata_cache import ParquetMetadataCache, reset_caches
-from strata.metadata_store import MetadataStore, extract_parquet_meta
 from strata.planner import _join_s3_path, _normalize_s3_path
 from strata.types import Task
 

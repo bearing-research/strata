@@ -19,7 +19,7 @@ from pyiceberg.types import (
 from strata_client.client import StrataClient
 from strata_client.integration.duckdb import StrataScanner
 
-from strata.cache import CachedFetcher, DiskCache
+from strata.cache.disk import CachedFetcher, DiskCache
 from strata.config import StrataConfig
 from strata.planner import ReadPlanner
 from strata.types import CacheKey, Filter, FilterOp, TableIdentity
@@ -281,7 +281,7 @@ class TestEndToEnd:
         import socket
 
         from strata.artifact_store import reset_artifact_store
-        from strata.metadata_cache import reset_caches
+        from strata.cache.metadata import reset_caches
 
         sock = socket.socket()
         sock.bind(("127.0.0.1", 0))
@@ -738,12 +738,12 @@ class TestEagerWarmup:
         assert "sqlite_entries" in warmup_times
 
     def test_warmup_initializes_metadata_store(self, tmp_path):
-        import strata.metadata_cache
+        from strata.cache import metadata as metadata_cache
+        from strata.cache.metadata import get_metadata_store
         from strata.config import StrataConfig
-        from strata.metadata_cache import get_metadata_store
         from strata.server import _eager_warmup
 
-        strata.metadata_cache._metadata_store = None
+        metadata_cache._metadata_store = None
 
         config = StrataConfig(cache_dir=tmp_path / "cache")
         _eager_warmup(config)

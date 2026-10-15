@@ -187,7 +187,7 @@ async def test_admin_worker_route_still_maps_a_missing_worker_to_404(workers_app
 async def test_metadata_store_call_does_not_block_the_loop(
     serve, monkeypatch, gated, method, path, check
 ):
-    from strata.metadata_cache import get_metadata_store
+    from strata.cache.metadata import get_metadata_store
     from strata.server import get_state
 
     app = serve(deployment_mode="personal")
@@ -202,7 +202,7 @@ async def test_metadata_store_call_does_not_block_the_loop(
 
 async def test_a_metadata_store_that_never_answers_is_not_ready(serve, monkeypatch):
     from strata.api.routers import metrics_health
-    from strata.metadata_cache import get_metadata_store
+    from strata.cache.metadata import get_metadata_store
     from strata.server import get_state
 
     serve(deployment_mode="personal")

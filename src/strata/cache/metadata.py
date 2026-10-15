@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import pyarrow.fs
 
-    from strata.metadata_store import MetadataStore, PersistedParquetMeta
+    from strata.cache.metadata_store import MetadataStore, PersistedParquetMeta
 
 
 class LRUCache[K: Hashable, V]:
@@ -296,7 +296,7 @@ _UNPERSISTABLE = (pa.ArrowException, ValueError, OverflowError)
 
 def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "PersistedParquetMeta":
     """Convert loaded Parquet metadata to the persisted representation."""
-    from strata.metadata_store import (
+    from strata.cache.metadata_store import (
         PersistedParquetMeta,
         PersistedRowGroupMeta,
         persisted_column_stats,
@@ -510,7 +510,7 @@ class ParquetMetadataCache:
 
     def _convert_persisted(self, persisted: "PersistedParquetMeta") -> ParquetMetadata | None:
         """Convert persisted metadata to ParquetMetadata."""
-        from strata.metadata_store import deserialize_arrow_schema
+        from strata.cache.metadata_store import deserialize_arrow_schema
 
         if _persisted_meta_is_legacy_leaf_named(persisted) or _persisted_stats_are_untyped(
             persisted
@@ -563,7 +563,7 @@ class ParquetMetadataCache:
 
     def _load_from_store(self, file_path: str) -> ParquetMetadata | None:
         """Load metadata from persistent store without reading the file."""
-        from strata.metadata_store import deserialize_arrow_schema
+        from strata.cache.metadata_store import deserialize_arrow_schema
 
         if self._store is None:
             return None
@@ -797,7 +797,7 @@ def get_metadata_store(cache_dir: Path | None = None) -> "MetadataStore":
     getters call this before taking the lock, so this cannot deadlock.
     """
     global _metadata_store
-    from strata.metadata_store import MetadataStore
+    from strata.cache.metadata_store import MetadataStore
 
     with _cache_lock:
         if cache_dir is None:

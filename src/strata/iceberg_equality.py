@@ -30,8 +30,8 @@ from pyiceberg.table.metadata import INITIAL_SEQUENCE_NUMBER
 from pyiceberg.typedef import Record
 
 from strata import lake_files
+from strata.cache.metadata import EqualityDeleteEntry
 from strata.iceberg_schema import absent_column
-from strata.metadata_cache import EqualityDeleteEntry
 
 # pyarrow.compute registers its kernels at import time, so ty does not know
 # members like ``is_in``/``or_``. Cast through Any.

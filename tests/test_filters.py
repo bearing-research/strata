@@ -501,7 +501,7 @@ class TestScanProjectionContract:
         """
         import pyarrow as pa
 
-        from strata.cache import CachedFetcher
+        from strata.cache.disk import CachedFetcher
 
         batch = pa.RecordBatch.from_pydict({"id": [1, 2], "value": [9.0, 8.0]})
 

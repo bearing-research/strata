@@ -19,7 +19,7 @@ from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 from strata_client.client import StrataClient
 
-from strata.cache import CACHE_FILE_EXTENSION, CACHE_VERSION, CachedFetcher, DiskCache
+from strata.cache.disk import CACHE_FILE_EXTENSION, CACHE_VERSION, CachedFetcher, DiskCache
 from strata.config import StrataConfig
 from strata.planner import ReadPlanner
 
@@ -165,7 +165,7 @@ class TestRestartPersistence:
 
     def test_metadata_cache_persists_across_planner_instances(self, temp_warehouse, tmp_path):
         """The SQLite metadata cache survives a planner restart."""
-        from strata.metadata_cache import get_metadata_store, reset_caches
+        from strata.cache.metadata import get_metadata_store, reset_caches
 
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
@@ -232,7 +232,7 @@ class TestCorruptedCacheSelfHealing:
             )
 
     def test_corrupted_metadata_sidecar_handled_gracefully(self, temp_warehouse, tmp_path):
-        from strata.cache import CACHE_META_EXTENSION
+        from strata.cache.disk import CACHE_META_EXTENSION
 
         cache_dir = tmp_path / "cache"
         table_uri = temp_warehouse["table_uri"]
@@ -351,7 +351,7 @@ class TestConcurrentRequestsNoThunderingHerd:
 class TestStaleMetadataInvalidation:
     def test_modified_file_invalidates_parquet_metadata(self, temp_warehouse, tmp_path):
         """Parquet metadata is invalidated when the underlying file changes."""
-        from strata.metadata_cache import get_metadata_store, reset_caches
+        from strata.cache.metadata import get_metadata_store, reset_caches
 
         cache_dir = tmp_path / "cache"
         table = temp_warehouse["table"]

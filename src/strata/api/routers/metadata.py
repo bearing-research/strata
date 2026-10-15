@@ -16,7 +16,7 @@ router = APIRouter(tags=["metadata"])
 @router.get("/v1/metadata/stats")
 def get_metadata_stats_v1():
     """Get hit/miss counters and entry counts for the SQLite metadata store and LRU caches."""
-    from strata.metadata_cache import get_metadata_store
+    from strata.cache.metadata import get_metadata_store
     from strata.server import get_state
 
     state = get_state()
@@ -51,7 +51,7 @@ def cleanup_metadata_v1():
     Runs on server startup too. Returns the number of entries removed. Requires
     ``admin:cache``: it rewrites the shared metadata store.
     """
-    from strata.metadata_cache import get_metadata_store
+    from strata.cache.metadata import get_metadata_store
 
     try:
         store = get_metadata_store()

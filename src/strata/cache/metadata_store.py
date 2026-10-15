@@ -542,6 +542,6 @@ def extract_parquet_meta(
 
 def reset_metadata_store() -> None:
     """Reset the global metadata store (for tests); delegates to ``metadata_cache.reset_caches``."""
-    from strata.metadata_cache import reset_caches
+    from strata.cache.metadata import reset_caches
 
     reset_caches()

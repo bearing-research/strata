@@ -14,11 +14,11 @@ import pyarrow.parquet as pq
 import pytest
 from pyiceberg.manifest import DataFile, DataFileContent, FileFormat
 
-from strata.cache import CachedFetcher
+from strata.cache.disk import CachedFetcher
+from strata.cache.metadata import DeleteFileEntry, ManifestCache
+from strata.cache.metadata_store import MetadataStore
 from strata.config import StrataConfig
 from strata.iceberg_deletes import DeletedRows, _read, in_row_group
-from strata.metadata_cache import DeleteFileEntry, ManifestCache
-from strata.metadata_store import MetadataStore
 from strata.planner import ReadPlanner, UnsupportedTableFormatError
 from strata.types import Filter, FilterOp
 

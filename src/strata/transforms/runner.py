@@ -37,7 +37,7 @@ from strata.artifact_store import BuildLeaseLost
 
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore
-    from strata.cache import CachedFetcher
+    from strata.cache.disk import CachedFetcher
     from strata.config import StrataConfig
     from strata.planner import ReadPlanner
     from strata.transforms.build_store import BuildState, BuildStore
@@ -728,7 +728,7 @@ class BuildRunner:
         empty: bool = False,
     ) -> None:
         """Synchronous helper to scan a table and write to file."""
-        from strata.cache import CachedFetcher
+        from strata.cache.disk import CachedFetcher
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
 

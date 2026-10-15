@@ -14,7 +14,7 @@ import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Response
 
 from strata.api.dependencies import require_scope
-from strata.cache_metrics import get_eviction_tracker
+from strata.cache.metrics import get_eviction_tracker
 from strata.gc_tracker import get_gc_stats
 from strata.health import HealthStatus, run_health_checks
 from strata.logging import get_logger
@@ -88,7 +88,7 @@ async def health_ready():
     import json
 
     from strata.artifact_store import get_artifact_store
-    from strata.metadata_cache import get_metadata_store
+    from strata.cache.metadata import get_metadata_store
     from strata.server import _check_readiness, _get_active_scan_count, _get_qos_metrics, get_state
 
     try:
@@ -267,7 +267,7 @@ async def metrics_prometheus():
     """Metrics in Prometheus text exposition format for scraping."""
     import asyncio
 
-    from strata.metadata_cache import get_metadata_store
+    from strata.cache.metadata import get_metadata_store
     from strata.server import (
         _get_cache_entry_count,
         _get_cache_size_bytes,

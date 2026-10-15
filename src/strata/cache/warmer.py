@@ -11,7 +11,7 @@ from strata.logging import get_logger
 from strata.types import TableIdentity, Task, WarmAsyncRequest, WarmJobProgress, WarmJobStatus
 
 if TYPE_CHECKING:
-    from strata.cache import CachedFetcher
+    from strata.cache.disk import CachedFetcher
     from strata.metrics import MetricsCollector
     from strata.planner import ReadPlanner
 

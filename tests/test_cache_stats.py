@@ -5,7 +5,7 @@ import pytest
 
 class TestWindowStats:
     def test_hit_rate_calculation(self):
-        from strata.cache_stats import WindowStats
+        from strata.cache.stats import WindowStats
 
         stats = WindowStats(
             window_seconds=60,
@@ -22,7 +22,7 @@ class TestWindowStats:
 
     def test_zero_division(self):
         """Hit rate with no accesses."""
-        from strata.cache_stats import WindowStats
+        from strata.cache.stats import WindowStats
 
         stats = WindowStats(
             window_seconds=60,
@@ -38,7 +38,7 @@ class TestWindowStats:
         assert stats.miss_rate == 0.0
 
     def test_to_dict(self):
-        from strata.cache_stats import WindowStats
+        from strata.cache.stats import WindowStats
 
         stats = WindowStats(
             window_seconds=60,
@@ -60,7 +60,7 @@ class TestWindowStats:
 
 class TestCacheStatsHistogram:
     def test_initial_state(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
         stats = histogram.get_lifetime_stats()
@@ -70,7 +70,7 @@ class TestCacheStatsHistogram:
         assert stats["total"] == 0
 
     def test_record_hit(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
         histogram.record_hit(bytes_accessed=1024, table_id="db.table1")
@@ -81,7 +81,7 @@ class TestCacheStatsHistogram:
         assert stats["bytes_from_cache"] == 1024
 
     def test_record_miss(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
         histogram.record_miss(bytes_accessed=2048, table_id="db.table1")
@@ -92,7 +92,7 @@ class TestCacheStatsHistogram:
         assert stats["bytes_from_storage"] == 2048
 
     def test_hit_rate_calculation(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
 
@@ -107,7 +107,7 @@ class TestCacheStatsHistogram:
         assert stats["hit_rate"] == 0.75
 
     def test_window_stats(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
 
@@ -123,7 +123,7 @@ class TestCacheStatsHistogram:
         assert window_stats.bytes_from_storage == 200
 
     def test_all_window_stats(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram(windows=[60, 300, 3600])
         histogram.record_hit(bytes_accessed=100)
@@ -137,7 +137,7 @@ class TestCacheStatsHistogram:
 
     def test_table_stats(self):
         """Per-table statistics."""
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
 
@@ -156,7 +156,7 @@ class TestCacheStatsHistogram:
         assert table_stats[1]["total"] == 1
 
     def test_summary(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
         histogram.record_hit(bytes_accessed=100, table_id="db.table1")
@@ -171,7 +171,7 @@ class TestCacheStatsHistogram:
         assert summary["lifetime"]["misses"] == 1
 
     def test_reset(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
         histogram.record_hit(bytes_accessed=100, table_id="db.table1")
@@ -186,7 +186,7 @@ class TestCacheStatsHistogram:
 
     def test_lifetime_counters_are_not_bounded_by_the_windows(self):
         """Retention bounds the windows, never the lifetime totals."""
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram(windows=[2])
 
@@ -198,7 +198,7 @@ class TestCacheStatsHistogram:
 
 class TestGlobalHistogram:
     def test_get_and_reset(self):
-        from strata.cache_stats import get_cache_histogram, reset_cache_histogram
+        from strata.cache.stats import get_cache_histogram, reset_cache_histogram
 
         reset_cache_histogram()
         hist1 = get_cache_histogram()
@@ -219,8 +219,8 @@ class TestCacheHistogramIntegration:
         from httpx import ASGITransport, AsyncClient
 
         import strata.server as server_module
-        from strata.cache_metrics import reset_eviction_tracker
-        from strata.cache_stats import reset_cache_histogram
+        from strata.cache.metrics import reset_eviction_tracker
+        from strata.cache.stats import reset_cache_histogram
         from strata.config import StrataConfig
         from strata.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
@@ -266,7 +266,7 @@ class TestWindowsCoverTheirFullDuration:
     """
 
     def test_a_window_counts_more_than_the_old_event_cap(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
 
@@ -296,7 +296,7 @@ class TestWindowsCoverTheirFullDuration:
         """
         import time
 
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram(windows=[60])
         histogram.record_hit(bytes_accessed=100)
@@ -316,7 +316,7 @@ class TestWindowsCoverTheirFullDuration:
         assert window.bytes_from_cache == 0
 
     def test_covered_seconds_reports_a_clamped_window(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram(windows=[60])
 
@@ -326,7 +326,7 @@ class TestWindowsCoverTheirFullDuration:
         assert histogram.get_window_stats(3600).to_dict()["covered_seconds"] == 60
 
     def test_configured_windows_report_their_own_duration(self):
-        from strata.cache_stats import CacheStatsHistogram
+        from strata.cache.stats import CacheStatsHistogram
 
         histogram = CacheStatsHistogram()
         histogram.record_hit(bytes_accessed=100)

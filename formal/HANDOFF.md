@@ -167,7 +167,7 @@ suspicion from reading code that hasn't been confirmed.
    real Iceberg tables with `temp_warehouse`-style fixtures and check that
    the scan with filters equals the scan without filters, filtered in
    Python.
-6. **Disk cache eviction vs concurrent readers (lead).** `cache.py`
+6. **Disk cache eviction vs concurrent readers (lead).** `cache/disk.py`
    evicts to a size limit while readers read cache files whole. A small
    TLA+ model of write (temp file + rename), evict (unlink) and read
    (open, then read) would settle whether a

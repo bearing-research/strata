@@ -20,11 +20,11 @@ from pyiceberg.transforms import IdentityTransform
 from pyiceberg.typedef import Record
 from pyiceberg.types import LongType, NestedField, StringType
 
-from strata.cache import CachedFetcher
+from strata.cache.disk import CachedFetcher
+from strata.cache.metadata import ManifestCache
+from strata.cache.metadata_store import MetadataStore
 from strata.config import StrataConfig
 from strata.fast_io import IncrementalIpcMerger
-from strata.metadata_cache import ManifestCache
-from strata.metadata_store import MetadataStore
 from strata.planner import ReadPlanner, UnsupportedTableFormatError
 from strata.types import Filter, FilterOp
 from tests.iceberg_fixtures import commit_files, data_file, equality_delete
@@ -302,8 +302,8 @@ def test_keys_of_one_type_in_another_arrow_form_match():
     """A uuid as Arrow uuid vs 16-byte storage, or a dictionary-encoded string, still matches."""
     import uuid
 
+    from strata.cache.metadata import EqualityDeleteEntry
     from strata.iceberg_equality import deleted_mask
-    from strata.metadata_cache import EqualityDeleteEntry
 
     a, b = uuid.uuid4().bytes, uuid.uuid4().bytes
     delete = EqualityDeleteEntry(file_path="d", actual_path="d", equality_ids=(1,), record_count=1)
@@ -556,8 +556,8 @@ def test_a_scan_artifact_counts_the_rows_left_and_a_refusal_says_why(people, tmp
 
 def test_a_key_the_file_predates_matches_on_its_v3_initial_default():
     """A file predating its key column holds the initial-default, not nulls."""
+    from strata.cache.metadata import EqualityDeleteEntry
     from strata.iceberg_equality import deleted_mask
-    from strata.metadata_cache import EqualityDeleteEntry
 
     table = pa.table({"name": ["a", "b"]})
     delete = EqualityDeleteEntry(file_path="d", actual_path="d", equality_ids=(3,), record_count=1)
