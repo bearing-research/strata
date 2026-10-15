@@ -3637,6 +3637,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Observability code lives in the <code>strata.observability</code> package.</strong>
+  <code>strata.tracing</code>, <code>logging</code>, <code>log_buffer</code>, <code>health</code>, <code>metrics</code>,
+  <code>pool_metrics</code>, <code>gc_tracker</code>, <code>memory_profiler</code> and <code>slow_ops</code> are now
+  <code>strata.observability.&lt;name&gt;</code>; the old module paths are gone. Loggers named
+  after their module move with it (<code>strata.health</code> is now
+  <code>strata.observability.health</code>, still under the <code>strata</code> logger); the
+  <code>strata.slow_ops</code> logger keeps its name. (#1192)</li>
 <li><strong>Auth and tenancy code lives in the <code>strata.auth</code> and <code>strata.tenancy</code>
   packages.</strong> <code>strata.auth</code> (now <code>strata.auth.principal</code>), <code>strata.api_keys</code>
   (<code>strata.auth.api_keys</code>), <code>strata.api_key_cli</code> (<code>strata.auth.api_key_cli</code>),
