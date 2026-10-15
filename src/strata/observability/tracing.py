@@ -67,7 +67,7 @@ def init_tracing(
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        from strata.health import _package_version
+        from strata.observability.health import _package_version
 
         resource = Resource.create(
             {

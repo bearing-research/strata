@@ -8,7 +8,7 @@ import pytest
 
 class TestHealthStatus:
     def test_health_status_values(self):
-        from strata.health import HealthStatus
+        from strata.observability.health import HealthStatus
 
         assert HealthStatus.HEALTHY.value == "healthy"
         assert HealthStatus.DEGRADED.value == "degraded"
@@ -17,7 +17,7 @@ class TestHealthStatus:
 
 class TestDependencyCheck:
     def test_to_dict_basic(self):
-        from strata.health import DependencyCheck, HealthStatus
+        from strata.observability.health import DependencyCheck, HealthStatus
 
         check = DependencyCheck(
             name="test_check",
@@ -33,7 +33,7 @@ class TestDependencyCheck:
         assert "details" not in d
 
     def test_to_dict_with_message_and_details(self):
-        from strata.health import DependencyCheck, HealthStatus
+        from strata.observability.health import DependencyCheck, HealthStatus
 
         check = DependencyCheck(
             name="test_check",
@@ -50,7 +50,7 @@ class TestDependencyCheck:
 
 class TestHealthReport:
     def test_to_dict(self):
-        from strata.health import DependencyCheck, HealthReport, HealthStatus
+        from strata.observability.health import DependencyCheck, HealthReport, HealthStatus
 
         checks = [
             DependencyCheck("check1", HealthStatus.HEALTHY, 1.0),
@@ -77,7 +77,7 @@ class TestHealthReport:
 class TestDiskCacheCheck:
     def test_healthy_cache(self, tmp_path):
         """May report degraded when the disk is full."""
-        from strata.health import HealthStatus, check_disk_cache
+        from strata.observability.health import HealthStatus, check_disk_cache
 
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
@@ -92,7 +92,7 @@ class TestDiskCacheCheck:
         assert "available_bytes" in result.details
 
     def test_missing_cache_dir(self, tmp_path):
-        from strata.health import HealthStatus, check_disk_cache
+        from strata.observability.health import HealthStatus, check_disk_cache
 
         cache_dir = tmp_path / "nonexistent"
 
@@ -105,7 +105,7 @@ class TestDiskCacheCheck:
 
 class TestMetadataStoreCheck:
     def test_healthy_store(self, tmp_path):
-        from strata.health import HealthStatus, check_metadata_store
+        from strata.observability.health import HealthStatus, check_metadata_store
 
         cache_dir = tmp_path / "cache"
         cache_dir.mkdir()
@@ -119,7 +119,7 @@ class TestMetadataStoreCheck:
 
 class TestArrowMemoryCheck:
     def test_arrow_memory_check(self):
-        from strata.health import HealthStatus, check_arrow_memory
+        from strata.observability.health import HealthStatus, check_arrow_memory
 
         result = check_arrow_memory()
 
@@ -131,8 +131,8 @@ class TestArrowMemoryCheck:
 
 class TestThreadPoolsCheck:
     def test_thread_pools_check(self):
-        from strata.health import HealthStatus, check_thread_pools
-        from strata.pool_metrics import get_pool_tracker, reset_metrics
+        from strata.observability.health import HealthStatus, check_thread_pools
+        from strata.observability.pool_metrics import get_pool_tracker, reset_metrics
 
         reset_metrics()
         tracker = get_pool_tracker()
@@ -157,7 +157,7 @@ class TestThreadPoolsCheck:
 
 class TestRateLimiterCheck:
     def test_rate_limiter_not_initialized(self):
-        from strata.health import HealthStatus, check_rate_limiter
+        from strata.observability.health import HealthStatus, check_rate_limiter
         from strata.rate_limiter import reset_rate_limiter
 
         reset_rate_limiter()
@@ -169,7 +169,7 @@ class TestRateLimiterCheck:
         assert result.details.get("enabled") is False
 
     def test_rate_limiter_healthy(self):
-        from strata.health import HealthStatus, check_rate_limiter
+        from strata.observability.health import HealthStatus, check_rate_limiter
         from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
 
         reset_rate_limiter()
@@ -187,7 +187,7 @@ class TestRateLimiterCheck:
 class TestCacheEvictionsCheck:
     def test_no_evictions(self):
         from strata.cache.metrics import reset_eviction_tracker
-        from strata.health import HealthStatus, check_cache_evictions
+        from strata.observability.health import HealthStatus, check_cache_evictions
 
         reset_eviction_tracker()
 
@@ -202,8 +202,8 @@ class TestRunHealthChecks:
     def test_all_healthy(self, tmp_path):
         """May report degraded when the disk is full."""
         from strata.cache.metrics import reset_eviction_tracker
-        from strata.health import HealthStatus, run_health_checks
-        from strata.pool_metrics import get_pool_tracker, reset_metrics
+        from strata.observability.health import HealthStatus, run_health_checks
+        from strata.observability.pool_metrics import get_pool_tracker, reset_metrics
         from strata.rate_limiter import reset_rate_limiter
 
         reset_metrics()
@@ -246,7 +246,7 @@ class TestHealthEndpointIntegration:
         import strata.server as server_module
         from strata.cache.metrics import reset_eviction_tracker
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
         from strata.server import ServerState, app
 
@@ -292,7 +292,7 @@ class TestHealthEndpointIntegration:
 
         import strata.server as server_module
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
         from strata.server import ServerState, app
 
@@ -404,7 +404,7 @@ class TestReportedVersionIsTheInstalledOne:
         import time
         from importlib.metadata import version as metadata_version
 
-        from strata.health import HealthReport, HealthStatus
+        from strata.observability.health import HealthReport, HealthStatus
 
         report = HealthReport(status=HealthStatus.HEALTHY, checks=[], timestamp=time.time())
         assert report.version == metadata_version("strata-notebook")
@@ -412,7 +412,7 @@ class TestReportedVersionIsTheInstalledOne:
     def test_version_is_not_the_stale_hardcoded_string(self):
         import time
 
-        from strata.health import HealthReport, HealthStatus
+        from strata.observability.health import HealthReport, HealthStatus
 
         report = HealthReport(status=HealthStatus.HEALTHY, checks=[], timestamp=time.time())
         assert report.version != "0.2.0"
@@ -421,7 +421,7 @@ class TestReportedVersionIsTheInstalledOne:
 
 def test_the_app_and_its_traces_report_the_installed_version():
     """The OpenAPI document and the trace resource report the installed version too."""
-    from strata.health import _package_version
+    from strata.observability.health import _package_version
     from strata.server import app
 
     assert app.version == _package_version()

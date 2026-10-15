@@ -54,17 +54,18 @@ from strata.auth.principal import (
 from strata.cache.disk import CachedFetcher
 from strata.cache.warmer import CacheWarmer
 from strata.config import StrataConfig, describe_config_error
-from strata.gc_tracker import install_gc_tracker
-from strata.health import _package_version
 from strata.json_types import JsonValue
-from strata.logging import (
+from strata.observability.gc_tracker import install_gc_tracker
+from strata.observability.health import _package_version
+from strata.observability.logging import (
     configure_logging,
     get_logger,
     request_context_middleware,
 )
-from strata.metrics import MetricsCollector
+from strata.observability.metrics import MetricsCollector
+from strata.observability.pool_metrics import get_connection_metrics, get_pool_tracker
+from strata.observability.tracing import init_tracing, instrument_fastapi
 from strata.planner import ReadPlanner
-from strata.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import (
     RateLimitConfig,
     get_rate_limiter,
@@ -85,7 +86,6 @@ from strata.tenancy.tenant import (
     set_tenant_id,
     validate_tenant_id,
 )
-from strata.tracing import init_tracing, instrument_fastapi
 from strata.types import (
     BuildStatusResponse,
 )
@@ -790,7 +790,7 @@ async def lifespan(app: FastAPI):
     configure_logging()
 
     # Backs GET /v1/logs; installed server-side only so CLI and harness skip it.
-    from strata.log_buffer import install_ring_buffer
+    from strata.observability.log_buffer import install_ring_buffer
 
     install_ring_buffer()
 

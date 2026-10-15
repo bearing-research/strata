@@ -15,7 +15,7 @@ import pyarrow as pa
 
 from strata.artifact.store import ArtifactStore, ArtifactVersion
 from strata.iceberg.catalog import IcebergWriter, PyIcebergCatalog, TableWrite
-from strata.logging import get_logger
+from strata.observability.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -96,7 +96,7 @@ def BuildContext(
 def get_trace_context() -> dict[str, str]:
     """Return ``trace_id`` and ``span_id`` of the active span, or ``{}`` without tracing."""
     try:
-        from strata.tracing import is_tracing_enabled
+        from strata.observability.tracing import is_tracing_enabled
 
         if not is_tracing_enabled():
             return {}

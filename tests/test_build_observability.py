@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from strata.logging import BuildContext, get_request_context
+from strata.observability.logging import BuildContext, get_request_context
 from strata.transforms.build_metrics import (
     BuildMetricsCollector,
     get_build_metrics,

@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 
 from strata.iceberg.equality import EqualityDeleteSets, deleted_mask
 from strata.iceberg.schema import read_as_snapshot, source_columns
-from strata.metrics import MetricsCollector
+from strata.observability.metrics import MetricsCollector
 from strata.types import Task
 
 if TYPE_CHECKING:

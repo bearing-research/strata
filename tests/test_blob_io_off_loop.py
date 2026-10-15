@@ -698,7 +698,7 @@ async def test_an_offload_borrows_a_server_thread_token_and_keeps_the_request_co
 ):
     """Route offloads count against anyio's default limiter, the one the Postgres pool is
     sized to, and the thread still sees the request's context (its log fields)."""
-    from strata.logging import get_request_context
+    from strata.observability.logging import get_request_context
 
     store = served.store
     version = store.create_artifact(artifact_id="uploaded", provenance_hash="d" * 64)

@@ -222,7 +222,7 @@ class TestCacheHistogramIntegration:
         from strata.cache.metrics import reset_eviction_tracker
         from strata.cache.stats import reset_cache_histogram
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.rate_limiter import reset_rate_limiter
         from strata.server import ServerState, app
 

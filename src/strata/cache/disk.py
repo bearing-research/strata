@@ -19,8 +19,8 @@ from strata.cache.stats import get_cache_histogram
 from strata.config import StrataConfig
 from strata.fetcher import Fetcher, create_fetcher
 from strata.file_modes import private_dir
-from strata.metrics import MetricsCollector
-from strata.tracing import trace_span
+from strata.observability.metrics import MetricsCollector
+from strata.observability.tracing import trace_span
 from strata.types import CacheGranularity, CacheKey, ReadPlan, Task
 
 # Arrow IPC stream format, served zero-copy.

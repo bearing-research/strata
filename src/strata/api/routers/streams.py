@@ -20,8 +20,8 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream
-from strata.logging import get_logger
-from strata.pool_metrics import get_pool_tracker
+from strata.observability.logging import get_logger
+from strata.observability.pool_metrics import get_pool_tracker
 from strata.streaming import QoSRejected
 from strata.streaming.scan_builds import record_scan_complete
 

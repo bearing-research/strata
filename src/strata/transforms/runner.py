@@ -317,7 +317,7 @@ class BuildRunner:
         """
         import time as time_mod
 
-        from strata.logging import BuildContext
+        from strata.observability.logging import BuildContext
         from strata.transforms.build_metrics import get_build_metrics
 
         build_id = build.build_id

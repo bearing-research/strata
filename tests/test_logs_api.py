@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from strata.config import StrataConfig
-from strata.log_buffer import RingBufferLogHandler
+from strata.observability.log_buffer import RingBufferLogHandler
 from tests.conftest import find_free_port, run_server
 
 
@@ -120,7 +120,7 @@ class TestLogsEndpoints:
 @pytest.fixture
 def ring_with_entry(monkeypatch):
     """A fresh server-wide ring buffer holding one known record."""
-    import strata.log_buffer as log_buffer
+    from strata.observability import log_buffer
 
     buf = RingBufferLogHandler(capacity=100)
     _emit(buf, logging.INFO, "tenant-a secret path /data/a")

@@ -1172,7 +1172,7 @@ class TestNonBlockingLogging:
         import io
         import queue as queue_module
 
-        from strata.metrics import MetricsCollector
+        from strata.observability.metrics import MetricsCollector
 
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True)
@@ -1200,9 +1200,9 @@ class TestNonBlockingLogging:
         import io
         import json
 
-        from strata.metrics import MetricsCollector
+        from strata.observability.metrics import MetricsCollector
 
-        monkeypatch.setattr("strata.logging._log_format", "text")
+        monkeypatch.setattr("strata.observability.logging._log_format", "text")
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True)
         try:
@@ -1221,7 +1221,7 @@ class TestNonBlockingLogging:
         """Logs are dropped, not blocked, when the queue is full."""
         import io
 
-        from strata.metrics import MetricsCollector
+        from strata.observability.metrics import MetricsCollector
 
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True, log_queue_size=2)
@@ -1247,7 +1247,7 @@ class TestNonBlockingLogging:
         """get_aggregate_stats() reads in-memory counters, with no I/O to block on."""
         import io
 
-        from strata.metrics import MetricsCollector
+        from strata.observability.metrics import MetricsCollector
 
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True)
@@ -1270,7 +1270,7 @@ class TestNonBlockingLogging:
     def test_dropped_logs_counter_in_stats(self):
         import io
 
-        from strata.metrics import MetricsCollector
+        from strata.observability.metrics import MetricsCollector
 
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True, log_queue_size=1)
@@ -1291,7 +1291,7 @@ class TestNonBlockingLogging:
     def test_logging_thread_shuts_down_gracefully(self):
         import io
 
-        from strata.metrics import MetricsCollector
+        from strata.observability.metrics import MetricsCollector
 
         output = io.StringIO()
         collector = MetricsCollector(output=output, enabled=True)

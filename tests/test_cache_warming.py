@@ -129,7 +129,7 @@ class TestCacheWarmerIntegration:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -187,7 +187,7 @@ class TestCacheWarmerIntegration:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -233,7 +233,7 @@ class TestCacheWarmerIntegration:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -267,7 +267,7 @@ class TestCacheWarmerIntegration:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -387,7 +387,7 @@ class TestCacheWarmingRealTables:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -441,7 +441,7 @@ class TestCacheWarmingRealTables:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -508,7 +508,7 @@ class TestCacheWarmingRealTables:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         reset_metrics()
@@ -582,7 +582,7 @@ class TestCacheWarmingRealTables:
         import strata.server as server_module
         from strata.cache.warmer import CacheWarmer
         from strata.config import StrataConfig
-        from strata.pool_metrics import reset_metrics
+        from strata.observability.pool_metrics import reset_metrics
         from strata.server import ServerState, app
 
         catalog = temp_warehouse["catalog"]

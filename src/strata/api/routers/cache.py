@@ -24,7 +24,7 @@ from strata.api.dependencies import (
 from strata.auth.principal import get_principal
 from strata.cache.metrics import get_eviction_tracker
 from strata.cache.stats import get_cache_histogram
-from strata.pool_metrics import get_pool_tracker
+from strata.observability.pool_metrics import get_pool_tracker
 from strata.tenancy.tenant import get_tenant_id
 from strata.types import (
     Task,

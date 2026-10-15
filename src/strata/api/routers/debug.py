@@ -13,11 +13,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query
 
 from strata.api.dependencies import require_scope
-from strata.gc_tracker import get_gc_stats, get_recent_gc_pauses
-from strata.memory_profiler import get_detailed_memory_report, get_memory_snapshot
-from strata.pool_metrics import get_connection_metrics, get_pool_tracker
+from strata.observability.gc_tracker import get_gc_stats, get_recent_gc_pauses
+from strata.observability.memory_profiler import get_detailed_memory_report, get_memory_snapshot
+from strata.observability.pool_metrics import get_connection_metrics, get_pool_tracker
+from strata.observability.slow_ops import get_latency_stats
 from strata.rate_limiter import get_rate_limiter
-from strata.slow_ops import get_latency_stats
 
 router = APIRouter(tags=["debug"])
 
@@ -30,7 +30,7 @@ async def get_latency_histograms_v1():
     """
     stats = get_latency_stats()
 
-    from strata.slow_ops import get_latency_percentiles
+    from strata.observability.slow_ops import get_latency_percentiles
 
     result = {"histograms": stats}
 

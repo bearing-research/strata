@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from strata.metrics import ScanMetrics
+from strata.observability.metrics import ScanMetrics
 
 TABLE = "strata.acme_payroll.salaries"
 

@@ -6,7 +6,7 @@ from typing import cast
 
 class TestRequestContext:
     def test_request_context_sets_and_clears(self):
-        from strata.logging import RequestContext, get_request_context
+        from strata.observability.logging import RequestContext, get_request_context
 
         assert get_request_context() == {}
 
@@ -19,7 +19,7 @@ class TestRequestContext:
 
     def test_nested_request_contexts(self):
         """Nested contexts restore the parent context."""
-        from strata.logging import RequestContext, get_request_context
+        from strata.observability.logging import RequestContext, get_request_context
 
         with RequestContext(request_id="outer"):
             assert get_request_context()["request_id"] == "outer"
@@ -34,7 +34,7 @@ class TestRequestContext:
             assert "scan_id" not in ctx
 
     def test_generate_request_id(self):
-        from strata.logging import generate_request_id
+        from strata.observability.logging import generate_request_id
 
         id1 = generate_request_id()
         id2 = generate_request_id()
@@ -49,7 +49,7 @@ class TestStructuredFormatter:
         import io
         import logging
 
-        from strata.logging import StructuredFormatter
+        from strata.observability.logging import StructuredFormatter
 
         stream = io.StringIO()
         handler = logging.StreamHandler(stream)
@@ -72,7 +72,7 @@ class TestStructuredFormatter:
         import io
         import logging
 
-        from strata.logging import RequestContext, StructuredFormatter
+        from strata.observability.logging import RequestContext, StructuredFormatter
 
         stream = io.StringIO()
         handler = logging.StreamHandler(stream)
@@ -98,7 +98,7 @@ class TestStructuredLogger:
         import io
         import logging
 
-        from strata.logging import StructuredFormatter, StructuredLogger
+        from strata.observability.logging import StructuredFormatter, StructuredLogger
 
         stream = io.StringIO()
         handler = logging.StreamHandler(stream)
@@ -127,12 +127,12 @@ class TestTraceContextIntegration:
         """Trace context is empty when tracing is disabled."""
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "false")
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
-        from strata.logging import get_trace_context
+        from strata.observability.logging import get_trace_context
 
         ctx = get_trace_context()
         assert ctx == {}
@@ -140,13 +140,13 @@ class TestTraceContextIntegration:
     def test_trace_context_when_enabled(self, monkeypatch):
         monkeypatch.setenv("STRATA_TRACING_ENABLED", "true")
 
-        import strata.tracing
+        from strata.observability import tracing
 
-        strata.tracing._tracer = None
-        strata.tracing._initialized = False
+        tracing._tracer = None
+        tracing._initialized = False
 
-        from strata.logging import get_trace_context
-        from strata.tracing import init_tracing, trace_span
+        from strata.observability.logging import get_trace_context
+        from strata.observability.tracing import init_tracing, trace_span
 
         init_tracing()
 
@@ -164,7 +164,7 @@ class TestMiddleware:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from strata.logging import get_request_context, request_context_middleware
+        from strata.observability.logging import get_request_context, request_context_middleware
 
         app = FastAPI()
         app.middleware("http")(request_context_middleware)
@@ -190,7 +190,7 @@ class TestMiddleware:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from strata.logging import get_request_context, request_context_middleware
+        from strata.observability.logging import get_request_context, request_context_middleware
 
         app = FastAPI()
         app.middleware("http")(request_context_middleware)
@@ -211,7 +211,7 @@ class TestMiddleware:
 
 class TestScanMetricsCorrelation:
     def test_scan_metrics_includes_request_id(self):
-        from strata.metrics import ScanMetrics
+        from strata.observability.metrics import ScanMetrics
 
         metrics = ScanMetrics(
             scan_id="scan-123",
@@ -223,7 +223,7 @@ class TestScanMetricsCorrelation:
         assert data["request_id"] == "req-abc"
 
     def test_scan_metrics_excludes_empty_request_id(self):
-        from strata.metrics import ScanMetrics
+        from strata.observability.metrics import ScanMetrics
 
         metrics = ScanMetrics(
             scan_id="scan-123",

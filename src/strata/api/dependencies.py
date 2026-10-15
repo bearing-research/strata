@@ -18,7 +18,7 @@ from fastapi import Depends, HTTPException
 # and FastAPI resolves hints against the router module's globals, where a string forward ref would
 # not resolve.
 from strata.artifact.store import ArtifactStore
-from strata.pool_metrics import get_pool_tracker
+from strata.observability.pool_metrics import get_pool_tracker
 from strata.transforms.build_store import BuildStore
 from strata.types import Principal, TableIdentity
 
