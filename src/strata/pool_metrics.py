@@ -2,7 +2,7 @@
 
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -101,7 +101,7 @@ class PoolMetricsTracker:
                 self._in_flight[pool_name] = max(0, self._in_flight[pool_name] - 1)
 
     @contextmanager
-    def track(self, pool_name: str) -> Iterator[None]:
+    def track(self, pool_name: str) -> Generator[None]:
         """Count one unit of work against ``pool_name`` for the block's life.
 
         Wrap the ``await loop.run_in_executor(...)`` that hands work to the pool; these counters

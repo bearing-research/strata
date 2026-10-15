@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def _provider_client(config: LlmConfig) -> AsyncIterator[httpx.AsyncClient]:
+async def _provider_client(config: LlmConfig) -> AsyncGenerator[httpx.AsyncClient]:
     """An HTTP client for *config*'s provider.
 
     With ``guard_hosts`` set (a notebook-chosen base_url on a service-mode

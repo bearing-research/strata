@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -24,7 +24,7 @@ class NotebookTimingRecorder:
     _phases_ms: dict[str, float] = field(default_factory=dict)
 
     @contextmanager
-    def phase(self, name: str) -> Iterator[None]:
+    def phase(self, name: str) -> Generator[None]:
         started = time.perf_counter()
         try:
             yield

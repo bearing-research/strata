@@ -23,7 +23,7 @@ import shutil
 import tempfile
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -814,7 +814,7 @@ class CellExecutor:
         )
 
     @contextmanager
-    def one_run(self) -> Iterator[None]:
+    def one_run(self) -> Generator[None]:
         """Treat every execution inside the block as one run of the notebook.
 
         Inside it each cell executes at most once; a repeat request returns the

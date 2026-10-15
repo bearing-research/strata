@@ -15,7 +15,7 @@ import time
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
 import uvicorn
@@ -1361,8 +1361,7 @@ async def auth_middleware(request: Request, call_next):
         else:
             principal = parse_principal(dict(request.headers), config)
         set_principal(principal)
-        # list is invariant, so widen list[str] to the logger's list[JsonValue].
-        scopes_json: list[JsonValue] = cast(list[JsonValue], list(principal.scopes))
+        scopes_json: list[JsonValue] = list(principal.scopes)
         logger.debug(
             "auth_success",
             principal=principal.id,

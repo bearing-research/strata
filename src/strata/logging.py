@@ -12,7 +12,7 @@ import os
 import sys
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from types import TracebackType
 from typing import cast
@@ -55,7 +55,7 @@ def clear_request_context() -> None:
 
 
 @contextmanager
-def RequestContext(**kwargs: JsonValue) -> Iterator[None]:
+def RequestContext(**kwargs: JsonValue) -> Generator[None]:
     """Context manager that adds its keyword arguments to every log entry inside it."""
     token = set_request_context(**kwargs)
     try:
@@ -71,7 +71,7 @@ def BuildContext(
     transform_ref: str | None = None,
     provenance_hash: str | None = None,
     **kwargs: JsonValue,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Context manager that adds build identity to every log entry inside it.
 
     Takes ``build_id``, ``tenant_id``, ``transform_ref``, ``provenance_hash`` and

@@ -14,7 +14,7 @@ import os
 import tempfile
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Buffer, Callable, Iterator
+from collections.abc import Buffer, Callable, Generator, Iterator
 from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
@@ -167,7 +167,7 @@ class BlobStore(ABC):
         commit: Callable[[Path], None],
         *,
         prefix: str = "strata_blob_",
-    ) -> Iterator[BinaryIO]:
+    ) -> Generator[BinaryIO]:
         """Stage writes through a local tempfile and pass it to ``commit(path)`` on clean exit.
 
         On exception the tempfile is removed and ``commit`` never runs, so a partial
@@ -230,7 +230,7 @@ class LocalBlobStore(BlobStore):
         path = self._blob_path(artifact_id, version)
 
         @contextmanager
-        def _writer() -> Iterator[BinaryIO]:
+        def _writer() -> Generator[BinaryIO]:
             fd, tmp_name = tempfile.mkstemp(
                 prefix=path.name + ".",
                 suffix=".tmp",
@@ -1039,7 +1039,7 @@ class AzureBlobStore(BlobStore):
             return None
 
         @contextmanager
-        def _reader() -> Iterator[BinaryIO]:
+        def _reader() -> Generator[BinaryIO]:
             stream = io.BufferedReader(_AzureDownloadReader(downloader))
             try:
                 yield stream

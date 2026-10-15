@@ -33,7 +33,7 @@ import subprocess
 import tarfile
 import tempfile
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -186,7 +186,7 @@ def _fetch(url: str, env_dir: Path) -> bool:
 
 
 @contextlib.contextmanager
-def _build_lock(path: Path) -> Iterator[None]:
+def _build_lock(path: Path) -> Generator[None]:
     """Hold one environment's build lock; a wait that outlasts a build is an environment error."""
     lock = filelock.FileLock(str(path), timeout=INSTALL_TIMEOUT_SECONDS)
     try:
