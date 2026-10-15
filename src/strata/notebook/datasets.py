@@ -241,7 +241,7 @@ def registry_for(config: Any, tenant: str | None = None) -> Registry:
     """
     remote = getattr(config, "notebook_remote_store_url", None)
     if remote:
-        from strata.auth import remote_store_headers
+        from strata.auth.principal import remote_store_headers
 
         return RemoteRegistry(str(remote), remote_store_headers(config))
     from strata.artifact.store import get_artifact_store

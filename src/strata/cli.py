@@ -767,7 +767,7 @@ def _dispatch_apikey(command: str):
     """Build a dispatcher that lazily imports the API key CLI module."""
 
     def _dispatch(args: argparse.Namespace) -> int:
-        from strata import api_key_cli
+        from strata.auth import api_key_cli
 
         return getattr(api_key_cli, command)(args)
 

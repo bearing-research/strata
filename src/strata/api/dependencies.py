@@ -60,7 +60,7 @@ def store_for_scope(scope: str):
     """
 
     def _store() -> ArtifactStore:
-        from strata.auth import get_principal
+        from strata.auth.principal import get_principal
         from strata.server import _get_artifact_store, get_state
 
         config = get_state().config
@@ -111,7 +111,7 @@ def current_principal() -> Principal | None:
 
     Routes that require one raise their own 401.
     """
-    from strata.auth import get_principal
+    from strata.auth.principal import get_principal
 
     return get_principal()
 
@@ -150,7 +150,7 @@ def require_scope(scope: str):
     """
 
     def _require() -> None:
-        from strata.auth import get_principal
+        from strata.auth.principal import get_principal
         from strata.server import get_state
 
         state = get_state()
@@ -241,7 +241,7 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
         HTTPException: 401 if no principal; 403, or 404 under
         ``hide_forbidden_as_not_found``, if the ACL denies the table.
     """
-    from strata.auth import AclEvaluator, get_principal
+    from strata.auth.principal import AclEvaluator, get_principal
     from strata.iceberg.catalog import named_catalog, shared_catalog_stores
     from strata.server import get_state
     from strata.types import TableRef

@@ -2840,7 +2840,7 @@ class CellExecutor:
         language: str = "python",
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through the core build + signed-URL transport path."""
-        from strata.auth import get_principal
+        from strata.auth.principal import get_principal
         from strata.server import get_state
 
         state = get_state()
@@ -3828,7 +3828,7 @@ class CellExecutor:
         config = self._lake_config()
         if not getattr(config, "notebook_remote_store_url", None):
             return {}
-        from strata.auth import remote_store_headers
+        from strata.auth.principal import remote_store_headers
 
         return remote_store_headers(config)
 

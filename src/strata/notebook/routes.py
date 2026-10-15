@@ -95,7 +95,7 @@ def _require_notebook_scope(request: Request) -> None:
     what the socket forbids. Keyed on the route's path template, so a new route is
     covered without a per-route decorator. No principal auth means nothing to check.
     """
-    from strata.auth import get_principal
+    from strata.auth.principal import get_principal
     from strata.server import get_state
 
     try:
@@ -198,8 +198,8 @@ def _reuse_open_session_by_path() -> tuple[bool, tuple[str, str | None] | None]:
 
     if state.config.deployment_mode == "personal":
         return True, None
-    from strata.auth import get_principal
-    from strata.tenant import DEFAULT_TENANT_ID
+    from strata.auth.principal import get_principal
+    from strata.tenancy.tenant import DEFAULT_TENANT_ID
 
     principal = get_principal()
     if principal is None:
@@ -230,9 +230,9 @@ def _caller_tenant_dir() -> str | None:
     tenantless caller gets the default tenant's subdir, never the whole root, which
     only ``admin:*`` sees.
     """
-    from strata.auth import get_principal
+    from strata.auth.principal import get_principal
     from strata.server import get_state
-    from strata.tenant import DEFAULT_TENANT_ID
+    from strata.tenancy.tenant import DEFAULT_TENANT_ID
 
     try:
         config = get_state().config
@@ -1338,7 +1338,7 @@ def _require_notebook_admin() -> None:
         return
     if not state.config.principal_auth_enabled:
         return
-    from strata.auth import get_principal
+    from strata.auth.principal import get_principal
 
     principal = get_principal()
     if principal is None or not principal.has_scope("admin:notebooks"):
@@ -3036,7 +3036,7 @@ async def promote_notebook_artifact(
             status_code=404, detail=f"{artifact_id}@v={version} is not in this notebook's store"
         )
 
-    from strata.auth import remote_store_headers
+    from strata.auth.principal import remote_store_headers
 
     target = RemoteStore(str(base_url), remote_store_headers(config))
     try:

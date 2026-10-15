@@ -40,7 +40,7 @@ from strata.iceberg.schema import (
     snapshot_arrow_schema,
     stored_columns,
 )
-from strata.tenant import get_tenant_id
+from strata.tenancy.tenant import get_tenant_id
 from strata.timing import elapsed_ms
 from strata.tracing import trace_span
 from strata.types import (

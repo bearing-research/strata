@@ -13,7 +13,7 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-from strata.auth import set_principal
+from strata.auth.principal import set_principal
 from strata.notebook.llm.config import LlmConfig
 from strata.notebook.llm.usage import reset_llm_usage
 from strata.types import Principal

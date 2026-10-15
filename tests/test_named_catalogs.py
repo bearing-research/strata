@@ -333,7 +333,7 @@ class TestAclNamesTheCatalog:
         assert str(self._ref("/data/wh#taxi.trips")) == "file:taxi.trips"
 
     def test_a_rule_for_a_warehouse_does_not_reach_the_catalogs_table(self):
-        from strata.auth import AclEvaluator
+        from strata.auth.principal import AclEvaluator
         from strata.config import _parse_acl_config
         from strata.types import Principal
 

@@ -1231,7 +1231,7 @@ async def test_each_callers_offered_results_carry_that_callers_principal(tmp_pat
     import http.server
     import threading
 
-    from strata.auth import set_principal
+    from strata.auth.principal import set_principal
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor
     from strata.notebook.parser import parse_notebook

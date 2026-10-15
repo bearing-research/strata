@@ -984,7 +984,7 @@ def usage_scope(
     ``admin:*`` a tenant named in the query (whole store when none). A tenant's
     figure excludes legacy tenantless rows, which would otherwise be charged to every tenant.
     """
-    from strata.auth import get_principal
+    from strata.auth.principal import get_principal
     from strata.server import _get_artifact_request_tenant, _get_artifact_store, get_state
 
     config = get_state().config

@@ -17,7 +17,7 @@ from strata.api.dependencies import (
     runtime_build_store,
 )
 from strata.artifact.store import reset_artifact_store
-from strata.auth import principal_context
+from strata.auth.principal import principal_context
 from strata.config import StrataConfig
 from strata.server import ServerState
 from strata.types import Principal

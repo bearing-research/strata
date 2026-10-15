@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from strata.api_keys import ApiKeyStore, format_key, parse_key, reset_api_key_store
-from strata.auth import AuthError, parse_api_key_principal
+from strata.auth.api_keys import ApiKeyStore, format_key, parse_key, reset_api_key_store
+from strata.auth.principal import AuthError, parse_api_key_principal
 from strata.config import StrataConfig
 
 
@@ -150,7 +150,7 @@ class TestAuthModeBranch:
 
     def test_bearer_key_resolves(self, store, monkeypatch):
         presented, _ = store.create_key(principal_id="svc-etl", scopes={"artifacts:write"})
-        monkeypatch.setattr("strata.api_keys.get_api_key_store", lambda *a, **k: store)
+        monkeypatch.setattr("strata.auth.api_keys.get_api_key_store", lambda *a, **k: store)
 
         principal = parse_api_key_principal(
             {"Authorization": f"Bearer {presented}"}, self._config()
@@ -159,7 +159,7 @@ class TestAuthModeBranch:
 
     def test_header_name_is_case_insensitive(self, store, monkeypatch):
         presented, _ = store.create_key(principal_id="svc")
-        monkeypatch.setattr("strata.api_keys.get_api_key_store", lambda *a, **k: store)
+        monkeypatch.setattr("strata.auth.api_keys.get_api_key_store", lambda *a, **k: store)
 
         assert (
             parse_api_key_principal({"authorization": f"Bearer {presented}"}, self._config()).id
@@ -176,12 +176,12 @@ class TestAuthModeBranch:
         ],
     )
     def test_missing_or_wrong_scheme_is_rejected(self, headers, store, monkeypatch):
-        monkeypatch.setattr("strata.api_keys.get_api_key_store", lambda *a, **k: store)
+        monkeypatch.setattr("strata.auth.api_keys.get_api_key_store", lambda *a, **k: store)
         with pytest.raises(AuthError):
             parse_api_key_principal(headers, self._config())
 
     def test_bad_key_is_rejected(self, store, monkeypatch):
-        monkeypatch.setattr("strata.api_keys.get_api_key_store", lambda *a, **k: store)
+        monkeypatch.setattr("strata.auth.api_keys.get_api_key_store", lambda *a, **k: store)
         with pytest.raises(AuthError):
             parse_api_key_principal({"Authorization": "Bearer strata_a_b"}, self._config())
 
@@ -190,7 +190,7 @@ class TestAuthModeBranch:
         # unauthenticated would be the worst outcome, since the operator
         # explicitly asked for authentication.
         reset_api_key_store()
-        monkeypatch.setattr("strata.api_keys.get_api_key_store", lambda *a, **k: None)
+        monkeypatch.setattr("strata.auth.api_keys.get_api_key_store", lambda *a, **k: None)
         with pytest.raises(AuthError):
             parse_api_key_principal({"Authorization": "Bearer strata_a_b"}, self._config())
 
@@ -213,8 +213,8 @@ class TestCliOutputStreams:
         )
 
     def test_stdout_carries_only_the_key(self, tmp_path, capsys):
-        from strata.api_key_cli import cmd_create
-        from strata.api_keys import ApiKeyStore
+        from strata.auth.api_key_cli import cmd_create
+        from strata.auth.api_keys import ApiKeyStore
 
         assert cmd_create(self._args(tmp_path)) == 0
         captured = capsys.readouterr()
@@ -228,7 +228,7 @@ class TestCliOutputStreams:
         assert store.verify(key) is not None
 
     def test_human_summary_goes_to_stderr(self, tmp_path, capsys):
-        from strata.api_key_cli import cmd_create
+        from strata.auth.api_key_cli import cmd_create
 
         cmd_create(self._args(tmp_path))
         captured = capsys.readouterr()
@@ -241,8 +241,8 @@ class TestCliOutputStreams:
         self, tmp_path, monkeypatch, capsys
     ):
         """The server reads STRATA_ARTIFACT_DIR, so a key minted elsewhere 401s."""
-        from strata.api_key_cli import cmd_create
-        from strata.api_keys import ApiKeyStore
+        from strata.auth.api_key_cli import cmd_create
+        from strata.auth.api_keys import ApiKeyStore
 
         configured = tmp_path / "srvstore"
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
@@ -257,6 +257,18 @@ class TestCliOutputStreams:
 
         assert ApiKeyStore(configured / "artifacts.sqlite").verify(key) is not None
         assert not (tmp_path / "home" / ".strata" / "artifacts" / "artifacts.sqlite").exists()
+
+    def test_the_strata_command_reaches_the_key_store(self, tmp_path, capsys):
+        """``strata apikey`` imports its module lazily, so only a run through ``main`` checks it."""
+        from strata.auth.api_keys import ApiKeyStore
+        from strata.cli import main
+
+        assert main(["apikey", "create", "svc", "--artifact-dir", str(tmp_path)]) == 0
+        key = capsys.readouterr().out.strip()
+        assert main(["apikey", "list", "--artifact-dir", str(tmp_path), "--format", "json"]) == 0
+
+        assert ApiKeyStore(tmp_path / "artifacts.sqlite").verify(key).id == "svc"
+        assert '"svc"' in capsys.readouterr().out
 
 
 class TestConfiguration:

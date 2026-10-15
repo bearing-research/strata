@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from strata.artifact.store import ArtifactStore, StagedVersion, TransformSpec
-from strata.auth import get_principal
+from strata.auth.principal import get_principal
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
 

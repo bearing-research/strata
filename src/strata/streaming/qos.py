@@ -12,9 +12,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from strata.adaptive_concurrency import ResizableLimiter
-from strata.auth import caller_key
-from strata.tenant import get_tenant_id
-from strata.tenant_registry import get_tenant_registry
+from strata.auth.principal import caller_key
+from strata.tenancy.registry import get_tenant_registry
+from strata.tenancy.tenant import get_tenant_id
 
 if TYPE_CHECKING:
     from starlette.requests import Request

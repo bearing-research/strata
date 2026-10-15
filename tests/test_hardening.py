@@ -980,7 +980,7 @@ class TestActiveScanCount:
         saturated.
         """
         from strata.server import ServerState, _update_saturation_tracking
-        from strata.tenant_registry import get_tenant_registry, reset_tenant_registry
+        from strata.tenancy.registry import get_tenant_registry, reset_tenant_registry
 
         reset_tenant_registry()
         config = StrataConfig(cache_dir=tmp_path / "cache", interactive_slots=2, bulk_slots=2)
@@ -1020,7 +1020,7 @@ class TestActiveScanCount:
         )
 
         from strata.server import ServerState, _get_active_scan_count
-        from strata.tenant_registry import get_tenant_registry, reset_tenant_registry
+        from strata.tenancy.registry import get_tenant_registry, reset_tenant_registry
 
         reset_tenant_registry()
         ServerState(config)

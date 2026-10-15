@@ -706,7 +706,7 @@ def _frame_scope_error(msg_type: str) -> str | None:
 
     ``None`` means allowed, including every no-auth deployment.
     """
-    from strata.auth import get_principal
+    from strata.auth.principal import get_principal
 
     if _configured_auth_mode() not in ("trusted_proxy", "api_key"):
         return None
@@ -723,7 +723,7 @@ async def _api_key_no_longer_valid(websocket: WebSocket, *, max_age: float = 0.0
     The upgrade verifies the key once; without this an open socket outlives its revocation.
     A key verified within ``max_age`` seconds is not looked up again.
     """
-    from strata.auth import AuthError, parse_api_key_principal
+    from strata.auth.principal import AuthError, parse_api_key_principal
     from strata.server import get_state
 
     if _configured_auth_mode() != "api_key":
@@ -752,7 +752,7 @@ async def _authenticate_websocket(websocket: WebSocket) -> bool:
     ``trusted_proxy`` and ``api_key``, like the HTTP middleware. With
     ``auth_mode="none"`` there is no principal and the socket stays open.
     """
-    from strata.auth import (
+    from strata.auth.principal import (
         AuthError,
         parse_api_key_principal,
         parse_principal,

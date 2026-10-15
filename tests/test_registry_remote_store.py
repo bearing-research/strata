@@ -278,7 +278,7 @@ class TestTargetResolution:
         """
         import strata.server as server_module
         from strata.api.remote_registry import remote_registry
-        from strata.auth import set_principal
+        from strata.auth.principal import set_principal
         from strata.types import Principal
 
         monkeypatch.setattr(

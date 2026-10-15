@@ -112,7 +112,7 @@ class TestTheApiKeyCli:
     ):
         import argparse
 
-        from strata.api_key_cli import cmd_create
+        from strata.auth.api_key_cli import cmd_create
 
         args = argparse.Namespace(
             principal="svc",

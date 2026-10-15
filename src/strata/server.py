@@ -42,7 +42,7 @@ from starlette.websockets import WebSocketClose
 
 from strata.api.dependencies import authorize_table_access
 from strata.artifact.uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
-from strata.auth import (
+from strata.auth.principal import (
     AuthError,
     caller_key,
     get_principal,
@@ -78,13 +78,13 @@ from strata.streaming import (
     StreamRegistry,
     StreamState,
 )
-from strata.tenant import (
+from strata.tenancy.registry import get_tenant_registry, init_tenant_registry
+from strata.tenancy.tenant import (
     DEFAULT_TENANT_ID,
     clear_tenant_context,
     set_tenant_id,
     validate_tenant_id,
 )
-from strata.tenant_registry import get_tenant_registry, init_tenant_registry
 from strata.tracing import init_tracing, instrument_fastapi
 from strata.types import (
     BuildStatusResponse,
@@ -613,7 +613,7 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     # API keys share the artifact database and backend. Created here so the
     # per-request auth middleware never creates the schema.
     if config.auth_mode == "api_key" and config.artifact_dir is not None:
-        from strata.api_keys import get_api_key_store
+        from strata.auth.api_keys import get_api_key_store
 
         get_api_key_store(
             config.artifact_dir / "artifacts.sqlite",
@@ -1799,7 +1799,7 @@ def _require_registry_approver():
     Under trusted-proxy auth requires ``admin:registry`` (``admin:*`` satisfies it); personal
     mode is the single operator and is allowed.
     """
-    from strata.auth import get_principal
+    from strata.auth.principal import get_principal
 
     state = get_state()
     principal = get_principal()

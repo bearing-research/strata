@@ -445,7 +445,7 @@ async def request_context_middleware(request, call_next):
     response header.
     """
     # Lazy import to avoid a circular dependency.
-    from strata.tenant import get_tenant_id
+    from strata.tenancy.tenant import get_tenant_id
 
     request_id = request.headers.get("X-Request-ID") or generate_request_id()
 

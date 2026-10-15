@@ -23,7 +23,7 @@ def service(tmp_path, monkeypatch):
     from strata.server import app
 
     with TestClient(app) as client:
-        from strata.api_keys import get_api_key_store
+        from strata.auth.api_keys import get_api_key_store
 
         def mint(principal_id="svc", tenant=None, scopes=frozenset()):
             key, _ = get_api_key_store().create_key(
@@ -78,8 +78,8 @@ class TestTenantIsolation:
         from strata.server import app
 
         with TestClient(app) as client:
-            from strata.api_keys import get_api_key_store
             from strata.artifact.store import get_artifact_store
+            from strata.auth.api_keys import get_api_key_store
 
             keys = get_api_key_store()
             owner, _ = keys.create_key(principal_id="alice", tenant="team-a")
@@ -112,7 +112,7 @@ class TestTenantIsolation:
         from strata.server import app
 
         with TestClient(app) as client:
-            from strata.api_keys import get_api_key_store
+            from strata.auth.api_keys import get_api_key_store
 
             keys = get_api_key_store()
             team_key, _ = keys.create_key(principal_id="alice", tenant="team-a")
@@ -203,7 +203,7 @@ class TestWebSocketAuthentication:
 
 class TestAclUnderApiKey:
     def test_acl_rules_are_accepted_and_enforced(self, tmp_path):
-        from strata.auth import AclEvaluator
+        from strata.auth.principal import AclEvaluator
         from strata.config import _parse_acl_config
         from strata.types import Principal, TableRef
 

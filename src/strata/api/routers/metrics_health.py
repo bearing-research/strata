@@ -20,7 +20,7 @@ from strata.health import HealthStatus, run_health_checks
 from strata.logging import get_logger
 from strata.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import get_rate_limiter
-from strata.tenant_registry import get_tenant_registry
+from strata.tenancy.registry import get_tenant_registry
 
 logger = get_logger(__name__)
 

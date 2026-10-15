@@ -348,7 +348,7 @@ async def test_admit_acquires_the_limiter_the_registry_counts(monkeypatch):
 
     The request must then acquire the limiter the registry tracks, or the drain and quota miss it.
     """
-    from strata.tenant_registry import MAX_TRACKED_TENANTS, TenantRegistry
+    from strata.tenancy.registry import MAX_TRACKED_TENANTS, TenantRegistry
 
     registry = TenantRegistry(default_interactive_slots=1, default_bulk_slots=1)
     monkeypatch.setattr("strata.streaming.qos.get_tenant_id", lambda: "a")
@@ -380,7 +380,7 @@ def _request_from(host: str):
 async def test_two_callers_behind_one_proxy_each_get_their_own_cap(monkeypatch):
     """Behind a proxy every request comes from the proxy's address; keyed on that, the whole
     service shared one caller's cap."""
-    from strata.auth import principal_context
+    from strata.auth.principal import principal_context
     from strata.types import Principal
 
     _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
@@ -397,7 +397,7 @@ async def test_two_callers_behind_one_proxy_each_get_their_own_cap(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_one_caller_from_two_addresses_still_has_one_cap(monkeypatch):
-    from strata.auth import principal_context
+    from strata.auth.principal import principal_context
     from strata.types import Principal
 
     _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
