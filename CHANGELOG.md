@@ -73,6 +73,10 @@ exhaustive commit history.
 
 ### Fixed
 
+- **strata-pool's Docker backend removes a stopped worker's volumes.** It
+  removed the container but kept its anonymous volumes, so a worker image that
+  declares `VOLUME` directories left one behind per worker until the disk
+  filled. Named volumes a deployment mounts are still kept. (#PR)
 - **An unreachable object store is a 503, not a 500.** Planning reads a
   table's metadata from the object store on every scan, cached data or not, so
   with the store down a scan failed with a bare 500 (or a dropped connection)
