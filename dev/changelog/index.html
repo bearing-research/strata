@@ -3637,6 +3637,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The scan caches live in the <code>strata.cache</code> package.</strong> <code>strata.cache</code>
+  (now <code>strata.cache.disk</code>), <code>strata.metadata_cache</code> (<code>strata.cache.metadata</code>),
+  <code>strata.metadata_store</code> (<code>strata.cache.metadata_store</code>), <code>strata.cache_warmer</code>
+  (<code>strata.cache.warmer</code>), <code>strata.cache_metrics</code> (<code>strata.cache.metrics</code>) and
+  <code>strata.cache_stats</code> (<code>strata.cache.stats</code>) moved; the old module paths are
+  gone. (#1188)</li>
 <li><strong><code>inspect_result</code> and <code>agent_note</code> frames have typed payloads.</strong> Both are
   validated against a model at the emit site and appear in the generated
   TypeScript, so the inspect panel reads a typed payload instead of an untyped
