@@ -14,7 +14,7 @@ exhaustive commit history.
   `strata.metadata_store` (`strata.cache.metadata_store`), `strata.cache_warmer`
   (`strata.cache.warmer`), `strata.cache_metrics` (`strata.cache.metrics`) and
   `strata.cache_stats` (`strata.cache.stats`) moved; the old module paths are
-  gone. (#PR)
+  gone. (#1188)
 - **`inspect_result` and `agent_note` frames have typed payloads.** Both are
   validated against a model at the emit site and appear in the generated
   TypeScript, so the inspect panel reads a typed payload instead of an untyped
