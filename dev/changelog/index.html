@@ -3637,6 +3637,11 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Auth and tenancy code lives in the <code>strata.auth</code> and <code>strata.tenancy</code>
+  packages.</strong> <code>strata.auth</code> (now <code>strata.auth.principal</code>), <code>strata.api_keys</code>
+  (<code>strata.auth.api_keys</code>), <code>strata.api_key_cli</code> (<code>strata.auth.api_key_cli</code>),
+  <code>strata.tenant</code> (<code>strata.tenancy.tenant</code>) and <code>strata.tenant_registry</code>
+  (<code>strata.tenancy.registry</code>) moved; the old module paths are gone. (#1191)</li>
 <li><strong>Iceberg code lives in the <code>strata.iceberg</code> package.</strong> <code>strata.iceberg</code>
   (now <code>strata.iceberg.catalog</code>), <code>strata.iceberg_schema</code>
   (<code>strata.iceberg.schema</code>), <code>strata.iceberg_deletes</code> (<code>strata.iceberg.deletes</code>),
