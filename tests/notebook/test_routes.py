@@ -1304,6 +1304,82 @@ def test_update_notebook_workers_forbidden_in_service_mode(
     assert "managed by the server" in response.json()["detail"]
 
 
+class TestNotebookWorkersOff:
+    """``notebook_workers_editable=False``: a personal server runs cells on its registry only."""
+
+    @staticmethod
+    def _server(monkeypatch, editable: bool) -> None:
+        set_server_state(
+            monkeypatch,
+            deployment_mode="personal",
+            notebook_workers_editable=editable,
+            transforms_config={
+                "notebook_workers": [
+                    {
+                        "name": "gpu-a100",
+                        "backend": "executor",
+                        "config": {"url": "embedded://local"},
+                    }
+                ]
+            },
+        )
+
+    @staticmethod
+    def _notebook(tmp_path, worker: str):
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+        from strata.notebook.writer import update_notebook_workers
+
+        notebook_dir = create_notebook(tmp_path, "Registry Only")
+        update_notebook_workers(
+            notebook_dir,
+            [
+                WorkerSpec(
+                    name="mine",
+                    backend=WorkerBackendType.EXECUTOR,
+                    config={"url": "embedded://local"},
+                )
+            ],
+        )
+        add_cell_to_notebook(notebook_dir, "c1")
+        write_cell(notebook_dir, "c1", f"# @worker {worker}\nx = 1")
+        return notebook_dir
+
+    @pytest.mark.parametrize(("editable", "status"), [(True, "ready"), (False, "error")])
+    def test_a_notebook_defined_worker_runs_only_while_the_setting_allows(
+        self, client, monkeypatch, tmp_path, editable, status
+    ):
+        self._server(monkeypatch, editable)
+        session_id = open_session_id(client, self._notebook(tmp_path, "mine"))
+
+        data = client.post(f"/v1/notebooks/{session_id}/cells/c1/execute").json()
+
+        assert data["status"] == status, data.get("error")
+        if not editable:
+            assert "blocked by server policy" in data["error"]
+            assert "registry" in data["error"]
+
+    def test_the_registry_worker_still_runs(self, client, monkeypatch, tmp_path):
+        self._server(monkeypatch, False)
+        session_id = open_session_id(client, self._notebook(tmp_path, "gpu-a100"))
+
+        data = client.post(f"/v1/notebooks/{session_id}/cells/c1/execute").json()
+
+        assert data["status"] == "ready", data.get("error")
+
+    def test_the_catalogue_editor_is_not_offered(self, client, monkeypatch, tmp_path):
+        self._server(monkeypatch, False)
+        session_id = open_session_id(client, self._notebook(tmp_path, "mine"))
+
+        listing = client.get(f"/v1/notebooks/{session_id}/workers").json()
+        refused = client.put(f"/v1/notebooks/{session_id}/workers", json={"workers": []})
+
+        assert listing["definitions_editable"] is False
+        mine = next(w for w in listing["workers"] if w["name"] == "mine")
+        assert (mine["source"], mine["allowed"]) == ("notebook", False)
+        assert refused.status_code == 403
+        assert "managed by the server" in refused.json()["detail"]
+
+
 def test_update_notebook_worker_requires_allowlisted_service_worker(
     client, service_mode_worker_state, tmp_path
 ):

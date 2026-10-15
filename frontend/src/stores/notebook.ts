@@ -1296,6 +1296,7 @@ function loadNotebookStateFromBackend(data: any) {
   registryEnabled.value = data?.registry_enabled === true
   teamStoreConfigured.value = data?.team_store_configured === true
   workersPanelShown.value = data?.workers_panel !== 'hidden'
+  serviceMode.value = data?.deployment_mode !== 'personal'
   scheduleRegistryRefresh()
   applyEnvSources(data)
   notebook.workers = Array.isArray(data.workers) ? data.workers.map(parseWorkerSpec) : []
@@ -1623,6 +1624,9 @@ const workerDefinitionsEditable = ref(false)
 // deployment mode (a failed /workers fetch would claim "Service mode").
 // Anything that describes the deployment must wait for this.
 const workerModeKnown = ref(false)
+// The deployment mode, apart from whether worker definitions are editable: a personal
+// server can keep them to its registry too (notebook_workers_editable).
+const serviceMode = ref(true)
 // Fail closed: the dashboard stays hidden until the backend enables it.
 const registryEnabled = ref(false)
 const teamStoreConfigured = ref(false)
@@ -3625,6 +3629,7 @@ export function useNotebook() {
     availableWorkers,
     workerDefinitionsEditable,
     workerModeKnown,
+    serviceMode,
     registryEnabled,
     workerHealthLoading,
     workerHealthCheckedAt,

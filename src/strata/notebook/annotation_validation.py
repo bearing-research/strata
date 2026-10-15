@@ -22,7 +22,7 @@ from strata.notebook.models import (
     DiagnosticSeverity,
     NotebookState,
 )
-from strata.notebook.workers import resolve_worker_spec
+from strata.notebook.workers import notebook_worker_definitions_editable, resolve_worker_spec
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +74,19 @@ def validate_cell_annotations(
     # The catalog execution resolves against: in service mode the server's registry,
     # where members cannot declare workers at all.
     if annotations.worker and resolve_worker_spec(notebook_state, annotations.worker) is None:
+        # A [[workers]] entry the server ignores reads as "defined" to the author.
+        ignored = not notebook_worker_definitions_editable(notebook_state) and any(
+            w.name == annotations.worker for w in notebook_state.workers
+        )
         diagnostics.append(
             AnnotationDiagnostic(
                 severity=DiagnosticSeverity.WARN,
                 code="worker_unknown",
                 message=(
-                    f"`@worker {annotations.worker}` is not a worker this notebook can use. "
+                    f"`@worker {annotations.worker}` is defined in notebook.toml, but this "
+                    "server runs cells only on its registry's workers."
+                    if ignored
+                    else f"`@worker {annotations.worker}` is not a worker this notebook can use. "
                     "Execution will fail until the worker is added."
                 ),
                 line=_find_annotation_line(cell.source, "worker"),

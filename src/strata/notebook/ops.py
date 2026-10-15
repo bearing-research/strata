@@ -232,7 +232,7 @@ class WorkerListView(BaseModel):
     """The notebook's registered workers plus which one is the default."""
 
     default: str | None  # configured notebook default; ``None`` ⇒ the built-in local worker
-    editable: bool  # False in service mode (definitions are server-managed)
+    editable: bool  # False when definitions are server-managed (service mode, or the setting)
     workers: list[WorkerView]
 
 
@@ -686,7 +686,7 @@ class LocalNotebookOps:
         Raises
         ------
         NotebookOpsError
-            If worker definitions aren't editable (service mode), ``name`` is the
+            If worker definitions aren't editable (server-managed), ``name`` is the
             reserved ``local``, the backend, transport or fields are invalid, or an
             ``executor`` worker is missing ``url``.
         """
@@ -701,7 +701,7 @@ class LocalNotebookOps:
 
         state = self._session.notebook_state
         if not notebook_worker_definitions_editable(state):
-            raise NotebookOpsError("worker definitions are managed by the server in service mode")
+            raise NotebookOpsError("worker definitions are managed by the server")
         # Resolution returns the built-in first, so a "local" entry would never run.
         if name == "local":
             raise NotebookOpsError("'local' is reserved for the built-in worker")
@@ -743,7 +743,7 @@ class LocalNotebookOps:
 
         state = self._session.notebook_state
         if not notebook_worker_definitions_editable(state):
-            raise NotebookOpsError("worker definitions are managed by the server in service mode")
+            raise NotebookOpsError("worker definitions are managed by the server")
         if name == "local":
             raise NotebookOpsError("cannot remove the built-in 'local' worker")
         remaining = [w for w in state.workers if w.name != name]

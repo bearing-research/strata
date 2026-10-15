@@ -143,7 +143,10 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
     )
 
     builtin = get_builtin_local_worker()
-    if service_mode:
+    # A host that keeps every remote run behind its registry (admitted, placed, metered)
+    # turns a personal server's notebook-defined workers off too.
+    registry_only = service_mode or (config is not None and not config.notebook_workers_editable)
+    if registry_only:
         effective_workers = {
             "local": builtin,
             **{name: record.worker for name, record in server_workers.items() if record.enabled},
@@ -160,7 +163,7 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
 
     return WorkerPolicy(
         service_mode=service_mode,
-        definitions_editable=not service_mode,
+        definitions_editable=not registry_only,
         effective_workers=effective_workers,
         server_workers=server_workers,
     )
@@ -483,15 +486,15 @@ def validate_worker_assignment(
 ) -> str | None:
     """Validate a worker assignment against deployment policy; ``None`` if allowed.
 
-    Personal mode is permissive so notebooks can name future workers; service mode
-    requires a server-managed registry entry.
+    Personal mode is permissive so notebooks can name future workers; service mode, or a
+    server with notebook-defined workers off, requires a server-managed registry entry.
     """
     normalized_name = (worker_name or "").strip()
     if not normalized_name or normalized_name == "local":
         return None
 
     policy = _policy(notebook_state)
-    if not policy.service_mode:
+    if policy.definitions_editable:
         return None
 
     server_record = policy.server_workers.get(normalized_name)
@@ -504,8 +507,14 @@ def validate_worker_assignment(
     if normalized_name in policy.effective_workers:
         return None
 
+    if policy.service_mode:
+        return (
+            f"Worker '{normalized_name}' is not allowed in service mode. "
+            "Choose a server-managed worker."
+        )
     return (
-        f"Worker '{normalized_name}' is not allowed in service mode. "
+        f"Worker '{normalized_name}' is blocked by server policy: this server runs cells only "
+        "on its registry's workers, not on a notebook's own [[workers]]. "
         "Choose a server-managed worker."
     )
 
@@ -672,7 +681,7 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
         allowed=True,
     )
 
-    if policy.service_mode:
+    if not policy.definitions_editable:
         for record in policy.server_workers.values():
             worker = record.worker
             health = (
@@ -1034,7 +1043,7 @@ async def build_worker_catalog_with_health(
     policy = _load_worker_policy(notebook_state)
     worker_by_name = (
         {name: record.worker for name, record in policy.server_workers.items()}
-        if policy.service_mode
+        if not policy.definitions_editable
         else {worker.name: worker for worker in policy.effective_workers.values()}
     )
 

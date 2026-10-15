@@ -16,6 +16,7 @@ const {
   connected,
   availableWorkers,
   workerDefinitionsEditable,
+  serviceMode,
   serverManagedWorkers,
   serverWorkerRegistryAvailable,
   serverWorkerRegistryLoading,
@@ -42,9 +43,7 @@ const registryManagedByServer = computed(() => !workerDefinitionsEditable.value)
 const canEditServerRegistry = computed(
   () => registryManagedByServer.value && serverWorkerRegistryAvailable.value,
 )
-const workerModeLabel = computed(() =>
-  registryManagedByServer.value ? 'Service mode' : 'Personal mode',
-)
+const workerModeLabel = computed(() => (serviceMode.value ? 'Service mode' : 'Personal mode'))
 const workerModeTitle = computed(() =>
   registryManagedByServer.value
     ? 'This notebook selects from a shared server-managed worker catalog.'
