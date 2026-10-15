@@ -3637,6 +3637,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Artifact code lives in the <code>strata.artifact</code> package.</strong>
+  <code>strata.artifact_store</code> (now <code>strata.artifact.store</code>), <code>strata.blob_store</code>
+  (<code>strata.artifact.blob_store</code>), <code>strata.artifact_transfer</code>
+  (<code>strata.artifact.transfer</code>), <code>strata.artifact_uris</code> (<code>strata.artifact.uris</code>),
+  <code>strata.table_export</code> (<code>strata.artifact.table_export</code>) and
+  <code>strata.artifact_cli</code> (<code>strata.artifact.cli</code>) moved; the old module paths are
+  gone. (#1189)</li>
 <li><strong>The scan caches live in the <code>strata.cache</code> package.</strong> <code>strata.cache</code>
   (now <code>strata.cache.disk</code>), <code>strata.metadata_cache</code> (<code>strata.cache.metadata</code>),
   <code>strata.metadata_store</code> (<code>strata.cache.metadata_store</code>), <code>strata.cache_warmer</code>
