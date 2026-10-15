@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import fnmatch
 import hmac
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
@@ -76,7 +76,7 @@ def remote_store_headers(config: Any) -> dict[str, str]:
 
 
 @contextmanager
-def principal_context(principal: Principal | None) -> Iterator[None]:
+def principal_context(principal: Principal | None) -> Generator[None]:
     """Make *principal* the current caller for a block, restoring the previous one after.
 
     For work outside the request task that authenticated it, such as an MCP tool call.

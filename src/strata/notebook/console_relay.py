@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -164,7 +164,7 @@ async def relaying(
     cell_id: str,
     shared_store: BuildStore | None = None,
     poll_seconds: float = _SHARED_POLL_SECONDS,
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     """Deliver a build's console to a cell for the duration of the block.
 
     With *shared_store* (a multi-node deployment) also poll it for chunks that

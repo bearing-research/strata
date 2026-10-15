@@ -22,7 +22,13 @@ import os
 import re
 import socket
 import time
-from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator
+from collections.abc import (
+    AsyncGenerator,
+    Callable,
+    Coroutine,
+    Generator,
+    Iterable,
+)
 from typing import Any
 
 import httpx
@@ -668,7 +674,7 @@ class Pool:
         await self._drain(job.machine_type, job.tenant_id)
 
     @contextlib.contextmanager
-    def _execution_span(self, job: Job, worker: Worker) -> Iterator[dict[str, str]]:
+    def _execution_span(self, job: Job, worker: Worker) -> Generator[dict[str, str]]:
         """Span the job's time on the machine; yield headers that make its work a child span.
 
         Without OpenTelemetry the submitter's trace context is forwarded unchanged.
@@ -875,7 +881,7 @@ class Pool:
     @contextlib.asynccontextmanager
     async def _holding(
         self, *, job_id: str | None = None, worker_id: str | None = None
-    ) -> AsyncIterator[None]:
+    ) -> AsyncGenerator[None]:
         """Renew this process's leases on a job and a machine while the body runs."""
 
         async def renew() -> None:

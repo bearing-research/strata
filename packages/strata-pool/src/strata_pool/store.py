@@ -18,7 +18,7 @@ import json
 import re
 import sqlite3
 import threading
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -306,7 +306,7 @@ class _SqlStore:
         raise NotImplementedError
 
     @contextmanager
-    def _transaction(self) -> Iterator[None]:
+    def _transaction(self) -> Generator[None]:
         """A write transaction serialized against every other process."""
         raise NotImplementedError
         yield
@@ -858,7 +858,7 @@ class PoolStore(_SqlStore):
         return self._conn.execute(sql, tuple(params))
 
     @contextmanager
-    def _transaction(self) -> Iterator[None]:
+    def _transaction(self) -> Generator[None]:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -908,7 +908,7 @@ class PostgresPoolStore(_SqlStore):
         return self._conn.execute(sql.replace("?", "%s"), tuple(params))
 
     @contextmanager
-    def _transaction(self) -> Iterator[None]:
+    def _transaction(self) -> Generator[None]:
         with self._lock:
             self._conn.execute("BEGIN")
             try:

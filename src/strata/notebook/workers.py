@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -176,7 +176,7 @@ _policy_memo: ContextVar[dict[int, WorkerPolicy] | None] = ContextVar(
 @contextmanager
 def one_policy_read(
     notebook_state: NotebookState | None = None, policy: WorkerPolicy | None = None
-) -> Iterator[None]:
+) -> Generator[None]:
     """Read the worker policy at most once per notebook inside the block (one pass).
 
     ``policy``, read beforehand by :func:`read_worker_policy`, serves ``notebook_state``

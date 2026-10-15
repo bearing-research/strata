@@ -6,7 +6,7 @@ variables apply.
 """
 
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -125,7 +125,7 @@ class NoOpSpan:
 def trace_span(
     name: str,
     **attributes: Any,
-) -> Iterator["Span | NoOpSpan"]:
+) -> Generator["Span | NoOpSpan"]:
     """Yield a span with *attributes*, or a no-op span when tracing is off.
 
     An exception raised in the block is recorded on the span and re-raised.
@@ -189,7 +189,7 @@ def trace_span_from(
     name: str,
     carrier: dict[str, Any] | None,
     **attributes: Any,
-) -> Iterator["Span | NoOpSpan"]:
+) -> Generator["Span | NoOpSpan"]:
     """A span whose parent is the trace context another process sent.
 
     ``carrier`` holds ``traceparent`` (and optionally ``tracestate``); without
