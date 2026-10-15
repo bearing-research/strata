@@ -17,7 +17,7 @@ exhaustive commit history.
   `[[workers]]` are ignored and shown as not allowed, a cell that names one is
   flagged and fails, and the Workers panel offers no editor for them. The mode
   badges now show the deployment mode rather than whether workers are editable.
-  (#PR)
+  (#1195)
 
 ### Changed
 
