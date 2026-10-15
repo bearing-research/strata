@@ -6,6 +6,7 @@ a stale file leaves the frontend compiling against types that no longer describe
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -92,3 +93,25 @@ def test_a_field_too_long_for_one_line_is_broken_as_prettier_breaks_it() -> None
     assert module._field_line("code", "?", too_long) == "  code?:\n" + "\n".join(
         f"    | 'code_number_{i}'" for i in range(8)
     )
+
+
+def _frame_union(source: str, name: str) -> set[str]:
+    start = source.index(f"export type {name} =")
+    block = source[start : source.index("\n\n", start)]
+    return set(re.findall(r"^\s*\|\s*'([a-z_]+)'", block, re.MULTILINE))
+
+
+def test_the_frontend_frame_names_are_the_servers() -> None:
+    """The frame-name unions in notebook.ts are written by hand, so check them against MessageType.
+
+    Both directions: a name the server never sends is a handler for nothing, and a frame
+    missing from the unions fails the type check of any handler a client adds for it.
+    """
+    source = (_REPO / "frontend" / "src" / "types" / "notebook.ts").read_text()
+    frontend = _frame_union(source, "WsClientMessageType") | _frame_union(
+        source, "WsServerMessageType"
+    )
+    server = {member.value for member in MessageType}
+
+    assert not frontend - server, f"not sent or handled by the server: {sorted(frontend - server)}"
+    assert not server - frontend, f"missing from notebook.ts: {sorted(server - frontend)}"

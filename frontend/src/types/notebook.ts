@@ -252,8 +252,6 @@ export interface Cell {
   durationMs?: number
   /** Whether this cell is frozen (skip invalidation, pinned artifact) */
   frozen?: boolean
-  /** Assertion results from this cell's execution */
-  assertions?: AssertionResult[]
   /** Artifact size in bytes */
   artifactSizeBytes?: number
   /** Which executor ran this cell (only present if remote) */
@@ -424,17 +422,6 @@ export interface CausalityDetail {
   package?: string
   fromPackageVersion?: string
   toPackageVersion?: string
-}
-
-/** Assertion result from a cell's assert statements */
-export interface AssertionResult {
-  /** The assertion message (from assert ..., "message") */
-  message: string
-  passed: boolean
-  /** Expression that was asserted (source text) */
-  expression?: string
-  /** Actual value on failure */
-  actualValue?: string
 }
 
 /** Run impact preview: what will happen if a cell is executed */
@@ -763,7 +750,6 @@ export type WsServerMessageType =
   | 'cell_output_delta' // Streamed partial output while running (prompt cells)
   | 'cell_console' // Incremental console output (stdout/stderr)
   | 'cell_error' // Cell execution failed
-  | 'cell_assertions' // Assertion results from cell execution
   | 'cell_iteration_progress' // Loop cell completed one iteration
   | 'cell_variant_progress' // @per_variant fan-out completed one variant
   | 'cell_test_status' // Cell unit-test run lifecycle (running/ready/error)
@@ -776,7 +762,6 @@ export type WsServerMessageType =
   | 'presence' // Who is on the session and which cell each is on
   | 'session_closed' // The server closed this session; offer to reopen
   | 'inspect_result' // Result of an inspect REPL evaluation
-  | 'notebook_status' // Batch status update (e.g., after open or env change)
   | 'notebook_state' // Full state sync (reconnection)
   | 'environment_job_started' // Background env job accepted and started
   | 'environment_job_progress' // Background env job emitted logs or phase changes
