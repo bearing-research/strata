@@ -3206,25 +3206,6 @@ class NotebookSession:
                 payload,
             )
             if job.action in {"add", "remove"}:
-                legacy_payload = {
-                    "action": job.action,
-                    "package": job.package,
-                    "success": job.status == "completed",
-                    "error": job.error,
-                    "lockfile_changed": job.lockfile_changed,
-                    "stale_cell_count": job.stale_cell_count,
-                    "cells": payload["cells"],
-                }
-                if "environment" in payload:
-                    legacy_payload["environment"] = payload["environment"]
-                    legacy_payload["dependencies"] = payload.get("dependencies", [])
-                    legacy_payload["resolved_dependencies"] = payload.get(
-                        "resolved_dependencies", []
-                    )
-                await self._broadcast_environment_job_message(
-                    MessageType.DEPENDENCY_CHANGED,
-                    legacy_payload,
-                )
                 await self._broadcast_environment_staleness_updates(job.stale_cell_ids)
             with self._environment_state_lock:
                 if self.environment_job is job:

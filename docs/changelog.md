@@ -18,6 +18,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Removed
 
+- **The `dependency_changed` WebSocket frame.** It repeated, for package
+  add and remove, what `environment_job_finished` already sends; a client
+  reads the job's action, package and status from that frame's
+  `environment_job`. (#PR)
 - **The Rust extension: Strata is pure Python.** One wheel now serves every
   platform, and building from source needs no Rust toolchain. The extension's
   IPC concat had no caller since 0.3.0, when artifact builds started writing
