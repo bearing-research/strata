@@ -7,6 +7,13 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Changed
+
+- **`inspect_result` and `agent_note` frames have typed payloads.** Both are
+  validated against a model at the emit site and appear in the generated
+  TypeScript, so the inspect panel reads a typed payload instead of an untyped
+  dict. (#1182)
+
 ### Removed
 
 - **The Rust extension: Strata is pure Python.** One wheel now serves every

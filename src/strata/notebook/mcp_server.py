@@ -14,7 +14,7 @@ registers thin wrappers whose docstrings are the agent-facing tool descriptions.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from strata.auth import get_principal, principal_context
 from strata.notebook.ops import LocalNotebookOps, NotebookOpsError
@@ -361,7 +361,7 @@ async def _broadcast_notebook(session_id: str, session: Any) -> None:
     await broadcast_notebook_sync(session_id, session)
 
 
-async def _agent_note(session_id: str, source: str, text: str) -> None:
+async def _agent_note(session_id: str, source: Literal["mcp", "agent"], text: str) -> None:
     """Surface a one-line ``agent_note`` frame in an attached terminal viewer's Agent tab.
 
     ``source`` is ``"mcp"`` for narrated tool actions and ``"agent"`` for explicit
@@ -369,6 +369,7 @@ async def _agent_note(session_id: str, source: str, text: str) -> None:
     """
     from strata.notebook.protocol import MessageType
     from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
+    from strata.notebook.ws_payloads import AgentNotePayload
 
     await _broadcast_message(
         session_id,
@@ -376,7 +377,7 @@ async def _agent_note(session_id: str, source: str, text: str) -> None:
         _make_message(
             MessageType.AGENT_NOTE,
             next_notebook_sequence(session_id),
-            {"source": source, "text": text},
+            AgentNotePayload(source=source, text=text).model_dump(mode="json"),
         ),
     )
 
