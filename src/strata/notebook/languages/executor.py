@@ -146,6 +146,10 @@ class _PythonExecutor:
         if annotations.loop is not None:
             return False
 
+        # Its folder is collected from its own run directory, which a batch does not have.
+        if annotations.output_dirs:
+            return False
+
         notebook_state = executor.session.notebook_state
         if (
             annotations.timeout is not None

@@ -457,6 +457,40 @@ appended to or merged into only when the server sets
 applies, as for an export, and a table last written for another tenant is
 refused.
 
+## @output_dir
+
+Give the cell an empty folder whose contents are an output: checkpoints, a saved
+model, a set of figures.
+
+```python
+# @output_dir ckpt
+for epoch in range(3):
+    train(model)
+    torch.save(model.state_dict(), ckpt / f"epoch{epoch}.pt")
+```
+
+Format: `# @output_dir <name>`, repeatable. `<name>` is a `pathlib.Path` to an
+empty, writable folder in the run's directory; everything in it when the run
+ends is the output. Each file is stored once, by its sha256, in the notebook's
+store (a file that did not change between runs is not stored again), and the
+output itself is a manifest of paths, sizes and digests with the run's
+provenance and inputs, so lineage and cache hits work as for any variable. The
+folder is kept even when no cell reads it.
+
+A cell that references `<name>` gets the folder rebuilt as a local `Path`: a
+copy, so writing to it changes nothing upstream.
+
+**A failed run keeps what it wrote.** Its files are stored and its manifest is
+kept as a failed version: never a cache hit and never an input, but lineage
+shows it and `<id>@v=<n>` reads it. A link in the folder, or a file with more
+than one hard link, is left out with a warning.
+
+For now the folder is collected when the run ends, on this server: a cell on a
+remote worker, a `# @loop` cell, or a remote cell reading a folder is refused
+before it runs, and run-all runs such a cell on its own rather than in a batch.
+An R cell gets the folder as a path string and its folder is kept, but cannot
+read another cell's folder yet.
+
 ## @nocache
 
 Force the cell to **always re-execute**: never serve a provenance cache hit.

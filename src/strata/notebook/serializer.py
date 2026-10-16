@@ -50,6 +50,9 @@ class ContentType(StrEnum):
     # An ``@fetch`` delivered to a remote worker: written into the run directory,
     # and the cell gets the ``Path``, as locally.
     FILE_PATH = "file/path"
+    # A ``# @output_dir`` folder: the server rebuilds it beside the manifest file, as
+    # ``<stem>.dir`` for ``<stem>.dirmanifest.json``, and the cell gets that ``Path``.
+    DIR_MANIFEST = "dir/manifest"
 
 
 class StrataRArtifactError(RuntimeError):
@@ -1745,6 +1748,10 @@ def _deserialize_file_path(file_path: Path) -> Path:
     return file_path
 
 
+def _deserialize_dir_manifest(file_path: Path) -> Path:
+    return file_path.with_name(file_path.name.removesuffix(".dirmanifest.json") + ".dir")
+
+
 def _deserialize_rds(file_path: Path) -> Any:
     # Python has no RDS reader; raise the structured error with the suggested fix.
     raise StrataRArtifactError(file_path)
@@ -1984,4 +1991,5 @@ _HANDLERS: dict[str, _Handler] = {
     # Python never produces RDS; harness.R writes it.
     ContentType.RDS_OBJECT: _Handler(None, _deserialize_rds),
     ContentType.FILE_PATH: _Handler(None, _deserialize_file_path),
+    ContentType.DIR_MANIFEST: _Handler(None, _deserialize_dir_manifest),
 }

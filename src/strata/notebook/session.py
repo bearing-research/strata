@@ -646,6 +646,12 @@ class NotebookSession:
             ):
                 references = references + [annotations.loop.carry]
 
+            # ``# @output_dir`` folders are this cell's outputs, bound before it runs.
+            for name in annotations.output_dirs:
+                if name not in defines:
+                    defines.append(name)
+            references = [name for name in references if name not in annotations.output_dirs]
+
             loop = annotations.loop
             seed_from = (
                 (loop.start_from_cell, loop.carry)
@@ -678,7 +684,8 @@ class NotebookSession:
                     per_variant=annotations.per_variant,
                     per_variant_group=annotations.per_variant_group,
                     seed_from=seed_from,
-                    written=[write.variable for write in annotations.table_writes],
+                    kept=[write.variable for write in annotations.table_writes]
+                    + annotations.output_dirs,
                 )
             )
             cell.defines = defines

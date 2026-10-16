@@ -41,6 +41,12 @@ exhaustive commit history.
   record of what the cell wrote, read each file without following links, so a
   link or hard link the cell leaves there is skipped with a warning instead of
   uploading what it points to. (#1201)
+- **`# @output_dir <name>`: a folder whose contents are an output.** The cell
+  gets an empty folder; what is in it when the run ends is stored file by file
+  (once per digest) with a manifest output that has the run's provenance, and a
+  downstream cell gets the folder back as a local path. A failed run keeps its
+  files as a failed version, never a cache hit. Local cells only for now: a
+  remote worker or a `# @loop` cell is refused. (#1203)
 
 ### Changed
 
