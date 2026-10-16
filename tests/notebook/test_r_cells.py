@@ -199,6 +199,23 @@ async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
     assert "hello from a mount" in str(r1.outputs["content"]["preview"])
 
 
+@pytest.mark.asyncio
+async def test_r_cell_output_dir_is_kept(r_notebook):
+    """``# @output_dir`` binds a path string in R, and the folder's files become the output."""
+    import json
+
+    r_src = '# @output_dir out\nwriteLines("from R", file.path(out, "note.txt"))\nn <- 1\n'
+
+    _, session = r_notebook(cells=[("c1", None, r_src, "r")])
+    result = await CellExecutor(session).execute_cell("c1", r_src)
+
+    assert result.success is True, result.error
+    manager = session.get_artifact_manager()
+    manifest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("c1", "out"))
+    files = json.loads(manager.artifact_store.read_blob(manifest.id, manifest.version))["files"]
+    assert list(files) == ["note.txt"]
+
+
 # Error-shape tests
 
 

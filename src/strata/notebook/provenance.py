@@ -42,6 +42,8 @@ def _annotation_fingerprint(source: str) -> str:
         # Where and how a result is written is part of what the run does: changing the
         # target or the mode runs the cell again, so the write is not skipped by a cache hit.
         fingerprint["write_table"] = [w.model_dump() for w in annotations.table_writes]
+    if annotations.output_dirs:
+        fingerprint["output_dir"] = annotations.output_dirs
     if annotations.per_variant:
         # The group decides which upstream binds a scalar; variant keys alone can coincide.
         fingerprint["per_variant"] = annotations.per_variant_group

@@ -248,11 +248,13 @@ def _validate_recorded_inputs(cell: CellState) -> list[AnnotationDiagnostic]:
             "expected `@write_table <var> <catalog>:<namespace>.<table> "
             "append|overwrite|merge`, with `on=<col>,...` after merge"
         ),
+        "output_dir": "expected `@output_dir <name>`, a Python identifier",
     }
     effects = {
         "fetch": "the variable it declares will not exist when the cell runs",
         "dataset": "the variable it declares will not exist when the cell runs",
         "write_table": "no table is written",
+        "output_dir": "the variable it declares will not exist when the cell runs",
     }
     return [
         AnnotationDiagnostic(

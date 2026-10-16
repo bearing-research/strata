@@ -168,7 +168,9 @@ def _line_sep(source: str) -> str:
 
 # Directives that may appear more than once in a cell; the single-line splice in
 # ``set_annotation_directive`` would silently collapse them, so it refuses them.
-_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table", "write_table", "fetch", "dataset"})
+_REPEATABLE_DIRECTIVES = frozenset(
+    {"env", "mount", "table", "write_table", "output_dir", "fetch", "dataset"}
+)
 
 
 def set_annotation_directive(source: str, key: str, value: str) -> str:
@@ -249,6 +251,9 @@ class CellAnnotations:
     mounts: list[MountSpec] = field(default_factory=list)
     tables: list[TableSpec] = field(default_factory=list)
     table_writes: list[TableWriteSpec] = field(default_factory=list)
+    # ``# @output_dir <name>``: an empty folder bound to ``<name>``; what is in it when the
+    # run ends is the output, read downstream as a local path.
+    output_dirs: list[str] = field(default_factory=list)
     fetches: list[FetchSpec] = field(default_factory=list)
     datasets: list[DatasetSpec] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -324,9 +329,9 @@ class CellAnnotations:
 def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
     """Return ``(lineno, directive, value)`` for each unparseable input or output directive.
 
-    ``@fetch``, ``@dataset`` and ``@write_table`` are dropped when malformed rather
-    than guessed at, so the cell would fail on an unexplained ``NameError``, or write
-    no table. The validator turns these into diagnostics.
+    ``@fetch``, ``@dataset``, ``@write_table`` and ``@output_dir`` are dropped when
+    malformed rather than guessed at, so the cell would fail on an unexplained
+    ``NameError``, or write no table. The validator turns these into diagnostics.
     """
     unreadable: list[tuple[int, str, str]] = []
     for lineno, line in iter_annotation_block(source):
@@ -339,6 +344,8 @@ def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
         elif key == "dataset" and _parse_dataset_annotation(value) is None:
             unreadable.append((lineno, key, value))
         elif key == "write_table" and _parse_write_table_annotation(value) is None:
+            unreadable.append((lineno, key, value))
+        elif key == "output_dir" and not value.isidentifier():
             unreadable.append((lineno, key, value))
     return unreadable
 
@@ -376,6 +383,10 @@ def parse_annotations(source: str) -> CellAnnotations:
             write = _parse_write_table_annotation(value)
             if write is not None:
                 result.table_writes.append(write)
+
+        elif key == "output_dir":
+            if value.isidentifier() and value not in result.output_dirs:
+                result.output_dirs.append(value)
 
         elif key == "fetch":
             fetch = _parse_fetch_annotation(value)

@@ -41,7 +41,7 @@ from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 # image). Batch frames are small dicts.
 from strata.artifact.store import ArtifactVersion, StagedVersion, get_artifact_store
 from strata.artifact.store import TransformSpec as ArtifactTransformSpec
-from strata.notebook import console_relay
+from strata.notebook import console_relay, output_dirs
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.credentials import CredentialResolver
@@ -1674,6 +1674,10 @@ class CellExecutor:
                     duration_ms,
                     execution_method,
                 ).apply_remote_metadata(**remote_metadata)
+                if not exec_result.success:
+                    self._keep_failed_output_dirs(
+                        cell_id, source, result_output_dir, provenance_hash, env_hash
+                    )
 
                 # ⑤ Store artifacts for consumed variables.
                 if exec_result.success:
@@ -2318,6 +2322,10 @@ class CellExecutor:
                 exec_result = self._parse_result(
                     cell_id, result, duration_ms, execution_method
                 ).apply_remote_metadata(**remote_metadata)
+                if not exec_result.success:
+                    self._keep_failed_output_dirs(
+                        cell_id, source, result_output_dir, provenance_hash, env_hash
+                    )
 
                 if exec_result.success:
                     self.session.record_successful_execution_provenance(
@@ -2675,6 +2683,17 @@ class CellExecutor:
         language: str = "python",
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through an external notebook executor over HTTP."""
+        # Before anything runs: a worker cannot return a folder yet, so a long run would be lost.
+        if parse_annotations(source).output_dirs:
+            raise RuntimeError(
+                "# @output_dir runs on this server only for now; a remote worker cannot "
+                "return the folder yet"
+            )
+        for name, spec in input_specs.items():
+            if spec.get("content_type") == output_dirs.CONTENT_TYPE:
+                raise RuntimeError(
+                    f"{name!r} is an output folder, which cannot be sent to a remote worker yet"
+                )
         for mount in mount_specs:
             if mount.uri.startswith("file://"):
                 raise RuntimeError(
@@ -4075,6 +4094,12 @@ class CellExecutor:
             }
             for name, rm in resolved_mounts.items()
         }
+        # ``# @output_dir`` folders reach the cell as writable mounts in its run directory,
+        # made here so the run directory's hand-over covers them.
+        for name in parse_annotations(source).output_dirs:
+            folder = output_dir / output_dirs.OUTPUT_DIRS / name
+            folder.mkdir(parents=True, exist_ok=True)
+            manifest_mounts[name] = {"uri": "", "mode": "rw", "local_path": str(folder)}
         manifest: dict[str, Any] = {
             "source": source,
             "inputs": input_specs,
@@ -4470,8 +4495,7 @@ class CellExecutor:
                 content_type = params.get("content_type") or content_type
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
-            with open(input_file, "wb") as f:
-                f.write(blob_data)
+            self._write_input_file(input_file, blob_data, content_type)
             return {
                 "content_type": content_type,
                 "file": f"{safe_filename_stem(file_stem)}{ext}",
@@ -4500,8 +4524,9 @@ class CellExecutor:
                 content_type = params.get("content_type") or content_type
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
-            with open(input_file, "wb") as f:
-                f.write(artifact_mgr.load_artifact_data(art_id, version))
+            self._write_input_file(
+                input_file, artifact_mgr.load_artifact_data(art_id, version), content_type
+            )
             return {"content_type": content_type, "file": f"{safe_filename_stem(file_stem)}{ext}"}
 
         def _attach_injected(var_name: str, spec: dict[str, Any]) -> None:
@@ -4722,7 +4747,32 @@ class CellExecutor:
             ".rds",
         ]
 
+        output_dir_names = set(parse_annotations(source or cell.source).output_dirs)
         for var_name in consumed_vars | leaf_vars:
+            if var_name in output_dir_names:
+                try:
+                    staged.append(
+                        self._stage_output_dir(
+                            cell_id,
+                            var_name,
+                            output_dir,
+                            provenance_hash,
+                            input_versions,
+                            source_hash=source_hash,
+                            source=source,
+                            env_hash=env_hash,
+                            variant=variant,
+                        )
+                    )
+                except UnsafeRunFile:
+                    artifact_mgr.discard_cell_outputs(staged)
+                    raise
+                except Exception:
+                    logger.exception("Failed to keep output folder %s of %s", var_name, cell_id)
+                    all_stored = False
+                    break
+                staged_names.append((var_name, output_dirs.CONTENT_TYPE))
+                continue
             # Python writes a case-safe stem (``Data-<hash>.json``), R the plain name. Try every
             # safe-stem candidate, then the plain name only if no safe-stem file exists at all
             # (never per-ext), so a case-differing sibling like ``data.arrow`` is never taken
@@ -4838,6 +4888,73 @@ class CellExecutor:
             )
 
         return True
+
+    def _write_input_file(self, path: Path, blob: bytes, content_type: str) -> None:
+        """Write an input's bytes for the harness; an output folder is rebuilt beside them."""
+        path.write_bytes(blob)
+        if content_type == output_dirs.CONTENT_TYPE:
+            folder = path.with_name(path.name.removesuffix(output_dirs.EXTENSION) + ".dir")
+            output_dirs.materialize(self.session.get_artifact_manager(), blob, folder)
+
+    def _stage_output_dir(
+        self,
+        cell_id: str,
+        name: str,
+        output_dir: Path,
+        provenance_hash: str,
+        input_versions: dict[str, str],
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+        variant: str | None = None,
+    ) -> StagedVersion:
+        """Keep a ``# @output_dir`` folder's files and stage its manifest as the output."""
+        artifact_mgr = self.session.get_artifact_manager()
+        manifest = output_dirs.collect(
+            artifact_mgr, cell_id, output_dir / output_dirs.OUTPUT_DIRS / name
+        )
+        return artifact_mgr.stage_cell_output(
+            cell_id=cell_id,
+            variable_name=name,
+            blob_data=manifest,
+            content_type=output_dirs.CONTENT_TYPE,
+            provenance_hash=derive_subkey(provenance_hash, name),
+            input_versions=input_versions,
+            source_hash=source_hash,
+            source=source,
+            env_hash=env_hash,
+            variant=variant,
+        )
+
+    def _keep_failed_output_dirs(
+        self, cell_id: str, source: str, output_dir: Path, provenance_hash: str, env_hash: str
+    ) -> None:
+        """Keep what a failed run left in its ``# @output_dir`` folders, as failed versions.
+
+        A failed version is never a cache hit or an input; lineage shows it, and it can be
+        read by its ``<id>@v=<n>``. Best effort: the run has already failed.
+        """
+        names = parse_annotations(source).output_dirs
+        if not names:
+            return
+        artifact_mgr = self.session.get_artifact_manager()
+        input_versions = self._input_refs(cell_id)
+        for name in names:
+            try:
+                staged = self._stage_output_dir(
+                    cell_id,
+                    name,
+                    output_dir,
+                    provenance_hash,
+                    input_versions,
+                    source_hash=compute_source_hash(source),
+                    source=source,
+                    env_hash=env_hash,
+                )
+                artifact_mgr.discard_cell_outputs([staged])
+            except Exception:
+                logger.exception("Failed to keep output folder %s of failed %s", name, cell_id)
 
     def _write_cell_tables(
         self, table_writes: list[TableWriteSpec], outputs: dict[str, StagedOutput]
@@ -5513,6 +5630,13 @@ class CellExecutor:
                     f"'{effective_worker}'. Remote-worker loops are not in "
                     f"the Phase 1 scope."
                 ),
+                execution_method="loop",
+            )
+        if annotations.output_dirs:
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error="# @output_dir does not work in a # @loop cell yet.",
                 execution_method="loop",
             )
 
@@ -6576,7 +6700,7 @@ class CellExecutor:
         content_type = _artifact_content_type(art)
         ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
         file_name = f"{safe_filename_stem(var_name)}{ext}"
-        (target_dir / file_name).write_bytes(blob)
+        self._write_input_file(target_dir / file_name, blob, content_type)
         return {"content_type": content_type, "file": file_name}
 
     def _upstream_artifact_uris(self, cell_id: str) -> dict[str, dict[str, str]]:
@@ -6915,6 +7039,7 @@ _ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
     "module/import": ".module.json",
     "module/cell": ".cell_module.json",
     "module/cell-instance": ".cell_instance.pickle",
+    output_dirs.CONTENT_TYPE: output_dirs.EXTENSION,
 }
 
 
