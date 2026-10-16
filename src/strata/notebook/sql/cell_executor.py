@@ -285,7 +285,7 @@ async def execute_sql_cell(
                     session=session,
                     cell_id=cell_id,
                 )
-                return _report_snapshots(_report_pin(hit, pin), pinned_lake)
+                return _with_reads(_report_snapshots(_report_pin(hit, pin), pinned_lake), lake)
 
     # ---- execute query ---------------------------------------------
     try:
@@ -362,7 +362,7 @@ async def execute_sql_cell(
         },
         pin,
     )
-    return _report_snapshots(result, pinned_lake)
+    return _with_reads(_report_snapshots(result, pinned_lake), lake)
 
 
 # --- helpers --------------------------------------------------------------
@@ -1146,6 +1146,12 @@ def _snapshot_params(
     if lake is not None:
         return {PARAM_BASIS: basis, PARAM_SNAPSHOT_IDS: json.dumps(snapshot_rows(lake.snapshots))}
     return None
+
+
+def _with_reads(result: dict[str, Any], lake: Lake | None) -> dict[str, Any]:
+    """Add the catalog tables the query read, for the table index."""
+    result["table_reads"] = lake.reads if lake is not None else []
+    return result
 
 
 def _report_snapshots(result: dict[str, Any], lake: Lake | None) -> dict[str, Any]:

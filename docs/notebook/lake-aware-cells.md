@@ -194,6 +194,32 @@ hence a different (missing) cache entry, hence a recompute. This is the same
 provenance machinery that makes ordinary cells stale when their source or
 inputs change; `@table` adds the lake snapshot to the mix.
 
+## Which cells read a table
+
+`.strata/tables/index.json` lists, for each cell, the tables it read on its
+last successful run (a cache hit included) and the snapshot of each. A SQL
+cell's catalog tables are listed too. A tool that shows a table's readers
+reads this file rather than parsing cell sources:
+
+```json
+{
+  "c1a2b3c4": [
+    {
+      "uri": "file:///tmp/strata-demo/warehouse#shop.orders",
+      "catalog": null,
+      "table": "shop.orders",
+      "snapshot_id": 1292033279574548405
+    }
+  ]
+}
+```
+
+`uri` is as the cell wrote it; a SQL cell's table appears as
+`<catalog>:<namespace>.<table>`. `catalog` is the configured catalog the URI
+names, or `null` for a warehouse path. `snapshot_id` is `null` for a table
+with no snapshots yet. A failed run leaves the cell's entry as it was, and a
+cell that stops reading tables, or is deleted, drops out.
+
 ## Gotchas
 
 - **Injected vars don't flow downstream.** `orders` and `orders_snapshot` live

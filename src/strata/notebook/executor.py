@@ -345,6 +345,8 @@ class _CellProvenance:
     dataset_fingerprints: list[str] = field(default_factory=list)
     datasets: dict[str, DatasetInput] = field(default_factory=dict)
     dataset_error: str | None = None
+    # The ``@table`` reads, as ``.strata/tables/index.json`` entries (see table_index.py).
+    table_reads: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(kw_only=True)
@@ -1141,6 +1143,15 @@ class CellExecutor:
             tables += lake_tables(self.session.notebook_state, source)
             config = with_notebook_catalogs(self._lake_config(), self.session.notebook_state)
         table_fingerprints, table_snapshots = await self._fingerprint_tables(tables, config)
+        table_reads = []
+        if annotations.tables:
+            from strata.notebook.table_index import table_read
+
+            read_config = config or self._lake_config()
+            table_reads = [
+                table_read(spec.uri, table_snapshots.get(spec.name), read_config)
+                for spec in annotations.tables
+            ]
         (
             fetch_fingerprints,
             fetched,
@@ -1188,6 +1199,7 @@ class CellExecutor:
             dataset_fingerprints=dataset_fingerprints,
             datasets=datasets,
             dataset_error=dataset_error,
+            table_reads=table_reads,
         )
 
     # ------------------------------------------------------------------
@@ -1618,6 +1630,7 @@ class CellExecutor:
                     provenance_hash,
                     source_hash,
                     env_hash,
+                    table_reads=prov.table_reads,
                 )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -1712,6 +1725,7 @@ class CellExecutor:
                         provenance_hash,
                         source_hash,
                         env_hash,
+                        table_reads=prov.table_reads,
                     )
                     store_error: str | None = None
                     try:
@@ -2045,6 +2059,7 @@ class CellExecutor:
                     prov.provenance_hash,
                     compute_source_hash(source),
                     prov.env_hash,
+                    table_reads=prov.table_reads,
                 )
             except Exception:
                 logger.exception("Failed to record fan-out base provenance for cell %s", cell_id)
@@ -2259,6 +2274,7 @@ class CellExecutor:
                     provenance_hash,
                     source_hash,
                     env_hash,
+                    table_reads=prov.table_reads,
                 )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -2348,6 +2364,7 @@ class CellExecutor:
                         provenance_hash,
                         source_hash,
                         env_hash,
+                        table_reads=prov.table_reads,
                     )
                     store_error = None
                     try:
@@ -4250,6 +4267,7 @@ class CellExecutor:
                 standard_provenance,
                 prov.source_hash,
                 prov.env_hash,
+                table_reads=prov.table_reads,
             )
 
         return CellExecutionResult(
@@ -4307,6 +4325,7 @@ class CellExecutor:
                 prov.provenance_hash,
                 prov.source_hash,
                 prov.env_hash,
+                table_reads=prov.table_reads + result_dict.get("table_reads", []),
             )
             # Back the result-table preview with an artifact. Otherwise `save_cell_output` refuses
             # it, export drops it (``markdown_text`` is stripped at persist time and re-fetched
@@ -4395,6 +4414,7 @@ class CellExecutor:
                 prov.provenance_hash,
                 prov.source_hash,
                 prov.env_hash,
+                table_reads=prov.table_reads,
             )
 
         return CellExecutionResult(
@@ -6107,6 +6127,7 @@ class CellExecutor:
             cell_provenance,
             source_hash,
             env_hash,
+            table_reads=prov.table_reads,
         )
         raw_displays = final_result.get("displays") if final_result else None
         display_outputs = (
@@ -7061,7 +7082,11 @@ class CellExecutor:
         # Record provenance + execution as single-cell does.
         try:
             self.session.record_successful_execution_provenance(
-                cell_id, provenance_hash, source_hash, env_hash
+                cell_id,
+                provenance_hash,
+                source_hash,
+                env_hash,
+                table_reads=prov.table_reads,
             )
         except Exception:
             pass

@@ -53,6 +53,8 @@ class Lake:
     fingerprints: list[str] = field(default_factory=list)
     # (namespace, table) → the snapshot the query reads.
     snapshots: dict[tuple[str, str], int] = field(default_factory=dict)
+    # Each catalog table read, as a table-index entry (see notebook/table_index.py).
+    reads: list[dict[str, Any]] = field(default_factory=list)
     # Service mode only (see duckdb._confine): each mount's root and each catalog
     # table's location, readable once confined.
     locations: list[str] = field(default_factory=list)
@@ -183,6 +185,7 @@ def resolve_lake(
             )
         except CredentialError as exc:
             raise LakeError(f"catalog {catalog!r}: {exc}") from exc
+        from strata.notebook.table_index import table_read
         from strata.notebook.tables import (
             fingerprint_tables,
             random_fingerprint,
@@ -211,6 +214,7 @@ def resolve_lake(
                     )
                 except ValueError as exc:
                     raise LakeError(f"table {table_spec.uri}: {exc}") from exc
+            lake.reads.append(table_read(table_spec.uri, snapshot, config))
             if snapshot is None:
                 # No snapshots yet: read it unpinned, and never cache what was read.
                 lake.fingerprints.append(f"{table_spec.name}:table:empty:{random_fingerprint()}")
