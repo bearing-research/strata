@@ -48,7 +48,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (once per digest) with a manifest output that has the run's provenance, and a
   downstream cell gets the folder back as a local path. A failed run keeps its
   files as a failed version, never a cache hit. Local cells only for now: a
-  remote worker or a `# @loop` cell is refused. (#PR)
+  remote worker or a `# @loop` cell is refused. (#1203)
 
 ### Changed
 
