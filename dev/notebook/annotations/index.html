@@ -3385,11 +3385,16 @@ copy, so writing to it changes nothing upstream.</p>
 kept as a failed version: never a cache hit and never an input, but lineage
 shows it and <code>&lt;id&gt;@v=&lt;n&gt;</code> reads it. A link in the folder, or a file with more
 than one hard link, is left out with a warning.</p>
-<p>For now the folder is collected when the run ends, on this server: a cell on a
-remote worker, a <code># @loop</code> cell, or a remote cell reading a folder is refused
-before it runs, and run-all runs such a cell on its own rather than in a batch.
-An R cell gets the folder as a path string and its folder is kept, but cannot
-read another cell's folder yet.</p>
+<p><strong>On a remote worker</strong> the folder comes back with the run's result, each file
+streamed, so a checkpoint is not held in memory and is not limited by
+<code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code>. A failed run on a worker keeps its
+files the same way, but a worker that is lost, or a run that times out, returns
+nothing yet. A worker too old to return folders is refused before the cell runs.</p>
+<p>For now the folder is collected when the run ends: a <code># @loop</code> cell, or a cell
+on a remote worker reading another cell's folder, is refused before it runs,
+and run-all runs such a cell on its own rather than in a batch. An R cell gets
+the folder as a path string and its folder is kept, but cannot read another
+cell's folder yet.</p>
 <h2 id="nocache">@nocache<a class="headerlink" href="#nocache" title="Permanent link">&para;</a></h2>
 <p>Force the cell to <strong>always re-execute</strong>: never serve a provenance cache hit.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># @nocache</span>
