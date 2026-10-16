@@ -42,7 +42,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `PermissionError` writing into the server's directory. The sync back, and the
   record of what the cell wrote, read each file without following links, so a
   link or hard link the cell leaves there is skipped with a warning instead of
-  uploading what it points to. (#PR)
+  uploading what it points to. (#1201)
 
 ### Changed
 
