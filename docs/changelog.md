@@ -65,7 +65,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   sent again; a stalled upload times out instead of holding the result; the
   server writes uploads off its event loop and reads each once; only declared
   folders are accepted; a folder the cell emptied is empty, not every file it
-  ever sent; and a cancelled run keeps what arrived, like a lost one. (#PR)
+  ever sent; and a cancelled run keeps what arrived, like a lost one. (#1206)
 
 ### Changed
 
