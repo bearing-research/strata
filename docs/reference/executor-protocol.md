@@ -48,6 +48,7 @@ Liveness + capabilities probe. No auth.
       "output_format": "notebook-output-bundle@v1",
       "pull_model": true,
       "cancel": true,
+      "output_dirs": true,
       "locked_environments": true,
       "locked_r_environments": true,
       "languages": ["python", "r"]
@@ -76,6 +77,8 @@ Liveness + capabilities probe. No auth.
 A cell runs with the worker's environment minus the worker's own secrets: `strata-worker` takes its token and credentials out of the process environment at startup and holds them in memory, so a cell cannot read them from its own environment or through `/proc`. `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the rest, as [the server's allowlist](../deployment/service-mode.md#what-a-cell-can-read) narrows a cell there. A cell gets what its manifest carries.
 
 `languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know.
+
+`output_dirs: true` says the worker returns a cell's `# @output_dir` folders in its bundle ([below](#output-bundle-notebook-output-bundlev1)). It makes each folder the cell names, empty, in its run directory, and gives the cell its path as a read-write mount of that name. Strata refuses to send a cell with `# @output_dir` to a worker that does not advertise it, since the cell would fail on the missing name after running.
 
 `locked_r_environments: true` says the worker restores an R cell's lock, the notebook's `renv.lock`, when the request carries one ([below](#the-r-environment-block)). It works like `locked_environments`: Strata sends the R block only to a worker that advertises it, and the reference worker reports it only when its `Rscript` can load `renv`.
 
@@ -473,6 +476,7 @@ files/                  - one file per serialized variable
   result.arrow
   log.json
   __display__0.png      - the cell's last display, as variable "_"
+dirs/<name>/<path>      - each file of each # @output_dir folder (output_dirs workers)
 ```
 
 **`manifest.json`:**
@@ -508,8 +512,16 @@ be a list, possibly empty.
 
 `hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
 
+`output_dirs` (from a worker that advertises it) indexes the `dirs/` members:
+`{"<name>": {"<path>": <size in bytes>}}`, with `<path>` relative to the folder and
+`/`-separated. Each file is one member, read by streaming, so it is not bound by
+`STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES`. A path that is absolute or contains
+`..`, or a member whose size differs from the index, fails the whole bundle. A
+worker should leave out links, as the reference worker does.
+
 When the cell raises, the bundle is still returned with `"success": false`,
-`error` and `traceback` set, and `variables` usually empty.
+`error` and `traceback` set, and `variables` usually empty. Its `output_dirs`
+are still sent: the notebook keeps what a failed run wrote.
 
 ## Error envelope
 

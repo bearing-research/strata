@@ -485,11 +485,17 @@ kept as a failed version: never a cache hit and never an input, but lineage
 shows it and `<id>@v=<n>` reads it. A link in the folder, or a file with more
 than one hard link, is left out with a warning.
 
-For now the folder is collected when the run ends, on this server: a cell on a
-remote worker, a `# @loop` cell, or a remote cell reading a folder is refused
-before it runs, and run-all runs such a cell on its own rather than in a batch.
-An R cell gets the folder as a path string and its folder is kept, but cannot
-read another cell's folder yet.
+**On a remote worker** the folder comes back with the run's result, each file
+streamed, so a checkpoint is not held in memory and is not limited by
+`STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES`. A failed run on a worker keeps its
+files the same way, but a worker that is lost, or a run that times out, returns
+nothing yet. A worker too old to return folders is refused before the cell runs.
+
+For now the folder is collected when the run ends: a `# @loop` cell, or a cell
+on a remote worker reading another cell's folder, is refused before it runs,
+and run-all runs such a cell on its own rather than in a batch. An R cell gets
+the folder as a path string and its folder is kept, but cannot read another
+cell's folder yet.
 
 ## @nocache
 

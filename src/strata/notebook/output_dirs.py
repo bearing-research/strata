@@ -22,7 +22,6 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from strata.artifact.store import TransformSpec
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,23 @@ EXTENSION = ".dirmanifest.json"
 _CHUNK = 1 << 20
 
 
-def _regular_files(root: Path) -> list[str]:
+def mount_entries(source: str, run_dir: Path) -> dict[str, dict[str, str]]:
+    """The run's ``# @output_dir`` folders as manifest mount entries, each folder made.
+
+    The harness binds a read-write mount as a writable path, so every harness (cold,
+    warm pool, R, a worker's) gives the cell its folder unchanged.
+    """
+    from strata.notebook.annotations import parse_annotations
+
+    entries: dict[str, dict[str, str]] = {}
+    for name in parse_annotations(source).output_dirs:
+        folder = run_dir / OUTPUT_DIRS / name
+        folder.mkdir(parents=True, exist_ok=True)
+        entries[name] = {"uri": "", "mode": "rw", "local_path": str(folder)}
+    return entries
+
+
+def regular_files(root: Path) -> list[str]:
     """Each regular file under *root*, as a POSIX path relative to it; links are not followed."""
     found: list[str] = []
     for dirpath, _dirnames, filenames in os.walk(root):
@@ -62,6 +77,9 @@ def _store_file(artifact_mgr: Any, cell_id: str, folder: Path, rel: str) -> dict
     existing = store.get_latest_version(artifact_id)
     if existing is not None and existing.state == "ready":
         return {"sha256": sha256, "size": size, "version": existing.version}
+
+    # Here, not at the top: a worker imports this module and has no artifact store.
+    from strata.artifact.store import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,
@@ -98,7 +116,7 @@ def collect(artifact_mgr: Any, cell_id: str, folder: Path) -> bytes:
     """
     files: dict[str, dict[str, Any]] = {}
     if folder.is_dir():
-        for rel in _regular_files(folder):
+        for rel in regular_files(folder):
             try:
                 files[rel] = _store_file(artifact_mgr, cell_id, folder, rel)
             except UnsafeRunFile:
