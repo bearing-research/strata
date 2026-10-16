@@ -40,11 +40,16 @@ def mount_entries(source: str, run_dir: Path) -> dict[str, dict[str, str]]:
     """
     from strata.notebook.annotations import parse_annotations
 
+    root = os.path.normpath(run_dir / OUTPUT_DIRS)
     entries: dict[str, dict[str, str]] = {}
     for name in parse_annotations(source).output_dirs:
-        folder = run_dir / OUTPUT_DIRS / name
-        folder.mkdir(parents=True, exist_ok=True)
-        entries[name] = {"uri": "", "mode": "rw", "local_path": str(folder)}
+        # The parser takes identifiers only; on a worker the source is the request's, so
+        # the folder is still checked to stay under the run directory.
+        folder = os.path.normpath(os.path.join(root, name))
+        if not folder.startswith(root + os.sep):
+            raise ValueError(f"# @output_dir name {name!r} leaves the run directory")
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        entries[name] = {"uri": "", "mode": "rw", "local_path": folder}
     return entries
 
 

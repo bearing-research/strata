@@ -344,3 +344,22 @@ class TestOnAWorker:
         manifest, state = _manifest(session, version=1)
         assert state == "failed"
         assert list(manifest["files"]) == ["e0.bin"]
+
+
+def test_a_folder_name_cannot_leave_the_run_directory(tmp_path, monkeypatch):
+    """The parser takes identifiers only; the check holds even if it did not."""
+    from strata.notebook import annotations
+    from strata.notebook.output_dirs import mount_entries
+
+    real = annotations.parse_annotations
+
+    def loose(source):
+        parsed = real(source)
+        parsed.output_dirs = ["../escape"]
+        return parsed
+
+    monkeypatch.setattr(annotations, "parse_annotations", loose)
+
+    with pytest.raises(ValueError, match="leaves the run directory"):
+        mount_entries("x = 1", tmp_path / "run")
+    assert not (tmp_path / "escape").exists()
