@@ -68,7 +68,7 @@ exhaustive commit history.
   the tables its last successful run read (`@table` and a SQL cell's catalog
   tables alike), as written, with the catalog, the `<namespace>.<table>`
   identifier and the snapshot read, so a tool can list a table's readers
-  without parsing cell sources. (#PR)
+  without parsing cell sources. (#1207)
 
 ### Changed
 
