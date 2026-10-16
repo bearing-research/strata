@@ -30,6 +30,12 @@ exhaustive commit history.
 
 ### Changed
 
+- **A catalog names its Strata credential with `strata_credential`.**
+  `credential` is pyiceberg's own key, a REST catalog's OAuth
+  `client_id:secret` (Polaris's quickstart sets it), and now reaches the catalog
+  untouched; before, Strata read it as a credential name and failed with an
+  error that echoed the secret. A `credential` that names a Strata credential is
+  refused at startup, naming `strata_credential`. (#1200)
 - **Read-only remote mounts share one bounded cache per machine.** Each remote
   file is kept once, by URI and version, and a mount's view of its prefix is
   hard links to those copies: a prefix with one new file downloads that file,

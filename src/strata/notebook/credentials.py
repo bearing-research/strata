@@ -1,8 +1,9 @@
 """Named credentials: data sources configured once, referenced by name.
 
-A mount, connection or catalog says ``credential = "lab-bucket"`` and never
-carries a secret. ``notebook_credentials`` maps each name to fields (fsspec
-``storage_options`` or driver ``auth``) whose values are ``${VAR}`` references::
+A mount or connection says ``credential = "lab-bucket"`` (a catalog,
+``strata_credential``) and never carries a secret. ``notebook_credentials`` maps
+each name to fields (fsspec ``storage_options``, driver ``auth`` or catalog
+properties) whose values are ``${VAR}`` references::
 
     STRATA_NOTEBOOK_CREDENTIALS='{"lab-bucket": {"key": "${LAB_AWS_KEY}",
                                                  "secret": "${LAB_AWS_SECRET}"}}'
@@ -146,12 +147,20 @@ class CredentialResolver:
         return merged
 
 
+CATALOG_CREDENTIAL_KEY = "strata_credential"
+"""A catalog's named credential. Not ``credential``: that is pyiceberg's REST OAuth secret."""
+
+
 def resolve_catalog_properties(
     properties: Mapping[str, str], resolver: CredentialResolver
 ) -> dict[str, str]:
-    """A catalog's pyiceberg properties with its ``credential`` resolved beneath its own keys."""
+    """A catalog's pyiceberg properties with its ``strata_credential`` resolved beneath them.
+
+    Any ``credential`` key is pyiceberg's own (a REST catalog's ``client_id:secret``) and
+    passes through untouched.
+    """
     props = dict(properties)
-    name = props.pop("credential", None)
+    name = props.pop(CATALOG_CREDENTIAL_KEY, None)
     if not name:
         return props
     return {**resolver.resolve(name), **props}

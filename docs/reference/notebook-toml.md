@@ -135,12 +135,15 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 
 The `@mount` annotation takes the name too: `# @mount raw s3://lab-bucket/raw ro credential=lab-bucket`.
 
-A named catalog in the server's `STRATA_CATALOGS` takes the same key, so the
-catalog's secrets (a SQL catalog's database URI, a REST token, `s3.*` keys)
-stay out of the catalog config:
+A named catalog in the server's `STRATA_CATALOGS` takes one as
+`strata_credential`, so the catalog's secrets (a SQL catalog's database URI, a
+REST token, `s3.*` keys) stay out of the catalog config. Not `credential`: that
+is pyiceberg's own key, a REST catalog's OAuth `client_id:secret`, and it passes
+through to the catalog untouched (as a property, or as a named credential's
+field):
 
 ```bash
-STRATA_CATALOGS='{"lake": {"type": "sql", "warehouse": "s3://lake/wh", "credential": "lake-db"}}'
+STRATA_CATALOGS='{"lake": {"type": "sql", "warehouse": "s3://lake/wh", "strata_credential": "lake-db"}}'
 STRATA_NOTEBOOK_CREDENTIALS='{"lake-db": {"uri": "${LAKE_DSN}", "s3.access-key-id": "${LAKE_KEY}"}}'
 ```
 
@@ -217,7 +220,7 @@ connections attach, instead of the server's `STRATA_CATALOGS`:
 type = "glue"
 "glue.id" = "123456789012"
 "glue.region" = "eu-west-1"
-credential = "lake-ro"
+strata_credential = "lake-ro"
 
 [connections.lake]
 driver = "duckdb"
@@ -226,7 +229,7 @@ catalog = "lake"
 ```
 
 Each entry is a set of PyIceberg catalog properties, the same shape as an
-entry in `STRATA_CATALOGS`, and `credential` names a server-defined
+entry in `STRATA_CATALOGS`, and `strata_credential` names a server-defined
 [credential](#named-credentials) so no secret is written here. A notebook entry
 wins over a server catalog of the same name, as a notebook's workers do.
 

@@ -172,7 +172,7 @@ class TestANamedCredential:
         cache.mkdir(exist_ok=True)
         config = StrataConfig(
             cache_dir=cache,
-            catalogs={"north": {**props, "credential": "north-db"}},
+            catalogs={"north": {**props, "strata_credential": "north-db"}},
             notebook_credentials=credentials,
         )
         return config, uri
@@ -193,7 +193,7 @@ class TestANamedCredential:
         assert _rows(config, "north:taxi.trips") == [1, 2]
         assert "uri" not in config.catalogs["north"]
         assert seen[0]["s3.access-key-id"] == "from-the-vault"
-        assert "credential" not in seen[0]
+        assert "strata_credential" not in seen[0]
 
     def test_a_notebook_s_env_resolves_it_and_never_reaches_another_reader(
         self, tmp_path, monkeypatch
@@ -231,6 +231,47 @@ class TestANamedCredential:
 
         with pytest.raises(ValueError, match="credential 'north-db' is not defined"):
             resolve_table_snapshot(TableSpec(name="trips", uri="north:taxi.trips"), config)
+
+
+class TestTheRestCatalogsOwnCredential:
+    """pyiceberg's REST catalog reads ``credential`` as ``client_id:secret``; Strata's key is
+    ``strata_credential``, so a catalog configured as pyiceberg documents it loads."""
+
+    def test_it_reaches_pyiceberg_untouched(self, monkeypatch):
+        from strata.iceberg import catalog as catalog_module
+        from strata.iceberg.catalog import PyIcebergCatalog
+
+        loaded = []
+        monkeypatch.setattr(
+            catalog_module, "load_catalog", lambda name, **props: loaded.append(props)
+        )
+        config = StrataConfig(
+            catalogs={
+                "lake": {"type": "rest", "uri": "http://polaris", "credential": "root:s3cret"}
+            }
+        )
+
+        PyIcebergCatalog(config)._get_named_catalog("lake")
+
+        assert loaded[0]["credential"] == "root:s3cret"
+
+    def test_beside_a_strata_credential(self):
+        from strata.notebook.credentials import CredentialResolver, resolve_catalog_properties
+
+        resolver = CredentialResolver({"lake-io": {"s3.access-key-id": "AK"}})
+        properties = resolve_catalog_properties(
+            {"credential": "root:s3cret", "strata_credential": "lake-io"}, resolver
+        )
+
+        assert properties == {"credential": "root:s3cret", "s3.access-key-id": "AK"}
+
+    def test_naming_a_strata_credential_with_it_is_refused(self):
+        """The old spelling would send the name to the catalog as an OAuth secret."""
+        with pytest.raises(ValueError, match="set strata_credential instead"):
+            StrataConfig(
+                catalogs={"lake": {"type": "rest", "uri": "http://p", "credential": "lake-ro"}},
+                notebook_credentials={"lake-ro": {"token": "t"}},
+            )
 
 
 class TestFileRouting:
