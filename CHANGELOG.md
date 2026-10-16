@@ -58,6 +58,12 @@ exhaustive commit history.
   file, kept as a failed version. The result names those files instead of
   carrying them. `STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS` (5) sets how often the
   worker checks. (#1205)
+- **Streaming `# @output_dir` files, hardened.** A file renamed or removed while
+  the worker polls no longer fails the run; a file the server refuses is not
+  sent again; a stalled upload times out instead of holding the result; the
+  server writes uploads off its event loop and reads each once; only declared
+  folders are accepted; a folder the cell emptied is empty, not every file it
+  ever sent; and a cancelled run keeps what arrived, like a lost one. (#PR)
 
 ### Changed
 

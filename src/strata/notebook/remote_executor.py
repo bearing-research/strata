@@ -250,25 +250,35 @@ class _OutputDirStreamer:
 
     A file is settled when its size and mtime held from one poll to the next; it is sent
     again if it changes later. What the server stored survives a worker lost afterwards.
-    An upload that fails (another node, the network) is tried at the next poll, and a file
-    never stored goes in the bundle.
+    An upload that fails on the network or a 5xx is tried at the next poll; one the server
+    refuses (another node, too large) is not sent again. A file never stored goes in the
+    bundle. Nothing here fails the run: the bundle is the fallback.
     """
+
+    # Per operation, not in total: a multi-GB upload takes as long as it takes, but a
+    # stalled one must not keep the result from going back.
+    _TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=300.0, pool=10.0)
 
     def __init__(self, root: Path, url: str):
         self._root = root
         self._url = url
         self._seen: dict[tuple[str, str], tuple[int, int]] = {}
         self._sent: dict[tuple[str, str], tuple[int, int]] = {}
+        self._refused: set[tuple[str, str]] = set()
+
+    def _folders(self) -> list[Path]:
+        if not self._root.is_dir():
+            return []
+        return [f for f in self._root.iterdir() if f.is_dir() and not f.is_symlink()]
 
     def _states(self) -> dict[tuple[str, str], tuple[int, int]]:
         states: dict[tuple[str, str], tuple[int, int]] = {}
-        if not self._root.is_dir():
-            return states
-        for folder in self._root.iterdir():
-            if not folder.is_dir() or folder.is_symlink():
-                continue
+        for folder in self._folders():
             for rel in output_dirs.regular_files(folder):
-                st = (folder / rel).lstat()
+                try:
+                    st = (folder / rel).lstat()
+                except FileNotFoundError:
+                    continue  # renamed or removed by the running cell
                 states[(folder.name, rel)] = (st.st_size, st.st_mtime_ns)
         return states
 
@@ -295,34 +305,50 @@ class _OutputDirStreamer:
             return
         if response.status_code == 201:
             self._sent[key] = state
-        else:
-            logger.warning(
-                "Output file %s/%s not stored (%s); it goes in the result",
-                folder,
-                rel,
-                response.status_code,
-            )
+            return
+        if response.status_code < 500:
+            # The server will not take it (another node, too large): the bundle carries it.
+            self._refused.add(key)
+        logger.warning(
+            "Output file %s/%s not stored (%s); it goes in the result",
+            folder,
+            rel,
+            response.status_code,
+        )
+
+    def _due(self, key: tuple[str, str], state: tuple[int, int]) -> bool:
+        return key not in self._refused and self._sent.get(key) != state
 
     async def run(self, stop: asyncio.Event) -> None:
         """Upload settled files until *stop* is set."""
-        async with httpx.AsyncClient(timeout=None, transport=_guarded_transport()) as client:
+        async with httpx.AsyncClient(
+            timeout=self._TIMEOUT, transport=_guarded_transport()
+        ) as client:
             while not stop.is_set():
-                states = await asyncio.to_thread(self._states)
-                for key, state in states.items():
-                    if self._seen.get(key) == state and self._sent.get(key) != state:
-                        await self._upload(client, key, state)
-                self._seen = states
+                try:
+                    states = await asyncio.to_thread(self._states)
+                    for key, state in states.items():
+                        if self._seen.get(key) == state and self._due(key, state):
+                            await self._upload(client, key, state)
+                    self._seen = states
+                except Exception:
+                    logger.warning("Checking output folders failed; trying again", exc_info=True)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=_output_dir_poll_seconds())
 
     async def finish(self) -> dict[str, set[str]]:
-        """Send what changed since its last upload; return what the server holds now."""
+        """Send what changed since its last upload; return what the server holds now.
+
+        Every folder is in the answer, an empty set for one the server holds none of.
+        """
         states = await asyncio.to_thread(self._states)
-        async with httpx.AsyncClient(timeout=None, transport=_guarded_transport()) as client:
+        async with httpx.AsyncClient(
+            timeout=self._TIMEOUT, transport=_guarded_transport()
+        ) as client:
             for key, state in states.items():
-                if self._sent.get(key) != state:
+                if self._due(key, state):
                     await self._upload(client, key, state)
-        held: dict[str, set[str]] = {}
+        held: dict[str, set[str]] = {folder.name: set() for folder in self._folders()}
         for (folder, rel), state in states.items():
             if self._sent.get((folder, rel)) == state:
                 held.setdefault(folder, set()).add(rel)
@@ -987,7 +1013,12 @@ def create_notebook_executor_app(
                         stop_streaming.set()
                         await streaming
                 if streamer is not None:
-                    streamed = await streamer.finish()
+                    try:
+                        streamed = await streamer.finish()
+                    except Exception:
+                        # Without a list the server keeps every file it received, and the
+                        # bundle carries them all.
+                        logger.warning("Sending output folders failed", exc_info=True)
                 if result.get("success", False):
                     # The server records these; it never sees this machine's staging copy.
                     result["mount_writes"] = [
