@@ -540,6 +540,9 @@ class NotebookSession:
             _set_variant_active(self.path, group_id, promote_to)
 
         self.reload()
+        from strata.notebook import table_index
+
+        table_index.record(self.path, cell_id, [], (c.id for c in self.notebook_state.cells))
 
     def add_variant(self, group: str, author: str | None = None) -> tuple[str, str]:
         """Add a sibling variant to ``group`` by cloning the active variant.
@@ -1288,12 +1291,15 @@ class NotebookSession:
         provenance_hash: str,
         source_hash: str,
         env_hash: str,
+        *,
+        table_reads: list[dict[str, Any]],
     ) -> None:
         """Persist the last successful execution provenance for uncached cells.
 
         Also writes ``.strata/runtime.json`` so ``compute_staleness`` classifies the
-        cell correctly after a reopen.
+        cell correctly after a reopen, and records *table_reads* in the table index.
         """
+        from strata.notebook import table_index
         from strata.notebook.runtime_state import persist_cell_provenance
 
         cell = self.notebook_state.get_cell(cell_id)
@@ -1312,6 +1318,9 @@ class NotebookSession:
             last_source_hash=source_hash,
             last_env_hash=env_hash,
             last_reopen_identity=cell.last_reopen_identity,
+        )
+        table_index.record(
+            self.path, cell_id, table_reads, (c.id for c in self.notebook_state.cells)
         )
 
     def reopen_identity(self, cell: CellState) -> str | None:

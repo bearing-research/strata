@@ -64,6 +64,11 @@ exhaustive commit history.
   server writes uploads off its event loop and reads each once; only declared
   folders are accepted; a folder the cell emptied is empty, not every file it
   ever sent; and a cancelled run keeps what arrived, like a lost one. (#1206)
+- **`.strata/tables/index.json`: the tables each cell read.** For each cell,
+  the tables its last successful run read (`@table` and a SQL cell's catalog
+  tables alike), as written, with the catalog, the `<namespace>.<table>`
+  identifier and the snapshot read, so a tool can list a table's readers
+  without parsing cell sources. (#PR)
 
 ### Changed
 

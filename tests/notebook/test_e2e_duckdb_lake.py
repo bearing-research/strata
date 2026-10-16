@@ -8,6 +8,7 @@ in between.
 from __future__ import annotations
 
 import io
+import json
 import socket
 from pathlib import Path
 from typing import Any
@@ -142,6 +143,17 @@ async def test_a_duckdb_cell_reads_the_catalog_and_goes_stale_on_a_new_snapshot(
     assert [f.rsplit(":", 1)[1] for f in session._collect_table_fingerprints(cell)] == [
         str(first_snapshot)
     ]
+    # The table index names the table and the snapshot the query read.
+    assert json.loads((nb_dir / ".strata" / "tables" / "index.json").read_text()) == {
+        "c1": [
+            {
+                "uri": "lake:taxi.trips",
+                "catalog": "lake",
+                "table": "taxi.trips",
+                "snapshot_id": first_snapshot,
+            }
+        ]
+    }
     assert session.compute_staleness()["c1"].status == CellStatus.READY
 
     catalog.load_table("taxi.trips").append(pa.table({"id": [3]}))
