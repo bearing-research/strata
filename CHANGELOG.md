@@ -27,6 +27,14 @@ exhaustive commit history.
   cell's `__mount__<name>` record, linked to the inputs the run read, so the
   MCP `lineage` tool shows what produced them. A remote worker reports its
   writes back. (#1197)
+- **A cell writes a table: `# @write_table <var> <table> append|overwrite|merge`.**
+  The server writes the variable into an Iceberg table when the run succeeds,
+  before its outputs are kept: a failed write fails the cell and keeps nothing,
+  and a cache hit writes nothing. `merge` upserts on `on=<col>,...`. Each
+  snapshot names the output's artifact id, version and provenance hash; a
+  `@table` reader goes out of date after each write. Appending to or merging
+  into a table Strata did not create needs
+  `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. (#PR)
 
 ### Changed
 

@@ -74,6 +74,7 @@ from strata.notebook.models import (
     MountSpec,
     NotebookState,
     TableSpec,
+    TableWriteSpec,
     WorkerBackendType,
 )
 from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
@@ -107,6 +108,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
 from strata.notebook.serializer import ContentType
+from strata.notebook.table_writes import StagedOutput, TableWriteError, write_cell_tables
 from strata.notebook.team_store import (
     TeamPull,
     TeamStore,
@@ -1702,23 +1704,27 @@ class CellExecutor:
                         source_hash,
                         env_hash,
                     )
-                    stored_ok = self._store_outputs(
-                        cell_id,
-                        result_output_dir,
-                        provenance_hash,
-                        input_hashes,
-                        source_hash=source_hash,
-                        source=source,
-                        env_hash=env_hash,
-                        variant=fanout_variant,
-                        # Reported by whatever ran the cell (venv or remote worker); this process
-                        # may not be on that machine.
-                        build_env=str(result.get("build_env") or ""),
-                        hardware=result.get("hardware") or {},
-                        # What a teammate is told they saved; they never ran the cell, so it travels
-                        # with the bytes.
-                        build_duration_ms=exec_result.duration_ms,
-                    )
+                    store_error: str | None = None
+                    try:
+                        stored_ok = self._store_outputs(
+                            cell_id,
+                            result_output_dir,
+                            provenance_hash,
+                            input_hashes,
+                            source_hash=source_hash,
+                            source=source,
+                            env_hash=env_hash,
+                            variant=fanout_variant,
+                            # Reported by whatever ran the cell (venv or remote worker); this
+                            # process may not be on that machine.
+                            build_env=str(result.get("build_env") or ""),
+                            hardware=result.get("hardware") or {},
+                            # What a teammate is told they saved; they never ran the cell, so it
+                            # travels with the bytes.
+                            build_duration_ms=exec_result.duration_ms,
+                        )
+                    except TableWriteError as exc:
+                        stored_ok, store_error = False, str(exc)
                     if not stored_ok:
                         logger.error(
                             "Cell %s executed OK but artifact storage failed.",
@@ -1731,7 +1737,8 @@ class CellExecutor:
                             stderr=exec_result.stderr,
                             outputs=exec_result.outputs,
                             duration_ms=exec_result.duration_ms,
-                            error=(
+                            error=store_error
+                            or (
                                 "Cell executed successfully but failed to "
                                 "store output artifacts. Check server logs."
                             ),
@@ -2319,18 +2326,22 @@ class CellExecutor:
                         source_hash,
                         env_hash,
                     )
-                    stored_ok = self._store_outputs(
-                        cell_id,
-                        result_output_dir,
-                        provenance_hash,
-                        input_hashes,
-                        source_hash=source_hash,
-                        source=source,
-                        env_hash=env_hash,
-                        # Reported by whatever ran the cell; empty for a local run.
-                        build_env=str(result.get("build_env") or ""),
-                        hardware=result.get("hardware") or {},
-                    )
+                    store_error = None
+                    try:
+                        stored_ok = self._store_outputs(
+                            cell_id,
+                            result_output_dir,
+                            provenance_hash,
+                            input_hashes,
+                            source_hash=source_hash,
+                            source=source,
+                            env_hash=env_hash,
+                            # Reported by whatever ran the cell; empty for a local run.
+                            build_env=str(result.get("build_env") or ""),
+                            hardware=result.get("hardware") or {},
+                        )
+                    except TableWriteError as exc:
+                        stored_ok, store_error = False, str(exc)
                     if not stored_ok:
                         logger.error(
                             "R cell %s executed OK but artifact storage failed.",
@@ -2343,7 +2354,8 @@ class CellExecutor:
                             stderr=exec_result.stderr,
                             outputs=exec_result.outputs,
                             duration_ms=exec_result.duration_ms,
-                            error=(
+                            error=store_error
+                            or (
                                 "Cell executed successfully but failed to "
                                 "store output artifacts. Check server logs."
                             ),
@@ -4673,6 +4685,7 @@ class CellExecutor:
         all_stored = True
         staged: list[StagedVersion] = []
         staged_names: list[tuple[str, str]] = []
+        staged_outputs: dict[str, StagedOutput] = {}
 
         # ``.rds`` is R-only (harness.R's RDS fallback), with its own content_type so
         # consumers recognize it without scanning bytes.
@@ -4755,6 +4768,12 @@ class CellExecutor:
                     )
                 )
                 staged_names.append((var_name, content_type))
+                staged_outputs[var_name] = StagedOutput(
+                    staged=staged[-1],
+                    blob=blob_data,
+                    content_type=content_type,
+                    provenance_hash=var_provenance,
+                )
             except UnsafeRunFile:
                 artifact_mgr.discard_cell_outputs(staged)
                 raise
@@ -4771,6 +4790,16 @@ class CellExecutor:
 
         # One run's outputs become current together or not at all: a downstream cell
         # must never read one variable from this run and another from an earlier one.
+        table_writes = parse_annotations(source or cell.source).table_writes
+        if all_stored and table_writes:
+            # Before the outputs become current: a failed write keeps none of them, so the
+            # next run is not a cache hit and writes again.
+            try:
+                self._write_cell_tables(table_writes, staged_outputs)
+            except TableWriteError:
+                artifact_mgr.discard_cell_outputs(staged)
+                raise
+
         try:
             if not all_stored:
                 artifact_mgr.discard_cell_outputs(staged)
@@ -4797,6 +4826,20 @@ class CellExecutor:
             )
 
         return True
+
+    def _write_cell_tables(
+        self, table_writes: list[TableWriteSpec], outputs: dict[str, StagedOutput]
+    ) -> None:
+        """Write ``@write_table`` variables with the server's catalogs and this notebook's env."""
+        written = write_cell_tables(
+            table_writes,
+            outputs,
+            config=self._lake_config(),
+            env=dict(self.session.notebook_state.env),
+            notebook=self.session.path,
+        )
+        for write in written:
+            logger.info("Wrote table %s (snapshot %d)", write.table, write.snapshot_id)
 
     def _store_console_outputs(
         self,
@@ -6760,7 +6803,7 @@ class CellExecutor:
                 source=executed_source,
                 env_hash=env_hash,
             )
-        except UnsafeRunFile as exc:
+        except (UnsafeRunFile, TableWriteError) as exc:
             return {"ok": False, "error": str(exc)}
 
         # Carry the post-persist metadata (with artifact_uri) in the ack so the dispatcher

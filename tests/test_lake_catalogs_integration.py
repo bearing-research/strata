@@ -449,3 +449,78 @@ def test_rows_iceberg_java_deleted_by_key_are_not_scanned(
     # A row written after the delete is not deleted by it.
     catalog.load_table("taxi.trips").append(pa.table({"id": pa.array([2], pa.int64())}))
     assert _rows(config, "rest:taxi.trips") == [1, 2, 3]
+
+
+async def test_a_cell_appends_twice_and_merges_into_a_rest_catalog_table(
+    tmp_path, rest_catalog, monkeypatch
+):
+    """Amber item 81: each run's snapshots name it, and a ``@table`` reader goes stale."""
+    from strata.iceberg.catalog import SUMMARY_ARTIFACT_ID, SUMMARY_VERSION
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.models import CellStatus
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    catalog, properties, _, warehouse = rest_catalog
+    # The catalog (root in its container) makes Hadoop directories 0755; open the ones
+    # this process writes data files into, as the fixture does for its own table.
+    for directory in ("lab", "lab/readings", "lab/readings/data", "lab/readings/metadata"):
+        (warehouse / directory).mkdir()
+        (warehouse / directory).chmod(0o777)
+    config = StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+    monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+
+    def writer(rows: str, mode: str = "append") -> str:
+        on = " on=id" if mode == "merge" else ""
+        return (
+            f"# @write_table rows lake:lab.readings {mode}{on}\n"
+            f"import pyarrow as pa\nrows = pa.table({rows})\n"
+        )
+
+    reader = "# @table readings lake:lab.readings\nseen = readings_snapshot\n"
+    nb = create_notebook(tmp_path, "Lake")
+    add_cell_to_notebook(nb, "w", None)
+    write_cell(nb, "w", writer('{"id": [1, 2], "v": [10, 20]}'))
+    add_cell_to_notebook(nb, "r", "w")
+    write_cell(nb, "r", reader)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
+    executor = CellExecutor(session)
+    versions = []
+
+    for source in (
+        writer('{"id": [1, 2], "v": [10, 20]}'),
+        writer('{"id": [3], "v": [30]}'),
+        writer('{"id": [2, 4], "v": [99, 40]}', "merge"),
+    ):
+        cell = session.notebook_state.get_cell("w")
+        cell.source = source
+        session.re_analyze_cell("w")
+        result = await executor.execute_cell("w", source)
+        assert result.success, result.error
+        manager = session.get_artifact_manager()
+        versions.append(
+            manager.artifact_store.get_latest_version(manager.cell_artifact_id("w", "rows")).version
+        )
+        assert session.compute_staleness()["r"].status != CellStatus.READY
+        assert (await executor.execute_cell("r", reader)).success
+        assert session.compute_staleness()["r"].status == CellStatus.READY
+
+    table = catalog.load_table("lab.readings")
+    rows = table.scan().to_arrow().sort_by("id")
+    assert list(zip(rows["id"].to_pylist(), rows["v"].to_pylist(), strict=True)) == [
+        (1, 10),
+        (2, 99),
+        (3, 30),
+        (4, 40),
+    ]
+    # A merge commits more than one snapshot (rows replaced, then rows added); every
+    # snapshot names the run that made it.
+    named = [
+        (s.summary.get(SUMMARY_ARTIFACT_ID), int(s.summary.get(SUMMARY_VERSION)))
+        for s in table.snapshots()
+    ]
+    assert {version for _, version in named} == set(versions)
+    assert len({artifact for artifact, _ in named}) == 1

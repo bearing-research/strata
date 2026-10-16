@@ -4,11 +4,11 @@ import contextlib
 import logging
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 
 import pyarrow as pa
@@ -553,12 +553,16 @@ class IcebergWriter:
         promoted_by: str | None,
         alias: str | None = None,
         tenant: str | None = None,
+        mode: Literal["overwrite", "append", "merge"] = "overwrite",
+        on: Sequence[str] = (),
+        allow_foreign: bool = False,
     ) -> TableWrite:
-        """Write *data* as the table's current snapshot.
+        """Write *data* into the table: as its current snapshot, appended, or merged on *on*.
 
         ``tenant`` is the tenant the write is scoped to (None: unscoped, as in personal
-        mode or for an admin). A scoped write may only replace a table whose latest
-        export was written for the same tenant.
+        mode or for an admin). A scoped write may only change a table whose latest
+        Strata write was for the same tenant. A table Strata never wrote is overwritten
+        never, and appended to or merged into only with ``allow_foreign``.
 
         Raises:
             TableOfAnotherTenant: The table's latest export belongs to another tenant.
@@ -592,16 +596,21 @@ class IcebergWriter:
         else:
             last_write = _last_strata_write(table)
             if last_write is None:
-                raise ValueError(
-                    f"{table_uri} holds data Strata did not write, and a later "
-                    f"write replaces the table's contents -- refusing to "
-                    f"overwrite it with {artifact_id}@v={version}. Export to a "
-                    f"table of its own, or append to this one outside Strata."
-                )
-            assert last_write.summary is not None
-            # The table ACL has no write verb, so the tenant that last exported here owns
-            # the table; without this any tenant allowed to read it could replace it.
-            if tenant is not None and last_write.summary.get(SUMMARY_TENANT) != tenant:
+                if mode == "overwrite":
+                    raise ValueError(
+                        f"{table_uri} holds data Strata did not write, and a later "
+                        f"write replaces the table's contents -- refusing to "
+                        f"overwrite it with {artifact_id}@v={version}. Export to a "
+                        f"table of its own, or append to this one outside Strata."
+                    )
+                if not allow_foreign:
+                    raise ValueError(
+                        f"{table_uri} holds data Strata did not write; this server does "
+                        f"not {mode} into such a table (STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN)."
+                    )
+            elif tenant is not None and (last_write.summary or {}).get(SUMMARY_TENANT) != tenant:
+                # The table ACL has no write verb, so the tenant that last wrote here owns
+                # the table; without this any tenant allowed to read it could change it.
                 raise TableOfAnotherTenant(f"{table_uri} was written for another tenant")
             try:
                 with table.update_schema() as update:
@@ -611,7 +620,12 @@ class IcebergWriter:
                     f"{artifact_id}@v={version} cannot be written to {table_uri}: "
                     f"its schema is not compatible with the table's ({exc})"
                 ) from exc
-            table.overwrite(data, snapshot_properties=properties)
+            if mode == "overwrite":
+                table.overwrite(data, snapshot_properties=properties)
+            elif mode == "append":
+                table.append(data, snapshot_properties=properties)
+            else:
+                table.upsert(data, join_cols=list(on), snapshot_properties=properties)
 
         snapshot = table.current_snapshot()
         assert snapshot is not None

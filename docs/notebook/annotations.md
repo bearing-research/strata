@@ -408,6 +408,55 @@ If the catalog is unreachable when provenance is computed, the cell is
 conservatively treated as out of date; if it is still unreachable at execution time,
 the run fails with a clear error.
 
+## @write_table
+
+Write one of the cell's variables into an Iceberg table when the run succeeds:
+a cleaning cell that replaces a table, an ingest cell that appends each day's
+data, a cell that merges corrections by key.
+
+```python
+# @write_table readings lake:lab.readings append
+readings = load_today()
+
+# @write_table fixes lake:lab.readings merge on=sample_id
+fixes = corrections()
+```
+
+Format: `# @write_table <var> <table> append|overwrite|merge [on=<col>,...]`.
+The table is one of the forms `@table` takes, written with the server's
+catalogs and credentials (a catalog's `strata_credential` resolves against the
+notebook's environment first). The mode is required:
+
+- `append` adds the rows as a new snapshot;
+- `overwrite` replaces the table's contents;
+- `merge` upserts on the `on` columns: rows whose keys match are replaced, the
+  rest are added (pyiceberg's upsert, which commits more than one snapshot).
+
+The variable must be an Arrow-representable table (a pandas, polars or pyarrow
+frame). A new table is created from its schema; an existing one gains new
+columns and widened types, and anything else is refused before writing.
+
+**The write rides the run.** The server writes after the cell succeeds and
+before its outputs are kept, so a write that fails fails the cell and keeps
+nothing: the next run is not a cache hit and writes again. A cache hit writes
+nothing, so running the same inputs again never appends twice; an explicit
+rerun (↻) writes again. The target and the mode are part of the cell's
+provenance, so changing either runs the cell again. Each snapshot's summary
+names the run: the output's artifact id and version and its provenance hash,
+as an export's does. A cell reading the table with `@table` goes out of date
+after each write. With several `@write_table` lines the tables are written one
+after another; if a later one fails, earlier ones keep their new snapshot and
+the next run writes them again.
+
+A cell should not also read the table it writes with `@table`: its own write
+changes the snapshot it read, so it would show out of date at once.
+
+A table Strata did not create (another writer's) is never overwritten, and is
+appended to or merged into only when the server sets
+`STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. Under principal auth the table ACL
+applies, as for an export, and a table last written for another tenant is
+refused.
+
 ## @nocache
 
 Force the cell to **always re-execute**: never serve a provenance cache hit.
