@@ -57,7 +57,7 @@ exhaustive commit history.
   once: a worker that is lost, or a run that times out, leaves every finished
   file, kept as a failed version. The result names those files instead of
   carrying them. `STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS` (5) sets how often the
-  worker checks. (#PR)
+  worker checks. (#1205)
 
 ### Changed
 
