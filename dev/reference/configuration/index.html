@@ -3812,6 +3812,21 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>Credential names only some notebooks may use, as JSON <code>{name: [directory, ...]}</code> with absolute directories. A listed name resolves only for a notebook under one of its directories, compared as written (symlinks are not followed, and a path with <code>..</code> is never inside); anywhere else, and outside any notebook, it fails naming the credential. Names not listed are open to every notebook. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_MOUNT_CACHE_DIR</code></td>
+<td><code>mount_cache</code> beside <code>STRATA_NOTEBOOK_STORAGE_DIR</code></td>
+<td>Where read-only remote mounts are kept, one copy per machine shared by every notebook: <code>objects/</code> holds each remote file once, by URI and version, and <code>views/</code> holds each mount's prefix as hard links to them. A harness user must be able to pass through it. On a worker, <code>~/.strata/mount_cache</code>, kept across jobs. See <a href="../../notebook/annotations/#mount"><code>@mount</code></a>.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES</code></td>
+<td><code>21474836480</code> (20 GiB)</td>
+<td>Once the mount cache's copies pass this, the least recently used views are removed, with the copies only they held, until it fits. A view used in the last hour is kept, since a cell may still be reading it. <code>0</code> turns the cap off.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS</code></td>
+<td><code>30</code></td>
+<td>A mount cache view unused this long is removed. <code>0</code> turns the limit off.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code></td>
 <td><code>[]</code></td>
 <td>Hosts <code>@fetch</code>, and a prompt cell's <code>[ai] base_url</code> from <code>notebook.toml</code>, may reach even on a private address (an internal data server or model server). Public hosts need no entry; in service mode, private, loopback and link-local addresses are refused unless listed. Personal mode allows them, so <code>localhost</code> works on a laptop. Comma-separated (not a JSON array) exact names, or a leading dot for a suffix (<code>.internal</code>). Same rule as <code>STRATA_WORKER_ALLOWED_HOSTS</code>, and applied to every redirect hop.</td>
