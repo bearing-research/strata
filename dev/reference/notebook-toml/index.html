@@ -2539,10 +2539,13 @@
 <li><code>STRATA_NOTEBOOK_CREDENTIAL_PATHS='{"lab-a": ["/srv/projects/lab-a"]}'</code> keeps a name to the notebooks under those directories, for a server that hosts several projects. Anywhere else, the cell fails with <code>credential 'lab-a' is not available to this notebook</code>, naming the credential and none of its fields. Mounts, connections and catalogs are all checked, and so is a mount sent to a remote worker, before it is sent. A listed name is not usable outside a notebook at all, for example by a scan through a catalog that names it. Names not listed stay open to every notebook.</li>
 </ul>
 <p>The <code>@mount</code> annotation takes the name too: <code># @mount raw s3://lab-bucket/raw ro credential=lab-bucket</code>.</p>
-<p>A named catalog in the server's <code>STRATA_CATALOGS</code> takes the same key, so the
-catalog's secrets (a SQL catalog's database URI, a REST token, <code>s3.*</code> keys)
-stay out of the catalog config:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">STRATA_CATALOGS</span><span class="o">=</span><span class="s1">'{"lake": {"type": "sql", "warehouse": "s3://lake/wh", "credential": "lake-db"}}'</span>
+<p>A named catalog in the server's <code>STRATA_CATALOGS</code> takes one as
+<code>strata_credential</code>, so the catalog's secrets (a SQL catalog's database URI, a
+REST token, <code>s3.*</code> keys) stay out of the catalog config. Not <code>credential</code>: that
+is pyiceberg's own key, a REST catalog's OAuth <code>client_id:secret</code>, and it passes
+through to the catalog untouched (as a property, or as a named credential's
+field):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">STRATA_CATALOGS</span><span class="o">=</span><span class="s1">'{"lake": {"type": "sql", "warehouse": "s3://lake/wh", "strata_credential": "lake-db"}}'</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">STRATA_NOTEBOOK_CREDENTIALS</span><span class="o">=</span><span class="s1">'{"lake-db": {"uri": "${LAKE_DSN}", "s3.access-key-id": "${LAKE_KEY}"}}'</span>
 </code></pre></div>
 <p>Its fields become pyiceberg catalog properties, beneath the catalog's own keys.
@@ -2670,7 +2673,7 @@ connections attach, instead of the server's <code>STRATA_CATALOGS</code>:</p>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"glue"</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s2">"glue.id"</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"123456789012"</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="s2">"glue.region"</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"eu-west-1"</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">credential</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lake-ro"</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">strata_credential</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lake-ro"</span>
 <a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
 <a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="k">[connections.lake]</span>
 <a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="n">driver</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"duckdb"</span>
@@ -2678,7 +2681,7 @@ connections attach, instead of the server's <code>STRATA_CATALOGS</code>:</p>
 <a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="n">catalog</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"lake"</span>
 </code></pre></div>
 <p>Each entry is a set of PyIceberg catalog properties, the same shape as an
-entry in <code>STRATA_CATALOGS</code>, and <code>credential</code> names a server-defined
+entry in <code>STRATA_CATALOGS</code>, and <code>strata_credential</code> names a server-defined
 <a href="#named-credentials">credential</a> so no secret is written here. A notebook entry
 wins over a server catalog of the same name, as a notebook's workers do.</p>
 <ul>
