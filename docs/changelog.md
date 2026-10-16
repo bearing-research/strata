@@ -28,7 +28,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   successful run created or changed (path, size, sha256) are stored as the
   cell's `__mount__<name>` record, linked to the inputs the run read, so the
   MCP `lineage` tool shows what produced them. A remote worker reports its
-  writes back. (#PR)
+  writes back. (#1197)
 ### Changed
 
 - **Observability code lives in the `strata.observability` package.**
