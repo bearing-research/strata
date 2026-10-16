@@ -9,6 +9,7 @@ import ctypes
 import hmac
 import json
 import logging
+import math
 import os
 import shutil
 import sys
@@ -504,9 +505,10 @@ def _worker_mount_cache() -> MountCache:
 
     def number(name: str, default: float) -> float:
         try:
-            return float(os.environ.get(name) or default)
+            value = float(os.environ.get(name) or default)
         except ValueError:
             return default
+        return value if math.isfinite(value) and value >= 0 else default
 
     return MountCache(
         Path(os.environ.get("STRATA_NOTEBOOK_MOUNT_CACHE_DIR") or default_root()),

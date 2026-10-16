@@ -33,13 +33,14 @@ exhaustive commit history.
 - **Read-only remote mounts share one bounded cache per machine.** Each remote
   file is kept once, by URI and version, and a mount's view of its prefix is
   hard links to those copies: a prefix with one new file downloads that file,
-  and two notebooks reading one prefix share one copy. The least recently used
+  and two notebooks reading one prefix with the same storage options (the same
+  credential values) share one copy; its files are read-only. The least recently used
   views go once the copies pass `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES` (20 GiB)
   or sit unused for `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS` (30). The cache
   lives in `STRATA_NOTEBOOK_MOUNT_CACHE_DIR`, by default `mount_cache` beside
   the notebook storage directory. Read-only copies left in a notebook's
   `.strata/mount_cache` are no longer read and can be deleted. A worker keeps
-  its cache across jobs. (#1198)
+  its cache across jobs. (#1198, #1199)
 - **Observability code lives in the `strata.observability` package.**
   `strata.tracing`, `logging`, `log_buffer`, `health`, `metrics`,
   `pool_metrics`, `gc_tracker`, `memory_profiler` and `slow_ops` are now
