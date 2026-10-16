@@ -3685,6 +3685,12 @@ exhaustive commit history.</p>
   <code>@table</code> reader goes out of date after each write. Appending to or merging
   into a table Strata did not create needs
   <code>STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true</code>. (#1202)</li>
+<li><strong>A read-write mount works under the harness user.</strong> A remote <code>rw</code> mount's
+  staging copy is handed to <code>STRATA_NOTEBOOK_HARNESS_USER</code>, which got
+  <code>PermissionError</code> writing into the server's directory. The sync back, and the
+  record of what the cell wrote, read each file without following links, so a
+  link or hard link the cell leaves there is skipped with a warning instead of
+  uploading what it points to. (#1201)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
