@@ -1000,6 +1000,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-cells-read-a-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which cells read a table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gotchas" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2164,6 +2175,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-cells-read-a-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which cells read a table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gotchas" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2361,6 +2383,27 @@ provenance is valid forever - and a moved snapshot is a different provenance,
 hence a different (missing) cache entry, hence a recompute. This is the same
 provenance machinery that makes ordinary cells stale when their source or
 inputs change; <code>@table</code> adds the lake snapshot to the mix.</p>
+<h2 id="which-cells-read-a-table">Which cells read a table<a class="headerlink" href="#which-cells-read-a-table" title="Permanent link">&para;</a></h2>
+<p><code>.strata/tables/index.json</code> lists, for each cell, the tables it read on its
+last successful run (a cache hit included) and the snapshot of each. A SQL
+cell's catalog tables are listed too. A tool that shows a table's readers
+reads this file rather than parsing cell sources:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">"c1a2b3c4"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">"uri"</span><span class="p">:</span><span class="w"> </span><span class="s2">"file:///tmp/strata-demo/warehouse#shop.orders"</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">"catalog"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="nt">"table"</span><span class="p">:</span><span class="w"> </span><span class="s2">"shop.orders"</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">"snapshot_id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1292033279574548405</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>uri</code> is as the cell wrote it; a SQL cell's table appears as
+<code>&lt;catalog&gt;:&lt;namespace&gt;.&lt;table&gt;</code>. <code>catalog</code> is the configured catalog the URI
+names, or <code>null</code> for a warehouse path. <code>snapshot_id</code> is <code>null</code> for a table
+with no snapshots yet. A failed run leaves the cell's entry as it was, and a
+cell that stops reading tables, or is deleted, drops out.</p>
 <h2 id="gotchas">Gotchas<a class="headerlink" href="#gotchas" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Injected vars don't flow downstream.</strong> <code>orders</code> and <code>orders_snapshot</code> live
