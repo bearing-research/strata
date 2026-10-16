@@ -40,7 +40,7 @@ exhaustive commit history.
   lives in `STRATA_NOTEBOOK_MOUNT_CACHE_DIR`, by default `mount_cache` beside
   the notebook storage directory. Read-only copies left in a notebook's
   `.strata/mount_cache` are no longer read and can be deleted. A worker keeps
-  its cache across jobs. (#1198, #PR)
+  its cache across jobs. (#1198, #1199)
 - **Observability code lives in the `strata.observability` package.**
   `strata.tracing`, `logging`, `log_buffer`, `health`, `metrics`,
   `pool_metrics`, `gc_tracker`, `memory_profiler` and `slow_ops` are now
