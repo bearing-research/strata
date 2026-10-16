@@ -3689,7 +3689,19 @@ class CellExecutor:
             return {}
         self._mount_resolver.credential_resolver = self._credential_resolver()
         self._mount_resolver.mount_cache = MountCache.from_config(self._lake_config())
-        return await self._mount_resolver.prepare_mounts(mount_specs)
+        resolved = await self._mount_resolver.prepare_mounts(mount_specs)
+        staged = [rm.staging_dir for rm in resolved.values() if rm.staging_dir is not None]
+        if staged:
+            try:
+                harness_user = resolve_harness_user()
+            except LocalExecutionRefused:
+                harness_user = None  # the run is refused where the cell would start
+            for staging in staged:
+                # The cell writes the staging copy; sync_back reads it without following links.
+                let_through(self._mount_resolver.cache_dir, harness_user)
+                let_through(staging.parent, harness_user)
+                hand_over(staging, harness_user)
+        return resolved
 
     async def _resolve_fetches(
         self, fetch_specs: list[FetchSpec]

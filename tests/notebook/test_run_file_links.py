@@ -319,3 +319,49 @@ x = 1
 
         assert list(victim.iterdir()) == []
         assert result.passed == 1
+
+
+@posix_only
+class TestATreeFile:
+    """``open_tree_file`` reads a nested path the harness user owns, following no link."""
+
+    def test_a_nested_regular_file_opens(self, run_dir: Path) -> None:
+        from strata.notebook.harness_user import open_tree_file
+
+        (run_dir / "a" / "b").mkdir(parents=True)
+        (run_dir / "a" / "b" / "c.txt").write_bytes(b"ok")
+
+        with open_tree_file(run_dir, "a/b/c.txt") as f:
+            assert f.read() == b"ok"
+
+    def test_a_linked_file_is_refused(self, run_dir: Path, secret: Path) -> None:
+        from strata.notebook.harness_user import open_tree_file
+
+        (run_dir / "a").mkdir()
+        (run_dir / "a" / "c.txt").symlink_to(secret)
+
+        with pytest.raises(UnsafeRunFile):
+            open_tree_file(run_dir, "a/c.txt")
+
+    def test_a_linked_directory_on_the_way_is_refused(self, run_dir: Path, secret: Path) -> None:
+        from strata.notebook.harness_user import open_tree_file
+
+        (run_dir / "a").symlink_to(secret.parent)
+
+        with pytest.raises(UnsafeRunFile):
+            open_tree_file(run_dir, f"a/{secret.name}")
+
+    def test_a_hard_link_is_refused(self, run_dir: Path, secret: Path) -> None:
+        from strata.notebook.harness_user import open_tree_file
+
+        os.link(secret, run_dir / "c.txt")
+
+        with pytest.raises(UnsafeRunFile):
+            open_tree_file(run_dir, "c.txt")
+
+    @pytest.mark.parametrize("rel", ["../escape", "a/../../x", "", "a//b"])
+    def test_a_path_that_is_not_plain_is_refused(self, run_dir: Path, rel: str) -> None:
+        from strata.notebook.harness_user import open_tree_file
+
+        with pytest.raises(UnsafeRunFile):
+            open_tree_file(run_dir, rel)

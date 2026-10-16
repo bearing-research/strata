@@ -21,12 +21,13 @@ import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel
 
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
+from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 from strata.notebook.models import MountMode, MountSpec
 from strata.notebook.mount_cache import MountCache, object_key
 
@@ -74,22 +75,52 @@ def _file_states(root: Path) -> dict[str, tuple[int, int]]:
     return states
 
 
-def _sha256_file(path: Path) -> str:
+def _sha256(f: BinaryIO) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(1 << 20):
-            digest.update(chunk)
+    while chunk := f.read(1 << 20):
+        digest.update(chunk)
     return digest.hexdigest()
+
+
+def _open_written(rm: ResolvedMount, rel: str) -> BinaryIO:
+    """A file the run wrote, opened for reading.
+
+    A staging copy is the cell's to write (under the harness user it owns it), so no link
+    in it is followed: one pointing at the server's files would be read, or uploaded.
+    """
+    if rm.staging_dir is not None:
+        return open_tree_file(rm.staging_dir, rel)
+    return open(rm.local_path / rel, "rb")
 
 
 def written_files(rm: ResolvedMount) -> list[WrittenFile]:
     """Files under a read-write mount that are new or changed since it was prepared."""
     before = rm.baseline or {}
-    return [
-        WrittenFile(path=rel, size=state[0], sha256=_sha256_file(rm.local_path / rel))
-        for rel, state in sorted(_file_states(rm.local_path).items())
-        if before.get(rel) != state
-    ]
+    files: list[WrittenFile] = []
+    for rel, state in sorted(_file_states(rm.local_path).items()):
+        if before.get(rel) == state:
+            continue
+        try:
+            with _open_written(rm, rel) as f:
+                digest = _sha256(f)
+        except UnsafeRunFile:
+            logger.warning("mount %s: not recording %s, a link", rm.spec.name, rel)
+            continue
+        files.append(WrittenFile(path=rel, size=state[0], sha256=digest))
+    return files
+
+
+def _upload_staging(fs: Any, remote_uri: str, rm: ResolvedMount) -> None:
+    """Upload each regular file of the staging copy to its place under *remote_uri*."""
+    assert rm.staging_dir is not None
+    for rel in sorted(_file_states(rm.staging_dir)):
+        try:
+            source = _open_written(rm, rel)
+        except UnsafeRunFile:
+            logger.warning("mount %s: not syncing %s, a link", rm.spec.name, rel)
+            continue
+        with source, fs.open(f"{remote_uri.rstrip('/')}/{rel}", "wb") as target:
+            shutil.copyfileobj(source, target, 1 << 20)
 
 
 # --- URI parsing ---
@@ -406,8 +437,7 @@ class MountResolver:
 
             try:
                 fs = _mount_filesystem(protocol, storage_options)
-                remote_uri = f"{protocol}://{remote_path}"
-                fs.put(str(rm.staging_dir), remote_uri, recursive=True)
+                await asyncio.to_thread(_upload_staging, fs, f"{protocol}://{remote_path}", rm)
                 logger.info(
                     "Synced RW mount '%s' back to %s",
                     name,

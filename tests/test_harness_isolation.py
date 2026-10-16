@@ -10,6 +10,8 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -130,3 +132,88 @@ def test_a_cell_run_as_the_harness_user_cannot_read_the_servers_environment(tmp_
     assert f"UID: {entry.pw_uid}" in result.stdout
     assert f"HOME: {entry.pw_dir}" in result.stdout
     assert "SERVER ENV: refused" in result.stdout
+
+
+class _FolderBucket:
+    """The fsspec calls a read-write mount makes, over a local folder standing in for a bucket."""
+
+    def __init__(self, root):
+        self.root = root
+
+    def _path(self, uri):
+        return self.root / uri.split("://", 1)[1]
+
+    def exists(self, uri):
+        return self._path(uri).exists()
+
+    def isfile(self, uri):
+        return self._path(uri).is_file()
+
+    def find(self, uri, withdirs=False, detail=True):
+        return {
+            path.relative_to(self.root).as_posix(): {
+                "name": path.relative_to(self.root).as_posix(),
+                "size": path.stat().st_size,
+            }
+            for path in self._path(uri).rglob("*")
+            if path.is_file()
+        }
+
+    def get(self, uri, local_path):
+        local_path = type(self.root)(local_path)
+        local_path.write_bytes(self._path(uri).read_bytes())
+
+    def open(self, uri, mode="rb"):
+        path = self._path(uri)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return open(path, mode)
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "linux" and _HARNESS_USER and os.geteuid() == 0),
+    reason="needs Linux, root, and STRATA_TEST_HARNESS_USER naming a second user",
+)
+def test_a_cell_run_as_the_harness_user_writes_through_a_read_write_mount(tmp_path, monkeypatch):
+    """The staging copy is handed over; the server syncs it back without following links."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+
+    bucket = _FolderBucket(tmp_path / "bucket")
+    (tmp_path / "bucket" / "lab" / "out").mkdir(parents=True)
+    (tmp_path / "bucket" / "lab" / "out" / "seed.txt").write_text("from the bucket")
+    monkeypatch.setattr("strata.notebook.mounts._mount_filesystem", lambda protocol, opts: bucket)
+    nb = create_notebook(tmp_path, "Writer", initialize_environment=False)
+    # The harness user has to reach the notebook, and pytest makes its base temp 0700.
+    for directory in (tmp_path, *tmp_path.parents):
+        if directory == Path(tempfile.gettempdir()) or directory == directory.parent:
+            break
+        os.chmod(directory, 0o755)
+    add_cell_to_notebook(nb, "w", None, language="python")
+    source = (
+        "# @mount out s3://lab/out rw\n"
+        "(out / 'result.txt').write_text('from the cell')\n"
+        "(out / 'seed.txt').write_text((out / 'seed.txt').read_text() + ', edited')\n"
+        "(out / 'leak.txt').symlink_to('/etc/shadow')\n"
+        "print('OWNER:', (out / 'result.txt').stat().st_uid)\n"
+    )
+    write_cell(nb, "w", source)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.venv_python = sys.executable
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(deployment_mode="service", notebook_harness_user=_HARNESS_USER)
+        ),
+    )
+
+    result = asyncio.run(CellExecutor(session).execute_cell("w", source))
+
+    import pwd
+
+    assert result.success, result.error
+    assert f"OWNER: {pwd.getpwnam(_HARNESS_USER).pw_uid}" in result.stdout
+    out = tmp_path / "bucket" / "lab" / "out"
+    assert (out / "result.txt").read_text() == "from the cell"
+    assert (out / "seed.txt").read_text() == "from the bucket, edited"
+    assert not (out / "leak.txt").exists()

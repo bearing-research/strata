@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import sys
 import types
 from pathlib import Path
@@ -71,10 +72,21 @@ class _FakeRemoteFS:
         key = self._strip(uri).rstrip("/")
         return any(name == key or name.startswith(f"{key}/") for name in self._files)
 
-    def put(self, local_path: str, remote_uri: str, recursive: bool = True) -> None:
-        del local_path, remote_uri, recursive
+    def open(self, uri: str, mode: str = "rb") -> io.BytesIO:
+        """Writing only, as sync-back uploads: the bytes land in the fake bucket on close."""
+        assert mode == "wb"
         if self._fail_put:
             raise RuntimeError("boom")
+        files, key = self._files, self._strip(uri)
+
+        class _Upload(io.BytesIO):
+            def close(self) -> None:
+                if not self.closed:
+                    data = self.getvalue()
+                    files[key] = {"name": key, "size": len(data), "content": data}
+                super().close()
+
+        return _Upload()
 
 
 def _install_fake_fsspec(
@@ -968,3 +980,96 @@ class TestSharedMountCache:
         monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES", raw)
 
         assert _worker_mount_cache().max_bytes == 20 * 1024**3
+
+
+class TestAStagingCopyIsTheCellsToWrite:
+    """Under the harness user the cell owns its staging copy, so the server follows no link
+    in it: neither the record nor the upload may carry a file the cell could not read."""
+
+    @staticmethod
+    async def _staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        fs = _FakeRemoteFS({})
+        _install_fake_fsspec(monkeypatch, fs)
+        resolver = MountResolver(cache_dir=tmp_path / "cache")
+        resolved = await resolver.prepare_mounts(
+            [MountSpec(name="out", uri="s3://bucket/out", mode=MountMode.READ_WRITE)]
+        )
+        return fs, resolver, resolved
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+    @pytest.mark.asyncio
+    async def test_a_link_is_neither_recorded_nor_uploaded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        secret = tmp_path / "server-only.txt"
+        secret.write_bytes(b"secret")
+        (tmp_path / "server-dir").mkdir()
+        (tmp_path / "server-dir" / "inner.txt").write_bytes(b"secret too")
+        fs, resolver, resolved = await self._staged(tmp_path, monkeypatch)
+        staging = resolved["out"].local_path
+        (staging / "result.txt").write_bytes(b"mine")
+        (staging / "nested").mkdir()
+        (staging / "nested" / "deep.txt").write_bytes(b"deep")
+        (staging / "leak.txt").symlink_to(secret)
+        (staging / "leakdir").symlink_to(tmp_path / "server-dir")
+
+        (write,) = await resolver.sync_back(resolved)
+
+        assert [f.path for f in write.files] == ["nested/deep.txt", "result.txt"]
+        assert sorted(fs._files) == ["bucket/out/nested/deep.txt", "bucket/out/result.txt"]
+        assert fs._files["bucket/out/result.txt"]["content"] == b"mine"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX hard-link counts")
+    @pytest.mark.asyncio
+    async def test_a_hard_link_is_neither_recorded_nor_uploaded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        secret = tmp_path / "server-only.txt"
+        secret.write_bytes(b"secret")
+        fs, resolver, resolved = await self._staged(tmp_path, monkeypatch)
+        staging = resolved["out"].local_path
+        (staging / "result.txt").write_bytes(b"mine")
+        os.link(secret, staging / "linked.txt")
+
+        (write,) = await resolver.sync_back(resolved)
+
+        assert [f.path for f in write.files] == ["result.txt"]
+        assert sorted(fs._files) == ["bucket/out/result.txt"]
+
+    @pytest.mark.asyncio
+    async def test_the_executor_hands_it_to_the_harness_user(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from types import SimpleNamespace
+
+        from strata.notebook import executor as executor_module
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.harness_user import HarnessUser
+
+        _install_fake_fsspec(monkeypatch, _FakeRemoteFS({}))
+        user = HarnessUser(name="cells", uid=4242, gid=4242, home="/home/cells")
+        calls: list[tuple[str, Path]] = []
+        monkeypatch.setattr(executor_module, "resolve_harness_user", lambda: user)
+        monkeypatch.setattr(
+            executor_module, "hand_over", lambda path, u: calls.append(("hand_over", path))
+        )
+        monkeypatch.setattr(
+            executor_module, "let_through", lambda path, u: calls.append(("let_through", path))
+        )
+        executor = CellExecutor.__new__(CellExecutor)
+        executor._mount_resolver = MountResolver(cache_dir=tmp_path / "cache")
+        executor._credential_resolver = lambda: executor._mount_resolver.credential_resolver
+        executor._lake_config = lambda: SimpleNamespace()
+
+        resolved = await executor._prepare_mounts(
+            [MountSpec(name="out", uri="s3://bucket/out", mode=MountMode.READ_WRITE)]
+        )
+
+        staging = resolved["out"].local_path
+        assert calls == [
+            ("let_through", tmp_path / "cache"),
+            ("let_through", staging.parent),
+            ("hand_over", staging),
+        ]
