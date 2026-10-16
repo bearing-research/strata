@@ -174,7 +174,7 @@ class TestNotYet:
         assert not result.success
         assert "@output_dir does not work in a # @loop cell" in result.error
 
-    async def test_a_remote_worker_is_refused_before_it_runs(self, tmp_path):
+    async def test_a_worker_that_cannot_be_asked_is_refused_before_it_runs(self, tmp_path):
         source = "# @worker gpu\n# @output_dir ckpt\n(ckpt / 'a').write_text('a')\n"
         session = _session(tmp_path, writer=source, reader=None)
         from strata.notebook.models import WorkerBackendType, WorkerSpec
@@ -190,7 +190,30 @@ class TestNotYet:
         result = await CellExecutor(session).execute_cell("w", source)
 
         assert not result.success
-        assert "a remote worker cannot return the folder yet" in result.error
+        assert "could not be asked whether it returns # @output_dir folders" in result.error
+
+    async def test_an_older_worker_is_refused_before_it_runs(self, tmp_path, monkeypatch):
+        source = "# @worker gpu\n# @output_dir ckpt\n(ckpt / 'a').write_text('a')\n"
+        session = _session(tmp_path, writer=source, reader=None)
+        from strata.notebook import workers
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+
+        async def older(worker, feature):
+            return False
+
+        monkeypatch.setattr(workers, "worker_advertises", older)
+        session.notebook_state.workers = [
+            WorkerSpec(
+                name="gpu",
+                backend=WorkerBackendType.EXECUTOR,
+                config={"url": "http://127.0.0.1:9/v1/execute"},
+            )
+        ]
+
+        result = await CellExecutor(session).execute_cell("w", source)
+
+        assert not result.success
+        assert "does not return # @output_dir folders" in result.error
 
     async def test_run_all_runs_it_on_its_own(self, tmp_path):
         """A batch shares one process and has no run directory per cell to collect from."""
@@ -201,3 +224,142 @@ class TestNotYet:
 
         assert not is_cell_batchable(executor, session.notebook_state.get_cell("w"))
         assert is_cell_batchable(executor, session.notebook_state.get_cell("r"))
+
+
+class TestTheBundle:
+    """A worker returns each folder's files in the bundle, streamed past the member cap."""
+
+    def test_files_larger_than_the_member_cap_round_trip(self, tmp_path, monkeypatch):
+        from strata.notebook.output_dirs import OUTPUT_DIRS
+        from strata.notebook.remote_bundle import (
+            pack_notebook_output_bundle,
+            unpack_notebook_output_bundle,
+        )
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES", "4096")
+        run = tmp_path / "run"
+        folder = run / OUTPUT_DIRS / "ckpt"
+        (folder / "deep").mkdir(parents=True)
+        big = bytes(range(256)) * 40  # 10240 bytes, past the 4096-byte cap
+        (folder / "deep" / "big.bin").write_bytes(big)
+        (folder / "empty.txt").write_bytes(b"")
+        if sys.platform != "win32":
+            (folder / "leak").symlink_to(tmp_path / "elsewhere")
+        bundle = tmp_path / "bundle.tar"
+
+        pack_notebook_output_bundle(bundle, {"success": True, "variables": {}}, run)
+        out = tmp_path / "unpacked"
+        unpack_notebook_output_bundle(bundle, out)
+
+        got = out / OUTPUT_DIRS / "ckpt"
+        assert (got / "deep" / "big.bin").read_bytes() == big
+        assert (got / "empty.txt").read_bytes() == b""
+        assert sorted(p.relative_to(got).as_posix() for p in got.rglob("*") if p.is_file()) == [
+            "deep/big.bin",
+            "empty.txt",
+        ]
+
+    @pytest.mark.parametrize("rel", ["../escape.bin", "/abs.bin"])
+    def test_a_path_leaving_the_folder_is_refused(self, tmp_path, rel):
+        import io
+        import tarfile
+
+        from strata.notebook.remote_bundle import SCHEMA_VERSION, unpack_notebook_output_bundle
+
+        bundle = tmp_path / "bundle.tar"
+        manifest = {
+            "schema_version": SCHEMA_VERSION,
+            "success": True,
+            "variables": {},
+            "stdout_file": "stdout.txt",
+            "stderr_file": "stderr.txt",
+            "output_dirs": {"ckpt": {rel: 1}},
+        }
+        with tarfile.open(bundle, "w") as tar:
+            for name, data in (
+                ("manifest.json", json.dumps(manifest).encode()),
+                ("stdout.txt", b""),
+                ("stderr.txt", b""),
+                (f"dirs/ckpt/{rel}", b"x"),
+            ):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+
+        with pytest.raises(ValueError, match="Invalid bundle output file"):
+            unpack_notebook_output_bundle(bundle, tmp_path / "unpacked")
+        assert not (tmp_path / "escape.bin").exists()
+
+
+class TestOnAWorker:
+    @pytest.mark.parametrize("transport", ["direct", "signed"])
+    async def test_a_worker_returns_the_folder_and_a_local_cell_reads_it(
+        self, tmp_path, transport, notebook_executor_server, notebook_personal_server
+    ):
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+
+        writer = "# @worker remote\n" + WRITER
+        session = _session(tmp_path, writer=writer)
+        config = {"url": notebook_executor_server["execute_url"], "transport": transport}
+        if transport == "signed":
+            config["strata_url"] = notebook_personal_server["base_url"]
+        session.notebook_state.workers = [
+            WorkerSpec(
+                name="remote", backend=WorkerBackendType.EXECUTOR, runtime_id="r", config=config
+            )
+        ]
+        executor = CellExecutor(session)
+
+        written = await executor.execute_cell("w", writer)
+        assert written.success, written.error
+        assert written.execution_method == "executor"
+        read = await executor.execute_cell("r", READER)
+
+        assert read.success, read.error
+        assert read.outputs["seen"]["preview"] == ["epochs/e0.bin", "epochs/e1.bin", "final.txt"]
+
+    async def test_a_failed_run_on_a_worker_keeps_what_it_wrote(
+        self, tmp_path, notebook_executor_server
+    ):
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+
+        failing = (
+            "# @worker remote\n# @output_dir ckpt\n"
+            "(ckpt / 'e0.bin').write_bytes(b'x' * 5)\n"
+            "raise RuntimeError('lost')\n"
+        )
+        session = _session(tmp_path, writer=failing, reader=None)
+        session.notebook_state.workers = [
+            WorkerSpec(
+                name="remote",
+                backend=WorkerBackendType.EXECUTOR,
+                runtime_id="r",
+                config={"url": notebook_executor_server["execute_url"]},
+            )
+        ]
+
+        result = await CellExecutor(session).execute_cell("w", failing)
+
+        assert not result.success
+        manifest, state = _manifest(session, version=1)
+        assert state == "failed"
+        assert list(manifest["files"]) == ["e0.bin"]
+
+
+def test_a_folder_name_cannot_leave_the_run_directory(tmp_path, monkeypatch):
+    """The parser takes identifiers only; the check holds even if it did not."""
+    from strata.notebook import annotations
+    from strata.notebook.output_dirs import mount_entries
+
+    real = annotations.parse_annotations
+
+    def loose(source):
+        parsed = real(source)
+        parsed.output_dirs = ["../escape"]
+        return parsed
+
+    monkeypatch.setattr(annotations, "parse_annotations", loose)
+
+    with pytest.raises(ValueError, match="leaves the run directory"):
+        mount_entries("x = 1", tmp_path / "run")
+    assert not (tmp_path / "escape").exists()

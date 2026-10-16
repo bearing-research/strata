@@ -2683,12 +2683,22 @@ class CellExecutor:
         language: str = "python",
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through an external notebook executor over HTTP."""
-        # Before anything runs: a worker cannot return a folder yet, so a long run would be lost.
+        from strata.notebook.workers import worker_advertises
+
+        # Before anything runs: an older worker would not make the folder, so a long run
+        # would end in a NameError with nothing kept.
         if parse_annotations(source).output_dirs:
-            raise RuntimeError(
-                "# @output_dir runs on this server only for now; a remote worker cannot "
-                "return the folder yet"
-            )
+            advertised = await worker_advertises(worker_spec, "output_dirs")
+            if advertised is None:
+                raise RuntimeError(
+                    f"worker {worker_spec.name!r} could not be asked whether it returns "
+                    "# @output_dir folders"
+                )
+            if not advertised:
+                raise RuntimeError(
+                    f"worker {worker_spec.name!r} does not return # @output_dir folders; "
+                    "upgrade strata on it"
+                )
         for name, spec in input_specs.items():
             if spec.get("content_type") == output_dirs.CONTENT_TYPE:
                 raise RuntimeError(
@@ -4094,12 +4104,8 @@ class CellExecutor:
             }
             for name, rm in resolved_mounts.items()
         }
-        # ``# @output_dir`` folders reach the cell as writable mounts in its run directory,
-        # made here so the run directory's hand-over covers them.
-        for name in parse_annotations(source).output_dirs:
-            folder = output_dir / output_dirs.OUTPUT_DIRS / name
-            folder.mkdir(parents=True, exist_ok=True)
-            manifest_mounts[name] = {"uri": "", "mode": "rw", "local_path": str(folder)}
+        # Made here, in the run directory, so its hand-over covers the folders.
+        manifest_mounts.update(output_dirs.mount_entries(source, output_dir))
         manifest: dict[str, Any] = {
             "source": source,
             "inputs": input_specs,

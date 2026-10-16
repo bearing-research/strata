@@ -9,7 +9,13 @@ import tarfile
 from pathlib import Path
 from typing import Any, BinaryIO, Literal
 
-from strata.notebook.harness_user import open_run_file, write_run_file
+from strata.notebook.harness_user import (
+    UnsafeRunFile,
+    open_run_file,
+    open_tree_file,
+    write_run_file,
+)
+from strata.notebook.output_dirs import OUTPUT_DIRS, regular_files
 
 SCHEMA_VERSION = "notebook-output-bundle@v1"
 
@@ -57,6 +63,57 @@ def _read_member(tar: tarfile.TarFile, name: str) -> bytes:
     if extracted is None:
         raise ValueError(f"Bundle member is not a regular file: {name}")
     return extracted.read()
+
+
+def _add_output_dirs(tar: tarfile.TarFile, output_dir: Path) -> dict[str, Any]:
+    """Add each ``# @output_dir`` folder's files, one member each, as ``{name: {path: size}}``.
+
+    Unpacking streams these members, so a checkpoint is not held in memory and the
+    per-member cap does not apply. Read without following links: the cell owned the
+    folder. A link is left out.
+    """
+    described: dict[str, Any] = {}
+    root = output_dir / OUTPUT_DIRS
+    if not root.is_dir():
+        return described
+    for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink()):
+        files: dict[str, int] = {}
+        for rel in regular_files(folder):
+            try:
+                f = open_tree_file(folder, rel)
+            except UnsafeRunFile:
+                continue
+            with f:
+                info = tarfile.TarInfo(name=f"dirs/{folder.name}/{rel}")
+                info.size = os.fstat(f.fileno()).st_size
+                tar.addfile(info, f)
+            files[rel] = info.size
+        described[folder.name] = files
+    return described
+
+
+def _unpack_output_dirs(tar: tarfile.TarFile, described: Any, output_dir: Path) -> None:
+    """Write each folder's files under ``output_dir``, streamed from their members."""
+    if not isinstance(described, dict):
+        raise ValueError("Bundle output_dirs must be a dict")
+    for name, files in described.items():
+        if not isinstance(name, str) or not name.isidentifier() or not isinstance(files, dict):
+            raise ValueError(f"Invalid bundle output folder: {name!r}")
+        folder = output_dir / OUTPUT_DIRS / name
+        for rel, size in files.items():
+            rel_path = Path(rel)
+            if rel_path.is_absolute() or rel_path.anchor or ".." in rel_path.parts:
+                raise ValueError(f"Invalid bundle output file: {name}/{rel}")
+            extracted = tar.extractfile(tar.getmember(f"dirs/{name}/{rel}"))
+            if extracted is None:
+                raise ValueError(f"Bundle output file is not a regular file: {name}/{rel}")
+            target = folder / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "xb") as out:
+                while chunk := extracted.read(1 << 20):
+                    out.write(chunk)
+            if target.stat().st_size != int(size):
+                raise ValueError(f"Bundle output file {name}/{rel} is incomplete")
 
 
 def pack_notebook_output_bundle(
@@ -130,11 +187,6 @@ def pack_notebook_output_bundle(
     with _open_tar(bundle_path, "w") as tar:
         _add_bytes(
             tar,
-            "manifest.json",
-            json.dumps(bundle_manifest, indent=2, sort_keys=True).encode("utf-8"),
-        )
-        _add_bytes(
-            tar,
             "stdout.txt",
             str(result_manifest.get("stdout", "")).encode("utf-8"),
         )
@@ -144,6 +196,7 @@ def pack_notebook_output_bundle(
             str(result_manifest.get("stderr", "")).encode("utf-8"),
         )
 
+        bundle_manifest["output_dirs"] = _add_output_dirs(tar, output_dir)
         # The last display is also ``_``, so the same file is named twice.
         added: set[str] = set()
         for meta in [*bundle_manifest["variables"].values(), *bundle_manifest["displays"]]:
@@ -155,6 +208,12 @@ def pack_notebook_output_bundle(
             added.add(arcname)
             with open_run_file(output_dir, Path(arcname).name) as f:
                 tar.addfile(tar.gettarinfo(arcname=arcname, fileobj=f), f)
+        # Last, since it lists the folder parts just added; readers look members up by name.
+        _add_bytes(
+            tar,
+            "manifest.json",
+            json.dumps(bundle_manifest, indent=2, sort_keys=True).encode("utf-8"),
+        )
 
 
 def unpack_notebook_output_bundle(
@@ -193,6 +252,7 @@ def unpack_notebook_output_bundle(
             "hardware": manifest_data.get("hardware") or {},
             "mount_writes": manifest_data.get("mount_writes") or [],
         }
+        _unpack_output_dirs(tar, manifest_data.get("output_dirs") or {}, output_dir)
 
         variables = manifest_data.get("variables", {})
         if not isinstance(variables, dict):

@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from starlette.background import BackgroundTask
 
 from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.notebook import output_dirs
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.hardware import hardware_report
 from strata.notebook.models import MountSpec
@@ -775,6 +776,7 @@ def create_notebook_executor_app(
                 }
                 for name, rm in resolved_mounts.items()
             }
+            manifest_mounts.update(output_dirs.mount_entries(source, output_dir))
 
             manifest = {
                 "source": source,
@@ -985,6 +987,8 @@ def create_notebook_executor_app(
                     "output_format": "notebook-output-bundle@v1",
                     "pull_model": True,
                     "cancel": True,
+                    # ``# @output_dir`` folders come back in the bundle, in parts.
+                    "output_dirs": True,
                     # Building the locked env is ``uv sync --frozen``, so probe for uv: claimed
                     # unconditionally, a pip-installed image would fail every Python cell with 500.
                     "locked_environments": shutil.which("uv") is not None,
