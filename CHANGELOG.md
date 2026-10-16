@@ -51,6 +51,13 @@ exhaustive commit history.
   the run's result, each file streamed past the bundle's member cap, and a
   failed run on a worker keeps its files. A worker too old to return folders is
   refused before the cell runs; a lost worker still keeps nothing. (#1204)
+- **`# @output_dir` files reach the server while the cell runs.** On the
+  `signed` transport a worker sends each file once it stops changing, to a new
+  signed `output_file_url` in the build manifest, and the server stores it at
+  once: a worker that is lost, or a run that times out, leaves every finished
+  file, kept as a failed version. The result names those files instead of
+  carrying them. `STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS` (5) sets how often the
+  worker checks. (#1205)
 
 ### Changed
 

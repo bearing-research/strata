@@ -41,7 +41,7 @@ from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 # image). Batch frames are small dicts.
 from strata.artifact.store import ArtifactVersion, StagedVersion, get_artifact_store
 from strata.artifact.store import TransformSpec as ArtifactTransformSpec
-from strata.notebook import console_relay, output_dirs
+from strata.notebook import console_relay, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.credentials import CredentialResolver
@@ -593,6 +593,9 @@ class CellExecutor:
         self._fetch_times: dict[str, dict[str, float]] = {}
         # Same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``.
         self._dataset_refs: dict[str, dict[str, str]] = {}
+        # ``# @output_dir`` files a worker uploaded during a cell's last remote run, by cell:
+        # ``{folder: {path: entry}}``. Taken by the run's staging, success or failure.
+        self._received_output_files: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
         # Also store the variables of a cell nothing downstream reads. Off by default: only
         # consumed variables are kept, and a leaf's result can be large.
         self.store_leaf_outputs = False
@@ -1241,6 +1244,8 @@ class CellExecutor:
         scoped to that variant.
         """
         remote_metadata: dict[str, str] = {}
+        # Nothing a worker uploaded for an earlier run belongs to this one.
+        self._received_output_files.pop(cell_id, None)
         try:
             # Re-fetch the cell: the dispatch wrapper already reset ``cache_hit``, but the rest of
             # the pipeline needs ``cell`` in scope.
@@ -1826,6 +1831,9 @@ class CellExecutor:
 
         except RemoteExecutionError as e:
             duration_ms = (time.time() - start_time) * 1000
+            if self._received_output_files.get(cell_id):
+                # No result came back, so what the worker uploaded is all there is.
+                self._keep_failed_output_dirs(cell_id, source, Path(), provenance_hash, env_hash)
             error_result = CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
@@ -2055,6 +2063,8 @@ class CellExecutor:
         provenance hashes and file extensions, which the R harness produces identically.
         """
         remote_metadata: dict[str, str] = {}
+        # Nothing a worker uploaded for an earlier run belongs to this one.
+        self._received_output_files.pop(cell_id, None)
         try:
             cell = self.session.notebook_state.get_cell(cell_id)
 
@@ -2430,6 +2440,9 @@ class CellExecutor:
 
         except RemoteExecutionError as e:
             duration_ms = (time.time() - start_time) * 1000
+            if self._received_output_files.get(cell_id):
+                # No result came back, so what the worker uploaded is all there is.
+                self._keep_failed_output_dirs(cell_id, source, Path(), provenance_hash, env_hash)
             error_result = CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
@@ -3154,23 +3167,43 @@ class CellExecutor:
                 if cell_id
                 else nullcontext()
             )
+            # Files the worker uploads while the cell runs are stored as they arrive, so a
+            # worker lost later still leaves them.
+            receiver = output_file_relay.Receiver(
+                self.session.get_artifact_manager(),
+                cell_id or "",
+                upload_dir=self.session.path / ".strata" / "uploads",
+            )
+            receiving = (
+                output_file_relay.receiving(build_id, receiver)
+                if cell_id and parse_annotations(source).output_dirs
+                else nullcontext()
+            )
+            self._received_output_files.pop(cell_id or "", None)
             async with relay:
-                async with httpx.AsyncClient(timeout=max(timeout_seconds + 10.0, 30.0)) as client:
-                    response = await client.post(
-                        manifest_execute_url, json=manifest, headers=headers
-                    )
-                if response.status_code == 202:
-                    response = await self._await_accepted_job(
-                        response,
-                        submit_url=manifest_execute_url,
-                        headers=headers,
-                        timeout_seconds=timeout_seconds,
-                        cancel=lambda: self._cancel_remote_execution(
-                            executor_url, build_id, worker_token
-                        ),
-                        worker_spec=worker_spec,
-                        cell_id=cell_id,
-                    )
+                with receiving:
+                    try:
+                        async with httpx.AsyncClient(
+                            timeout=max(timeout_seconds + 10.0, 30.0)
+                        ) as client:
+                            response = await client.post(
+                                manifest_execute_url, json=manifest, headers=headers
+                            )
+                        if response.status_code == 202:
+                            response = await self._await_accepted_job(
+                                response,
+                                submit_url=manifest_execute_url,
+                                headers=headers,
+                                timeout_seconds=timeout_seconds,
+                                cancel=lambda: self._cancel_remote_execution(
+                                    executor_url, build_id, worker_token
+                                ),
+                                worker_spec=worker_spec,
+                                cell_id=cell_id,
+                            )
+                    finally:
+                        if cell_id:
+                            self._received_output_files[cell_id] = receiver.received()
         except RemoteExecutionError as exc:
             await _fail(str(exc), exc.remote_error_code or "EXECUTOR_ERROR")
             raise
@@ -4915,10 +4948,18 @@ class CellExecutor:
         env_hash: str,
         variant: str | None = None,
     ) -> StagedVersion:
-        """Keep a ``# @output_dir`` folder's files and stage its manifest as the output."""
+        """Keep a ``# @output_dir`` folder's files and stage its manifest as the output.
+
+        Files a worker uploaded during the run are in already; its result lists which of
+        them the folder still holds, and without a result (a lost worker) all count.
+        """
         artifact_mgr = self.session.get_artifact_manager()
+        received = self._received_output_files.get(cell_id, {}).get(name, {})
+        listed = output_dirs.read_streamed(output_dir).get(name)
+        if listed is not None:
+            received = {rel: entry for rel, entry in received.items() if rel in listed}
         manifest = output_dirs.collect(
-            artifact_mgr, cell_id, output_dir / output_dirs.OUTPUT_DIRS / name
+            artifact_mgr, cell_id, output_dir / output_dirs.OUTPUT_DIRS / name, received
         )
         return artifact_mgr.stage_cell_output(
             cell_id=cell_id,

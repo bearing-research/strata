@@ -94,11 +94,13 @@ class BuildManifest:
     output_url: SignedUploadURL
     finalize_url: str
     log_url: str = ""
+    output_file_url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the JSON wire shape sent to the executor.
 
-        ``{build_id, metadata, inputs, output, finalize_url, log_url}``; ``output`` omits the
+        ``{build_id, metadata, inputs, output, finalize_url, log_url, output_file_url}``;
+        ``output`` omits the
         ``build_id`` already carried at the top level.
         """
         output = asdict(self.output_url)
@@ -113,6 +115,7 @@ class BuildManifest:
             "output": output,
             "finalize_url": self.finalize_url,
             "log_url": self.log_url,
+            "output_file_url": self.output_file_url,
         }
 
 
@@ -269,6 +272,21 @@ class URLSigner:
         params = {"expires_at": str(expires_at), "signature": self._sign(data)}
         return f"{base_url}/v1/builds/{build_id}/log?{urlencode(params)}"
 
+    def generate_output_file_url(
+        self,
+        base_url: str,
+        build_id: str,
+        expiry_seconds: float = 600.0,
+    ) -> str:
+        """Sign a URL an executor uploads ``# @output_dir`` files to while the cell runs.
+
+        Its own ``op``, like the log URL's. The executor appends ``folder`` and ``path``.
+        """
+        expires_at = time.time() + expiry_seconds
+        data = {"op": "output_file", "build_id": build_id, "expires_at": expires_at}
+        params = {"expires_at": str(expires_at), "signature": self._sign(data)}
+        return f"{base_url}/v1/builds/{build_id}/output-file?{urlencode(params)}"
+
     def generate_finalize_url(
         self,
         base_url: str,
@@ -314,6 +332,18 @@ class URLSigner:
         if time.time() > expires_at:
             return False
         data = {"op": "log", "build_id": build_id, "expires_at": expires_at}
+        return self._verify(data, signature)
+
+    def verify_output_file_signature(
+        self,
+        build_id: str,
+        expires_at: float,
+        signature: str,
+    ) -> bool:
+        """Verify an output-file URL's signature and expiry."""
+        if time.time() > expires_at:
+            return False
+        data = {"op": "output_file", "build_id": build_id, "expires_at": expires_at}
         return self._verify(data, signature)
 
     def verify_finalize_signature(
@@ -439,6 +469,11 @@ class URLSigner:
             output_url=output_url,
             finalize_url=finalize_url,
             log_url=self.generate_log_url(
+                base_url=base_url,
+                build_id=build_id,
+                expiry_seconds=url_expiry_seconds,
+            ),
+            output_file_url=self.generate_output_file_url(
                 base_url=base_url,
                 build_id=build_id,
                 expiry_seconds=url_expiry_seconds,

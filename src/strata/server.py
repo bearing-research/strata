@@ -298,13 +298,13 @@ def _route_path(conn: HTTPConnection) -> str:
 
 
 def _is_signed_build_request(request: Request) -> bool:
-    """Return True when the request presents a build's signed finalize or log capability.
+    """Return True when a request presents a build's signed finalize, log or output-file URL.
 
     A worker holds only the HMAC capability, no proxy token or API key, and the
     routes verify the signature themselves.
     """
     return bool(
-        re.fullmatch(r"/v1/builds/[^/]+/(finalize|log)", _route_path(request))
+        re.fullmatch(r"/v1/builds/[^/]+/(finalize|log|output-file)", _route_path(request))
         and "signature" in request.query_params
         and "expires_at" in request.query_params
     )

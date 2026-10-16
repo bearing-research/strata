@@ -313,7 +313,8 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
     "method": "POST"
   },
   "finalize_url": "https://strata.example.com/v1/builds/01HZJV/finalize?...",
-  "log_url": "https://strata.example.com/v1/builds/01HZJV/log?..."
+  "log_url": "https://strata.example.com/v1/builds/01HZJV/log?...",
+  "output_file_url": "https://strata.example.com/v1/builds/01HZJV/output-file?..."
 }
 ```
 
@@ -328,7 +329,7 @@ the build is over and the upload URL has expired.
 
 With `STRATA_ARTIFACT_PRESIGNED_URLS` on and a blob store the server can sign
 for, the input URLs and `output.url` point straight at the object store.
-`finalize_url` and `log_url` stay Strata routes, and finalize checks the
+`finalize_url`, `log_url` and `output_file_url` stay Strata routes, and finalize checks the
 output's size against `output.max_bytes` before publishing.
 
 | Store | Inputs | Output | Signs with |
@@ -370,6 +371,7 @@ carries the context in the request headers only.
 
 1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
 2. Run the cell in a subprocess (same as `/v1/execute`). While it runs, `POST` each chunk of console output as the raw body to `log_url` with `&stream=stdout` or `&stream=stderr` and `&seq=N` appended, so the notebook shows it live. `seq` numbers each stream's chunks from 0, counting every chunk the cell printed: a worker that skips one (its queue was full, a post failed) leaves a gap, and the notebook then shows nothing after the gap until the cell finishes, so what it showed is always the start of the console. A repeated `seq` is ignored, so a chunk can be retried. The route answers `202`. `log_url` is optional: a worker that ignores it still delivers the console in the bundle.
+   While it runs, a worker that advertises `output_dirs` also sends the cell's `# @output_dir` files to `output_file_url` as they settle: `POST` each file as the raw body with `&folder=<name>&path=<path>` appended (`<path>` relative to the folder, `/`-separated). The reference worker checks every `STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS` (default 5) and sends a file once its size and mtime held from one check to the next, again if it changes later, and everything that changed since its last send when the cell ends. The route answers `201` once the file is stored in the notebook's store, so a worker lost afterwards still leaves it. It answers `409` when the server that dispatched the build is not the one receiving (or the run has ended), `413` past `max_upload_bytes`, and `400` for a folder that is not an identifier or a path with `..`, an empty part or a backslash. A file the server did not store goes in the bundle instead. `output_file_url` is optional: a worker that ignores it sends every file in the bundle.
 3. Upload the resulting output bundle to `output.url`. With `output.fields`, it is a presigned form upload (S3, GCS): `POST` a multipart form containing each field plus the bundle as the `file` part (S3 and GCS answer `204`). With `output.method` `PUT` (Azure), `PUT` the bundle as the raw body with `output.headers` and `Content-Length` (Azure answers `201`). Otherwise `POST` the bundle as the raw body with `Content-Type: application/x-tar` (a Strata route).
 4. `POST {"output_format": "notebook-output-bundle@v1"}` to `finalize_url`.
 5. Return the `finalize` response body to the caller.
@@ -511,6 +513,11 @@ emitted, in order, in the same shape (a display that failed to serialize has
 be a list, possibly empty.
 
 `hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
+
+`output_dirs_streamed`, when the worker sent files to `output_file_url`, lists
+them by folder, `{"<name>": ["<path>", ...]}`, without members: the server already
+holds them, and the folder is those files plus the members. A file sent during the
+run but missing from this list (the cell deleted it) is not part of the folder.
 
 `output_dirs` (from a worker that advertises it) indexes the `dirs/` members:
 `{"<name>": {"<path>": <size in bytes>}}`, with `<path>` relative to the folder and

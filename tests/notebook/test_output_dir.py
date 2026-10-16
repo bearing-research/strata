@@ -363,3 +363,179 @@ def test_a_folder_name_cannot_leave_the_run_directory(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="leaves the run directory"):
         mount_entries("x = 1", tmp_path / "run")
     assert not (tmp_path / "escape").exists()
+
+
+class TestTheUploadUrl:
+    def test_it_verifies_and_is_not_a_log_url(self):
+        from urllib.parse import parse_qs, urlparse
+
+        from strata.transforms.signed_urls import URLSigner
+
+        signer = URLSigner(b"k" * 32)
+        url = signer.generate_output_file_url(base_url="http://s", build_id="b1")
+        query = parse_qs(urlparse(url).query)
+        expires, signature = float(query["expires_at"][0]), query["signature"][0]
+
+        assert "/v1/builds/b1/output-file" in url
+        assert signer.verify_output_file_signature("b1", expires, signature)
+        assert not signer.verify_output_file_signature("b2", expires, signature)
+        assert not signer.verify_log_signature("b1", expires, signature)
+
+        log = parse_qs(urlparse(signer.generate_log_url(base_url="http://s", build_id="b1")).query)
+        assert not signer.verify_output_file_signature(
+            "b1", float(log["expires_at"][0]), log["signature"][0]
+        )
+
+
+class TestTheUploadRoute:
+    """``POST /v1/builds/{id}/output-file`` stores a file for the run receiving it."""
+
+    @staticmethod
+    def _receiver(tmp_path):
+        from strata.notebook.output_file_relay import Receiver
+
+        session = _session(tmp_path, reader=None)
+        return session, Receiver(
+            session.get_artifact_manager(), "w", upload_dir=tmp_path / "uploads"
+        )
+
+    @staticmethod
+    def _url(build_id: str, **params: str) -> str:
+        from urllib.parse import urlencode
+
+        from strata.server import get_state
+
+        url = get_state().url_signer.generate_output_file_url(
+            base_url="http://127.0.0.1", build_id=build_id
+        )
+        return url.split("http://127.0.0.1", 1)[1] + "&" + urlencode(params)
+
+    def test_a_file_reaches_the_receiving_run(self, tmp_path, notebook_personal_server):
+        import httpx
+
+        from strata.notebook.output_file_relay import receiving
+
+        session, receiver = self._receiver(tmp_path)
+        base = notebook_personal_server["base_url"]
+        with receiving("b1", receiver):
+            response = httpx.post(
+                base + self._url("b1", folder="ckpt", path="deep/e0.bin"), content=b"x" * 7
+            )
+
+        assert response.status_code == 201, response.text
+        entry = receiver.received()["ckpt"]["deep/e0.bin"]
+        manager = session.get_artifact_manager()
+        file_id = manager.cell_artifact_id("w", f"__file__{entry['sha256']}")
+        assert manager.artifact_store.read_blob(file_id, entry["version"]) == b"x" * 7
+        assert list((tmp_path / "uploads").iterdir()) == []
+
+    @pytest.mark.parametrize(
+        ("build", "params", "status"),
+        [
+            ("b1", {"folder": "ckpt", "path": "../escape"}, 400),
+            ("b1", {"folder": "../x", "path": "e0.bin"}, 400),
+            ("b1", {"folder": "ckpt", "path": "/abs"}, 400),
+            ("other", {"folder": "ckpt", "path": "e0.bin"}, 409),
+        ],
+    )
+    def test_a_bad_upload_is_refused(
+        self, tmp_path, notebook_personal_server, build, params, status
+    ):
+        import httpx
+
+        from strata.notebook.output_file_relay import receiving
+
+        _, receiver = self._receiver(tmp_path)
+        base = notebook_personal_server["base_url"]
+        with receiving("b1", receiver):
+            response = httpx.post(base + self._url(build, **params), content=b"x")
+
+        assert response.status_code == status, response.text
+        assert receiver.received() == {}
+
+    def test_a_forged_signature_is_refused(self, tmp_path, notebook_personal_server):
+        import httpx
+
+        from strata.notebook.output_file_relay import receiving
+
+        _, receiver = self._receiver(tmp_path)
+        url = self._url("b1", folder="ckpt", path="e0.bin").replace("signature=", "signature=0")
+        with receiving("b1", receiver):
+            response = httpx.post(notebook_personal_server["base_url"] + url, content=b"x")
+
+        assert response.status_code == 403
+        assert receiver.received() == {}
+
+
+class TestStreamingFromAWorker:
+    """On the signed transport a worker uploads settled files while the cell runs."""
+
+    @staticmethod
+    def _session_on_worker(tmp_path, writer, executor_server, personal_server):
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+
+        session = _session(tmp_path, writer=writer)
+        session.notebook_state.workers = [
+            WorkerSpec(
+                name="remote",
+                backend=WorkerBackendType.EXECUTOR,
+                runtime_id="r",
+                config={
+                    "url": executor_server["execute_url"],
+                    "transport": "signed",
+                    "strata_url": personal_server["base_url"],
+                },
+            )
+        ]
+        return session
+
+    async def test_files_arrive_while_it_runs_and_the_result_only_names_them(
+        self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
+    ):
+        # e0 is uploaded, then deleted: the result's list keeps it out of the folder.
+        monkeypatch.setenv("STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS", "0.1")
+        writer = (
+            "# @worker remote\n# @output_dir ckpt\nimport time\n"
+            "(ckpt / 'e0.bin').write_bytes(b'0' * 9)\n"
+            "(ckpt / 'keep.bin').write_bytes(b'k' * 9)\n"
+            "time.sleep(1)\n"
+            "(ckpt / 'e0.bin').unlink()\n"
+            "(ckpt / 'e1.bin').write_bytes(b'1' * 9)\n"
+        )
+        session = self._session_on_worker(
+            tmp_path, writer, notebook_executor_server, notebook_personal_server
+        )
+        executor = CellExecutor(session)
+
+        written = await executor.execute_cell("w", writer)
+
+        assert written.success, written.error
+        assert sorted(executor._received_output_files["w"]["ckpt"]) == [
+            "e0.bin",
+            "e1.bin",
+            "keep.bin",
+        ]
+        manifest, state = _manifest(session)
+        assert state == "ready"
+        assert sorted(manifest["files"]) == ["e1.bin", "keep.bin"]
+
+    async def test_a_lost_worker_leaves_what_it_uploaded(
+        self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
+    ):
+        """The run times out on the worker: no result comes back, the uploads stay."""
+        monkeypatch.setenv("STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS", "0.1")
+        writer = (
+            "# @worker remote\n# @timeout 4\n# @output_dir ckpt\nimport time\n"
+            "(ckpt / 'e0.bin').write_bytes(b'0' * 9)\n"
+            "time.sleep(60)\n"
+        )
+        session = self._session_on_worker(
+            tmp_path, writer, notebook_executor_server, notebook_personal_server
+        )
+
+        result = await CellExecutor(session).execute_cell("w", writer)
+
+        assert not result.success
+        manifest, state = _manifest(session, version=1)
+        assert state == "failed"
+        assert list(manifest["files"]) == ["e0.bin"]

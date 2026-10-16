@@ -18,6 +18,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -26,8 +27,10 @@ from starlette.background import BackgroundTask
 
 from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook import output_dirs
+from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.hardware import hardware_report
+from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 from strata.notebook.models import MountSpec
 from strata.notebook.mount_cache import (
     DEFAULT_MAX_BYTES,
@@ -228,6 +231,102 @@ async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
             with contextlib.suppress(asyncio.CancelledError):
                 await forwarder
     return stdout, stderr
+
+
+_DEFAULT_OUTPUT_DIR_POLL_SECONDS = 5.0
+
+
+def _output_dir_poll_seconds() -> float:
+    """How often a run's ``# @output_dir`` folders are checked for settled files."""
+    try:
+        value = float(os.environ.get("STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS") or 0)
+    except ValueError:
+        return _DEFAULT_OUTPUT_DIR_POLL_SECONDS
+    return value if math.isfinite(value) and value > 0 else _DEFAULT_OUTPUT_DIR_POLL_SECONDS
+
+
+class _OutputDirStreamer:
+    """Upload a run's ``# @output_dir`` files to the server as they settle.
+
+    A file is settled when its size and mtime held from one poll to the next; it is sent
+    again if it changes later. What the server stored survives a worker lost afterwards.
+    An upload that fails (another node, the network) is tried at the next poll, and a file
+    never stored goes in the bundle.
+    """
+
+    def __init__(self, root: Path, url: str):
+        self._root = root
+        self._url = url
+        self._seen: dict[tuple[str, str], tuple[int, int]] = {}
+        self._sent: dict[tuple[str, str], tuple[int, int]] = {}
+
+    def _states(self) -> dict[tuple[str, str], tuple[int, int]]:
+        states: dict[tuple[str, str], tuple[int, int]] = {}
+        if not self._root.is_dir():
+            return states
+        for folder in self._root.iterdir():
+            if not folder.is_dir() or folder.is_symlink():
+                continue
+            for rel in output_dirs.regular_files(folder):
+                st = (folder / rel).lstat()
+                states[(folder.name, rel)] = (st.st_size, st.st_mtime_ns)
+        return states
+
+    async def _upload(
+        self, client: httpx.AsyncClient, key: tuple[str, str], state: tuple[int, int]
+    ) -> None:
+        folder, rel = key
+        try:
+            f = open_tree_file(self._root / folder, rel)
+        except (UnsafeRunFile, OSError):
+            return
+
+        async def body() -> AsyncIterator[bytes]:
+            while chunk := await asyncio.to_thread(f.read, BLOB_STREAM_CHUNK_BYTES):
+                yield chunk
+
+        separator = "&" if "?" in self._url else "?"
+        target = f"{self._url}{separator}{urlencode({'folder': folder, 'path': rel})}"
+        try:
+            with f:
+                response = await client.post(target, content=body())
+        except httpx.HTTPError:
+            logger.warning("Could not upload output file %s/%s; will retry", folder, rel)
+            return
+        if response.status_code == 201:
+            self._sent[key] = state
+        else:
+            logger.warning(
+                "Output file %s/%s not stored (%s); it goes in the result",
+                folder,
+                rel,
+                response.status_code,
+            )
+
+    async def run(self, stop: asyncio.Event) -> None:
+        """Upload settled files until *stop* is set."""
+        async with httpx.AsyncClient(timeout=None, transport=_guarded_transport()) as client:
+            while not stop.is_set():
+                states = await asyncio.to_thread(self._states)
+                for key, state in states.items():
+                    if self._seen.get(key) == state and self._sent.get(key) != state:
+                        await self._upload(client, key, state)
+                self._seen = states
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), timeout=_output_dir_poll_seconds())
+
+    async def finish(self) -> dict[str, set[str]]:
+        """Send what changed since its last upload; return what the server holds now."""
+        states = await asyncio.to_thread(self._states)
+        async with httpx.AsyncClient(timeout=None, transport=_guarded_transport()) as client:
+            for key, state in states.items():
+                if self._sent.get(key) != state:
+                    await self._upload(client, key, state)
+        held: dict[str, set[str]] = {}
+        for (folder, rel), state in states.items():
+            if self._sent.get((folder, rel)) == state:
+                held.setdefault(folder, set()).add(rel)
+        return held
 
 
 class _PendingRun:
@@ -641,6 +740,7 @@ def create_notebook_executor_app(
         write_input: Any,
         build_id: str | None = None,
         log_url: str | None = None,
+        output_file_url: str | None = None,
         trace_carrier: dict[str, Any] | None = None,
         notebook_id: str | None = None,
         cell_id: str | None = None,
@@ -692,6 +792,7 @@ def create_notebook_executor_app(
                     write_input=write_input,
                     build_id=build_id,
                     log_url=log_url,
+                    output_file_url=output_file_url,
                     gpu=gpu,
                     environment=environment,
                     language=language,
@@ -714,6 +815,7 @@ def create_notebook_executor_app(
         build_id: str | None,
         log_url: str | None,
         gpu: int | None,
+        output_file_url: str | None = None,
         environment: Any = None,
         language: str = "python",
         mutation_defines: list[str] | None = None,
@@ -856,17 +958,36 @@ def create_notebook_executor_app(
                     status_code=409,
                     content={"success": False, "error": "execution was cancelled"},
                 )
+            # With a URL to send them to, folder files go to the server as they settle, so a
+            # lost worker still leaves them; the bundle then names them instead of carrying them.
+            streamer = (
+                _OutputDirStreamer(output_dir / output_dirs.OUTPUT_DIRS, output_file_url)
+                if output_file_url and parse_annotations(source).output_dirs
+                else None
+            )
+            stop_streaming = asyncio.Event()
+            streaming = (
+                asyncio.create_task(streamer.run(stop_streaming)) if streamer is not None else None
+            )
+            streamed: dict[str, set[str]] | None = None
             try:
-                result = await _run_harness(
-                    harness_path,
-                    manifest_path,
-                    timeout_seconds,
-                    in_flight=in_flight,
-                    build_id=build_id,
-                    log_url=log_url,
-                    env=_cell_env(harness_extra or None),
-                    interpreter=interpreter,
-                )
+                try:
+                    result = await _run_harness(
+                        harness_path,
+                        manifest_path,
+                        timeout_seconds,
+                        in_flight=in_flight,
+                        build_id=build_id,
+                        log_url=log_url,
+                        env=_cell_env(harness_extra or None),
+                        interpreter=interpreter,
+                    )
+                finally:
+                    if streaming is not None:
+                        stop_streaming.set()
+                        await streaming
+                if streamer is not None:
+                    streamed = await streamer.finish()
                 if result.get("success", False):
                     # The server records these; it never sees this machine's staging copy.
                     result["mount_writes"] = [
@@ -897,7 +1018,7 @@ def create_notebook_executor_app(
             result = {**result, "hardware": await asyncio.to_thread(hardware_report)}
             if prepared_env is not None:
                 result["environment"] = prepared_env
-            pack_notebook_output_bundle(bundle_path, result, output_dir)
+            pack_notebook_output_bundle(bundle_path, result, output_dir, streamed)
             return bundle_path, tmpdir
         except BaseException:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1222,6 +1343,9 @@ def create_notebook_executor_app(
         log_url = str(manifest.get("log_url", "")).strip() or None
         if log_url:
             _assert_url_safe(log_url, "log_url")
+        output_file_url = str(manifest.get("output_file_url", "")).strip() or None
+        if output_file_url:
+            _assert_url_safe(output_file_url, "output_file_url")
 
         async def _download_input(
             var_name: str,
@@ -1293,6 +1417,7 @@ def create_notebook_executor_app(
             write_input=_download_input,
             build_id=str(metadata.get("build_id") or "") or None,
             log_url=log_url,
+            output_file_url=output_file_url,
             # Headers first: a pool in between forwards its own, nearer span. The
             # manifest's copy is the server's, for dispatchers that send only the body.
             trace_carrier=(

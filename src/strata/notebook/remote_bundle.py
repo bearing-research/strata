@@ -15,7 +15,7 @@ from strata.notebook.harness_user import (
     open_tree_file,
     write_run_file,
 )
-from strata.notebook.output_dirs import OUTPUT_DIRS, regular_files
+from strata.notebook.output_dirs import OUTPUT_DIRS, STREAMED, regular_files
 
 SCHEMA_VERSION = "notebook-output-bundle@v1"
 
@@ -65,9 +65,12 @@ def _read_member(tar: tarfile.TarFile, name: str) -> bytes:
     return extracted.read()
 
 
-def _add_output_dirs(tar: tarfile.TarFile, output_dir: Path) -> dict[str, Any]:
+def _add_output_dirs(
+    tar: tarfile.TarFile, output_dir: Path, streamed: dict[str, set[str]]
+) -> dict[str, Any]:
     """Add each ``# @output_dir`` folder's files, one member each, as ``{name: {path: size}}``.
 
+    A file in *streamed* (the server stored it as the worker uploaded it) is left out.
     Unpacking streams these members, so a checkpoint is not held in memory and the
     per-member cap does not apply. Read without following links: the cell owned the
     folder. A link is left out.
@@ -79,6 +82,8 @@ def _add_output_dirs(tar: tarfile.TarFile, output_dir: Path) -> dict[str, Any]:
     for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink()):
         files: dict[str, int] = {}
         for rel in regular_files(folder):
+            if rel in streamed.get(folder.name, ()):
+                continue
             try:
                 f = open_tree_file(folder, rel)
             except UnsafeRunFile:
@@ -120,8 +125,13 @@ def pack_notebook_output_bundle(
     bundle_path: Path | BinaryIO,
     result_manifest: dict[str, Any],
     output_dir: Path,
+    streamed: dict[str, set[str]] | None = None,
 ) -> None:
-    """Pack one harness result directory into a transport bundle."""
+    """Pack one harness result directory into a transport bundle.
+
+    *streamed* names the ``# @output_dir`` files the server already holds, which travel
+    as names only (``output_dirs_streamed``), not as members.
+    """
     bundle_manifest: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "success": bool(result_manifest.get("success", False)),
@@ -196,7 +206,11 @@ def pack_notebook_output_bundle(
             str(result_manifest.get("stderr", "")).encode("utf-8"),
         )
 
-        bundle_manifest["output_dirs"] = _add_output_dirs(tar, output_dir)
+        bundle_manifest["output_dirs"] = _add_output_dirs(tar, output_dir, streamed or {})
+        if streamed is not None:
+            bundle_manifest["output_dirs_streamed"] = {
+                name: sorted(paths) for name, paths in streamed.items()
+            }
         # The last display is also ``_``, so the same file is named twice.
         added: set[str] = set()
         for meta in [*bundle_manifest["variables"].values(), *bundle_manifest["displays"]]:
@@ -253,6 +267,13 @@ def unpack_notebook_output_bundle(
             "mount_writes": manifest_data.get("mount_writes") or [],
         }
         _unpack_output_dirs(tar, manifest_data.get("output_dirs") or {}, output_dir)
+        streamed = manifest_data.get("output_dirs_streamed")
+        if streamed is not None:
+            if not isinstance(streamed, dict) or not all(
+                isinstance(paths, list) for paths in streamed.values()
+            ):
+                raise ValueError("Bundle output_dirs_streamed must map folders to path lists")
+            write_run_file(output_dir, STREAMED, json.dumps(streamed).encode("utf-8"))
 
         variables = manifest_data.get("variables", {})
         if not isinstance(variables, dict):
