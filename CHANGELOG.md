@@ -50,7 +50,7 @@ exhaustive commit history.
 - **`# @output_dir` on a remote worker.** The worker returns the folder with
   the run's result, each file streamed past the bundle's member cap, and a
   failed run on a worker keeps its files. A worker too old to return folders is
-  refused before the cell runs; a lost worker still keeps nothing. (#PR)
+  refused before the cell runs; a lost worker still keeps nothing. (#1204)
 
 ### Changed
 
