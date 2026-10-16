@@ -81,6 +81,9 @@ def pack_notebook_output_bundle(
     # Only a worker reports it; a local bundle omits it rather than claim an empty machine.
     if result_manifest.get("hardware"):
         bundle_manifest["hardware"] = result_manifest["hardware"]
+    # What the worker wrote through read-write mounts; the server records it.
+    if result_manifest.get("mount_writes"):
+        bundle_manifest["mount_writes"] = result_manifest["mount_writes"]
 
     variables = result_manifest.get("variables", {})
     if not isinstance(variables, dict):
@@ -188,6 +191,7 @@ def unpack_notebook_output_bundle(
             "traceback": manifest_data.get("traceback"),
             "build_env": manifest_data.get("build_env", ""),
             "hardware": manifest_data.get("hardware") or {},
+            "mount_writes": manifest_data.get("mount_writes") or [],
         }
 
         variables = manifest_data.get("variables", {})

@@ -837,7 +837,11 @@ def create_notebook_executor_app(
                     interpreter=interpreter,
                 )
                 if result.get("success", False):
-                    await mount_resolver.sync_back(resolved_mounts)
+                    # The server records these; it never sees this machine's staging copy.
+                    result["mount_writes"] = [
+                        write.model_dump()
+                        for write in await mount_resolver.sync_back(resolved_mounts)
+                    ]
             except TimeoutError:
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 # Lazy: keeps the heavy executor module out of worker load on a rare path.

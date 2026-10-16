@@ -547,3 +547,72 @@ def test_each_remote_mount_scheme_has_an_extra_with_its_filesystem(scheme, extra
     declared = {re.split(r"[<>=\[ ;]", req, maxsplit=1)[0] for req in extras[extra]}
     implementation = known_implementations[_scheme_to_fsspec_protocol(scheme)]["class"]
     assert implementation.split(".")[0] in declared
+
+
+class TestWhatACellWrote:
+    """``sync_back`` reports the files a run created or changed through a read-write mount."""
+
+    @staticmethod
+    def _sha(data: bytes) -> str:
+        import hashlib
+
+        return hashlib.sha256(data).hexdigest()
+
+    @pytest.mark.asyncio
+    async def test_a_local_mount_reports_new_and_changed_files_only(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "keep.txt").write_bytes(b"untouched")
+        (out / "old.txt").write_bytes(b"before")
+        resolver = MountResolver(cache_dir=tmp_path / "cache")
+        spec = MountSpec(name="out", uri=out.as_uri(), mode=MountMode.READ_WRITE)
+        resolved = await resolver.prepare_mounts([spec])
+
+        (out / "old.txt").write_bytes(b"after, longer")
+        (out / "sub").mkdir()
+        (out / "sub" / "new.bin").write_bytes(b"\x00\x01")
+        (out / "link").symlink_to(out / "keep.txt")
+
+        (write,) = await resolver.sync_back(resolved)
+
+        assert (write.mount, write.uri) == ("out", out.as_uri())
+        assert [(f.path, f.size, f.sha256) for f in write.files] == [
+            ("old.txt", 13, self._sha(b"after, longer")),
+            ("sub/new.bin", 2, self._sha(b"\x00\x01")),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_remote_mount_reports_against_what_was_staged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Staged files the cell left alone are uploaded again but were not written."""
+        fs = _FakeRemoteFS(
+            {
+                "bucket/out/a.txt": {"content": b"a", "size": 1},
+                "bucket/out/b.txt": {"content": b"b", "size": 1},
+            }
+        )
+        _install_fake_fsspec(monkeypatch, fs)
+        resolver = MountResolver(cache_dir=tmp_path / "cache")
+        resolved = await resolver.prepare_mounts(
+            [MountSpec(name="out", uri="s3://bucket/out", mode=MountMode.READ_WRITE)]
+        )
+        staging = resolved["out"].local_path
+        (staging / "b.txt").write_bytes(b"bb")
+        (staging / "c.txt").write_bytes(b"c")
+
+        (write,) = await resolver.sync_back(resolved)
+
+        assert [f.path for f in write.files] == ["b.txt", "c.txt"]
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_writes_nothing_reports_nothing(self, tmp_path: Path) -> None:
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "keep.txt").write_bytes(b"untouched")
+        resolver = MountResolver(cache_dir=tmp_path / "cache")
+        resolved = await resolver.prepare_mounts(
+            [MountSpec(name="out", uri=out.as_uri(), mode=MountMode.READ_WRITE)]
+        )
+
+        assert await resolver.sync_back(resolved) == []

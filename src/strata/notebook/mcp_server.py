@@ -631,9 +631,11 @@ def _cell_output(session_manager: SessionManager, session_id: str, cell_id: str,
     for name, artifact in manager.list_cell_artifacts(cell_id):
         if name == variable:
             return manager.artifact_store, artifact
-    # ``__console__`` / ``__display__N`` are the cell's records, not variables it defined.
+    # ``__console__`` / ``__display__N`` replay the run; ``__mount__<name>`` is what it wrote.
     stored = sorted(
-        name for name, _ in manager.list_cell_artifacts(cell_id) if not name.startswith("__")
+        name
+        for name, _ in manager.list_cell_artifacts(cell_id)
+        if not name.startswith(("__console__", "__display__"))
     )
     raise ValueError(
         f"Cell {cell_id} has no stored output named {variable!r}. "
@@ -1267,7 +1269,8 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         Every step that produced it, newest first, each with the code it ran,
         the environment it ran in, who computed it and the digest of its bytes.
         ``variable`` is the name the cell assigned; only variables a downstream
-        cell reads are stored, and the error lists what is.
+        cell reads are stored, and the error lists what is. ``__mount__<name>``
+        is what a run wrote through a read-write mount: its files and digests.
         """
         return _lineage(session_manager, session_id, cell_id, variable, max_depth)
 

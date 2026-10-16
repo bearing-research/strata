@@ -196,6 +196,13 @@ its filesystem library goes where Strata is installed: the `s3` extra for
 `s3://` (`s3fs`), `gcs` for `gs://` (`gcsfs`) and `azure` for `az://`
 (`adlfs`), for example `uv tool install "strata-notebook[s3]"`.
 
+**What a cell writes through an `rw` mount is recorded.** After a successful run,
+the files it created or changed (path, size and sha256) are stored as the cell's
+`__mount__<name>` record, linked to the inputs the run read, so its lineage shows
+what produced them. On a remote worker the worker reports them. Each run adds a
+version, since an `rw` cell never serves a cached result. Deleted files are not
+recorded, and are not deleted from a remote mount either.
+
 Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---
