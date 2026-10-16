@@ -794,7 +794,9 @@ boundary.** It keeps cells away from the server; it does not keep one tenant's
 cells away from another's. Every cell runs as the same user, and that user has
 to read every notebook directory, so a cell can read any tenant's notebook
 source and data files, and the bytes another notebook fetched (`.strata/fetch`)
-or mounted (`.strata/mount_cache`), given the path. Tenants that must not see
+or mounted (a view in `STRATA_NOTEBOOK_MOUNT_CACHE_DIR`), given the path. The
+mount cache's `views/` and `objects/` directories cannot be listed, and a
+view's name hashes the storage options that reach the store. Tenants that must not see
 each other need separate servers (or containers, each with its own storage),
 or every cell on workers that serve one tenant each.
 

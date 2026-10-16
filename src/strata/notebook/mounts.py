@@ -1,8 +1,9 @@
 """File mount resolution and fingerprinting for notebook cells.
 
 Local (``file://``) mounts are used directly; remote ones (``s3``, ``gs``,
-``az``) are mirrored to a local cache via ``fsspec`` before the subprocess
-spawns, so the harness only sees ``pathlib.Path``. Read-only mounts are
+``az``) are copied locally via ``fsspec`` before the subprocess spawns, so the
+harness only sees ``pathlib.Path``: read-only ones into the machine's shared
+:class:`~strata.notebook.mount_cache.MountCache`. Read-only mounts are
 fingerprinted into provenance; read-write mounts are synced back after
 execution and do not participate in provenance. What a cell writes through one is
 recorded instead: :meth:`MountResolver.sync_back` returns the files it created or
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -26,6 +28,7 @@ from pydantic import BaseModel
 
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.models import MountMode, MountSpec
+from strata.notebook.mount_cache import MountCache, object_key
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +146,9 @@ for valid keys (s3fs, gcsfs, adlfs). Per-mount ``options`` from
 class MountResolver:
     """Resolves mount URIs to local paths for cell execution.
 
-    Local mounts must exist; remote mounts are mirrored under ``cache_dir`` via
-    fsspec. ``credentials`` are per-scheme fsspec storage options.
+    Local mounts must exist. Read-only remote mounts are views in ``mount_cache``;
+    read-write ones are staged under ``cache_dir``, which is the caller's own (per
+    notebook or per job). ``credentials`` are per-scheme fsspec storage options.
     """
 
     def __init__(
@@ -152,10 +156,12 @@ class MountResolver:
         cache_dir: Path | None = None,
         credentials: MountCredentials | None = None,
         credential_resolver: CredentialResolver | None = None,
+        mount_cache: MountCache | None = None,
     ):
         # User-scoped, not a shared /tmp dir that invites cross-user cache poisoning.
         # Real callers always pass cache_dir.
         self.cache_dir = cache_dir or Path.home() / ".strata" / "mount_cache"
+        self.mount_cache = mount_cache or MountCache(self.cache_dir)
         self.credentials = credentials or {}
         # Empty by default, so a mount naming an undefined credential fails by name
         # instead of reaching the store anonymously.
@@ -245,71 +251,76 @@ class MountResolver:
                 f"Install it with: pip install fsspec s3fs gcsfs adlfs"
             )
 
-        mount_hash = hashlib.sha256(mount.uri.encode()).hexdigest()[:12]
-        local_dir = self.cache_dir / f"{mount.name}_{mount_hash}"
-
         if mount.mode == MountMode.READ_ONLY:
-            return await self._resolve_remote_ro(
-                mount,
-                scheme,
-                remote_path,
-                local_dir,
-            )
-        else:
-            # RW: stage locally, sync back after execution.
-            return await self._resolve_remote_rw(
-                mount,
-                scheme,
-                remote_path,
-                local_dir,
-            )
+            return await self._resolve_remote_ro(mount, scheme, remote_path)
+        # RW: stage locally, sync back after execution.
+        mount_hash = hashlib.sha256(mount.uri.encode()).hexdigest()[:12]
+        return await self._resolve_remote_rw(
+            mount,
+            scheme,
+            remote_path,
+            self.cache_dir / f"{mount.name}_{mount_hash}",
+        )
 
     async def _resolve_remote_ro(
         self,
         mount: MountSpec,
         scheme: str,
         remote_path: str,
-        local_dir: Path,
     ) -> ResolvedMount:
-        """Resolve a read-only remote mount recursively."""
+        """Resolve a read-only remote mount to a view in the shared mount cache."""
         protocol = _scheme_to_fsspec_protocol(scheme)
         storage_options = self.storage_options(mount)
-        fingerprint = await MountFingerprinter.fingerprint_mount(
-            mount, storage_options=storage_options
-        )
-        assert fingerprint is not None
+        try:
+            fingerprint, local_path = await asyncio.to_thread(
+                self._prepare_view, mount, protocol, remote_path, storage_options
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to materialize remote mount '{mount.name}' from {mount.uri}: {e}"
+            ) from e
+        return ResolvedMount(spec=mount, local_path=local_path, fingerprint=fingerprint)
 
+    def _prepare_view(
+        self,
+        mount: MountSpec,
+        protocol: str,
+        remote_path: str,
+        storage_options: dict[str, Any],
+    ) -> tuple[str, Path]:
+        """The mount's fingerprint and its view, built from one listing so the two agree."""
         fs = _mount_filesystem(protocol, storage_options)
-        snapshot_dir = local_dir / fingerprint[:12]
-        local_mirror = snapshot_dir / "data"
-        complete_marker = snapshot_dir / ".complete"
+        # The options are part of the key: a view is only handed to a caller that reaches the
+        # store the same way, so a credential it lacks never yields another notebook's copy.
+        options_digest = hashlib.sha256(
+            json.dumps(storage_options, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        listing: dict[str, dict[str, Any]] | None = None
+        if mount.pin is not None:
+            fingerprint = hashlib.sha256(f"pin:{mount.pin}".encode()).hexdigest()
+        else:
+            listing = _list_remote_file_info(fs, protocol, remote_path)
+            fingerprint = _fingerprint_listing(listing)
+        key = hashlib.sha256(
+            "\0".join([protocol, remote_path, options_digest, fingerprint]).encode()
+        ).hexdigest()
 
-        if not complete_marker.exists():
-            if snapshot_dir.exists():
-                shutil.rmtree(snapshot_dir)
-            local_mirror.mkdir(parents=True, exist_ok=True)
-            mirror_root = local_mirror.resolve()
-            try:
-                for remote_name in _list_remote_files(fs, protocol, remote_path):
-                    rel = _relative_remote_path(remote_name, protocol, remote_path)
-                    local_file = local_mirror / rel
-                    # Path-traversal guard: a remote name with ``..`` or an absolute path would
-                    # escape local_mirror and silently widen what the cell can read.
-                    _assert_within(local_file, mirror_root, mount.name, remote_name)
-                    local_file.parent.mkdir(parents=True, exist_ok=True)
-                    fs.get(f"{protocol}://{remote_name}", str(local_file))
-                complete_marker.write_text("", encoding="utf-8")
-            except Exception as e:
-                shutil.rmtree(snapshot_dir, ignore_errors=True)
-                raise RuntimeError(
-                    f"Failed to materialize remote mount '{mount.name}' from {mount.uri}: {e}"
-                ) from e
-
-        return ResolvedMount(
-            spec=mount,
-            local_path=local_mirror,
-            fingerprint=fingerprint,
+        found = self.mount_cache.find_view(key)
+        if found is not None:
+            self.mount_cache.sweep()
+            return fingerprint, found
+        if listing is None:
+            listing = _list_remote_file_info(fs, protocol, remote_path)
+        endpoint = _endpoint_identity(storage_options)
+        files = []
+        for remote_name, info in sorted(listing.items()):
+            rel = _relative_remote_path(remote_name, protocol, remote_path)
+            _check_relative(rel, mount.name, remote_name)
+            files.append((rel, object_key(protocol, endpoint, remote_name, info), remote_name))
+        view = self.mount_cache.build_view(
+            key, files, lambda name, dest: fs.get(f"{protocol}://{name}", str(dest))
         )
+        return fingerprint, view
 
     async def _resolve_remote_rw(
         self,
@@ -449,17 +460,7 @@ class MountFingerprinter:
         try:
             protocol = _scheme_to_fsspec_protocol(scheme)
             fs = _mount_filesystem(protocol, storage_options or {})
-            listing = _list_remote_file_info(fs, protocol, remote_path)
-            parts: list[str] = []
-            for info in listing.values():
-                name = info.get("name", "")
-                size = info.get("size", 0)
-                etag = info.get("ETag", info.get("etag", ""))
-                mtime = info.get("LastModified", info.get("mtime", ""))
-                parts.append(f"{name}:{size}:{etag}:{mtime}")
-
-            content = "\n".join(sorted(parts))
-            return hashlib.sha256(content.encode()).hexdigest()
+            return _fingerprint_listing(_list_remote_file_info(fs, protocol, remote_path))
 
         except ImportError as exc:
             # fsspec or the backend driver is missing. A deterministic hash here would
@@ -532,6 +533,39 @@ class MountFingerprinter:
 
 
 # --- Helpers ---
+
+
+def _fingerprint_listing(listing: dict[str, dict[str, Any]]) -> str:
+    """A remote prefix's fingerprint from its listing: names, sizes, etags and mtimes."""
+    parts: list[str] = []
+    for info in listing.values():
+        name = info.get("name", "")
+        size = info.get("size", 0)
+        etag = info.get("ETag", info.get("etag", ""))
+        mtime = info.get("LastModified", info.get("mtime", ""))
+        parts.append(f"{name}:{size}:{etag}:{mtime}")
+    return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()
+
+
+def _endpoint_identity(storage_options: dict[str, Any]) -> str:
+    """Which store the options reach, without their secrets: two stores can share a bucket name."""
+    client = storage_options.get("client_kwargs") or {}
+    endpoint = storage_options.get("endpoint_url") or client.get("endpoint_url") or ""
+    return f"{endpoint}|{storage_options.get('account_name') or ''}"
+
+
+def _check_relative(rel: Path, mount_name: str, remote_name: str) -> None:
+    """Raise if a remote name's path under the mount would leave it.
+
+    Lexical: the view is a fresh directory holding no links, so ``..``, a root or a
+    drive are the only ways out.
+    """
+    if rel.anchor or ".." in rel.parts or not rel.parts:
+        raise RuntimeError(
+            f"Mount '{mount_name}' rejected: remote name {remote_name!r} is outside the "
+            f"mount root. This usually means the remote returned a path-traversal name "
+            f"(.. segments or an absolute path)."
+        )
 
 
 def _scheme_to_fsspec_protocol(scheme: str) -> str:

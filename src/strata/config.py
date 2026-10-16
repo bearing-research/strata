@@ -20,6 +20,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from strata.notebook.mount_cache import DEFAULT_MAX_BYTES as DEFAULT_MOUNT_CACHE_MAX_BYTES
+from strata.notebook.mount_cache import DEFAULT_MAX_IDLE_DAYS as DEFAULT_MOUNT_CACHE_MAX_IDLE_DAYS
 from strata.notebook.python_versions import (
     current_python_minor,
     discover_installed_python_minors,
@@ -430,6 +432,18 @@ class StrataConfig(BaseSettings):
     # several projects keeps a project's data source to that project. Unlisted names are open.
     notebook_credential_paths: Annotated[dict[str, list[str]], NoDecode] = Field(
         default_factory=dict
+    )
+    # Read-only remote mounts, one copy per machine, under notebook_mount_cache_dir (default:
+    # "mount_cache" beside notebook_storage_dir, where a harness user can reach it): each
+    # file is kept once by URI and version, and each notebook's view of a prefix is hard
+    # links to those copies. Views unused for notebook_mount_cache_max_idle_days are
+    # removed, then the least recently used until the copies fit in
+    # notebook_mount_cache_max_bytes (a view used in the last hour is kept). 0 turns off the
+    # cap or the idle limit. A worker reads the same STRATA_ variables.
+    notebook_mount_cache_dir: Path | None = None
+    notebook_mount_cache_max_bytes: Annotated[int, Field(ge=0)] = DEFAULT_MOUNT_CACHE_MAX_BYTES
+    notebook_mount_cache_max_idle_days: Annotated[float, Field(ge=0)] = (
+        DEFAULT_MOUNT_CACHE_MAX_IDLE_DAYS
     )
 
     # Hosts ``@fetch``, and a prompt cell's ``[ai] base_url`` from
