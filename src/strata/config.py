@@ -838,13 +838,21 @@ class StrataConfig(BaseSettings):
         """Reject an object-store warehouse whose SQL catalog has no ``uri``.
 
         Without one the catalog is SQLite on this server's disk, invisible to
-        every other reader of the bucket.
+        every other reader of the bucket. Also reject a ``credential`` that names a
+        Strata credential: it would reach pyiceberg as a REST OAuth secret.
         """
         configured = {"catalog_properties": self.catalog_properties}
         configured.update({f"catalogs.{name}": props for name, props in self.catalogs.items()})
         for where, props in configured.items():
+            # Only a defined name is echoed, never a value that may be a secret.
+            if props.get("credential") in self.notebook_credentials:
+                raise ValueError(
+                    f"{where} sets credential = {props['credential']!r}, which is pyiceberg's "
+                    "REST OAuth secret; to use the Strata credential of that name, set "
+                    "strata_credential instead."
+                )
             warehouse = props.get("warehouse", "")
-            credential = self.notebook_credentials.get(props.get("credential", ""), {})
+            credential = self.notebook_credentials.get(props.get("strata_credential", ""), {})
             if (
                 "://" in warehouse
                 and not warehouse.startswith("file://")

@@ -333,7 +333,9 @@ class TestACatalogCredential:
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
         session.notebook_state.env = {"LAKE_TOKEN": "from-the-vault"}
         config = StrataConfig(
-            catalogs={"lake": {"type": "rest", "uri": "http://catalog", "credential": "lake-ro"}},
+            catalogs={
+                "lake": {"type": "rest", "uri": "http://catalog", "strata_credential": "lake-ro"}
+            },
             notebook_credentials=credentials,
         )
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
@@ -394,7 +396,9 @@ async def test_a_catalog_credential_set_only_in_the_notebook_env_resolves_its_sn
     monkeypatch.delenv("LAKE_DB", raising=False)
     config = StrataConfig(
         cache_dir=tmp_path / "cache",
-        catalogs={"lake": {"type": "sql", "warehouse": warehouse.as_uri(), "credential": "db"}},
+        catalogs={
+            "lake": {"type": "sql", "warehouse": warehouse.as_uri(), "strata_credential": "db"}
+        },
         notebook_credentials={"db": {"uri": "${LAKE_DB}"}},
     )
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)

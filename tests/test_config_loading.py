@@ -247,11 +247,11 @@ class TestObjectStoreWarehouseNeedsACatalogUri:
     def test_a_named_credential_can_supply_the_uri(self, tmp_path):
         config = StrataConfig(
             cache_dir=tmp_path / "c",
-            catalogs={"lake": {"warehouse": "s3://l/wh", "credential": "lake-db"}},
+            catalogs={"lake": {"warehouse": "s3://l/wh", "strata_credential": "lake-db"}},
             notebook_credentials={"lake-db": {"uri": "${LAKE_DSN}"}},
         )
 
-        assert config.catalogs["lake"]["credential"] == "lake-db"
+        assert config.catalogs["lake"]["strata_credential"] == "lake-db"
 
     @pytest.mark.parametrize(
         "props",
