@@ -75,6 +75,7 @@ EXPECTED_ROUTES = [
     ("/v1/builds/{build_id}/finalize", "POST", 0),
     ("/v1/builds/{build_id}/log", "POST", 0),
     ("/v1/builds/{build_id}/manifest", "GET", 0),
+    ("/v1/builds/{build_id}/output-file", "POST", 0),
     ("/v1/cache/clear", "POST", 1),
     # 1 dependency: require_scope("admin:cache"); the listing is cache-wide and exposes
     # every tenant's entry metadata.

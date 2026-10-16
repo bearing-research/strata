@@ -444,6 +444,67 @@ async def append_build_log(
     return JSONResponse(status_code=202, content={"delivered": delivered})
 
 
+def _output_file_path(folder: str, path: str) -> str | None:
+    """*path* as a plain relative POSIX path inside *folder*, or None if it is not one."""
+    if not folder.isidentifier() or "\\" in path or "\x00" in path:
+        return None
+    parts = path.split("/")
+    if not path or any(part in ("", ".", "..") for part in parts):
+        return None
+    return path
+
+
+@router.post("/v1/builds/{build_id}/output-file")
+async def upload_output_file(
+    build_id: str,
+    expires_at: str,
+    signature: str,
+    folder: str,
+    path: str,
+    request: Request,
+):
+    """Store one ``# @output_dir`` file of a build that is still running.
+
+    Stored in the notebook's store as it arrives, so a worker lost afterwards still
+    leaves it. 409 when this node did not dispatch the build (or it has ended): the
+    worker sends the file in its result instead.
+    """
+    import uuid
+
+    from strata.notebook import output_file_relay
+    from strata.server import get_state
+
+    try:
+        expires_float = float(expires_at)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid parameter format")
+    if not get_state().url_signer.verify_output_file_signature(build_id, expires_float, signature):
+        raise HTTPException(status_code=403, detail="Invalid or expired signature")
+    rel = _output_file_path(folder, path)
+    if rel is None:
+        raise HTTPException(status_code=400, detail="Invalid output folder or path")
+    receiver = output_file_relay.receiver_for(build_id)
+    if receiver is None:
+        raise HTTPException(status_code=409, detail="No run is receiving files for this build")
+
+    limit = get_state().config.max_upload_bytes
+    upload = receiver.upload_dir / f".upload-{uuid.uuid4().hex}"
+    try:
+        size = 0
+        with open(upload, "xb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(
+                        status_code=413, detail="Output file exceeds max_upload_bytes"
+                    )
+                out.write(chunk)
+        await anyio.to_thread.run_sync(receiver.accept, folder, rel, upload)
+    finally:
+        upload.unlink(missing_ok=True)
+    return JSONResponse(status_code=201, content={"stored": True, "size": size})
+
+
 @router.post("/v1/builds/{build_id}/finalize")
 async def finalize_build(
     build_id: str,

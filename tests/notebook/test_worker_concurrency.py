@@ -69,7 +69,7 @@ def harness(monkeypatch):
     return fake
 
 
-def _write_empty_bundle(bundle_path: Path, _result, _output_dir) -> None:
+def _write_empty_bundle(bundle_path: Path, _result, _output_dir, _streamed=None) -> None:
     bundle_path.write_bytes(b"")
 
 

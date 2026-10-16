@@ -19,8 +19,9 @@ import logging
 import os
 import shutil
 import stat
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 
@@ -53,6 +54,17 @@ def mount_entries(source: str, run_dir: Path) -> dict[str, dict[str, str]]:
     return entries
 
 
+STREAMED = "output-dirs-streamed.json"  # in a run directory: what a worker uploaded
+
+
+def read_streamed(run_dir: Path) -> dict[str, list[str]]:
+    """``{folder: [path, ...]}`` a worker's result says the server already has, or ``{}``."""
+    path = run_dir / STREAMED
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def regular_files(root: Path) -> list[str]:
     """Each regular file under *root*, as a POSIX path relative to it; links are not followed."""
     found: list[str] = []
@@ -68,11 +80,16 @@ def file_artifact_id(artifact_mgr: Any, cell_id: str, sha256: str) -> str:
     return artifact_mgr.cell_artifact_id(cell_id, f"__file__{sha256}")
 
 
-def _store_file(artifact_mgr: Any, cell_id: str, folder: Path, rel: str) -> dict[str, Any]:
-    """Store one file by its digest, unless a ready copy is already there."""
+def _store_opened(
+    artifact_mgr: Any, cell_id: str, opener: Callable[[], BinaryIO], shown: str
+) -> dict[str, Any]:
+    """Store one file by its digest, unless a ready copy is already there.
+
+    *opener* opens it afresh for each of the two passes, hashing then copying.
+    """
     digest = hashlib.sha256()
     size = 0
-    with open_tree_file(folder, rel) as f:
+    with opener() as f:
         while chunk := f.read(_CHUNK):
             digest.update(chunk)
             size += len(chunk)
@@ -98,15 +115,12 @@ def _store_file(artifact_mgr: Any, cell_id: str, folder: Path, rel: str) -> dict
     # Hashed again while copying: the file may have changed since the first pass.
     copied = hashlib.sha256()
     try:
-        with (
-            open_tree_file(folder, rel) as f,
-            store.blob_store.open_blob_writer(artifact_id, version) as out,
-        ):
+        with opener() as f, store.blob_store.open_blob_writer(artifact_id, version) as out:
             while chunk := f.read(_CHUNK):
                 copied.update(chunk)
                 out.write(chunk)
         if copied.hexdigest() != sha256:
-            raise RuntimeError(f"{rel} changed while it was being stored")
+            raise RuntimeError(f"{shown} changed while it was being stored")
     except BaseException:
         store.fail_artifact(artifact_id, version)
         raise
@@ -114,16 +128,33 @@ def _store_file(artifact_mgr: Any, cell_id: str, folder: Path, rel: str) -> dict
     return {"sha256": sha256, "size": size, "version": version}
 
 
-def collect(artifact_mgr: Any, cell_id: str, folder: Path) -> bytes:
+def store_received(artifact_mgr: Any, cell_id: str, path: Path) -> dict[str, Any]:
+    """Store a file a worker uploaded while the cell ran (a server-owned temp file)."""
+    return _store_opened(artifact_mgr, cell_id, lambda: open(path, "rb"), path.name)
+
+
+def collect(
+    artifact_mgr: Any,
+    cell_id: str,
+    folder: Path,
+    received: dict[str, dict[str, Any]] | None = None,
+) -> bytes:
     """Store the folder's files and return its manifest: the writing cell and each file.
 
-    A link, or a file with more than one hard link, is left out with a warning.
+    *received* holds entries for files already stored as a worker uploaded them; a file
+    in *folder* too replaces its entry. A link, or a file with more than one hard link,
+    is left out with a warning.
     """
-    files: dict[str, dict[str, Any]] = {}
+    files: dict[str, dict[str, Any]] = dict(received or {})
     if folder.is_dir():
         for rel in regular_files(folder):
             try:
-                files[rel] = _store_file(artifact_mgr, cell_id, folder, rel)
+                files[rel] = _store_opened(
+                    artifact_mgr,
+                    cell_id,
+                    lambda rel=rel: open_tree_file(folder, rel),
+                    rel,
+                )
             except UnsafeRunFile:
                 logger.warning("output folder %s: not keeping %s, a link", folder.name, rel)
     return json.dumps({"cell_id": cell_id, "files": files}, sort_keys=True).encode("utf-8")

@@ -488,8 +488,18 @@ than one hard link, is left out with a warning.
 **On a remote worker** the folder comes back with the run's result, each file
 streamed, so a checkpoint is not held in memory and is not limited by
 `STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES`. A failed run on a worker keeps its
-files the same way, but a worker that is lost, or a run that times out, returns
-nothing yet. A worker too old to return folders is refused before the cell runs.
+files the same way. A worker too old to return folders is refused before the
+cell runs.
+
+**On the `signed` transport each file reaches the server while the cell runs**,
+once its size and mtime stop changing (checked every
+`STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS`, 5 by default), and again if it changes.
+The server stores it at once, so a worker that is lost, or a run that times out,
+still leaves every file that arrived, kept as a failed version. A training loop
+that writes one checkpoint per epoch keeps every finished epoch. The result then
+names those files instead of carrying them, and a file the cell deleted before it
+ended is not part of the folder. On the `direct` transport the worker cannot
+reach the server, so files come back only with the result.
 
 For now the folder is collected when the run ends: a `# @loop` cell, or a cell
 on a remote worker reading another cell's folder, is refused before it runs,
