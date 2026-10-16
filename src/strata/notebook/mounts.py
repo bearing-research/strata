@@ -198,6 +198,7 @@ class MountResolver:
             ImportError: If a remote mount is requested but fsspec is unavailable.
         """
         resolved: dict[str, ResolvedMount] = {}
+        cached = False
 
         for mount in mounts:
             scheme, path = parse_mount_uri(mount.uri)
@@ -210,7 +211,11 @@ class MountResolver:
                     scheme,
                     path,
                 )
+                cached = cached or mount.mode == MountMode.READ_ONLY
 
+        if cached:
+            # Once per prepare, not per mount: a sweep walks every object.
+            await asyncio.to_thread(self.mount_cache.sweep)
         return resolved
 
     async def _resolve_local(
@@ -290,8 +295,9 @@ class MountResolver:
     ) -> tuple[str, Path]:
         """The mount's fingerprint and its view, built from one listing so the two agree."""
         fs = _mount_filesystem(protocol, storage_options)
-        # The options are part of the key: a view is only handed to a caller that reaches the
-        # store the same way, so a credential it lacks never yields another notebook's copy.
+        # The options key the view and its objects: neither is handed to a caller that reaches
+        # the store another way, so a credential that may list a prefix but not read it never
+        # gets another notebook's bytes. A rotated secret starts a fresh copy.
         options_digest = hashlib.sha256(
             json.dumps(storage_options, sort_keys=True, default=str).encode()
         ).hexdigest()
@@ -307,16 +313,16 @@ class MountResolver:
 
         found = self.mount_cache.find_view(key)
         if found is not None:
-            self.mount_cache.sweep()
             return fingerprint, found
         if listing is None:
             listing = _list_remote_file_info(fs, protocol, remote_path)
-        endpoint = _endpoint_identity(storage_options)
         files = []
         for remote_name, info in sorted(listing.items()):
             rel = _relative_remote_path(remote_name, protocol, remote_path)
             _check_relative(rel, mount.name, remote_name)
-            files.append((rel, object_key(protocol, endpoint, remote_name, info), remote_name))
+            files.append(
+                (rel, object_key(protocol, options_digest, remote_name, info), remote_name)
+            )
         view = self.mount_cache.build_view(
             key, files, lambda name, dest: fs.get(f"{protocol}://{name}", str(dest))
         )
@@ -545,13 +551,6 @@ def _fingerprint_listing(listing: dict[str, dict[str, Any]]) -> str:
         mtime = info.get("LastModified", info.get("mtime", ""))
         parts.append(f"{name}:{size}:{etag}:{mtime}")
     return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()
-
-
-def _endpoint_identity(storage_options: dict[str, Any]) -> str:
-    """Which store the options reach, without their secrets: two stores can share a bucket name."""
-    client = storage_options.get("client_kwargs") or {}
-    endpoint = storage_options.get("endpoint_url") or client.get("endpoint_url") or ""
-    return f"{endpoint}|{storage_options.get('account_name') or ''}"
 
 
 def _check_relative(rel: Path, mount_name: str, remote_name: str) -> None:

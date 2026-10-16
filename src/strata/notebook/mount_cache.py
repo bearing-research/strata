@@ -43,13 +43,17 @@ def default_root() -> Path:
     return Path.home() / ".strata" / "mount_cache"
 
 
-def object_key(protocol: str, endpoint: str, name: str, info: Mapping[str, Any]) -> str | None:
-    """A remote file's identity at its current version, or ``None`` when it has no version."""
+def object_key(protocol: str, scope: str, name: str, info: Mapping[str, Any]) -> str | None:
+    """A remote file's identity at its current version, or ``None`` when it has no version.
+
+    *scope* names how the store is reached (a digest of the storage options), so an object
+    is only reused by a caller that fetched the listing the same way.
+    """
     etag = str(info.get("ETag", info.get("etag", "")))
     mtime = str(info.get("LastModified", info.get("mtime", "")))
     if not etag and not mtime:
         return None
-    parts = [protocol, endpoint, name, str(info.get("size", "")), etag, mtime]
+    parts = [protocol, scope, name, str(info.get("size", "")), etag, mtime]
     return hashlib.sha256("\0".join(parts).encode()).hexdigest()
 
 
@@ -68,6 +72,7 @@ class MountCache:
         self.views = root / "views"
         self.max_bytes = max_bytes  # 0: no cap
         self.max_idle_seconds = max_idle_days * 86400.0  # 0: no idle limit
+        self._grew = False  # downloaded since the last sweep
 
     @classmethod
     def from_config(cls, config: Any) -> MountCache:
@@ -117,6 +122,8 @@ class MountCache:
             for rel, okey, remote_name in files:
                 dest = data / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
+                # Two names on one path (a case-insensitive disk): the last wins.
+                dest.unlink(missing_ok=True)
                 if okey is None:
                     fetch(remote_name, dest)
                     downloaded += 1
@@ -132,7 +139,7 @@ class MountCache:
             shutil.rmtree(building, ignore_errors=True)
             raise
         logger.info("mount view %s: %d of %d files downloaded", key[:12], downloaded, len(files))
-        self.sweep(force=downloaded > 0)
+        self._grew = self._grew or downloaded > 0
         found = self.find_view(key)
         if found is None:
             raise RuntimeError("the mount cache removed a view as it was built")
@@ -154,6 +161,12 @@ class MountCache:
                 return downloaded
             except FileNotFoundError:
                 continue
+            except OSError as exc:
+                # No hard links here (some network or FUSE disks): a copy still serves.
+                logger.debug("mount cache: copying %s, no hard link: %s", path.name, exc)
+                shutil.copyfile(path, dest)
+                _make_read_only(dest)
+                return downloaded
         raise RuntimeError(f"could not keep {remote_name} in the mount cache")
 
     def _download(self, path: Path, remote_name: str, fetch: Callable[[str, Path], None]) -> None:
@@ -164,9 +177,7 @@ class MountCache:
             fetch(remote_name, partial)
             # Its mtime says when it arrived, so a sweep spares a fresh download.
             os.utime(partial)
-            if os.name != "nt":
-                # Read bits as the umask left them, so a harness user reads what it could before.
-                partial.chmod(stat.S_IMODE(partial.stat().st_mode) & ~0o222)
+            _make_read_only(partial)
             os.replace(partial, path)
         except BaseException:
             partial.unlink(missing_ok=True)
@@ -175,13 +186,16 @@ class MountCache:
     def sweep(self, *, force: bool = False, now: float | None = None) -> None:
         """Evict until under the bound and nothing is idle past the limit.
 
-        Without *force*, at most once per ``_SWEEP_INTERVAL_SECONDS`` for this root.
+        Unless forced or something was downloaded since the last one, at most once per
+        ``_SWEEP_INTERVAL_SECONDS`` for this root.
         """
         now = time.time() if now is None else now
         last = _last_sweep.get(self.root)
+        force = force or self._grew
         if not force and last is not None and now - last < _SWEEP_INTERVAL_SECONDS:
             return
         _last_sweep[self.root] = now
+        self._grew = False
 
         objects: dict[int, tuple[Path, int]] = {}
         total = 0
@@ -269,6 +283,12 @@ def _remove_view(view: Path, views: Path) -> set[int]:
         return set()
     shutil.rmtree(trash, ignore_errors=True)
     return inodes
+
+
+def _make_read_only(path: Path) -> None:
+    """Clear the write bits (POSIX), keeping the read bits the umask left."""
+    if os.name != "nt":
+        path.chmod(stat.S_IMODE(path.stat().st_mode) & ~0o222)
 
 
 def _remove_if_stale(path: Path, now: float) -> None:

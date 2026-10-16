@@ -703,7 +703,11 @@ class TestSharedMountCache:
     async def test_other_storage_options_get_their_own_view(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A pinned view is never handed to a caller reaching the store another way."""
+        """Neither a pinned view nor its objects reach a caller using other storage options.
+
+        A credential that may list a prefix but not read it must not get another notebook's
+        bytes by matching a listing.
+        """
         from strata.notebook.mount_cache import MountCache
 
         fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa"}))
@@ -730,7 +734,7 @@ class TestSharedMountCache:
 
         assert b != a
         assert len(listings) == 2  # the store was asked, with lab-b's options
-        assert len(fetched) == 1  # same store, same object: no second download
+        assert len(fetched) == 2  # and the bytes fetched with them, not linked from lab-a's
 
     @pytest.mark.asyncio
     async def test_another_endpoint_does_not_reuse_objects(
@@ -895,3 +899,72 @@ class TestSharedMountCache:
         for directory in (cache.views, cache.objects, shard):
             assert stat.S_IMODE(directory.stat().st_mode) & 0o044 == 0, directory
         assert stat.S_IMODE((view / "a").stat().st_mode) & 0o222 == 0
+
+    def test_two_names_on_one_path_keep_the_last(self, tmp_path: Path) -> None:
+        """A case-insensitive disk folds ``Data.csv`` and ``data.csv``; the view still builds."""
+        from strata.notebook.mount_cache import MountCache
+
+        contents = {"remote/A": b"first", "remote/B": b"second"}
+        cache = MountCache(tmp_path / "mc")
+
+        view = cache.build_view(
+            "k",
+            [(Path("same"), "a" * 64, "remote/A"), (Path("same"), "b" * 64, "remote/B")],
+            lambda name, dest: dest.write_bytes(contents[name]),
+        )
+
+        assert (view / "same").read_bytes() == b"second"
+
+    def test_a_disk_without_hard_links_gets_copies(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook import mount_cache
+        from strata.notebook.mount_cache import MountCache
+
+        def no_links(src: object, dst: object) -> None:
+            raise PermissionError("operation not permitted")
+
+        monkeypatch.setattr(mount_cache.os, "link", no_links)
+        cache = MountCache(tmp_path / "mc")
+
+        view = cache.build_view(
+            "k", [(Path("a"), "a" * 64, "remote/a")], lambda name, dest: dest.write_bytes(b"aa")
+        )
+
+        assert (view / "a").read_bytes() == b"aa"
+
+    @pytest.mark.asyncio
+    async def test_one_sweep_per_prepare(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A sweep walks every object; a cell with several mounts pays for one."""
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(
+            {**self._files("bucket/one", {"a": b"a"}), **self._files("bucket/two", {"b": b"b"})}
+        )
+        _install_fake_fsspec(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc")
+        sweeps: list[bool] = []
+        original = cache.sweep
+        monkeypatch.setattr(cache, "sweep", lambda **kw: sweeps.append(True) or original(**kw))
+
+        await MountResolver(mount_cache=cache).prepare_mounts(
+            [
+                MountSpec(name="one", uri="s3://bucket/one", mode=MountMode.READ_ONLY),
+                MountSpec(name="two", uri="s3://bucket/two", mode=MountMode.READ_ONLY),
+            ]
+        )
+
+        assert len(sweeps) == 1
+
+    @pytest.mark.parametrize("raw", ["inf", "nan", "-5"])
+    def test_a_worker_ignores_a_number_it_cannot_use(
+        self, raw: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook.remote_executor import _worker_mount_cache
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_DIR", str(tmp_path / "mc"))
+        monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES", raw)
+
+        assert _worker_mount_cache().max_bytes == 20 * 1024**3
