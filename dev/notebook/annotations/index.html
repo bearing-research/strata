@@ -3099,6 +3099,12 @@ joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
 its filesystem library goes where Strata is installed: the <code>s3</code> extra for
 <code>s3://</code> (<code>s3fs</code>), <code>gcs</code> for <code>gs://</code> (<code>gcsfs</code>) and <code>azure</code> for <code>az://</code>
 (<code>adlfs</code>), for example <code>uv tool install "strata-notebook[s3]"</code>.</p>
+<p><strong>What a cell writes through an <code>rw</code> mount is recorded.</strong> After a successful run,
+the files it created or changed (path, size and sha256) are stored as the cell's
+<code>__mount__&lt;name&gt;</code> record, linked to the inputs the run read, so its lineage shows
+what produced them. On a remote worker the worker reports them. Each run adds a
+version, since an <code>rw</code> cell never serves a cached result. Deleted files are not
+recorded, and are not deleted from a remote mount either.</p>
 <p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw] [credential=&lt;name&gt;]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. <code>credential=</code> names a <a href="../../reference/notebook-toml/#named-credentials">server-defined credential</a> instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).</p>
 <hr />
 <h2 id="fetch">@fetch<a class="headerlink" href="#fetch" title="Permanent link">&para;</a></h2>
