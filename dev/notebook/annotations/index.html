@@ -3388,8 +3388,17 @@ than one hard link, is left out with a warning.</p>
 <p><strong>On a remote worker</strong> the folder comes back with the run's result, each file
 streamed, so a checkpoint is not held in memory and is not limited by
 <code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code>. A failed run on a worker keeps its
-files the same way, but a worker that is lost, or a run that times out, returns
-nothing yet. A worker too old to return folders is refused before the cell runs.</p>
+files the same way. A worker too old to return folders is refused before the
+cell runs.</p>
+<p><strong>On the <code>signed</code> transport each file reaches the server while the cell runs</strong>,
+once its size and mtime stop changing (checked every
+<code>STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS</code>, 5 by default), and again if it changes.
+The server stores it at once, so a worker that is lost, or a run that times out,
+still leaves every file that arrived, kept as a failed version. A training loop
+that writes one checkpoint per epoch keeps every finished epoch. The result then
+names those files instead of carrying them, and a file the cell deleted before it
+ended is not part of the folder. On the <code>direct</code> transport the worker cannot
+reach the server, so files come back only with the result.</p>
 <p>For now the folder is collected when the run ends: a <code># @loop</code> cell, or a cell
 on a remote worker reading another cell's folder, is refused before it runs,
 and run-all runs such a cell on its own rather than in a batch. An R cell gets

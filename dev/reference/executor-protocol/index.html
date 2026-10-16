@@ -2780,8 +2780,9 @@ A worker that answers <code>200</code> directly needs no change.</p>
 <a id="__codelineno-7-37" name="__codelineno-7-37" href="#__codelineno-7-37"></a><span class="w">    </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"POST"</span>
 <a id="__codelineno-7-38" name="__codelineno-7-38" href="#__codelineno-7-38"></a><span class="w">  </span><span class="p">},</span>
 <a id="__codelineno-7-39" name="__codelineno-7-39" href="#__codelineno-7-39"></a><span class="w">  </span><span class="nt">"finalize_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/finalize?..."</span><span class="p">,</span>
-<a id="__codelineno-7-40" name="__codelineno-7-40" href="#__codelineno-7-40"></a><span class="w">  </span><span class="nt">"log_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/log?..."</span>
-<a id="__codelineno-7-41" name="__codelineno-7-41" href="#__codelineno-7-41"></a><span class="p">}</span>
+<a id="__codelineno-7-40" name="__codelineno-7-40" href="#__codelineno-7-40"></a><span class="w">  </span><span class="nt">"log_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/log?..."</span><span class="p">,</span>
+<a id="__codelineno-7-41" name="__codelineno-7-41" href="#__codelineno-7-41"></a><span class="w">  </span><span class="nt">"output_file_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://strata.example.com/v1/builds/01HZJV/output-file?..."</span>
+<a id="__codelineno-7-42" name="__codelineno-7-42" href="#__codelineno-7-42"></a><span class="p">}</span>
 </code></pre></div>
 <p>Each URL is a signed capability that expires at <code>expires_at</code>; <code>output.max_bytes</code>
 caps the upload. Fetching a build's manifest again (<code>GET
@@ -2793,7 +2794,7 @@ bytes that are never finalized are removed by the server's build runner once
 the build is over and the upload URL has expired.</p>
 <p>With <code>STRATA_ARTIFACT_PRESIGNED_URLS</code> on and a blob store the server can sign
 for, the input URLs and <code>output.url</code> point straight at the object store.
-<code>finalize_url</code> and <code>log_url</code> stay Strata routes, and finalize checks the
+<code>finalize_url</code>, <code>log_url</code> and <code>output_file_url</code> stay Strata routes, and finalize checks the
 output's size against <code>output.max_bytes</code> before publishing.</p>
 <table>
 <thead>
@@ -2853,7 +2854,8 @@ carries the context in the request headers only.</p>
 <p><strong>Worker behavior:</strong></p>
 <ol>
 <li>For each entry in <code>metadata.params.input_specs</code>, look up its <code>uri</code> in <code>inputs[]</code> and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (declared via <code>Content-Length</code> or measured during stream) are rejected with <code>413</code>.</li>
-<li>Run the cell in a subprocess (same as <code>/v1/execute</code>). While it runs, <code>POST</code> each chunk of console output as the raw body to <code>log_url</code> with <code>&amp;stream=stdout</code> or <code>&amp;stream=stderr</code> and <code>&amp;seq=N</code> appended, so the notebook shows it live. <code>seq</code> numbers each stream's chunks from 0, counting every chunk the cell printed: a worker that skips one (its queue was full, a post failed) leaves a gap, and the notebook then shows nothing after the gap until the cell finishes, so what it showed is always the start of the console. A repeated <code>seq</code> is ignored, so a chunk can be retried. The route answers <code>202</code>. <code>log_url</code> is optional: a worker that ignores it still delivers the console in the bundle.</li>
+<li>Run the cell in a subprocess (same as <code>/v1/execute</code>). While it runs, <code>POST</code> each chunk of console output as the raw body to <code>log_url</code> with <code>&amp;stream=stdout</code> or <code>&amp;stream=stderr</code> and <code>&amp;seq=N</code> appended, so the notebook shows it live. <code>seq</code> numbers each stream's chunks from 0, counting every chunk the cell printed: a worker that skips one (its queue was full, a post failed) leaves a gap, and the notebook then shows nothing after the gap until the cell finishes, so what it showed is always the start of the console. A repeated <code>seq</code> is ignored, so a chunk can be retried. The route answers <code>202</code>. <code>log_url</code> is optional: a worker that ignores it still delivers the console in the bundle.
+   While it runs, a worker that advertises <code>output_dirs</code> also sends the cell's <code># @output_dir</code> files to <code>output_file_url</code> as they settle: <code>POST</code> each file as the raw body with <code>&amp;folder=&lt;name&gt;&amp;path=&lt;path&gt;</code> appended (<code>&lt;path&gt;</code> relative to the folder, <code>/</code>-separated). The reference worker checks every <code>STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS</code> (default 5) and sends a file once its size and mtime held from one check to the next, again if it changes later, and everything that changed since its last send when the cell ends. The route answers <code>201</code> once the file is stored in the notebook's store, so a worker lost afterwards still leaves it. It answers <code>409</code> when the server that dispatched the build is not the one receiving (or the run has ended), <code>413</code> past <code>max_upload_bytes</code>, and <code>400</code> for a folder that is not an identifier or a path with <code>..</code>, an empty part or a backslash. A file the server did not store goes in the bundle instead. <code>output_file_url</code> is optional: a worker that ignores it sends every file in the bundle.</li>
 <li>Upload the resulting output bundle to <code>output.url</code>. With <code>output.fields</code>, it is a presigned form upload (S3, GCS): <code>POST</code> a multipart form containing each field plus the bundle as the <code>file</code> part (S3 and GCS answer <code>204</code>). With <code>output.method</code> <code>PUT</code> (Azure), <code>PUT</code> the bundle as the raw body with <code>output.headers</code> and <code>Content-Length</code> (Azure answers <code>201</code>). Otherwise <code>POST</code> the bundle as the raw body with <code>Content-Type: application/x-tar</code> (a Strata route).</li>
 <li><code>POST {"output_format": "notebook-output-bundle@v1"}</code> to <code>finalize_url</code>.</li>
 <li>Return the <code>finalize</code> response body to the caller.</li>
@@ -2963,6 +2965,10 @@ emitted, in order, in the same shape (a display that failed to serialize has
 <code>error</code> and no file); the last one also travels as the variable <code>_</code>. It must
 be a list, possibly empty.</p>
 <p><code>hardware</code> is the same object <code>/health</code> returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside <code>build_env</code>, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.</p>
+<p><code>output_dirs_streamed</code>, when the worker sent files to <code>output_file_url</code>, lists
+them by folder, <code>{"&lt;name&gt;": ["&lt;path&gt;", ...]}</code>, without members: the server already
+holds them, and the folder is those files plus the members. A file sent during the
+run but missing from this list (the cell deleted it) is not part of the folder.</p>
 <p><code>output_dirs</code> (from a worker that advertises it) indexes the <code>dirs/</code> members:
 <code>{"&lt;name&gt;": {"&lt;path&gt;": &lt;size in bytes&gt;}}</code>, with <code>&lt;path&gt;</code> relative to the folder and
 <code>/</code>-separated. Each file is one member, read by streaming, so it is not bound by
