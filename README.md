@@ -253,10 +253,10 @@ mode = "ro"
 options = { anon = true }
 ```
 
-Inside the cell, `taxi_zones` is a `pathlib.Path`. Strata mirrors the
-remote prefix to a local cache before the cell runs, and reuses that copy
-while the remote fingerprint is unchanged. The mirror runs in Strata's own
-environment, so install the extra for the scheme there: `s3`, `gcs` or
+Inside the cell, `taxi_zones` is a `pathlib.Path`. Strata copies the
+remote prefix to a local cache before the cell runs, shared by every
+notebook on the machine, and when the prefix changes it downloads only the
+new or changed files. The copy runs in Strata's own environment, so install the extra for the scheme there: `s3`, `gcs` or
 `azure` (for example `uv tool install "strata-notebook[s3]"`).
 
 ## Examples

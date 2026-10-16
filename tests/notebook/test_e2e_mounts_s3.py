@@ -214,3 +214,56 @@ async def test_toml_mount_options_carry_endpoint_credentials(
 
     assert result.success, f"cell errored: {result.error}"
     assert result.outputs["content"]["preview"] == "hello from toml options"
+
+
+# Scope D: the machine's shared mount cache
+
+
+@pytest.mark.asyncio
+async def test_two_notebooks_share_a_copy_and_a_new_object_downloads_alone(
+    tmp_path: Path,
+    minio_container,
+    s3_credentials: MountCredentials,
+    fresh_bucket: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real s3fs listings key the objects: unchanged ones are neither copied nor fetched twice."""
+    from strata.config import StrataConfig
+
+    cache_root = tmp_path / "machine-mount-cache"
+    config = StrataConfig(notebook_mount_cache_dir=cache_root)
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+    for name in ("a", "b", "c"):
+        _put(minio_container, fresh_bucket, f"data/{name}.txt", name.encode())
+
+    source = textwrap.dedent(
+        f"""
+        # @mount data s3://{fresh_bucket}/data ro
+        content = ",".join(sorted(p.read_text() for p in data.iterdir()))
+        """
+    ).strip()
+    one = _make_session(tmp_path / "one", [("c1", source)])
+    two = _make_session(tmp_path / "two", [("c1", source)])
+
+    def objects() -> dict[str, int]:
+        return {p.name: p.stat().st_ino for p in (cache_root / "objects").rglob("*") if p.is_file()}
+
+    first = await CellExecutor(one, mount_credentials=s3_credentials).execute_cell("c1", source)
+    assert first.success, first.error
+    assert first.outputs["content"]["preview"] == "a,b,c"
+    after_one = objects()
+    assert len(after_one) == 3
+
+    second = await CellExecutor(two, mount_credentials=s3_credentials).execute_cell("c1", source)
+    assert second.success, second.error
+    assert objects() == after_one
+    assert not (one.path / ".strata" / "mount_cache").exists()
+
+    _put(minio_container, fresh_bucket, "data/d.txt", b"d")
+    third = await CellExecutor(one, mount_credentials=s3_credentials).execute_cell("c1", source)
+    assert third.success, third.error
+    assert third.outputs["content"]["preview"] == "a,b,c,d"
+    after_new = objects()
+    # One more object; the other three are the same files, not fresh downloads.
+    assert len(after_new) == 4
+    assert {k: v for k, v in after_new.items() if k in after_one} == after_one

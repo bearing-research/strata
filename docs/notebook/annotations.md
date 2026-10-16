@@ -187,11 +187,22 @@ scratch / "summary.txt"  # → Path("/tmp/work/summary.txt")
 
 **The mount name becomes a `pathlib.Path` variable in the cell's namespace.** No
 `/mnt/<name>` directory convention - the variable directly references the
-resolved local path (the cached mirror for remote URIs, the URI's local
+resolved local path (a local copy for remote URIs, the URI's local
 filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
 joining, `.read_text()`, `.iterdir()`, etc.
 
-Strata mirrors a remote mount in its own process, not the notebook's venv, so
+**A read-only remote mount is copied once per machine.** Each remote file is
+kept once, by URI and version (etag, size and modification time), in the
+machine's mount cache, and the cell's path is a view of the prefix made of hard
+links to those copies. When the prefix changes, only the new or changed files
+are downloaded, and notebooks reading the same prefix share one copy. The files
+are read-only, since every view shares them. The cache stays under a size bound
+and drops views unused for some days, least recently used first; see
+[`STRATA_NOTEBOOK_MOUNT_CACHE_DIR`](../reference/configuration.md#notebook) and
+the two settings after it. A worker keeps its cache across jobs. An `rw` mount
+is still staged per notebook.
+
+Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the `s3` extra for
 `s3://` (`s3fs`), `gcs` for `gs://` (`gcsfs`) and `azure` for `az://`
 (`adlfs`), for example `uv tool install "strata-notebook[s3]"`.

@@ -616,3 +616,282 @@ class TestWhatACellWrote:
         )
 
         assert await resolver.sync_back(resolved) == []
+
+
+class TestSharedMountCache:
+    """Read-only remote mounts share one bounded copy per machine (``MountCache``)."""
+
+    @staticmethod
+    def _files(prefix: str, contents: dict[str, bytes]) -> dict[str, dict[str, object]]:
+        return {
+            f"{prefix}/{name}": {
+                "name": f"{prefix}/{name}",
+                "size": len(data),
+                "etag": hashlib.md5(data).hexdigest(),
+                "mtime": "1",
+                "content": data,
+            }
+            for name, data in contents.items()
+        }
+
+    @staticmethod
+    def _count_gets(monkeypatch: pytest.MonkeyPatch, fs: _FakeRemoteFS) -> list[str]:
+        fetched: list[str] = []
+        original = fs.get
+
+        def get(uri: str, local_path: str, recursive: bool = False) -> None:
+            fetched.append(uri)
+            original(uri, local_path, recursive=recursive)
+
+        monkeypatch.setattr(fs, "get", get)
+        return fetched
+
+    @staticmethod
+    def _spec(uri: str = "s3://bucket/data", **kwargs: object) -> MountSpec:
+        return MountSpec(name="data", uri=uri, mode=MountMode.READ_ONLY, **kwargs)  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_a_changed_prefix_downloads_only_what_changed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa", "b": b"bb", "c": b"cc"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        fetched = self._count_gets(monkeypatch, fs)
+        resolver = MountResolver(cache_dir=tmp_path / "nb", mount_cache=MountCache(tmp_path / "mc"))
+
+        first = (await resolver.prepare_mounts([self._spec()]))["data"].local_path
+        assert len(fetched) == 3
+
+        fs._files.update(self._files("bucket/data", {"d": b"dd", "a": b"a2"}))
+        fetched.clear()
+        second = (await resolver.prepare_mounts([self._spec()]))["data"].local_path
+
+        assert sorted(fetched) == ["s3://bucket/data/a", "s3://bucket/data/d"]
+        assert second != first
+        assert {p.name: p.read_bytes() for p in second.iterdir()} == {
+            "a": b"a2",
+            "b": b"bb",
+            "c": b"cc",
+            "d": b"dd",
+        }
+        # The earlier view still reads its own version, through the same bytes where unchanged.
+        assert (first / "a").read_bytes() == b"aa"
+        assert (first / "b").stat().st_ino == (second / "b").stat().st_ino
+
+    @pytest.mark.asyncio
+    async def test_two_notebooks_share_one_copy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa", "b": b"bb"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        fetched = self._count_gets(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc")
+        one = MountResolver(cache_dir=tmp_path / "nb1", mount_cache=cache)
+        two = MountResolver(cache_dir=tmp_path / "nb2", mount_cache=cache)
+
+        a = (await one.prepare_mounts([self._spec()]))["data"].local_path
+        b = (await two.prepare_mounts([self._spec()]))["data"].local_path
+
+        assert len(fetched) == 2
+        assert a == b
+
+    @pytest.mark.asyncio
+    async def test_other_storage_options_get_their_own_view(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pinned view is never handed to a caller reaching the store another way."""
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        fetched = self._count_gets(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc")
+        listings: list[str] = []
+        original_find = fs.find
+
+        def find(uri: str, **kwargs: object) -> dict[str, dict[str, object]]:
+            listings.append(uri)
+            return original_find(uri, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(fs, "find", find)
+
+        pinned = self._spec(pin="v1", options={"key": "lab-a"})
+        a = (await MountResolver(mount_cache=cache).prepare_mounts([pinned]))["data"].local_path
+        again = (await MountResolver(mount_cache=cache).prepare_mounts([pinned]))["data"]
+        assert again.local_path == a
+        assert len(listings) == 1  # a pinned view is reused without asking the store
+
+        other = self._spec(pin="v1", options={"key": "lab-b"})
+        b = (await MountResolver(mount_cache=cache).prepare_mounts([other]))["data"].local_path
+
+        assert b != a
+        assert len(listings) == 2  # the store was asked, with lab-b's options
+        assert len(fetched) == 1  # same store, same object: no second download
+
+    @pytest.mark.asyncio
+    async def test_another_endpoint_does_not_reuse_objects(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        fetched = self._count_gets(monkeypatch, fs)
+        resolver = MountResolver(mount_cache=MountCache(tmp_path / "mc"))
+
+        await resolver.prepare_mounts([self._spec(options={"endpoint_url": "http://one"})])
+        await resolver.prepare_mounts([self._spec(options={"endpoint_url": "http://two"})])
+
+        assert len(fetched) == 2
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="objects are made read-only on POSIX")
+    @pytest.mark.asyncio
+    async def test_a_cell_cannot_change_the_shared_copy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        from strata.notebook.mount_cache import MountCache
+
+        if os.geteuid() == 0:
+            pytest.skip("root ignores file modes")
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        resolver = MountResolver(mount_cache=MountCache(tmp_path / "mc"))
+        view = (await resolver.prepare_mounts([self._spec()]))["data"].local_path
+
+        with pytest.raises(PermissionError):
+            (view / "a").write_bytes(b"changed")
+
+    @staticmethod
+    def _age_view(view_data: Path, seconds: float) -> None:
+        import os
+        import time
+
+        lock = view_data.parent / ".lock"
+        then = time.time() - seconds
+        os.utime(lock, (then, then))
+
+    @pytest.mark.asyncio
+    async def test_the_cache_stays_under_its_bound(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Least recently used views go first, and their objects with them."""
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(
+            {
+                **self._files("bucket/old", {"a": b"x" * 10}),
+                **self._files("bucket/mid", {"b": b"y" * 10}),
+                **self._files("bucket/new", {"c": b"z" * 10}),
+            }
+        )
+        _install_fake_fsspec(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc", max_bytes=25)
+        resolver = MountResolver(mount_cache=cache)
+
+        old = (await resolver.prepare_mounts([self._spec("s3://bucket/old")]))["data"].local_path
+        self._age_view(old, 3 * 3600)
+        mid = (await resolver.prepare_mounts([self._spec("s3://bucket/mid")]))["data"].local_path
+        self._age_view(mid, 2 * 3600)
+        new = (await resolver.prepare_mounts([self._spec("s3://bucket/new")]))["data"].local_path
+
+        assert not old.exists()
+        assert mid.exists() and new.exists()
+        objects = [p for p in (cache.objects).rglob("*") if p.is_file()]
+        assert sum(p.stat().st_size for p in objects) == 20
+
+    @pytest.mark.asyncio
+    async def test_a_view_used_in_the_last_hour_is_kept_over_the_bound(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A running cell may still be reading it."""
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(
+            {
+                **self._files("bucket/one", {"a": b"x" * 10}),
+                **self._files("bucket/two", {"b": b"y" * 10}),
+            }
+        )
+        _install_fake_fsspec(monkeypatch, fs)
+        resolver = MountResolver(mount_cache=MountCache(tmp_path / "mc", max_bytes=5))
+
+        one = (await resolver.prepare_mounts([self._spec("s3://bucket/one")]))["data"].local_path
+        two = (await resolver.prepare_mounts([self._spec("s3://bucket/two")]))["data"].local_path
+
+        assert one.exists() and two.exists()
+
+    @pytest.mark.asyncio
+    async def test_an_idle_view_is_removed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import time
+
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc", max_idle_days=1)
+        resolver = MountResolver(mount_cache=cache)
+        view = (await resolver.prepare_mounts([self._spec()]))["data"].local_path
+
+        cache.sweep(force=True, now=time.time() + 86400 - 60)
+        assert view.exists()
+        cache.sweep(force=True, now=time.time() + 86400 + 60)
+        assert not view.exists()
+        assert not [p for p in cache.objects.rglob("*") if p.is_file()]
+
+    def test_a_worker_reads_the_server_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from strata.notebook.remote_executor import _worker_mount_cache
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_DIR", str(tmp_path / "mc"))
+        monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES", "1000")
+        monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS", "not a number")
+
+        cache = _worker_mount_cache()
+
+        assert cache.root == tmp_path / "mc"
+        assert cache.max_bytes == 1000
+        assert cache.max_idle_seconds == 30 * 86400
+
+    def test_the_cache_defaults_beside_notebook_storage(self, tmp_path: Path) -> None:
+        """Where a harness user, which reads the notebooks, can reach it too."""
+        from strata.config import StrataConfig
+        from strata.notebook.mount_cache import MountCache
+
+        default = StrataConfig(notebook_storage_dir=tmp_path / "notebooks")
+        configured = StrataConfig(
+            notebook_storage_dir=tmp_path / "notebooks", notebook_mount_cache_dir=tmp_path / "mc"
+        )
+
+        assert MountCache.from_config(default).root == tmp_path / "mount_cache"
+        assert MountCache.from_config(configured).root == tmp_path / "mc"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+    @pytest.mark.asyncio
+    async def test_another_user_cannot_list_the_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Passable, so a harness user reads the view it is handed, but not listable."""
+        import stat
+
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc")
+        view = (await MountResolver(mount_cache=cache).prepare_mounts([self._spec()]))[
+            "data"
+        ].local_path
+
+        shard = next(cache.objects.iterdir())
+        for directory in (cache.views, cache.objects, shard):
+            assert stat.S_IMODE(directory.stat().st_mode) & 0o044 == 0, directory
+        assert stat.S_IMODE((view / "a").stat().st_mode) & 0o222 == 0

@@ -27,6 +27,12 @@ from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.hardware import hardware_report
 from strata.notebook.models import MountSpec
+from strata.notebook.mount_cache import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_IDLE_DAYS,
+    MountCache,
+    default_root,
+)
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
 from strata.observability.tracing import trace_span_from
@@ -489,6 +495,26 @@ def _worker_credentials() -> CredentialResolver:
     )
 
 
+def _worker_mount_cache() -> MountCache:
+    """The machine's read-only mount cache, kept across jobs while the worker is warm.
+
+    The server's ``STRATA_NOTEBOOK_MOUNT_CACHE_*`` variables, read directly like the
+    credentials; an unparsable number falls back to its default.
+    """
+
+    def number(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name) or default)
+        except ValueError:
+            return default
+
+    return MountCache(
+        Path(os.environ.get("STRATA_NOTEBOOK_MOUNT_CACHE_DIR") or default_root()),
+        max_bytes=int(number("STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES", DEFAULT_MAX_BYTES)),
+        max_idle_days=number("STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS", DEFAULT_MAX_IDLE_DAYS),
+    )
+
+
 def create_notebook_executor_app(
     max_concurrent: int | None = None,
     gpu_slots: int | None = None,
@@ -736,6 +762,7 @@ def create_notebook_executor_app(
                 cache_dir=output_dir / "mount_cache",
                 # Resolved against the worker's own config; only the name travels.
                 credential_resolver=_worker_credentials(),
+                mount_cache=_worker_mount_cache(),
             )
             resolved_mounts = await mount_resolver.prepare_mounts(mount_specs)
             manifest_mounts = {

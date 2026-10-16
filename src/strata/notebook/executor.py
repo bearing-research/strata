@@ -77,6 +77,7 @@ from strata.notebook.models import (
     WorkerBackendType,
 )
 from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
+from strata.notebook.mount_cache import MountCache
 from strata.notebook.mounts import (
     MountCredentials,
     MountResolver,
@@ -3675,6 +3676,7 @@ class CellExecutor:
         if not mount_specs:
             return {}
         self._mount_resolver.credential_resolver = self._credential_resolver()
+        self._mount_resolver.mount_cache = MountCache.from_config(self._lake_config())
         return await self._mount_resolver.prepare_mounts(mount_specs)
 
     async def _resolve_fetches(
