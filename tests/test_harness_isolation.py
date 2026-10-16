@@ -10,6 +10,8 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -182,7 +184,11 @@ def test_a_cell_run_as_the_harness_user_writes_through_a_read_write_mount(tmp_pa
     (tmp_path / "bucket" / "lab" / "out" / "seed.txt").write_text("from the bucket")
     monkeypatch.setattr("strata.notebook.mounts._mount_filesystem", lambda protocol, opts: bucket)
     nb = create_notebook(tmp_path, "Writer", initialize_environment=False)
-    os.chmod(tmp_path, 0o755)
+    # The harness user has to reach the notebook, and pytest makes its base temp 0700.
+    for directory in (tmp_path, *tmp_path.parents):
+        if directory == Path(tempfile.gettempdir()) or directory == directory.parent:
+            break
+        os.chmod(directory, 0o755)
     add_cell_to_notebook(nb, "w", None, language="python")
     source = (
         "# @mount out s3://lab/out rw\n"
