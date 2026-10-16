@@ -37,6 +37,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `@table` reader goes out of date after each write. Appending to or merging
   into a table Strata did not create needs
   `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. (#1202)
+- **A read-write mount works under the harness user.** A remote `rw` mount's
+  staging copy is handed to `STRATA_NOTEBOOK_HARNESS_USER`, which got
+  `PermissionError` writing into the server's directory. The sync back, and the
+  record of what the cell wrote, read each file without following links, so a
+  link or hard link the cell leaves there is skipped with a warning instead of
+  uploading what it points to. (#PR)
 
 ### Changed
 

@@ -777,9 +777,11 @@ under the installing user's home, which for a root server is `/root` and
 unreadable by anyone else, so every cell fails with `Permission denied` on the
 venv's `python`. Install them somewhere world-readable with
 `UV_PYTHON_INSTALL_DIR=/opt/uv-python`. Nothing else needs arranging: the
-per-run directories a cell writes into are handed to the harness user, the
-harness runs the venv's interpreter directly rather than through `uv run`, and
-the artifact store is never read by the cell. The server, in turn, never
+per-run directories a cell writes into are handed to the harness user, as is
+a remote `rw` mount's staging copy (which the server then uploads without
+following any link the cell left in it, so a link to a server file is skipped,
+not synced), the harness runs the venv's interpreter directly rather than
+through `uv run`, and the artifact store is never read by the cell. The server, in turn, never
 unpickles what a cell stored: prompt and SQL cells do not load a pickled value,
 and cell tests load their inputs in the test process.
 

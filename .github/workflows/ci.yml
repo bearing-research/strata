@@ -288,7 +288,8 @@ jobs:
 
       # Needs root and a second OS user, which the suite cannot arrange: a cell
       # run as the harness user must not read the server's environment through
-      # /proc. That user must reach the venv's interpreter and the checkout, so
+      # /proc, and writes through a read-write mount it is handed. That user
+      # must reach the venv's interpreter and the checkout, so
       # every directory on both paths gets o+x.
       - name: Harness-user isolation (Linux, root)
         if: runner.os == 'Linux' && matrix.python-version == '3.13'
@@ -302,10 +303,10 @@ jobs:
           set -o pipefail
           sudo env "PATH=$PATH" STRATA_TEST_HARNESS_USER=strata-cells \
             .venv/bin/python -m pytest tests/test_harness_isolation.py \
-            -k cannot_read_the_servers_environment \
+            -k "cannot_read_the_servers_environment or writes_through_a_read_write_mount" \
             -p no:cacheprovider --basetemp=/tmp/strata-harness-e2e -v | tee harness-e2e.log
           # A skip passes pytest; here it would mean nothing was checked.
-          grep -q " 1 passed" harness-e2e.log
+          grep -q " 2 passed" harness-e2e.log
 
   # E2E and integration tests, Ubuntu only for speed.
   e2e-tests:

@@ -7,6 +7,7 @@ the files it created or changed, with digests, linked to the inputs it read.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import sys
 import types
@@ -120,8 +121,8 @@ class TestAWorkersReport:
             def exists(self, uri):
                 return False
 
-            def put(self, local_path, remote_uri, recursive=True):
-                pass
+            def open(self, uri, mode="rb"):
+                return io.BytesIO()
 
         monkeypatch.setitem(
             sys.modules, "fsspec", types.SimpleNamespace(filesystem=lambda p, **k: _Bucket())

@@ -200,18 +200,57 @@ def open_run_file(directory: Path, name: str) -> BinaryIO:
         return open(directory / name, "rb")
     dir_fd = _open_dir(directory, name)
     try:
+        return _open_at(dir_fd, name, name)
+    finally:
+        os.close(dir_fd)
+
+
+def open_tree_file(root: Path, rel: str) -> BinaryIO:
+    """Open the file at relative POSIX path *rel* under *root*, following no link on the way.
+
+    For a tree the harness user writes, such as a read-write mount's staging copy: it can
+    swap any entry for a link to something only the server may read.
+    """
+    parts = rel.split("/")
+    for part in parts:
+        _check_name(part)
+    if not hasattr(os, "O_NOFOLLOW"):
+        current = root
+        _lstat_checked(current, rel, stat.S_IFDIR)
+        for part in parts[:-1]:
+            current = current / part
+            _lstat_checked(current, rel, stat.S_IFDIR)
+        _lstat_checked(current / parts[-1], rel, stat.S_IFREG)
+        return open(current / parts[-1], "rb")
+    dir_fd = _open_dir(root, rel)
+    try:
+        for part in parts[:-1]:
+            try:
+                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+            except OSError as exc:
+                if exc.errno in _LINK_ERRNOS:
+                    raise _refuse(rel) from exc
+                raise
+            os.close(dir_fd)
+            dir_fd = next_fd
+        return _open_at(dir_fd, parts[-1], rel)
+    finally:
+        os.close(dir_fd)
+
+
+def _open_at(dir_fd: int, name: str, shown: str) -> BinaryIO:
+    """Open regular file *name* in the open directory *dir_fd*, no link, one hard link."""
+    try:
         # O_NONBLOCK so a planted FIFO cannot hang the open.
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     except OSError as exc:
         if exc.errno in _LINK_ERRNOS:
-            raise _refuse(name) from exc
+            raise _refuse(shown) from exc
         raise
-    finally:
-        os.close(dir_fd)
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
         os.close(fd)
-        raise _refuse(name)
+        raise _refuse(shown)
     return os.fdopen(fd, "rb")
 
 
