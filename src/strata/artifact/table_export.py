@@ -42,6 +42,11 @@ def artifact_arrow_table(store: ArtifactStore, artifact: ArtifactVersion) -> pa.
     blob = store.read_blob(artifact.id, artifact.version)
     if blob is None:
         raise ValueError(f"{ref} has no stored bytes")
+    return arrow_table_from_ipc(blob, ref)
+
+
+def arrow_table_from_ipc(blob: bytes, ref: str) -> pa.Table:
+    """Arrow IPC bytes as a table; ``ValueError`` naming *ref* for an array or a scalar."""
     table = pa.ipc.open_stream(blob).read_all()
     if (table.schema.metadata or {}).get(_SHAPE_KEY) in _NOT_TABLES:
         raise ValueError(f"{ref} is an array or a scalar, not a table")

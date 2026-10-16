@@ -236,23 +236,31 @@ def validate_cell_annotations(
 
 
 def _validate_recorded_inputs(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Report a ``@fetch`` or ``@dataset`` line that did not parse.
+    """Report a ``@fetch``, ``@dataset`` or ``@write_table`` line that did not parse.
 
-    Both are dropped when unparseable, so the cell would otherwise die on a
-    ``NameError`` with nothing pointing at the ignored line.
+    Each is dropped when unparseable, so the cell would otherwise die on a
+    ``NameError``, or write no table, with nothing pointing at the ignored line.
     """
     hints = {
         "fetch": "expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`",
         "dataset": "expected `@dataset <var> <name>[@<alias>|@v=<n>]`",
+        "write_table": (
+            "expected `@write_table <var> <catalog>:<namespace>.<table> "
+            "append|overwrite|merge`, with `on=<col>,...` after merge"
+        ),
+    }
+    effects = {
+        "fetch": "the variable it declares will not exist when the cell runs",
+        "dataset": "the variable it declares will not exist when the cell runs",
+        "write_table": "no table is written",
     }
     return [
         AnnotationDiagnostic(
             severity=DiagnosticSeverity.WARN,
             code=f"{directive}_unreadable",
             message=(
-                f"`@{directive} {value}` could not be read and was ignored, so the "
-                f"variable it declares will not exist when the cell runs. "
-                f"{hints[directive]}."
+                f"`@{directive} {value}` could not be read and was ignored, so "
+                f"{effects[directive]}. {hints[directive]}."
             ),
             line=lineno,
         )

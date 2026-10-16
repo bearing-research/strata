@@ -58,6 +58,20 @@ class MountSpec(BaseModel):
     )
 
 
+class TableWriteSpec(BaseModel):
+    """A table a cell writes one of its variables into (``@write_table``).
+
+    The server writes the variable when the run succeeds, before its outputs are kept: a
+    write that fails keeps nothing, so the next run tries again, and a cache hit writes
+    nothing. ``merge`` upserts on the ``on`` columns.
+    """
+
+    variable: str = Field(..., pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    table: str = Field(..., description="<catalog>:<namespace>.<table>, or a table URI")
+    mode: Literal["append", "overwrite", "merge"]
+    on: list[str] = Field(default_factory=list, description="merge keys")
+
+
 class TableSpec(BaseModel):
     """An Iceberg table input declaration (``@table``).
 

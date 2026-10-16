@@ -77,6 +77,8 @@ class CellAnalysisWithId:
     # ``# @loop start_from=<cell>@iter=k``: ``(cell, carry)``. The seed is that cell's
     # iteration, so the loop depends on it whichever cell last defined the carry.
     seed_from: tuple[str, str] | None = None
+    # ``# @write_table`` variables: kept like consumed ones, since the server writes them.
+    written: list[str] = field(default_factory=list)
 
 
 class VariantNameCollisionError(ValueError):
@@ -230,6 +232,8 @@ class NotebookDag:
                     and carry not in dag.wired_variables(cell.id, seed_id)
                 ):
                     _wire_variable_edge(dag, seed_id, cell.id, carry)
+
+            dag.consumed_variables[cell.id].update(v for v in cell.written if v in cell.defines)
 
             # ``# @after <cell-id>``: ordering-only edge (e.g. a setup cell seeding a SQLite
             # file). It affects wiring and topological order but not consumed_variables, so

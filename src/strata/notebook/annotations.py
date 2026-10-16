@@ -10,7 +10,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
-from strata.notebook.models import DatasetSpec, FetchSpec, MountMode, MountSpec, TableSpec
+from strata.notebook.models import (
+    DatasetSpec,
+    FetchSpec,
+    MountMode,
+    MountSpec,
+    TableSpec,
+    TableWriteSpec,
+)
 
 
 class LoopWirePayload(TypedDict):
@@ -161,7 +168,7 @@ def _line_sep(source: str) -> str:
 
 # Directives that may appear more than once in a cell; the single-line splice in
 # ``set_annotation_directive`` would silently collapse them, so it refuses them.
-_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table", "fetch", "dataset"})
+_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table", "write_table", "fetch", "dataset"})
 
 
 def set_annotation_directive(source: str, key: str, value: str) -> str:
@@ -241,6 +248,7 @@ class CellAnnotations:
     timeout: float | None = None
     mounts: list[MountSpec] = field(default_factory=list)
     tables: list[TableSpec] = field(default_factory=list)
+    table_writes: list[TableWriteSpec] = field(default_factory=list)
     fetches: list[FetchSpec] = field(default_factory=list)
     datasets: list[DatasetSpec] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
@@ -314,11 +322,11 @@ class CellAnnotations:
 
 
 def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
-    """Return ``(lineno, directive, value)`` for unparseable ``@fetch``/``@dataset`` lines.
+    """Return ``(lineno, directive, value)`` for each unparseable input or output directive.
 
-    Both are dropped when malformed rather than guessed at, but each names a
-    variable the cell expects, so the cell would fail on an unexplained
-    ``NameError``. The validator turns these into diagnostics.
+    ``@fetch``, ``@dataset`` and ``@write_table`` are dropped when malformed rather
+    than guessed at, so the cell would fail on an unexplained ``NameError``, or write
+    no table. The validator turns these into diagnostics.
     """
     unreadable: list[tuple[int, str, str]] = []
     for lineno, line in iter_annotation_block(source):
@@ -329,6 +337,8 @@ def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
         if key == "fetch" and _parse_fetch_annotation(value) is None:
             unreadable.append((lineno, key, value))
         elif key == "dataset" and _parse_dataset_annotation(value) is None:
+            unreadable.append((lineno, key, value))
+        elif key == "write_table" and _parse_write_table_annotation(value) is None:
             unreadable.append((lineno, key, value))
     return unreadable
 
@@ -361,6 +371,11 @@ def parse_annotations(source: str) -> CellAnnotations:
             table = _parse_table_annotation(value)
             if table is not None:
                 result.tables.append(table)
+
+        elif key == "write_table":
+            write = _parse_write_table_annotation(value)
+            if write is not None:
+                result.table_writes.append(write)
 
         elif key == "fetch":
             fetch = _parse_fetch_annotation(value)
@@ -618,6 +633,28 @@ def _parse_table_annotation(value: str) -> TableSpec | None:
         return None
 
     return TableSpec(name=name, uri=uri, snapshot_pin=snapshot_pin)
+
+
+def _parse_write_table_annotation(value: str) -> TableWriteSpec | None:
+    """Parse ``<variable> <table> append|overwrite|merge [on=<col>,...]``.
+
+    The mode is required, since append and overwrite differ in what they destroy; merge
+    needs ``on``.
+    """
+    parts = value.split()
+    if len(parts) < 3 or parts[2] not in ("append", "overwrite", "merge"):
+        return None
+    on: list[str] = []
+    for extra in parts[3:]:
+        if not extra.startswith("on="):
+            return None
+        on = [col for col in extra[len("on=") :].split(",") if col]
+    if (parts[2] == "merge") != bool(on):
+        return None
+    try:
+        return TableWriteSpec(variable=parts[0], table=parts[1], mode=parts[2], on=on)
+    except ValueError:
+        return None
 
 
 def _parse_mount_annotation(value: str) -> MountSpec | None:

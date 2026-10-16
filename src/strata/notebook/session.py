@@ -678,6 +678,7 @@ class NotebookSession:
                     per_variant=annotations.per_variant,
                     per_variant_group=annotations.per_variant_group,
                     seed_from=seed_from,
+                    written=[write.variable for write in annotations.table_writes],
                 )
             )
             cell.defines = defines

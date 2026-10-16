@@ -433,6 +433,10 @@ class StrataConfig(BaseSettings):
     notebook_credential_paths: Annotated[dict[str, list[str]], NoDecode] = Field(
         default_factory=dict
     )
+    # Whether a cell's ``# @write_table ... append|merge`` may change a table Strata did not
+    # create (another writer's). Off: only tables Strata wrote first. An overwrite of such a
+    # table is refused either way.
+    notebook_table_writes_foreign: bool = False
     # Read-only remote mounts, one copy per machine, under notebook_mount_cache_dir (default:
     # "mount_cache" beside notebook_storage_dir, where a harness user can reach it): each
     # file is kept once by URI and version, and each notebook's view of a prefix is hard
