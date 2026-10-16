@@ -179,7 +179,7 @@ def resolve_lake(
         try:
             update["catalog_properties"] = resolve_catalog_properties(
                 properties,
-                CredentialResolver.from_config(config, env=env),
+                CredentialResolver.from_config(config, env=env, notebook=session.path),
             )
         except CredentialError as exc:
             raise LakeError(f"catalog {catalog!r}: {exc}") from exc
@@ -192,7 +192,10 @@ def resolve_lake(
         pinned = pinned or {}
         specs = {_table_key(spec): spec for spec in _catalog_tables(catalog, tables)}
         _, snapshots = fingerprint_tables(
-            [spec for key, spec in specs.items() if key not in pinned], config, env
+            [spec for key, spec in specs.items() if key not in pinned],
+            config,
+            env,
+            notebook=session.path,
         )
         for (namespace, name), table_spec in specs.items():
             if (namespace, name) in pinned:
@@ -203,7 +206,9 @@ def resolve_lake(
                 # Unresolved the first time: ask again, so the cell fails with the catalog's
                 # reason or reads what a retry found.
                 try:
-                    snapshot = resolve_table_snapshot(table_spec, config, env)
+                    snapshot = resolve_table_snapshot(
+                        table_spec, config, env, notebook=session.path
+                    )
                 except ValueError as exc:
                     raise LakeError(f"table {table_spec.uri}: {exc}") from exc
             if snapshot is None:
@@ -216,7 +221,9 @@ def resolve_lake(
                 # otherwise).
                 lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
             if confined:
-                lake.locations.append(_table_location(table_spec, config, env))
+                lake.locations.append(
+                    _table_location(table_spec, config, env, notebook=session.path)
+                )
     if mount_names:
         update["mount_sources"] = _mount_sources(
             session, cell_id, source, mount_names, lake, config if confined else None
@@ -259,7 +266,9 @@ def snapshot_rows(snapshots: dict[tuple[str, str], int]) -> list[list[Any]]:
     return sorted([namespace, name, snapshot] for (namespace, name), snapshot in snapshots.items())
 
 
-def _table_location(table_spec: TableSpec, config: Any, env: dict[str, str]) -> str:
+def _table_location(
+    table_spec: TableSpec, config: Any, env: dict[str, str], *, notebook: Path
+) -> str:
     """Where a catalog table's metadata and data files live, as a directory.
 
     Files outside it (a ``write.data.path`` elsewhere) are refused to a
@@ -268,7 +277,9 @@ def _table_location(table_spec: TableSpec, config: Any, env: dict[str, str]) -> 
     from strata.iceberg.catalog import PyIcebergCatalog
 
     try:
-        location = PyIcebergCatalog(config, env).load_table(table_spec.uri).location()
+        location = (
+            PyIcebergCatalog(config, env, notebook=notebook).load_table(table_spec.uri).location()
+        )
     except Exception as exc:  # the catalog's own error types vary by backend
         raise LakeError(f"table {table_spec.uri}: {exc}") from exc
     return location.rstrip("/") + "/"
@@ -375,7 +386,7 @@ def _mount_sources(
     resolver = MountResolver(
         cache_dir=session.path / ".strata" / "mount_cache",
         credential_resolver=CredentialResolver.from_config(
-            session._lake_config(), env=dict(session.notebook_state.env)
+            session._lake_config(), env=dict(session.notebook_state.env), notebook=session.path
         ),
     )
     sources: list[dict[str, Any]] = []

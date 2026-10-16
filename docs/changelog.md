@@ -20,7 +20,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   flagged and fails, and the Workers panel offers no editor for them. The mode
   badges now show the deployment mode rather than whether workers are editable.
   (#1195)
-
+- **`STRATA_NOTEBOOK_CREDENTIAL_PATHS`** keeps a named credential to the
+  notebooks under some directories, for a server that hosts several projects.
+  Elsewhere a mount, connection or catalog that names it fails the cell naming
+  the credential, and a remote worker is never sent it. (#1196)
 ### Changed
 
 - **Observability code lives in the `strata.observability` package.**

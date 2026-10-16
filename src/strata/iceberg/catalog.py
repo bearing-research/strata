@@ -196,14 +196,22 @@ class PyIcebergCatalog:
     planning threads do not build duplicates.
     """
 
-    def __init__(self, config: StrataConfig, env: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        config: StrataConfig,
+        env: Mapping[str, str] | None = None,
+        *,
+        notebook: Path | None = None,
+    ) -> None:
         """Initialize the provider from server config (catalog properties, storage credentials).
 
         *env* is a notebook's environment: a named catalog's credential resolves
         against it before the server's, as the notebook's DuckDB attach does.
+        *notebook* is that notebook's directory, for a credential restricted to some.
         """
         self.config = config
         self._env = env
+        self._notebook = notebook
         self._catalogs: dict[str, Catalog] = {}
         self._lock = Lock()
 
@@ -343,7 +351,9 @@ class PyIcebergCatalog:
 
                 properties = resolve_catalog_properties(
                     self.config.catalogs[name],
-                    CredentialResolver.from_config(self.config, env=self._env),
+                    CredentialResolver.from_config(
+                        self.config, env=self._env, notebook=self._notebook
+                    ),
                 )
                 catalog = load_catalog(name, **_with_catalog_uri(properties))
                 self._catalogs[key] = catalog

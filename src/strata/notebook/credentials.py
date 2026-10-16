@@ -11,12 +11,18 @@ References resolve against the notebook's environment (where a secret manager
 puts what it fetches), then the server's. The name is folded into provenance;
 the values are not, so rotating a secret invalidates nothing.
 ``notebook_mount_credentials`` names a default per URI scheme (``{"s3": "org-bucket"}``).
+
+``notebook_credential_paths`` restricts a name to the notebooks under some directories
+(``{"lab-a": ["/srv/projects/lab-a"]}``), for a server that hosts several projects. A
+restricted name resolves for nothing else, a server-level use included. Paths compare as
+written, symlinks unfollowed.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from strata.notebook.writer import drop_blanked_secrets
@@ -52,17 +58,57 @@ class CredentialResolver:
         *,
         scheme_defaults: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
+        restricted: Mapping[str, Sequence[str]] | None = None,
+        notebook: Path | None = None,
     ):
         self._registry = dict(registry or {})
         self._scheme_defaults = dict(scheme_defaults or {})
         self._env = drop_blanked_secrets(env or {})
+        # Compared as written, without touching the filesystem: a notebook is judged by the
+        # path the server opened it under, and a relative or ``..`` path is never inside.
+        self._restricted = {
+            name: [Path(os.path.normpath(Path(prefix).expanduser())) for prefix in prefixes]
+            for name, prefixes in (restricted or {}).items()
+        }
+        self._notebook = (
+            notebook
+            if notebook is not None and notebook.is_absolute() and ".." not in notebook.parts
+            else None
+        )
 
     @classmethod
-    def from_config(cls, config: Any, env: Mapping[str, str] | None = None) -> CredentialResolver:
+    def from_config(
+        cls,
+        config: Any,
+        env: Mapping[str, str] | None = None,
+        *,
+        notebook: Path | None = None,
+    ) -> CredentialResolver:
+        """The server's credentials as the notebook at *notebook* may use them."""
         return cls(
             getattr(config, "notebook_credentials", None) or {},
             scheme_defaults=getattr(config, "notebook_mount_credentials", None) or {},
             env=env,
+            restricted=getattr(config, "notebook_credential_paths", None) or {},
+            notebook=notebook,
+        )
+
+    def ensure_allowed(self, name: str) -> None:
+        """Refuse a restricted *name* outside its notebooks, by name only.
+
+        Also the check before a remote worker, which resolves names from its own registry.
+
+        Raises:
+            CredentialError: naming the credential and never its fields.
+        """
+        prefixes = self._restricted.get(name)
+        if prefixes is None:
+            return
+        if self._notebook is not None and any(self._notebook.is_relative_to(p) for p in prefixes):
+            return
+        raise CredentialError(
+            f"credential {name!r} is not available to this notebook "
+            "(STRATA_NOTEBOOK_CREDENTIAL_PATHS)"
         )
 
     def resolve(self, name: str) -> dict[str, str]:
@@ -71,6 +117,7 @@ class CredentialResolver:
         Raises:
             CredentialError: naming the credential, so the failure says which one to define.
         """
+        self.ensure_allowed(name)
         fields = self._registry.get(name)
         if fields is None:
             raise CredentialError(

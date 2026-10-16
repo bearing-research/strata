@@ -22,6 +22,7 @@ import hashlib
 import logging
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from strata.notebook.models import TableSpec
@@ -33,12 +34,17 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_table_snapshot(
-    spec: TableSpec, config: StrataConfig, env: Mapping[str, str] | None = None
+    spec: TableSpec,
+    config: StrataConfig,
+    env: Mapping[str, str] | None = None,
+    *,
+    notebook: Path | None = None,
 ) -> int | None:
     """Resolve the snapshot id a cell should read for ``spec``: the pin, else the current one.
 
     None when the table has no snapshots yet (created, never written).
-    A named catalog's credential resolves against *env* (the notebook's) first.
+    A named catalog's credential resolves against *env* (the notebook's) first, and only if
+    the notebook at *notebook* may use it.
 
     Raises:
         ValueError: If the catalog/table cannot be reached.
@@ -50,7 +56,7 @@ def resolve_table_snapshot(
 
     try:
         # A provider per call: its catalog cache holds this notebook's secrets.
-        catalog = PyIcebergCatalog(config, env)
+        catalog = PyIcebergCatalog(config, env, notebook=notebook)
         table = catalog.load_table(spec.uri)
     except Exception as e:
         raise ValueError(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
@@ -60,7 +66,11 @@ def resolve_table_snapshot(
 
 
 def fingerprint_tables(
-    specs: list[TableSpec], config: StrataConfig, env: Mapping[str, str] | None = None
+    specs: list[TableSpec],
+    config: StrataConfig,
+    env: Mapping[str, str] | None = None,
+    *,
+    notebook: Path | None = None,
 ) -> tuple[list[str], dict[str, int | None]]:
     """Resolve every table's snapshot for provenance hashing.
 
@@ -76,7 +86,7 @@ def fingerprint_tables(
     snapshots: dict[str, int | None] = {}
     for spec in sorted(specs, key=lambda t: t.name):
         try:
-            snapshot_id = resolve_table_snapshot(spec, config, env)
+            snapshot_id = resolve_table_snapshot(spec, config, env, notebook=notebook)
         except ValueError as e:
             logger.warning(
                 "table fingerprint unresolved for %s (%s): %s",

@@ -268,9 +268,13 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     config = StrataConfig(catalogs={"lake": {"type": "rest", "uri": "http://catalog"}})
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
     monkeypatch.setattr(
-        tables, "fingerprint_tables", lambda specs, cfg, env=None: (["x:unresolved"], {})
+        tables,
+        "fingerprint_tables",
+        lambda specs, cfg, env=None, notebook=None: (["x:unresolved"], {}),
     )
-    monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg, env=None: 7)
+    monkeypatch.setattr(
+        tables, "resolve_table_snapshot", lambda spec, cfg, env=None, notebook=None: 7
+    )
 
     lake = resolve_lake(
         session,
@@ -297,7 +301,7 @@ def test_a_table_never_written_is_read_unpinned_and_never_cached(tmp_path, monke
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
     name = _lake_name("lake:taxi.trips")
     monkeypatch.setattr(
-        tables, "fingerprint_tables", lambda specs, cfg, env=None: ([], {name: None})
+        tables, "fingerprint_tables", lambda specs, cfg, env=None, notebook=None: ([], {name: None})
     )
 
     def resolve():
@@ -333,8 +337,12 @@ class TestACatalogCredential:
             notebook_credentials=credentials,
         )
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
-        monkeypatch.setattr(tables, "fingerprint_tables", lambda specs, cfg, env=None: ([], {}))
-        monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg, env=None: 7)
+        monkeypatch.setattr(
+            tables, "fingerprint_tables", lambda specs, cfg, env=None, notebook=None: ([], {})
+        )
+        monkeypatch.setattr(
+            tables, "resolve_table_snapshot", lambda spec, cfg, env=None, notebook=None: 7
+        )
         return resolve_lake(
             session,
             "c1",
@@ -629,12 +637,14 @@ class TestNotebookCatalogs:
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
         seen: list[dict] = []
 
-        def fingerprint(specs, cfg, env=None):
+        def fingerprint(specs, cfg, env=None, notebook=None):
             seen.append(dict(cfg.catalogs))
             return [], {}
 
         monkeypatch.setattr(tables, "fingerprint_tables", fingerprint)
-        monkeypatch.setattr(tables, "resolve_table_snapshot", lambda spec, cfg, env=None: 7)
+        monkeypatch.setattr(
+            tables, "resolve_table_snapshot", lambda spec, cfg, env=None, notebook=None: 7
+        )
         return session, seen
 
     @staticmethod

@@ -2152,7 +2152,7 @@ class NotebookSession:
         resolver = MountResolver(
             cache_dir=self.path / ".strata" / "mount_cache",
             credential_resolver=CredentialResolver.from_config(
-                self._lake_config(), env=dict(self.notebook_state.env)
+                self._lake_config(), env=dict(self.notebook_state.env), notebook=self.path
             ),
         )
         mount_fingerprints: list[str] = []
@@ -2187,7 +2187,9 @@ class NotebookSession:
             return []
         from strata.notebook.tables import fingerprint_tables
 
-        fingerprints, _ = fingerprint_tables(tables, config, dict(self.notebook_state.env))
+        fingerprints, _ = fingerprint_tables(
+            tables, config, dict(self.notebook_state.env), notebook=self.path
+        )
         return fingerprints
 
     def _collect_fetch_fingerprints(self, cell: Any) -> list[str]:

@@ -2622,6 +2622,12 @@ class CellExecutor:
                 raise RuntimeError(
                     f"Remote executor workers do not support file:// mounts: '{mount.name}'"
                 )
+        # The worker resolves names from its own registry, so this notebook's allowance is
+        # checked here, before the names leave.
+        credentials = self._credential_resolver()
+        for mount in mount_specs:
+            if mount.credential:
+                credentials.ensure_allowed(mount.credential)
 
         executor_url = str(worker_spec.config.url or "").strip()
         if not executor_url:
@@ -3611,7 +3617,9 @@ class CellExecutor:
         and a rotated value must reach the next run.
         """
         return CredentialResolver.from_config(
-            self._lake_config(), env=dict(self.session.notebook_state.env)
+            self._lake_config(),
+            env=dict(self.session.notebook_state.env),
+            notebook=self.session.path,
         )
 
     async def _prepare_mounts(
@@ -3761,7 +3769,12 @@ class CellExecutor:
         config = config or self._lake_config()
         env = dict(self.session.notebook_state.env)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, fingerprint_tables, table_specs, config, env)
+        return await loop.run_in_executor(
+            None,
+            functools.partial(
+                fingerprint_tables, table_specs, config, env, notebook=self.session.path
+            ),
+        )
 
     def _lake_config(self):
         """Server config when running inside the server, else loaded fresh."""
