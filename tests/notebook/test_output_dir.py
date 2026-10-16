@@ -396,7 +396,10 @@ class TestTheUploadRoute:
 
         session = _session(tmp_path, reader=None)
         return session, Receiver(
-            session.get_artifact_manager(), "w", upload_dir=tmp_path / "uploads"
+            session.get_artifact_manager(),
+            "w",
+            upload_dir=tmp_path / "uploads",
+            folders=frozenset({"ckpt"}),
         )
 
     @staticmethod
@@ -436,6 +439,7 @@ class TestTheUploadRoute:
             ("b1", {"folder": "../x", "path": "e0.bin"}, 400),
             ("b1", {"folder": "ckpt", "path": "/abs"}, 400),
             ("other", {"folder": "ckpt", "path": "e0.bin"}, 409),
+            ("b1", {"folder": "undeclared", "path": "e0.bin"}, 400),
         ],
     )
     def test_a_bad_upload_is_refused(
@@ -522,7 +526,14 @@ class TestStreamingFromAWorker:
     async def test_a_lost_worker_leaves_what_it_uploaded(
         self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
     ):
-        """The run times out on the worker: no result comes back, the uploads stay."""
+        """The run times out on the worker: no result comes back, the uploads stay.
+
+        Only the uploads: a folder of the same name where the server runs is not the run's.
+        """
+        stray = tmp_path / "cwd" / "output_dirs" / "ckpt"
+        stray.mkdir(parents=True)
+        (stray / "stray.bin").write_bytes(b"not the run's")
+        monkeypatch.chdir(tmp_path / "cwd")
         monkeypatch.setenv("STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS", "0.1")
         writer = (
             "# @worker remote\n# @timeout 4\n# @output_dir ckpt\nimport time\n"
@@ -539,3 +550,124 @@ class TestStreamingFromAWorker:
         manifest, state = _manifest(session, version=1)
         assert state == "failed"
         assert list(manifest["files"]) == ["e0.bin"]
+
+    async def test_a_folder_emptied_before_the_end_is_empty(
+        self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
+    ):
+        """Every file sent was deleted: the result lists the folder with none of them."""
+        monkeypatch.setenv("STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS", "0.1")
+        writer = (
+            "# @worker remote\n# @output_dir ckpt\nimport time\n"
+            "(ckpt / 'tmp.bin').write_bytes(b't' * 9)\n"
+            "time.sleep(1)\n"
+            "(ckpt / 'tmp.bin').unlink()\n"
+        )
+        session = self._session_on_worker(
+            tmp_path, writer, notebook_executor_server, notebook_personal_server
+        )
+        executor = CellExecutor(session)
+
+        written = await executor.execute_cell("w", writer)
+
+        assert written.success, written.error
+        assert list(executor._received_output_files["w"]["ckpt"]) == ["tmp.bin"]
+        manifest, _ = _manifest(session)
+        assert manifest["files"] == {}
+
+    async def test_a_cancelled_run_keeps_what_arrived(
+        self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
+    ):
+        import asyncio
+
+        from strata.notebook import output_file_relay
+
+        monkeypatch.setenv("STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS", "0.1")
+        writer = (
+            "# @worker remote\n# @output_dir ckpt\nimport time\n"
+            "(ckpt / 'e0.bin').write_bytes(b'0' * 9)\n"
+            "time.sleep(60)\n"
+        )
+        session = self._session_on_worker(
+            tmp_path, writer, notebook_executor_server, notebook_personal_server
+        )
+        run = asyncio.create_task(CellExecutor(session).execute_cell("w", writer))
+        for _ in range(200):
+            if any(r.received() for r in output_file_relay._receivers.values()):
+                break
+            await asyncio.sleep(0.05)
+
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+
+        manifest, state = _manifest(session, version=1)
+        assert state == "failed"
+        assert list(manifest["files"]) == ["e0.bin"]
+
+
+class TestTheStreamer:
+    """The worker's poller: never fails the run, and does not resend what is refused."""
+
+    async def test_a_file_gone_between_listing_and_stat_is_skipped(self, tmp_path, monkeypatch):
+        from strata.notebook import output_dirs as module
+        from strata.notebook.remote_executor import _OutputDirStreamer
+
+        (tmp_path / "ckpt").mkdir()
+        (tmp_path / "ckpt" / "here.bin").write_bytes(b"x")
+        monkeypatch.setattr(module, "regular_files", lambda folder: ["gone.tmp", "here.bin"])
+
+        states = _OutputDirStreamer(tmp_path, "http://s/u?x=1")._states()
+
+        assert list(states) == [("ckpt", "here.bin")]
+
+    async def test_a_refused_file_is_not_sent_again(self, tmp_path):
+        import httpx
+
+        from strata.notebook.remote_executor import _OutputDirStreamer
+
+        (tmp_path / "ckpt").mkdir()
+        (tmp_path / "ckpt" / "big.bin").write_bytes(b"x" * 10)
+        posts: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            posts.append(str(request.url))
+            return httpx.Response(413, json={"detail": "too large"})
+
+        streamer = _OutputDirStreamer(tmp_path, "http://s/u?x=1")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            key, state = next(iter(streamer._states().items()))
+            for _ in range(3):
+                if streamer._due(key, state):
+                    await streamer._upload(client, key, state)
+
+        assert len(posts) == 1
+
+
+def test_a_result_that_lists_no_files_keeps_none_of_the_uploads(tmp_path):
+    """An empty list is an answer (nothing held), unlike no list at all (a lost worker)."""
+    import json as json_module
+
+    from strata.notebook.output_dirs import STREAMED
+
+    session = _session(tmp_path, reader=None)
+    executor = CellExecutor(session)
+    executor._received_output_files["w"] = {
+        "ckpt": {"gone.bin": {"sha256": "0" * 64, "size": 1, "version": 1}}
+    }
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / STREAMED).write_text(json_module.dumps({}))
+
+    listed_none = executor._stage_output_dir(
+        "w", "ckpt", run, "p" * 64, {}, source_hash="", source="", env_hash=""
+    )
+    lost = executor._stage_output_dir(
+        "w", "ckpt", None, "q" * 64, {}, source_hash="", source="", env_hash=""
+    )
+
+    manager = session.get_artifact_manager()
+    read = lambda staged: json_module.loads(  # noqa: E731
+        manager.artifact_store.blob_store.read_blob(staged.artifact_id, staged.version)
+    )
+    assert read(listed_none)["files"] == {}
+    assert list(read(lost)["files"]) == ["gone.bin"]

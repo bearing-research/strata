@@ -27,12 +27,13 @@ class Receiver:
     artifact_mgr: Any
     cell_id: str
     upload_dir: Path  # server-owned, for an upload in progress
+    folders: frozenset[str] = frozenset()  # the cell's ``# @output_dir`` names
     files: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def accept(self, folder: str, rel: str, path: Path) -> None:
+    def accept(self, folder: str, rel: str, path: Path, sha256: str, size: int) -> None:
         """Store an uploaded file and record it as the folder's *rel*; a later upload wins."""
-        entry = output_dirs.store_received(self.artifact_mgr, self.cell_id, path)
+        entry = output_dirs.store_received(self.artifact_mgr, self.cell_id, path, sha256, size)
         with self._lock:
             self.files.setdefault(folder, {})[rel] = entry
 

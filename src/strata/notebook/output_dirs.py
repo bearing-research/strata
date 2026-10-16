@@ -57,11 +57,15 @@ def mount_entries(source: str, run_dir: Path) -> dict[str, dict[str, str]]:
 STREAMED = "output-dirs-streamed.json"  # in a run directory: what a worker uploaded
 
 
-def read_streamed(run_dir: Path) -> dict[str, list[str]]:
-    """``{folder: [path, ...]}`` a worker's result says the server already has, or ``{}``."""
+def read_streamed(run_dir: Path) -> dict[str, list[str]] | None:
+    """``{folder: [path, ...]}`` a worker's result says the server already has.
+
+    ``None`` when the result says nothing (nothing was sent during the run); a folder
+    missing from the map holds none of the files sent.
+    """
     path = run_dir / STREAMED
     if not path.is_file():
-        return {}
+        return None
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -71,7 +75,11 @@ def regular_files(root: Path) -> list[str]:
     for dirpath, _dirnames, filenames in os.walk(root):
         for filename in filenames:
             path = Path(dirpath) / filename
-            if stat.S_ISREG(path.lstat().st_mode):
+            try:
+                mode = path.lstat().st_mode
+            except FileNotFoundError:
+                continue  # removed since the listing: a cell renaming a checkpoint into place
+            if stat.S_ISREG(mode):
                 found.append(path.relative_to(root).as_posix())
     return sorted(found)
 
@@ -128,15 +136,43 @@ def _store_opened(
     return {"sha256": sha256, "size": size, "version": version}
 
 
-def store_received(artifact_mgr: Any, cell_id: str, path: Path) -> dict[str, Any]:
-    """Store a file a worker uploaded while the cell ran (a server-owned temp file)."""
-    return _store_opened(artifact_mgr, cell_id, lambda: open(path, "rb"), path.name)
+def store_received(
+    artifact_mgr: Any, cell_id: str, path: Path, sha256: str, size: int
+) -> dict[str, Any]:
+    """Store a file a worker uploaded while the cell ran, hashed as it arrived.
+
+    *path* is a server-owned file nothing else writes, so it is published as it is,
+    read once.
+    """
+    store = artifact_mgr.artifact_store
+    artifact_id = file_artifact_id(artifact_mgr, cell_id, sha256)
+    existing = store.get_latest_version(artifact_id)
+    if existing is not None and existing.state == "ready":
+        return {"sha256": sha256, "size": size, "version": existing.version}
+    from strata.artifact.store import TransformSpec
+
+    version = store.create_artifact(
+        artifact_id=artifact_id,
+        provenance_hash=sha256,
+        transform_spec=TransformSpec(
+            executor="notebook/cell@v1",
+            params={"cell_id": cell_id, "content_type": "application/octet-stream"},
+            inputs=[],
+        ),
+    )
+    try:
+        store.blob_store.publish_blob_from_path(artifact_id, version, path)
+    except BaseException:
+        store.fail_artifact(artifact_id, version)
+        raise
+    store.finalize_artifact(artifact_id, version, "", None, size, content_sha256=sha256)
+    return {"sha256": sha256, "size": size, "version": version}
 
 
 def collect(
     artifact_mgr: Any,
     cell_id: str,
-    folder: Path,
+    folder: Path | None,
     received: dict[str, dict[str, Any]] | None = None,
 ) -> bytes:
     """Store the folder's files and return its manifest: the writing cell and each file.
@@ -146,7 +182,7 @@ def collect(
     is left out with a warning.
     """
     files: dict[str, dict[str, Any]] = dict(received or {})
-    if folder.is_dir():
+    if folder is not None and folder.is_dir():
         for rel in regular_files(folder):
             try:
                 files[rel] = _store_opened(

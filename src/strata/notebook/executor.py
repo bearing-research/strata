@@ -1829,11 +1829,16 @@ class CellExecutor:
                 self.session.apply_execution_result_metadata(cell_id, exec_result)
                 return exec_result
 
+        except asyncio.CancelledError:
+            if self._received_output_files.get(cell_id):
+                # Cancelled mid-run: keep what the worker already uploaded, as on a loss.
+                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
+            raise
         except RemoteExecutionError as e:
             duration_ms = (time.time() - start_time) * 1000
             if self._received_output_files.get(cell_id):
                 # No result came back, so what the worker uploaded is all there is.
-                self._keep_failed_output_dirs(cell_id, source, Path(), provenance_hash, env_hash)
+                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
             error_result = CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
@@ -2438,11 +2443,16 @@ class CellExecutor:
                 self.session.apply_execution_result_metadata(cell_id, exec_result)
                 return exec_result
 
+        except asyncio.CancelledError:
+            if self._received_output_files.get(cell_id):
+                # Cancelled mid-run: keep what the worker already uploaded, as on a loss.
+                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
+            raise
         except RemoteExecutionError as e:
             duration_ms = (time.time() - start_time) * 1000
             if self._received_output_files.get(cell_id):
                 # No result came back, so what the worker uploaded is all there is.
-                self._keep_failed_output_dirs(cell_id, source, Path(), provenance_hash, env_hash)
+                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
             error_result = CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
@@ -3169,14 +3179,16 @@ class CellExecutor:
             )
             # Files the worker uploads while the cell runs are stored as they arrive, so a
             # worker lost later still leaves them.
+            declared = frozenset(parse_annotations(source).output_dirs)
             receiver = output_file_relay.Receiver(
                 self.session.get_artifact_manager(),
                 cell_id or "",
                 upload_dir=self.session.path / ".strata" / "uploads",
+                folders=declared,
             )
             receiving = (
                 output_file_relay.receiving(build_id, receiver)
-                if cell_id and parse_annotations(source).output_dirs
+                if cell_id and declared
                 else nullcontext()
             )
             self._received_output_files.pop(cell_id or "", None)
@@ -4939,7 +4951,7 @@ class CellExecutor:
         self,
         cell_id: str,
         name: str,
-        output_dir: Path,
+        output_dir: Path | None,
         provenance_hash: str,
         input_versions: dict[str, str],
         *,
@@ -4955,11 +4967,15 @@ class CellExecutor:
         """
         artifact_mgr = self.session.get_artifact_manager()
         received = self._received_output_files.get(cell_id, {}).get(name, {})
-        listed = output_dirs.read_streamed(output_dir).get(name)
-        if listed is not None:
+        streamed = output_dirs.read_streamed(output_dir) if output_dir is not None else None
+        if streamed is not None:
+            listed = set(streamed.get(name, ()))
             received = {rel: entry for rel, entry in received.items() if rel in listed}
         manifest = output_dirs.collect(
-            artifact_mgr, cell_id, output_dir / output_dirs.OUTPUT_DIRS / name, received
+            artifact_mgr,
+            cell_id,
+            output_dir / output_dirs.OUTPUT_DIRS / name if output_dir is not None else None,
+            received,
         )
         return artifact_mgr.stage_cell_output(
             cell_id=cell_id,
@@ -4975,9 +4991,16 @@ class CellExecutor:
         )
 
     def _keep_failed_output_dirs(
-        self, cell_id: str, source: str, output_dir: Path, provenance_hash: str, env_hash: str
+        self,
+        cell_id: str,
+        source: str,
+        output_dir: Path | None,
+        provenance_hash: str,
+        env_hash: str,
     ) -> None:
         """Keep what a failed run left in its ``# @output_dir`` folders, as failed versions.
+
+        ``output_dir`` is ``None`` when no result came back: what a worker uploaded is all.
 
         A failed version is never a cache hit or an input; lineage shows it, and it can be
         read by its ``<id>@v=<n>``. Best effort: the run has already failed.

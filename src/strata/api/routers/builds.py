@@ -469,8 +469,10 @@ async def upload_output_file(
     leaves it. 409 when this node did not dispatch the build (or it has ended): the
     worker sends the file in its result instead.
     """
+    import hashlib
     import uuid
 
+    from strata.api.routers.artifacts import _capped
     from strata.notebook import output_file_relay
     from strata.server import get_state
 
@@ -486,20 +488,33 @@ async def upload_output_file(
     receiver = output_file_relay.receiver_for(build_id)
     if receiver is None:
         raise HTTPException(status_code=409, detail="No run is receiving files for this build")
+    if folder not in receiver.folders:
+        raise HTTPException(status_code=400, detail=f"The cell has no # @output_dir {folder!r}")
 
-    limit = get_state().config.max_upload_bytes
+    # Hashed as it arrives and written off the loop, a megabyte at a time: a checkpoint can
+    # be many GB, and the file is then stored as it is, read once.
+    body = _capped(request)
     upload = receiver.upload_dir / f".upload-{uuid.uuid4().hex}"
+    digest = hashlib.sha256()
+    size = 0
+    pending = bytearray()
     try:
-        size = 0
-        with open(upload, "xb") as out:
-            async for chunk in request.stream():
+        out = await anyio.to_thread.run_sync(open, upload, "xb")
+        try:
+            async for chunk in body.stream():
+                digest.update(chunk)
                 size += len(chunk)
-                if size > limit:
-                    raise HTTPException(
-                        status_code=413, detail="Output file exceeds max_upload_bytes"
-                    )
-                out.write(chunk)
-        await anyio.to_thread.run_sync(receiver.accept, folder, rel, upload)
+                pending += chunk
+                if len(pending) >= BLOB_STREAM_CHUNK_BYTES:
+                    await anyio.to_thread.run_sync(out.write, bytes(pending))
+                    pending.clear()
+            if pending:
+                await anyio.to_thread.run_sync(out.write, bytes(pending))
+        finally:
+            await anyio.to_thread.run_sync(out.close)
+        await anyio.to_thread.run_sync(
+            receiver.accept, folder, rel, upload, digest.hexdigest(), size
+        )
     finally:
         upload.unlink(missing_ok=True)
     return JSONResponse(status_code=201, content={"stored": True, "size": size})
