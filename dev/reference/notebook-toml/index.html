@@ -2536,6 +2536,7 @@
 <li>A name the server does not define, or a reference that is not set, fails the cell with a message naming the credential.</li>
 <li><code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS='{"s3": "org-bucket"}'</code> applies a credential to every mount of a scheme that names none, so the organization's primary store works without editing notebooks.</li>
 <li>A remote worker resolves names against its own <code>STRATA_NOTEBOOK_CREDENTIALS</code>; only the name travels in the dispatch.</li>
+<li><code>STRATA_NOTEBOOK_CREDENTIAL_PATHS='{"lab-a": ["/srv/projects/lab-a"]}'</code> keeps a name to the notebooks under those directories, for a server that hosts several projects. Anywhere else, the cell fails with <code>credential 'lab-a' is not available to this notebook</code>, naming the credential and none of its fields. Mounts, connections and catalogs are all checked, and so is a mount sent to a remote worker, before it is sent. A listed name is not usable outside a notebook at all, for example by a scan through a catalog that names it. Names not listed stay open to every notebook.</li>
 </ul>
 <p>The <code>@mount</code> annotation takes the name too: <code># @mount raw s3://lab-bucket/raw ro credential=lab-bucket</code>.</p>
 <p>A named catalog in the server's <code>STRATA_CATALOGS</code> takes the same key, so the

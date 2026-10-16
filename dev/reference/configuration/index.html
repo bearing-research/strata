@@ -3807,6 +3807,11 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>A default credential per mount URI scheme as JSON, e.g. <code>{"s3": "org-bucket"}</code>, applied to mounts that name none.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_CREDENTIAL_PATHS</code></td>
+<td><code>{}</code></td>
+<td>Credential names only some notebooks may use, as JSON <code>{name: [directory, ...]}</code> with absolute directories. A listed name resolves only for a notebook under one of its directories, compared as written (symlinks are not followed, and a path with <code>..</code> is never inside); anywhere else, and outside any notebook, it fails naming the credential. Names not listed are open to every notebook. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code></td>
 <td><code>[]</code></td>
 <td>Hosts <code>@fetch</code>, and a prompt cell's <code>[ai] base_url</code> from <code>notebook.toml</code>, may reach even on a private address (an internal data server or model server). Public hosts need no entry; in service mode, private, loopback and link-local addresses are refused unless listed. Personal mode allows them, so <code>localhost</code> works on a laptop. Comma-separated (not a JSON array) exact names, or a leading dot for a suffix (<code>.internal</code>). Same rule as <code>STRATA_WORKER_ALLOWED_HOSTS</code>, and applied to every redirect hop.</td>
