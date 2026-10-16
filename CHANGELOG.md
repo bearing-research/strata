@@ -34,7 +34,7 @@ exhaustive commit history.
   snapshot names the output's artifact id, version and provenance hash; a
   `@table` reader goes out of date after each write. Appending to or merging
   into a table Strata did not create needs
-  `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. (#PR)
+  `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. (#1202)
 
 ### Changed
 
