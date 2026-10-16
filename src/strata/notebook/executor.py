@@ -32,6 +32,7 @@ from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
 import anyio.to_thread
 import httpx
+from pydantic import ValidationError
 
 from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 
@@ -79,6 +80,7 @@ from strata.notebook.module_export import build_module_export_plan, runtime_bind
 from strata.notebook.mounts import (
     MountCredentials,
     MountResolver,
+    MountWrite,
     ResolvedMount,
     mount_fingerprint,
     resolve_cell_mounts,
@@ -528,6 +530,28 @@ def _team_cache_publish_policy(config: Any) -> str:
     missing setting means the pre-existing behaviour.
     """
     return str(getattr(config, "notebook_team_cache_publish", "all") or "all")
+
+
+def _worker_mount_writes(result: Any, mount_specs: list[MountSpec]) -> list[MountWrite]:
+    """What a remote worker reports it wrote, for the cell's own read-write mounts only.
+
+    The report comes from another machine, perhaps another Strata version: an entry that
+    does not parse, or names a mount this cell does not have, is dropped.
+    """
+    raw = result.get("mount_writes") if isinstance(result, dict) else None
+    if not isinstance(raw, list):
+        return []
+    rw = {m.name: m.uri for m in mount_specs if m.mode == MountMode.READ_WRITE}
+    writes: list[MountWrite] = []
+    for entry in raw:
+        try:
+            write = MountWrite.model_validate(entry)
+        except ValidationError:
+            logger.warning("Ignoring a malformed mount write report from a worker")
+            continue
+        if rw.get(write.mount) == write.uri:
+            writes.append(write)
+    return writes
 
 
 class CellExecutor:
@@ -1746,10 +1770,12 @@ class CellExecutor:
                                 display_count=len(exec_result.display_outputs),
                             )
 
-                    # ⑥ Sync back read-write mounts.
+                    # ⑥ Sync back read-write mounts. A worker syncs its own and reports what
+                    # was written in its result.
+                    mount_writes = _worker_mount_writes(result, mount_specs)
                     if exec_result.success and resolved_mounts:
                         try:
-                            await self._mount_resolver.sync_back(resolved_mounts)
+                            mount_writes = await self._mount_resolver.sync_back(resolved_mounts)
                         except Exception as exc:
                             logger.exception(
                                 "Failed to sync-back RW mounts for cell %s",
@@ -1769,6 +1795,15 @@ class CellExecutor:
                                 execution_method=exec_result.execution_method,
                                 mutation_warnings=exec_result.mutation_warnings,
                             ).apply_remote_metadata(**remote_metadata)
+                    if exec_result.success and mount_writes:
+                        self._store_mount_writes(
+                            cell_id,
+                            provenance_hash,
+                            mount_writes,
+                            source_hash=source_hash,
+                            source=source,
+                            env_hash=env_hash,
+                        )
 
                 self.session.persist_display_outputs(
                     cell_id,
@@ -2332,9 +2367,10 @@ class CellExecutor:
                             exec_result.display_outputs[-1] if exec_result.display_outputs else None
                         )
 
+                    mount_writes: list[MountWrite] = []
                     if exec_result.success and resolved_mounts:
                         try:
-                            await self._mount_resolver.sync_back(resolved_mounts)
+                            mount_writes = await self._mount_resolver.sync_back(resolved_mounts)
                         except Exception as exc:
                             logger.exception(
                                 "Failed to sync-back RW mounts for R cell %s",
@@ -2354,6 +2390,15 @@ class CellExecutor:
                                 execution_method=exec_result.execution_method,
                                 mutation_warnings=exec_result.mutation_warnings,
                             )
+                    if exec_result.success and mount_writes:
+                        self._store_mount_writes(
+                            cell_id,
+                            provenance_hash,
+                            mount_writes,
+                            source_hash=source_hash,
+                            source=source,
+                            env_hash=env_hash,
+                        )
 
                 self.session.persist_display_outputs(
                     cell_id,
@@ -4790,6 +4835,48 @@ class CellExecutor:
             env_hash=env_hash,
             extra_params=params,
         )
+
+    def _store_mount_writes(
+        self,
+        cell_id: str,
+        provenance_hash: str,
+        writes: list[MountWrite],
+        *,
+        source_hash: str,
+        source: str,
+        env_hash: str,
+    ) -> None:
+        """Record what a run wrote through each read-write mount, as ``__mount__<name>``.
+
+        A read-write cell never cache-hits, so this is the run's record of its side effect:
+        the files it created or changed, with sizes and sha256 digests, linked to the inputs
+        it read. Each run adds a version, so earlier runs' records stay readable.
+        """
+        artifact_mgr = self.session.get_artifact_manager()
+        input_versions = self._input_refs(cell_id)
+        for write in writes:
+            blob = json.dumps(
+                {"uri": write.uri, "files": [f.model_dump() for f in write.files]},
+                sort_keys=True,
+            ).encode("utf-8")
+            label = f"__mount__{write.mount}"
+            try:
+                artifact_mgr.store_cell_output(
+                    cell_id=cell_id,
+                    variable_name=label,
+                    blob_data=blob,
+                    content_type="json/object",
+                    provenance_hash=derive_subkey(provenance_hash, label),
+                    input_versions=input_versions,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                    extra_params={"mount_uri": write.uri},
+                )
+            except Exception:
+                # The files are already written and synced; losing the record is not a
+                # reason to fail the run.
+                logger.exception("Failed to record writes through mount %s", write.mount)
 
     def _store_inline_display_outputs(
         self,

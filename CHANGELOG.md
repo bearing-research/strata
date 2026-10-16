@@ -22,6 +22,11 @@ exhaustive commit history.
   notebooks under some directories, for a server that hosts several projects.
   Elsewhere a mount, connection or catalog that names it fails the cell naming
   the credential, and a remote worker is never sent it. (#1196)
+- **What a cell writes through a read-write mount is recorded.** The files a
+  successful run created or changed (path, size, sha256) are stored as the
+  cell's `__mount__<name>` record, linked to the inputs the run read, so the
+  MCP `lineage` tool shows what produced them. A remote worker reports its
+  writes back. (#PR)
 ### Changed
 
 - **Observability code lives in the `strata.observability` package.**

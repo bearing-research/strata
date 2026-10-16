@@ -4,19 +4,25 @@ Local (``file://``) mounts are used directly; remote ones (``s3``, ``gs``,
 ``az``) are mirrored to a local cache via ``fsspec`` before the subprocess
 spawns, so the harness only sees ``pathlib.Path``. Read-only mounts are
 fingerprinted into provenance; read-write mounts are synced back after
-execution and do not participate in provenance.
+execution and do not participate in provenance. What a cell writes through one is
+recorded instead: :meth:`MountResolver.sync_back` returns the files it created or
+changed, with sizes and digests.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
 import shutil
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+
+from pydantic import BaseModel
 
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.models import MountMode, MountSpec
@@ -33,6 +39,54 @@ class ResolvedMount:
     fingerprint: str | None  # None for RW mounts: the cell is not cacheable.
     # Remote RW only: synced back after execution.
     staging_dir: Path | None = None
+    # RW only: each file's (size, mtime_ns) before the cell ran, to tell what it wrote.
+    baseline: dict[str, tuple[int, int]] | None = None
+
+
+class WrittenFile(BaseModel):
+    """One file a cell created or changed through a read-write mount."""
+
+    path: str  # relative to the mount, POSIX separators
+    size: int
+    sha256: str
+
+
+class MountWrite(BaseModel):
+    """What one run wrote through one read-write mount."""
+
+    mount: str
+    uri: str
+    files: list[WrittenFile]
+
+
+def _file_states(root: Path) -> dict[str, tuple[int, int]]:
+    """``{relative path: (size, mtime_ns)}`` for each regular file under *root*, no links."""
+    states: dict[str, tuple[int, int]] = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            path = Path(dirpath) / filename
+            st = path.lstat()
+            if stat.S_ISREG(st.st_mode):
+                states[path.relative_to(root).as_posix()] = (st.st_size, st.st_mtime_ns)
+    return states
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def written_files(rm: ResolvedMount) -> list[WrittenFile]:
+    """Files under a read-write mount that are new or changed since it was prepared."""
+    before = rm.baseline or {}
+    return [
+        WrittenFile(path=rel, size=state[0], sha256=_sha256_file(rm.local_path / rel))
+        for rel, state in sorted(_file_states(rm.local_path).items())
+        if before.get(rel) != state
+    ]
 
 
 # --- URI parsing ---
@@ -164,7 +218,12 @@ class MountResolver:
         if mount.mode == MountMode.READ_WRITE:
             # RW: no fingerprint (side effect).
             p.mkdir(parents=True, exist_ok=True)
-            return ResolvedMount(spec=mount, local_path=p, fingerprint=None)
+            return ResolvedMount(
+                spec=mount,
+                local_path=p,
+                fingerprint=None,
+                baseline=await asyncio.to_thread(_file_states, p),
+            )
 
         if not p.exists():
             raise ValueError(f"Local mount '{mount.name}' path does not exist: {p}")
@@ -295,16 +354,25 @@ class MountResolver:
             local_path=staging,
             fingerprint=None,
             staging_dir=staging,
+            baseline=await asyncio.to_thread(_file_states, staging),
         )
 
     async def sync_back(
         self,
         resolved: dict[str, ResolvedMount],
-    ) -> None:
-        """Sync read-write mounts back to their remote URIs after a successful run."""
+    ) -> list[MountWrite]:
+        """Sync read-write mounts back to their remote URIs after a successful run.
+
+        Returns what the run wrote, one entry per mount it wrote anything through. A
+        deletion is not recorded, and is not synced back to a remote mount either.
+        """
+        writes: list[MountWrite] = []
         for name, rm in resolved.items():
             if rm.spec.mode != MountMode.READ_WRITE:
                 continue
+            files = await asyncio.to_thread(written_files, rm)
+            if files:
+                writes.append(MountWrite(mount=name, uri=rm.spec.uri, files=files))
             if rm.staging_dir is None:
                 continue
 
@@ -332,6 +400,7 @@ class MountResolver:
                 raise RuntimeError(
                     f"Failed to sync-back RW mount '{name}' to {rm.spec.uri}: {e}"
                 ) from e
+        return writes
 
 
 class MountFingerprinter:
