@@ -48,7 +48,7 @@ Change in `helpers.py` → `Config` class:
 
 ## DuckDB schema
 
-One file: `trading.db` next to the notebook. Tables:
+One file: `work/trading.db` in the notebook's directory. Tables:
 
 - `news_raw`: raw headlines (idempotent insert by `article_id`)
 - `signals`: extracted sentiment per article

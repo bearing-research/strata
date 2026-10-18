@@ -40,6 +40,7 @@ _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
+_work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
 
 # Harness-injected, not user inputs: excluded from mutation fingerprinting.
 _AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
@@ -386,6 +387,7 @@ def _run_one_batched_cell(
     output_dir: Path,
     frame_out: Any,
     resp_in: Any,
+    manifest: dict,
 ) -> tuple[str, str | None]:
     """Execute one cell within a batch; return ``(status, failed_reason)``.
 
@@ -485,12 +487,13 @@ def _run_one_batched_cell(
                     with display_capture.capture_side_effects():
                         display_value = _exec_with_display(source, namespace)
                 except Exception as exc:
+                    hint = _work_dir.hint(exc, manifest)
                     _send_frame(
                         frame_out,
                         "cell_error",
                         {
                             "cell_id": cell_id,
-                            "error": str(exc),
+                            "error": f"{exc}\n{hint}" if hint else str(exc),
                             "traceback": traceback.format_exc(),
                             "stdout": stdout_capture.getvalue(),
                             "stderr": stderr_capture.getvalue(),
@@ -618,6 +621,7 @@ def execute_batch(
     output_dir: Path,
     frame_out: Any,
     resp_in: Any,
+    manifest: dict,
 ) -> None:
     """Execute a sequence of cells in one Python process.
 
@@ -658,7 +662,9 @@ def execute_batch(
             )
             return
 
-        status, reason = _run_one_batched_cell(cell, namespace, output_dir, frame_out, resp_in)
+        status, reason = _run_one_batched_cell(
+            cell, namespace, output_dir, frame_out, resp_in, manifest
+        )
         if status != "ok":
             _send_frame(
                 frame_out,
@@ -727,6 +733,7 @@ def batch_main() -> None:
 
     manifest_path = sys.argv[2]
     manifest = load_manifest(manifest_path)
+    _work_dir.enter(manifest)
 
     frame_fd = int(os.environ["STRATA_BATCH_FRAME_FD"])
     resp_fd = int(os.environ["STRATA_BATCH_RESP_FD"])
@@ -741,6 +748,7 @@ def batch_main() -> None:
         output_dir=output_dir,
         frame_out=frame_out,
         resp_in=resp_in,
+        manifest=manifest,
     )
 
     # Flush + close so the parent's reader sees EOF promptly.
@@ -799,6 +807,7 @@ def main():
             stderr_buffer = _Tee(sys.stderr)
         source = manifest.get("source", "")
         output_dir = Path(manifest.get("output_dir", "/tmp/strata_output"))
+        _work_dir.enter(manifest)
 
         # Before deserializing, not just around the body: a library that reads
         # config once at import (jax and JAX_ENABLE_X64) would otherwise take the
@@ -872,9 +881,10 @@ def main():
 
     except Exception as e:
         # SystemExit still runs the finally block; the parent checks result.json, not the exit code.
+        hint = _work_dir.hint(e, manifest)
         result = {
             "success": False,
-            "error": str(e),
+            "error": f"{e}\n{hint}" if hint else str(e),
             "traceback": traceback.format_exc(),
             "variables": {},
             "stdout": stdout_buffer.getvalue() or stdout_text,

@@ -726,6 +726,7 @@ class TestAmbientPromoteWiring:
         )
         return SimpleNamespace(
             _lake_config=lambda: config,
+            _work_dir_fields=lambda: {},
             session=SimpleNamespace(id="sess-1"),
         )
 

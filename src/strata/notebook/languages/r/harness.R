@@ -240,6 +240,13 @@ if (!is.null(manifest$env)) {
   }
 }
 
+# The cell runs in its notebook's work/, not beside notebook.toml. R started in the
+# notebook's directory, so the notebook's own .Rprofile (renv activation) ran, never
+# one a cell left in work/.
+if (!is.null(manifest$work_dir)) {
+  setwd(manifest$work_dir)
+}
+
 # ---------------------------------------------------------------------------
 # Cell execution
 # ---------------------------------------------------------------------------

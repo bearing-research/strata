@@ -61,12 +61,13 @@ def _run_in_thread(
     output_dir: Path,
     frame_w_f: Any,
     resp_r_f: Any,
+    manifest: dict | None = None,
 ) -> tuple[threading.Thread, list[BaseException]]:
     errors: list[BaseException] = []
 
     def target() -> None:
         try:
-            execute_batch(cells, upstream_inputs, output_dir, frame_w_f, resp_r_f)
+            execute_batch(cells, upstream_inputs, output_dir, frame_w_f, resp_r_f, manifest or {})
         except BaseException as exc:
             errors.append(exc)
         finally:

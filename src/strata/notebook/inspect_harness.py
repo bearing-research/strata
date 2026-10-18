@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -33,6 +34,13 @@ def _load_serializer():
 
 
 _ser = _load_serializer()
+
+
+def _enter_work_dir(manifest):
+    """Evaluate where the cell ran: its notebook's ``work/`` (``work_dir.enter``)."""
+    work_dir = manifest.get("work_dir")
+    if work_dir:
+        os.chdir(work_dir)
 
 
 def _repr_value(value, max_len=4000):
@@ -152,6 +160,7 @@ def main():
     with open(sys.argv[1]) as f:
         manifest = json.load(f)
 
+    _enter_work_dir(manifest)
     namespace = _load_namespace(manifest)
 
     _emit({"ok": True, "result": "ready", "type": "str"})

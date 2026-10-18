@@ -336,7 +336,8 @@ The committed set is:
 
 The `.mcp.json` and `CLAUDE.md` that `strata agent` writes are ignored: each
 launch rewrites them with the server's port and the session id, so they
-describe one machine's run rather than the notebook.
+describe one machine's run rather than the notebook. So is `work/`, the
+directory cells run in and write their files to.
 
 The rules live in `strata.notebook.layout`: `committed_paths()` returns the
 set for a given directory and `IGNORED_PATTERNS` is what the `.gitignore`

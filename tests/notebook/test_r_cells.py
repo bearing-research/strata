@@ -200,6 +200,19 @@ async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_r_cell_runs_in_the_notebooks_work_directory(r_notebook):
+    """A relative write lands in ``work/``, after R started where its ``.Rprofile`` is."""
+    r_src = 'writeLines("from R", "r.txt")\nhere <- getwd()\n'
+
+    notebook_dir, session = r_notebook(cells=[("c1", None, r_src, "r")])
+    result = await CellExecutor(session).execute_cell("c1", r_src)
+
+    assert result.success is True, result.error
+    assert (notebook_dir / "work" / "r.txt").read_text() == "from R\n"
+    assert not (notebook_dir / "r.txt").exists()
+
+
+@pytest.mark.asyncio
 async def test_r_cell_output_dir_is_kept(r_notebook):
     """``# @output_dir`` binds a path string in R, and the folder's files become the output."""
     import json

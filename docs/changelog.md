@@ -92,6 +92,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **A cell runs in its notebook's `work/`, not beside `notebook.toml`.** Python
+  and R cells, Run All, the warm pool and the inspect REPL all start there, so a
+  relative path a cell writes lands in `work/` and a file beside the notebook is
+  `../<path>`; a Python cell that misses one gets a hint naming it. Under
+  `STRATA_NOTEBOOK_HARNESS_USER`, where a relative write failed with
+  `PermissionError` in the server's directory, `work/` is handed to the cell's
+  user and the notebook's own files stay the server's. A worker cell gets a
+  `work/` of its own for the run. `strata new` gitignores `work/`, and exports
+  leave it out. (#1212)
 - **A catalog names its Strata credential with `strata_credential`.**
   `credential` is pyiceberg's own key, a REST catalog's OAuth
   `client_id:secret` (Polaris's quickstart sets it), and now reaches the catalog

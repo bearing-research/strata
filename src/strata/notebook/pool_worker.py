@@ -58,6 +58,7 @@ _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
+_work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
 
 # Harness-injected names excluded from mutation fingerprinting (the ``display``
 # buffer grows every run and would read as an in-place mutation).
@@ -246,6 +247,8 @@ def execute_harness(manifest: dict) -> dict:
     ambient_client: Any = None
 
     try:
+        _work_dir.enter(manifest)
+
         # Inside the try so a StrataRArtifactError (R-only RDS artifact read by a Python
         # cell) yields a structured error instead of a later ``NameError``.
         def _deser_one(spec: dict, var_name: str) -> Any:
@@ -358,6 +361,7 @@ def execute_harness(manifest: dict) -> dict:
 
         sys.stdout = old_stdout
         sys.stderr = old_stderr
+        _work_dir.hint(e, manifest)
         return {
             "success": False,
             "variables": {},
