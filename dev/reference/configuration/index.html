@@ -3812,6 +3812,11 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <td>Credential names only some notebooks may use, as JSON <code>{name: [directory, ...]}</code> with absolute directories. A listed name resolves only for a notebook under one of its directories, compared as written (symlinks are not followed, and a path with <code>..</code> is never inside); anywhere else, and outside any notebook, it fails naming the credential. Names not listed are open to every notebook. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code></td>
+<td><code>{}</code></td>
+<td>Who may mount a credential read-write, as JSON <code>{name: [principal glob, ...]}</code> matched against the principal who started the run (<code>"*"</code> is anyone, and the only pattern a run with no principal matches). Once set, even to <code>{}</code>, a name not listed is read-only: an <code>rw</code> mount through it fails before the run, naming the credential, and an <code>rw</code> mount on <code>s3</code>, <code>gs</code> or <code>az</code> must name a credential. Unset, every name writes. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN</code></td>
 <td><code>false</code></td>
 <td>Whether a cell's <a href="../../notebook/annotations/#write_table"><code># @write_table</code></a> may <code>append</code> to or <code>merge</code> into a table Strata did not create (another writer's). Off, only tables Strata wrote first; an <code>overwrite</code> of such a table is refused either way.</td>

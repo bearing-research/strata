@@ -3744,6 +3744,13 @@ exhaustive commit history.</p>
   member who started the run, without <code>admin:</code> scopes, on the ambient client's
   routes and its own session's promote, until the run ends. Run All shares one
   token. Personal mode is unchanged. (#1215)</li>
+<li><strong><code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code></strong> says who may mount a named
+  credential read-write, as globs over the principal who started the run.
+  Once it is set, even to <code>{}</code>, a name not listed is read-only: an <code>rw</code> mount
+  through it, from a cell or from <code>notebook.toml</code>, fails before anything is
+  staged, naming the credential, and so does one sent to a remote worker. An
+  <code>rw</code> mount on <code>s3</code>, <code>gs</code> or <code>az</code> that names no credential fails too, since it
+  would write as the server's own identity. Unset, nothing changes. (#1217)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
