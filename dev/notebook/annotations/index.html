@@ -3381,6 +3381,10 @@ provenance and inputs, so lineage and cache hits work as for any variable. The
 folder is kept even when no cell reads it.</p>
 <p>A cell that references <code>&lt;name&gt;</code> gets the folder rebuilt as a local <code>Path</code>: a
 copy, so writing to it changes nothing upstream.</p>
+<p><strong>The cell shows what the folder holds</strong>: its file count, total size, and a
+table of paths and sizes (the first 20 files, then a count of the rest), ahead
+of the cell's own output. It is a markdown display like any other, so a cache
+hit, a reopened notebook and an export show it too.</p>
 <p><strong>A failed run keeps what it wrote.</strong> Its files are stored and its manifest is
 kept as a failed version: never a cache hit and never an input, but lineage
 shows it and <code>&lt;id&gt;@v=&lt;n&gt;</code> reads it. A link in the folder, or a file with more
