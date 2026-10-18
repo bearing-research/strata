@@ -3728,6 +3728,10 @@ exhaustive commit history.</p>
   folder file no kept version (current, earlier, failed or pinned) names, so
   old checkpoints no longer stay forever. A file a run is still assembling is
   never taken. (#1209)</li>
+<li><strong>A cell on a remote worker reads another cell's <code># @output_dir</code> folder.</strong>
+  The server sends the folder's files as one tar, which the worker unpacks to a
+  local <code>Path</code> before the cell runs, on either transport. A worker too old to
+  take one is refused before the cell runs. (#1210)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
