@@ -46,7 +46,8 @@ Strata        → decides whether it already exists, and persists it
 ```
 
 Strata also provides snapshot-aware Iceberg scanning. Parquet row groups are
-cached as Arrow IPC keyed by immutable snapshot IDs (no cache invalidation).
+cached as Arrow IPC keyed by immutable data files plus what the snapshot deletes
+from them (no cache invalidation; an append misses only its new files).
 Streaming is bounded-memory; two-tier QoS prevents bulk queries from starving
 dashboards. Storage backends:
 local, S3, GCS, Azure.
@@ -87,7 +88,10 @@ dev interpreter, so the dev env needs the `[notebook]` extra
 
 ### Cache key & pruning
 
-Cache key: `hash(tenant | table_identity | snapshot_id | file_path | row_group_id | projection_fingerprint)`.
+Cache key: `hash(tenant | table_identity | file_path | file_size | row_group_id | projection_fingerprint | schema_id | deletes | reading)`.
+No snapshot: `deletes` fingerprints the row group's deleted positions and the
+equality delete files that may meet it (empty for most), and `reading` the
+format version and name mapping, which change without a snapshot.
 `TableIdentity` is canonical (`catalog.namespace.table`) to avoid URI-variation duplicates.
 
 Filters apply at two levels: Iceberg manifest stats (skip files) → Parquet

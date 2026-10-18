@@ -1099,7 +1099,7 @@ class TestInputAcquisition:
             cache_key=CacheKey(
                 tenant_id="team-a",
                 table_identity=TableIdentity(catalog="strata", namespace="ns", table="tbl"),
-                snapshot_id=1,
+                file_size=1024,
                 file_path="file:///warehouse/data.parquet",
                 row_group_id=0,
                 projection_fingerprint="*",

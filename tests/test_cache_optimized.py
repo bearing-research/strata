@@ -39,7 +39,7 @@ def cache_key():
     return CacheKey(
         tenant_id="_default",
         table_identity=identity,
-        snapshot_id=123,
+        file_size=1024,
         file_path="/data/file.parquet",
         row_group_id=0,
         projection_fingerprint="abc123",
@@ -372,7 +372,7 @@ class TestEvictionWithoutWalkingOnEveryPut:
         return CacheKey(
             tenant_id="_default",
             table_identity=TableIdentity.from_table_id("test_db.events"),
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=i,
             projection_fingerprint="abc123",

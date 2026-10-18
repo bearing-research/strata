@@ -278,7 +278,7 @@ class TestCacheKeyTenantIsolation:
         key_a = CacheKey(
             tenant_id="tenant-a",
             table_identity=table_identity,
-            snapshot_id=1,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc",
@@ -286,7 +286,7 @@ class TestCacheKeyTenantIsolation:
         key_b = CacheKey(
             tenant_id="tenant-b",
             table_identity=table_identity,
-            snapshot_id=1,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc",
@@ -300,7 +300,7 @@ class TestCacheKeyTenantIsolation:
         key_a = CacheKey(
             tenant_id="tenant-a",
             table_identity=table_identity,
-            snapshot_id=1,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc",
@@ -308,7 +308,7 @@ class TestCacheKeyTenantIsolation:
         key_b = CacheKey(
             tenant_id="tenant-a",
             table_identity=table_identity,
-            snapshot_id=1,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc",
@@ -322,7 +322,7 @@ class TestCacheKeyTenantIsolation:
         key = CacheKey(
             tenant_id="my-tenant",
             table_identity=table_identity,
-            snapshot_id=1,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc",

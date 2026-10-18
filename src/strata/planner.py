@@ -1,5 +1,6 @@
 """Read planner: builds ReadPlan from snapshot + filters + projection."""
 
+import hashlib
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 from pyiceberg.conversions import from_bytes, to_bytes
+from pyiceberg.table.name_mapping import NameMapping
 from pyiceberg.transforms import IdentityTransform
 from pyiceberg.types import IcebergType
 
@@ -186,6 +188,34 @@ def _equality_deletes(
     return tuple(sorted(entries, key=lambda entry: entry.file_path))
 
 
+def _deletes_fingerprint(
+    deleted_rows: pa.Array | None, equality: tuple[EqualityDeleteEntry, ...]
+) -> str:
+    """Name what a snapshot deletes from one row group, empty for nothing (most row groups).
+
+    Its deleted positions, and the equality delete files that may meet it: delete files never
+    change, so the same ones always remove the same rows.
+    """
+    if deleted_rows is None and not equality:
+        return ""
+    digest = hashlib.sha256()
+    if deleted_rows is not None:
+        positions = deleted_rows.cast(pa.int64()).to_numpy(zero_copy_only=False)
+        digest.update(b"positions:%d:" % len(positions))
+        digest.update(positions.tobytes())
+    for delete in equality:
+        path = delete.file_path.encode()
+        digest.update(b"equality:%d:" % len(path))
+        digest.update(path)
+    return digest.hexdigest()
+
+
+def _reading_fingerprint(format_version: int, name_mapping: NameMapping | None) -> str:
+    """Name how a table reads its files: a property change, which makes no snapshot."""
+    mapping = name_mapping.model_dump_json() if name_mapping is not None else ""
+    return hashlib.sha256(f"{format_version}|{mapping}".encode()).hexdigest()[:16]
+
+
 def _partition_values(
     data_file, table, top_level: dict[int, IcebergType]
 ) -> tuple[tuple[int, str, str], ...]:
@@ -315,10 +345,11 @@ class ReadPlanner:
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
         self._deleted_rows = DeletedRows()
-        # Per (table, schema id, file): column layout (None when it needs none), columns by
-        # field id, identity-partition values. Safe to cache: data files never change.
+        # Per (table, schema id, reading fingerprint, file): column layout (None when it needs
+        # none), columns by field id, identity-partition values. Safe to cache: data files
+        # never change.
         self._file_columns: LRUCache[
-            tuple[str, int, str],
+            tuple[str, int, str, str],
             tuple[tuple[Column, ...] | None, dict[int, str], dict[int, Any]],
         ] = LRUCache(10_000)
 
@@ -426,6 +457,7 @@ class ReadPlanner:
                         ManifestEntry(
                             file_path=file_path,
                             actual_path=actual_path,
+                            file_size_in_bytes=planned.data_file.file_size_in_bytes,
                             delete_files=_delete_files(
                                 planned.positional_deletes, table_identity_str
                             ),
@@ -460,6 +492,7 @@ class ReadPlanner:
             snapshot_schema = table.scan(snapshot_id=resolved_snapshot_id).projection()
         plan.schema_id = snapshot_schema.schema_id
         name_mapping = table.name_mapping()
+        reading = _reading_fingerprint(table.metadata.format_version, name_mapping)
         initial_defaults = {
             field.field_id: field.initial_default for field in snapshot_schema.fields
         }
@@ -488,7 +521,7 @@ class ReadPlanner:
             # Schema evolution rewrites no files, so an older file may name, hold or type a
             # column differently. Columns match by field id; ``layout`` says how to read
             # this file as the snapshot's schema (None when it already is).
-            layout_key = (table_identity_str, snapshot_schema.schema_id, actual_path)
+            layout_key = (table_identity_str, snapshot_schema.schema_id, reading, actual_path)
             cached_layout = self._file_columns.get(layout_key)
             if cached_layout is None:
                 partition = _decode_partition_values(entry.partition_values)
@@ -535,7 +568,7 @@ class ReadPlanner:
             compiled_filters = _compile_filters(filters, col_index_map)
 
             # Merge-on-read: the fetcher drops these rows, so the row group is cached without
-            # them under a key that names the snapshot (and so its deletes).
+            # them under a key that names them.
             deleted = (
                 self._deleted_rows.for_data_file(table.io, file_path, entry.delete_files)
                 if entry.delete_files
@@ -589,11 +622,13 @@ class ReadPlanner:
                 cache_key = CacheKey(
                     tenant_id=get_tenant_id(),
                     table_identity=table_identity,
-                    snapshot_id=resolved_snapshot_id,
                     file_path=file_path,
+                    file_size=entry.file_size_in_bytes,
                     row_group_id=rg_idx,
                     projection_fingerprint=proj_fingerprint,
                     schema_id=plan.schema_id,
+                    deletes=_deletes_fingerprint(deleted_rows, equality),
+                    reading=reading,
                 )
 
                 # Projection-aware; takes our RowGroupMeta or PyArrow's RowGroupMetaData.

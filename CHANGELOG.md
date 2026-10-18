@@ -90,6 +90,16 @@ exhaustive commit history.
 
 ### Changed
 
+- **An append no longer empties a table's row-group cache.** The cache key named
+  the snapshot, so a snapshot that only added files missed every row group the
+  table had cached. Data files never change, so the key now names the file (and
+  its size) and what the snapshot does to the row group's rows instead: the
+  positions it deletes and the equality delete files that may meet it, the
+  schema, and the table's format version and name mapping. A row group stays
+  cached across every snapshot that reads it the same way, and a delete misses
+  only the row groups it deletes from. A name-mapping change or a format upgrade,
+  which make no snapshot, are no longer served from the cache. The cache starts
+  empty after the upgrade. (#PR)
 - **A row-group cache miss no longer walks the whole cache.** Each write used to
   list and stat every cached file to check the size cap, so on a cache of a few
   hundred thousand row groups that walk was most of a miss. The cache now counts
@@ -158,6 +168,9 @@ exhaustive commit history.
 
 ### Removed
 
+- **Per-snapshot cache counts.** `/v1/cache/stats` no longer returns
+  `entries_by_snapshot`, and a `/v1/cache/entries` entry no longer has
+  `snapshot_id`: a cached row group belongs to no one snapshot. (#PR)
 - **Names exported from the `strata` package root.** `strata.Filter`,
   `FilterOp`, `FilterValue`, `StrataConfig`, `CacheKey`, `ReadPlan` and `Task`
   were left over from when the HTTP client lived in this package; import them

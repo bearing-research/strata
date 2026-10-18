@@ -341,8 +341,16 @@ class TestManifestCache:
 
         resolution = ManifestResolution(
             data_files=[
-                ManifestEntry(file_path="/data/file1.parquet", actual_path="/abs/file1.parquet"),
-                ManifestEntry(file_path="/data/file2.parquet", actual_path="/abs/file2.parquet"),
+                ManifestEntry(
+                    file_path="/data/file1.parquet",
+                    actual_path="/abs/file1.parquet",
+                    file_size_in_bytes=1024,
+                ),
+                ManifestEntry(
+                    file_path="/data/file2.parquet",
+                    actual_path="/abs/file2.parquet",
+                    file_size_in_bytes=1024,
+                ),
             ]
         )
 
@@ -373,7 +381,13 @@ class TestManifestCache:
 
         cache = ManifestCache(max_size=10, store=_LockedStore())
         resolution = ManifestResolution(
-            data_files=[ManifestEntry(file_path="/data/f.parquet", actual_path="/abs/f.parquet")]
+            data_files=[
+                ManifestEntry(
+                    file_path="/data/f.parquet",
+                    actual_path="/abs/f.parquet",
+                    file_size_in_bytes=1024,
+                )
+            ]
         )
         with caplog.at_level(logging.DEBUG, logger="strata.cache.metadata"):
             cache.put("default", "strata.ns.table", 123, resolution)
@@ -389,10 +403,22 @@ class TestManifestCache:
         cache = ManifestCache(max_size=10)
 
         res1 = ManifestResolution(
-            data_files=[ManifestEntry(file_path="/data/v1.parquet", actual_path="/data/v1.parquet")]
+            data_files=[
+                ManifestEntry(
+                    file_path="/data/v1.parquet",
+                    actual_path="/data/v1.parquet",
+                    file_size_in_bytes=1024,
+                )
+            ]
         )
         res2 = ManifestResolution(
-            data_files=[ManifestEntry(file_path="/data/v2.parquet", actual_path="/data/v2.parquet")]
+            data_files=[
+                ManifestEntry(
+                    file_path="/data/v2.parquet",
+                    actual_path="/data/v2.parquet",
+                    file_size_in_bytes=1024,
+                )
+            ]
         )
 
         cache.put("default", "strata.ns.table", 1, res1)
@@ -429,6 +455,7 @@ class TestManifestCache:
                 ManifestEntry(
                     file_path="/data/file1.parquet",
                     actual_path="/abs/file1.parquet",
+                    file_size_in_bytes=1024,
                 )
             ]
         )
@@ -451,6 +478,7 @@ class TestManifestCache:
                 ManifestEntry(
                     file_path="/data/file1.parquet",
                     actual_path="/abs/file1.parquet",
+                    file_size_in_bytes=1024,
                 )
             ]
         )

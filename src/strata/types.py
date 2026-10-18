@@ -232,22 +232,32 @@ class CacheGranularity(Enum):
 
 @dataclass(frozen=True)
 class CacheKey:
-    """Immutable cache key for one row group.
+    """Immutable cache key for one row group, as a snapshot reads it.
 
-    SHA-256 over ``tenant|table_identity|snapshot|file|row_group[|projection]|schema=``;
-    the projection is included only under ``ROW_GROUP_PROJECTION``. Keyed by the
+    SHA-256 over ``tenant|table_identity|file|size|row_group[|projection]|schema=|deletes=|
+    reading=``; the projection is included only under ``ROW_GROUP_PROJECTION``. Keyed by the
     canonical ``TableIdentity``, not the URI, so URI spellings share entries.
+
+    No snapshot: a data file never changes, so its row group stays cached across every
+    snapshot that reads it the same way, and an append misses only the new files. What a
+    snapshot can change about the rows is named instead.
     """
 
     tenant_id: str
     table_identity: TableIdentity  # Canonical identity like 'strata.namespace.table'
-    snapshot_id: int
     file_path: str
+    # The manifest's size of the file: a path written again with other bytes, which the
+    # spec forbids, is then another key.
+    file_size: int
     row_group_id: int
     projection_fingerprint: str  # Used only if granularity includes projection
-    # The Iceberg schema the row group was read as: a schema change makes no
-    # snapshot, so the snapshot alone cannot say.
+    # The Iceberg schema the row group was read as.
     schema_id: int | None = None
+    # What the snapshot deletes from this row group, empty for nothing: the cached rows
+    # are the ones left.
+    deletes: str = ""
+    # How the table reads its files (format version, name mapping); no snapshot records it.
+    reading: str = ""
 
     @property
     def table_id(self) -> str:
@@ -256,17 +266,13 @@ class CacheKey:
 
     def to_hex(self, granularity: CacheGranularity = CacheGranularity.ROW_GROUP_PROJECTION) -> str:
         """Return the key's SHA-256 hex digest; ``granularity`` decides if projection counts."""
-        if granularity == CacheGranularity.ROW_GROUP:
-            key_str = (
-                f"{self.tenant_id}|{self.table_identity}|{self.snapshot_id}|"
-                f"{self.file_path}|{self.row_group_id}"
-            )
-        else:
-            key_str = (
-                f"{self.tenant_id}|{self.table_identity}|{self.snapshot_id}|"
-                f"{self.file_path}|{self.row_group_id}|{self.projection_fingerprint}"
-            )
-        key_str += f"|schema={self.schema_id}"
+        key_str = (
+            f"{self.tenant_id}|{self.table_identity}|{self.file_path}|{self.file_size}|"
+            f"{self.row_group_id}"
+        )
+        if granularity != CacheGranularity.ROW_GROUP:
+            key_str += f"|{self.projection_fingerprint}"
+        key_str += f"|schema={self.schema_id}|deletes={self.deletes}|reading={self.reading}"
         return hashlib.sha256(key_str.encode()).hexdigest()
 
     @staticmethod
