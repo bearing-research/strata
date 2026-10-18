@@ -111,10 +111,24 @@ def _load_namespace(manifest):
     return namespace
 
 
+# Replies go to the original stdout through a private fd; ``main`` points fd 1 at
+# devnull so output written straight to it (``os.system``, C code) cannot pose as one.
+_replies = sys.stdout
+
+
+def _take_stdout():
+    """Keep the parent's stdout pipe for replies only; return it as a text stream."""
+    reply_fd = os.dup(1)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, 1)
+    os.close(devnull)
+    return os.fdopen(reply_fd, "w")
+
+
 def _emit(response):
-    """Write one JSON response line to stdout and flush."""
-    sys.stdout.write(json.dumps(response) + "\n")
-    sys.stdout.flush()
+    """Write one JSON response line to the reply stream and flush."""
+    _replies.write(json.dumps(response) + "\n")
+    _replies.flush()
 
 
 def _evaluate(expr, namespace):
@@ -157,6 +171,8 @@ def _evaluate(expr, namespace):
 
 def main():
     """Read JSON commands from stdin, evaluate them, write results to stdout."""
+    global _replies
+    _replies = _take_stdout()
     with open(sys.argv[1]) as f:
         manifest = json.load(f)
 

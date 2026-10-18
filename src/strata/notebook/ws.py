@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import anyio.to_thread
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
 from strata.notebook import console_relay, prewarm
 from strata.notebook.annotations import parse_annotations
@@ -2772,23 +2773,16 @@ async def _handle_inspect_eval(
         return
 
     result = await inspect_session.evaluate(expr)
-
-    await websocket.send_text(
-        _json_encode(
-            _make_message(
-                MessageType.INSPECT_RESULT,
-                seq,
-                inspect_result_payload(
-                    {
-                        "cell_id": cell_id,
-                        "action": "eval",
-                        "expr": expr,
-                        **result,
-                    }
-                ),
-            )
+    answer = {"cell_id": cell_id, "action": "eval", "expr": expr}
+    try:
+        reply = inspect_result_payload({**result, **answer})
+    except (TypeError, ValidationError) as exc:
+        # Raising here would close the socket; the REPL's line was not an answer.
+        reply = inspect_result_payload(
+            {**answer, "ok": False, "error": f"Malformed inspect reply: {exc}"}
         )
-    )
+
+    await websocket.send_text(_json_encode(_make_message(MessageType.INSPECT_RESULT, seq, reply)))
 
 
 async def _handle_inspect_close(
