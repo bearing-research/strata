@@ -83,7 +83,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A cell on a remote worker reads another cell's `# @output_dir` folder.**
   The server sends the folder's files as one tar, which the worker unpacks to a
   local `Path` before the cell runs, on either transport. A worker too old to
-  take one is refused before the cell runs. (#PR)
+  take one is refused before the cell runs. (#1210)
 
 ### Changed
 
