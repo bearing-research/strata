@@ -238,10 +238,13 @@ class PooledCellExecutor:
         manifest_path: Path,
         notebook_dir: Path,
         timeout_seconds: float = 30,
+        *,
+        run_token: str | None = None,
     ) -> dict | None:
         """Execute a cell using a warm process from the pool.
 
-        Returns None when no warm process is available; the caller then cold-spawns.
+        Returns None when no warm process is available; the caller then cold-spawns. A
+        *run_token* follows the manifest path on the worker's stdin.
 
         Raises:
             TimeoutError: the cell exceeded ``timeout_seconds`` in the worker. This is
@@ -263,6 +266,8 @@ class PooledCellExecutor:
             assert warm_proc.process.stdin is not None
             assert warm_proc.process.stdout is not None
             manifest_str = (str(manifest_path) + "\n").encode()
+            if run_token is not None:
+                manifest_str += f"{run_token}\n".encode()
             warm_proc.process.stdin.write(manifest_str)
             await warm_proc.process.stdin.drain()
 

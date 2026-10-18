@@ -87,6 +87,13 @@ exhaustive commit history.
   folder; the last is the cell's output. A file unchanged since the last
   iteration is not read again, a failed iteration keeps what the folder held,
   and `start_from=<cell>@iter=k` starts from that iteration's folder. (#1211)
+- **A cell calls its own server under `trusted_proxy` or `api_key`.** Its
+  ambient `strata` client held no credential, so `strata.materialize`, `put`,
+  artifact reads and `promote` got 401. Each local run now gets a token over the
+  harness's stdin, never a file, argv or the environment. The cell acts as the
+  member who started the run, without `admin:` scopes, on the ambient client's
+  routes and its own session's promote, until the run ends. Run All shares one
+  token. Personal mode is unchanged. (#PR)
 
 ### Changed
 

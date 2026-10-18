@@ -124,7 +124,9 @@ registry is LRU-bounded. See `tenancy/tenant.py`, `tenancy/registry.py`.
 Auth: trusted-proxy model. Strata does not authenticate, only the proxy can
 reach it (network-layer enforced). Proxy injects `X-Strata-Principal`,
 `X-Tenant-ID` (the configurable `tenant_header`), `X-Strata-Scopes`,
-`X-Strata-Proxy-Token`. ACL evaluation
+`X-Strata-Proxy-Token`. A local cell run's token (`auth/run_tokens.py`, sent on the
+harness's stdin) stands in for the proxy token on the ambient client's routes,
+as the run's principal minus `admin:` scopes, until the run ends. ACL evaluation
 is **deny-first** (deny rules → allow rules → default). Enforcement points:
 `POST /v1/materialize` (table/artifact), `GET /v1/streams/{id}` (stream
 ownership), `POST /v1/cache/clear` (`admin:cache` scope). Table ACL lives in

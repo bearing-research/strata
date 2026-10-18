@@ -127,19 +127,6 @@ class TestExecuteHarnessClientCellId:
         assert result["success"] is True, result.get("error")
         assert result["variables"]["cid"]["preview"] == "cell-xyz"
 
-    def test_remote_store_headers_reach_injected_client(self, tmp_path: Path) -> None:
-        """strata_headers (remote store auth/tenant) reach the warm worker's client."""
-        manifest = {
-            "source": "principal = strata._headers.get('X-Strata-Principal', '')",
-            "inputs": {},
-            "output_dir": str(tmp_path),
-            "strata_url": "http://remote-store:8765",
-            "strata_headers": {"X-Strata-Principal": "alice", "X-Tenant-ID": "team-a"},
-        }
-        result = execute_harness(manifest)
-        assert result["success"] is True, result.get("error")
-        assert result["variables"]["principal"]["preview"] == "alice"
-
 
 class TestExecuteHarnessDisplayDeduplication:
     """A cell ending in a bare consumed variable must not serialize it twice, as in the cold

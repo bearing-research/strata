@@ -190,6 +190,16 @@ def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
     )
 
 
+def read_run_token(manifest: dict) -> None:
+    """Take this run's token from stdin into *manifest*, when the server sends one.
+
+    A pipe, not the manifest file, argv or the environment: every cell runs as the same
+    user, and another cell could read those.
+    """
+    if manifest.get("run_token_on_stdin"):
+        manifest["strata_run_token"] = sys.stdin.readline().strip()
+
+
 def inject_client(manifest: dict, namespace: dict) -> Any:
     """Inject an ambient ``strata`` client bound to the server URL.
 
@@ -202,8 +212,9 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
         return None
     # Path-loaded, not ``import strata``: the notebook venv has only pyarrow + stdlib.
     cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
-    # Auth headers when the client targets a remote shared store (empty locally).
-    headers = manifest.get("strata_headers") or None
+    # The run's token, when its server authenticates callers (read_run_token).
+    token = manifest.get("strata_run_token")
+    headers = {_client_mod.RUN_TOKEN_HEADER: token} if token else None
     # Lets ``strata.promote("rows")`` name an input the way the cell reads it.
     input_uris = {
         name: spec.get("uri", "")
@@ -441,7 +452,12 @@ def _run_one_batched_cell(
             # ``strata.promote("rows")``). Before the namespace snapshot below, so
             # ``strata`` counts as an injected input, not a cell output.
             ambient_client = inject_client(
-                {**cell, "inputs": response.get("input_uris") or {}}, namespace
+                {
+                    **cell,
+                    "inputs": response.get("input_uris") or {},
+                    "strata_run_token": manifest.get("strata_run_token"),
+                },
+                namespace,
             )
 
             if response.get("cache_hit"):
@@ -744,6 +760,7 @@ def batch_main() -> None:
 
     manifest_path = sys.argv[2]
     manifest = load_manifest(manifest_path)
+    read_run_token(manifest)
     _work_dir.enter(manifest)
 
     frame_fd = int(os.environ["STRATA_BATCH_FRAME_FD"])
@@ -813,6 +830,7 @@ def main():
 
     try:
         manifest = load_manifest(manifest_path)
+        read_run_token(manifest)
         if manifest.get("stream_console"):
             stdout_buffer = _Tee(sys.stdout)
             stderr_buffer = _Tee(sys.stderr)

@@ -129,7 +129,7 @@ class TestHarnessCrashDiagnostic:
         class _FakeProc:
             pid = 0
 
-            async def communicate(self):
+            async def communicate(self, input=None):
                 return (
                     b"",
                     b"Traceback (most recent call last):\n"

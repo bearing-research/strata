@@ -834,8 +834,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
             manifest_path: Path,
             venv_python: Path,
             timeout_seconds: float,
+            *,
+            run_token: str | None = None,
         ) -> dict[str, object]:
-            del manifest_path, venv_python
+            del manifest_path, venv_python, run_token
             observed.append(timeout_seconds)
             return {
                 "success": True,
@@ -874,8 +876,10 @@ plain = os.environ.get("STRATA_TEST_PLAIN")
             manifest_path: Path,
             venv_python: Path,
             timeout_seconds: float,
+            *,
+            run_token: str | None = None,
         ) -> dict[str, object]:
-            del manifest_path, venv_python
+            del manifest_path, venv_python, run_token
             observed.append(timeout_seconds)
             return {
                 "success": True,

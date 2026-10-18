@@ -561,7 +561,9 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
 
     warm_calls = 0
 
-    async def fake_execute_with_pool(pool, manifest_path, notebook_dir, timeout_seconds=30):
+    async def fake_execute_with_pool(
+        pool, manifest_path, notebook_dir, timeout_seconds=30, *, run_token=None
+    ):
         nonlocal warm_calls
         warm_calls += 1
         return {

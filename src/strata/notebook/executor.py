@@ -2634,42 +2634,46 @@ class CellExecutor:
         result = None
         execution_method = "cold"
         resolved_mounts = await self._prepare_mounts(mount_specs)
-        manifest_path = self._write_manifest(
-            source,
-            input_specs,
-            output_dir,
-            runtime_env,
-            resolved_mounts,
-            mutation_defines=mutation_defines,
-            tables=tables,
-            cell_id=cell_id,
-        )
-
-        # Without an interpreter nothing runs, not even in a pre-started warm process:
-        # _run_harness refuses below.
-        if self.pool is not None and venv_path is not None:
-            from strata.notebook.pool import PooledCellExecutor
-
-            pool_result = await PooledCellExecutor.execute_with_pool(
-                self.pool,
-                manifest_path,
-                self.session.path,
-                timeout_seconds,
+        with self._run_token(timeout_seconds) as run_token:
+            manifest_path = self._write_manifest(
+                source,
+                input_specs,
+                output_dir,
+                runtime_env,
+                resolved_mounts,
+                mutation_defines=mutation_defines,
+                tables=tables,
+                cell_id=cell_id,
+                run_token=run_token,
             )
-            if pool_result is not None:
-                result = pool_result
-                execution_method = "warm"
-                logger.debug(
-                    "Executed cell %s with warm process",
-                    manifest_path.parent.name,
+
+            # Without an interpreter nothing runs, not even in a pre-started warm process:
+            # _run_harness refuses below.
+            if self.pool is not None and venv_path is not None:
+                from strata.notebook.pool import PooledCellExecutor
+
+                pool_result = await PooledCellExecutor.execute_with_pool(
+                    self.pool,
+                    manifest_path,
+                    self.session.path,
+                    timeout_seconds,
+                    run_token=run_token,
                 )
+                if pool_result is not None:
+                    result = pool_result
+                    execution_method = "warm"
+                    logger.debug(
+                        "Executed cell %s with warm process",
+                        manifest_path.parent.name,
+                    )
 
-        if result is None:
-            result = await self._run_harness(
-                manifest_path,
-                venv_path,
-                timeout_seconds,
-            )
+            if result is None:
+                result = await self._run_harness(
+                    manifest_path,
+                    venv_path,
+                    timeout_seconds,
+                    run_token=run_token,
+                )
 
         return result, output_dir, execution_method, resolved_mounts
 
@@ -2688,17 +2692,21 @@ class CellExecutor:
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run the bundle-based executor path locally for supported executor workers."""
         resolved_mounts = await self._prepare_mounts(mount_specs)
-        manifest_path = self._write_manifest(
-            source,
-            input_specs,
-            output_dir,
-            runtime_env,
-            resolved_mounts,
-            mutation_defines=mutation_defines,
-            tables=tables,
-            cell_id=cell_id,
-        )
-        result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
+        with self._run_token(timeout_seconds) as run_token:
+            manifest_path = self._write_manifest(
+                source,
+                input_specs,
+                output_dir,
+                runtime_env,
+                resolved_mounts,
+                mutation_defines=mutation_defines,
+                tables=tables,
+                cell_id=cell_id,
+                run_token=run_token,
+            )
+            result = await self._run_harness(
+                manifest_path, venv_path, timeout_seconds, run_token=run_token
+            )
 
         # A process the cell left running still owns output_dir and can swap any path under
         # it for a link: tar into an unnamed file, unpack through the run-file helpers.
@@ -4048,6 +4056,23 @@ class CellExecutor:
             return ""
         return f"{server_url}/v1/notebooks/{self.session.id}"
 
+    @contextmanager
+    def _run_token(self, timeout_seconds: float) -> Generator[str | None, None, None]:
+        """A token the cell's ambient client calls this server with, for the run's length.
+
+        ``None`` unless the run was started by an authenticated principal, whom the cell
+        then acts as (see ``strata.auth.run_tokens``).
+        """
+        from strata.auth.principal import get_principal
+        from strata.auth.run_tokens import run_token
+
+        principal = get_principal()
+        if principal is None:
+            yield None
+            return
+        with run_token(principal, self.session.id, timeout_seconds) as token:
+            yield token
+
     def _cell_strata_url(self) -> str:
         """Where a cell's ambient client points: this server, never the team store.
 
@@ -4216,11 +4241,13 @@ class CellExecutor:
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         folder_mounts: dict[str, dict[str, str]] | None = None,
+        run_token: str | None = None,
     ) -> Path:
         """Write the harness manifest for one local execution.
 
         *folder_mounts* replaces the run's own ``# @output_dir`` folders: a loop's live
-        outside each iteration's run directory.
+        outside each iteration's run directory. A *run_token* is not written, only
+        announced: it follows on the harness's stdin.
         """
         manifest_mounts = {
             name: {
@@ -4251,6 +4278,8 @@ class CellExecutor:
         }
         if loop_config is not None:
             manifest["loop"] = loop_config
+        if run_token is not None:
+            manifest["run_token_on_stdin"] = True
         manifest_path = output_dir / "manifest.json"
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f)
@@ -5541,8 +5570,13 @@ class CellExecutor:
         manifest_path: Path,
         venv_python: Path | None,
         timeout_seconds: float,
+        *,
+        run_token: str | None = None,
     ) -> dict[str, Any]:
-        """Run the harness via uv, or as the harness user; no-op if ``venv_python`` is None."""
+        """Run the harness via uv, or as the harness user; no-op if ``venv_python`` is None.
+
+        A *run_token* goes to the harness on its stdin.
+        """
         if venv_python is None:
             return {
                 "success": False,
@@ -5579,6 +5613,7 @@ class CellExecutor:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(self.session.path),
+            stdin=asyncio.subprocess.PIPE if run_token is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             # ``uv run`` must find the notebook's .venv, not the server's environment.
@@ -5590,7 +5625,7 @@ class CellExecutor:
 
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
+                proc.communicate(None if run_token is None else f"{run_token}\n".encode()),
                 timeout=timeout_seconds,
             )
         except asyncio.CancelledError:
@@ -5974,36 +6009,40 @@ class CellExecutor:
                     if loop.until_expr is not None
                     else {"iteration": k}
                 )
-                manifest_path = self._write_manifest(
-                    source,
-                    input_specs,
-                    output_dir,
-                    runtime_env,
-                    resolved_mounts,
-                    mutation_defines=mutation_defines,
-                    loop_config=loop_config,
-                    cell_id=cell_id,
-                    folder_mounts=folder_mounts,
-                )
-
-                venv_path = self.session.venv_python
-                try:
-                    result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
-                except TimeoutError:
-                    keep_failed()
-                    duration_ms = (time.time() - start_time) * 1000
-                    return CellExecutionResult(
+                with self._run_token(timeout_seconds) as run_token:
+                    manifest_path = self._write_manifest(
+                        source,
+                        input_specs,
+                        output_dir,
+                        runtime_env,
+                        resolved_mounts,
+                        mutation_defines=mutation_defines,
+                        loop_config=loop_config,
                         cell_id=cell_id,
-                        success=False,
-                        error=(
-                            f"Loop cell iter {k} timed out after "
-                            f"{timeout_seconds}s (per-iteration timeout)."
-                        ),
-                        stdout="".join(combined_stdout),
-                        stderr="".join(combined_stderr),
-                        duration_ms=duration_ms,
-                        execution_method="loop",
+                        folder_mounts=folder_mounts,
+                        run_token=run_token,
                     )
+
+                    venv_path = self.session.venv_python
+                    try:
+                        result = await self._run_harness(
+                            manifest_path, venv_path, timeout_seconds, run_token=run_token
+                        )
+                    except TimeoutError:
+                        keep_failed()
+                        duration_ms = (time.time() - start_time) * 1000
+                        return CellExecutionResult(
+                            cell_id=cell_id,
+                            success=False,
+                            error=(
+                                f"Loop cell iter {k} timed out after "
+                                f"{timeout_seconds}s (per-iteration timeout)."
+                            ),
+                            stdout="".join(combined_stdout),
+                            stderr="".join(combined_stderr),
+                            duration_ms=duration_ms,
+                            execution_method="loop",
+                        )
 
                 combined_stdout.append(result.get("stdout", ""))
                 combined_stderr.append(result.get("stderr", ""))
@@ -6563,146 +6602,156 @@ class CellExecutor:
         end_reason = "subprocess_died"
         failed_cell_id: str | None = None
 
-        try:
-            upstream_inputs = self._batch_resolve_upstream_inputs(cell_specs, batch_tmpdir)
-            manifest = {
-                "cells": cell_specs,
-                "upstream_inputs": upstream_inputs,
-                **self._work_dir_fields(),
-            }
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-            lifeline_fds, lifeline_vars = lifeline_handoff()
-            env = identity_env(
-                self._harness_env(
-                    {
-                        "STRATA_BATCH_FRAME_FD": str(frame_w),
-                        "STRATA_BATCH_RESP_FD": str(resp_r),
-                        "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
-                        **lifeline_vars,
-                    }
-                ),
-                harness_user,
-            )
-            hand_over(batch_tmpdir, harness_user)
-
-            # New process group so a timeout SIGKILL reaches every descendant. Mirrors
-            # _run_harness.
-            proc = await asyncio.create_subprocess_exec(
-                str(venv_python),
-                str(self.harness_path),
-                "--batch",
-                str(manifest_path),
-                env=env,
-                pass_fds=(frame_w, resp_r, *lifeline_fds),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.session.path),
-                **spawn_kwargs(harness_user),
-                **subprocess_kwargs_for_new_group(),
-            )
-
-            # Close the parent's copies of harness-side fds so EOF detection works on exit.
-            os.close(frame_w)
-            os.close(resp_r)
-            frame_w = -1  # mark already-closed for finally
-            resp_r = -1
-
-            # Drain stdout/stderr concurrently to prevent pipe-buffer deadlock (no per-cell
-            # attribution).
-            assert proc.stdout is not None
-            assert proc.stderr is not None
-            stdout_task = asyncio.create_task(_drain_stream(proc.stdout))
-            stderr_task = asyncio.create_task(_drain_stream(proc.stderr))
-
-            # The default 64 KiB limit would make readline() raise on any frame embedding a big
-            # stdout capture or display payload, aborting the batch.
-            loop = asyncio.get_running_loop()
-            frame_reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT, loop=loop)
-            frame_protocol = asyncio.StreamReaderProtocol(frame_reader, loop=loop)
-            frame_file = os.fdopen(frame_r, "rb")
-            frame_r = -1  # ownership transferred to file
-            await loop.connect_read_pipe(lambda: frame_protocol, frame_file)
-
-            # Sync os.write: the kernel pipe buffer absorbs our small JSON responses.
-            resp_w_fd = resp_w
-            resp_w = -1  # ownership transferred
-
-            def send_response(payload: dict) -> None:
-                line = (json.dumps(payload) + "\n").encode("utf-8")
-                os.write(resp_w_fd, line)
-
-            # Per-cell watchdog, integrated into the service loop's readline via wait_for (no
-            # separate task). On timeout the loop records the cell and SIGKILLs the harness;
-            # readline then returns "" and the loop exits. Cells with explicit timeouts aren't
-            # batchable, so the default applies to every cell.
-            watchdog_state: dict[str, Any] = {
-                "active_cell_id": None,
-                "active_started_at": None,
-                "active_timeout": cell_timeout_seconds,
-                "timed_out": False,
-                "timeout_cell_id": None,
-                "proc": proc,
-            }
-
+        # One token for the batch: Run All acts as whoever started it.
+        with self._run_token(batch_timeout_seconds) as run_token:
             try:
-                end_reason, failed_cell_id = await asyncio.wait_for(
-                    self._batch_service_loop(
-                        frame_reader,
-                        send_response,
-                        cell_results,
-                        batch_tmpdir,
-                        # Sources frozen at partition time: ``cell.source`` can change under a
-                        # running batch, and hashing it would file outputs under the edit's key.
-                        executed_sources={
-                            str(spec.get("cell_id", "")): str(spec.get("source", ""))
-                            for spec in cell_specs
-                        },
-                        use_cache=use_cache,
-                        on_cell_event=on_cell_event,
-                        watchdog_state=watchdog_state,
+                upstream_inputs = self._batch_resolve_upstream_inputs(cell_specs, batch_tmpdir)
+                manifest = {
+                    "cells": cell_specs,
+                    "upstream_inputs": upstream_inputs,
+                    **self._work_dir_fields(),
+                }
+                if run_token is not None:
+                    manifest["run_token_on_stdin"] = True
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+                lifeline_fds, lifeline_vars = lifeline_handoff()
+                env = identity_env(
+                    self._harness_env(
+                        {
+                            "STRATA_BATCH_FRAME_FD": str(frame_w),
+                            "STRATA_BATCH_RESP_FD": str(resp_r),
+                            "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
+                            **lifeline_vars,
+                        }
                     ),
-                    timeout=batch_timeout_seconds,
+                    harness_user,
                 )
-                completed = end_reason == "complete"
-            except TimeoutError:
-                # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
-                await terminate_subprocess_tree(proc)
-                end_reason = "subprocess_died"
-                completed = False
-            finally:
-                # Close the response fd so a still-live harness sees EOF.
+                hand_over(batch_tmpdir, harness_user)
+
+                # New process group so a timeout SIGKILL reaches every descendant. Mirrors
+                # _run_harness.
+                proc = await asyncio.create_subprocess_exec(
+                    str(venv_python),
+                    str(self.harness_path),
+                    "--batch",
+                    str(manifest_path),
+                    env=env,
+                    pass_fds=(frame_w, resp_r, *lifeline_fds),
+                    stdin=asyncio.subprocess.PIPE if run_token is not None else None,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(self.session.path),
+                    **spawn_kwargs(harness_user),
+                    **subprocess_kwargs_for_new_group(),
+                )
+
+                if run_token is not None:
+                    assert proc.stdin is not None
+                    proc.stdin.write(f"{run_token}\n".encode())
+                    proc.stdin.close()
+
+                # Close the parent's copies of harness-side fds so EOF detection works on exit.
+                os.close(frame_w)
+                os.close(resp_r)
+                frame_w = -1  # mark already-closed for finally
+                resp_r = -1
+
+                # Drain stdout/stderr concurrently to prevent pipe-buffer deadlock (no per-cell
+                # attribution).
+                assert proc.stdout is not None
+                assert proc.stderr is not None
+                stdout_task = asyncio.create_task(_drain_stream(proc.stdout))
+                stderr_task = asyncio.create_task(_drain_stream(proc.stderr))
+
+                # The default 64 KiB limit would make readline() raise on any frame embedding a big
+                # stdout capture or display payload, aborting the batch.
+                loop = asyncio.get_running_loop()
+                frame_reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT, loop=loop)
+                frame_protocol = asyncio.StreamReaderProtocol(frame_reader, loop=loop)
+                frame_file = os.fdopen(frame_r, "rb")
+                frame_r = -1  # ownership transferred to file
+                await loop.connect_read_pipe(lambda: frame_protocol, frame_file)
+
+                # Sync os.write: the kernel pipe buffer absorbs our small JSON responses.
+                resp_w_fd = resp_w
+                resp_w = -1  # ownership transferred
+
+                def send_response(payload: dict) -> None:
+                    line = (json.dumps(payload) + "\n").encode("utf-8")
+                    os.write(resp_w_fd, line)
+
+                # Per-cell watchdog, integrated into the service loop's readline via wait_for (no
+                # separate task). On timeout the loop records the cell and SIGKILLs the harness;
+                # readline then returns "" and the loop exits. Cells with explicit timeouts aren't
+                # batchable, so the default applies to every cell.
+                watchdog_state: dict[str, Any] = {
+                    "active_cell_id": None,
+                    "active_started_at": None,
+                    "active_timeout": cell_timeout_seconds,
+                    "timed_out": False,
+                    "timeout_cell_id": None,
+                    "proc": proc,
+                }
+
                 try:
-                    os.close(resp_w_fd)
-                except OSError:
-                    pass
-
-            # A watchdog kill ends the loop as "subprocess_died"; override with the timeout
-            # details so the dispatcher sees which cell hung.
-            if watchdog_state["timed_out"] and watchdog_state["timeout_cell_id"]:
-                timed_out_id = watchdog_state["timeout_cell_id"]
-                timed_out_result = BatchCellResult(
-                    cell_id=timed_out_id,
-                    status="cell_error",
-                    error=cell_timeout_message(watchdog_state["active_timeout"]),
-                )
-                cell_results[timed_out_id] = timed_out_result
-                if on_cell_event is not None:
-                    await on_cell_event(timed_out_result)
-                end_reason = "cell_timeout"
-                failed_cell_id = timed_out_id
-                completed = False
-
-            await proc.wait()
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-        finally:
-            for fd in (frame_w, resp_r, frame_r, resp_w):
-                if fd >= 0:
+                    end_reason, failed_cell_id = await asyncio.wait_for(
+                        self._batch_service_loop(
+                            frame_reader,
+                            send_response,
+                            cell_results,
+                            batch_tmpdir,
+                            # Sources frozen at partition time: ``cell.source`` can change under a
+                            # running batch, and hashing it would file outputs under the edit's key.
+                            executed_sources={
+                                str(spec.get("cell_id", "")): str(spec.get("source", ""))
+                                for spec in cell_specs
+                            },
+                            use_cache=use_cache,
+                            on_cell_event=on_cell_event,
+                            watchdog_state=watchdog_state,
+                        ),
+                        timeout=batch_timeout_seconds,
+                    )
+                    completed = end_reason == "complete"
+                except TimeoutError:
+                    # SIGTERM the whole tree; proc.kill() alone would leak user-spawned children.
+                    await terminate_subprocess_tree(proc)
+                    end_reason = "subprocess_died"
+                    completed = False
+                finally:
+                    # Close the response fd so a still-live harness sees EOF.
                     try:
-                        os.close(fd)
+                        os.close(resp_w_fd)
                     except OSError:
                         pass
-            shutil.rmtree(batch_tmpdir, ignore_errors=True)
+
+                # A watchdog kill ends the loop as "subprocess_died"; override with the timeout
+                # details so the dispatcher sees which cell hung.
+                if watchdog_state["timed_out"] and watchdog_state["timeout_cell_id"]:
+                    timed_out_id = watchdog_state["timeout_cell_id"]
+                    timed_out_result = BatchCellResult(
+                        cell_id=timed_out_id,
+                        status="cell_error",
+                        error=cell_timeout_message(watchdog_state["active_timeout"]),
+                    )
+                    cell_results[timed_out_id] = timed_out_result
+                    if on_cell_event is not None:
+                        await on_cell_event(timed_out_result)
+                    end_reason = "cell_timeout"
+                    failed_cell_id = timed_out_id
+                    completed = False
+
+                await proc.wait()
+                await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            finally:
+                for fd in (frame_w, resp_r, frame_r, resp_w):
+                    if fd >= 0:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
+                shutil.rmtree(batch_tmpdir, ignore_errors=True)
 
         return BatchExecutionResult(
             cell_results=list(cell_results.values()),
