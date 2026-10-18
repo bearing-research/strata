@@ -93,7 +93,7 @@ exhaustive commit history.
   harness's stdin, never a file, argv or the environment. The cell acts as the
   member who started the run, without `admin:` scopes, on the ambient client's
   routes and its own session's promote, until the run ends. Run All shares one
-  token. Personal mode is unchanged. (#PR)
+  token. Personal mode is unchanged. (#1215)
 
 ### Changed
 
