@@ -3389,6 +3389,11 @@ hit, a reopened notebook and an export show it too.</p>
 kept as a failed version: never a cache hit and never an input, but lineage
 shows it and <code>&lt;id&gt;@v=&lt;n&gt;</code> reads it. A link in the folder, or a file with more
 than one hard link, is left out with a warning.</p>
+<p><strong>Files go with the last version that names them.</strong> Folder versions are pruned
+like any cell output's earlier values
+(<a href="../../reference/configuration/#notebook"><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></a>);
+a file no kept version names is removed in the same pass, so old checkpoints do
+not pile up. Pin a folder version to keep its files.</p>
 <p><strong>On a remote worker</strong> the folder comes back with the run's result, each file
 streamed, so a checkpoint is not held in memory and is not limited by
 <code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code>. A failed run on a worker keeps its
