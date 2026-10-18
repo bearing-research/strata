@@ -179,6 +179,17 @@ def inject_tables(manifest: dict, namespace: dict) -> None:
         namespace[f"{table_name}_snapshot"] = spec.get("snapshot_id")
 
 
+def no_client_hint(exc: BaseException, manifest: dict) -> str | None:
+    """Why ``strata`` is undefined on a worker, in place of a bare ``NameError``."""
+    if manifest.get("strata_url") or not isinstance(exc, NameError) or exc.name != "strata":
+        return None
+    return (
+        "A cell on a worker has no ambient `strata` client, so it cannot scan or read "
+        "artifacts through the notebook's server. Do that in a cell that runs on the "
+        "server and use its result here."
+    )
+
+
 def inject_client(manifest: dict, namespace: dict) -> Any:
     """Inject an ambient ``strata`` client bound to the server URL.
 
@@ -881,7 +892,7 @@ def main():
 
     except Exception as e:
         # SystemExit still runs the finally block; the parent checks result.json, not the exit code.
-        hint = _work_dir.hint(e, manifest)
+        hint = _work_dir.hint(e, manifest) or no_client_hint(e, manifest)
         result = {
             "success": False,
             "error": f"{e}\n{hint}" if hint else str(e),
