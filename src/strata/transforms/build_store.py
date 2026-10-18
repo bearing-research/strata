@@ -193,8 +193,9 @@ def _row_to_build_state(row: Any) -> BuildState:
 
 
 # How create_build's json.dumps writes the mark a notebook puts on a build its own
-# worker runs (see the notebook executor's signed transport).
-_EXTERNAL_DISPATCH_JSON = json.dumps({"_dispatch_mode": "external"})[1:-1]
+# worker runs (see the notebook executor's signed transport), as a ``LIKE`` literal:
+# a bare ``_`` matches any character, so ``xdispatch_mode`` would match too.
+_EXTERNAL_DISPATCH_LIKE = json.dumps({"_dispatch_mode": "external"})[1:-1].replace("_", "\\_")
 
 
 class BuildStore:
@@ -799,13 +800,13 @@ class BuildStore:
                         PARTITION BY tenant_id ORDER BY created_at ASC
                     ) AS tenant_rank
                     FROM artifact_builds
-                    WHERE state = 'pending' AND (params IS NULL OR params NOT LIKE ?)
+                    WHERE state = 'pending' AND (params IS NULL OR params NOT LIKE ? ESCAPE '\\')
                 ) ranked
                 WHERE tenant_rank <= ?
                 ORDER BY created_at ASC
                 LIMIT ?
                 """,
-                (f"%{_EXTERNAL_DISPATCH_JSON}%", per_tenant, limit),
+                (f"%{_EXTERNAL_DISPATCH_LIKE}%", per_tenant, limit),
             )
 
             return [_row_to_build_state(row) for row in cursor.fetchall()]
