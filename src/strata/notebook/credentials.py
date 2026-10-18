@@ -20,7 +20,8 @@ written, symlinks unfollowed.
 
 ``notebook_credential_writers`` names who may mount a credential read-write
 (``{"lab": ["user_*"]}``), as globs over the principal who started the run. Once it is
-set, an unlisted name is read-only. It limits what Strata stages and syncs back, not what
+set, even to ``{}``, an unlisted name is read-only and a remote read-write mount must name
+one. It limits what Strata stages and syncs back, not what
 a cell can do with a credential's values should they reach it (see the docs).
 """
 
@@ -71,7 +72,12 @@ class CredentialResolver:
         principal: str | None = None,
     ):
         self._registry = dict(registry or {})
-        self._writers = {name: list(patterns) for name, patterns in (writers or {}).items()}
+        # None is unset (every name writes); ``{}`` is set with nothing writable.
+        self._writers = (
+            None
+            if writers is None
+            else {name: list(patterns) for name, patterns in writers.items()}
+        )
         self._principal = principal
         self._scheme_defaults = dict(scheme_defaults or {})
         self._env = drop_blanked_secrets(env or {})
@@ -104,7 +110,7 @@ class CredentialResolver:
             env=env,
             restricted=getattr(config, "notebook_credential_paths", None) or {},
             notebook=notebook,
-            writers=getattr(config, "notebook_credential_writers", None) or {},
+            writers=getattr(config, "notebook_credential_writers", None),
             principal=principal,
         )
 
@@ -130,15 +136,20 @@ class CredentialResolver:
         """Refuse a read-write mount through a credential this run's principal may not write.
 
         Both the scheme's default and the mount's own credential count: the write uses both.
+        A remote mount that names neither would write as the server's own identity.
 
         Raises:
             CredentialError: naming the credential.
         """
-        if not self._writers:
+        if self._writers is None:
             return
-        for name in (self._scheme_defaults.get(scheme), credential):
-            if not name:
-                continue
+        names = [name for name in (self._scheme_defaults.get(scheme), credential) if name]
+        if not names and scheme != "file":
+            raise CredentialError(
+                f"a read-write {scheme} mount must name the source it writes to with "
+                "credential=<name> (STRATA_NOTEBOOK_CREDENTIAL_WRITERS)"
+            )
+        for name in names:
             patterns = self._writers.get(name)
             if patterns is None:
                 raise CredentialError(

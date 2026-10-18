@@ -51,16 +51,37 @@ class TestWhoWrites:
             _resolver("user_ana", defaults={"s3": "org"}).ensure_writable("s3", None)
 
     def test_unset_every_name_writes(self):
-        _resolver(None, writers={}).ensure_writable("s3", "org")
+        _resolver(None, writers=None).ensure_writable("s3", "org")
+        _resolver(None, writers=None).ensure_writable("s3", None)
 
-    def test_a_mount_with_no_credential_is_not_judged(self):
-        _resolver(None).ensure_writable("s3", None)
+    def test_set_to_nothing_every_name_is_read_only(self):
+        with pytest.raises(CredentialError, match="'shared' is read-only"):
+            _resolver("user_ana", writers={}).ensure_writable("s3", "shared")
+
+    @pytest.mark.parametrize("scheme", ["s3", "gs", "az"])
+    @pytest.mark.parametrize("writers", [WRITERS, {}])
+    def test_a_remote_mount_naming_no_credential_is_refused(self, scheme, writers):
+        """It would write as the server's own identity, which no setting lists."""
+        with pytest.raises(
+            CredentialError, match=f"read-write {scheme} mount must name the source"
+        ):
+            _resolver("user_ana", writers=writers).ensure_writable(scheme, None)
+
+    def test_a_local_mount_needs_no_credential(self):
+        _resolver(None, writers={}).ensure_writable("file", None)
+
+    def test_a_server_that_never_set_it_writes(self):
+        from strata.config import StrataConfig
+
+        CredentialResolver.from_config(StrataConfig()).ensure_writable("s3", None)
 
     def test_config_reads_the_env_var_json_form(self, monkeypatch):
         from strata.config import StrataConfig
 
+        assert StrataConfig().notebook_credential_writers is None
+        monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIAL_WRITERS", "{}")
+        assert StrataConfig().notebook_credential_writers == {}
         monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIAL_WRITERS", '{"lab": ["user_*"]}')
-
         assert StrataConfig().notebook_credential_writers == {"lab": ["user_*"]}
 
 
@@ -142,6 +163,16 @@ class TestARunOnTheServer:
 
         assert result.success is False
         assert "'org' is read-only" in (result.error or "")
+        assert fetched == []
+
+    async def test_a_cells_rw_mount_naming_no_credential_fails_before_running(
+        self, tmp_path, fetched
+    ):
+        source = "# @mount out s3://lab/out rw\nx = 1"
+
+        result = await self._run(tmp_path, source, "user_ana")
+
+        assert "read-write s3 mount must name the source" in (result.error or "")
         assert fetched == []
 
     async def test_a_notebook_toml_rw_mount_is_judged_too(self, tmp_path, fetched):
