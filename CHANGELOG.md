@@ -82,6 +82,11 @@ exhaustive commit history.
   The server sends the folder's files as one tar, which the worker unpacks to a
   local `Path` before the cell runs, on either transport. A worker too old to
   take one is refused before the cell runs. (#1210)
+- **A `# @loop` cell keeps a `# @output_dir` folder across iterations.** Each
+  iteration sees what the earlier ones wrote and is stored as its `@iter=k`
+  folder; the last is the cell's output. A file unchanged since the last
+  iteration is not read again, a failed iteration keeps what the folder held,
+  and `start_from=<cell>@iter=k` starts from that iteration's folder. (#PR)
 
 ### Changed
 

@@ -913,6 +913,17 @@ strata://artifact/nb_..._cell_<loop_id>_var_state@iter=1@v=1
 
 The inspect panel shows an iteration picker so you can scrub through the intermediate states. The **final** iteration's artifact is also the cell's canonical output (no `@iter` suffix); downstream cells read it via the normal DAG path.
 
+### Output folders
+
+A loop cell's [`# @output_dir`](annotations.md#output_dir) folder lasts the
+whole loop: each iteration sees what the earlier ones wrote, so a training loop
+can add one checkpoint per iteration. After every iteration the folder is
+stored as that iteration's `@iter=k` version, and the last one is the cell's
+output. A file unchanged since the last iteration (same size, times and inode)
+is not read again. When an iteration fails, what the folder held is kept as a
+failed version. A loop started with `start_from=<cell>@iter=k` gets that
+iteration's folder, when the run its carry came from kept one.
+
 ### Forking a loop
 
 Intermediate iterations are first-class artifacts, so you can branch a new

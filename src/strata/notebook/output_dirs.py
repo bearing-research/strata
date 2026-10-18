@@ -256,23 +256,39 @@ def collect(
     cell_id: str,
     folder: Path | None,
     received: dict[str, dict[str, Any]] | None = None,
+    seen: dict[str, tuple[tuple[int, ...], dict[str, Any]]] | None = None,
 ) -> bytes:
     """Store the folder's files and return its manifest: the writing cell and each file.
 
     *received* holds entries for files already stored as a worker uploaded them; a file
     in *folder* too replaces its entry. A link, or a file with more than one hard link,
     is left out with a warning.
+
+    *seen* carries ``{path: (stat key, entry)}`` from one collect of a folder to the next,
+    as a loop's iterations do: a file whose size, times and inode are unchanged is not
+    read again, so a checkpoint per iteration is hashed once, not once per iteration.
     """
     files: dict[str, dict[str, Any]] = dict(received or {})
     if folder is not None and folder.is_dir():
         for rel in regular_files(folder):
             try:
+                key = None
+                if seen is not None:
+                    with open_tree_file(folder, rel) as f:
+                        st = os.fstat(f.fileno())
+                    # ctime moves on any write and a cell cannot set it.
+                    key = (st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
+                    if rel in seen and seen[rel][0] == key:
+                        files[rel] = seen[rel][1]
+                        continue
                 files[rel] = _store_opened(
                     artifact_mgr,
                     cell_id,
                     lambda rel=rel: open_tree_file(folder, rel),
                     rel,
                 )
+                if seen is not None and key is not None:
+                    seen[rel] = (key, files[rel])
             except UnsafeRunFile:
                 logger.warning("output folder %s: not keeping %s, a link", folder.name, rel)
     return json.dumps({"cell_id": cell_id, "files": files}, sort_keys=True).encode("utf-8")

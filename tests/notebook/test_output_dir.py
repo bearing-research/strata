@@ -362,16 +362,139 @@ class TestTheFileSweep:
             assert store.get_artifact(artifact_id, entry["version"]).state == "ready"
 
 
-class TestNotYet:
-    async def test_a_loop_cell_is_refused(self, tmp_path):
-        source = "# @loop max_iter=2 carry=n\n# @output_dir ckpt\nn = 1\n"
-        session = _session(tmp_path, writer=source, reader=None)
+LOOP = (
+    "# @loop max_iter=3 carry=n\n"
+    "# @output_dir ckpt\n"
+    "(ckpt / f'e{n}.bin').write_bytes(bytes([n]) * 4)\n"
+    "(ckpt / 'latest.txt').write_text(str(n))\n"
+    "n = n + 1\n"
+)
 
-        result = await CellExecutor(session).execute_cell("w", source)
+
+def _loop_session(tmp_path: Path, loop: str = LOOP):
+    nb = create_notebook(tmp_path, "Loop folders")
+    add_cell_to_notebook(nb, "s", None)
+    write_cell(nb, "s", "n = 0\n")
+    add_cell_to_notebook(nb, "w", "s")
+    write_cell(nb, "w", loop)
+    add_cell_to_notebook(nb, "r", "w")
+    write_cell(nb, "r", READER)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
+    return session
+
+
+def _files_at(session, iteration: int) -> list[str]:
+    manager = session.get_artifact_manager()
+    artifact = manager.get_iteration_artifact("w", "ckpt", iteration)
+    return sorted(
+        json.loads(manager.artifact_store.read_blob(artifact.id, artifact.version))["files"]
+    )
+
+
+class TestALoopCell:
+    """One folder for the whole loop: each iteration sees, and is stored with, what came before."""
+
+    async def test_each_iteration_adds_to_the_folder_and_the_last_is_the_output(
+        self, tmp_path, caplog
+    ):
+        session = _loop_session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("s", "n = 0\n")).success
+
+        result = await executor.execute_cell("w", LOOP)
+        read = await executor.execute_cell("r", READER)
+
+        assert result.success, result.error
+        assert [_files_at(session, k) for k in range(3)] == [
+            ["e0.bin", "latest.txt"],
+            ["e0.bin", "e1.bin", "latest.txt"],
+            ["e0.bin", "e1.bin", "e2.bin", "latest.txt"],
+        ]
+        assert read.success, read.error
+        assert read.outputs["seen"]["preview"] == ["e0.bin", "e1.bin", "e2.bin", "latest.txt"]
+        assert _listings(result.display_outputs)[0].startswith("**ckpt**: 4 files, 13 B")
+        assert "did not produce it" not in caplog.text  # the folder is not a carried value
+
+    async def test_a_file_is_read_again_only_when_it_changed(self, tmp_path, monkeypatch):
+        stored: list[str] = []
+        real = output_dirs._store_opened
+
+        def counting(artifact_mgr, cell_id, opener, shown):
+            stored.append(shown)
+            return real(artifact_mgr, cell_id, opener, shown)
+
+        monkeypatch.setattr(output_dirs, "_store_opened", counting)
+        session = _loop_session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("s", "n = 0\n")).success
+
+        assert (await executor.execute_cell("w", LOOP)).success
+
+        # Each checkpoint once; latest.txt, rewritten at the same size, every time.
+        assert sorted(stored) == ["e0.bin", "e1.bin", "e2.bin"] + ["latest.txt"] * 3
+        manifest, _ = _manifest(session)
+        manager = session.get_artifact_manager()
+        latest = manifest["files"]["latest.txt"]
+        artifact_id = output_dirs.file_artifact_id(manager, "w", latest["sha256"])
+        assert manager.artifact_store.read_blob(artifact_id, latest["version"]) == b"2"
+
+    async def test_a_failed_iteration_keeps_what_the_folder_held(self, tmp_path):
+        failing = LOOP + "if n == 2:\n    raise RuntimeError('lost')\n"
+        session = _loop_session(tmp_path, failing)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("s", "n = 0\n")).success
+
+        result = await executor.execute_cell("w", failing)
 
         assert not result.success
-        assert "@output_dir does not work in a # @loop cell" in result.error
+        assert _files_at(session, 0) == ["e0.bin", "latest.txt"]
+        manifest, state = _manifest(session, version=1)
+        assert state == "failed"
+        assert sorted(manifest["files"]) == ["e0.bin", "e1.bin", "latest.txt"]
 
+    async def test_a_second_run_is_a_cache_hit_that_shows_the_folder(self, tmp_path):
+        session = _loop_session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("s", "n = 0\n")).success
+        first = await executor.execute_cell("w", LOOP)
+
+        second = await executor.execute_cell("w", LOOP)
+
+        assert second.cache_hit
+        assert _listings(second.display_outputs) == _listings(first.display_outputs)
+
+    async def test_a_resumed_loop_starts_from_that_iterations_folder(self, tmp_path):
+        session = _loop_session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("s", "n = 0\n")).success
+        assert (await executor.execute_cell("w", LOOP)).success
+        resumed = LOOP.replace("max_iter=3 carry=n", "max_iter=1 carry=n start_from=w@iter=0")
+
+        result = await executor.execute_cell("w", resumed)
+
+        assert result.success, result.error
+        manifest, _ = _manifest(session)
+        # Iteration 0 left e0 and n == 1, so the resumed iteration adds e1.
+        assert sorted(manifest["files"]) == ["e0.bin", "e1.bin", "latest.txt"]
+
+    async def test_a_folder_from_an_older_run_is_not_the_seed(self, tmp_path):
+        """The seed carry comes from the latest run, which kept no folder."""
+        session = _loop_session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("s", "n = 0\n")).success
+        assert (await executor.execute_cell("w", LOOP)).success
+        assert (await executor.execute_cell("w", "# @loop max_iter=3 carry=n\nn = n + 1\n")).success
+        resumed = LOOP.replace("max_iter=3 carry=n", "max_iter=1 carry=n start_from=w@iter=0")
+
+        result = await executor.execute_cell("w", resumed)
+
+        assert result.success, result.error
+        manifest, _ = _manifest(session)
+        assert sorted(manifest["files"]) == ["e1.bin", "latest.txt"]
+
+
+class TestNotYet:
     async def test_a_worker_that_cannot_be_asked_is_refused_before_it_runs(self, tmp_path):
         source = "# @worker gpu\n# @output_dir ckpt\n(ckpt / 'a').write_text('a')\n"
         session = _session(tmp_path, writer=source, reader=None)
