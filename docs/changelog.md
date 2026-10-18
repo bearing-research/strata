@@ -88,7 +88,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   iteration sees what the earlier ones wrote and is stored as its `@iter=k`
   folder; the last is the cell's output. A file unchanged since the last
   iteration is not read again, a failed iteration keeps what the folder held,
-  and `start_from=<cell>@iter=k` starts from that iteration's folder. (#PR)
+  and `start_from=<cell>@iter=k` starts from that iteration's folder. (#1211)
 
 ### Changed
 
