@@ -270,6 +270,20 @@ def _artifact_content_type(artifact: Any) -> str:
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
 
 
+@contextmanager
+def _loop_folders(names: list[str]) -> Generator[Path | None]:
+    """Where a loop's ``# @output_dir`` folders live, outside every iteration's run directory.
+
+    Each iteration sees what the earlier ones wrote; the sweep holds off until the loop
+    ends, since each iteration stores files ahead of the cell's manifest.
+    """
+    if not names:
+        yield None
+        return
+    with output_dirs.assembling(), tempfile.TemporaryDirectory(prefix="strata_loop_dirs_") as root:
+        yield Path(root)
+
+
 def _loop_run_token(artifact: Any) -> str:
     """The token of the loop run that stored an ``@iter=k`` artifact."""
     spec = json.loads(artifact.transform_spec or "{}")
@@ -968,15 +982,17 @@ class CellExecutor:
                 )
             self._materializing.add(cell_id)
             try:
-                loop_result = await self._execute_loop_cell(
-                    cell_id,
-                    source,
-                    annotations.loop,
-                    timeout_seconds,
-                    start_time,
-                    materialize_upstreams=materialize_upstreams,
-                    use_cache=use_cache,
-                )
+                with _loop_folders(annotations.output_dirs) as folders:
+                    loop_result = await self._execute_loop_cell(
+                        cell_id,
+                        source,
+                        annotations.loop,
+                        timeout_seconds,
+                        start_time,
+                        materialize_upstreams=materialize_upstreams,
+                        use_cache=use_cache,
+                        folders=folders,
+                    )
             finally:
                 self._materializing.discard(cell_id)
             # As the Python path does: a CLI run has no WS handler to persist the console.
@@ -4197,8 +4213,13 @@ class CellExecutor:
         loop_config: dict[str, Any] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
+        folder_mounts: dict[str, dict[str, str]] | None = None,
     ) -> Path:
-        """Write the harness manifest for one local execution."""
+        """Write the harness manifest for one local execution.
+
+        *folder_mounts* replaces the run's own ``# @output_dir`` folders: a loop's live
+        outside each iteration's run directory.
+        """
         manifest_mounts = {
             name: {
                 "uri": rm.spec.uri,
@@ -4208,7 +4229,11 @@ class CellExecutor:
             for name, rm in resolved_mounts.items()
         }
         # Made here, in the run directory, so its hand-over covers the folders.
-        manifest_mounts.update(output_dirs.mount_entries(source, output_dir))
+        manifest_mounts.update(
+            output_dirs.mount_entries(source, output_dir)
+            if folder_mounts is None
+            else folder_mounts
+        )
         manifest: dict[str, Any] = {
             "source": source,
             "inputs": input_specs,
@@ -5757,12 +5782,14 @@ class CellExecutor:
         *,
         materialize_upstreams: bool,
         use_cache: bool = True,
+        folders: Path | None = None,
     ) -> CellExecutionResult:
         """Execute a loop cell by running the body up to ``loop.max_iter`` times.
 
         Local worker only, no rw mounts. Each iteration is a fresh harness
         subprocess; the carry passes in as a named input and out as a named
-        output, stored with an ``@iter=k`` suffix.
+        output, stored with an ``@iter=k`` suffix. ``# @output_dir`` folders live
+        under *folders* for the whole loop, each stored after every iteration too.
         """
         annotations = parse_annotations(source)
         effective_worker = effective_worker_name(
@@ -5779,14 +5806,6 @@ class CellExecutor:
                 ),
                 execution_method="loop",
             )
-        if annotations.output_dirs:
-            return CellExecutionResult(
-                cell_id=cell_id,
-                success=False,
-                error="# @output_dir does not work in a # @loop cell yet.",
-                execution_method="loop",
-            )
-
         if materialize_upstreams:
             failure = await self._materialize_upstreams_or_failure(cell_id, start_time, "loop")
             if failure is not None:
@@ -5858,6 +5877,8 @@ class CellExecutor:
 
         try:
             carry_blob, carry_content_type = self._resolve_loop_seed(cell_id, loop)
+            if folders is not None:
+                self._seed_loop_folders(loop, annotations.output_dirs, folders)
         except ValueError as exc:
             return CellExecutionResult(
                 cell_id=cell_id,
@@ -5873,7 +5894,8 @@ class CellExecutor:
         consumed_vars = (
             self.session.dag.consumed_variables.get(cell_id, set()) if self.session.dag else set()
         )
-        extra_consumed = sorted(consumed_vars - {loop.carry})
+        folder_names = list(annotations.output_dirs)
+        extra_consumed = sorted(consumed_vars - {loop.carry, *folder_names})
         # var -> (blob, content_type), captured each iteration (the tmpdir dies with the
         # ``with`` block); the last capture is the final state.
         extra_blobs: dict[str, tuple[bytes, str]] = {}
@@ -5894,6 +5916,25 @@ class CellExecutor:
         combined_stderr: list[str] = []
         all_mutation_warnings: list[MutationWarning] = []
         final_display_files: dict[str, bytes] = {}
+        self._folder_listings.pop(cell_id, None)
+
+        folder_mounts: dict[str, dict[str, str]] | None = None
+        folder_seen: dict[str, dict[str, tuple[tuple[int, ...], dict[str, Any]]]] = {}
+        folder_manifests: dict[str, bytes] = {}
+        if folders is not None:
+            # Made once, before any iteration: a process one leaves behind could put a link
+            # where a later mkdir would follow it.
+            folder_mounts = output_dirs.mount_entries(source, folders)
+            try:
+                harness_user = resolve_harness_user()
+            except LocalExecutionRefused:
+                harness_user = None  # the run is refused where the cell would start
+            hand_over(folders, harness_user)
+            folder_seen = {name: {} for name in folder_names}
+
+        def keep_failed() -> None:
+            if folders is not None:
+                self._keep_failed_output_dirs(cell_id, source, folders, cell_provenance, env_hash)
 
         for k in range(loop.max_iter):
             with tempfile.TemporaryDirectory(prefix=f"strata_loop_iter_{k}_") as tmpdir:
@@ -5926,12 +5967,14 @@ class CellExecutor:
                     mutation_defines=mutation_defines,
                     loop_config=loop_config,
                     cell_id=cell_id,
+                    folder_mounts=folder_mounts,
                 )
 
                 venv_path = self.session.venv_python
                 try:
                     result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
                 except TimeoutError:
+                    keep_failed()
                     duration_ms = (time.time() - start_time) * 1000
                     return CellExecutionResult(
                         cell_id=cell_id,
@@ -5959,6 +6002,7 @@ class CellExecutor:
                         if traceback_text
                         else "Unknown error"
                     )
+                    keep_failed()
                     duration_ms = (time.time() - start_time) * 1000
                     return CellExecutionResult(
                         cell_id=cell_id,
@@ -5976,6 +6020,7 @@ class CellExecutor:
                 if loop_state.get("error"):
                     # A predicate that cannot be evaluated would otherwise run every iteration and
                     # report success.
+                    keep_failed()
                     return CellExecutionResult(
                         cell_id=cell_id,
                         success=False,
@@ -5995,6 +6040,7 @@ class CellExecutor:
                         if isinstance(carry_meta, dict)
                         else "carry variable missing from cell outputs"
                     )
+                    keep_failed()
                     return CellExecutionResult(
                         cell_id=cell_id,
                         success=False,
@@ -6071,6 +6117,25 @@ class CellExecutor:
                     extra_params={"loop_run": loop_run},
                 )
                 final_artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
+                if folders is not None:
+                    for name in folder_names:
+                        folder_manifests[name] = output_dirs.collect(
+                            artifact_mgr,
+                            cell_id,
+                            folders / output_dirs.OUTPUT_DIRS / name,
+                            seen=folder_seen[name],
+                        )
+                        artifact_mgr.store_cell_output(
+                            cell_id=cell_id,
+                            variable_name=name,
+                            blob_data=folder_manifests[name],
+                            content_type=output_dirs.CONTENT_TYPE,
+                            provenance_hash=derive_subkey(iter_provenance, name),
+                            source_hash=source_hash,
+                            source=source,
+                            iteration=k,
+                            extra_params={"loop_run": loop_run},
+                        )
 
                 carry_blob = new_carry_blob
                 carry_content_type = new_content_type
@@ -6164,6 +6229,27 @@ class CellExecutor:
                 ),
             }
 
+        # The last iteration's folders are the cell's, kept even when no cell reads them.
+        for name in folder_names:
+            staged.append(
+                artifact_mgr.stage_cell_output(
+                    cell_id=cell_id,
+                    variable_name=name,
+                    blob_data=folder_manifests[name],
+                    content_type=output_dirs.CONTENT_TYPE,
+                    provenance_hash=derive_subkey(cell_provenance, name),
+                    input_versions=loop_input_versions,
+                    source_hash=source_hash,
+                    source=source,
+                    env_hash=env_hash,
+                    build_env=loop_build_env,
+                    build_duration_ms=loop_duration_ms,
+                )
+            )
+            self._folder_listings.setdefault(cell_id, {})[name] = output_dirs.listing(
+                name, folder_manifests[name]
+            )
+
         stored = artifact_mgr.finalize_cell_outputs(staged)
         canonical_artifact = stored[0]
         canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
@@ -6174,7 +6260,9 @@ class CellExecutor:
             consumed_vars,
             {
                 name: f"strata://artifact/{artifact.id}@v={artifact.version}"
-                for name, artifact in zip([loop.carry, *extra_outputs], stored, strict=True)
+                for name, artifact in zip(
+                    [loop.carry, *extra_outputs, *folder_names], stored, strict=True
+                )
             },
         )
 
@@ -6192,7 +6280,7 @@ class CellExecutor:
             if isinstance(raw_displays, list)
             else []
         )
-        if display_outputs:
+        if display_outputs or self._folder_listings.get(cell_id):
             # The iteration's run dir is gone; stage its display files to store them as a
             # Python cell's are, after the outputs so no display outlives a failed finalize.
             with tempfile.TemporaryDirectory(prefix="strata_loop_displays_") as display_dir:
@@ -6245,6 +6333,33 @@ class CellExecutor:
             execution_method="loop",
             mutation_warnings=all_mutation_warnings,
         )
+
+    def _seed_loop_folders(self, loop: LoopAnnotation, names: list[str], folders: Path) -> None:
+        """Start a resumed loop's folders as ``start_from``'s iteration left them.
+
+        Only a folder the seed carry's own run stored: one from another run would not
+        match the carry. Raises ``ValueError`` if that folder's manifest is gone.
+        """
+        if loop.start_from_cell is None or loop.start_from_iter is None:
+            return
+        artifact_mgr = self.session.get_artifact_manager()
+        carry = artifact_mgr.get_iteration_artifact(
+            loop.start_from_cell, loop.carry, loop.start_from_iter
+        )
+        if carry is None:
+            return
+        for name in names:
+            kept = artifact_mgr.get_iteration_artifact(
+                loop.start_from_cell, name, loop.start_from_iter
+            )
+            if kept is None or _loop_run_token(kept) != _loop_run_token(carry):
+                continue
+            manifest = artifact_mgr.artifact_store.read_blob(kept.id, kept.version)
+            if manifest is None:
+                raise ValueError(f"Loop seed folder missing for {kept.id}@v={kept.version}.")
+            output_dirs.materialize(
+                artifact_mgr, manifest, folders / output_dirs.OUTPUT_DIRS / name
+            )
 
     def _resolve_loop_seed(
         self,

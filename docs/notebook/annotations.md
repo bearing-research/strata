@@ -517,11 +517,12 @@ the folder's files as one tar input, and the worker's harness unpacks it to a
 local `Path` with the same name it has on the server before the cell runs. A
 worker too old to take one is refused before the cell runs.
 
-For now the folder is collected when the run ends: a `# @loop` cell is refused
-before it runs, and run-all runs a cell with a folder on its own rather than in
-a batch. An R cell gets
-the folder as a path string and its folder is kept, but cannot read another
-cell's folder yet.
+**In a `# @loop` cell the folder lasts the whole loop**, and each iteration's
+contents are stored as its `@iter=k` version ([loop cells](cells.md#output-folders)).
+
+For now run-all runs a cell with a folder on its own rather than in a batch.
+An R cell gets the folder as a path string and its folder is kept, but cannot
+read another cell's folder yet.
 
 ## @nocache
 
