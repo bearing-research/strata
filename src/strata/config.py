@@ -433,6 +433,11 @@ class StrataConfig(BaseSettings):
     notebook_credential_paths: Annotated[dict[str, list[str]], NoDecode] = Field(
         default_factory=dict
     )
+    # Who may mount a credential read-write: ``{name: [principal glob, ...]}``, matched against
+    # the principal who started the run (``"*"`` is anyone, and the only pattern a run with no
+    # principal matches). Once set, even to ``{}``, an unlisted name is read-only and a remote
+    # read-write mount must name one. Unset, every name writes.
+    notebook_credential_writers: Annotated[dict[str, list[str]] | None, NoDecode] = None
     # Whether a cell's ``# @write_table ... append|merge`` may change a table Strata did not
     # create (another writer's). Off: only tables Strata wrote first. An overwrite of such a
     # table is refused either way.
@@ -658,6 +663,14 @@ class StrataConfig(BaseSettings):
         if not isinstance(v, dict):
             raise ValueError(f"{info.field_name} must be a JSON object")
         return v
+
+    @field_validator("notebook_credential_writers", mode="before")
+    @classmethod
+    def parse_credential_writers(cls, v: Any, info: Any) -> dict | None:
+        """As the other credential maps, except unset stays ``None``: ``{}`` is a setting."""
+        if v is None or v == "":
+            return None
+        return cls.parse_credential_maps(v, info)
 
     @field_validator("notebook_credential_paths")
     @classmethod
