@@ -3740,6 +3740,9 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A worker cell that uses <code>strata</code> says why it can't.</strong> A cell on a remote
+  worker has no ambient client; it now fails with a sentence saying to scan or
+  read artifacts in a cell on the server, not a bare <code>NameError</code>. (#1216)</li>
 <li><strong>An append no longer empties a table's row-group cache.</strong> The cache key named
   the snapshot, so a snapshot that only added files missed every row group the
   table had cached. Data files never change, so the key now names the file (and
