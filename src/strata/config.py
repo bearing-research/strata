@@ -433,6 +433,12 @@ class StrataConfig(BaseSettings):
     notebook_credential_paths: Annotated[dict[str, list[str]], NoDecode] = Field(
         default_factory=dict
     )
+    # Who may mount a credential read-write: ``{name: [principal glob, ...]}``, matched against
+    # the principal who started the run (``"*"`` is anyone, and the only pattern a run with no
+    # principal matches). Once set, an unlisted name is read-only. Unset, every name writes.
+    notebook_credential_writers: Annotated[dict[str, list[str]], NoDecode] = Field(
+        default_factory=dict
+    )
     # Whether a cell's ``# @write_table ... append|merge`` may change a table Strata did not
     # create (another writer's). Off: only tables Strata wrote first. An overwrite of such a
     # table is refused either way.
@@ -644,6 +650,7 @@ class StrataConfig(BaseSettings):
         "notebook_credentials",
         "notebook_mount_credentials",
         "notebook_credential_paths",
+        "notebook_credential_writers",
         mode="before",
     )
     @classmethod

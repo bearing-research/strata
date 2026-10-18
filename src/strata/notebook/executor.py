@@ -86,6 +86,7 @@ from strata.notebook.mounts import (
     MountResolver,
     MountWrite,
     ResolvedMount,
+    ensure_writable,
     mount_fingerprint,
     resolve_cell_mounts,
 )
@@ -2817,6 +2818,7 @@ class CellExecutor:
         for mount in mount_specs:
             if mount.credential:
                 credentials.ensure_allowed(mount.credential)
+        ensure_writable(credentials, mount_specs)
 
         executor_url = str(worker_spec.config.url or "").strip()
         if not executor_url:
@@ -3830,12 +3832,17 @@ class CellExecutor:
         """Named credentials as this notebook sees them right now.
 
         Rebuilt per use: a secret manager fills the env after the session opens,
-        and a rotated value must reach the next run.
+        and a rotated value must reach the next run. Who may write through a credential is
+        judged by the principal who started this run.
         """
+        from strata.auth.principal import get_principal
+
+        principal = get_principal()
         return CredentialResolver.from_config(
             self._lake_config(),
             env=dict(self.session.notebook_state.env),
             notebook=self.session.path,
+            principal=principal.id if principal is not None else None,
         )
 
     async def _prepare_mounts(
@@ -3846,6 +3853,7 @@ class CellExecutor:
         if not mount_specs:
             return {}
         self._mount_resolver.credential_resolver = self._credential_resolver()
+        ensure_writable(self._mount_resolver.credential_resolver, mount_specs)
         self._mount_resolver.mount_cache = MountCache.from_config(self._lake_config())
         resolved = await self._mount_resolver.prepare_mounts(mount_specs)
         staged = [rm.staging_dir for rm in resolved.values() if rm.staging_dir is not None]

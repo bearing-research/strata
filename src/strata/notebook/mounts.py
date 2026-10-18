@@ -735,6 +735,16 @@ def resolve_cell_mounts(
     return list(merged.values())
 
 
+def ensure_writable(credentials: CredentialResolver, mounts: list[MountSpec]) -> None:
+    """Refuse a run whose read-write mounts use a credential its principal may not write.
+
+    Called before anything is staged or sent, so the cell is refused as a whole.
+    """
+    for mount in mounts:
+        if mount.mode == MountMode.READ_WRITE:
+            credentials.ensure_writable(parse_mount_uri(mount.uri)[0], mount.credential)
+
+
 def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | None:
     """The provenance component for one mount, shared by execution and staleness.
 

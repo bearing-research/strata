@@ -17,10 +17,16 @@ the values are not, so rotating a secret invalidates nothing.
 (``{"lab-a": ["/srv/projects/lab-a"]}``), for a server that hosts several projects. A
 restricted name resolves for nothing else, a server-level use included. Paths compare as
 written, symlinks unfollowed.
+
+``notebook_credential_writers`` names who may mount a credential read-write
+(``{"lab": ["user_*"]}``), as globs over the principal who started the run. Once it is
+set, an unlisted name is read-only. It limits what Strata stages and syncs back, not what
+a cell can do with a credential's values should they reach it (see the docs).
 """
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -61,8 +67,12 @@ class CredentialResolver:
         env: Mapping[str, str] | None = None,
         restricted: Mapping[str, Sequence[str]] | None = None,
         notebook: Path | None = None,
+        writers: Mapping[str, Sequence[str]] | None = None,
+        principal: str | None = None,
     ):
         self._registry = dict(registry or {})
+        self._writers = {name: list(patterns) for name, patterns in (writers or {}).items()}
+        self._principal = principal
         self._scheme_defaults = dict(scheme_defaults or {})
         self._env = drop_blanked_secrets(env or {})
         # Compared as written, without touching the filesystem: a notebook is judged by the
@@ -84,14 +94,18 @@ class CredentialResolver:
         env: Mapping[str, str] | None = None,
         *,
         notebook: Path | None = None,
+        principal: str | None = None,
     ) -> CredentialResolver:
-        """The server's credentials as the notebook at *notebook* may use them."""
+        """The server's credentials as the notebook at *notebook*, run by *principal*, may
+        use them."""
         return cls(
             getattr(config, "notebook_credentials", None) or {},
             scheme_defaults=getattr(config, "notebook_mount_credentials", None) or {},
             env=env,
             restricted=getattr(config, "notebook_credential_paths", None) or {},
             notebook=notebook,
+            writers=getattr(config, "notebook_credential_writers", None) or {},
+            principal=principal,
         )
 
     def ensure_allowed(self, name: str) -> None:
@@ -111,6 +125,38 @@ class CredentialResolver:
             f"credential {name!r} is not available to this notebook "
             "(STRATA_NOTEBOOK_CREDENTIAL_PATHS)"
         )
+
+    def ensure_writable(self, scheme: str, credential: str | None) -> None:
+        """Refuse a read-write mount through a credential this run's principal may not write.
+
+        Both the scheme's default and the mount's own credential count: the write uses both.
+
+        Raises:
+            CredentialError: naming the credential.
+        """
+        if not self._writers:
+            return
+        for name in (self._scheme_defaults.get(scheme), credential):
+            if not name:
+                continue
+            patterns = self._writers.get(name)
+            if patterns is None:
+                raise CredentialError(
+                    f"credential {name!r} is read-only on this server "
+                    "(STRATA_NOTEBOOK_CREDENTIAL_WRITERS)"
+                )
+            if not any(
+                pattern == "*"
+                or (self._principal is not None and fnmatch.fnmatchcase(self._principal, pattern))
+                for pattern in patterns
+            ):
+                who = (
+                    "a run with no principal" if self._principal is None else repr(self._principal)
+                )
+                raise CredentialError(
+                    f"credential {name!r} is not writable by {who} "
+                    "(STRATA_NOTEBOOK_CREDENTIAL_WRITERS)"
+                )
 
     def resolve(self, name: str) -> dict[str, str]:
         """The fields behind *name*, with every reference resolved.
