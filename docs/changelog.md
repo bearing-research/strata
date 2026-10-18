@@ -100,7 +100,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `PermissionError` in the server's directory, `work/` is handed to the cell's
   user and the notebook's own files stay the server's. A worker cell gets a
   `work/` of its own for the run. `strata new` gitignores `work/`, and exports
-  leave it out. (#PR)
+  leave it out. (#1212)
 - **A catalog names its Strata credential with `strata_credential`.**
   `credential` is pyiceberg's own key, a REST catalog's OAuth
   `client_id:secret` (Polaris's quickstart sets it), and now reaches the catalog
