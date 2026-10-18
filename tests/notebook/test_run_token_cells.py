@@ -141,16 +141,13 @@ def test_a_copied_token_is_refused_once_its_run_ends(server, tmp_path, temp_ware
 
 @pytest.mark.integration
 @pytest.mark.warm_pool
-def test_a_warm_cell_scans_through_its_server(server, tmp_path, temp_warehouse, warm_pool):
+async def test_a_warm_cell_scans_through_its_server(server, tmp_path, temp_warehouse, warm_pool):
     source = _scan_source(temp_warehouse["table_uri"])
     session = _session(tmp_path, source)
+    executor = CellExecutor(session, await warm_pool(session))
 
-    async def run():
-        executor = CellExecutor(session, await warm_pool(session))
-        with principal_context(ANA):
-            return await executor.execute_cell("c", source)
-
-    result = asyncio.run(run())
+    with principal_context(ANA):
+        result = await executor.execute_cell("c", source)
 
     assert result.success, result.error
     assert result.execution_method == "warm"
