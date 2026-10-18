@@ -111,7 +111,7 @@ cd ~/.strata/notebooks/mynotebook
 uv sync       # rebuilds .venv from pyproject.toml + uv.lock
 ```
 
-The `uv.lock` ensures the rebuilt venv pins identical versions to the source machine. The Rust toolchain on the destination needs to match Strata's source requirements only if you're upgrading Strata at the same time; for an existing wheel install it's not needed.
+The `uv.lock` ensures the rebuilt venv pins identical versions to the source machine.
 
 `strata export <dir> --to snapshot --include all --out <file>.zip` packs the committed files, runtime state, every artifact and the bytes each `@fetch` read into one zip, and `strata import <file>.zip` unpacks it on the other side. See [Snapshots](../notebook/export.md#snapshots).
 

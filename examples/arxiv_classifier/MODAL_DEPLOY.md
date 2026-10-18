@@ -25,9 +25,8 @@ modal profile current
 modal deploy examples/arxiv_classifier/modal_gpu_worker.py
 ```
 
-The first deploy is slow, Modal builds the image from scratch, which
-includes installing the Rust toolchain and compiling Strata's native
-extension. Expect 5-10 minutes. Subsequent deploys reuse the cached image
+The first deploy is slow, Modal builds the image from scratch. Expect a few
+minutes. Subsequent deploys reuse the cached image
 and finish in seconds unless dependencies changed.
 
 When deploy finishes, Modal prints something like:
