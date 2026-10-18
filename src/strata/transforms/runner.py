@@ -34,6 +34,7 @@ import anyio.to_thread
 import httpx
 
 from strata.artifact.store import BuildLeaseLost
+from strata.tenancy.tenant import DEFAULT_TENANT_ID, reset_tenant_id, set_tenant_id
 
 if TYPE_CHECKING:
     from strata.artifact.store import ArtifactStore
@@ -687,7 +688,9 @@ class BuildRunner:
         snapshot_id, schema_id = _admitted_table_version(admitted_version)
         # Empty at admission: rows written since are not in this build's provenance.
         empty = admitted_version is not None and admitted_version.startswith("empty:")
-        return await self._scan_to_file(input_uri, temp_files, snapshot_id, schema_id, empty=empty)
+        return await self._scan_to_file(
+            input_uri, temp_files, snapshot_id, schema_id, empty=empty, tenant_id=tenant_id
+        )
 
     async def _scan_to_file(
         self,
@@ -696,10 +699,11 @@ class BuildRunner:
         snapshot_id: int | None = None,
         schema_id: int | None = None,
         empty: bool = False,
+        tenant_id: str | None = None,
     ) -> Path:
         """Scan a table at ``snapshot_id`` and ``schema_id`` (None: current) into a temp file.
 
-        ``empty`` writes no rows, only the schema.
+        ``empty`` writes no rows, only the schema. ``tenant_id`` is the build's tenant.
         """
 
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
@@ -716,6 +720,7 @@ class BuildRunner:
             snapshot_id,
             schema_id,
             empty,
+            tenant_id,
         )
 
         return temp_file
@@ -727,8 +732,25 @@ class BuildRunner:
         snapshot_id: int | None = None,
         schema_id: int | None = None,
         empty: bool = False,
+        tenant_id: str | None = None,
     ) -> None:
         """Synchronous helper to scan a table and write to file."""
+        # A build runs outside any request, so nothing else sets its tenant, which the plan
+        # keys each row group by.
+        token = set_tenant_id(tenant_id or DEFAULT_TENANT_ID)
+        try:
+            self._write_scan(table_uri, output_path, snapshot_id, schema_id, empty)
+        finally:
+            reset_tenant_id(token)
+
+    def _write_scan(
+        self,
+        table_uri: str,
+        output_path: Path,
+        snapshot_id: int | None,
+        schema_id: int | None,
+        empty: bool,
+    ) -> None:
         from strata.cache.disk import CachedFetcher
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner

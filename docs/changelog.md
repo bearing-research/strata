@@ -220,10 +220,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ### Fixed
 
 - **A tenant's scans are cached as its own.** In multi-tenant mode, a
-  `scan@v1` through `/v1/materialize` and a `/v1/cache/warm` request planned
-  without the request's tenant, so their row groups were cached under the
-  default tenant: shared with every other tenant, and missed by the tenant's
-  own background warm jobs. (#PR)
+  `scan@v1` through `/v1/materialize`, a `/v1/cache/warm` request and a
+  transform build reading a table planned without the tenant, so their row
+  groups were cached under the default tenant: shared with every other tenant,
+  and missed by the tenant's own background warm jobs. (#PR)
 - **A `scan@v1` returns its columns in the order requested.** Its artifact
   was keyed by the columns sorted, so the same columns in another order were
   served the first request's artifact, in the first request's order. (#PR)

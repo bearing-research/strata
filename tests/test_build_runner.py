@@ -1090,6 +1090,30 @@ class TestInputAcquisition:
         assert built.num_rows == 0
         assert built.column_names == ["id", "value", "name", "timestamp"]
 
+    async def test_a_table_input_is_planned_as_the_builds_tenant(self, build_runner):
+        """A build runs outside any request; its plan keys row groups by the build's tenant."""
+        from strata.tenancy.tenant import get_tenant_id
+
+        tenants: list[str] = []
+
+        def plan(**kwargs):
+            tenants.append(get_tenant_id())
+            return ReadPlan(
+                table_uri="file:///warehouse#ns.tbl",
+                table_identity=TableIdentity(catalog="strata", namespace="ns", table="tbl"),
+                snapshot_id=1,
+                tasks=[],
+                schema=pa.schema([("id", pa.int64())]),
+            )
+
+        build_runner.scan_planner = MagicMock()
+        build_runner.scan_planner.plan.side_effect = plan
+        build_runner.scan_fetcher = MagicMock()
+
+        await build_runner._acquire_input("file:///warehouse#ns.tbl", [], tenant_id="team-a")
+
+        assert tenants == ["team-a"]
+
     def test_scan_to_file_sync_uses_fetch_pipeline_on_cold_cache(self, build_runner, artifact_dir):
         """Table inputs fetch through the planner/fetcher path, not raw cache files."""
         batch = pa.record_batch([pa.array([1, 2, 3])], names=["id"])
