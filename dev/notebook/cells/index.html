@@ -1371,6 +1371,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#output-folders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output folders
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#forking-a-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3184,6 +3195,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#output-folders" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output folders
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#forking-a-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4345,6 +4367,15 @@ same <code>embed_frame_ancestors</code> rule decides which hosts may frame it.</
 <a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>...
 </code></pre></div>
 <p>The inspect panel shows an iteration picker so you can scrub through the intermediate states. The <strong>final</strong> iteration's artifact is also the cell's canonical output (no <code>@iter</code> suffix); downstream cells read it via the normal DAG path.</p>
+<h3 id="output-folders">Output folders<a class="headerlink" href="#output-folders" title="Permanent link">&para;</a></h3>
+<p>A loop cell's <a href="../annotations/#output_dir"><code># @output_dir</code></a> folder lasts the
+whole loop: each iteration sees what the earlier ones wrote, so a training loop
+can add one checkpoint per iteration. After every iteration the folder is
+stored as that iteration's <code>@iter=k</code> version, and the last one is the cell's
+output. A file unchanged since the last iteration (same size, times and inode)
+is not read again. When an iteration fails, what the folder held is kept as a
+failed version. A loop started with <code>start_from=&lt;cell&gt;@iter=k</code> gets that
+iteration's folder, when the run its carry came from kept one.</p>
 <h3 id="forking-a-loop">Forking a loop<a class="headerlink" href="#forking-a-loop" title="Permanent link">&para;</a></h3>
 <p>Intermediate iterations are first-class artifacts, so you can branch a new
 run from any step of an old one without re-running the expensive prefix.</p>

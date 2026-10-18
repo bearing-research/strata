@@ -3732,6 +3732,11 @@ exhaustive commit history.</p>
   The server sends the folder's files as one tar, which the worker unpacks to a
   local <code>Path</code> before the cell runs, on either transport. A worker too old to
   take one is refused before the cell runs. (#1210)</li>
+<li><strong>A <code># @loop</code> cell keeps a <code># @output_dir</code> folder across iterations.</strong> Each
+  iteration sees what the earlier ones wrote and is stored as its <code>@iter=k</code>
+  folder; the last is the cell's output. A file unchanged since the last
+  iteration is not read again, a failed iteration keeps what the folder held,
+  and <code>start_from=&lt;cell&gt;@iter=k</code> starts from that iteration's folder. (#1211)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
