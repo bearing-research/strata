@@ -398,6 +398,75 @@ class TestWhatIsCollected:
         assert _exists(store, idle)
 
 
+class TestCollectable:
+    """Versions the caller knows nothing needs, though each is its id's current value."""
+
+    def test_a_current_value_named_collectable_goes(self, store):
+        named = _ready(store, "nb_x_cell_c_var___file__aa")
+        other = _ready(store, "nb_x_cell_c_var_df")
+        for key in (named, other):
+            _last_used(store, key, DAY)
+
+        result = store.garbage_collect(collectable=[named], min_idle_seconds=3600)
+
+        assert result["deleted_count"] == 1
+        assert not _exists(store, named)
+        assert _exists(store, other)
+
+    def test_a_lower_version_named_collectable_goes_too(self, store):
+        artifact_id = "nb_x_cell_c_var___file__aa"
+        first = _ready(store, artifact_id)
+        second = _ready(store, artifact_id)
+        for key in (first, second):
+            _last_used(store, key, DAY)
+
+        store.garbage_collect(collectable=[first, second], min_idle_seconds=3600)
+
+        assert not _exists(store, first)
+        assert not _exists(store, second)
+
+    @pytest.mark.parametrize("hold", ["pin", "name", "recent use", "chain"])
+    def test_every_other_rule_still_keeps_it(self, store, hold):
+        key = _ready(store, "nb_x_cell_c_var___file__aa")
+        _last_used(store, key, DAY)
+        if hold == "pin":
+            store.pin_artifact(*key, "review")
+        elif hold == "name":
+            store.set_name("ckpt", *key)
+        elif hold == "recent use":
+            _last_used(store, key, 60)
+        else:
+            ref = f"{key[0]}@v={key[1]}"
+            reader = _ready(store, "nb_x_cell_d_var_out", inputs={f"strata://artifact/{ref}": ref})
+            store.pin_artifact(*reader, "review")
+
+        result = store.garbage_collect(collectable=[key], min_idle_seconds=3600)
+
+        assert result["deleted_count"] == 0
+        assert _exists(store, key)
+
+    def test_a_housekeeping_read_is_not_a_use(self, store):
+        key = _ready(store, "nb_x_cell_c_var_ckpt")
+        _last_used(store, key, DAY)
+        before = _row(store, *key)["last_used_at"]
+
+        assert store.read_blob(*key, note_use=False) == b"x" * 100
+
+        assert _row(store, *key)["last_used_at"] == before
+
+    def test_every_version_of_a_prefix_is_listed_in_any_state(self, store):
+        first = _ready(store, "nb_x_cell_c_var_a")
+        building = store.create_artifact("nb_x_cell_c_var_a", "prov-b")
+        _ready(store, "nb_y_cell_c_var_a")
+
+        listed = store.list_versions_by_id_prefix("nb_x_")
+
+        assert [(v.id, v.version, v.state) for v in listed] == [
+            (*first, "ready"),
+            ("nb_x_cell_c_var_a", building, "building"),
+        ]
+
+
 class TestTheSettings:
     def _config(self, tmp_path: Path, **overrides):
         from strata.config import StrataConfig

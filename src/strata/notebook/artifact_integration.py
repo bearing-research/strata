@@ -72,7 +72,8 @@ class NotebookArtifactManager:
         """Drop each cell output's values older than its newest *keep_superseded*.
 
         Keeps every output's current value, anything named, pinned or published, and
-        anything used in the last *min_idle_seconds*. Values a crash left half-written
+        anything used in the last *min_idle_seconds*. Then drops each ``# @output_dir``
+        file no manifest version still names. Values a crash left half-written
         are failed first, so they no longer hold their inputs.
 
         Raises:
@@ -83,9 +84,20 @@ class NotebookArtifactManager:
 
         assert_writable(self.artifact_dir)
         self.artifact_store.sweep_zombie_builds(_ABANDONED_BUILD_SECONDS)
-        return self.artifact_store.garbage_collect(
+        result = self.artifact_store.garbage_collect(
             keep_superseded=keep_superseded, min_idle_seconds=min_idle_seconds
         )
+        # After the values: a folder file goes once no manifest version left names it.
+        from strata.notebook.output_dirs import unreferenced_files
+
+        files = unreferenced_files(self)
+        if files:
+            swept = self.artifact_store.garbage_collect(
+                collectable=files, min_idle_seconds=min_idle_seconds
+            )
+            result["deleted_count"] += swept["deleted_count"]
+            result["deleted_bytes"] += swept["deleted_bytes"]
+        return result
 
     def find_cached(self, provenance_hash: str) -> ArtifactVersion | None:
         """Find a cached artifact by provenance hash, or None."""

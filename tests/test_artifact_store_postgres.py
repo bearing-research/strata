@@ -550,6 +550,22 @@ class TestGarbageCollection:
         assert result["deleted_count"] == 0
         assert store.get_artifact(artifact, 1) is not None
 
+    def test_a_collectable_current_value_goes_and_a_pinned_one_stays(self, store):
+        """A folder file no manifest names: its id's current value, collected on request."""
+        loose = "nb_x_cell_c_var___file__" + "a" * 64
+        pinned = "nb_x_cell_c_var___file__" + "b" * 64
+        for artifact_id in (loose, pinned):
+            self._ready(store, artifact_id, f"prov-{artifact_id}")
+            self._last_used(store, artifact_id, 7200)
+        store.pin_artifact(pinned, 1, "review")
+
+        result = store.garbage_collect(collectable=[(loose, 1), (pinned, 1)], min_idle_seconds=3600)
+
+        assert result["deleted_count"] == 1
+        assert store.get_artifact(loose, 1) is None
+        assert store.get_artifact(pinned, 1) is not None
+        assert [v.id for v in store.list_versions_by_id_prefix("nb_x_")] == [pinned]
+
     def test_an_overtaken_version_goes_with_its_canonical(self, store):
         canonical = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e04"
         overtaken = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e05"

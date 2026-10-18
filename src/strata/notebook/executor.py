@@ -1010,14 +1010,15 @@ class CellExecutor:
         self._materializing.add(cell_id)
 
         try:
-            return await self._materialize_cell(
-                cell_id,
-                source,
-                timeout_seconds,
-                start_time,
-                materialize_upstreams=materialize_upstreams,
-                use_cache=use_cache,
-            )
+            with output_dirs.assembling() if annotations.output_dirs else nullcontext():
+                return await self._materialize_cell(
+                    cell_id,
+                    source,
+                    timeout_seconds,
+                    start_time,
+                    materialize_upstreams=materialize_upstreams,
+                    use_cache=use_cache,
+                )
         finally:
             self._materializing.discard(cell_id)
 

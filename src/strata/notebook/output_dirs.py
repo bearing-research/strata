@@ -17,9 +17,12 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import stat
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -88,6 +91,74 @@ def file_artifact_id(artifact_mgr: Any, cell_id: str, sha256: str) -> str:
     return artifact_mgr.cell_artifact_id(cell_id, f"__file__{sha256}")
 
 
+_FILE_ID = re.compile(r"_var___file__[0-9a-f]{64}$")
+_assembling = 0  # runs in this process whose stored files may not be in a manifest yet
+_assembling_lock = threading.Lock()
+
+
+@contextmanager
+def assembling() -> Generator[None]:
+    """Hold off the file sweep while a run stores files ahead of its manifest.
+
+    A worker's uploads arrive during the run, hours before its manifest is staged.
+    """
+    global _assembling
+    with _assembling_lock:
+        _assembling += 1
+    try:
+        yield
+    finally:
+        with _assembling_lock:
+            _assembling -= 1
+
+
+def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
+    """Each stored folder-file version no manifest version in the store names.
+
+    ``None`` while a run is assembling a folder, or when a manifest cannot be read,
+    so nothing it might name is taken.
+    """
+    if _assembling:
+        return None
+    store = artifact_mgr.artifact_store
+    versions = store.list_versions_by_id_prefix(f"nb_{artifact_mgr.notebook_id}_cell_")
+    named: set[tuple[str, int]] = set()
+    for version in versions:
+        params = json.loads(version.transform_spec or "{}").get("params") or {}
+        if params.get("content_type") != CONTENT_TYPE:
+            continue
+        # Housekeeping: a read that counted as a use would keep old manifests forever.
+        blob = store.read_blob(version.id, version.version, note_use=False)
+        if blob is None:
+            return None  # being written, or lost: what it names is unknown
+        manifest = json.loads(blob)
+        for entry in manifest["files"].values():
+            sha256 = entry["sha256"]
+            named.add(
+                (file_artifact_id(artifact_mgr, manifest["cell_id"], sha256), entry["version"])
+            )
+    return [
+        (version.id, version.version)
+        for version in versions
+        if _FILE_ID.search(version.id) and (version.id, version.version) not in named
+    ]
+
+
+def _reused(store: Any, artifact_id: str) -> int | None:
+    """The ready version of a file already stored, recorded as used, or ``None``.
+
+    The use keeps a sweep from taking it; checked again after, in case one just did.
+    """
+    existing = store.get_latest_version(artifact_id)
+    if existing is None or existing.state != "ready":
+        return None
+    store.record_use(artifact_id, existing.version)
+    again = store.get_latest_version(artifact_id)
+    if again is None or again.version != existing.version:
+        return None
+    return existing.version
+
+
 def _store_opened(
     artifact_mgr: Any, cell_id: str, opener: Callable[[], BinaryIO], shown: str
 ) -> dict[str, Any]:
@@ -104,9 +175,9 @@ def _store_opened(
     sha256 = digest.hexdigest()
     store = artifact_mgr.artifact_store
     artifact_id = file_artifact_id(artifact_mgr, cell_id, sha256)
-    existing = store.get_latest_version(artifact_id)
-    if existing is not None and existing.state == "ready":
-        return {"sha256": sha256, "size": size, "version": existing.version}
+    reused = _reused(store, artifact_id)
+    if reused is not None:
+        return {"sha256": sha256, "size": size, "version": reused}
 
     # Here, not at the top: a worker imports this module and has no artifact store.
     from strata.artifact.store import TransformSpec
@@ -146,9 +217,9 @@ def store_received(
     """
     store = artifact_mgr.artifact_store
     artifact_id = file_artifact_id(artifact_mgr, cell_id, sha256)
-    existing = store.get_latest_version(artifact_id)
-    if existing is not None and existing.state == "ready":
-        return {"sha256": sha256, "size": size, "version": existing.version}
+    reused = _reused(store, artifact_id)
+    if reused is not None:
+        return {"sha256": sha256, "size": size, "version": reused}
     from strata.artifact.store import TransformSpec
 
     version = store.create_artifact(
