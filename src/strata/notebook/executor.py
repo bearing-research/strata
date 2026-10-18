@@ -598,6 +598,9 @@ class CellExecutor:
         # ``# @output_dir`` files a worker uploaded during a cell's last remote run, by cell:
         # ``{folder: {path: entry}}``. Taken by the run's staging, success or failure.
         self._received_output_files: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
+        # Each ``# @output_dir`` folder's listing from a cell's run, by cell then folder,
+        # shown ahead of the run's displays when it succeeds.
+        self._folder_listings: dict[str, dict[str, str]] = {}
         # Also store the variables of a cell nothing downstream reads. Off by default: only
         # consumed variables are kept, and a leaf's result can be large.
         self.store_leaf_outputs = False
@@ -1258,6 +1261,7 @@ class CellExecutor:
         remote_metadata: dict[str, str] = {}
         # Nothing a worker uploaded for an earlier run belongs to this one.
         self._received_output_files.pop(cell_id, None)
+        self._folder_listings.pop(cell_id, None)
         try:
             # Re-fetch the cell: the dispatch wrapper already reset ``cache_hit``, but the rest of
             # the pipeline needs ``cell`` in scope.
@@ -2085,6 +2089,7 @@ class CellExecutor:
         remote_metadata: dict[str, str] = {}
         # Nothing a worker uploaded for an earlier run belongs to this one.
         self._received_output_files.pop(cell_id, None)
+        self._folder_listings.pop(cell_id, None)
         try:
             cell = self.session.notebook_state.get_cell(cell_id)
 
@@ -4997,6 +5002,7 @@ class CellExecutor:
             output_dir / output_dirs.OUTPUT_DIRS / name if output_dir is not None else None,
             received,
         )
+        self._folder_listings.setdefault(cell_id, {})[name] = output_dirs.listing(name, manifest)
         return artifact_mgr.stage_cell_output(
             cell_id=cell_id,
             variable_name=name,
@@ -5216,7 +5222,20 @@ class CellExecutor:
         source: str = "",
         env_hash: str = "",
     ) -> list[dict[str, Any]]:
-        """Persist ordered cell display outputs as canonical artifacts."""
+        """Persist ordered cell display outputs as canonical artifacts.
+
+        The run's ``# @output_dir`` listings come first, so the cell's last display stays last.
+        """
+        listings = self._folder_listings.pop(cell_id, {})
+        display_outputs = [
+            {
+                "content_type": "text/markdown",
+                "markdown_text": listings[name],
+                "bytes": len(listings[name].encode("utf-8")),
+                "preview": None,
+            }
+            for name in sorted(listings)
+        ] + list(display_outputs or [])
         if not display_outputs:
             return []
 
@@ -5227,14 +5246,16 @@ class CellExecutor:
         for index, display_output in enumerate(display_outputs):
             file_name = str(display_output.get("file", "")).strip()
             content_type = str(display_output.get("content_type", "")).strip()
-            if not file_name or not content_type:
-                continue
-
-            output_file = output_dir / file_name
-            if not output_file.exists():
-                continue
-
-            blob_data = read_run_file(output_dir, file_name)
+            markdown_text = display_output.get("markdown_text")
+            if not file_name and content_type == "text/markdown" and isinstance(markdown_text, str):
+                # Made by the server (a folder's listing), not written by the cell.
+                blob_data = markdown_text.encode("utf-8")
+            else:
+                if not file_name or not content_type:
+                    continue
+                if not (output_dir / file_name).exists():
+                    continue
+                blob_data = read_run_file(output_dir, file_name)
             row_count = display_output.get("rows")
             display_provenance = derive_subkey(provenance_hash, f"__display__{index}")
             artifact_version = artifact_mgr.store_cell_output(

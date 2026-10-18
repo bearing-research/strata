@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from strata.notebook import output_dirs
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
@@ -162,6 +163,88 @@ class TestAFolderOutput:
 
         manifest, _ = _manifest(session)
         assert list(manifest["files"]) == ["mine.txt"]
+
+
+def _listings(displays) -> list[str]:
+    """The markdown displays: a trailing ``write_text`` call shows its return value too."""
+    return [d["markdown_text"] for d in displays if d["content_type"] == "text/markdown"]
+
+
+LISTING = (
+    "**ckpt**: 3 files, 24 B\n"
+    "\n"
+    "| File | Size |\n"
+    "| --- | ---: |\n"
+    "| `epochs/e0.bin` | 10 B |\n"
+    "| `epochs/e1.bin` | 10 B |\n"
+    "| `final.txt` | 4 B |"
+)
+
+
+class TestTheCellShowsTheFolder:
+    async def test_a_run_shows_its_files_and_sizes_before_the_cells_own_display(self, tmp_path):
+        writer = WRITER + "'trained'\n"
+        session = _session(tmp_path, writer=writer)
+
+        result = await CellExecutor(session).execute_cell("w", writer)
+
+        assert result.success, result.error
+        shown = [d.get("markdown_text") or d.get("preview") for d in result.display_outputs]
+        assert shown == [LISTING, "trained"]
+        assert result.display_output["preview"] == "trained"
+
+    async def test_two_folders_are_shown_in_name_order(self, tmp_path):
+        writer = "# @output_dir b\n# @output_dir a\n(a / 'x').write_text('1')\n"
+        session = _session(tmp_path, writer=writer, reader=None)
+
+        result = await CellExecutor(session).execute_cell("w", writer)
+
+        listed = _listings(result.display_outputs)
+        assert [text.split(":")[0] for text in listed] == ["**a**", "**b**"]
+        assert listed[1] == "**b**: 0 files, 0 B"
+
+    async def test_a_cache_hit_and_a_reopen_show_it_from_the_store(self, tmp_path):
+        session = _session(tmp_path)
+        assert (await CellExecutor(session).execute_cell("w", WRITER)).success
+
+        again = await CellExecutor(session).execute_cell("w", WRITER)
+        reopened = NotebookSession(parse_notebook(session.path), session.path)
+        reopened.compute_staleness()
+
+        assert again.cache_hit
+        assert _listings(again.display_outputs) == [LISTING]
+        cell = reopened.serialize_cell(reopened.notebook_state.get_cell("w"))
+        assert _listings(cell["display_outputs"]) == [LISTING]
+
+    async def test_a_failed_runs_folder_is_not_shown_by_the_next_run(self, tmp_path):
+        failing = "# @output_dir old\n(old / 'x').write_text('1')\nraise ValueError('no')\n"
+        session = _session(tmp_path, writer=failing, reader=None)
+        executor = CellExecutor(session)
+        assert not (await executor.execute_cell("w", failing)).success
+
+        cell = session.notebook_state.get_cell("w")
+        cell.source = WRITER
+        session.re_analyze_cell("w")
+        result = await executor.execute_cell("w", WRITER)
+
+        assert result.success, result.error
+        assert _listings(result.display_outputs) == [LISTING]
+
+    def test_a_long_folder_lists_the_first_files_and_counts_the_rest(self):
+        files = {f"f{i:02d}": {"size": 1536} for i in range(25)}
+        shown = output_dirs.listing("big", json.dumps({"cell_id": "w", "files": files}).encode())
+
+        assert shown.startswith("**big**: 25 files, 37.5 KiB\n")
+        assert "| `f19` | 1.5 KiB |" in shown
+        assert "f20" not in shown
+        assert shown.endswith("\n\n... and 5 more")
+
+    def test_a_path_cannot_break_out_of_its_table_cell(self):
+        files = {"a|b": {"size": 1}, "c`d": {"size": 2}}
+        shown = output_dirs.listing("odd", json.dumps({"cell_id": "w", "files": files}).encode())
+
+        assert "| `a\\|b` | 1 B |" in shown
+        assert "| `` c`d `` | 2 B |" in shown
 
 
 class TestNotYet:
@@ -317,6 +400,7 @@ class TestOnAWorker:
 
         assert read.success, read.error
         assert read.outputs["seen"]["preview"] == ["epochs/e0.bin", "epochs/e1.bin", "final.txt"]
+        assert written.display_outputs[0]["markdown_text"] == LISTING
 
     async def test_a_failed_run_on_a_worker_keeps_what_it_wrote(
         self, tmp_path, notebook_executor_server

@@ -71,6 +71,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   tables alike), as written, with the catalog, the `<namespace>.<table>`
   identifier and the snapshot read, so a tool can list a table's readers
   without parsing cell sources. (#1207)
+- **A cell shows its `# @output_dir` folders.** Each folder's file count,
+  total size, and a table of its paths and sizes (the first 20) appear ahead of
+  the cell's own output, as a markdown display that a cache hit, a reopen and an
+  export show too. (#PR)
 
 ### Changed
 
