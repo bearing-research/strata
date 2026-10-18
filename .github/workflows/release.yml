@@ -330,8 +330,8 @@ jobs:
           # The HTTP client ships in strata-client; this package exposes only
           # the wire/config surface.
           /tmp/strata-smoke/bin/python -c "
-          import strata
-          from strata import Filter, FilterOp, FilterValue, StrataConfig
+          from strata.config import StrataConfig
+          from strata.filters import Filter, FilterOp, FilterValue
           print('strata server package imports ok')
           "
 
