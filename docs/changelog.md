@@ -94,7 +94,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 - **A worker cell that uses `strata` says why it can't.** A cell on a remote
   worker has no ambient client; it now fails with a sentence saying to scan or
-  read artifacts in a cell on the server, not a bare `NameError`. (#PR)
+  read artifacts in a cell on the server, not a bare `NameError`. (#1216)
 - **An append no longer empties a table's row-group cache.** The cache key named
   the snapshot, so a snapshot that only added files missed every row group the
   table had cached. Data files never change, so the key now names the file (and
