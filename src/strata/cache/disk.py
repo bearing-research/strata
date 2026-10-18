@@ -195,10 +195,13 @@ class DiskCache:
         if not versioned_dir.exists():
             return 0
         for path in versioned_dir.rglob("*"):
-            if path.name.endswith(CACHE_FILE_EXTENSION):
-                total += path.stat().st_size
-            elif path.name.endswith(".tmp") and path.stat().st_mtime < stale_before:
-                path.unlink(missing_ok=True)
+            try:
+                if path.name.endswith(CACHE_FILE_EXTENSION):
+                    total += path.stat().st_size
+                elif path.name.endswith(".tmp") and path.stat().st_mtime < stale_before:
+                    path.unlink(missing_ok=True)
+            except FileNotFoundError:
+                continue  # another process sharing the cache evicted or renamed it
         return total
 
     def _key_path(self, key: CacheKey) -> Path:

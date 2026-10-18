@@ -494,6 +494,20 @@ class TestEvictionWithoutWalkingOnEveryPut:
         assert [cache.contains(self._key(i)) for i in range(4)] == [False, False, True, True]
         assert cache._size_bytes == cache.get_size_bytes() == 2 * size
 
+    def test_an_entry_gone_while_a_new_cache_counts_does_not_fail_it(
+        self, strata_config, sample_batch, monkeypatch
+    ):
+        """Another process sharing the cache can evict an entry this one is counting at start."""
+        cache = DiskCache(strata_config)
+        size = self._over_the_limit_on_next_put(cache, sample_batch)
+        first = cache.get_path(self._key(0))
+        assert first is not None
+        self._on_stat_of(monkeypatch, first, lambda: cache._delete_entry_files(first))
+
+        restarted = DiskCache(strata_config)
+
+        assert restarted._size_bytes == 2 * size
+
     def test_a_put_during_the_walk_is_counted(self, strata_config, sample_batch, monkeypatch):
         """The walk adjusts the count rather than overwriting what puts added meanwhile."""
         cache = DiskCache(strata_config)
