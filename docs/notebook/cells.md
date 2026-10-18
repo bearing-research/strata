@@ -69,7 +69,7 @@ strata.set_alias("taxi/tip-model", "champion", art.artifact_id, art.version)
 
 It's a lightweight client with the same API surface for the common operations (`materialize`, `put`, `set_alias`, `set_tag`, `resolve_alias`, …); explicit `from strata_client import StrataClient` still works if you want the full client. The ambient `strata` is created fresh per cell run and closed automatically - you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a `@mount` path or an `@table` variable.
 
-Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata` - import a client explicitly there.
+Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata`: one that uses it fails with a sentence saying so. Scan or read artifacts in a cell on the server and pass the result on, or import a client explicitly where the worker can reach the server.
 
 `strata.promote()` sends an upstream result, and the whole chain behind it, to
 the team store - by the variable name the cell reads it under, not by an
