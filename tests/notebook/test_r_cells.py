@@ -216,6 +216,29 @@ async def test_r_cell_output_dir_is_kept(r_notebook):
     assert list(files) == ["note.txt"]
 
 
+@pytest.mark.asyncio
+async def test_r_cell_shows_its_folder_and_not_a_failed_runs(r_notebook):
+    """The cell shows the folder's files; a failed run's folder is not shown by the next run."""
+    failing = '# @output_dir old\nwriteLines("x", file.path(old, "x.txt"))\nstop("no")\n'
+    r_src = '# @output_dir out\nwriteLines("from R", file.path(out, "note.txt"))\nn <- 1\n'
+    _, session = r_notebook(cells=[("c1", None, failing, "r")])
+    executor = CellExecutor(session)
+    assert (await executor.execute_cell("c1", failing)).success is False
+
+    cell = session.notebook_state.get_cell("c1")
+    cell.source = r_src
+    session.re_analyze_cell("c1")
+    result = await executor.execute_cell("c1", r_src)
+
+    assert result.success is True, result.error
+    shown = [
+        d["markdown_text"] for d in result.display_outputs if d["content_type"] == "text/markdown"
+    ]
+    assert shown == [
+        "**out**: 1 file, 7 B\n\n| File | Size |\n| --- | ---: |\n| `note.txt` | 7 B |"
+    ]
+
+
 # Error-shape tests
 
 

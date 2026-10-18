@@ -196,6 +196,41 @@ def collect(
     return json.dumps({"cell_id": cell_id, "files": files}, sort_keys=True).encode("utf-8")
 
 
+_LISTED = 20  # files a folder's listing shows; the rest are counted
+
+
+def listing(name: str, manifest: bytes) -> str:
+    """The folder's files and sizes as markdown, for the cell to show."""
+    files = json.loads(manifest)["files"]
+    total = sum(int(entry["size"]) for entry in files.values())
+    noun = "file" if len(files) == 1 else "files"
+    lines = [f"**{name}**: {len(files)} {noun}, {_size(total)}"]
+    if files:
+        lines += ["", "| File | Size |", "| --- | ---: |"]
+        for rel in sorted(files)[:_LISTED]:
+            lines.append(f"| {_code(rel)} | {_size(int(files[rel]['size']))} |")
+        if len(files) > _LISTED:
+            lines += ["", f"... and {len(files) - _LISTED} more"]
+    return "\n".join(lines)
+
+
+def _code(path: str) -> str:
+    """*path* as an inline code span inside a table cell."""
+    path = path.replace("|", "\\|")
+    return f"`` {path} ``" if "`" in path else f"`{path}`"
+
+
+def _size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    scaled = n / 1024
+    for unit in ("KiB", "MiB"):
+        if scaled < 1024:
+            return f"{scaled:.1f} {unit}"
+        scaled /= 1024
+    return f"{scaled:.1f} GiB"
+
+
 def materialize(artifact_mgr: Any, manifest: bytes, dest: Path) -> None:
     """Rebuild the folder a manifest describes at *dest*, for a downstream cell to read."""
     store = artifact_mgr.artifact_store

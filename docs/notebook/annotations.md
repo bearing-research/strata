@@ -480,6 +480,11 @@ folder is kept even when no cell reads it.
 A cell that references `<name>` gets the folder rebuilt as a local `Path`: a
 copy, so writing to it changes nothing upstream.
 
+**The cell shows what the folder holds**: its file count, total size, and a
+table of paths and sizes (the first 20 files, then a count of the rest), ahead
+of the cell's own output. It is a markdown display like any other, so a cache
+hit, a reopened notebook and an export show it too.
+
 **A failed run keeps what it wrote.** Its files are stored and its manifest is
 kept as a failed version: never a cache hit and never an input, but lineage
 shows it and `<id>@v=<n>` reads it. A link in the folder, or a file with more
