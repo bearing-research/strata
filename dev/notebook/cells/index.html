@@ -3464,6 +3464,14 @@
 </code></pre></div>
 <p>It's a lightweight client with the same API surface for the common operations (<code>materialize</code>, <code>put</code>, <code>set_alias</code>, <code>set_tag</code>, <code>resolve_alias</code>, …); explicit <code>from strata_client import StrataClient</code> still works if you want the full client. The ambient <code>strata</code> is created fresh per cell run and closed automatically - you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a <code>@mount</code> path or an <code>@table</code> variable.</p>
 <p>Cells routed to a <strong>remote executor worker</strong> (not local execution) don't get the ambient <code>strata</code>: one that uses it fails with a sentence saying so. Scan or read artifacts in a cell on the server and pass the result on, or import a client explicitly where the worker can reach the server.</p>
+<p>On a server that authenticates callers (<code>auth_mode</code> <code>trusted_proxy</code> or
+<code>api_key</code>), the client holds no proxy token or API key. Instead, the server
+mints a token for each run and hands it to the cell on its stdin, so it never
+lands in a file, argv or the environment. With it the cell acts as the member who started
+the run, minus any <code>admin:</code> scope, on the client's own routes (materialize,
+streams, artifact reads, <code>put</code>, tags, names and aliases, the registry audit) and
+on promote for its own notebook session; any other route answers 403. The token
+stops working when the run ends. Run All uses one token for the whole batch.</p>
 <p><code>strata.promote()</code> sends an upstream result, and the whole chain behind it, to
 the team store - by the variable name the cell reads it under, not by an
 artifact id you never see:</p>
