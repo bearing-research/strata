@@ -318,7 +318,7 @@ async def test_a_slow_table_plan_holds_no_worker_thread(served, monkeypatch, rou
     """A table input plans in the planning pool, and waiting for a slow catalog must not
     occupy one of the worker threads every sync route and store call shares."""
     planning, release = threading.Event(), threading.Event()
-    plan = SimpleNamespace(snapshot_id=7, schema_id=0, table_identity=None)
+    plan = SimpleNamespace(snapshot_id=7, schema_id=0, reading="", table_identity=None)
 
     def slow_plan(**kwargs):
         planning.set()

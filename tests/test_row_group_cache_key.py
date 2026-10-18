@@ -187,3 +187,29 @@ def test_a_path_written_again_with_other_bytes_is_another_key():
         )
 
     assert key(1024).to_hex() != key(2048).to_hex()
+
+
+def test_a_recreated_table_reading_a_rewritten_path_is_not_served_the_old_rows(tmp_path):
+    """Dropped, recreated, and given the same path with other bytes of the same size."""
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField
+
+    catalog, uri = _catalog(tmp_path)
+    path = tmp_path / "part-00000.parquet"
+    config = _config(tmp_path)
+
+    def register(ids: list[int]) -> None:
+        pq.write_table(pa.table({"id": pa.array(ids, pa.int64())}), path, compression="none")
+        if catalog.table_exists("db.t"):
+            catalog.drop_table("db.t")
+        schema = Schema(NestedField(1, "id", LongType(), required=False))
+        catalog.create_table("db.t", schema=schema).add_files([path.as_uri()])
+
+    register([1, 2, 3])
+    size = path.stat().st_size
+    assert _ids(_scan(config, uri)[0]) == [1, 2, 3]
+
+    register([7, 8, 9])
+    assert path.stat().st_size == size
+
+    assert _ids(_scan(config, uri)[0]) == [7, 8, 9]

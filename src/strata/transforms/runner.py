@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 def _admitted_table_version(version: str | None) -> tuple[int | None, int | None]:
-    """The ``(snapshot, schema)`` in a table input's recorded ``{snapshot}:{schema}``.
+    """The ``(snapshot, schema)`` in a table input's recorded ``{snapshot}:{schema}:{reading}``.
 
     ``empty:{token}:{schema}`` (no snapshot at admission) has no snapshot; no record reads the
     current table.
@@ -56,7 +56,8 @@ def _admitted_table_version(version: str | None) -> tuple[int | None, int | None
         return None, None
     if version.startswith("empty:"):
         return None, int(version.rpartition(":")[2])
-    snapshot, _, schema = version.partition(":")
+    snapshot, _, rest = version.partition(":")
+    schema = rest.partition(":")[0]
     return int(snapshot), int(schema) if schema else None
 
 
@@ -641,8 +642,8 @@ class BuildRunner:
         Accepts ``strata://artifact/{id}@v={version}`` and ``strata://name/{name}``; any other
         ``strata://`` URI raises ``ValueError``, and any other URI is a table, as admission
         resolved it. ``admitted_version`` is what admission recorded for the input
-        (``{id}@v={n}`` for a name, ``{snapshot}:{schema}`` for a table); the input is read at it
-        when given.
+        (``{id}@v={n}`` for a name, ``{snapshot}:{schema}:{reading}`` for a table); the input is
+        read at its snapshot and schema when given.
         """
         if input_uri.startswith("strata://artifact/"):
             import re

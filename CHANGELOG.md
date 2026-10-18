@@ -109,14 +109,16 @@ exhaustive commit history.
   read artifacts in a cell on the server, not a bare `NameError`. (#1216)
 - **An append no longer empties a table's row-group cache.** The cache key named
   the snapshot, so a snapshot that only added files missed every row group the
-  table had cached. Data files never change, so the key now names the file (and
-  its size) and what the snapshot does to the row group's rows instead: the
+  table had cached. Data files never change, so the key now names the table
+  (its UUID, so a dropped and recreated table is another), the file (and its
+  size) and what the snapshot does to the row group's rows instead: the
   positions it deletes and the equality delete files that may meet it, the
   schema, and the table's format version and name mapping. A row group stays
   cached across every snapshot that reads it the same way, and a delete misses
   only the row groups it deletes from. A name-mapping change or a format upgrade,
-  which make no snapshot, are no longer served from the cache. The cache starts
-  empty after the upgrade. (#1214)
+  which make no snapshot, are no longer served from the cache, nor from a
+  `scan@v1` or transform artifact built before it. The cache starts empty after
+  the upgrade, and an artifact built from a table is built again once. (#1214)
 - **A row-group cache miss no longer walks the whole cache.** Each write used to
   list and stat every cached file to check the size cap, so on a cache of a few
   hundred thousand row groups that walk was most of a miss. The cache now counts
@@ -215,6 +217,14 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A tenant's scans are cached as its own.** In multi-tenant mode, a
+  `scan@v1` through `/v1/materialize` and a `/v1/cache/warm` request planned
+  without the request's tenant, so their row groups were cached under the
+  default tenant: shared with every other tenant, and missed by the tenant's
+  own background warm jobs. (#PR)
+- **A `scan@v1` returns its columns in the order requested.** Its artifact
+  was keyed by the columns sorted, so the same columns in another order were
+  served the first request's artifact, in the first request's order. (#PR)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk
