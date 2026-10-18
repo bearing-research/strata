@@ -21,6 +21,7 @@ import logging
 import os
 import pickle
 import sys
+import tarfile
 from collections.abc import Callable, Iterable
 from enum import StrEnum
 from pathlib import Path
@@ -53,6 +54,9 @@ class ContentType(StrEnum):
     # A ``# @output_dir`` folder: the server rebuilds it beside the manifest file, as
     # ``<stem>.dir`` for ``<stem>.dirmanifest.json``, and the cell gets that ``Path``.
     DIR_MANIFEST = "dir/manifest"
+    # That folder sent to a remote worker, as a tar the harness unpacks to ``<stem>.dir``
+    # for ``<stem>.dir.tar``.
+    DIR_TAR = "dir/tar"
 
 
 class StrataRArtifactError(RuntimeError):
@@ -1752,6 +1756,13 @@ def _deserialize_dir_manifest(file_path: Path) -> Path:
     return file_path.with_name(file_path.name.removesuffix(".dirmanifest.json") + ".dir")
 
 
+def _deserialize_dir_tar(file_path: Path) -> Path:
+    folder = file_path.with_suffix("")
+    with tarfile.open(file_path) as tar:
+        tar.extractall(folder, filter="data")
+    return folder
+
+
 def _deserialize_rds(file_path: Path) -> Any:
     # Python has no RDS reader; raise the structured error with the suggested fix.
     raise StrataRArtifactError(file_path)
@@ -1992,4 +2003,5 @@ _HANDLERS: dict[str, _Handler] = {
     ContentType.RDS_OBJECT: _Handler(None, _deserialize_rds),
     ContentType.FILE_PATH: _Handler(None, _deserialize_file_path),
     ContentType.DIR_MANIFEST: _Handler(None, _deserialize_dir_manifest),
+    ContentType.DIR_TAR: _Handler(None, _deserialize_dir_tar),
 }

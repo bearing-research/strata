@@ -740,6 +740,8 @@ def create_notebook_executor_app(
             "module/import": ".module.json",
             "module/cell": ".cell_module.json",
             "module/cell-instance": ".cell_instance.pickle",
+            # The harness unpacks ``<var>.dir.tar`` to ``<var>.dir``.
+            "dir/tar": ".dir.tar",
         }.get(content_type, ".bin")
 
     def _response_error_detail(response: httpx.Response) -> str:
@@ -1141,6 +1143,8 @@ def create_notebook_executor_app(
                     "cancel": True,
                     # ``# @output_dir`` folders come back in the bundle, in parts.
                     "output_dirs": True,
+                    # An upstream ``# @output_dir`` folder arrives as a tar the harness unpacks.
+                    "folder_inputs": True,
                     # Building the locked env is ``uv sync --frozen``, so probe for uv: claimed
                     # unconditionally, a pip-installed image would fail every Python cell with 500.
                     "locked_environments": shutil.which("uv") is not None,
