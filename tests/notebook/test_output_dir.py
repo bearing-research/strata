@@ -545,6 +545,121 @@ class TestOnAWorker:
         assert list(manifest["files"]) == ["e0.bin"]
 
 
+REMOTE_READER = (
+    "# @worker remote\n" + READER + "text = (ckpt / 'final.txt').read_text()\nname = ckpt.name\n"
+)
+
+
+def _remote(session, config: dict) -> None:
+    from strata.notebook.models import WorkerBackendType, WorkerSpec
+
+    session.notebook_state.workers = [
+        WorkerSpec(name="remote", backend=WorkerBackendType.EXECUTOR, runtime_id="r", config=config)
+    ]
+
+
+class TestAFolderInputOnAWorker:
+    @pytest.mark.parametrize("transport", ["direct", "signed"])
+    async def test_a_worker_cell_reads_a_local_cells_folder(
+        self, tmp_path, transport, notebook_executor_server, notebook_personal_server
+    ):
+        session = _session(tmp_path, reader=REMOTE_READER)
+        config = {"url": notebook_executor_server["execute_url"], "transport": transport}
+        if transport == "signed":
+            config["strata_url"] = notebook_personal_server["base_url"]
+        _remote(session, config)
+        executor = CellExecutor(session)
+
+        assert (await executor.execute_cell("w", WRITER)).success
+        read = await executor.execute_cell("r", REMOTE_READER)
+
+        assert read.success, read.error
+        assert read.execution_method == "executor"
+        assert read.outputs["seen"]["preview"] == ["epochs/e0.bin", "epochs/e1.bin", "final.txt"]
+        assert read.outputs["text"]["preview"] == "done"
+        assert read.outputs["name"]["preview"] == "ckpt.dir"  # as on the server
+
+    async def test_a_worker_that_cannot_be_asked_is_refused_before_it_runs(self, tmp_path):
+        session = _session(tmp_path, reader=REMOTE_READER)
+        _remote(session, {"url": "http://127.0.0.1:9/v1/execute"})
+        executor = CellExecutor(session)
+
+        assert (await executor.execute_cell("w", WRITER)).success
+        read = await executor.execute_cell("r", REMOTE_READER)
+
+        assert not read.success
+        assert "could not be asked whether it takes # @output_dir folders as inputs" in read.error
+
+    async def test_an_older_worker_is_refused_before_it_runs(self, tmp_path, monkeypatch):
+        from strata.notebook import workers
+
+        asked = []
+
+        async def older(worker, feature):
+            asked.append(feature)
+            return False
+
+        monkeypatch.setattr(workers, "worker_advertises", older)
+        session = _session(tmp_path, reader=REMOTE_READER)
+        _remote(session, {"url": "http://127.0.0.1:9/v1/execute"})
+        executor = CellExecutor(session)
+
+        assert (await executor.execute_cell("w", WRITER)).success
+        read = await executor.execute_cell("r", REMOTE_READER)
+
+        assert not read.success
+        assert "cannot take 'ckpt', an # @output_dir folder, as an input" in read.error
+        assert asked == ["folder_inputs"]
+
+    def test_the_folder_goes_as_a_tar_the_harness_unpacks(self, tmp_path):
+        from strata.notebook.serializer import deserialize_value
+
+        folder = tmp_path / "src"
+        (folder / "deep").mkdir(parents=True)
+        (folder / "deep" / "a.bin").write_bytes(b"abc")
+        (folder / "empty.txt").write_bytes(b"")
+        if sys.platform != "win32":
+            (folder / "leak").symlink_to(tmp_path / "elsewhere")
+        tar = tmp_path / "run" / f"ckpt{output_dirs.TAR_EXTENSION}"
+        tar.parent.mkdir()
+        output_dirs.pack(folder, tar)
+
+        got = deserialize_value(output_dirs.TAR_CONTENT_TYPE, tar)
+
+        assert got == tmp_path / "run" / "ckpt.dir"
+        assert sorted(p.relative_to(got).as_posix() for p in got.rglob("*")) == [
+            "deep",
+            "deep/a.bin",
+            "empty.txt",
+        ]
+        assert (got / "deep" / "a.bin").read_bytes() == b"abc"
+
+    @pytest.mark.parametrize("kind", ["path", "link"])
+    def test_a_tar_cannot_write_outside_its_folder(self, tmp_path, kind):
+        import io
+        import tarfile
+
+        from strata.notebook.serializer import deserialize_value
+
+        tar = tmp_path / "run" / f"ckpt{output_dirs.TAR_EXTENSION}"
+        tar.parent.mkdir()
+        with tarfile.open(tar, "w") as out:
+            if kind == "path":
+                info = tarfile.TarInfo("../escape.bin")
+                info.size = 1
+                out.addfile(info, io.BytesIO(b"x"))
+            else:
+                info = tarfile.TarInfo("leak")
+                info.type = tarfile.SYMTYPE
+                info.linkname = str(tmp_path / "escape.bin")
+                out.addfile(info)
+
+        with pytest.raises(tarfile.FilterError):
+            deserialize_value(output_dirs.TAR_CONTENT_TYPE, tar)
+        assert not (tmp_path / "run" / "escape.bin").exists()
+        assert not (tmp_path / "run" / "ckpt.dir" / "leak").is_symlink()
+
+
 def test_a_folder_name_cannot_leave_the_run_directory(tmp_path, monkeypatch):
     """The parser takes identifiers only; the check holds even if it did not."""
     from strata.notebook import annotations

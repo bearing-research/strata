@@ -512,9 +512,14 @@ names those files instead of carrying them, and a file the cell deleted before i
 ended is not part of the folder. On the `direct` transport the worker cannot
 reach the server, so files come back only with the result.
 
-For now the folder is collected when the run ends: a `# @loop` cell, or a cell
-on a remote worker reading another cell's folder, is refused before it runs,
-and run-all runs such a cell on its own rather than in a batch. An R cell gets
+**A cell on a remote worker can read another cell's folder.** The server sends
+the folder's files as one tar input, and the worker's harness unpacks it to a
+local `Path` with the same name it has on the server before the cell runs. A
+worker too old to take one is refused before the cell runs.
+
+For now the folder is collected when the run ends: a `# @loop` cell is refused
+before it runs, and run-all runs a cell with a folder on its own rather than in
+a batch. An R cell gets
 the folder as a path string and its folder is kept, but cannot read another
 cell's folder yet.
 

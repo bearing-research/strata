@@ -1633,7 +1633,7 @@ class Person:
         calls = self._record_store_calls_on_loop(
             monkeypatch,
             notebook_build_server,
-            ["create_artifact", "write_blob", "finalize_artifact", "open_blob_reader"],
+            ["create_artifact", "publish_blob_from_path", "finalize_artifact", "open_blob_reader"],
             ["create_build", "start_build", "get_build"],
         )
 
@@ -1647,7 +1647,7 @@ class Person:
         # The second run staged its input, so every wrapped method was reached.
         assert {name for name, _ in calls} == {
             "create_artifact",
-            "write_blob",
+            "publish_blob_from_path",
             "finalize_artifact",
             "open_blob_reader",
             "create_build",

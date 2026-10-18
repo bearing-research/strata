@@ -313,6 +313,21 @@ def _add_fetch_inputs(
         input_specs[name] = {"content_type": ContentType.FILE_PATH.value, "file": file_name}
 
 
+def _pack_folder_inputs(
+    input_specs: dict[str, dict[str, Any]], output_dir: Path
+) -> dict[str, dict[str, Any]]:
+    """Each ``# @output_dir`` input as a tar of its rebuilt folder, the form a worker takes."""
+    packed = dict(input_specs)
+    for name, spec in input_specs.items():
+        if spec.get("content_type") != output_dirs.CONTENT_TYPE:
+            continue
+        stem = str(spec["file"]).removesuffix(output_dirs.EXTENSION)
+        file_name = stem + output_dirs.TAR_EXTENSION
+        output_dirs.pack(output_dir / f"{stem}.dir", output_dir / file_name)
+        packed[name] = {**spec, "content_type": output_dirs.TAR_CONTENT_TYPE, "file": file_name}
+    return packed
+
+
 @dataclass(kw_only=True, frozen=True)
 class _CellProvenance:
     """Inputs and result of the standard cell-provenance computation.
@@ -2745,11 +2760,26 @@ class CellExecutor:
                     f"worker {worker_spec.name!r} does not return # @output_dir folders; "
                     "upgrade strata on it"
                 )
-        for name, spec in input_specs.items():
-            if spec.get("content_type") == output_dirs.CONTENT_TYPE:
+        folders = sorted(
+            name
+            for name, spec in input_specs.items()
+            if spec.get("content_type") == output_dirs.CONTENT_TYPE
+        )
+        if folders:
+            advertised = await worker_advertises(worker_spec, "folder_inputs")
+            if advertised is None:
                 raise RuntimeError(
-                    f"{name!r} is an output folder, which cannot be sent to a remote worker yet"
+                    f"worker {worker_spec.name!r} could not be asked whether it takes "
+                    "# @output_dir folders as inputs"
                 )
+            if not advertised:
+                raise RuntimeError(
+                    f"worker {worker_spec.name!r} cannot take {folders[0]!r}, an "
+                    "# @output_dir folder, as an input; upgrade strata on it"
+                )
+            input_specs = await anyio.to_thread.run_sync(
+                _pack_folder_inputs, input_specs, output_dir
+            )
         for mount in mount_specs:
             if mount.uri.startswith("file://"):
                 raise RuntimeError(
@@ -3629,7 +3659,12 @@ class CellExecutor:
                 raise RuntimeError(
                     f"Signed notebook executor transport could not find input file {file_name!r}"
                 )
-            blob_data = input_path.read_bytes()
+            # Hashed in chunks and published from the path: a folder's tar can be gigabytes.
+            byte_hash = hashlib.sha256()
+            with open(input_path, "rb") as f:
+                while chunk := f.read(1 << 20):
+                    byte_hash.update(chunk)
+            byte_size = input_path.stat().st_size
             source_token = source_uri or f"local:{file_name}"
             # The tenant is in the id: the store refuses an id another tenant holds, and two
             # tenants' notebooks can share a notebook id and input URIs.
@@ -3643,7 +3678,7 @@ class CellExecutor:
                     {
                         "source": source_token,
                         "content_type": content_type,
-                        "byte_hash": hashlib.sha256(blob_data).hexdigest(),
+                        "byte_hash": byte_hash.hexdigest(),
                     },
                     sort_keys=True,
                 ).encode("utf-8")
@@ -3665,14 +3700,14 @@ class CellExecutor:
                 tenant=tenant_id,
                 principal=principal_id,
             )
-            artifact_store.write_blob(artifact_id, version, blob_data)
+            artifact_store.publish_blob_from_path(artifact_id, version, input_path)
             finalized = artifact_store.finalize_artifact(
                 artifact_id,
                 version,
                 schema_json=json.dumps({"content_type": content_type}),
                 row_count=None,
-                byte_size=len(blob_data),
-                content_sha256=hashlib.sha256(blob_data).hexdigest(),
+                byte_size=byte_size,
+                content_sha256=byte_hash.hexdigest(),
             )
             if finalized is None:
                 raise RuntimeError(

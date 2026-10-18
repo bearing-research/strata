@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import stat
+import tarfile
 import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -33,6 +34,9 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIRS = "output_dirs"  # under a run directory, one folder per name
 CONTENT_TYPE = "dir/manifest"
 EXTENSION = ".dirmanifest.json"
+# A folder input sent to a worker: a tar of its files, which the harness unpacks.
+TAR_CONTENT_TYPE = "dir/tar"
+TAR_EXTENSION = ".dir.tar"
 _CHUNK = 1 << 20
 
 
@@ -85,6 +89,13 @@ def regular_files(root: Path) -> list[str]:
             if stat.S_ISREG(mode):
                 found.append(path.relative_to(root).as_posix())
     return sorted(found)
+
+
+def pack(folder: Path, target: Path) -> None:
+    """Write *folder*'s regular files to *target* as a tar, for a worker to unpack."""
+    with tarfile.open(target, "w") as tar:
+        for rel in regular_files(folder):
+            tar.add(folder / rel, arcname=rel, recursive=False)
 
 
 def file_artifact_id(artifact_mgr: Any, cell_id: str, sha256: str) -> str:

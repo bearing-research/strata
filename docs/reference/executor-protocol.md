@@ -49,6 +49,7 @@ Liveness + capabilities probe. No auth.
       "pull_model": true,
       "cancel": true,
       "output_dirs": true,
+      "folder_inputs": true,
       "locked_environments": true,
       "locked_r_environments": true,
       "languages": ["python", "r"]
@@ -79,6 +80,8 @@ A cell runs with the worker's environment minus the worker's own secrets: `strat
 `languages` lists the cell languages the worker can run: `r` when `Rscript` is on its `PATH`. An R cell's request says `"language": "r"`, in `transform.params.language` on `POST /v1/execute`, `language` in `POST /v1/notebook-execute` metadata, and `params.language` in a manifest; a Python cell's request carries no `language`. The worker runs `harness.R` under `Rscript` with the same manifest a Python cell's harness gets, and answers an R cell with `500` and `Rscript is not installed on this worker` when it has no R, or `400` for a language it does not know.
 
 `output_dirs: true` says the worker returns a cell's `# @output_dir` folders in its bundle ([below](#output-bundle-notebook-output-bundlev1)). It makes each folder the cell names, empty, in its run directory, and gives the cell its path as a read-write mount of that name. Strata refuses to send a cell with `# @output_dir` to a worker that does not advertise it, since the cell would fail on the missing name after running.
+
+`folder_inputs: true` says the worker takes another cell's `# @output_dir` folder as an input. Strata sends the folder's files as one tar with format `dir/tar`, named `<stem>.dir.tar`, and the harness unpacks it to `<stem>.dir` beside it, refusing a member that would land outside, and gives the cell that path. Strata refuses to send a cell reading a folder to a worker that does not advertise it.
 
 `locked_r_environments: true` says the worker restores an R cell's lock, the notebook's `renv.lock`, when the request carries one ([below](#the-r-environment-block)). It works like `locked_environments`: Strata sends the R block only to a worker that advertises it, and the reference worker reports it only when its `Rscript` can load `renv`.
 
@@ -194,7 +197,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `transform.params.env` | object | Env vars set in the cell subprocess. |
 | `transform.params.mutation_defines` | array of string | Present only when non-empty. Variables the cell changes in place without rebinding. The harness re-serializes exactly these: without the list it sees an unchanged `id()` and stores nothing, and the downstream cell reads the value from before, under a provenance hash that says otherwise. |
 | `transform.params.tables` | object | Present only when non-empty. `{name: {uri, snapshot_id}}` for each `@table` the cell declares. Injected as `<name>` and `<name>_snapshot`; no catalog access is needed at the worker to read them. |
-| `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type - `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`, or `file/path` for an `@fetch`'s bytes, which the harness injects as a `pathlib.Path` to the written file instead of loading. |
+| `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type - `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`, `file/path` for an `@fetch`'s bytes, which the harness injects as a `pathlib.Path` to the written file instead of loading, or `dir/tar` for another cell's `# @output_dir` folder ([`folder_inputs`](#get-health)). |
 
 **Response (200)**:
 
