@@ -72,7 +72,7 @@ exhaustive commit history.
 - **A cell shows its `# @output_dir` folders.** Each folder's file count,
   total size, and a table of its paths and sizes (the first 20) appear ahead of
   the cell's own output, as a markdown display that a cache hit, a reopen and an
-  export show too. (#PR)
+  export show too. (#1208)
 
 ### Changed
 
