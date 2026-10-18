@@ -38,6 +38,9 @@ _VERSION_DIR = re.compile(r"v\d+")
 # holding entries, their metadata sidecars and write temp files.
 _CACHE_SUBDIR = re.compile(r"[0-9a-f]{2}|[0-9a-f]{8}")
 _CACHE_FILE_SUFFIXES = (CACHE_FILE_EXTENSION, CACHE_META_EXTENSION, ".tmp")
+# A put's temp file older than this was left by a crash: a live put renames it within seconds,
+# and another process sharing the cache may be mid-put when this one starts.
+_STALE_TEMP_SECONDS = 3600
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +150,9 @@ class DiskCache:
         # The current version's bytes, kept as puts land so a put does not walk the cache.
         # Another process's writes are not counted; the walk at eviction corrects them.
         self._size_lock = threading.Lock()
-        self._size_bytes = self.get_size_bytes()
+        self._size_bytes = self._count_and_sweep()
+        # One eviction walk at a time; a put that finds one running leaves eviction to it.
+        self._evict_lock = threading.Lock()
 
     def _remove_other_versions(self) -> None:
         """Delete the directories of other cache versions.
@@ -178,6 +183,23 @@ class DiskCache:
                 logger.warning("Could not remove cache directory %s: %s", item, e)
                 continue
             logger.info("Removed cache directory %s left by another cache version", item)
+
+    def _count_and_sweep(self) -> int:
+        """Return the current version's bytes, removing temp files a crashed put left.
+
+        Nothing else counts, evicts or removes a temp file.
+        """
+        total = 0
+        stale_before = time.time() - _STALE_TEMP_SECONDS
+        versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
+        if not versioned_dir.exists():
+            return 0
+        for path in versioned_dir.rglob("*"):
+            if path.name.endswith(CACHE_FILE_EXTENSION):
+                total += path.stat().st_size
+            elif path.name.endswith(".tmp") and path.stat().st_mtime < stale_before:
+                path.unlink(missing_ok=True)
+        return total
 
     def _key_path(self, key: CacheKey) -> Path:
         """Return (and create the directory for) a cache key's data file.
@@ -315,12 +337,16 @@ class DiskCache:
                 self._size_bytes += len(stream_bytes) - replaced
 
             self.metrics.record_cache_write(len(stream_bytes))
-
-            self._evict_if_needed()
         except Exception:
             tmp_path.unlink(missing_ok=True)
             meta_tmp_path.unlink(missing_ok=True)
             raise
+
+        # The entry is in place: failing the put now would fail the scan reading this row group.
+        try:
+            self._evict_if_needed()
+        except OSError as e:
+            logger.warning("Cache eviction failed: %s", e)
 
     def contains(self, key: CacheKey) -> bool:
         """Return whether ``key`` is cached."""
@@ -426,17 +452,31 @@ class DiskCache:
         """Evict the oldest entries by mtime when the cache exceeds its limit.
 
         Write-time order, not LRU (``get`` does not touch mtime). Evicts down to 80% of the limit
-        so it does not run on every ``put``. Only a count over the limit walks the cache, and
-        the walk resets the count to what is on disk.
+        so it does not run on every ``put``. Only a count over the limit walks the cache, one
+        walk at a time, and the walk resets the count to what is on disk.
         """
         if self._size_bytes <= self.max_size_bytes:
             return
+        if not self._evict_lock.acquire(blocking=False):
+            return
+        try:
+            self._evict()
+        finally:
+            self._evict_lock.release()
 
+    def _evict(self) -> None:
+        """Walk the cache and delete the oldest entries down to 80% of the limit."""
+        with self._size_lock:
+            counted_before = self._size_bytes
         files = []
         versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
         if versioned_dir.exists():
-            for path in versioned_dir.rglob(f"*{CACHE_FILE_EXTENSION}"):
-                st = path.stat()
+            for path in list(versioned_dir.rglob(f"*{CACHE_FILE_EXTENSION}")):
+                try:
+                    st = path.stat()
+                except FileNotFoundError:
+                    # Removed since the listing (by another process's eviction, or clear).
+                    continue
                 files.append((path, st.st_mtime, st.st_size))
         files.sort(key=lambda x: x[1])
         current_size = size_before = sum(size for _, _, size in files)
@@ -453,7 +493,9 @@ class DiskCache:
             evicted_count += 1
             evicted_bytes += size
         with self._size_lock:
-            self._size_bytes = current_size
+            # Keep what puts added during the walk. One that landed before the listing is
+            # counted twice, which only brings the next walk sooner; that walk corrects it.
+            self._size_bytes = current_size + self._size_bytes - counted_before
 
         if evicted_count > 0:
             self.metrics.record_cache_eviction(evicted_count, evicted_bytes)

@@ -507,10 +507,7 @@ class ReadPlanner:
         estimated_bytes = 0
 
         actual_paths = [entry.actual_path for entry in manifest_resolution.data_files]
-        try:
-            pq_meta_batch = self.parquet_cache.get_or_load_many(actual_paths)
-        except Exception as e:
-            raise RuntimeError(f"Failed to read Parquet metadata: {e}") from e
+        pq_meta_batch = self.parquet_cache.get_or_load_many(actual_paths)
 
         for entry in manifest_resolution.data_files:
             file_path = entry.file_path

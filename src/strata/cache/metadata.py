@@ -482,7 +482,12 @@ class ParquetMetadataCache:
 
         if errors:
             first_path, first_error = next(iter(errors.items()))
-            raise RuntimeError(f"Failed to load Parquet metadata for {first_path}: {first_error}")
+            if isinstance(first_error, OSError):
+                # Unwrapped, so the scan routes can tell an unreachable object store (a 503).
+                raise first_error
+            raise RuntimeError(
+                f"Failed to load Parquet metadata for {first_path}: {first_error}"
+            ) from first_error
 
         if loaded and self._store is not None:
             to_persist: list[tuple[str, PersistedParquetMeta]] = []

@@ -115,6 +115,18 @@ def warehouse_uri(tmp_path):
     return f"file://{wh}#test_db.events"
 
 
+async def _ran_while_cache_call_held(monkeypatch, state, method: str, call):
+    """Whether the loop ran while ``state``'s cache ``method`` was blocked, and the response."""
+    from httpx import ASGITransport, AsyncClient
+
+    from strata.server import app
+    from tests.conftest import hold, ran_while_held
+
+    gate = hold(monkeypatch, state.fetcher.cache, method)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        return await ran_while_held(gate, call(client))
+
+
 class TestCacheStatsAndEntries:
     def test_stats_returns_disk_cache_stats(self, cache_client):
         client, _ = cache_client
@@ -128,6 +140,16 @@ class TestCacheStatsAndEntries:
         assert resp.status_code == 200
         assert "entries" in resp.json()
         assert isinstance(resp.json()["entries"], list)
+
+    async def test_entries_walks_off_the_loop(self, cache_client, monkeypatch):
+        """Listing reads every entry's sidecar from disk."""
+        _, state = cache_client
+        ran, resp = await _ran_while_cache_call_held(
+            monkeypatch, state, "list_entries", lambda client: client.get("/v1/cache/entries")
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert ran
 
     def test_evictions_with_events(self, cache_client):
         client, _ = cache_client
@@ -152,6 +174,20 @@ class TestClearCache:
         resp = client.post("/v1/cache/clear")
         assert resp.status_code == 200
         assert resp.json() == {"status": "cleared"}
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="DiskCache.clear() hits Windows file-locking on the just-created cache dir",
+    )
+    async def test_clear_removes_off_the_loop(self, cache_client, monkeypatch):
+        """Clearing deletes every cached file."""
+        _, state = cache_client
+        ran, resp = await _ran_while_cache_call_held(
+            monkeypatch, state, "clear", lambda client: client.post("/v1/cache/clear")
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert ran
 
     def test_clear_error_is_500(self, cache_client):
         client, state = cache_client
