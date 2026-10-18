@@ -77,7 +77,7 @@ exhaustive commit history.
   When the server prunes a notebook's earlier values, it now also removes each
   folder file no kept version (current, earlier, failed or pinned) names, so
   old checkpoints no longer stay forever. A file a run is still assembling is
-  never taken. (#PR)
+  never taken. (#1209)
 
 ### Changed
 
