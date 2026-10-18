@@ -100,7 +100,7 @@ exhaustive commit history.
   through it, from a cell or from `notebook.toml`, fails before anything is
   staged, naming the credential, and so does one sent to a remote worker. An
   `rw` mount on `s3`, `gs` or `az` that names no credential fails too, since it
-  would write as the server's own identity. Unset, nothing changes. (#PR)
+  would write as the server's own identity. Unset, nothing changes. (#1217)
 
 ### Changed
 
