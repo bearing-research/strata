@@ -71,6 +71,15 @@ It's a lightweight client with the same API surface for the common operations (`
 
 Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata`: one that uses it fails with a sentence saying so. Scan or read artifacts in a cell on the server and pass the result on, or import a client explicitly where the worker can reach the server.
 
+On a server that authenticates callers (`auth_mode` `trusted_proxy` or
+`api_key`), the client holds no proxy token or API key. Instead, the server
+mints a token for each run and hands it to the cell on its stdin, so it never
+lands in a file, argv or the environment. With it the cell acts as the member who started
+the run, minus any `admin:` scope, on the client's own routes (materialize,
+streams, artifact reads, `put`, tags, names and aliases, the registry audit) and
+on promote for its own notebook session; any other route answers 403. The token
+stops working when the run ends. Run All uses one token for the whole batch.
+
 `strata.promote()` sends an upstream result, and the whole chain behind it, to
 the team store - by the variable name the cell reads it under, not by an
 artifact id you never see:

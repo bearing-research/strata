@@ -122,6 +122,10 @@ class Artifact:
 # ---------------------------------------------------------------------------
 
 
+# strata.auth.run_tokens.RUN_TOKEN_HEADER; this module cannot import strata.
+RUN_TOKEN_HEADER = "X-Strata-Run-Token"
+
+
 class StrataClient:
     """Notebook-venv client over urllib (no httpx / no strata import)."""
 
@@ -137,7 +141,7 @@ class StrataClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._cell_id = cell_id
-        # Sent on every request: auth for a remote shared store. Empty for the local server.
+        # Sent on every request: the run's token when the server authenticates callers.
         self._headers = dict(headers or {})
         # Where ``promote`` posts. Not ``base_url``: with a team store, the client points at
         # that store, but the copy route runs on the notebook server, the only process that

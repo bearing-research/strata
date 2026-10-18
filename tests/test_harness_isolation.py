@@ -277,3 +277,54 @@ def test_a_cell_run_as_the_harness_user_writes_in_its_work_directory(tmp_path, m
     assert "ALLOWED" not in result.stdout, result.stdout
     assert (nb / "work").stat().st_uid == pwd.getpwnam(_HARNESS_USER).pw_uid
     assert (nb / "work" / "out.txt").read_text() == "first, second"
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "linux" and _HARNESS_USER and os.geteuid() == 0),
+    reason="needs Linux, root, and STRATA_TEST_HARNESS_USER naming a second user",
+)
+def test_a_cell_run_as_the_harness_user_scans_a_table_through_its_server(tmp_path, temp_warehouse):
+    """Under trusted_proxy the ambient client holds no proxy token; its run's token stands in."""
+    from strata.auth.principal import principal_context
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.types import Principal
+    from tests.conftest import find_free_port, run_server
+
+    nb = create_notebook(tmp_path, "Scan", initialize_environment=False)
+    for directory in (tmp_path, *tmp_path.parents):
+        if directory == Path(tempfile.gettempdir()) or directory == directory.parent:
+            break
+        os.chmod(directory, 0o755)
+    source = (
+        f"# @table events {temp_warehouse['table_uri']}\n"
+        "scan = strata.materialize(inputs=[events], transform={'executor': 'scan@v1'})\n"
+        "print('ROWS', scan.to_arrow().num_rows)\n"
+        "del scan\n"
+    )
+    add_cell_to_notebook(nb, "scan", None, language="python")
+    write_cell(nb, "scan", source)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.venv_python = sys.executable
+    config = StrataConfig(
+        host="127.0.0.1",
+        port=find_free_port(),
+        cache_dir=tmp_path / "cache",
+        deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="proxy-secret",
+        notebook_harness_user=_HARNESS_USER,
+        rate_limit_enabled=False,
+    )
+
+    async def run():
+        with principal_context(Principal(id="ana")):
+            return await CellExecutor(session).execute_cell("scan", source)
+
+    with run_server(config):
+        result = asyncio.run(run())
+
+    assert result.success, result.error
+    assert "ROWS 500" in result.stdout

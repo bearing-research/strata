@@ -796,6 +796,14 @@ finishes: it keeps running as the harness user, so the server never writes by
 path into a directory it has handed over. A notebook that needs more isolation
 than that wants a worker on another machine.
 
+A cell's ambient `strata` client reaches this server with a token the server
+hands each run on the harness's stdin (see
+[the ambient client](../notebook/cells.md#the-ambient-strata-client)), which
+stands in for the proxy token on the client's routes only and stops working when
+the run ends. Every cell runs as the one harness user, so keep the host's
+`kernel.yama.ptrace_scope` at 1 or higher: at 0, a cell can read the memory of
+another running cell, its token included.
+
 **One harness user serves every tenant, so it is not a tenant isolation
 boundary.** It keeps cells away from the server; it does not keep one tenant's
 cells away from another's. Every cell runs as the same user, and that user has

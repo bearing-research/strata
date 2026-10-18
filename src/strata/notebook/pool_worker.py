@@ -187,8 +187,9 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
     # Path-loaded, not ``import strata``: the warm worker runs in the notebook venv
     # (pyarrow + stdlib only); see notebook_client.py.
     cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
-    # Auth headers for a remote shared store (empty locally). Mirrors harness.inject_client.
-    headers = manifest.get("strata_headers") or None
+    # The run's token, read after the manifest path. Mirrors harness.inject_client.
+    token = manifest.get("strata_run_token")
+    headers = {_client_mod.RUN_TOKEN_HEADER: token} if token else None
     # Variable -> artifact URI, so ``strata.promote("rows")`` names an input the
     # way the cell reads it. Mirrors harness.inject_client.
     input_uris = {
@@ -395,6 +396,9 @@ def main() -> None:
         try:
             with open(manifest_path, "rb") as f:
                 manifest = orjson.loads(f.read())
+            # The next line, never the manifest file: see harness.read_run_token.
+            if manifest.get("run_token_on_stdin"):
+                manifest["strata_run_token"] = sys.stdin.readline().strip()
             result = execute_harness(manifest)
             print(_dumps_result(result), flush=True)
         except Exception as e:

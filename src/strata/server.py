@@ -51,6 +51,7 @@ from strata.auth.principal import (
     set_principal,
     verify_proxy_token,
 )
+from strata.auth.run_tokens import RUN_TOKEN_HEADER, grant_for
 from strata.cache.disk import CachedFetcher
 from strata.cache.warmer import CacheWarmer
 from strata.config import StrataConfig, describe_config_error
@@ -1312,7 +1313,8 @@ async def auth_middleware(request: Request, call_next):
     """Verify the trusted proxy and set the principal context.
 
     Under ``auth_mode="trusted_proxy"``, checks ``X-Strata-Proxy-Token`` and parses the
-    principal, tenant (configured ``tenant_header``) and scopes headers. Health, metrics and
+    principal, tenant (configured ``tenant_header``) and scopes headers. A live cell run's
+    token stands in for either credential on the ambient client's routes. Health, metrics and
     self-authenticating routes skip this.
     """
     state = get_state()
@@ -1335,6 +1337,24 @@ async def auth_middleware(request: Request, call_next):
         or _is_public_publication_request(request)
     ):
         return await call_next(request)
+
+    run_token = request.headers.get(RUN_TOKEN_HEADER)
+    if run_token is not None:
+        grant = grant_for(run_token)
+        if grant is None:
+            logger.warning("auth_failed", reason="run_token_not_live", path=path)
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        if not grant.allows(request.method, path):
+            logger.warning("auth_failed", reason="run_token_route", path=path)
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "A cell's run token does not reach this route"},
+            )
+        set_principal(grant.principal)
+        try:
+            return await call_next(request)
+        finally:
+            set_principal(None)
 
     # Under api_key the key is the credential and there is no proxy. Under
     # trusted_proxy the token proves the caller is the proxy; without it anyone
