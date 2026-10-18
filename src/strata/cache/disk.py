@@ -147,6 +147,10 @@ class DiskCache:
         # Row groups of every tenant's tables: no other account on the host reads them.
         private_dir(self.cache_dir)
         self._remove_other_versions()
+        # The current version's bytes, kept as puts land so a put does not walk the cache.
+        # Another process's writes are not counted; the walk at eviction corrects them.
+        self._size_lock = threading.Lock()
+        self._size_bytes = self.get_size_bytes()
 
     def _remove_other_versions(self) -> None:
         """Delete the directories of other cache versions.
@@ -305,8 +309,14 @@ class DiskCache:
 
             # Another thread may already have written this entry; overwriting it with the same data
             # is fine.
+            try:
+                replaced = path.stat().st_size
+            except FileNotFoundError:
+                replaced = 0
             os.replace(tmp_path, path)
             os.replace(meta_tmp_path, meta_path)
+            with self._size_lock:
+                self._size_bytes += len(stream_bytes) - replaced
 
             self.metrics.record_cache_write(len(stream_bytes))
 
@@ -334,6 +344,8 @@ class DiskCache:
                 shutil.rmtree(item)
             else:
                 item.unlink()
+        with self._size_lock:
+            self._size_bytes = 0
 
     def get_size_bytes(self) -> int:
         """Return the current cache size in bytes (current version only)."""
@@ -424,21 +436,20 @@ class DiskCache:
         """Evict the oldest entries by mtime when the cache exceeds its limit.
 
         Write-time order, not LRU (``get`` does not touch mtime). Evicts down to 80% of the limit
-        so it does not run on every ``put``.
+        so it does not run on every ``put``. Only a count over the limit walks the cache, and
+        the walk resets the count to what is on disk.
         """
-        current_size = self.get_size_bytes()
-        if current_size <= self.max_size_bytes:
+        if self._size_bytes <= self.max_size_bytes:
             return
 
-        size_before = current_size
-
-        versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
-        if not versioned_dir.exists():
-            return
         files = []
-        for path in versioned_dir.rglob(f"*{CACHE_FILE_EXTENSION}"):
-            files.append((path, path.stat().st_mtime, path.stat().st_size))
+        versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
+        if versioned_dir.exists():
+            for path in versioned_dir.rglob(f"*{CACHE_FILE_EXTENSION}"):
+                st = path.stat()
+                files.append((path, st.st_mtime, st.st_size))
         files.sort(key=lambda x: x[1])
+        current_size = size_before = sum(size for _, _, size in files)
 
         # Target 80% to avoid evicting on every put.
         target_size = int(self.max_size_bytes * 0.8)
@@ -451,6 +462,8 @@ class DiskCache:
             current_size -= size
             evicted_count += 1
             evicted_bytes += size
+        with self._size_lock:
+            self._size_bytes = current_size
 
         if evicted_count > 0:
             self.metrics.record_cache_eviction(evicted_count, evicted_bytes)

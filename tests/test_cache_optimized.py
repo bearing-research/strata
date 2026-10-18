@@ -1,5 +1,6 @@
 """Tests for the cache's unparsed read path and entry lifecycle."""
 
+import os
 from pathlib import Path
 
 import pyarrow as pa
@@ -358,3 +359,100 @@ class TestClearPreservesTheMetadataDatabase:
 
         cache.clear()
         assert cache.get_as_stream_bytes(cache_key) is None
+
+
+class TestEvictionWithoutWalkingOnEveryPut:
+    """A put counts its bytes; only a count over the limit walks the cache and evicts.
+
+    Walking every entry on every put made a miss on a large cache cost a full directory scan.
+    """
+
+    @staticmethod
+    def _key(i: int) -> CacheKey:
+        return CacheKey(
+            tenant_id="_default",
+            table_identity=TableIdentity.from_table_id("test_db.events"),
+            snapshot_id=123,
+            file_path="/data/file.parquet",
+            row_group_id=i,
+            projection_fingerprint="abc123",
+        )
+
+    def _put(self, cache: DiskCache, i: int, batch) -> int:
+        """Put entry ``i``, dated ``i`` so eviction goes in put order; return its size."""
+        cache.put(self._key(i), batch)
+        path = cache.get_path(self._key(i))
+        assert path is not None
+        os.utime(path, (i, i))
+        return path.stat().st_size
+
+    @staticmethod
+    def _no_walks(monkeypatch):
+        def walk(self, pattern):
+            raise AssertionError(f"walked the cache for {pattern}")
+
+        monkeypatch.setattr(Path, "rglob", walk)
+
+    def test_a_put_under_the_limit_does_not_walk_the_cache(
+        self, strata_config, sample_batch, monkeypatch
+    ):
+        cache = DiskCache(strata_config)
+        self._no_walks(monkeypatch)
+
+        for i in range(5):
+            self._put(cache, i, sample_batch)
+
+        assert all(cache.contains(self._key(i)) for i in range(5))
+
+    def test_over_the_limit_the_oldest_go(self, strata_config, sample_batch, monkeypatch):
+        cache = DiskCache(strata_config)
+        size = self._put(cache, 0, sample_batch)
+        cache.max_size_bytes = int(size * 3.5)
+
+        for i in range(1, 4):
+            self._put(cache, i, sample_batch)
+
+        # Four entries pass 3.5; eviction goes down to 80% of the limit, 2.8 entries.
+        assert [cache.contains(self._key(i)) for i in range(4)] == [False, False, True, True]
+        assert cache.get_size_bytes() == 2 * size
+
+        # The eviction left the count at what is on disk, so the next put does not walk.
+        self._no_walks(monkeypatch)
+        self._put(cache, 4, sample_batch)
+
+    def test_a_cache_already_over_the_limit_is_counted_on_start(self, strata_config, sample_batch):
+        first = DiskCache(strata_config)
+        size = 0
+        for i in range(4):
+            size = self._put(first, i, sample_batch)
+
+        second = DiskCache(strata_config)
+        second.max_size_bytes = int(size * 3.5)
+        self._put(second, 4, sample_batch)
+
+        assert not second.contains(self._key(0))
+        assert second.get_size_bytes() <= second.max_size_bytes
+
+    def test_rewriting_an_entry_counts_it_once(self, strata_config, sample_batch, monkeypatch):
+        cache = DiskCache(strata_config)
+        size = self._put(cache, 0, sample_batch)
+        cache.max_size_bytes = int(size * 2.5)
+        self._no_walks(monkeypatch)
+
+        for _ in range(5):
+            self._put(cache, 0, sample_batch)
+
+        assert cache.contains(self._key(0))
+
+    def test_clear_resets_the_count(self, strata_config, sample_batch, monkeypatch):
+        cache = DiskCache(strata_config)
+        size = self._put(cache, 0, sample_batch)
+        self._put(cache, 1, sample_batch)
+        cache.max_size_bytes = int(size * 2.5)
+        cache.clear()
+        self._no_walks(monkeypatch)
+
+        self._put(cache, 2, sample_batch)
+        self._put(cache, 3, sample_batch)
+
+        assert cache.contains(self._key(3))
