@@ -14,7 +14,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -2230,6 +2230,45 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def list_versions_by_id_prefix(self, prefix: str) -> list[ArtifactVersion]:
+        """Every version, in any state, of each artifact whose id starts with ``prefix``."""
+        if not prefix:
+            return []
+        like_pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, version, state, provenance_hash, schema_json,
+                       row_count, byte_size, created_at, transform_spec,
+                       input_versions, tenant, principal, content_sha256
+                FROM artifact_versions
+                WHERE id LIKE ? ESCAPE '\\'
+                ORDER BY id, version
+                """,
+                (like_pattern,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            ArtifactVersion(
+                id=row["id"],
+                version=row["version"],
+                state=row["state"],
+                provenance_hash=row["provenance_hash"],
+                schema_json=row["schema_json"],
+                row_count=row["row_count"],
+                byte_size=row["byte_size"],
+                created_at=row["created_at"],
+                transform_spec=row["transform_spec"],
+                input_versions=row["input_versions"],
+                tenant=row["tenant"],
+                principal=row["principal"],
+                content_sha256=row["content_sha256"],
+            )
+            for row in rows
+        ]
+
     def list_latest_by_id_prefix(self, prefix: str) -> list[ArtifactVersion]:
         """Return the current value of each artifact whose id starts with ``prefix``.
 
@@ -2422,12 +2461,22 @@ class ArtifactStore:
         blob_id = attempt_blob_id(artifact_id, attempt) if attempt else artifact_id
         self.blob_store.write_blob(blob_id, version, data)
 
-    def read_blob(self, artifact_id: str, version: int, attempt: str | None = None) -> bytes | None:
-        """Read a version's Arrow IPC bytes (or ``attempt``'s), or None if not found."""
+    def read_blob(
+        self,
+        artifact_id: str,
+        version: int,
+        attempt: str | None = None,
+        *,
+        note_use: bool = True,
+    ) -> bytes | None:
+        """Read a version's Arrow IPC bytes (or ``attempt``'s), or None if not found.
+
+        ``note_use=False`` for a read that is housekeeping, not a use retention should see.
+        """
         # Reading a version's bytes is a use; reading one build attempt's
         # bytes (finalize checking what it wrote) is not.
         return self.blob_store.read_blob(
-            *self._blob_key(artifact_id, version, attempt, note_use=attempt is None)
+            *self._blob_key(artifact_id, version, attempt, note_use=note_use and attempt is None)
         )
 
     def open_blob_reader(self, artifact_id: str, version: int, attempt: str | None = None):
@@ -4170,14 +4219,19 @@ class ArtifactStore:
             )
 
     def _protected_reachable(
-        self, conn: StoreConnection, *, current_values: bool = True
+        self,
+        conn: StoreConnection,
+        *,
+        current_values: bool = True,
+        not_current: Collection[tuple[str, int]] = (),
     ) -> set[tuple[str, int]]:
         """Every version something holds, with its whole chain of inputs.
 
         Roots: names and aliases; pending alias changes; publications (revoked ones
         too) and pins; running builds; and with ``current_values`` the current value
-        of every caller-named id. Deliberately not tenant-scoped: over-protecting is
-        free, and proving chains never cross tenants is not.
+        of every caller-named id, except those in ``not_current``. Deliberately not
+        tenant-scoped: over-protecting is free, and proving chains never cross tenants
+        is not.
         """
         roots_sql = (
             "SELECT artifact_id, version FROM artifact_publications "
@@ -4189,13 +4243,17 @@ class ArtifactStore:
             "UNION SELECT id AS artifact_id, version FROM artifact_versions "
             "WHERE state = 'building'"
         )
+        roots = [(row["artifact_id"], row["version"]) for row in conn.execute(roots_sql)]
         if current_values:
-            roots_sql += (
-                " UNION SELECT id AS artifact_id, MAX(version) AS version "
-                "FROM artifact_versions WHERE minted = 0 "
-                "AND state IN ('ready', 'superseded') GROUP BY id"
-            )
-        roots = conn.execute(roots_sql).fetchall()
+            roots += [
+                (row["artifact_id"], row["version"])
+                for row in conn.execute(
+                    "SELECT id AS artifact_id, MAX(version) AS version "
+                    "FROM artifact_versions WHERE minted = 0 "
+                    "AND state IN ('ready', 'superseded') GROUP BY id"
+                )
+                if (row["artifact_id"], row["version"]) not in not_current
+            ]
         # One read of every recorded edge, walked in memory: a notebook store
         # has a root per cell output, and a query per node would be the sweep.
         inputs: dict[tuple[str, int], str] = {
@@ -4216,7 +4274,7 @@ class ArtifactStore:
         }
 
         reachable: set[tuple[str, int]] = set()
-        pending = [(row["artifact_id"], row["version"]) for row in roots]
+        pending = list(roots)
         while pending:
             node = pending.pop()
             if node in reachable:
@@ -4416,6 +4474,7 @@ class ArtifactStore:
         min_idle_seconds: float = 0.0,
         tenant: str | None = None,
         collect_latest: bool = False,
+        collectable: Collection[tuple[str, int]] = (),
         dry_run: bool = False,
     ) -> dict:
         """Collect the versions nothing needs, least recently used first.
@@ -4428,9 +4487,10 @@ class ArtifactStore:
         Collected: candidates idle beyond ``max_idle_days``; when over ``max_bytes``,
         the least recently used down to 80% of it; with ``keep_superseded``, each id's
         candidates past that many earlier ready/superseded versions (failed ones
-        never count). With none of the three set nothing is collected. An id never
-        loses its highest version while keeping a lower one, so a version number is
-        never reused.
+        never count); and the ``collectable`` versions, which the caller knows nothing
+        needs though each may be its id's current value. With none of the four set
+        nothing is collected. An id never loses its highest version while keeping a
+        lower one, so a version number is never reused.
 
         ``tenant`` limits the sweep, and the ``max_bytes`` measure, to that tenant
         and legacy tenantless rows. Returns ``deleted_count``, ``deleted_bytes``,
@@ -4454,6 +4514,8 @@ class ArtifactStore:
                   AND av.state IN ('ready', 'superseded', 'failed')
                   AND {used} <= ?
             """
+            # Without the current-value rule below, for the ``collectable`` versions.
+            any_value = query
             if not collect_latest:
                 # The current value of a caller-named id is spared by two rules. The version
                 # ``get_latest_version`` resolves (newest ready or superseded) is spared, since a
@@ -4484,19 +4546,34 @@ class ArtifactStore:
             # _USE_RESOLUTION_SECONDS, so a floor honours that lag too.
             floor = min_idle_seconds + _USE_RESOLUTION_SECONDS if min_idle_seconds else 0.0
             params: list[float | str] = [now - floor]
+            filters = ""
             if tenant is not None:
-                query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
+                filters += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
                 params.append(tenant)
             # Least recently used first; the version breaks ties, so a sweep
             # facing an id whose versions share a timestamp takes the oldest.
-            query += f" ORDER BY {used} ASC, av.id ASC, av.version ASC"
+            filters += f" ORDER BY {used} ASC, av.id ASC, av.version ASC"
 
-            protected = self._protected_reachable(conn, current_values=not collect_latest)
+            protected = self._protected_reachable(
+                conn, current_values=not collect_latest, not_current=set(collectable)
+            )
             candidates = [
                 row
-                for row in conn.execute(query, params).fetchall()
+                for row in conn.execute(query + filters, params).fetchall()
                 if (row["id"], row["version"]) not in protected
             ]
+            wanted = set(collectable)
+            if wanted:
+                seen = {(row["id"], row["version"]) for row in candidates}
+                current = [
+                    row
+                    for row in conn.execute(any_value + filters, params).fetchall()
+                    if (row["id"], row["version"]) in wanted - seen
+                    and (row["id"], row["version"]) not in protected
+                ]
+                candidates = sorted(
+                    candidates + current, key=lambda r: (r["used"], r["id"], r["version"])
+                )
             # Measured over what the sweep may collect: a tenant's cap is on
             # its own share, or one tenant's sweep would empty its cache while
             # the others kept the store over the cap.
@@ -4510,7 +4587,11 @@ class ArtifactStore:
                 size_params.append(tenant)
             store_bytes = int(conn.execute(size_sql, size_params).fetchone()[0])
 
-            chosen: dict[tuple[str, int], Any] = {}
+            chosen: dict[tuple[str, int], Any] = {
+                (row["id"], row["version"]): row
+                for row in candidates
+                if (row["id"], row["version"]) in wanted
+            }
             if max_idle_days is not None:
                 idle_before = now - max_idle_days * 86400
                 for row in candidates:

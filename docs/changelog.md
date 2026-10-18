@@ -75,6 +75,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   total size, and a table of its paths and sizes (the first 20) appear ahead of
   the cell's own output, as a markdown display that a cache hit, a reopen and an
   export show too. (#1208)
+- **A `# @output_dir` file goes with the last folder version that names it.**
+  When the server prunes a notebook's earlier values, it now also removes each
+  folder file no kept version (current, earlier, failed or pinned) names, so
+  old checkpoints no longer stay forever. A file a run is still assembling is
+  never taken. (#1209)
 
 ### Changed
 

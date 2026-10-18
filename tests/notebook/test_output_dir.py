@@ -247,6 +247,121 @@ class TestTheCellShowsTheFolder:
         assert "| `` c`d `` | 2 B |" in shown
 
 
+_SAME = "# @output_dir ckpt\n(ckpt / 'same.txt').write_text('same')\n"
+OLD = _SAME + "(ckpt / 'old.txt').write_text('o')\n"
+NEW = _SAME + "(ckpt / 'new.txt').write_text('n')\n"
+
+
+class TestTheFileSweep:
+    """A folder file goes once no manifest version left in the store names it."""
+
+    @staticmethod
+    async def _two_runs(tmp_path):
+        session = _session(tmp_path, writer=OLD)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("w", OLD)).success
+        cell = session.notebook_state.get_cell("w")
+        cell.source = NEW
+        session.re_analyze_cell("w")
+        assert (await executor.execute_cell("w", NEW)).success
+        return session, executor
+
+    @staticmethod
+    def _stored(session, content: bytes) -> bool:
+        import hashlib
+
+        manager = session.get_artifact_manager()
+        sha256 = hashlib.sha256(content).hexdigest()
+        artifact_id = output_dirs.file_artifact_id(manager, "w", sha256)
+        return manager.artifact_store.get_latest_version(artifact_id) is not None
+
+    async def test_a_file_only_a_pruned_manifest_named_goes(self, tmp_path):
+        session, executor = await self._two_runs(tmp_path)
+
+        session.get_artifact_manager().prune(keep_superseded=0, min_idle_seconds=0)
+
+        assert not self._stored(session, b"o")
+        assert self._stored(session, b"same")
+        assert self._stored(session, b"n")
+        read = await executor.execute_cell("r", READER)
+        assert read.success, read.error
+        assert read.outputs["seen"]["preview"] == ["new.txt", "same.txt"]
+
+    async def test_a_pinned_earlier_manifest_keeps_its_files(self, tmp_path):
+        session, _ = await self._two_runs(tmp_path)
+        manager = session.get_artifact_manager()
+        manager.artifact_store.pin_artifact(manager.cell_artifact_id("w", "ckpt"), 1, "review")
+
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+
+        assert self._stored(session, b"o")
+
+    async def test_nothing_goes_while_a_run_is_assembling_a_folder(self, tmp_path):
+        session, _ = await self._two_runs(tmp_path)
+        manager = session.get_artifact_manager()
+
+        with output_dirs.assembling():
+            manager.prune(keep_superseded=0, min_idle_seconds=0)
+        assert self._stored(session, b"o")
+
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+        assert not self._stored(session, b"o")
+
+    async def test_a_run_holds_off_a_sweep_until_its_manifest_names_its_files(
+        self, tmp_path, monkeypatch
+    ):
+        session, executor = await self._two_runs(tmp_path)
+        manager = session.get_artifact_manager()
+        collect = output_dirs.collect
+
+        def prune_before_the_manifest(*args, **kwargs):
+            # The run's files are stored and named by no manifest yet.
+            manifest = collect(*args, **kwargs)
+            manager.prune(keep_superseded=0, min_idle_seconds=0)
+            return manifest
+
+        monkeypatch.setattr(output_dirs, "collect", prune_before_the_manifest)
+        third = "# @output_dir ckpt\n(ckpt / 'third.txt').write_text('3')\n"
+        cell = session.notebook_state.get_cell("w")
+        cell.source = third
+        session.re_analyze_cell("w")
+        assert (await executor.execute_cell("w", third)).success
+
+        assert self._stored(session, b"3")
+
+    async def test_a_manifest_that_cannot_be_read_stops_the_sweep(self, tmp_path):
+        session, _ = await self._two_runs(tmp_path)
+        manager = session.get_artifact_manager()
+        current = manager.artifact_store.get_latest_version(manager.cell_artifact_id("w", "ckpt"))
+        manager.artifact_store.blob_store.delete_blob(current.id, current.version)
+
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+
+        assert self._stored(session, b"o")
+
+    async def test_a_file_swept_while_a_run_reuses_it_is_stored_again(self, tmp_path, monkeypatch):
+        session = _session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("w", WRITER)).success
+        store = session.get_artifact_manager().artifact_store
+        reused = []
+
+        def swept_meanwhile(artifact_id, version):
+            reused.append(artifact_id)
+            store.delete_artifact(artifact_id, version)
+
+        monkeypatch.setattr(store, "record_use", swept_meanwhile)
+        rerun = await executor.execute_cell_rerun("w", WRITER)
+
+        assert rerun.success, rerun.error
+        assert reused  # each unchanged file was reused, and marked as used first
+        manifest, _ = _manifest(session)
+        manager = session.get_artifact_manager()
+        for entry in manifest["files"].values():
+            artifact_id = output_dirs.file_artifact_id(manager, "w", entry["sha256"])
+            assert store.get_artifact(artifact_id, entry["version"]).state == "ready"
+
+
 class TestNotYet:
     async def test_a_loop_cell_is_refused(self, tmp_path):
         source = "# @loop max_iter=2 carry=n\n# @output_dir ckpt\nn = 1\n"

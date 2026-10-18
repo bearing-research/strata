@@ -219,6 +219,13 @@ marked failed then. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
 to keep more, or to `0` to keep every value. Deleting the notebook deletes its
 store.
 
+A `# @output_dir` folder's files are stored one per digest and outlive the
+values that named them, so the same pass then removes each file no kept folder
+version (current, earlier, failed or pinned) still names, once it has gone
+unused for `STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS`. A file a run is still
+assembling is never taken: while any folder cell is running on the server, the
+file pass waits for the next open.
+
 Every sweep, of either store, also removes the temporary files of blob writes
 that died part way (a killed process), once they have gone untouched for an
 hour.
