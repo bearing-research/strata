@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import httpx
 import pytest
 
@@ -74,11 +72,10 @@ def test_a_token_is_refused_once_its_run_ends(server, temp_warehouse):
     assert _scan(server, temp_warehouse, _token(token)).status_code == 401
 
 
-def test_a_token_is_refused_past_its_hard_expiry(server, temp_warehouse, monkeypatch):
-    with run_token(ANA, "s1", 60) as token:
-        later = time.monotonic() + 60 + 61
-        monkeypatch.setattr(run_tokens.time, "monotonic", lambda: later)
-
+def test_a_token_is_refused_past_its_hard_expiry(server, temp_warehouse):
+    """A run past its timeout and the margin, though its block has not exited yet."""
+    # Not by patching time.monotonic: that is the time module's, and freezes the server's loop.
+    with run_token(ANA, "s1", -run_tokens._EXPIRY_MARGIN_SECONDS - 1) as token:
         assert _scan(server, temp_warehouse, _token(token)).status_code == 401
 
 
