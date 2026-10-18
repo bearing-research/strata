@@ -101,7 +101,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   cached across every snapshot that reads it the same way, and a delete misses
   only the row groups it deletes from. A name-mapping change or a format upgrade,
   which make no snapshot, are no longer served from the cache. The cache starts
-  empty after the upgrade. (#PR)
+  empty after the upgrade. (#1214)
 - **A row-group cache miss no longer walks the whole cache.** Each write used to
   list and stat every cached file to check the size cap, so on a cache of a few
   hundred thousand row groups that walk was most of a miss. The cache now counts
@@ -172,7 +172,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 - **Per-snapshot cache counts.** `/v1/cache/stats` no longer returns
   `entries_by_snapshot`, and a `/v1/cache/entries` entry no longer has
-  `snapshot_id`: a cached row group belongs to no one snapshot. (#PR)
+  `snapshot_id`: a cached row group belongs to no one snapshot. (#1214)
 - **Names exported from the `strata` package root.** `strata.Filter`,
   `FilterOp`, `FilterValue`, `StrataConfig`, `CacheKey`, `ReadPlan` and `Task`
   were left over from when the HTTP client lived in this package; import them
