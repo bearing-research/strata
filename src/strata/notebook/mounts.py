@@ -315,7 +315,10 @@ class MountResolver:
             raise RuntimeError(
                 f"Failed to materialize remote mount '{mount.name}' from {mount.uri}: {e}"
             ) from e
-        return ResolvedMount(spec=mount, local_path=local_path, fingerprint=fingerprint)
+        resolved = ResolvedMount(spec=mount, local_path=local_path, fingerprint=fingerprint)
+        # Held as long as the run keeps its resolved mounts, however long it runs.
+        self.mount_cache.hold(resolved, local_path)
+        return resolved
 
     def _prepare_view(
         self,

@@ -198,8 +198,8 @@ links to those copies. When the prefix changes, only the new or changed files
 are downloaded, and notebooks reading the same prefix share one copy when they
 reach the store with the same storage options (a different credential value
 makes its own copy, so a credential that can list a prefix but not read it never
-gets another notebook's bytes). Its files are read-only, since every notebook
-using the view shares them. The cache stays under a size bound
+gets another notebook's bytes). Its files and folders are read-only, since
+every notebook using the view shares them. The cache stays under a size bound
 and drops views unused for some days, least recently used first; see
 [`STRATA_NOTEBOOK_MOUNT_CACHE_DIR`](../reference/configuration.md#notebook) and
 the two settings after it. A worker keeps its cache across jobs. An `rw` mount
