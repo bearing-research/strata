@@ -47,13 +47,13 @@ class Config:
     SLIPPAGE_BPS = 5.0
 
     # --- Storage -------------------------------------------------------
-    # "." resolves to the notebook directory at runtime.
+    # "." is the cell's working directory, the notebook's work/.
     DB_FILENAME = "trading.db"
     LOOKBACK_DAYS = 30
 
 
 def db_path() -> Path:
-    """Where the DuckDB file lives (notebook directory)."""
+    """Where the DuckDB file lives (the notebook's work/)."""
     return Path(".") / Config.DB_FILENAME
 
 

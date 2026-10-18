@@ -55,12 +55,14 @@ from strata.notebook.harness_user import (
     hand_over,
     identity_env,
     let_through,
+    prepare_work_dir,
     read_run_file,
     resolve_harness_user,
     spawn_kwargs,
     write_run_file,
 )
 from strata.notebook.immutability import MutationWarning
+from strata.notebook.layout import WORK_DIR
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.models import (
     CellLanguage,
@@ -4245,6 +4247,7 @@ class CellExecutor:
             "strata_url": self._cell_strata_url(),
             "strata_cell_id": cell_id,
             "strata_promote_url": self._ambient_promote_url(),
+            **self._work_dir_fields(),
         }
         if loop_config is not None:
             manifest["loop"] = loop_config
@@ -4252,6 +4255,19 @@ class CellExecutor:
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f)
         return manifest_path
+
+    def _work_dir_fields(self) -> dict[str, str]:
+        """Where a local cell runs, its notebook's ``work/``, made and handed over here.
+
+        Relative: every local harness starts in the notebook's directory, and a relative
+        change needs no directory above it to be searchable by the cell's user.
+        """
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused:
+            harness_user = None  # the run is refused where the cell would start
+        prepare_work_dir(self.session.path, harness_user)
+        return {"work_dir": WORK_DIR, "notebook_dir": str(self.session.path)}
 
     def _extract_remote_error(self, response: httpx.Response) -> str:
         """Extract the most useful error message from a remote executor response."""
@@ -6552,6 +6568,7 @@ class CellExecutor:
             manifest = {
                 "cells": cell_specs,
                 "upstream_inputs": upstream_inputs,
+                **self._work_dir_fields(),
             }
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 

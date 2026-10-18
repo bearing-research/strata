@@ -217,3 +217,63 @@ def test_a_cell_run_as_the_harness_user_writes_through_a_read_write_mount(tmp_pa
     assert (out / "result.txt").read_text() == "from the cell"
     assert (out / "seed.txt").read_text() == "from the bucket, edited"
     assert not (out / "leak.txt").exists()
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "linux" and _HARNESS_USER and os.geteuid() == 0),
+    reason="needs Linux, root, and STRATA_TEST_HARNESS_USER naming a second user",
+)
+def test_a_cell_run_as_the_harness_user_writes_in_its_work_directory(tmp_path, monkeypatch):
+    """It writes, reads back and overwrites in work/; the notebook's own files are out of reach."""
+    import pwd
+
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+
+    nb = create_notebook(tmp_path, "Work", initialize_environment=False)
+    for directory in (tmp_path, *tmp_path.parents):
+        if directory == Path(tempfile.gettempdir()) or directory == directory.parent:
+            break
+        os.chmod(directory, 0o755)
+    write = "from pathlib import Path\nPath('out.txt').write_text('first')\n"
+    attempts = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "Path('out.txt').write_text(Path('out.txt').read_text() + ', second')\n"
+        "print('READ:', Path('out.txt').read_text())\n"
+        "for name, act in (\n"
+        "    ('modify notebook.toml', lambda: open('../notebook.toml', 'a').close()),\n"
+        "    ('delete a cell', lambda: os.remove('../cells/w.py')),\n"
+        "    ('rename a cell', lambda: os.rename('../cells/w.py', '../cells/x.py')),\n"
+        "    ('plant beside the notebook', lambda: os.mkdir('../renv')),\n"
+        "    ('touch .strata', lambda: open('../.strata/planted', 'w').close()),\n"
+        "):\n"
+        "    try:\n"
+        "        act()\n"
+        "        print(name, 'ALLOWED')\n"
+        "    except PermissionError:\n"
+        "        print(name, 'refused')\n"
+    )
+    add_cell_to_notebook(nb, "w", None, language="python")
+    write_cell(nb, "w", write)
+    add_cell_to_notebook(nb, "a", "w", language="python")
+    write_cell(nb, "a", attempts)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.venv_python = sys.executable
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(deployment_mode="service", notebook_harness_user=_HARNESS_USER)
+        ),
+    )
+    executor = CellExecutor(session)
+
+    assert asyncio.run(executor.execute_cell("w", write)).success
+    result = asyncio.run(executor.execute_cell("a", attempts))
+
+    assert result.success, result.error
+    assert "READ: first, second" in result.stdout
+    assert "ALLOWED" not in result.stdout, result.stdout
+    assert (nb / "work").stat().st_uid == pwd.getpwnam(_HARNESS_USER).pw_uid
+    assert (nb / "work" / "out.txt").read_text() == "first, second"

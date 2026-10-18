@@ -49,6 +49,7 @@ class InspectSession:
             LocalExecutionRefused,
             hand_over,
             identity_env,
+            prepare_work_dir,
             resolve_harness_user,
             spawn_kwargs,
         )
@@ -73,6 +74,8 @@ class InspectSession:
         manifest = {
             "inputs": input_specs,
             "output_dir": str(self._manifest_dir),
+            # Relative to the notebook's directory, where the REPL starts.
+            "work_dir": prepare_work_dir(session.path, harness_user).name,
         }
         manifest_path = self._manifest_dir / "inspect_manifest.json"
         with open(manifest_path, "w") as f:

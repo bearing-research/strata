@@ -190,6 +190,14 @@ df.drop(columns=[...], inplace=True)
 
 Warnings surface as a pill on the cell and a structured entry in the execution log.
 
+### Where a cell runs: `work/`
+
+A cell runs in its notebook's `work/` directory, not beside `notebook.toml`. A file it writes by a relative path (`plt.savefig("fig.png")`) lands in `work/fig.png`, and a later cell reads it back by the same path. `work/` is made on the first run and kept between runs. The `.gitignore` that `strata new` writes leaves it out of git, exports and snapshots leave it out too, and it is never on `sys.path`, so a file a cell wrote there is not imported in place of a library. R cells run there as well.
+
+A file beside the notebook is one directory up: read it as `../data.csv`. A Python cell that opens `data.csv` and finds it only beside the notebook fails with a hint saying so. A SQL connection's relative `path` still resolves against the notebook's directory.
+
+A cell on a [worker](workers.md) runs in a `work/` of its own, made for the run and removed with it. To keep a file from a worker run, write it to an [`# @output_dir`](annotations.md#output_dir) folder.
+
 ### Python-cell annotations
 
 | Annotation         | What it does                                     |

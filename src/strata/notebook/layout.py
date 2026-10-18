@@ -9,6 +9,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# A cell's working directory, beside the notebook's own files: cells write here,
+# never next to notebook.toml.
+WORK_DIR = "work"
+
 # All reproducible from the committed set, and none of it portable between
 # machines (a .venv built on a Mac is broken on Linux).
 IGNORED_PATTERNS: tuple[str, ...] = (
@@ -18,6 +22,8 @@ IGNORED_PATTERNS: tuple[str, ...] = (
     "renv/staging/",
     "__pycache__/",
     "*.pyc",
+    # What cells wrote: their working directory.
+    "/work/",
     # Rewritten by every `strata agent` launch: the server's port and session id.
     "/.mcp.json",
     "/CLAUDE.md",
@@ -28,8 +34,9 @@ _GITIGNORE_HEADER = """\
 #
 # Everything here is rebuilt from notebook.toml, cells/, pyproject.toml and
 # uv.lock. .strata/ holds display outputs, console logs and the artifact
-# store; .venv/ and renv/library/ hold installed packages. `strata agent`
-# writes .mcp.json and CLAUDE.md on each launch.
+# store; .venv/ and renv/library/ hold installed packages; work/ is where
+# cells write their files. `strata agent` writes .mcp.json and CLAUDE.md on
+# each launch.
 """
 
 

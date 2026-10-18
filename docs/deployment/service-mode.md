@@ -778,6 +778,11 @@ unreadable by anyone else, so every cell fails with `Permission denied` on the
 venv's `python`. Install them somewhere world-readable with
 `UV_PYTHON_INSTALL_DIR=/opt/uv-python`. Nothing else needs arranging: the
 per-run directories a cell writes into are handed to the harness user, as is
+each notebook's `work/`, where its cells run. The notebook's directory stays the
+server's, so a cell cannot change `notebook.toml`, its cells or its lockfiles,
+or put a file beside them. Strata makes `work/` itself, refuses one that is a
+link, and changes only that directory's owner, never that of the files an
+earlier run left in it. Also handed over is
 a remote `rw` mount's staging copy (which the server then uploads without
 following any link the cell left in it, so a link to a server file is skipped,
 not synced), the harness runs the venv's interpreter directly rather than

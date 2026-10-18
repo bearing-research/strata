@@ -28,7 +28,7 @@ class TestGitignore:
     def test_it_covers_the_runtime_state(self, notebook):
         contents = (notebook / ".gitignore").read_text()
 
-        for pattern in (".strata/", ".venv/", "renv/library/"):
+        for pattern in (".strata/", ".venv/", "renv/library/", "/work/"):
             assert pattern in contents
 
     def test_an_existing_one_is_never_replaced(self, tmp_path):
@@ -60,11 +60,14 @@ class TestCommittedPaths:
         (notebook / ".strata" / "runtime.json").write_text("{}")
         (notebook / ".venv").mkdir()
         (notebook / ".venv" / "pyvenv.cfg").write_text("")
+        (notebook / "work").mkdir()
+        (notebook / "work" / "fig.png").write_bytes(b"")
 
         paths = {str(p) for p in committed_paths(notebook)}
 
         assert not any(p.startswith(".strata") for p in paths)
         assert not any(p.startswith(".venv") for p in paths)
+        assert not any(p.startswith("work") for p in paths)
 
     def test_cell_tests_are_committed(self, notebook):
         """A cell's tests are as much the notebook as the cell is."""
@@ -107,6 +110,8 @@ class TestAgainstRealGit:
         (notebook / ".strata" / "runtime.json").write_text("{}")
         (notebook / "cells" / "tests").mkdir()
         (notebook / "cells" / "tests" / "test_a1b2c3d4.py").write_text("def test_x(): pass\n")
+        (notebook / "work").mkdir()
+        (notebook / "work" / "fig.png").write_bytes(b"")
         # What a `strata agent` launch leaves behind: a port and a session id.
         _write_agent_config(notebook, "http://127.0.0.1:8765", "sess1234")
 
@@ -119,7 +124,7 @@ class TestAgainstRealGit:
         assert staged == [str(p) for p in committed_paths(notebook)], (
             "git add -A must stage the committed set and nothing else"
         )
-        assert not any(p.startswith((".strata", ".venv")) for p in staged)
+        assert not any(p.startswith((".strata", ".venv", "work")) for p in staged)
 
 
 def test_gitignore_contents_is_stable_and_commented():

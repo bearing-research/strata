@@ -139,6 +139,26 @@ def hand_over(path: Path, user: HarnessUser | None) -> None:
             os.chown(os.path.join(root, name), user.uid, user.gid, follow_symlinks=False)
 
 
+def prepare_work_dir(notebook_dir: Path, user: HarnessUser | None) -> Path:
+    """The notebook's ``work/``, made if missing and owned by the user cells run as.
+
+    One left by an earlier, unisolated run may be a link or a cell's own directory:
+    a link is refused, and only the directory changes owner, never what is in it.
+    The notebook's directory stays the server's, so a cell cannot swap ``work/``.
+    """
+    from strata.notebook.layout import WORK_DIR
+
+    work = notebook_dir / WORK_DIR
+    with contextlib.suppress(FileExistsError):
+        work.mkdir()
+    mode = os.lstat(work).st_mode
+    if not stat.S_ISDIR(mode):
+        raise UnsafeRunFile(f"{work} is not a directory, so cells cannot run in it")
+    if user is not None and user.uid != os.geteuid():
+        os.chown(work, user.uid, user.gid, follow_symlinks=False)
+    return work
+
+
 def let_through(path: Path, user: HarnessUser | None) -> None:
     """Let the harness user reach entries of *path* by name without owning it.
 

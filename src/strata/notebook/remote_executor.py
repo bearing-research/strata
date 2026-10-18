@@ -31,6 +31,7 @@ from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.hardware import hardware_report
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
+from strata.notebook.layout import WORK_DIR
 from strata.notebook.models import MountSpec
 from strata.notebook.mount_cache import (
     DEFAULT_MAX_BYTES,
@@ -907,11 +908,15 @@ def create_notebook_executor_app(
                 for name, rm in resolved_mounts.items()
             }
             manifest_mounts.update(output_dirs.mount_entries(source, output_dir))
+            # As on a server: the cell runs in a work/ of its own, gone with the run.
+            work_dir = output_dir / WORK_DIR
+            work_dir.mkdir()
 
             manifest = {
                 "source": source,
                 "inputs": inputs,
                 "output_dir": str(output_dir),
+                "work_dir": str(work_dir),
                 "mounts": manifest_mounts,
                 "env": runtime_env,
                 # Same as a local harness manifest: without them the worker skipped mutation
