@@ -96,7 +96,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   list and stat every cached file to check the size cap, so on a cache of a few
   hundred thousand row groups that walk was most of a miss. The cache now counts
   its bytes as it writes, from one walk at startup, and walks only to evict
-  once the count passes `STRATA_MAX_CACHE_SIZE_BYTES`. (#PR)
+  once the count passes `STRATA_MAX_CACHE_SIZE_BYTES`. (#1213)
 - **A cell runs in its notebook's `work/`, not beside `notebook.toml`.** Python
   and R cells, Run All, the warm pool and the inspect REPL all start there, so a
   relative path a cell writes lands in `work/` and a file beside the notebook is
