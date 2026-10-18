@@ -2863,7 +2863,8 @@ one; <code>strata new --no-git</code> skips it.</p>
 </ul>
 <p>The <code>.mcp.json</code> and <code>CLAUDE.md</code> that <code>strata agent</code> writes are ignored: each
 launch rewrites them with the server's port and the session id, so they
-describe one machine's run rather than the notebook.</p>
+describe one machine's run rather than the notebook. So is <code>work/</code>, the
+directory cells run in and write their files to.</p>
 <p>The rules live in <code>strata.notebook.layout</code>: <code>committed_paths()</code> returns the
 set for a given directory and <code>IGNORED_PATTERNS</code> is what the <code>.gitignore</code>
 contains, so this list is a rendering of the code rather than a second source

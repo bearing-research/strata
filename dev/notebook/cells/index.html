@@ -945,6 +945,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#where-a-cell-runs-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where a cell runs: work/
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#python-cell-annotations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2769,6 +2780,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#where-a-cell-runs-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where a cell runs: work/
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#python-cell-annotations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3528,6 +3550,10 @@ It appears in the <a href="../../core/registry/#in-the-notebook-the-registry-das
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p>Warnings surface as a pill on the cell and a structured entry in the execution log.</p>
+<h3 id="where-a-cell-runs-work">Where a cell runs: <code>work/</code><a class="headerlink" href="#where-a-cell-runs-work" title="Permanent link">&para;</a></h3>
+<p>A cell runs in its notebook's <code>work/</code> directory, not beside <code>notebook.toml</code>. A file it writes by a relative path (<code>plt.savefig("fig.png")</code>) lands in <code>work/fig.png</code>, and a later cell reads it back by the same path. <code>work/</code> is made on the first run and kept between runs. The <code>.gitignore</code> that <code>strata new</code> writes leaves it out of git, exports and snapshots leave it out too, and it is never on <code>sys.path</code>, so a file a cell wrote there is not imported in place of a library. R cells run there as well.</p>
+<p>A file beside the notebook is one directory up: read it as <code>../data.csv</code>. A Python cell that opens <code>data.csv</code> and finds it only beside the notebook fails with a hint saying so. A SQL connection's relative <code>path</code> still resolves against the notebook's directory.</p>
+<p>A cell on a <a href="../workers/">worker</a> runs in a <code>work/</code> of its own, made for the run and removed with it. To keep a file from a worker run, write it to an <a href="../annotations/#output_dir"><code># @output_dir</code></a> folder.</p>
 <h3 id="python-cell-annotations">Python-cell annotations<a class="headerlink" href="#python-cell-annotations" title="Permanent link">&para;</a></h3>
 <table>
 <thead>

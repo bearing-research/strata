@@ -2079,7 +2079,7 @@
 <li><code>TICKER_WHITELIST</code>: the LLM <em>cannot</em> place orders in tickers outside this list, even if a headline mentions one</li>
 </ul>
 <h2 id="duckdb-schema">DuckDB schema<a class="headerlink" href="#duckdb-schema" title="Permanent link">&para;</a></h2>
-<p>One file: <code>trading.db</code> next to the notebook. Tables:</p>
+<p>One file: <code>work/trading.db</code> in the notebook's directory. Tables:</p>
 <ul>
 <li><code>news_raw</code>: raw headlines (idempotent insert by <code>article_id</code>)</li>
 <li><code>signals</code>: extracted sentiment per article</li>
@@ -2186,13 +2186,13 @@ nothing computationally, the real work starts in <code>helpers</code>.</p>
 <a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a>    <span class="n">SLIPPAGE_BPS</span> <span class="o">=</span> <span class="mf">5.0</span>
 <a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a>
 <a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a>    <span class="c1"># --- Storage -------------------------------------------------------</span>
-<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a>    <span class="c1"># "." resolves to the notebook directory at runtime.</span>
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a>    <span class="c1"># "." is the cell's working directory, the notebook's work/.</span>
 <a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a>    <span class="n">DB_FILENAME</span> <span class="o">=</span> <span class="s2">"trading.db"</span>
 <a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a>    <span class="n">LOOKBACK_DAYS</span> <span class="o">=</span> <span class="mi">30</span>
 <a id="__codelineno-1-53" name="__codelineno-1-53" href="#__codelineno-1-53"></a>
 <a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a>
 <a id="__codelineno-1-55" name="__codelineno-1-55" href="#__codelineno-1-55"></a><span class="k">def</span><span class="w"> </span><span class="nf">db_path</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
-<a id="__codelineno-1-56" name="__codelineno-1-56" href="#__codelineno-1-56"></a><span class="w">    </span><span class="sd">"""Where the DuckDB file lives (notebook directory)."""</span>
+<a id="__codelineno-1-56" name="__codelineno-1-56" href="#__codelineno-1-56"></a><span class="w">    </span><span class="sd">"""Where the DuckDB file lives (the notebook's work/)."""</span>
 <a id="__codelineno-1-57" name="__codelineno-1-57" href="#__codelineno-1-57"></a>    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"."</span><span class="p">)</span> <span class="o">/</span> <span class="n">Config</span><span class="o">.</span><span class="n">DB_FILENAME</span>
 <a id="__codelineno-1-58" name="__codelineno-1-58" href="#__codelineno-1-58"></a>
 <a id="__codelineno-1-59" name="__codelineno-1-59" href="#__codelineno-1-59"></a>

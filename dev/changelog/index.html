@@ -3740,6 +3740,15 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell runs in its notebook's <code>work/</code>, not beside <code>notebook.toml</code>.</strong> Python
+  and R cells, Run All, the warm pool and the inspect REPL all start there, so a
+  relative path a cell writes lands in <code>work/</code> and a file beside the notebook is
+  <code>../&lt;path&gt;</code>; a Python cell that misses one gets a hint naming it. Under
+  <code>STRATA_NOTEBOOK_HARNESS_USER</code>, where a relative write failed with
+  <code>PermissionError</code> in the server's directory, <code>work/</code> is handed to the cell's
+  user and the notebook's own files stay the server's. A worker cell gets a
+  <code>work/</code> of its own for the run. <code>strata new</code> gitignores <code>work/</code>, and exports
+  leave it out. (#1212)</li>
 <li><strong>A catalog names its Strata credential with <code>strata_credential</code>.</strong>
   <code>credential</code> is pyiceberg's own key, a REST catalog's OAuth
   <code>client_id:secret</code> (Polaris's quickstart sets it), and now reaches the catalog
