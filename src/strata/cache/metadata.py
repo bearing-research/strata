@@ -273,6 +273,7 @@ class ManifestEntry:
 
     file_path: str  # As the manifest names it
     actual_path: str  # Resolved for reading
+    file_size_in_bytes: int  # As the manifest records it; part of the row-group cache key
     # Positional deletes; which apply is pyiceberg's call (sequence numbers, partition,
     # referenced file).
     delete_files: tuple[DeleteFileEntry, ...] = ()
@@ -717,6 +718,7 @@ class ManifestCache:
                         ManifestEntry(
                             file_path=entry["file_path"],
                             actual_path=entry["actual_path"],
+                            file_size_in_bytes=entry["file_size_in_bytes"],
                             delete_files=tuple(
                                 DeleteFileEntry(**delete) for delete in entry["delete_files"]
                             ),

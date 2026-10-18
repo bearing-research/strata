@@ -71,8 +71,8 @@ def _stat_identity(file_path: str) -> tuple[float | None, int | None]:
 
 # Bump when a table's layout or a stored value's meaning changes; a store in another
 # version is discarded. Manifest entries carry delete files (1), equality deletes (2),
-# identity-partition values (3).
-METADATA_STORE_VERSION = 3
+# identity-partition values (3), file sizes (4).
+METADATA_STORE_VERSION = 4
 
 
 class MetadataStore:

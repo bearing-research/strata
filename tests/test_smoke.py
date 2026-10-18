@@ -116,7 +116,7 @@ class TestCacheKey:
         key = CacheKey(
             tenant_id="_default",
             table_identity=identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc123",
@@ -175,7 +175,7 @@ class TestDiskCache:
         key = CacheKey(
             tenant_id="_default",
             table_identity=identity,
-            snapshot_id=1,
+            file_size=1024,
             file_path="/test.parquet",
             row_group_id=0,
             projection_fingerprint="*",
@@ -203,7 +203,7 @@ class TestDiskCache:
         key = CacheKey(
             tenant_id="_default",
             table_identity=identity,
-            snapshot_id=1,
+            file_size=1024,
             file_path="/test.parquet",
             row_group_id=0,
             projection_fingerprint="*",

@@ -36,7 +36,7 @@ def _task(row_group_id: int = 0) -> Task:
     key = CacheKey(
         tenant_id="_default",
         table_identity=TableIdentity(catalog="strata", namespace="db", table="events"),
-        snapshot_id=1,
+        file_size=1024,
         file_path="/data/file.parquet",
         row_group_id=row_group_id,
         projection_fingerprint="all",

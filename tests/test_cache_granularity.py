@@ -46,7 +46,7 @@ class TestCacheKeyGranularity:
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc123",
@@ -54,7 +54,7 @@ class TestCacheKeyGranularity:
         key2 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="def456",
@@ -68,7 +68,7 @@ class TestCacheKeyGranularity:
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc123",
@@ -76,7 +76,7 @@ class TestCacheKeyGranularity:
         key2 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="def456",
@@ -90,7 +90,7 @@ class TestCacheKeyGranularity:
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="abc123",
@@ -98,7 +98,7 @@ class TestCacheKeyGranularity:
         key2 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=1,
             projection_fingerprint="abc123",
@@ -121,7 +121,7 @@ class TestDiskCacheGranularity:
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="proj1",
@@ -129,7 +129,7 @@ class TestDiskCacheGranularity:
         key2 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="proj2",
@@ -152,7 +152,7 @@ class TestDiskCacheGranularity:
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="proj1",
@@ -160,7 +160,7 @@ class TestDiskCacheGranularity:
         key2 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="proj2",
@@ -183,7 +183,7 @@ class TestDiskCacheGranularity:
         key1 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=0,
             projection_fingerprint="proj1",
@@ -191,7 +191,7 @@ class TestDiskCacheGranularity:
         key2 = CacheKey(
             tenant_id="_default",
             table_identity=table_identity,
-            snapshot_id=123,
+            file_size=1024,
             file_path="/data/file.parquet",
             row_group_id=1,
             projection_fingerprint="proj1",
@@ -231,7 +231,7 @@ class TestDiskCacheGranularity:
             cache_key=CacheKey(
                 tenant_id="_default",
                 table_identity=table_identity,
-                snapshot_id=123,
+                file_size=1024,
                 file_path=str(parquet_path),
                 row_group_id=0,
                 projection_fingerprint=CacheKey.compute_projection_fingerprint(["id"]),
@@ -248,7 +248,7 @@ class TestDiskCacheGranularity:
             cache_key=CacheKey(
                 tenant_id="_default",
                 table_identity=table_identity,
-                snapshot_id=123,
+                file_size=1024,
                 file_path=str(parquet_path),
                 row_group_id=0,
                 projection_fingerprint=CacheKey.compute_projection_fingerprint(None),
@@ -267,7 +267,7 @@ class TestDiskCacheGranularity:
             cache_key=CacheKey(
                 tenant_id="_default",
                 table_identity=table_identity,
-                snapshot_id=123,
+                file_size=1024,
                 file_path=str(parquet_path),
                 row_group_id=0,
                 projection_fingerprint=CacheKey.compute_projection_fingerprint(["id"]),

@@ -29,7 +29,7 @@ CACHE_META_EXTENSION = ".meta.json"
 
 # Bump when the cache format changes. Baked into the directory layout; a DiskCache deletes other
 # versions' directories at startup, since nothing else would evict them.
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 # A cache directory of some version, current or not: ``v`` and digits only.
 _VERSION_DIR = re.compile(r"v\d+")
@@ -68,7 +68,6 @@ class CacheEntryMetadata:
     """
 
     table_id: str
-    snapshot_id: int
     file_path: str
     row_group_id: int
     columns: list[str] | None
@@ -81,8 +80,7 @@ class CacheEntryMetadata:
 class CacheStats:
     """Aggregate statistics for the disk cache (current cache version only).
 
-    Timestamps are epoch seconds, ``None`` when empty; ``entries_by_snapshot`` is keyed by
-    ``"table_id:snapshot_id"``.
+    Timestamps are epoch seconds, ``None`` when empty.
     """
 
     total_entries: int
@@ -92,7 +90,6 @@ class CacheStats:
     oldest_entry: float | None
     newest_entry: float | None
     entries_by_table: dict[str, int]
-    entries_by_snapshot: dict[str, int]
 
 
 class Cache(Protocol):
@@ -297,7 +294,6 @@ class DiskCache:
 
             metadata = CacheEntryMetadata(
                 table_id=key.table_id,
-                snapshot_id=key.snapshot_id,
                 file_path=key.file_path,
                 row_group_id=key.row_group_id,
                 columns=None,  # Could be extracted from projection_fingerprint if needed
@@ -365,7 +361,6 @@ class DiskCache:
         total_size = 0
         timestamps: list[float] = []
         by_table: dict[str, int] = {}
-        by_snapshot: dict[str, int] = {}
 
         versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
         if not versioned_dir.exists():
@@ -377,7 +372,6 @@ class DiskCache:
                 oldest_entry=None,
                 newest_entry=None,
                 entries_by_table={},
-                entries_by_snapshot={},
             )
 
         for meta_path in versioned_dir.rglob(f"*{CACHE_META_EXTENSION}"):
@@ -392,9 +386,6 @@ class DiskCache:
                 timestamps.append(meta.created_at)
 
                 by_table[meta.table_id] = by_table.get(meta.table_id, 0) + 1
-
-                snap_key = f"{meta.table_id}:{meta.snapshot_id}"
-                by_snapshot[snap_key] = by_snapshot.get(snap_key, 0) + 1
             except Exception:
                 continue
 
@@ -412,7 +403,6 @@ class DiskCache:
             oldest_entry=oldest,
             newest_entry=newest,
             entries_by_table=by_table,
-            entries_by_snapshot=by_snapshot,
         )
 
     def list_entries(self) -> list[CacheEntryMetadata]:
