@@ -2935,7 +2935,7 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 <tbody>
 <tr>
 <td><code>admin:cache</code></td>
-<td><code>POST /v1/cache/clear</code>, <code>GET /v1/cache/entries</code>, <code>GET /v1/cache/histogram</code>, <code>GET /v1/debug/cache/inspect</code>, <code>POST /v1/metadata/cleanup</code></td>
+<td><code>POST /v1/cache/clear</code>, <code>GET /v1/cache/stats</code>, <code>GET /v1/cache/entries</code>, <code>GET /v1/cache/histogram</code>, <code>GET /v1/debug/cache/inspect</code>, <code>POST /v1/metadata/cleanup</code></td>
 </tr>
 <tr>
 <td><code>admin:tenants</code></td>
@@ -3338,7 +3338,8 @@ than that wants a worker on another machine.</p>
 <p>A cell's ambient <code>strata</code> client reaches this server with a token the server
 hands each run on the harness's stdin (see
 <a href="../../notebook/cells/#the-ambient-strata-client">the ambient client</a>), which
-stands in for the proxy token on the client's routes only and stops working when
+stands in for the proxy token (or, under <code>api_key</code>, the key) on the client's
+routes only and stops working when
 the run ends. Every cell runs as the one harness user, so keep the host's
 <code>kernel.yama.ptrace_scope</code> at 1 or higher: at 0, a cell can read the memory of
 another running cell, its token included.</p>
@@ -3430,7 +3431,11 @@ Google credentials (its application default credentials), so one with none is
 refused in the same three places.
 A <code>${VAR}</code> in a connection's <code>auth</code> reads the notebook's env, never the server's
 environment, which would otherwise go to whatever host the notebook names; a
-secret the server holds reaches a connection only as a named <code>credential</code>.</p>
+secret the server holds reaches a connection only as a named <code>credential</code>.
+<code>STRATA_NOTEBOOK_CREDENTIAL_PATHS</code> keeps a named credential to the notebooks
+under some directories, and <code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code> says who may
+mount one read-write (see <a href="../../reference/configuration/#notebook">Configuration</a>
+and <a href="../../reference/notebook-toml/#named-credentials">Named credentials</a>).</p>
 <p>Prompt cells call their model from the server process too, and show the author
 what came back. A <code>base_url</code> from the notebook's <code>[ai]</code> section is checked like
 an <code>@fetch</code> URL: http(s) only, and a host on a loopback, private or link-local

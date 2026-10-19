@@ -2401,8 +2401,9 @@ reads this file rather than parsing cell sources:</p>
 </code></pre></div>
 <p><code>uri</code> is as the cell wrote it; a SQL cell's table appears as
 <code>&lt;catalog&gt;:&lt;namespace&gt;.&lt;table&gt;</code>. <code>catalog</code> is the configured catalog the URI
-names, or <code>null</code> for a warehouse path. <code>snapshot_id</code> is <code>null</code> for a table
-with no snapshots yet. A failed run leaves the cell's entry as it was, and a
+names, or <code>null</code> for a warehouse path or the server's default catalog
+(<code>STRATA_CATALOG_NAME</code>). <code>snapshot_id</code> is <code>null</code> for a table with no snapshots
+yet. A failed run leaves the cell's entry as it was, and a
 cell that stops reading tables, or is deleted, drops out.</p>
 <h2 id="gotchas">Gotchas<a class="headerlink" href="#gotchas" title="Permanent link">&para;</a></h2>
 <ul>

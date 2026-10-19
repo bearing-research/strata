@@ -2307,7 +2307,7 @@ the <a href="../cli/">Notebook CLI</a> for the full command surface. The rest of
 is the file-format contract underneath both.</p>
 <h2 id="on-disk-layout">On-disk layout<a class="headerlink" href="#on-disk-layout" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>my_analysis/
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── .gitignore             # written by `strata new`: keeps .strata/ and .venv/ out of git
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── .gitignore             # written by `strata new`: keeps .strata/, .venv/ and work/ out of git
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── notebook.toml          # committed config: cells, env, workers, mounts
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├── pyproject.toml         # uv-managed dependencies
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>├── uv.lock                # written by uv; do not hand-edit
@@ -2315,7 +2315,8 @@ is the file-format contract underneath both.</p>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   ├── load.py
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   ├── notes.md
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>│   └── stats.py
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>└── .strata/               # runtime state - NEVER create, edit, or commit
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>├── work/                  # where cells run and write files - not committed
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>└── .strata/               # runtime state - NEVER create, edit, or commit
 </code></pre></div>
 <p><strong><code>.strata/</code> is hands-off.</strong> Display outputs, provenance hashes, console
 snapshots, and the artifact store live there; the server and CLI manage

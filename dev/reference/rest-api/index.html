@@ -4297,7 +4297,8 @@ cell is already running (execute, close, delete) carries a plain string.</p>
 check's <code>400</code> (missing or invalid tenant header) and <code>403</code> (tenant not
 enabled), and the rate limiter's <code>429</code>, which also sets <code>Retry-After</code> (whole
 seconds) and <code>X-RateLimit-Limit-Type</code>. A stream refused by QoS admission is a
-JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</code>.</p>
+JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</code>, and an unreachable object
+store is a JSON <code>503</code> with <code>Retry-After</code>.</p>
 <p>Validation errors (<code>422</code>) come from Pydantic and contain structured field info:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
@@ -4328,7 +4329,7 @@ JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</c
 </tr>
 <tr>
 <td><code>400</code></td>
-<td>Malformed request (invalid path, bad enum value, a table URI that names no <code>namespace.table</code>, a scan of a column the table does not have)</td>
+<td>Malformed request (invalid path, bad enum value, a table URI that names no <code>namespace.table</code>, a scan of a column the table does not have, a transform param key starting with <code>_</code> at any depth, which is reserved for the server's own marks)</td>
 </tr>
 <tr>
 <td><code>401</code></td>
@@ -4364,7 +4365,7 @@ JSON <code>429</code> (<code>{"error", "tier"}</code>) with <code>Retry-After</c
 </tr>
 <tr>
 <td><code>503</code></td>
-<td>The server is draining for shutdown and takes no new materialize requests</td>
+<td>The server is draining for shutdown and takes no new materialize requests, or the object store holding a table could not be reached while planning a scan or resolving a transform's table input (with <code>Retry-After: 5</code>; access denied and missing files are not reported this way)</td>
 </tr>
 <tr>
 <td><code>504</code></td>
@@ -4782,7 +4783,9 @@ not in the server's <code>available_python_versions</code> is a <code>400</code>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-64-1" name="__codelineno-64-1" href="#__codelineno-64-1"></a>PUT /v1/notebooks/{session_id}/workers
 </code></pre></div>
 <p>Replaces the notebook's <code>[[workers]]</code>. A worker named <code>local</code> is refused with
-<code>400</code>: the name is reserved for the built-in worker.</p>
+<code>400</code>: the name is reserved for the built-in worker. In service mode, or with
+<code>STRATA_NOTEBOOK_WORKERS_EDITABLE=false</code>, the server manages workers and the
+request is refused with <code>403</code>.</p>
 <h3 id="ssh-workers">SSH Workers<a class="headerlink" href="#ssh-workers" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-65-1" name="__codelineno-65-1" href="#__codelineno-65-1"></a>GET    /v1/notebooks/{session_id}/workers/ssh
 <a id="__codelineno-65-2" name="__codelineno-65-2" href="#__codelineno-65-2"></a>POST   /v1/notebooks/{session_id}/workers/ssh

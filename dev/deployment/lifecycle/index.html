@@ -2252,7 +2252,7 @@
 <tr>
 <td><strong>Notebook storage</strong></td>
 <td><code>~/.strata/notebooks/</code></td>
-<td>One subdirectory per notebook: <code>notebook.toml</code>, <code>cells/*.py</code>, <code>pyproject.toml</code>, <code>uv.lock</code>, <code>.strata/</code> (per-notebook runtime), <code>.venv/</code> (per-notebook venv)</td>
+<td>One subdirectory per notebook: <code>notebook.toml</code>, <code>cells/*.py</code>, <code>pyproject.toml</code>, <code>uv.lock</code>, <code>work/</code> (where cells write files), <code>.strata/</code> (per-notebook runtime), <code>.venv/</code> (per-notebook venv)</td>
 <td>Always - this is your work</td>
 </tr>
 <tr>
@@ -2273,17 +2273,24 @@
 that warehouse's Iceberg catalog in SQLite at <code>~/.strata/meta.sqlite</code> (or
 <code>STRATA_METADATA_DB</code>). It holds those tables' definitions, not a cache: back it
 up if you write tables that way.</p>
+<p>Read-only remote mounts are kept once per machine in the mount cache,
+<code>STRATA_NOTEBOOK_MOUNT_CACHE_DIR</code> (by default <code>mount_cache</code> beside the notebook
+storage directory, so <code>~/.strata/mount_cache/</code>). It is a cache, safe to delete
+while the server is stopped. See <a href="../../reference/configuration/#notebook">Configuration</a>.</p>
 <p>Inside each notebook directory:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mynotebook/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── notebook.toml             # committed config - schema: notebook-toml.md
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── pyproject.toml            # uv-managed deps for this notebook
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── uv.lock                   # pinned versions
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── cells/                    # one .py per cell - committed source
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── .strata/                  # runtime state - gitignored
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── runtime.json          # display outputs, provenance hashes, env metadata
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── console/              # per-cell stdout/stderr (one JSON per cell)
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    └── artifacts/            # SQLite + blobs (cached cell outputs)
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>└── .venv/                    # uv-materialized venv - gitignored, host-specific
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── work/                     # where cells run and write files - gitignored
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>└── .strata/                  # runtime state - gitignored
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── runtime.json          # display outputs, provenance hashes, env metadata
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    ├── console/              # per-cell stdout/stderr (one JSON per cell)
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    ├── fetch/                # the bytes each @fetch last read
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    ├── tables/index.json     # the tables each cell's last good run read
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    └── artifacts/            # SQLite + blobs (cached cell outputs)
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>└── .venv/                    # uv-materialized venv - gitignored, host-specific
 </code></pre></div>
 <p>The <code>.strata/artifacts/</code> directory is the <strong>per-notebook</strong> artifact store. It grows as cells produce outputs and is the thing that makes "re-run an unchanged cell" instant.</p>
 <h2 id="backup">Backup<a class="headerlink" href="#backup" title="Permanent link">&para;</a></h2>
@@ -2459,7 +2466,7 @@ hour.</p>
 </code></pre></div>
 <p>Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; service mode requires the <code>admin:cache</code> scope. Safe to run at any time - the worst case is the next read repopulates from Parquet.</p>
 <h2 id="disk-usage-budgeting">Disk-usage budgeting<a class="headerlink" href="#disk-usage-budgeting" title="Permanent link">&para;</a></h2>
-<p>There are <strong>two</strong> caps to understand, and they don't cover everything.</p>
+<p>There are <strong>three</strong> caps to understand, and they don't cover everything.</p>
 <table>
 <thead>
 <tr>
@@ -2482,11 +2489,18 @@ hour.</p>
 <td>The Core artifact store (<code>~/.strata/artifacts/</code>), least recently used first, on the hourly sweep</td>
 <td>The notebook-scoped artifact stores, and anything named, pinned or published</td>
 </tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES</code></td>
+<td>20 GiB</td>
+<td>The mount cache (<code>~/.strata/mount_cache/</code>), least recently used views first; views unused for <code>STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS</code> (30) go too</td>
+<td>Read-write mounts, which are not cached</td>
+</tr>
 </tbody>
 </table>
 <p>Things with <strong>no built-in size limit</strong>:</p>
 <ul>
 <li><code>~/.strata/notebooks/*/​.strata/artifacts/</code> - per-notebook artifact stores. Each cell output keeps its current value and a few earlier ones (<code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code>), so a store grows with the number and size of a notebook's outputs rather than with every run.</li>
+<li><code>~/.strata/notebooks/*/work/</code> - what cells write by a relative path, kept between runs. Delete files there once you no longer need them.</li>
 <li><code>~/.strata/notebooks/*/​.venv/</code> - per-notebook venvs. Grow with each <code>uv add</code>; the heaviest notebooks (torch + cuda) can run to several GB each. Use shared system packages or smaller deps if disk is tight.</li>
 </ul>
 <p>Practical guidance:</p>

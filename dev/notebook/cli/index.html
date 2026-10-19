@@ -2572,9 +2572,10 @@ run</code> is the expensive step. See
 </code></pre></div>
 <p>Creates <code>&lt;parent&gt;/my_analysis/</code> with <code>notebook.toml</code>, <code>pyproject.toml</code>
 (pre-seeded with the notebook runtime packages), an empty <code>cells/</code>
-directory and a <code>.gitignore</code> that keeps <code>.strata/</code>, <code>.venv/</code> and
-<code>renv/library/</code> out of version control (skip it with <code>--no-git</code>; an existing
-<code>.gitignore</code> is never replaced), then syncs the venv (skip with <code>--no-env</code>;
+directory and a <code>.gitignore</code> (skip it with <code>--no-git</code>; an existing
+<code>.gitignore</code> is never replaced). The <code>.gitignore</code> keeps <code>.strata/</code>, <code>.venv/</code>,
+<code>renv/library/</code>, <code>work/</code>, and the <code>.mcp.json</code> and <code>CLAUDE.md</code> that
+<code>strata agent</code> writes, out of version control. It then syncs the venv (skip with <code>--no-env</code>;
 <code>strata run</code> syncs it later). Idempotent on an existing notebook directory:
 the notebook is left as it is (its id, cells, configuration and
 dependencies), and only missing scaffolding is added, so re-running it never
@@ -2582,8 +2583,7 @@ orphans artifacts or loses settings.</p>
 <p><code>--project-mount [NAME]</code> adds a notebook-level <strong>read-only mount of <code>--parent</code></strong>
 (the project directory) as a <code>Path</code> variable <code>NAME</code> (default <code>project</code>) in every
 cell, so cells read project files as <code>open(project / "file")</code> without absolute
-paths, even though a cell runs with its working directory set to the notebook
-dir. The mount is <strong>pinned</strong>, so it never gets fingerprinted (no directory
+paths, even though a cell runs in the notebook's <code>work/</code> directory. The mount is <strong>pinned</strong>, so it never gets fingerprinted (no directory
 hashing, and the project's own churn never re-stales cells). This is the
 scratchpad-friendly default when the notebook lives in a subdirectory of a
 project (see <a href="../scratchpad/">the notebook as an agent's scratchpad</a>).</p>

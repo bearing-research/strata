@@ -3083,6 +3083,7 @@ routes, and the host sets a notebook's default worker with
 </code></pre></div>
 <p>The worker annotation is the <strong>only</strong> change needed; the cell code itself is identical to local execution. On a worker that runs locked environments the cell gets the notebook's own packages; on one that does not, the worker's image needs them installed.</p>
 <p>A <a href="../cells/#loop-cells">loop cell</a> is the exception: it runs only on the notebook's own server, so a <code># @loop</code> cell sent to a remote worker (by its <code># @worker</code> or the notebook's default) fails before it starts. Give it <code># @worker local</code>, or run the part that needs the worker in an ordinary cell.</p>
+<p>A worker cell runs in a <code>work/</code> directory made for the run and removed with it, so a file it writes by a relative path does not come back. To keep files from a worker run, write them to an <a href="../annotations/#output_dir"><code># @output_dir</code></a> folder, which the worker returns with the result.</p>
 <h3 id="precedence">Precedence<a class="headerlink" href="#precedence" title="Permanent link">&para;</a></h3>
 <p>When multiple levels define a worker, the most specific wins:</p>
 <ol>

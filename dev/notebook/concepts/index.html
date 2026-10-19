@@ -2479,12 +2479,15 @@ explicit <code>map_location</code> - see the device/placement guidance in
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>├── cells/
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   ├── a1b2c3d4.py        # Cell source files
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   └── e5f6g7h8.py
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>└── .strata/               # Gitignored, runtime state, not committed
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    ├── runtime.json           # Display outputs, provenance hashes, env metadata
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    ├── console/               # Per-cell stdout/stderr ({cell_id}.json)
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    └── artifacts/
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>        ├── artifacts.sqlite   # Artifact metadata
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>        └── blobs/             # Serialized cell outputs
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>├── work/                  # Gitignored: where cells run and write their files
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>└── .strata/               # Gitignored, runtime state, not committed
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    ├── runtime.json           # Display outputs, provenance hashes, env metadata
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    ├── console/               # Per-cell stdout/stderr ({cell_id}.json)
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    ├── fetch/                 # The bytes each @fetch last read
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    ├── tables/index.json      # The tables each cell's last good run read
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    └── artifacts/
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>        ├── artifacts.sqlite   # Artifact metadata
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>        └── blobs/             # Serialized cell outputs
 </code></pre></div>
 <p><code>notebook.toml</code> holds stable config you'd commit to git; <code>.strata/</code> holds runtime state that changes on every execution (display outputs, console snapshots, the last <code>uv sync</code> timestamp, per-cell provenance hashes). <code>notebook.toml</code>'s <code>updated_at</code> tracks only structural edits (adding/removing cells, changing workers or mounts), so example notebooks don't churn under version control.</p>
 <p><code>notebook.toml</code> defines the notebook identity and cell ordering:</p>
