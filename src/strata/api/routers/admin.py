@@ -1,11 +1,14 @@
-"""Admin routes: the server-managed notebook worker registry and per-tenant observability.
+"""Admin routes: the server-managed notebook worker registry, named credentials and
+catalogs, and per-tenant observability.
 
 Worker routes need the ``admin:notebook-workers`` scope under principal auth, in either mode:
-a personal server's caller already runs cells as its owner. Tenant routes need ``admin:tenants``.
+a personal server's caller already runs cells as its owner. Credential routes need
+``admin:notebook-credentials``, tenant routes ``admin:tenants``.
 """
 
 from __future__ import annotations
 
+import re
 import time
 
 import anyio.to_thread
@@ -244,6 +247,89 @@ async def reload_admin_notebook_workers():
     records = await anyio.to_thread.run_sync(get_server_managed_worker_records)
     prune_worker_health_cache(records)
     return await _serialize_admin_notebook_workers(records, force_refresh=True)
+
+
+class AdminNotebookCredentialsRequest(BaseModel):
+    """The named credential and catalog settings, replaced together."""
+
+    notebook_credentials: dict[str, dict[str, str]] = Field(default_factory=dict)
+    notebook_mount_credentials: dict[str, str] = Field(default_factory=dict)
+    notebook_credential_paths: dict[str, list[str]] = Field(default_factory=dict)
+    # None, not {}: once set, a name not listed is read-only.
+    notebook_credential_writers: dict[str, list[str]] | None = None
+    catalogs: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+_REDACTED = "<redacted>"
+# A catalog's own keys that may carry a secret; a credential's every literal may.
+_SECRET_CATALOG_KEY = re.compile(r"uri|key|secret|token|password|credential", re.IGNORECASE)
+
+
+def _shown(value: str, *, secret: bool) -> str:
+    """A reference names where a value lives, so it is shown; a literal secret is not."""
+    if value.startswith("${") and value.endswith("}"):
+        return value
+    return _REDACTED if secret else value
+
+
+def _serialize_notebook_credentials() -> dict[str, object]:
+    from strata.server import get_state
+
+    config = get_state().config
+    return {
+        "notebook_credentials": {
+            name: {key: _shown(value, secret=True) for key, value in fields.items()}
+            for name, fields in config.notebook_credentials.items()
+        },
+        "notebook_mount_credentials": config.notebook_mount_credentials,
+        "notebook_credential_paths": config.notebook_credential_paths,
+        "notebook_credential_writers": config.notebook_credential_writers,
+        "catalogs": {
+            name: {
+                key: _shown(value, secret=bool(_SECRET_CATALOG_KEY.search(key)))
+                for key, value in properties.items()
+            }
+            for name, properties in config.catalogs.items()
+        },
+    }
+
+
+@router.get(
+    "/v1/admin/notebook-credentials",
+    dependencies=[require_scope("admin:notebook-credentials")],
+)
+async def get_admin_notebook_credentials():
+    """The named credentials and catalogs in use, literal secrets redacted."""
+    return _serialize_notebook_credentials()
+
+
+@router.put(
+    "/v1/admin/notebook-credentials",
+    dependencies=[require_scope("admin:notebook-credentials")],
+)
+async def replace_admin_notebook_credentials(request: AdminNotebookCredentialsRequest):
+    """Replace the five settings together, used from the next run on.
+
+    A running cell keeps what it resolved. In this process only: a restart goes back to
+    the environment, and each replica of a service takes its own call.
+    """
+    from strata.config import StrataConfig, check_catalogs
+    from strata.server import get_state
+
+    state = get_state()
+    update = request.model_dump()
+    try:
+        StrataConfig.credential_paths_are_absolute(update["notebook_credential_paths"])
+        check_catalogs(
+            state.config.catalog_properties, update["catalogs"], update["notebook_credentials"]
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    for field, value in update.items():
+        setattr(state.config, field, value)
+    # Built from the old properties and credentials; the next use rebuilds them.
+    state.planner.catalog.forget_named_catalogs()
+    return _serialize_notebook_credentials()
 
 
 @router.get("/v1/admin/tenants", dependencies=[require_scope("admin:tenants")])

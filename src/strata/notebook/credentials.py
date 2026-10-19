@@ -44,12 +44,23 @@ class CredentialError(ValueError):
 def resolve_reference(value: str, env: Mapping[str, str]) -> str:
     """``${VAR}`` to its value from *env*, then the process environment.
 
-    Anything else is a literal and passes through: the registry is operator
-    config, not a committed file.
+    ``${file:/path}`` is the file's contents, read at each use, without trailing line
+    breaks, so a host rotates a secret by rewriting the file. Anything else is a
+    literal and passes through: the registry is operator config, not a committed file.
     """
     if not (value.startswith("${") and value.endswith("}")):
         return value
     name = value[2:-1]
+    if name.startswith("file:"):
+        path = Path(name.removeprefix("file:"))
+        if not path.is_absolute():
+            raise CredentialError(f"references ${{{name}}}, which is not an absolute path")
+        try:
+            return path.read_text().rstrip("\r\n")
+        except OSError as exc:
+            raise CredentialError(
+                f"references ${{{name}}}, which cannot be read ({exc.strerror})"
+            ) from None
     if name in env:
         return env[name]
     resolved = os.environ.get(name)

@@ -431,6 +431,7 @@ auth (`admin:*` satisfies any of them):
 | `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/stats`, `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` |
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
 | `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload); a personal server, which has no principal auth, serves them to whoever can reach it |
+| `admin:notebook-credentials` | `GET` and `PUT /v1/admin/notebook-credentials`, a running server's named credentials and catalogs (see [Changing them while the server runs](../reference/notebook-toml.md#changing-them-while-the-server-runs)) |
 | `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
 | `admin:*` | Garbage collection (`POST /v1/artifacts/gc`, which sweeps the whole store), reading another tenant's `GET /v1/artifacts/usage` / `stats`, the server-wide log buffer (`GET /v1/logs`, `GET /v1/logs/stream`), per-table metrics (`GET /metrics/tables*`), and the process diagnostics under `/v1/debug/*` (latency, GC pauses, pools, connections, memory, rate limits) |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
