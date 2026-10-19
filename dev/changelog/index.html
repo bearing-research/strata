@@ -3765,6 +3765,11 @@ exhaustive commit history.</p>
   callable asked at each start, over the machine type's <code>env</code>. They are never
   stored or logged, and a callable that raises fails the start, leaving the
   job queued. (#1232)</li>
+<li><strong>Keyless <code>gs</code> and <code>az</code> mounts.</strong> A named credential whose <code>token</code> names a
+  workload identity federation file (<code>external_account</code>) reads GCS through it,
+  and one with <code>tenant_id</code>, <code>client_id</code> and <code>federated_token_file</code> reads Azure
+  through an Entra ID app, each with no stored key. Both read the token file
+  again at every exchange, so a rewritten token needs no restart. (#1237)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
