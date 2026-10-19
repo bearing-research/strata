@@ -3859,8 +3859,8 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>GET /v1/cache/stats</code> needs <code>admin:cache</code>.</strong> Its counts per table and
-  snapshot cover every tenant's cached data, like <code>/v1/cache/entries</code>, which
+<li><strong><code>GET /v1/cache/stats</code> needs <code>admin:cache</code>.</strong> Its counts per table cover
+  every tenant's cached data, like <code>/v1/cache/entries</code>, which
   already needed the scope; under principal auth any caller could read them.
   It also no longer walks the cache directory on the event loop. Personal mode
   is unchanged. (#1167)</li>
@@ -3881,6 +3881,19 @@ exhaustive commit history.</p>
   directory it owned for a symlink mid-walk and be given whatever the link
   named, such as <code>/etc</code>. The walk now holds each directory open and changes
   the run directory's own owner last. (#1219)</li>
+<li><strong>Concurrent cache writes over the size cap no longer fail scans.</strong> Each
+  row-group write that found the cache over <code>STRATA_MAX_CACHE_SIZE_BYTES</code>
+  started its own eviction walk, and one walk deleting files another was
+  measuring made the write raise, failing the scan that read the row group.
+  One walk runs at a time now, a file gone mid-walk is skipped, an eviction
+  error is logged rather than failing the write, and bytes written during a
+  walk stay counted. (#1222)</li>
+<li><strong>Cache warming plans its tables off the event loop.</strong> An async warming job
+  read each table's catalog entry and manifests on the server's event loop, so
+  a slow object store stalled every other request while it planned. (#1222)</li>
+<li><strong><code>GET /v1/cache/entries</code> and <code>POST /v1/cache/clear</code> run off the event
+  loop.</strong> Listing read every entry's sidecar, and clearing deleted every cached
+  file, on the event loop, stalling other requests on a large cache. (#1222)</li>
 <li><strong>strata-pool's Docker backend removes a stopped worker's volumes.</strong> It
   removed the container but kept its anonymous volumes, so a worker image that
   declares <code>VOLUME</code> directories left one behind per worker until the disk
@@ -3894,7 +3907,9 @@ exhaustive commit history.</p>
 <li><strong>Smaller fixes from the core data-plane review.</strong> A disk-cache read that hits
   an I/O error (such as running out of file handles) is a miss that keeps the
   entry, instead of deleting a valid one. Stopping cache warming waits for the
-  jobs it cancels. A legacy SQLite store's tenant normalization runs in one
+  jobs it cancels and for the row-group reads they started, which kept writing
+  to the cache after shutdown moved on. A legacy SQLite store's tenant
+  normalization runs in one
   write transaction, so a failure part way keeps the old uniqueness index and
   two processes upgrading together cannot interleave. (#1172)</li>
 <li><strong>A failed upload to S3 or GCS no longer leaves a truncated blob.</strong> PyArrow
