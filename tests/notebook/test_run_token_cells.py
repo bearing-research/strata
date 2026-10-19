@@ -8,16 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import httpx
 import pytest
 
 from strata.auth.principal import principal_context
-from strata.auth.run_tokens import RUN_TOKEN_HEADER
+from strata.auth.run_tokens import RUN_TOKEN_HEADER, grant_for
 from strata.config import StrataConfig
 from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
+from strata.notebook.pool import PooledCellExecutor
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 from strata.types import Principal
@@ -173,3 +178,82 @@ def test_a_batched_cell_scans_through_its_server(server, tmp_path, temp_warehous
 
     assert batch.completed, batch.cell_results[0].error
     assert "ROWS 500" in (batch.cell_results[0].stdout or "")
+
+
+class TestATokenLivesAsLongAsItsHarness:
+    """A token's clock starts where its harness's timeout does: when the harness starts."""
+
+    @staticmethod
+    def _clock(monkeypatch) -> list[float]:
+        """Run tokens' clock only: the time module's would freeze the event loop."""
+        from strata.auth import run_tokens
+
+        now = [1000.0]
+        monkeypatch.setattr(run_tokens, "time", SimpleNamespace(monotonic=lambda: now[0]))
+        return now
+
+    async def test_a_cold_rerun_after_a_warm_process_died_has_a_live_token(
+        self, tmp_path, monkeypatch
+    ):
+        now = self._clock(monkeypatch)
+        session = _session(tmp_path, "x = 1\n")
+        live: list[bool] = []
+
+        async def died_late(*args, **kwargs):
+            now[0] += 30.0 + 61.0  # it ran past the timeout and the margin, then died
+            return None
+
+        async def cold(self, manifest_path, venv_python, timeout_seconds, *, run_token=None):
+            live.append(run_token is not None and grant_for(run_token) is not None)
+            return {"success": True, "variables": {}}
+
+        monkeypatch.setattr(PooledCellExecutor, "execute_with_pool", died_late)
+        monkeypatch.setattr(CellExecutor, "_run_harness", cold)
+        executor = CellExecutor(session, pool=cast(Any, object()))
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+
+        with principal_context(ANA):
+            await executor._dispatch_local(
+                "x = 1\n", {}, [], output_dir, Path(sys.executable), {}, 30.0
+            )
+
+        assert live == [True]
+
+    async def test_a_run_all_token_is_minted_after_its_inputs_are_staged(
+        self, tmp_path, monkeypatch
+    ):
+        now = self._clock(monkeypatch)
+        session = _session(tmp_path, "x = 1\n")
+        staging = CellExecutor._batch_resolve_upstream_inputs
+
+        def slow_staging(self, *args, **kwargs):
+            now[0] += 600.0 + 61.0  # staging large inputs took a batch timeout and more
+            return staging(self, *args, **kwargs)
+
+        minted: list[str | None] = []
+        mint = CellExecutor._run_token
+
+        @contextmanager
+        def recording(self, timeout_seconds):
+            with mint(self, timeout_seconds) as token:
+                minted.append(token)
+                yield token
+
+        live: list[bool] = []
+        spawn = asyncio.create_subprocess_exec
+
+        async def spawning(*args, **kwargs):
+            live.append(all(t is not None and grant_for(t) is not None for t in minted))
+            return await spawn(*args, **kwargs)
+
+        monkeypatch.setattr(CellExecutor, "_batch_resolve_upstream_inputs", slow_staging)
+        monkeypatch.setattr(CellExecutor, "_run_token", recording)
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawning)
+
+        with principal_context(ANA):
+            batch = await CellExecutor(session).execute_batch([_cell_spec("c", "x = 1\n")])
+
+        assert batch.completed, batch.cell_results[0].error
+        assert len(minted) == 1
+        assert live == [True]

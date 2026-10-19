@@ -208,6 +208,44 @@ async def test_run_cell_tests_gets_table_inputs(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_the_cell_runs_in_work_with_its_output_dirs_writable():
+    """As in a run: relative paths are the notebook's ``work/``, each folder is a path."""
+    source = (
+        "# @output_dir ckpt\n"
+        "text = open('../data.csv').read()\n"
+        "def save(n):\n"
+        "    (ckpt / 'a.txt').write_text(str(n))\n"
+        "    return sorted(p.name for p in ckpt.iterdir())\n"
+    )
+    session = _session_with([("cell1", source, None)])
+    (session.path / "data.csv").write_text("a,b")
+
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1",
+        "import os\n"
+        "def test_cell(cell):\n"
+        "    assert cell.text == 'a,b'\n"
+        "    assert cell.save(3) == ['a.txt']\n"
+        "    assert os.path.basename(os.getcwd()) == 'work'\n",
+    )
+
+    assert (result.passed, result.failed, result.errored) == (1, 0, 0), result.tests
+
+
+@pytest.mark.asyncio
+async def test_a_cell_that_uses_strata_is_told_its_tests_have_no_client():
+    session = _session_with([("cell1", "rows = strata.materialize(inputs=[])\n", None)])
+
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1", "def test_rows(cell):\n    assert cell.rows\n"
+    )
+
+    (test,) = result.tests
+    assert test.outcome == "error"
+    assert "A cell's tests have no ambient `strata` client" in test.message
+
+
+@pytest.mark.asyncio
 async def test_a_changed_mount_or_env_marks_the_test_stale(tmp_path):
     """The stale flag covers the mount and env inputs a test reads, not only upstreams."""
     data_dir = tmp_path / "data"

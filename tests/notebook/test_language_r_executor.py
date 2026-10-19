@@ -92,6 +92,24 @@ class TestExecutorPaths:
         assert result.success is True
 
 
+class TestATableOnAnRCell:
+    async def test_is_refused_rather_than_run_without_its_names(self, monkeypatch, tmp_path):
+        source = f"# @table events file://{tmp_path / 'warehouse'}#db.events\nx <- events\n"
+        _, session = _make_r_notebook(tmp_path, cells=[("c1", None, source)])
+
+        async def must_not_run(self, manifest_path, timeout_seconds):
+            raise AssertionError("harness.R binds no table names")
+
+        monkeypatch.setattr(CellExecutor, "_run_r_harness", must_not_run)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert not result.success
+        assert result.error == (
+            "@table is not supported on R cells; read the table in a Python cell upstream"
+        )
+
+
 # ``_run_r_harness`` failure shapes
 
 
