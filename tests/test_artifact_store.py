@@ -4,8 +4,17 @@ import json
 
 import pytest
 
-from strata.artifact.provenance import TransformSpec, compute_provenance_hash
-from strata.artifact.store import ArtifactNotFoundError, ArtifactStore, reset_artifact_store
+from strata.artifact.provenance import (
+    TransformSpec,
+    compute_provenance_hash,
+    parse_transform_spec,
+)
+from strata.artifact.store import (
+    ArtifactNotFoundError,
+    ArtifactStore,
+    ArtifactVersion,
+    reset_artifact_store,
+)
 from tests.conftest import race_after_pending_read
 
 
@@ -37,7 +46,7 @@ class TestTransformSpec:
         assert data["params"] == {"sql": "SELECT * FROM input"}
         assert data["inputs"] == ["strata://table/db.events"]
 
-    def test_from_json(self):
+    def test_parse(self):
         json_str = json.dumps(
             {
                 "executor": "local://duckdb_sql@v1",
@@ -45,10 +54,8 @@ class TestTransformSpec:
                 "inputs": [],
             }
         )
-        spec = TransformSpec.from_json(json_str)
-        assert spec.executor == "local://duckdb_sql@v1"
-        assert spec.params == {"sql": "SELECT 1"}
-        assert spec.inputs == []
+        spec = parse_transform_spec(json_str)
+        assert spec == TransformSpec("local://duckdb_sql@v1", {"sql": "SELECT 1"}, [])
 
     def test_roundtrip(self):
         original = TransformSpec(
@@ -56,10 +63,36 @@ class TestTransformSpec:
             params={"expr": "col('a') + 1"},
             inputs=["input1", "input2"],
         )
-        restored = TransformSpec.from_json(original.canonical_json)
-        assert restored.executor == original.executor
-        assert restored.params == original.params
-        assert restored.inputs == original.inputs
+        assert parse_transform_spec(original.canonical_json) == original
+
+    @pytest.mark.parametrize("text", [None, "", "{not json", "[1, 2]", "null"])
+    def test_an_absent_or_unreadable_spec_parses_to_none(self, text):
+        """Rows arrive from other servers too, so an unreadable spec reads as unrecorded."""
+        assert parse_transform_spec(text) is None
+
+    def test_missing_or_mistyped_fields_read_as_empty(self):
+        spec = parse_transform_spec(json.dumps({"params": "oops", "inputs": {"a": 1}}))
+        assert spec == TransformSpec(executor="", params={}, inputs=[])
+
+    def test_an_artifact_version_reads_its_spec_and_params(self):
+        stored = TransformSpec("notebook/cell@v1", {"content_type": "json/object"}, ["u"])
+        version = ArtifactVersion(
+            id="a",
+            version=1,
+            state="ready",
+            provenance_hash="p",
+            transform_spec=stored.canonical_json,
+        )
+        assert version.spec == stored
+        assert version.params == {"content_type": "json/object"}
+
+    @pytest.mark.parametrize("transform_spec", [None, "{not json"])
+    def test_an_artifact_version_without_a_readable_spec_has_empty_params(self, transform_spec):
+        version = ArtifactVersion(
+            id="a", version=1, state="ready", provenance_hash="p", transform_spec=transform_spec
+        )
+        assert version.spec is None
+        assert version.params == {}
 
 
 class TestProvenanceHash:

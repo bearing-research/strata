@@ -78,20 +78,13 @@ def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
     for cell in session.notebook_state.cells:
         entries = []
         for variable, artifact in sorted(manager.list_cell_artifacts(cell.id)):
-            content_type = ""
-            if artifact.transform_spec:
-                try:
-                    params = json.loads(artifact.transform_spec).get("params", {})
-                except ValueError:
-                    params = {}
-                content_type = params.get("content_type") or ""
             entries.append(
                 {
                     "variable": variable,
                     "artifact_id": artifact.id,
                     "version": artifact.version,
                     "provenance_hash": artifact.provenance_hash,
-                    "content_type": content_type,
+                    "content_type": artifact.params.get("content_type") or "",
                     "content_sha256": store.content_digest(artifact.id, artifact.version),
                     "byte_size": artifact.byte_size,
                 }

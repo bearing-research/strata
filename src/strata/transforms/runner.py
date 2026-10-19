@@ -379,11 +379,11 @@ class BuildRunner:
                 if artifact is None:
                     raise ValueError(f"Artifact not found: {build.artifact_id}@v={build.version}")
 
-                if artifact.transform_spec is None:
-                    raise ValueError("Artifact has no transform spec")
+                transform_spec, spec = artifact.transform_spec, artifact.spec
+                if transform_spec is None or spec is None:
+                    raise ValueError("Artifact has no readable transform spec")
 
-                transform_data = json.loads(artifact.transform_spec)
-                input_uris = transform_data.get("inputs", [])
+                input_uris = spec.inputs
                 # Read each input at the version admission hashed: a table or name that
                 # moved on since would put other bytes under this provenance.
                 admitted = json.loads(artifact.input_versions) if artifact.input_versions else {}
@@ -422,10 +422,8 @@ class BuildRunner:
                     "provenance_hash": artifact.provenance_hash,
                     "transform": {
                         "ref": build.executor_ref,
-                        "code_hash": hashlib.sha256(artifact.transform_spec.encode()).hexdigest()[
-                            :16
-                        ],
-                        "params": transform_data.get("params", {}),
+                        "code_hash": hashlib.sha256(transform_spec.encode()).hexdigest()[:16],
+                        "params": spec.params,
                     },
                     "inputs": [
                         {"name": name, "format": "arrow_ipc_stream"} for name, _ in input_files

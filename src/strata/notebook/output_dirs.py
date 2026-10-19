@@ -149,8 +149,7 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
     versions = store.list_versions_by_id_prefix(f"nb_{artifact_mgr.notebook_id}_cell_")
     named: set[tuple[str, int]] = set()
     for version in versions:
-        params = json.loads(version.transform_spec or "{}").get("params") or {}
-        if params.get("content_type") != CONTENT_TYPE:
+        if version.params.get("content_type") != CONTENT_TYPE:
             continue
         # Housekeeping: a read that counted as a use would keep old manifests forever.
         blob = store.read_blob(version.id, version.version, note_use=False)

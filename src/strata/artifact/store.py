@@ -16,10 +16,11 @@ import secrets
 import time
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.artifact.provenance import TransformSpec
+from strata.artifact.provenance import TransformSpec, parse_transform_spec
 from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
@@ -132,11 +133,8 @@ def _split_ref(ref: str) -> tuple[str, int]:
 
 def _declared_content_type(transform_spec: str | None) -> str:
     """The ``content_type`` a version's transform params declare, or ``""`` for none."""
-    try:
-        params = json.loads(transform_spec or "{}").get("params") or {}
-    except (ValueError, AttributeError):
-        return ""
-    content_type = params.get("content_type") if isinstance(params, dict) else None
+    spec = parse_transform_spec(transform_spec)
+    content_type = spec.params.get("content_type") if spec is not None else None
     return content_type if isinstance(content_type, str) else ""
 
 
@@ -171,6 +169,17 @@ class ArtifactVersion:
     # SHA-256 of the stored bytes, recorded at finalize. None on rows written
     # before the column existed, until something asks (``content_digest``).
     content_sha256: str | None = None
+
+    @cached_property
+    def spec(self) -> TransformSpec | None:
+        """``transform_spec`` parsed, or ``None`` when absent or unreadable."""
+        return parse_transform_spec(self.transform_spec)
+
+    @property
+    def params(self) -> dict:
+        """The spec's params, or ``{}`` without a readable spec."""
+        spec = self.spec
+        return spec.params if spec is not None else {}
 
 
 @dataclass(frozen=True)

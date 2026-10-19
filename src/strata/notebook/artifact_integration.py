@@ -335,13 +335,7 @@ class NotebookArtifactManager:
         if artifact is None:
             raise ValueError(f"Artifact {artifact_id}@v={version} not found")
 
-        content_type = "unknown"
-        if artifact.transform_spec:
-            try:
-                spec = json.loads(artifact.transform_spec)
-                content_type = spec.get("params", {}).get("content_type", "unknown")
-            except (ValueError, KeyError):
-                pass
+        content_type = artifact.params.get("content_type", "unknown")
 
         return {
             "id": artifact.id,
@@ -390,13 +384,7 @@ class NotebookArtifactManager:
         if artifact is None:
             return None
 
-        content_type = "unknown"
-        if artifact.transform_spec:
-            try:
-                spec = json.loads(artifact.transform_spec)
-                content_type = spec.get("params", {}).get("content_type", "unknown")
-            except (ValueError, KeyError):
-                pass
+        content_type = artifact.params.get("content_type", "unknown")
 
         return ArtifactInfo(
             id=artifact.id,

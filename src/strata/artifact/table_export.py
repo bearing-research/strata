@@ -8,7 +8,6 @@ table's tag of the same name (``follow_alias``).
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pyarrow as pa
@@ -29,14 +28,7 @@ _NOT_TABLES = {b"tensor", b"scalar"}
 def artifact_arrow_table(store: ArtifactStore, artifact: ArtifactVersion) -> pa.Table:
     """The artifact's bytes as an Arrow table, or ``ValueError`` if they are not one."""
     ref = f"{artifact.id}@v={artifact.version}"
-    content_type = None
-    if artifact.transform_spec:
-        try:
-            content_type = (json.loads(artifact.transform_spec).get("params") or {}).get(
-                "content_type"
-            )
-        except (ValueError, AttributeError):
-            content_type = None
+    content_type = artifact.params.get("content_type")
     if content_type not in (None, "", "arrow/ipc"):
         raise ValueError(f"{ref} is {content_type}, not a table")
     blob = store.read_blob(artifact.id, artifact.version)

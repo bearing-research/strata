@@ -40,15 +40,29 @@ class TransformSpec:
             sort_keys=True,
         )
 
-    @classmethod
-    def from_json(cls, json_str: str) -> TransformSpec:
-        """Deserialize from JSON string."""
-        data = json.loads(json_str)
-        return cls(
-            executor=data["executor"],
-            params=data["params"],
-            inputs=data["inputs"],
-        )
+
+def parse_transform_spec(text: str | None) -> TransformSpec | None:
+    """A stored spec read back; ``None`` when there is none or it is not a JSON object.
+
+    Unreadable reads as unrecorded, not an error: rows also arrive from other servers
+    (team store pulls, snapshot imports, datasets), and every reader treats a spec it
+    cannot read as one that names nothing. A missing or mistyped field reads as empty.
+    """
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    params = data.get("params")
+    inputs = data.get("inputs")
+    return TransformSpec(
+        executor=data.get("executor") or "",
+        params=params if isinstance(params, dict) else {},
+        inputs=inputs if isinstance(inputs, list) else [],
+    )
 
 
 def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSpec) -> str:

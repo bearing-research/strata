@@ -938,18 +938,7 @@ def _spec_param(artifact, key: str) -> str:
     Used for ``content_type`` and ``build_env``; "" rather than a guessed default,
     since a wrong default would mis-decode pickled values.
     """
-    if not artifact.transform_spec:
-        return ""
-    try:
-        spec = json.loads(artifact.transform_spec)
-    except ValueError:
-        return ""
-    if not isinstance(spec, dict):
-        return ""
-    params = spec.get("params")
-    if not isinstance(params, dict):
-        return ""
-    return str(params.get(key) or "")
+    return str(artifact.params.get(key) or "")
 
 
 def _spec_int(artifact, key: str) -> int:
