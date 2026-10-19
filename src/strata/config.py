@@ -433,8 +433,9 @@ class StrataConfig(BaseSettings):
     notebook_credential_paths: Annotated[dict[str, list[str]], NoDecode] = Field(
         default_factory=dict
     )
-    # Who may mount a credential read-write: ``{name: [principal glob, ...]}``, matched against
-    # the principal who started the run (``"*"`` is anyone, and the only pattern a run with no
+    # Who may write through a credential (an rw mount, a ``write=true`` SQL connection, a
+    # ``@write_table`` catalog): ``{name: [principal glob, ...]}``, matched against the
+    # principal who started the run (``"*"`` is anyone, and the only pattern a run with no
     # principal matches). Once set, even to ``{}``, an unlisted name is read-only and a remote
     # read-write mount must name one. Unset, every name writes.
     notebook_credential_writers: Annotated[dict[str, list[str]] | None, NoDecode] = None

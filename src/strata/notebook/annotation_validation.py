@@ -946,6 +946,22 @@ def _validate_per_variant_annotation(
     diagnostics: list[AnnotationDiagnostic] = []
     line = _find_annotation_line(cell.source, "per_variant")
 
+    # Every variant writes the same table, so an overwrite keeps only the last one's rows.
+    if any(spec.mode == "overwrite" for spec in annotations.table_writes):
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.ERROR,
+                code="per_variant_write_table_overwrite",
+                message=(
+                    "`@write_table ... overwrite` can't be combined with `@per_variant`: "
+                    "each variant would replace the one before it. Append, merge on a "
+                    "column that tells the variants apart, or overwrite from a cell that "
+                    "reads the {variant: value} dict."
+                ),
+                line=_find_annotation_line(cell.source, "write_table", "overwrite"),
+            )
+        )
+
     # Mutually exclusive with @variant membership.
     if annotations.variant is not None:
         diagnostics.append(

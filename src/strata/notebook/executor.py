@@ -111,7 +111,12 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
 from strata.notebook.serializer import ContentType
-from strata.notebook.table_writes import StagedOutput, TableWriteError, write_cell_tables
+from strata.notebook.table_writes import (
+    StagedOutput,
+    TableWriteError,
+    authorize_table_writes,
+    write_cell_tables,
+)
 from strata.notebook.team_store import (
     TeamPull,
     TeamStore,
@@ -1479,6 +1484,10 @@ class CellExecutor:
                 # the cell runs anyway, and an applied promotion would disagree with the rest.
                 to_promote: list[tuple[str, int]] = []
                 invalid: tuple[str, ArtifactVersion | None, str] | None = None
+                # A later run replaced or merged into these tables; promoting would not undo it.
+                rewrites = {
+                    spec.variable for spec in prov.annotations.table_writes if spec.mode != "append"
+                }
                 # sorted() keeps the reported variable and promotion order stable across runs.
                 for var_name in sorted(consumed_vars):
                     canonical_id = artifact_mgr.cell_artifact_id(
@@ -1490,8 +1499,12 @@ class CellExecutor:
                     )
                     if canonical_art is not None and canonical_art.provenance_hash == var_prov:
                         continue
-                    older = artifact_mgr.artifact_store.find_version_by_provenance(
-                        canonical_id, var_prov
+                    older = (
+                        None
+                        if var_name in rewrites
+                        else artifact_mgr.artifact_store.find_version_by_provenance(
+                            canonical_id, var_prov
+                        )
                     )
                     if older is None or not artifact_mgr.artifact_store.blob_exists(
                         canonical_id, older.version
@@ -1675,6 +1688,11 @@ class CellExecutor:
                 return cached_result
 
             # ④ Cache miss: execute the cell.
+            refusal = self._table_write_refusal(source)
+            if refusal is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id, success=False, error=refusal, execution_method="error"
+                )
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_dir = Path(tmpdir)
                 remote_build_id = (
@@ -2025,6 +2043,24 @@ class CellExecutor:
         ``{variant: value}`` dict. Succeeds iff every variant succeeds.
         Upstreams are materialised once, not per variant.
         """
+        # Each variant writes the same table: an overwrite would keep only the last variant's.
+        overwrites = [
+            spec.table
+            for spec in parse_annotations(source).table_writes
+            if spec.mode == "overwrite"
+        ]
+        if overwrites:
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=(
+                    f"@write_table {overwrites[0]} overwrite is not supported on a @per_variant "
+                    "cell: each variant would replace the one before it. Append, merge on a "
+                    "column that tells the variants apart, or overwrite from a cell that reads "
+                    "the {variant: value} dict"
+                ),
+                execution_method="fanout",
+            )
         if materialize_upstreams:
             await self._materialize_upstreams(cell_id)
 
@@ -2319,6 +2355,11 @@ class CellExecutor:
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
 
+            refusal = self._table_write_refusal(source)
+            if refusal is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id, success=False, error=refusal, execution_method="error"
+                )
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_dir = Path(tmpdir)
                 input_specs = self._load_input_blobs(cell_id, output_dir)
@@ -5180,6 +5221,19 @@ class CellExecutor:
         for write in written:
             logger.info("Wrote table %s (snapshot %d)", write.table, write.snapshot_id)
 
+    def _table_write_refusal(self, source: str) -> str | None:
+        """Why this run may not write its ``@write_table`` tables, checked before it runs."""
+        try:
+            authorize_table_writes(
+                parse_annotations(source).table_writes,
+                config=self._lake_config(),
+                env=dict(self.session.notebook_state.env),
+                notebook=self.session.path,
+            )
+        except TableWriteError as exc:
+            return str(exc)
+        return None
+
     def _store_console_outputs(
         self,
         cell_id: str,
@@ -5934,6 +5988,12 @@ class CellExecutor:
                 persist_cell_loop_run(self.session.path, cell_id, None)
                 return cached
 
+        refusal = self._table_write_refusal(source)
+        if refusal is not None:
+            return CellExecutionResult(
+                cell_id=cell_id, success=False, error=refusal, execution_method="loop"
+            )
+
         try:
             carry_blob, carry_content_type = self._resolve_loop_seed(cell_id, loop)
             if folders is not None:
@@ -6256,6 +6316,14 @@ class CellExecutor:
                 build_duration_ms=loop_duration_ms,
             )
         ]
+        table_outputs = {
+            loop.carry: StagedOutput(
+                staged=staged[0],
+                blob=carry_blob,
+                content_type=carry_content_type,
+                provenance_hash=carry_var_provenance,
+            )
+        }
 
         # Same canonical ids and per-variable provenance as non-loop outputs.
         extra_outputs: dict[str, Any] = {}
@@ -6285,6 +6353,12 @@ class CellExecutor:
                     build_duration_ms=loop_duration_ms,
                 )
             )
+            table_outputs[extra_var] = StagedOutput(
+                staged=staged[-1],
+                blob=extra_blob,
+                content_type=extra_content_type,
+                provenance_hash=derive_subkey(cell_provenance, extra_var),
+            )
             extra_outputs[extra_var] = {
                 "content_type": extra_content_type,
                 "file": (
@@ -6312,6 +6386,23 @@ class CellExecutor:
             self._folder_listings.setdefault(cell_id, {})[name] = output_dirs.listing(
                 name, folder_manifests[name]
             )
+
+        # The final values, before they become current, as for any cell: a failed write
+        # keeps none of them, so the next run is not a cache hit and writes again.
+        if annotations.table_writes:
+            try:
+                self._write_cell_tables(annotations.table_writes, table_outputs)
+            except TableWriteError as exc:
+                artifact_mgr.discard_cell_outputs(staged)
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=str(exc),
+                    stdout="".join(combined_stdout),
+                    stderr="".join(combined_stderr),
+                    duration_ms=(time.time() - start_time) * 1000,
+                    execution_method="loop",
+                )
 
         stored = artifact_mgr.finalize_cell_outputs(staged)
         canonical_artifact = stored[0]

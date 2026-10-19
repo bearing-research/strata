@@ -448,6 +448,16 @@ after each write. With several `@write_table` lines the tables are written one
 after another; if a later one fails, earlier ones keep their new snapshot and
 the next run writes them again.
 
+**Going back to earlier source** (or inputs) is a cache hit for an `append`
+cell, which writes nothing. An `overwrite` or `merge` cell runs again instead,
+since the later run replaced or merged rows that only a write puts back; the
+table then holds what the cell shows.
+
+A `# @loop` cell writes its final values once, after the last iteration, and
+not each iteration's. A `# @per_variant` cell writes once per variant into the
+same table, so `overwrite` is refused there (each variant would replace the one
+before it); append, or merge on a column that tells the variants apart.
+
 A cell should not also read the table it writes with `@table`: its own write
 changes the snapshot it read, so it would show out of date at once.
 
@@ -455,7 +465,13 @@ A table Strata did not create (another writer's) is never overwritten, and is
 appended to or merged into only when the server sets
 `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. Under principal auth the table ACL
 applies, as for an export, and a table last written for another tenant is
-refused.
+refused. In service mode a write also needs what an export needs:
+`STRATA_SERVICE_WRITES_ENABLED=true` and the `artifacts:write` scope. A catalog
+whose `strata_credential` the server's
+[`STRATA_NOTEBOOK_CREDENTIAL_WRITERS`](../reference/notebook-toml.md#named-credentials)
+does not let the run's principal write through is refused too. Each of these
+fails the cell, naming why, before it runs (in a Run All batch, before its
+outputs are kept).
 
 ## @output_dir
 
@@ -960,8 +976,9 @@ to fan out over - `# @per_variant model` - and the others collapse to dicts. A
 cell fans out over **one** group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: `per_variant_no_sweep_source`
 (nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
-`per_variant_on_variant_member` (a cell can't both be a variant and fan out).
-The named group is part of the cell's cache key, so switching it runs the
+`per_variant_on_variant_member` (a cell can't both be a variant and fan out),
+`per_variant_write_table_overwrite` (every variant would overwrite the same
+table). The named group is part of the cell's cache key, so switching it runs the
 instances again.
 
 ### Defines contract

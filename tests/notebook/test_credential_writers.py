@@ -222,3 +222,54 @@ class TestARunOnTheServer:
 
         assert result.success is False
         assert "'org' is read-only" in (result.error or "")
+
+
+class TestASqlWriteCell:
+    """A ``write=true`` connection that names a credential writes only for a listed principal."""
+
+    @staticmethod
+    async def _run(tmp_path: Path, monkeypatch, principal: str):
+        import sqlite3
+
+        from strata.config import StrataConfig
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.sql.cell_executor import execute_sql_cell
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        pytest.importorskip("adbc_driver_sqlite")
+        config = StrataConfig(
+            notebook_credentials={"lab": {}},
+            notebook_credential_writers={"lab": ["user_*"]},
+        )
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        db = tmp_path / "out.db"
+        source = "# @sql connection=db write=true\nCREATE TABLE t (n INTEGER);\n"
+        nb = create_notebook(tmp_path, "nb")
+        add_cell_to_notebook(nb, "c1", language="sql")
+        write_cell(nb, "c1", source)
+        toml = nb / "notebook.toml"
+        toml.write_text(
+            toml.read_text()
+            + f'\n[connections.db]\ndriver = "sqlite"\npath = "{db}"\ncredential = "lab"\n'
+        )
+        with principal_context(Principal(id=principal)):
+            result = await execute_sql_cell(NotebookSession(parse_notebook(nb), nb), "c1", source)
+        with sqlite3.connect(db) as conn:
+            tables = conn.execute("SELECT name FROM sqlite_master").fetchall()
+        return result, tables
+
+    async def test_another_principal_is_refused_before_anything_is_written(
+        self, tmp_path, monkeypatch
+    ):
+        result, tables = await self._run(tmp_path, monkeypatch, "agent:agt_2/run-1")
+
+        assert not result["success"]
+        assert "'lab' is not writable by 'agent:agt_2/run-1'" in result["error"]
+        assert tables == []
+
+    async def test_a_listed_principal_writes(self, tmp_path, monkeypatch):
+        result, tables = await self._run(tmp_path, monkeypatch, "user_ana")
+
+        assert result["success"], result.get("error")
+        assert tables == [("t",)]

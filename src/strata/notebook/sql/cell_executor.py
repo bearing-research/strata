@@ -434,9 +434,10 @@ async def _execute_write_cell(
     # No probe slots. Runtime spec for relative credential paths;
     # ``read_only=False`` puts the write principal in the identity.
     try:
-        runtime_spec = _resolve_runtime_spec(
-            spec, session.path, _credentials(session), _auth_env(session)
-        )
+        credentials = _credentials(session)
+        if spec.credential:
+            credentials.ensure_may_write(spec.credential)
+        runtime_spec = _resolve_runtime_spec(spec, session.path, credentials, _auth_env(session))
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     try:
@@ -761,9 +762,16 @@ def _synthesize_write_result_table(stats: dict[str, Any]) -> Any:
 
 
 def _credentials(session: NotebookSession) -> CredentialResolver:
-    """Named credentials as this notebook sees them, secret-manager values included."""
+    """Named credentials as this notebook, run by this principal, sees them, secret-manager
+    values included."""
+    from strata.auth.principal import get_principal
+
+    principal = get_principal()
     return CredentialResolver.from_config(
-        session._lake_config(), env=dict(session.notebook_state.env), notebook=session.path
+        session._lake_config(),
+        env=dict(session.notebook_state.env),
+        notebook=session.path,
+        principal=principal.id if principal is not None else None,
     )
 
 

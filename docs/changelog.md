@@ -32,11 +32,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **A cell writes a table: `# @write_table <var> <table> append|overwrite|merge`.**
   The server writes the variable into an Iceberg table when the run succeeds,
   before its outputs are kept: a failed write fails the cell and keeps nothing,
-  and a cache hit writes nothing. `merge` upserts on `on=<col>,...`. Each
-  snapshot names the output's artifact id, version and provenance hash; a
-  `@table` reader goes out of date after each write. Appending to or merging
-  into a table Strata did not create needs
-  `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. (#1202)
+  and a cache hit writes nothing. Going back to earlier source runs an
+  `overwrite` or `merge` cell again rather than hitting the cache, so the table
+  holds what the cell shows. `merge` upserts on `on=<col>,...`. A `@loop` cell
+  writes its final value once; a `@per_variant` cell may append or merge, not
+  overwrite. Each snapshot names the output's artifact id, version and
+  provenance hash; a `@table` reader goes out of date after each write.
+  Appending to or merging into a table Strata did not create needs
+  `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. In service mode a write needs
+  what an export needs, `STRATA_SERVICE_WRITES_ENABLED=true` and the
+  `artifacts:write` scope, and is refused before the cell runs otherwise. (#1202)
 - **A read-write mount works under the harness user.** A remote `rw` mount's
   staging copy is handed to `STRATA_NOTEBOOK_HARNESS_USER`, which got
   `PermissionError` writing into the server's directory. The sync back, and the
@@ -96,13 +101,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   member who started the run, without `admin:` scopes, on the ambient client's
   routes and its own session's promote, until the run ends. Run All shares one
   token. Personal mode is unchanged. (#1215)
-- **`STRATA_NOTEBOOK_CREDENTIAL_WRITERS`** says who may mount a named
-  credential read-write, as globs over the principal who started the run.
-  Once it is set, even to `{}`, a name not listed is read-only: an `rw` mount
-  through it, from a cell or from `notebook.toml`, fails before anything is
-  staged, naming the credential, and so does one sent to a remote worker. An
-  `rw` mount on `s3`, `gs` or `az` that names no credential fails too, since it
-  would write as the server's own identity. Unset, nothing changes. (#1217)
+- **`STRATA_NOTEBOOK_CREDENTIAL_WRITERS`** says who may write through a named
+  credential, as globs over the principal who started the run: an `rw` mount
+  (its scheme's default credential included), a `# @sql ... write=true`
+  connection, or a `# @write_table` catalog's `strata_credential`. Once it is
+  set, even to `{}`, a name not listed is read-only: such a write, from a cell
+  or from `notebook.toml`, fails before anything is staged or written, naming
+  the credential, and so does a mount sent to a remote worker. An `rw` mount on
+  `s3`, `gs` or `az` that names no credential fails too, since it would write
+  as the server's own identity; a `file://` mount is outside the setting.
+  Unset, nothing changes. (#1217)
 
 ### Changed
 
