@@ -107,6 +107,7 @@ whether an un-primed session uses the notebook at all. See
 - **an append keeps the cache:** cached row groups are keyed by data file, not snapshot, so after an append a scan reads only the new files
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3, GCS or Azure prefix a local `pathlib.Path`
 - **one mount cache per machine:** every notebook shares one bounded copy of each remote file, so a prefix with one new file downloads only that file
+- **know what a run will read:** a cell's badge shows what its mounts, tables and fetches weigh and how much is already on its machine, and above a size or cost you set, a run asks before it moves anything
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution, same DAG and same cache
 
@@ -119,6 +120,7 @@ whether an un-primed session uses the notebook at all. See
 - **share a session:** presence, cell focus and soft locks, with every cell recording who wrote it
 - **safe to share in service mode:** cells run as their own OS user once you name one, notebook scopes are enforced on every notebook route under principal auth, and an MCP tool call runs as its caller
 - **host it for many people:** in service mode every notebook route, the WebSocket and MCP stay within the caller's tenant, the server runs under a path behind your proxy, and the editor can be framed inside your own product
+- **credentials a host can rotate:** named credentials read GCS and Azure through workload identity token files with no stored key, and a running server takes new credentials and catalogs from one `PUT` without closing a session
 - **a store that stays bounded:** results nobody has used for a while are collected least recently used first, never anything named, pinned, published or still needed
 
 **Surfaces**
@@ -143,7 +145,7 @@ docker compose up -d --build
 
 # Or the prebuilt image (linux/amd64), published with each release.
 docker run --rm -p 127.0.0.1:8765:8765 -v strata_state:/home/strata/.strata \
-  ghcr.io/bearing-research/strata:0.10.0
+  ghcr.io/bearing-research/strata:0.11.0
 
 # Or install via uv (recommended). Puts the CLI on PATH in a uv-managed
 # tool env. `pip install` is not supported; see Requirements below.

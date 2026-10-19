@@ -5,7 +5,7 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## Unreleased
+## 0.11.0 - 2026-10-19
 
 ### Added
 
@@ -39,7 +39,7 @@ exhaustive commit history.
   Appending to or merging into a table Strata did not create needs
   `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. In service mode a write needs
   what an export needs, `STRATA_SERVICE_WRITES_ENABLED=true` and the
-  `artifacts:write` scope, and is refused before the cell runs otherwise. (#1202)
+  `artifacts:write` scope, and is refused before the cell runs otherwise. (#1202, #1223)
 - **`# @output_dir <name>`: a folder whose contents are an output.** The cell
   gets an empty folder; what is in it when the run ends is stored file by file
   (once per digest) with a manifest output that has the run's provenance, and a
@@ -76,7 +76,7 @@ exhaustive commit history.
   When the server prunes a notebook's earlier values, it now also removes each
   folder file no kept version (current, earlier, failed or pinned) names, so
   old checkpoints no longer stay forever. A file a run is still assembling is
-  never taken. (#1209)
+  never taken. (#1209, #1224)
 - **A cell on a remote worker reads another cell's `# @output_dir` folder.**
   The server sends the folder's files as one tar, which the worker unpacks to a
   local `Path` before the cell runs, on either transport. A worker too old to
@@ -207,7 +207,7 @@ exhaustive commit history.
   lives in `STRATA_NOTEBOOK_MOUNT_CACHE_DIR`, by default `mount_cache` beside
   the notebook storage directory. Read-only copies left in a notebook's
   `.strata/mount_cache` are no longer read and can be deleted. A worker keeps
-  its cache across jobs. (#1198, #1199)
+  its cache across jobs. (#1198, #1199, #1221, #1229)
 - **Observability code lives in the `strata.observability` package.**
   `strata.tracing`, `logging`, `log_buffer`, `health`, `metrics`,
   `pool_metrics`, `gc_tracker`, `memory_profiler` and `slow_ops` are now
