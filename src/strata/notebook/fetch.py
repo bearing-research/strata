@@ -33,7 +33,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -131,6 +131,9 @@ class FetchedBytes:
     sha256: str
     # When these bytes were downloaded (a 304 recheck keeps the original time).
     fetched_at: float | None = None
+    # Whether this resolve downloaded them, rather than finding them cached. Says how they
+    # were got, not what they are, so equal bytes compare equal either way.
+    downloaded: bool = field(default=False, compare=False)
 
     def fingerprint(self, spec: FetchSpec) -> str:
         return f"{spec.name}:fetch:{spec.url}:{self.sha256}"
@@ -256,7 +259,9 @@ class FetchCache:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(partial, target)
                     entry = self._record(spec.url, sha, response, None, filename=target.name)
-                    return FetchedBytes(path=target, sha256=sha, fetched_at=entry["fetched_at"])
+                    return FetchedBytes(
+                        path=target, sha256=sha, fetched_at=entry["fetched_at"], downloaded=True
+                    )
             raise FetchError(
                 f"@fetch {spec.name}: {spec.url} redirected more than {MAX_REDIRECTS} times"
             )

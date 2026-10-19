@@ -163,6 +163,22 @@ class TestTheCache:
         assert second == first
         assert "If-None-Match" in origin.requests[-1][1]
 
+    def test_only_the_resolve_that_downloads_says_so(self, tmp_path, origin):
+        """Amber item 89: a fetch's bytes moved only when this check downloaded them."""
+        cache = _cache(tmp_path)
+        spec = FetchSpec(name="zones", url=origin.url())
+
+        first = cache.resolve(spec)
+        revalidated = cache.resolve(spec, max_age=0)
+        origin.body = b"zone,borough\n1,Brooklyn\n"
+        changed = cache.resolve(spec, max_age=0)
+
+        assert [first.downloaded, revalidated.downloaded, changed.downloaded] == [
+            True,
+            False,
+            True,
+        ]
+
     def test_moved_bytes_are_a_new_digest(self, tmp_path, origin):
         cache = _cache(tmp_path)
         spec = FetchSpec(name="zones", url=origin.url())

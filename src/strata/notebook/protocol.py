@@ -55,6 +55,9 @@ class MessageType(StrEnum):
     CELL_CONSOLE = "cell_console"
     CELL_ERROR = "cell_error"
     CELL_ITERATION_PROGRESS = "cell_iteration_progress"
+    # What a cell's declared inputs weigh, once a run has resolved them. Payload:
+    # ``{cell_id, machine, inputs: [{kind, name, uri, credential?, bytes?, cached_bytes?}]}``.
+    CELL_INPUTS = "cell_inputs"
     # One completed variant of a ``# @per_variant`` fan-out cell. Payload:
     # ``{cell_id, variant, index, total, success, duration_ms, error?}``.
     CELL_VARIANT_PROGRESS = "cell_variant_progress"

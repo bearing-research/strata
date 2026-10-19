@@ -45,6 +45,7 @@ import type {
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
 import type {
+  CellInputsPayload,
   InspectResultPayload,
   PresenceEntryModel,
   PresencePayload,
@@ -1282,6 +1283,8 @@ function parseBackendCellPayload(raw: any): Cell {
 
   cell.testSource = typeof raw.test_source === 'string' ? raw.test_source : ''
   cell.testResult = raw.test_result ? parseBackendTestResult(raw.test_result) : undefined
+  cell.inputWeights = Array.isArray(raw.inputs) ? raw.inputs : []
+  cell.inputsMachine = typeof raw.inputs_machine === 'string' ? raw.inputs_machine : undefined
 
   return cell
 }
@@ -2091,6 +2094,14 @@ function initializeWebSocket() {
         cell.streamAttempt = attempt
       }
       cell.streamBuffer = (cell.streamBuffer ?? '') + text
+    })
+
+    wsInstance.onMessage('cell_inputs', (msg: WsMessage) => {
+      const p = msg.payload as CellInputsPayload
+      const cell = cellMap.value.get(p.cell_id as CellId)
+      if (!cell) return
+      cell.inputWeights = p.inputs
+      cell.inputsMachine = p.machine
     })
 
     wsInstance.onMessage('cell_iteration_progress', (msg: WsMessage) => {

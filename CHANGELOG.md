@@ -127,6 +127,14 @@ exhaustive commit history.
   `admin:notebook-credentials` scope. A credential value can now be
   `${file:/path}`, the file's contents at each use, so rewriting the file
   rotates the secret. (#1244)
+- **A cell says how much it reads, and what its run moved.** A badge shows what
+  its read-only remote mounts, `@table` inputs and `@fetch` URLs weigh, and while
+  it runs, how much moves onto the machine after what its mount cache already
+  holds, with each input on hover; a table's size, or a remote worker's unasked
+  cache, makes a total an upper bound. The new `cell_inputs` WebSocket frame
+  carries the estimate, kept on the cell as `inputs`, and
+  `.strata/reads/index.json` records the bytes each input of a cell's last good
+  run moved and where. (#1245)
 
 ### Changed
 

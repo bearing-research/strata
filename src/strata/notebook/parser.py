@@ -208,6 +208,8 @@ def parse_notebook(directory: Path) -> NotebookState:
             else None
         )
 
+        inputs = (runtime_cell.inputs if runtime_cell is not None else None) or {}
+
         from strata.notebook.writer import load_cell_console_output
 
         console_stdout, console_stderr = load_cell_console_output(directory, cell_meta.id)
@@ -243,6 +245,8 @@ def parse_notebook(directory: Path) -> NotebookState:
                 error=runtime_cell.last_error if runtime_cell else None,
                 error_source_hash=(runtime_cell.last_error_source_hash if runtime_cell else None),
                 widget_values=dict(runtime_cell.widget_values) if runtime_cell else {},
+                inputs=inputs.get("inputs", []),
+                inputs_machine=inputs.get("machine"),
             )
         )
 

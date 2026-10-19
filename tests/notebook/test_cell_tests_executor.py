@@ -326,9 +326,9 @@ async def test_a_passing_test_over_an_empty_table_stays_fresh(tmp_path, monkeypa
     assert result.passed == 1, result.tests
 
     resolves: list[object] = []
-    resolve = tables.resolve_table_snapshot
+    resolve = tables.resolve_table_read
     monkeypatch.setattr(
-        tables, "resolve_table_snapshot", lambda *a, **k: resolves.append(a) or resolve(*a, **k)
+        tables, "resolve_table_read", lambda *a, **k: resolves.append(a) or resolve(*a, **k)
     )
     cell = session.notebook_state.get_cell("cell1")
     assert session.serialize_cell(cell)["test_result"]["stale"] is False

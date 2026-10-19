@@ -72,6 +72,7 @@ from strata.notebook.models import (
     CellTestResult,
     DatasetSpec,
     FetchSpec,
+    InputWeight,
     MountMode,
     MountSpec,
     NotebookState,
@@ -87,8 +88,8 @@ from strata.notebook.mounts import (
     MountWrite,
     ResolvedMount,
     ensure_writable,
-    mount_fingerprint,
     resolve_cell_mounts,
+    weigh_mount_sync,
 )
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
@@ -376,6 +377,33 @@ class _CellProvenance:
     dataset_error: str | None = None
     # The ``@table`` reads, as ``.strata/tables/index.json`` entries (see table_index.py).
     table_reads: list[dict[str, Any]] = field(default_factory=list)
+    # What each declared input weighs (Amber item 89), for the badge and the reads index.
+    input_weights: list[InputWeight] = field(default_factory=list)
+    # Whether the cell reads its mounts through this server's mount cache.
+    reads_here: bool = False
+
+    def reads(self, mounts_moved: dict[str, int]) -> dict[str, Any] | None:
+        """The reads index entry for a good run: what each input moved, if known."""
+        if not self.input_weights:
+            return None
+        inputs = []
+        for weight in self.input_weights:
+            moved: int | None = None
+            if weight.kind == "mount" and self.reads_here:
+                moved = mounts_moved.get(weight.name, 0)
+            elif weight.kind == "fetch" and weight.bytes is not None:
+                moved = weight.bytes - (weight.cached_bytes or 0)
+            inputs.append(
+                {
+                    **weight.model_dump(include={"kind", "name", "uri", "credential"}),
+                    "bytes_moved": moved,
+                }
+            )
+        return {
+            "machine": self.effective_worker,
+            "ran_at": int(time.time() * 1000),
+            "inputs": inputs,
+        }
 
 
 @dataclass(kw_only=True)
@@ -624,6 +652,11 @@ class CellExecutor:
         self._fetch_times: dict[str, dict[str, float]] = {}
         # Same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``.
         self._dataset_refs: dict[str, dict[str, str]] = {}
+        # Bytes each read-only remote mount downloaded on this server during a cell's run,
+        # ``{mount name: bytes}``, for the reads index. Reset as a run starts
+        # (``forget_mounts_moved``), not as provenance is made: a batch prepares mounts
+        # first, and a fan-out cell makes its provenance again after its variants ran.
+        self._mounts_moved: dict[str, dict[str, int]] = {}
         # ``# @output_dir`` files a worker uploaded during a cell's last remote run, by cell:
         # ``{folder: {path: entry}}``. Taken by the run's staging, success or failure.
         self._received_output_files: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
@@ -1153,14 +1186,18 @@ class CellExecutor:
             annotations = parse_annotations(source)
         if mount_specs is None:
             mount_specs = self._resolve_cell_mount_specs(cell_id, source)
-        if mount_fingerprints is None or has_rw_mount is None:
-            mount_fingerprints, has_rw_mount = await self._fingerprint_mounts(mount_specs)
-
-        source_hash = compute_source_hash(source)
-        runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
         effective_worker = effective_worker_name(
             self.session.notebook_state, cell_id, annotations.worker
         )
+        weights: list[InputWeight] = []
+        machine_cache = self._mount_cache_for(effective_worker)
+        if mount_fingerprints is None or has_rw_mount is None:
+            mount_fingerprints, has_rw_mount = await self._fingerprint_mounts(
+                mount_specs, weights=weights, cache=machine_cache
+            )
+
+        source_hash = compute_source_hash(source)
+        runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
         runtime_identity = worker_runtime_identity(self.session.notebook_state, effective_worker)
         cell_state = self.session.notebook_state.get_cell(cell_id)
         declared_env_keys = set(annotations.env) | set(
@@ -1187,7 +1224,24 @@ class CellExecutor:
 
             tables += lake_tables(self.session.notebook_state, source)
             config = with_notebook_catalogs(self._lake_config(), self.session.notebook_state)
-        table_fingerprints, table_snapshots = await self._fingerprint_tables(tables, config)
+        from strata.notebook.tables import table_credential
+
+        table_sizes: dict[str, int | None] = {}
+        table_fingerprints, table_snapshots = await self._fingerprint_tables(
+            tables, config, sizes=table_sizes
+        )
+        weights += [
+            InputWeight(
+                kind="table",
+                name=spec.name,
+                uri=spec.uri,
+                credential=table_credential(spec.uri, config or self._lake_config()),
+                bytes=table_sizes[spec.name],
+                cached_bytes=None,
+            )
+            for spec in annotations.tables
+            if spec.name in table_sizes
+        ]
         table_reads = []
         if annotations.tables:
             from strata.notebook.table_index import table_read
@@ -1204,7 +1258,7 @@ class CellExecutor:
             fetch_times,
             fetch_error,
             fetch_error_code,
-        ) = await self._resolve_fetches(annotations.fetches)
+        ) = await self._resolve_fetches(annotations.fetches, weights=weights)
         self._fetch_refs[cell_id] = fetch_refs
         self._fetch_times[cell_id] = fetch_times
         dataset_fingerprints, datasets, dataset_error = await self._resolve_datasets(
@@ -1213,6 +1267,10 @@ class CellExecutor:
         self._dataset_refs[cell_id] = {
             dataset.resolved.lineage_uri: dataset.local_ref for dataset in datasets.values()
         }
+        # Provenance is also made for upstreams that only hit the cache: only news is sent.
+        # An empty list is news too: it clears what the cell showed.
+        if self.session.record_cell_inputs(cell_id, effective_worker, weights):
+            await self._broadcast_cell_inputs(cell_id, effective_worker, weights)
         provenance_hash = compute_provenance_hash(
             input_hashes
             + mount_fingerprints
@@ -1245,6 +1303,8 @@ class CellExecutor:
             datasets=datasets,
             dataset_error=dataset_error,
             table_reads=table_reads,
+            input_weights=weights,
+            reads_here=machine_cache is not None,
         )
 
     # ------------------------------------------------------------------
@@ -1263,6 +1323,8 @@ class CellExecutor:
     ) -> CellExecutionResult:
         """Dispatch a cell to its language executor; a missing cell uses the Python one."""
         from strata.notebook.languages import get_language_executor
+
+        self.forget_mounts_moved(cell_id)
 
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is not None:
@@ -1685,6 +1747,7 @@ class CellExecutor:
                     source_hash,
                     env_hash,
                     table_reads=prov.table_reads,
+                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
                 )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -1842,6 +1905,7 @@ class CellExecutor:
                             source_hash,
                             env_hash,
                             table_reads=prov.table_reads,
+                            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
                         )
 
                     if exec_result.success:
@@ -2148,6 +2212,7 @@ class CellExecutor:
                     compute_source_hash(source),
                     prov.env_hash,
                     table_reads=prov.table_reads,
+                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
                 )
             except Exception:
                 logger.exception("Failed to record fan-out base provenance for cell %s", cell_id)
@@ -2373,6 +2438,7 @@ class CellExecutor:
                     source_hash,
                     env_hash,
                     table_reads=prov.table_reads,
+                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
                 )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -2426,7 +2492,7 @@ class CellExecutor:
                     if remote_build_id and remote_metadata.get("remote_transport") == "signed":
                         remote_metadata["remote_build_state"] = "ready"
                 else:
-                    resolved_mounts = await self._prepare_mounts(mount_specs)
+                    resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
                     manifest_path = self._write_manifest(
                         source,
                         input_specs,
@@ -2514,6 +2580,7 @@ class CellExecutor:
                             source_hash,
                             env_hash,
                             table_reads=prov.table_reads,
+                            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
                         )
 
                     if exec_result.success:
@@ -2712,7 +2779,7 @@ class CellExecutor:
         """Run the direct local execution path."""
         result = None
         execution_method = "cold"
-        resolved_mounts = await self._prepare_mounts(mount_specs)
+        resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
         with self._run_token(timeout_seconds) as run_token:
             manifest_path = self._write_manifest(
                 source,
@@ -2778,7 +2845,7 @@ class CellExecutor:
         The result is unpacked into *result_dir*, a server-only directory: output_dir
         still holds the folders' files, and the cell can redirect anything under it.
         """
-        resolved_mounts = await self._prepare_mounts(mount_specs)
+        resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
         with self._run_token(timeout_seconds) as run_token:
             manifest_path = self._write_manifest(
                 source,
@@ -3703,6 +3770,36 @@ class CellExecutor:
                         )
                 await asyncio.sleep(_JOB_POLL_SECONDS)
 
+    def _mount_cache_for(self, worker_name: str) -> MountCache | None:
+        """The mount cache a cell on *worker_name* reads through, if it is this server's."""
+        worker = resolve_worker_spec(self.session.notebook_state, worker_name)
+        if worker is None or worker.backend == WorkerBackendType.LOCAL:
+            return MountCache.from_config(self._lake_config())
+        if is_embedded_executor_worker(worker):
+            return MountCache.from_config(self._lake_config())
+        return None
+
+    async def _broadcast_cell_inputs(
+        self, cell_id: str, machine: str, weights: list[InputWeight]
+    ) -> None:
+        """Tell the notebook what the cell's inputs weigh. Best effort, like the phase."""
+        try:
+            from strata.notebook.protocol import MessageType
+            from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
+            from strata.notebook.ws_payloads import cell_inputs_payload
+
+            session_id = self.session.id
+            await _broadcast_message(
+                session_id,
+                _make_message(
+                    MessageType.CELL_INPUTS,
+                    next_notebook_sequence(session_id),
+                    cell_inputs_payload(cell_id, machine, weights),
+                ),
+            )
+        except Exception:
+            logger.debug("cell inputs broadcast failed", exc_info=True)
+
     async def _broadcast_remote_phase(
         self,
         cell_id: str | None,
@@ -3907,13 +4004,31 @@ class CellExecutor:
     async def _fingerprint_mounts(
         self,
         mount_specs: list[MountSpec],
+        *,
+        weights: list[InputWeight] | None = None,
+        cache: MountCache | None = None,
     ) -> tuple[list[str], bool]:
-        """Compute mount fingerprints without preparing local materializations."""
+        """Compute mount fingerprints without preparing local materializations.
+
+        *weights*, when given, gets each remote read-only mount's weight from the same
+        listing, its cached share counted in *cache* (``None``: unknown).
+        """
         self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
         has_rw_mount = False
         for mount in sorted(mount_specs, key=lambda item: item.name):
-            fingerprint = await mount_fingerprint(self._mount_resolver, mount)
+            fingerprint, weight = weigh_mount_sync(self._mount_resolver, mount, cache)
+            if weights is not None and weight is not None:
+                weights.append(
+                    InputWeight(
+                        kind="mount",
+                        name=mount.name,
+                        uri=mount.uri,
+                        credential=mount.credential,
+                        bytes=weight.bytes,
+                        cached_bytes=weight.cached_bytes,
+                    )
+                )
             if fingerprint is None:
                 has_rw_mount = True
             else:
@@ -3937,17 +4052,30 @@ class CellExecutor:
             principal=principal.id if principal is not None else None,
         )
 
+    def forget_mounts_moved(self, cell_id: str) -> None:
+        """A run of *cell_id* starts: what an earlier one downloaded is not its own."""
+        self._mounts_moved.pop(cell_id, None)
+
     async def _prepare_mounts(
         self,
         mount_specs: list[MountSpec],
+        cell_id: str | None = None,
     ) -> dict[str, ResolvedMount]:
-        """Prepare local mount materializations for local execution paths."""
+        """Prepare local mount materializations for local execution paths.
+
+        With *cell_id*, what each view downloaded is added to the cell's moved bytes.
+        """
         if not mount_specs:
             return {}
         self._mount_resolver.credential_resolver = self._credential_resolver()
         ensure_writable(self._mount_resolver.credential_resolver, mount_specs)
         self._mount_resolver.mount_cache = MountCache.from_config(self._lake_config())
         resolved = await self._mount_resolver.prepare_mounts(mount_specs)
+        if cell_id is not None:
+            moved = self._mounts_moved.setdefault(cell_id, {})
+            for name, mount in resolved.items():
+                if mount.bytes_moved is not None:
+                    moved[name] = moved.get(name, 0) + mount.bytes_moved
         staged = [rm.staging_dir for rm in resolved.values() if rm.staging_dir is not None]
         if staged:
             try:
@@ -3962,7 +4090,7 @@ class CellExecutor:
         return resolved
 
     async def _resolve_fetches(
-        self, fetch_specs: list[FetchSpec]
+        self, fetch_specs: list[FetchSpec], *, weights: list[InputWeight] | None = None
     ) -> tuple[
         list[str], dict[str, Path], dict[str, str], dict[str, float], str | None, str | None
     ]:
@@ -3971,7 +4099,8 @@ class CellExecutor:
         Always rechecked (``max_age=0``) so the run records what the URL served
         when it ran. Returns fingerprints, a path per name, the lineage input per
         URL, when each URL's bytes were downloaded, and the first failure and its
-        code, if any.
+        code, if any. *weights*, when given, gets each fetch's size, cached unless this
+        check downloaded it.
         """
         if not fetch_specs:
             return [], {}, {}, {}, None, None
@@ -3998,6 +4127,18 @@ class CellExecutor:
                 continue
             fingerprints.append(result.fingerprint(spec))
             fetched[spec.name] = result.path
+            if weights is not None:
+                size = result.path.stat().st_size
+                weights.append(
+                    InputWeight(
+                        kind="fetch",
+                        name=spec.name,
+                        uri=spec.url,
+                        credential=None,
+                        bytes=size,
+                        cached_bytes=0 if result.downloaded else size,
+                    )
+                )
             refs[spec.url] = f"sha256:{result.sha256}"
             if result.fetched_at is not None:
                 times[spec.url] = result.fetched_at
@@ -4084,6 +4225,8 @@ class CellExecutor:
         self,
         table_specs: list[TableSpec],
         config: Any = None,
+        *,
+        sizes: dict[str, int | None] | None = None,
     ) -> tuple[list[str], dict[str, int | None]]:
         """Resolve table snapshots for provenance hashing (see tables.py).
 
@@ -4101,7 +4244,12 @@ class CellExecutor:
         return await loop.run_in_executor(
             None,
             functools.partial(
-                fingerprint_tables, table_specs, config, env, notebook=self.session.path
+                fingerprint_tables,
+                table_specs,
+                config,
+                env,
+                notebook=self.session.path,
+                sizes=sizes,
             ),
         )
 
@@ -4479,6 +4627,7 @@ class CellExecutor:
                 prov.source_hash,
                 prov.env_hash,
                 table_reads=prov.table_reads,
+                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
             )
 
         return CellExecutionResult(
@@ -4537,6 +4686,7 @@ class CellExecutor:
                 prov.source_hash,
                 prov.env_hash,
                 table_reads=prov.table_reads + result_dict.get("table_reads", []),
+                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
             )
             # Back the result-table preview with an artifact. Otherwise `save_cell_output` refuses
             # it, export drops it (``markdown_text`` is stripped at persist time and re-fetched
@@ -4626,6 +4776,7 @@ class CellExecutor:
                 prov.source_hash,
                 prov.env_hash,
                 table_reads=prov.table_reads,
+                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
             )
 
         return CellExecutionResult(
@@ -6089,6 +6240,7 @@ class CellExecutor:
                     source_hash,
                     env_hash,
                     table_reads=prov.table_reads,
+                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
                 )
                 return cached
 
@@ -6175,7 +6327,7 @@ class CellExecutor:
                     "file": carry_file,
                 }
 
-                resolved_mounts = await self._prepare_mounts(mount_specs)
+                resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
                 loop_config: dict[str, Any] | None = (
                     {"until_expr": loop.until_expr, "iteration": k}
                     if loop.until_expr is not None
@@ -6533,6 +6685,7 @@ class CellExecutor:
             source_hash,
             env_hash,
             table_reads=prov.table_reads,
+            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
         )
         raw_displays = final_result.get("displays") if final_result else None
         display_outputs = (
@@ -7411,6 +7564,7 @@ class CellExecutor:
             prov.source_hash,
             prov.env_hash,
             table_reads=prov.table_reads,
+            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
         )
 
         return {
@@ -7540,6 +7694,7 @@ class CellExecutor:
                 source_hash,
                 env_hash,
                 table_reads=prov.table_reads,
+                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
             )
         except Exception:
             pass

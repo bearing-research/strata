@@ -56,6 +56,12 @@ export interface CellConsolePayload {
   chunk_seq?: number | null
 }
 
+export interface CellInputsPayload {
+  cell_id: string
+  machine: string
+  inputs: InputWeight[]
+}
+
 export interface CellIterationProgressPayload {
   cell_id: string
   iteration: number
@@ -201,6 +207,15 @@ export interface ImpactPreviewPayload {
   estimated_ms: number
 }
 
+export interface InputWeight {
+  kind: 'mount' | 'table' | 'fetch'
+  name: string
+  uri: string
+  credential?: string | null
+  bytes?: number | null
+  cached_bytes?: number | null
+}
+
 export interface InspectResultPayload {
   cell_id: string
   action: 'open' | 'eval' | 'close'
@@ -252,6 +267,7 @@ export interface WsServerPayloadMap {
   cascade_progress: CascadeProgressPayload
   cascade_prompt: CascadePromptPayload
   cell_console: CellConsolePayload
+  cell_inputs: CellInputsPayload
   cell_iteration_progress: CellIterationProgressPayload
   cell_output_delta: CellOutputDeltaPayload
   cell_status: CellStatusPayload

@@ -23,7 +23,7 @@ import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from strata.notebook.models import TableSpec
 
@@ -49,8 +49,19 @@ def resolve_table_snapshot(
     Raises:
         ValueError: If the catalog/table cannot be reached.
     """
+    return resolve_table_read(spec, config, env, notebook=notebook)[0]
+
+
+def resolve_table_read(
+    spec: TableSpec,
+    config: StrataConfig,
+    env: Mapping[str, str] | None,
+    *,
+    notebook: Path | None,
+) -> tuple[int | None, int | None]:
+    """The snapshot to read and its data files' bytes; a pin's size is not looked up."""
     if spec.snapshot_pin is not None:
-        return spec.snapshot_pin
+        return spec.snapshot_pin, None
 
     from strata.iceberg.catalog import PyIcebergCatalog
 
@@ -62,7 +73,10 @@ def resolve_table_snapshot(
         raise ValueError(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
 
     snapshot = table.current_snapshot()
-    return None if snapshot is None else snapshot.snapshot_id
+    if snapshot is None:
+        return None, 0
+    size = snapshot.summary.get("total-files-size") if snapshot.summary else None
+    return snapshot.snapshot_id, int(size) if size is not None else None
 
 
 def fingerprint_tables(
@@ -71,8 +85,12 @@ def fingerprint_tables(
     env: Mapping[str, str] | None = None,
     *,
     notebook: Path | None = None,
+    sizes: dict[str, int | None] | None = None,
 ) -> tuple[list[str], dict[str, int | None]]:
     """Resolve every table's snapshot for provenance hashing.
+
+    *sizes*, when given, is filled with each resolved table's data-file bytes (from its
+    snapshot summary, ``None`` if unknown), an upper bound on what a scan reads.
 
     Returns ``(fingerprints, snapshots)``: fingerprints are
     ``"<name>:table:<uri>:<snapshot_id>"``; ``snapshots`` maps table name to
@@ -86,7 +104,7 @@ def fingerprint_tables(
     snapshots: dict[str, int | None] = {}
     for spec in sorted(specs, key=lambda t: t.name):
         try:
-            snapshot_id = resolve_table_snapshot(spec, config, env, notebook=notebook)
+            snapshot_id, size = resolve_table_read(spec, config, env, notebook=notebook)
         except ValueError as e:
             logger.warning(
                 "table fingerprint unresolved for %s (%s): %s",
@@ -97,6 +115,8 @@ def fingerprint_tables(
             fingerprints.append(f"{spec.name}:table:unresolved:{random_fingerprint()}")
             continue
         snapshots[spec.name] = snapshot_id
+        if sizes is not None:
+            sizes[spec.name] = size
         if snapshot_id is None:
             fingerprints.append(f"{spec.name}:table:empty:{random_fingerprint()}")
             continue
@@ -119,3 +139,14 @@ def without_empty_table_nonce(fingerprint: str) -> str:
 def random_fingerprint() -> str:
     """A fingerprint no other run shares, for a table whose state cannot be keyed."""
     return hashlib.sha256(os.urandom(32)).hexdigest()
+
+
+def table_credential(table_uri: str, config: Any) -> str | None:
+    """The named credential a table's catalog reads through, if it names one."""
+    from strata.iceberg.catalog import named_catalog
+    from strata.notebook.credentials import CATALOG_CREDENTIAL_KEY
+
+    catalog, _table = named_catalog(table_uri, config)
+    if catalog is None:
+        return None
+    return config.catalogs[catalog].get(CATALOG_CREDENTIAL_KEY) or None

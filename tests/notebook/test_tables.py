@@ -87,6 +87,35 @@ class TestFingerprintTables:
         assert fp_before != fp_after
         assert snaps_after["events"] != mini_warehouse["snapshot_id"]
 
+    def test_sizes_are_what_the_snapshots_data_files_weigh(self, mini_warehouse, config):
+        """Amber item 89: an upper bound on what a scan of the table reads."""
+        import pyarrow as pa
+
+        table = mini_warehouse["table"]
+        specs = [TableSpec(name="events", uri=mini_warehouse["uri"])]
+
+        def data_bytes() -> int:
+            table.refresh()
+            return sum(task.file.file_size_in_bytes for task in table.scan().plan_files())
+
+        before: dict[str, int | None] = {}
+        fingerprint_tables(specs, config, sizes=before)
+        table.append(pa.table({"id": pa.array([4], type=pa.int64())}))
+        after: dict[str, int | None] = {}
+        fingerprint_tables(specs, config, sizes=after)
+
+        assert before["events"] and after["events"] == data_bytes() > before["events"]
+
+    def test_a_pinned_tables_size_is_not_looked_up(self, config):
+        sizes: dict[str, int | None] = {}
+        fingerprint_tables(
+            [TableSpec(name="events", uri="file:///nope#db.gone", snapshot_pin=42)],
+            config,
+            sizes=sizes,
+        )
+
+        assert sizes == {"events": None}
+
     def test_pin_survives_append(self, mini_warehouse, config):
         import pyarrow as pa
 

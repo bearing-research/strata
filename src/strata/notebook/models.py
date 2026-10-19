@@ -574,6 +574,24 @@ class CellOutput(BaseModel):
     error: str | None = Field(default=None, description="Error message if serialization failed")
 
 
+class InputWeight(BaseModel):
+    """What one declared input weighs (Amber item 89). A size nothing told us is ``None``.
+
+    Each comes from what the run already reads to fingerprint its inputs: a mount's
+    listing, a table's snapshot summary, a fetch's bytes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["mount", "table", "fetch"]
+    name: str
+    uri: str
+    credential: str | None = None
+    bytes: int | None = None
+    # How many of ``bytes`` are already on the machine; a table's never are known.
+    cached_bytes: int | None = None
+
+
 class CellTestCase(BaseModel):
     """One pytest test case from a cell-test run."""
 
@@ -627,6 +645,13 @@ class CellState(BaseModel):
     test_result: CellTestResult | None = Field(
         default=None,
         description="Last persisted cell-test result (None until tests are run)",
+    )
+    inputs: list[InputWeight] = Field(
+        default_factory=list,
+        description="What the declared inputs weighed when the cell last started",
+    )
+    inputs_machine: str | None = Field(
+        default=None, description="The worker those inputs were weighed for"
     )
     language: CellLanguage = Field(default=CellLanguage.PYTHON, description="Programming language")
     order: float = Field(default=0, description="Display order in notebook")
