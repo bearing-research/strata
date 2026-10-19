@@ -3753,6 +3753,9 @@ exhaustive commit history.</p>
   <code>s3</code>, <code>gs</code> or <code>az</code> that names no credential fails too, since it would write
   as the server's own identity; a <code>file://</code> mount is outside the setting.
   Unset, nothing changes. (#1217)</li>
+<li><strong>A running remote cell's badge keeps its dispatcher's sentence.</strong> A job
+  that reports <code>running</code> with a <code>detail</code>, such as where it runs, shows it on the
+  badge, as a waiting job's does, and a new one replaces it. (#1230)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
