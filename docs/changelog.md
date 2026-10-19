@@ -232,7 +232,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   by walking their paths, so a process a cell left running could swap a
   directory it owned for a symlink mid-walk and be given whatever the link
   named, such as `/etc`. The walk now holds each directory open and changes
-  the run directory's own owner last. (#PR)
+  the run directory's own owner last. (#1219)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk
