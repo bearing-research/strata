@@ -2289,8 +2289,9 @@ while the server is stopped. See <a href="../../reference/configuration/#noteboo
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    ├── console/              # per-cell stdout/stderr (one JSON per cell)
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    ├── fetch/                # the bytes each @fetch last read
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    ├── tables/index.json     # the tables each cell's last good run read
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    └── artifacts/            # SQLite + blobs (cached cell outputs)
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>└── .venv/                    # uv-materialized venv - gitignored, host-specific
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    ├── reads/index.json      # the bytes each cell's last good run moved, per input
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    └── artifacts/            # SQLite + blobs (cached cell outputs)
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>└── .venv/                    # uv-materialized venv - gitignored, host-specific
 </code></pre></div>
 <p>The <code>.strata/artifacts/</code> directory is the <strong>per-notebook</strong> artifact store. It grows as cells produce outputs and is the thing that makes "re-run an unchanged cell" instant.</p>
 <h2 id="backup">Backup<a class="headerlink" href="#backup" title="Permanent link">&para;</a></h2>

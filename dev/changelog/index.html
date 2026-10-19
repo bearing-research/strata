@@ -3777,6 +3777,14 @@ exhaustive commit history.</p>
   <code>admin:notebook-credentials</code> scope. A credential value can now be
   <code>${file:/path}</code>, the file's contents at each use, so rewriting the file
   rotates the secret. (#1244)</li>
+<li><strong>A cell says how much it reads, and what its run moved.</strong> A badge shows what
+  its read-only remote mounts, <code>@table</code> inputs and <code>@fetch</code> URLs weigh, and while
+  it runs, how much moves onto the machine after what its mount cache already
+  holds, with each input on hover; a table's size, or a remote worker's unasked
+  cache, makes a total an upper bound. The new <code>cell_inputs</code> WebSocket frame
+  carries the estimate, kept on the cell as <code>inputs</code>, and
+  <code>.strata/reads/index.json</code> records the bytes each input of a cell's last good
+  run moved and where. (#1245)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>

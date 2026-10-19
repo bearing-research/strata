@@ -3152,6 +3152,15 @@ and drops views unused for some days, least recently used first; see
 <a href="../../reference/configuration/#notebook"><code>STRATA_NOTEBOOK_MOUNT_CACHE_DIR</code></a> and
 the two settings after it. A worker keeps its cache across jobs. An <code>rw</code> mount
 is still staged per notebook.</p>
+<p><strong>A cell says how much it reads.</strong> A badge shows what its read-only remote mounts,
+<code>@table</code> inputs and <code>@fetch</code> URLs weighed when it last started ("reads 3.0 GB"), and
+while it runs, how much of that moves onto the machine ("2.0 GB to read"), with each
+input and what the machine already holds on hover. A table counts its snapshot's
+data files and a remote worker's cache is not asked yet, so those make a total an
+upper bound ("up to 2.0 GB to read"). A size that is not known, such as a pinned
+mount's, is not guessed. After a successful run, <code>.strata/reads/index.json</code> records
+what each input moved and on which machine; see
+<a href="../lake-aware-cells/#what-a-run-moved">What a run moved</a>.</p>
 <p>Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the <code>s3</code> extra for
 <code>s3://</code> (<code>s3fs</code>), <code>gcs</code> for <code>gs://</code> (<code>gcsfs</code>) and <code>azure</code> for <code>az://</code>
