@@ -19,7 +19,7 @@ import logging
 import os
 import shutil
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.parse import unquote, urlparse
@@ -820,10 +820,12 @@ class MountWeight:
     """A remote read-only mount's bytes, and how many are already where the cell runs.
 
     ``None`` is unknown: a pinned mount is not listed, and a share needs the cache.
+    *listing* is kept when the share is unknown, so the machine can be asked for it.
     """
 
     bytes: int | None
     cached_bytes: int | None
+    listing: dict[str, dict[str, Any]] | None = field(default=None, compare=False, repr=False)
 
 
 def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | None:
@@ -886,7 +888,7 @@ def _weigh_listing(
         return MountWeight(bytes=None, cached_bytes=None)
     sizes = {name: int(info.get("size") or 0) for name, info in listing.items()}
     if cache is None:
-        return MountWeight(bytes=sum(sizes.values()), cached_bytes=None)
+        return MountWeight(bytes=sum(sizes.values()), cached_bytes=None, listing=listing)
     protocol = _scheme_to_fsspec_protocol(scheme)
     digest = _options_digest(storage_options)
     objects = [
@@ -896,3 +898,42 @@ def _weigh_listing(
         bytes=sum(sizes.values()),
         cached_bytes=cache.cached_bytes(_view_key(protocol, path, digest, fingerprint), objects),
     )
+
+
+def listing_entries(listing: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """A listing as JSON, keeping what its fingerprint and object keys read.
+
+    A missing size stays missing: the two read it with different defaults.
+    """
+    return [
+        {
+            "key": key,
+            "name": info.get("name", ""),
+            "etag": str(info.get("ETag", info.get("etag", ""))),
+            "mtime": str(info.get("LastModified", info.get("mtime", ""))),
+            **({"size": info["size"]} if "size" in info else {}),
+        }
+        for key, info in listing.items()
+    ]
+
+
+def cached_share(
+    mount: MountSpec,
+    storage_options: dict[str, Any],
+    entries: list[dict[str, Any]],
+    cache: MountCache,
+) -> int | None:
+    """How many bytes of a listing a machine's *cache* holds, for a server that asks.
+
+    The object keys hash the storage options, so only the machine reading the mount
+    can compute them. ``None`` for a mount it would not read through a view.
+    """
+    scheme, path = parse_mount_uri(mount.uri)
+    if scheme == "file" or mount.mode == MountMode.READ_WRITE:
+        return None
+    listing = {
+        entry["key"]: {k: entry[k] for k in ("name", "size", "etag", "mtime") if k in entry}
+        for entry in entries
+    }
+    fingerprint = _fingerprint_listing(listing)
+    return _weigh_listing(scheme, path, storage_options, fingerprint, listing, cache).cached_bytes

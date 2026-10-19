@@ -298,3 +298,109 @@ async def test_a_batched_run_counts_what_its_mounts_downloaded(tmp_path, remote,
 
     assert [c.status.value for c in session.notebook_state.cells] == ["ready", "ready"]
     assert [i["bytes_moved"] for i in reads_index.load(nb)["c1"]["inputs"]] == [5]
+
+
+async def test_a_worker_answers_by_its_own_object_keys(tmp_path, monkeypatch):
+    """The keys hash the storage options, and a worker's are not the server's."""
+    from datetime import UTC, datetime
+
+    from fastapi.testclient import TestClient
+
+    from strata.notebook.credentials import CredentialResolver
+    from strata.notebook.mounts import MountFingerprinter, listing_entries
+    from strata.notebook.remote_executor import create_notebook_executor_app
+
+    files = _files("bucket/data", {"a": b"aa", "b": b"bbb"})
+    # s3fs lists a datetime: the entries carry it as text, and the keys still agree.
+    for info in files.values():
+        del info["mtime"]
+        info["LastModified"] = datetime(2026, 10, 1, tzinfo=UTC)
+    _install_fake_fsspec(monkeypatch, _FakeRemoteFS(files))
+    monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_DIR", str(tmp_path / "worker"))
+    # The worker's default credential for s3 adds an option the server does not have.
+    monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIALS", json.dumps({"anon": {"anon": "true"}}))
+    monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CREDENTIALS", json.dumps({"s3": "anon"}))
+    worker_reader = MountResolver(
+        cache_dir=tmp_path / "w",
+        credential_resolver=CredentialResolver(
+            {"anon": {"anon": "true"}}, scheme_defaults={"s3": "anon"}
+        ),
+        mount_cache=MountCache(tmp_path / "worker"),
+    )
+    # The server lists with no options of its own.
+    _, listing = MountFingerprinter.remote_listing_sync("s3", "bucket/data", None)
+    assert listing is not None
+    body = {
+        "mounts": [
+            {"spec": spec.model_dump(mode="json"), "entries": listing_entries(listing)}
+            for spec in (_mount(), _mount(credential="nope"))
+        ]
+    }
+
+    with TestClient(create_notebook_executor_app()) as client:
+        features = client.get("/health").json()["capabilities"]["features"]
+        cold = client.post("/v1/mount-cache/cached", json=body).json()
+        await worker_reader.prepare_mounts([_mount("s3://bucket/data/a")])
+        partly = client.post("/v1/mount-cache/cached", json=body).json()
+        await worker_reader.prepare_mounts([_mount()])
+        warm = client.post("/v1/mount-cache/cached", json=body).json()
+
+    assert features["mount_cache_probe"] is True
+    # A credential the worker does not have: it cannot tell.
+    assert [cold, partly, warm] == [
+        {"cached_bytes": [0, None]},
+        {"cached_bytes": [2, None]},
+        {"cached_bytes": [5, None]},
+    ]
+
+
+@pytest.mark.parametrize("transport", ["direct", "signed"])
+async def test_a_remote_run_shows_the_workers_share_and_what_it_moved(
+    tmp_path, remote, monkeypatch, notebook_executor_server, notebook_personal_server, transport
+):
+    from strata.config import StrataConfig
+    from strata.notebook import reads_index
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.models import WorkerBackendType, WorkerSpec
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    monkeypatch.setenv("STRATA_NOTEBOOK_MOUNT_CACHE_DIR", str(tmp_path / "worker"))
+    config = StrataConfig(cache_dir=tmp_path / "cache", notebook_mount_cache_dir=tmp_path / "srv")
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+    source = "# @mount data s3://bucket/data ro\nn = len(list(data.iterdir()))"
+    nb = create_notebook(tmp_path / "nb", "Remote moves")
+    add_cell_to_notebook(nb, "c1", None)
+    write_cell(nb, "c1", source)
+    session = NotebookSession(parse_notebook(nb), nb)
+    worker_config = {"url": notebook_executor_server["execute_url"], "transport": transport}
+    if transport == "signed":
+        worker_config["strata_url"] = notebook_personal_server["base_url"]
+    session.notebook_state.workers = [
+        WorkerSpec(
+            name="remote", backend=WorkerBackendType.EXECUTOR, runtime_id="r", config=worker_config
+        )
+    ]
+    session.notebook_state.worker = "remote"
+    executor = CellExecutor(session)
+    cell = session.notebook_state.get_cell("c1")
+
+    first = await executor.execute_cell("c1", source)
+    assert first.success, first.error
+    assert first.execution_method == "executor"
+    shares = [cell.inputs[0].cached_bytes]
+    moved = [reads_index.load(nb)["c1"]]
+    again = await executor.execute_cell_rerun("c1", source)
+    assert again.success, again.error
+    shares.append(cell.inputs[0].cached_bytes)
+    moved.append(reads_index.load(nb)["c1"])
+
+    # Asked of the worker, not read from the server's own (empty) cache.
+    assert shares == [0, 5]
+    reported = [(e["machine"], e["inputs"][0]["bytes_moved"]) for e in moved]
+    # A signed rerun under the same transport provenance gets the first run's bundle
+    # back, report included, so only the first run's figure is the worker's own.
+    runs = 1 if transport == "signed" else 2
+    assert reported[:runs] == [("remote", 5), ("remote", 0)][:runs]
+    assert not (tmp_path / "srv").exists() or not any((tmp_path / "srv").rglob("*.lock"))

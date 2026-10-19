@@ -804,6 +804,42 @@ async def worker_advertises(worker: WorkerSpec, feature: str) -> bool | None:
     return cached[1].get(feature) is True
 
 
+async def worker_cached_bytes(
+    worker: WorkerSpec, token: str | None, mounts: list[dict[str, Any]]
+) -> list[int | None] | None:
+    """Ask *worker* how many bytes of each listed mount its cache holds (Amber item 89).
+
+    *mounts* are ``{"spec", "entries"}``. ``None`` when it cannot answer: it does not
+    advertise ``mount_cache_probe`` (a pool's dispatcher does not, since the machine is
+    picked later), or the request fails.
+    """
+    if not await worker_advertises(worker, "mount_cache_probe"):
+        return None
+    health_url = _health_url_for_worker(worker)
+    if health_url is None:
+        return None
+    url = health_url.removesuffix("/health") + "/v1/mount-cache/cached"
+    headers = {"Authorization": f"Bearer {token}"} if token else None
+    try:
+        # Short: the run waits on it, and an unknown share only bounds the badge.
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(url, json={"mounts": mounts}, headers=headers)
+    except httpx.HTTPError:
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        answer = response.json().get("cached_bytes")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(answer, list) or len(answer) != len(mounts):
+        return None
+    return [
+        value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+        for value in answer
+    ]
+
+
 def _health_url_for_worker(worker: WorkerSpec) -> str | None:
     """Map a worker config URL to its health endpoint."""
     if not is_http_executor_worker(worker):

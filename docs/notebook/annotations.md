@@ -208,10 +208,11 @@ is still staged per notebook.
 **A cell says how much it reads.** A badge shows what its read-only remote mounts,
 `@table` inputs and `@fetch` URLs weighed when it last started ("reads 3.0 GB"), and
 while it runs, how much of that moves onto the machine ("2.0 GB to read"), with each
-input and what the machine already holds on hover. A table counts its snapshot's
-data files and a remote worker's cache is not asked yet, so those make a total an
-upper bound ("up to 2.0 GB to read"). A size that is not known, such as a pinned
-mount's, is not guessed. After a successful run, `.strata/reads/index.json` records
+input and what the machine already holds on hover. On a remote worker that share
+is the worker's own cache, which the worker reports. A table counts its snapshot's
+data files, and a pool cannot say which machine will run the cell, so those make a
+total an upper bound ("up to 2.0 GB to read"). A size that is not known, such as a
+pinned mount's, is not guessed. After a successful run, `.strata/reads/index.json` records
 what each input moved and on which machine; see
 [What a run moved](lake-aware-cells.md#what-a-run-moved).
 

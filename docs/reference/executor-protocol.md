@@ -52,6 +52,7 @@ Liveness + capabilities probe. No auth.
       "folder_inputs": true,
       "locked_environments": true,
       "locked_r_environments": true,
+      "mount_cache_probe": true,
       "languages": ["python", "r"]
     }
   },
@@ -84,6 +85,8 @@ A cell runs with the worker's environment minus the worker's own secrets: `strat
 `folder_inputs: true` says the worker takes another cell's `# @output_dir` folder as an input. Strata sends the folder's files as one tar with format `dir/tar`, named `<stem>.dir.tar`, and the harness unpacks it to `<stem>.dir` beside it, refusing a member that would land outside, and gives the cell that path. Strata refuses to send a cell reading a folder to a worker that does not advertise it.
 
 `locked_r_environments: true` says the worker restores an R cell's lock, the notebook's `renv.lock`, when the request carries one ([below](#the-r-environment-block)). It works like `locked_environments`: Strata sends the R block only to a worker that advertises it, and the reference worker reports it only when its `Rscript` can load `renv`.
+
+`mount_cache_probe: true` says the worker answers [`POST /v1/mount-cache/cached`](#post-v1mount-cachecached-optional) with how much of a read-only mount its own cache holds, so the notebook can show that share before a cell runs there. Strata asks only a worker that advertises it; for any other, the share shows as unknown.
 
 ### The `environment` block
 
@@ -474,6 +477,29 @@ minute, and only for a worker its policy lets the notebook use.
 `strata-pool`'s own `POST /v1/hints` takes a `machine_type` instead, so a
 dispatcher maps the worker to one.
 
+## `POST /v1/mount-cache/cached` (optional)
+
+Before a cell with a read-only `# @mount` runs on a worker, the notebook lists the mount (it needs the listing for the cell's provenance anyway) and asks the worker how much of it the worker's [mount cache](../notebook/lake-aware-cells.md) already holds. The cache keys objects by a hash that covers the storage options, and only the worker holds its own credentials, so only the worker can answer. The URL is the worker's `/health` URL with `/health` replaced by `/v1/mount-cache/cached`, with the same `Authorization` header as a dispatch.
+
+```json
+{
+  "mounts": [
+    {
+      "spec": {"name": "raw", "uri": "s3://bucket/raw", "mode": "ro", "credential": null, "options": {}},
+      "entries": [{"key": "a.parquet", "name": "bucket/raw/a.parquet", "etag": "\"9b2c\"", "mtime": "2026-10-01 12:00:00+00:00", "size": 1048576}]
+    }
+  ]
+}
+```
+
+`entries` is the listing as `strata.notebook.mounts.listing_entries` writes it: each object's key relative to the mount, its full name, its ETag and modified time as strings, and its size when the store gave one. The answer has one figure per mount, in order:
+
+```json
+{"cached_bytes": [1048576]}
+```
+
+`null` is a share the worker cannot tell: a credential it does not have, a `file://` mount, or a read-write one. The notebook waits at most 5 seconds and treats any failure as unknown. A pool's `/health` advertises no features, so a cell bound to a pool is not asked: the machine that will run it is not known until dispatch.
+
 ## `POST /execute` (worker-pool alias)
 
 The same handler as `/v1/execute-manifest`, at the path `strata-pool` dispatches to. The pool forwards the job body verbatim with no content type, and a build manifest is self-describing, so a manifest that arrives through the pool and one pushed directly are validated identically.
@@ -513,6 +539,7 @@ dirs/<name>/<path>      - each file of each # @output_dir folder (output_dirs wo
   "error": null,
   "traceback": null,
   "build_env": "cpython-3.13-linux-x86_64",
+  "mount_bytes": {"raw": 1048576},
   "hardware": {"cpus": 32, "memory_mb": 257000, "accelerators": ["..."], "cuda": "12.2"}
 }
 ```
@@ -523,6 +550,8 @@ Each entry in `variables` is the serializer's metadata for that value, with
 emitted, in order, in the same shape (a display that failed to serialize has
 `error` and no file); the last one also travels as the variable `_`. It must
 be a list, possibly empty.
+
+`mount_bytes`, on a successful run, is what each read-only mount downloaded into the worker's cache for this run, `{"<mount name>": <bytes>}`, and `0` for a mount it already held. The notebook records it in its reads index as the bytes that mount moved. A worker that leaves it out has its mounts recorded as unknown.
 
 `hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
 

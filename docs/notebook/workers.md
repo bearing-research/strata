@@ -77,6 +77,7 @@ Expected response (`locked_environments` is `false` if `uv` is not on the worker
       "cancel": true,
       "locked_environments": true,
       "locked_r_environments": false,
+      "mount_cache_probe": true,
       "languages": ["python"]
     }
   },

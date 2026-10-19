@@ -243,8 +243,11 @@ data a notebook moved:
 ```
 
 `bytes_moved` is 0 for an input already on the machine, a cache hit included,
-and `null` where it is not known yet: a table's scan, and a mount read on a
-remote worker. It follows the table index's rules: a failed run leaves the
+and `null` where it is not known yet: a table's scan, and a mount on a worker that
+does not report what it downloaded (a remote worker reports it in its result). On a
+worker reached through signed URLs, a forced rerun of a build the server already
+stored is answered with that stored result, so its entry repeats the first run's
+figures. It follows the table index's rules: a failed run leaves the
 entry, and a cell that stops reading these inputs, or is deleted, drops out.
 
 ## Gotchas
