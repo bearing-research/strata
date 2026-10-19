@@ -2257,12 +2257,14 @@ deployment shape that matches your trust boundary.</p>
 <h3 id="iceberg-scan-cache-shared-by-design">Iceberg scan cache, shared by design<a class="headerlink" href="#iceberg-scan-cache-shared-by-design" title="Permanent link">&para;</a></h3>
 <p>The original Strata value prop: identical scans hit the same cache.
 The key is content-addressed:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>hash(tenant | table_identity | file_path | file_size | row_group_id | projection_fingerprint
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>     | schema_id | deletes | reading)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>hash(tenant | table_identity | table_uuid | file_path | file_size | row_group_id
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>     | projection_fingerprint | schema_id | deletes | reading)
 </code></pre></div>
 <p>No snapshot id: a data file never changes, so a row group stays cached
 across appends. <code>deletes</code> names the rows a snapshot deletes from that
-row group, and <code>reading</code> the table's format version and name mapping.</p>
+row group, <code>reading</code> the table's format version and name mapping, and
+<code>table_uuid</code> the table itself, so a dropped and recreated table never
+reads the old one's entries.</p>
 <p>If Alice ran a scan an hour ago and Bob runs the same scan now, Bob
 hits Alice's cached result. <strong>This is intentional</strong>: it's the
 performance win that makes Strata interesting. In multi-tenant
