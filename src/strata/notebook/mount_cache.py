@@ -14,6 +14,7 @@ by a run in this process (:meth:`MountCache.hold`), is kept even over the bound.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import logging
 import os
@@ -145,10 +146,13 @@ class MountCache:
                 else:
                     downloaded += self._link_object(okey, remote_name, dest, fetch)
             (building / _LOCK).touch()
-            _seal(building)
+            # Only data: some filesystems refuse to move a directory without its write bit.
+            _seal(data)
             try:
                 building.rename(self.views / key)
-            except OSError:
+            except OSError as exc:
+                if not isinstance(exc, FileExistsError) and exc.errno != errno.ENOTEMPTY:
+                    raise
                 # Another process built the same view first; theirs is identical.
                 _rmtree(building)
         except BaseException:
