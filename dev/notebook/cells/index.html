@@ -4318,24 +4318,33 @@ editing and export are unchanged. Hiding <strong>Delete Notebook</strong> is not
 wants deletes to go through its own records refuses <code>DELETE
 /v1/notebooks/{session_id}</code> and <code>POST /v1/notebooks/delete-by-path</code> itself. The
 same <code>embed_frame_ancestors</code> rule decides which hosts may frame it.</p>
+<p>A framed editor posts the cell the member is on to the parent page, each time
+it changes, so a panel beside the frame can follow it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="nb">window</span><span class="p">.</span><span class="nx">addEventListener</span><span class="p">(</span><span class="s1">'message'</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">source</span><span class="w"> </span><span class="o">!==</span><span class="w"> </span><span class="nx">frame</span><span class="p">.</span><span class="nx">contentWindow</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">origin</span><span class="w"> </span><span class="o">!==</span><span class="w"> </span><span class="nx">strataOrigin</span><span class="p">)</span><span class="w"> </span><span class="k">return</span>
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">type</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="s1">'strata:frame:focus'</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="w">    </span><span class="c1">// e.data.sessionId, and e.data.cellId, which is null when no cell has focus</span>
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a><span class="p">})</span>
+</code></pre></div>
 <hr />
 <h2 id="markdown-cells">Markdown Cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
 <p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves verbatim; a markdown export escapes raw HTML, as the UI does.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="gu">## Stage 1: Load + Clean</span>
-<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>
-<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a>The next two cells pull last quarter's events and drop rows with
-<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a>missing timestamps. The clean DataFrame <span class="sb">`events_clean`</span> is what
-<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a>everything downstream reads.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="gu">## Stage 1: Load + Clean</span>
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>The next two cells pull last quarter's events and drop rows with
+<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a>missing timestamps. The clean DataFrame <span class="sb">`events_clean`</span> is what
+<a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a>everything downstream reads.
 </code></pre></div>
 <p>Create a markdown cell via the <strong>+ Add cell</strong> menu (pick "Markdown") or by setting <code>language = "markdown"</code> on a cell entry in <code>notebook.toml</code>. The cell source lives in <code>cells/&lt;id&gt;.md</code> rather than <code>.py</code>.</p>
 <p>See <a href="../../examples/markdown_showcase/">Markdown showcase</a> for what the supported renderers handle (headings, lists, tables, code fences, fenced HTML attributes) and what's stripped by the security guard.</p>
 <hr />
 <h2 id="artifact-uris">Artifact URIs<a class="headerlink" href="#artifact-uris" title="Permanent link">&para;</a></h2>
 <p>Cells expose their outputs as artifacts under a stable URI scheme:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;
 </code></pre></div>
 <p>For loop cells, each iteration gets a suffix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>strata://artifact/&lt;artifact_id&gt;@iter=&lt;k&gt;@v=&lt;version&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>strata://artifact/&lt;artifact_id&gt;@iter=&lt;k&gt;@v=&lt;version&gt;
 </code></pre></div>
 <p>A notebook's <code>&lt;artifact_id&gt;</code> names a cell variable, not its content: <code>nb_&lt;notebook_id&gt;_cell_&lt;cell_id&gt;_var_&lt;variable&gt;</code>. Each new result for that variable is stored as the next <code>@v=N</code> of the same id, with its provenance hash (code + inputs + env) recorded on the version. The cache lookup searches by that hash, so same code + same inputs + same env finds the stored version whatever its number. A notebook keeps each id's current value plus its last 3 earlier versions, so reverting a recent edit is still a cache hit (<a href="../../reference/configuration/#notebook"><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></a> sets how many).</p>
 <p>You don't usually need to construct these ids by hand; the inspect panel surfaces them and <code># @loop start_from=&lt;cell-id&gt;@iter=k</code> references them by cell ID + iteration index, not the full URI.</p>
@@ -4345,21 +4354,21 @@ same <code>embed_frame_ancestors</code> rule decides which hosts may frame it.</
 <p>Use loop cells for iterative refinement (hill climbing, MCMC, training loops with checkpoints), simulations, and anything where you'd want to pause and inspect intermediate states, or fork a new run from a promising one.</p>
 <h3 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h3>
 <p>Two cells: a seed and a loop.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="c1"># seed cell, initial carry state</span>
-<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"x"</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s2">"best_score"</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="s2">"inf"</span><span class="p">),</span> <span class="s2">"iter"</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="c1"># seed cell, initial carry state</span>
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"x"</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s2">"best_score"</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="s2">"inf"</span><span class="p">),</span> <span class="s2">"iter"</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="c1"># loop cell</span>
-<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="c1"># @loop max_iter=40 carry=state</span>
-<a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a><span class="c1"># @loop_until state["best_score"] &lt; 1e-3</span>
-<a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
-<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a>
-<a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a><span class="c1"># Each iteration: read `state`, compute the next step, rebind `state`.</span>
-<a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a><span class="n">candidate</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">]</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
-<a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a><span class="n">score</span> <span class="o">=</span> <span class="n">candidate</span><span class="o">**</span><span class="mi">2</span>  <span class="c1"># some objective</span>
-<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a><span class="k">if</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">]:</span>
-<a id="__codelineno-39-10" name="__codelineno-39-10" href="#__codelineno-39-10"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">:</span> <span class="n">candidate</span><span class="p">,</span> <span class="s2">"best_score"</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">"iter"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
-<a id="__codelineno-39-11" name="__codelineno-39-11" href="#__codelineno-39-11"></a><span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">"iter"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a><span class="c1"># loop cell</span>
+<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="c1"># @loop max_iter=40 carry=state</span>
+<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a><span class="c1"># @loop_until state["best_score"] &lt; 1e-3</span>
+<a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+<a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a>
+<a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a><span class="c1"># Each iteration: read `state`, compute the next step, rebind `state`.</span>
+<a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a><span class="n">candidate</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">"x"</span><span class="p">]</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
+<a id="__codelineno-40-8" name="__codelineno-40-8" href="#__codelineno-40-8"></a><span class="n">score</span> <span class="o">=</span> <span class="n">candidate</span><span class="o">**</span><span class="mi">2</span>  <span class="c1"># some objective</span>
+<a id="__codelineno-40-9" name="__codelineno-40-9" href="#__codelineno-40-9"></a><span class="k">if</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="n">state</span><span class="p">[</span><span class="s2">"best_score"</span><span class="p">]:</span>
+<a id="__codelineno-40-10" name="__codelineno-40-10" href="#__codelineno-40-10"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">"x"</span><span class="p">:</span> <span class="n">candidate</span><span class="p">,</span> <span class="s2">"best_score"</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">"iter"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
+<a id="__codelineno-40-11" name="__codelineno-40-11" href="#__codelineno-40-11"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-40-12" name="__codelineno-40-12" href="#__codelineno-40-12"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">"iter"</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">"iter"</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
 </code></pre></div>
 <p>After execution, <code>state</code> holds the final iteration's value and every intermediate iteration is queryable.</p>
 <p>The cell's display output (a figure, <code>display(...)</code>, a trailing expression) is what its final iteration displayed. It is saved like any Python cell's, so it is still there after a reopen, in <code>strata cell show</code> and in <code>strata export</code>. Earlier iterations' displays are not kept.</p>
@@ -4404,9 +4413,9 @@ same <code>embed_frame_ancestors</code> rule decides which hosts may frame it.</
 </table>
 <h3 id="per-iteration-artifacts">Per-iteration artifacts<a class="headerlink" href="#per-iteration-artifacts" title="Permanent link">&para;</a></h3>
 <p>Every iteration's carry value becomes its own artifact with an <code>@iter=k</code> suffix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@iter=0@v=1
-<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@iter=1@v=1
-<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>...
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@iter=0@v=1
+<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@iter=1@v=1
+<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>...
 </code></pre></div>
 <p>The inspect panel shows an iteration picker so you can scrub through the intermediate states. The <strong>final</strong> iteration's artifact is also the cell's canonical output (no <code>@iter</code> suffix); downstream cells read it via the normal DAG path.</p>
 <h3 id="output-folders">Output folders<a class="headerlink" href="#output-folders" title="Permanent link">&para;</a></h3>
@@ -4432,10 +4441,10 @@ happens if you push harder from that exact state with a different step size.</p>
 <li>Add a new loop cell below. Reference the original cell's ID (not the full
    URI) in <code>start_from</code>:</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a><span class="c1"># new loop cell, continues from iteration 17 of the previous run</span>
-<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a><span class="c1"># @loop max_iter=20 carry=state start_from=hill_climb@iter=17</span>
-<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a><span class="n">state</span><span class="p">[</span><span class="s2">"step_size"</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.5</span>  <span class="c1"># smaller steps from here on</span>
-<a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">sample_and_score</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a><span class="c1"># new loop cell, continues from iteration 17 of the previous run</span>
+<a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a><span class="c1"># @loop max_iter=20 carry=state start_from=hill_climb@iter=17</span>
+<a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a><span class="n">state</span><span class="p">[</span><span class="s2">"step_size"</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.5</span>  <span class="c1"># smaller steps from here on</span>
+<a id="__codelineno-42-4" name="__codelineno-42-4" href="#__codelineno-42-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">sample_and_score</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
 </code></pre></div>
 <ol>
 <li>Run the new cell. It reads iteration 17's carry value as its seed, runs up

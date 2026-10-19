@@ -3756,6 +3756,10 @@ exhaustive commit history.</p>
 <li><strong>A running remote cell's badge keeps its dispatcher's sentence.</strong> A job
   that reports <code>running</code> with a <code>detail</code>, such as where it runs, shows it on the
   badge, as a waiting job's does, and a new one replaces it. (#1230)</li>
+<li><strong>A framed editor posts the focused cell to its page.</strong> Under <code>?framed=1</code>,
+  each focus change posts <code>{type: 'strata:frame:focus', sessionId, cellId}</code> to
+  the parent, so a platform's panel beside the frame can follow the member's
+  cell. (#1231)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
