@@ -404,3 +404,127 @@ async def test_a_remote_run_shows_the_workers_share_and_what_it_moved(
     runs = 1 if transport == "signed" else 2
     assert reported[:runs] == [("remote", 5), ("remote", 0)][:runs]
     assert not (tmp_path / "srv").exists() or not any((tmp_path / "srv").rglob("*.lock"))
+
+
+@pytest.fixture
+def scan_server(tmp_path):
+    """A live personal server the cells' ``strata`` client scans through."""
+    from strata.config import StrataConfig
+    from tests.conftest import find_free_port, run_server
+
+    config = StrataConfig(
+        host="127.0.0.1",
+        port=find_free_port(),
+        cache_dir=tmp_path / "scan-cache",
+        artifact_dir=tmp_path / "scan-artifacts",
+        deployment_mode="personal",
+        rate_limit_enabled=False,
+    )
+    with run_server(config) as base:
+        yield base
+
+
+def _scan(table_uri: str) -> str:
+    return (
+        f"# @table events {table_uri}\n"
+        "scan = strata.materialize(inputs=[events], transform={'executor': 'scan@v1'})\n"
+        "rows = scan.to_arrow().num_rows\n"
+        "del scan\n"
+    )
+
+
+def _chunk_bytes(table) -> int:
+    """Every column chunk of the snapshot's data files, compressed: a full scan's read."""
+    import pyarrow.parquet as pq
+
+    total = 0
+    for task in table.scan().plan_files():
+        meta = pq.ParquetFile(task.file.file_path.removeprefix("file://")).metadata
+        for rg in range(meta.num_row_groups):
+            row_group = meta.row_group(rg)
+            total += sum(
+                row_group.column(i).total_compressed_size for i in range(row_group.num_columns)
+            )
+    return total
+
+
+def _table_moved(nb, cell_id: str) -> int | None:
+    from strata.notebook import reads_index
+
+    (entry,) = reads_index.load(nb)[cell_id]["inputs"]
+    assert entry["kind"] == "table"
+    return entry["bytes_moved"]
+
+
+@pytest.mark.integration
+async def test_a_cells_scans_count_what_they_read_from_storage(
+    scan_server, tmp_path, temp_warehouse
+):
+    """The first scan reads the files; a rerun is answered by the stored scan."""
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = _scan(temp_warehouse["table_uri"])
+    nb = create_notebook(tmp_path / "nb", "Scans")
+    add_cell_to_notebook(nb, "c1", None)
+    write_cell(nb, "c1", source)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
+    executor = CellExecutor(session)
+
+    first = await executor.execute_cell("c1", source)
+    assert first.success, first.error
+    moved_first = _table_moved(nb, "c1")
+    again = await executor.execute_cell_rerun("c1", source)
+    assert again.success, again.error
+
+    assert moved_first == _chunk_bytes(temp_warehouse["table"]) > 0
+    assert _table_moved(nb, "c1") == 0
+
+
+@pytest.mark.integration
+async def test_a_batched_run_counts_each_cells_scans_apart(scan_server, tmp_path, temp_warehouse):
+    """One token for the batch; each cell's own scans count for it."""
+    import asyncio
+
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+    from strata.notebook.ws import (
+        _ensure_execution_state,
+        _handle_notebook_run_all,
+        _notebook_connections,
+        forget_notebook_execution_state,
+    )
+
+    class _Socket:
+        async def send_text(self, text: str) -> None:
+            return None
+
+    uri = temp_warehouse["table_uri"]
+    nb = create_notebook(tmp_path / "nb", "Batched scans")
+    add_cell_to_notebook(nb, "c1", None)
+    write_cell(nb, "c1", _scan(uri))
+    add_cell_to_notebook(nb, "c2", "c1")
+    write_cell(nb, "c2", _scan(uri).replace("rows =", "rows2 =") + "total = rows + rows2\n")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+    socket = _Socket()
+    _notebook_connections[session.id] = [socket]
+    try:
+        state = _ensure_execution_state(session.id)
+        await _handle_notebook_run_all(socket, session, state, session.id, {})
+        if state.execution_task is not None:
+            await asyncio.gather(state.execution_task)
+    finally:
+        _notebook_connections.pop(session.id, None)
+        forget_notebook_execution_state(session.id)
+
+    assert [c.status.value for c in session.notebook_state.cells] == ["ready", "ready"]
+    # The second cell's scan is the first's stored artifact.
+    assert _table_moved(nb, "c1") == _chunk_bytes(temp_warehouse["table"])
+    assert _table_moved(nb, "c2") == 0

@@ -6,6 +6,9 @@ hands it to the harness over a pipe (never a file, argv or the environment, whic
 cells under the same harness user could read), and accepts it in place of the proxy token
 while the run lives. The request acts as whoever started the run, without ``admin:``
 scopes, and reaches only the routes the ambient client calls.
+
+Every local run gets a token, authenticated or not, so the server can also count what the
+run's scans read from storage, by cell and table, for the notebook's reads index.
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ from dataclasses import dataclass, replace
 from strata.types import Principal
 
 RUN_TOKEN_HEADER = "X-Strata-Run-Token"
+# Which cell of the run made a call, for counting only: a batch runs many under one token.
+RUN_CELL_HEADER = "X-Strata-Cell-Id"
 
 # A run that outlives its timeout is being killed; this covers the kill and the last request.
 _EXPIRY_MARGIN_SECONDS = 60.0
@@ -63,6 +68,9 @@ class RunGrant:
 
 # Keyed by the token's digest, so a lookup compares no secret byte by byte.
 _live: dict[str, RunGrant] = {}
+# A run's read meter, ``{cell id: {table uri: bytes read from storage}}``, owned by the
+# caller, which reads it after the run. Same keys.
+_meters: dict[str, dict[str, dict[str, int]]] = {}
 
 
 def _digest(token: str) -> str:
@@ -70,22 +78,35 @@ def _digest(token: str) -> str:
 
 
 @contextmanager
-def run_token(principal: Principal, session_id: str, timeout_seconds: float) -> Generator[str]:
-    """A token for one run, live until the block exits or the timeout and a margin pass."""
+def run_token(
+    principal: Principal | None,
+    session_id: str,
+    timeout_seconds: float,
+    meter: dict[str, dict[str, int]] | None = None,
+) -> Generator[str]:
+    """A token for one run, live until the block exits or the timeout and a margin pass.
+
+    Without a *principal* the token authenticates nothing; it only counts the run's scans
+    into *meter*.
+    """
     token = secrets.token_urlsafe(32)
     key = _digest(token)
-    _live[key] = RunGrant(
-        principal=replace(
-            principal,
-            scopes=frozenset(s for s in principal.scopes if not s.startswith("admin:")),
-        ),
-        session_id=session_id,
-        expires_at=time.monotonic() + timeout_seconds + _EXPIRY_MARGIN_SECONDS,
-    )
+    if principal is not None:
+        _live[key] = RunGrant(
+            principal=replace(
+                principal,
+                scopes=frozenset(s for s in principal.scopes if not s.startswith("admin:")),
+            ),
+            session_id=session_id,
+            expires_at=time.monotonic() + timeout_seconds + _EXPIRY_MARGIN_SECONDS,
+        )
+    if meter is not None:
+        _meters[key] = meter
     try:
         yield token
     finally:
         _live.pop(key, None)
+        _meters.pop(key, None)
 
 
 def grant_for(token: str) -> RunGrant | None:
@@ -94,3 +115,20 @@ def grant_for(token: str) -> RunGrant | None:
     if grant is None or time.monotonic() > grant.expires_at:
         return None
     return grant
+
+
+def run_reader(token: str | None, cell_id: str | None) -> tuple[str, str] | None:
+    """Who a scan's storage reads count for: the run's digest and its cell, if metered."""
+    if token is None or not cell_id:
+        return None
+    key = _digest(token)
+    return (key, cell_id) if key in _meters else None
+
+
+def count_storage_read(reader: tuple[str, str], table_uri: str, nbytes: int) -> None:
+    """Add a finished scan's storage bytes to its run's meter, if the run still lives."""
+    key, cell_id = reader
+    meter = _meters.get(key)
+    if meter is not None:
+        tables = meter.setdefault(cell_id, {})
+        tables[table_uri] = tables.get(table_uri, 0) + nbytes

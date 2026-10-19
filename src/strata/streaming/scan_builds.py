@@ -46,6 +46,7 @@ def record_scan_complete(
 
     *artifact_bytes* marks a scan answered from a stored artifact: every row group
     counts as a cache hit. Otherwise the plan's tasks say how each row group was read.
+    A notebook cell's scan also counts its storage bytes for the cell's run.
     """
     from strata.observability.metrics import ScanMetrics
     from strata.tenancy.registry import get_tenant_registry
@@ -80,6 +81,10 @@ def record_scan_complete(
     get_tenant_registry().record_scan(
         get_tenant_id(), hits, misses, from_cache, from_storage, rows_returned
     )
+    if plan.read_by is not None:
+        from strata.auth.run_tokens import count_storage_read
+
+        count_storage_read(plan.read_by, plan.table_uri, sum(t.storage_bytes for t in tasks))
 
 
 # First row groups fetched ahead and not yet streamed. One waits up to the stream's TTL for

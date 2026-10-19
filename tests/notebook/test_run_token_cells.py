@@ -87,7 +87,7 @@ def test_a_cell_scans_a_table_through_its_server(server, tmp_path, temp_warehous
     assert "ROWS 500" in result.stdout
 
 
-def test_a_run_nobody_started_gets_no_token(server, tmp_path, temp_warehouse):
+def test_a_run_nobody_started_reaches_nothing(server, tmp_path, temp_warehouse):
     source = _scan_source(temp_warehouse["table_uri"])
 
     result = _run(CellExecutor(_session(tmp_path, source)), source, principal=None)

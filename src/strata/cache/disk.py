@@ -637,6 +637,7 @@ class CachedFetcher:
             if cache_full_row_groups and task.columns is not None:
                 fetch_task = replace(task, columns=None)
             batch = self.fetcher.fetch(fetch_task)
+            task.storage_bytes = fetch_task.storage_bytes
             span.set_attribute("bytes_read", batch.nbytes)
             span.set_attribute("num_rows", batch.num_rows)
 

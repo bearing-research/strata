@@ -279,3 +279,50 @@ class TestDiskCacheGranularity:
         streamed_batch = list(ipc.open_stream(pa.BufferReader(stream_bytes)))[0]
         assert projected_stream_task.cached is True
         assert streamed_batch.schema.names == ["id"]
+
+
+@pytest.mark.parametrize(
+    ("granularity", "read"),
+    [
+        (CacheGranularity.ROW_GROUP_PROJECTION, ["id"]),
+        # The miss reads the whole row group to cache it, whatever the scan projects.
+        (CacheGranularity.ROW_GROUP, ["id", "value", "name"]),
+    ],
+)
+def test_a_fetch_counts_the_column_chunks_it_read_from_storage(tmp_path, granularity, read):
+    parquet_path = tmp_path / "data.parquet"
+    pq.write_table(
+        pa.table({"id": [1, 2], "value": [10.0, 20.0], "name": ["a", "b"]}), parquet_path
+    )
+    row_group = pq.ParquetFile(parquet_path).metadata.row_group(0)
+    chunks = {
+        row_group.column(i).path_in_schema: row_group.column(i).total_compressed_size
+        for i in range(row_group.num_columns)
+    }
+    fetcher = CachedFetcher(
+        StrataConfig(cache_dir=tmp_path / "cache", cache_granularity=granularity)
+    )
+
+    def task() -> Task:
+        return Task(
+            file_path=str(parquet_path),
+            row_group_id=0,
+            cache_key=CacheKey(
+                tenant_id="_default",
+                table_identity=TableIdentity.from_table_id("test_db.events"),
+                file_size=1024,
+                file_path=str(parquet_path),
+                row_group_id=0,
+                projection_fingerprint=CacheKey.compute_projection_fingerprint(["id"]),
+            ),
+            num_rows=2,
+            columns=["id"],
+        )
+
+    miss, hit = task(), task()
+    fetcher.fetch(miss)
+    fetcher.fetch(hit)
+
+    assert miss.storage_bytes == sum(chunks[name] for name in read) > 0
+    assert hit.cached is True
+    assert hit.storage_bytes == 0

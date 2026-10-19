@@ -27,6 +27,16 @@ pc = cast(Any, _pc)
 _MAX_FILE_CACHE_SIZE = 128
 
 
+def _chunk_bytes(row_group: pq.RowGroupMetaData, columns: list[str] | None) -> int:
+    """The compressed size of the row group's column chunks a read of *columns* fetches."""
+    wanted = None if columns is None else set(columns)
+    return sum(
+        chunk.total_compressed_size
+        for chunk in (row_group.column(i) for i in range(row_group.num_columns))
+        if wanted is None or chunk.path_in_schema.split(".")[0] in wanted
+    )
+
+
 class Fetcher(Protocol):
     """Protocol for fetching row groups from Parquet files."""
 
@@ -106,6 +116,7 @@ class PyArrowFetcher:
         pf = self._open(task.file_path)
         try:
             table = pf.read_row_group(task.row_group_id, columns=columns)
+            task.storage_bytes = _chunk_bytes(pf.metadata.row_group(task.row_group_id), columns)
         finally:
             self._close_parquet_file(pf)
         # One mask over the rows as read, so positions stay the file's.

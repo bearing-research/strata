@@ -64,10 +64,12 @@ from strata.notebook.executor import CellExecutor
 executor = CellExecutor.__new__(CellExecutor)
 executor.harness_path = harness
 executor.session = SimpleNamespace(
+    id="s",
     path=work,
     venv_python=Path(sys.executable),
     notebook_state=SimpleNamespace(get_cell=lambda _cell_id: None),
 )
+executor._tables_moved = {}
 spec = {"cell_id": "c1", "source": source, "env": {}, "mount_manifest": {}}
 asyncio.run(executor._run_batch([spec], use_cache=False, batch_timeout_seconds=600.0))
 """,

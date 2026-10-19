@@ -325,6 +325,8 @@ class Task:
     # Populated after fetch
     cached: bool = False
     bytes_read: int = 0
+    # The Parquet column chunks read from storage, compressed; 0 when the cache served it.
+    storage_bytes: int = 0
 
 
 @dataclass
@@ -364,6 +366,10 @@ class ReadPlan:
     # Set when auth_mode=trusted_proxy, for stream ownership checks
     owner_principal: str | None = None
     owner_tenant: str | None = None
+
+    # A notebook cell's scan: (its run token's digest, cell id), whose run counts the
+    # bytes this scan reads from storage (strata.auth.run_tokens).
+    read_by: tuple[str, str] | None = None
 
 
 class ErrorResponse(BaseModel):

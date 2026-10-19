@@ -383,7 +383,9 @@ class _CellProvenance:
     # What each declared input weighs (Amber item 89), for the badge and the reads index.
     input_weights: list[InputWeight] = field(default_factory=list)
 
-    def reads(self, mounts_moved: dict[str, int | None]) -> dict[str, Any] | None:
+    def reads(
+        self, mounts_moved: dict[str, int | None], tables_moved: dict[str, int]
+    ) -> dict[str, Any] | None:
         """The reads index entry for a good run: what each input moved, if known."""
         if not self.input_weights:
             return None
@@ -392,6 +394,8 @@ class _CellProvenance:
             moved: int | None = None
             if weight.kind == "mount":
                 moved = mounts_moved.get(weight.name, 0)
+            elif weight.kind == "table":
+                moved = tables_moved.get(weight.uri)
             elif weight.kind == "fetch" and weight.bytes is not None:
                 moved = weight.bytes - (weight.cached_bytes or 0)
             inputs.append(
@@ -673,9 +677,13 @@ class CellExecutor:
         # Bytes each read-only remote mount downloaded on this server during a cell's run,
         # ``{mount name: bytes}`` (``None``: a worker did not say), for the reads index.
         # A mount missing from it moved nothing: the run did not prepare it. Reset as a run starts
-        # (``forget_mounts_moved``), not as provenance is made: a batch prepares mounts
+        # (``forget_moved``), not as provenance is made: a batch prepares mounts
         # first, and a fan-out cell makes its provenance again after its variants ran.
         self._mounts_moved: dict[str, dict[str, int | None]] = {}
+        # Bytes each cell's scans through this server read from storage during its run,
+        # ``{cell id: {table uri: bytes}}``, counted by the server under the run's token.
+        # A table missing from it was not scanned here. Reset with the mounts.
+        self._tables_moved: dict[str, dict[str, int]] = {}
         # ``# @output_dir`` files a worker uploaded during a cell's last remote run, by cell:
         # ``{folder: {path: entry}}``. Taken by the run's staging, success or failure.
         self._received_output_files: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
@@ -1345,7 +1353,7 @@ class CellExecutor:
         """Dispatch a cell to its language executor; a missing cell uses the Python one."""
         from strata.notebook.languages import get_language_executor
 
-        self.forget_mounts_moved(cell_id)
+        self.forget_moved(cell_id)
 
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is not None:
@@ -1768,7 +1776,7 @@ class CellExecutor:
                     source_hash,
                     env_hash,
                     table_reads=prov.table_reads,
-                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                    reads=prov.reads(*self._moved(cell_id)),
                 )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -1926,7 +1934,7 @@ class CellExecutor:
                             source_hash,
                             env_hash,
                             table_reads=prov.table_reads,
-                            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                            reads=prov.reads(*self._moved(cell_id)),
                         )
 
                     if exec_result.success:
@@ -2233,7 +2241,7 @@ class CellExecutor:
                     compute_source_hash(source),
                     prov.env_hash,
                     table_reads=prov.table_reads,
-                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                    reads=prov.reads(*self._moved(cell_id)),
                 )
             except Exception:
                 logger.exception("Failed to record fan-out base provenance for cell %s", cell_id)
@@ -2459,7 +2467,7 @@ class CellExecutor:
                     source_hash,
                     env_hash,
                     table_reads=prov.table_reads,
-                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                    reads=prov.reads(*self._moved(cell_id)),
                 )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -2601,7 +2609,7 @@ class CellExecutor:
                             source_hash,
                             env_hash,
                             table_reads=prov.table_reads,
-                            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                            reads=prov.reads(*self._moved(cell_id)),
                         )
 
                     if exec_result.success:
@@ -4123,9 +4131,14 @@ class CellExecutor:
                 _worker_mount_bytes(result, mount_specs)
             )
 
-    def forget_mounts_moved(self, cell_id: str) -> None:
-        """A run of *cell_id* starts: what an earlier one downloaded is not its own."""
+    def forget_moved(self, cell_id: str) -> None:
+        """A run of *cell_id* starts: what an earlier one read is not its own."""
         self._mounts_moved.pop(cell_id, None)
+        self._tables_moved.pop(cell_id, None)
+
+    def _moved(self, cell_id: str) -> tuple[dict[str, int | None], dict[str, int]]:
+        """What *cell_id*'s run moved: by mount name, and by table URI."""
+        return self._mounts_moved.get(cell_id, {}), self._tables_moved.get(cell_id, {})
 
     async def _prepare_mounts(
         self,
@@ -4376,20 +4389,18 @@ class CellExecutor:
         return f"{server_url}/v1/notebooks/{self.session.id}"
 
     @contextmanager
-    def _run_token(self, timeout_seconds: float) -> Generator[str | None, None, None]:
+    def _run_token(self, timeout_seconds: float) -> Generator[str, None, None]:
         """A token the cell's ambient client calls this server with, for the run's length.
 
-        ``None`` unless the run was started by an authenticated principal, whom the cell
-        then acts as (see ``strata.auth.run_tokens``).
+        The server counts the run's scans under it. Run by an authenticated principal, the
+        cell also acts as them (see ``strata.auth.run_tokens``).
         """
         from strata.auth.principal import get_principal
         from strata.auth.run_tokens import run_token
 
-        principal = get_principal()
-        if principal is None:
-            yield None
-            return
-        with run_token(principal, self.session.id, timeout_seconds) as token:
+        with run_token(
+            get_principal(), self.session.id, timeout_seconds, meter=self._tables_moved
+        ) as token:
             yield token
 
     def _cell_strata_url(self) -> str:
@@ -4698,7 +4709,7 @@ class CellExecutor:
                 prov.source_hash,
                 prov.env_hash,
                 table_reads=prov.table_reads,
-                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                reads=prov.reads(*self._moved(cell_id)),
             )
 
         return CellExecutionResult(
@@ -4757,7 +4768,7 @@ class CellExecutor:
                 prov.source_hash,
                 prov.env_hash,
                 table_reads=prov.table_reads + result_dict.get("table_reads", []),
-                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                reads=prov.reads(*self._moved(cell_id)),
             )
             # Back the result-table preview with an artifact. Otherwise `save_cell_output` refuses
             # it, export drops it (``markdown_text`` is stripped at persist time and re-fetched
@@ -4847,7 +4858,7 @@ class CellExecutor:
                 prov.source_hash,
                 prov.env_hash,
                 table_reads=prov.table_reads,
-                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                reads=prov.reads(*self._moved(cell_id)),
             )
 
         return CellExecutionResult(
@@ -6311,7 +6322,7 @@ class CellExecutor:
                     source_hash,
                     env_hash,
                     table_reads=prov.table_reads,
-                    reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                    reads=prov.reads(*self._moved(cell_id)),
                 )
                 return cached
 
@@ -6756,7 +6767,7 @@ class CellExecutor:
             source_hash,
             env_hash,
             table_reads=prov.table_reads,
-            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+            reads=prov.reads(*self._moved(cell_id)),
         )
         raw_displays = final_result.get("displays") if final_result else None
         display_outputs = (
@@ -7034,16 +7045,16 @@ class CellExecutor:
         with ExitStack() as token_scope:
             try:
                 upstream_inputs = self._batch_resolve_upstream_inputs(cell_specs, batch_tmpdir)
-                # One token for the batch: Run All acts as whoever started it. Minted after the
-                # inputs are staged, since the batch's timeout runs from the spawn.
+                # One token for the batch: Run All acts as whoever started it, and each
+                # cell's scans count under it by cell id. Minted after the inputs are
+                # staged, since the batch's timeout runs from the spawn.
                 run_token = token_scope.enter_context(self._run_token(batch_timeout_seconds))
                 manifest = {
                     "cells": cell_specs,
                     "upstream_inputs": upstream_inputs,
                     **self._work_dir_fields(),
                 }
-                if run_token is not None:
-                    manifest["run_token_on_stdin"] = True
+                manifest["run_token_on_stdin"] = True
                 manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
                 lifeline_fds, lifeline_vars = lifeline_handoff()
@@ -7635,7 +7646,7 @@ class CellExecutor:
             prov.source_hash,
             prov.env_hash,
             table_reads=prov.table_reads,
-            reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+            reads=prov.reads(*self._moved(cell_id)),
         )
 
         return {
@@ -7765,7 +7776,7 @@ class CellExecutor:
                 source_hash,
                 env_hash,
                 table_reads=prov.table_reads,
-                reads=prov.reads(self._mounts_moved.get(cell_id, {})),
+                reads=prov.reads(*self._moved(cell_id)),
             )
         except Exception:
             pass

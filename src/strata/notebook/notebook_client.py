@@ -122,8 +122,10 @@ class Artifact:
 # ---------------------------------------------------------------------------
 
 
-# strata.auth.run_tokens.RUN_TOKEN_HEADER; this module cannot import strata.
+# strata.auth.run_tokens.RUN_TOKEN_HEADER and RUN_CELL_HEADER; this module cannot import
+# strata.
 RUN_TOKEN_HEADER = "X-Strata-Run-Token"
+RUN_CELL_HEADER = "X-Strata-Cell-Id"
 
 
 class StrataClient:
@@ -141,8 +143,11 @@ class StrataClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._cell_id = cell_id
-        # Sent on every request: the run's token when the server authenticates callers.
+        # Sent on every request: the run's token, and the cell, so the server counts what
+        # the cell's scans read under its run.
         self._headers = dict(headers or {})
+        if cell_id:
+            self._headers[RUN_CELL_HEADER] = cell_id
         # Where ``promote`` posts. Not ``base_url``: with a team store, the client points at
         # that store, but the copy route runs on the notebook server, the only process that
         # can read the notebook's artifacts. None when no team store is configured.
