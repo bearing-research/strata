@@ -16,6 +16,7 @@ on; a dead process's leases expire and the others take over.
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 import os
@@ -24,10 +25,12 @@ import socket
 import time
 from collections.abc import (
     AsyncGenerator,
+    Awaitable,
     Callable,
     Coroutine,
     Generator,
     Iterable,
+    Mapping,
 )
 from typing import Any
 
@@ -77,6 +80,8 @@ class Pool:
         tracer: Any = None,
         instance_id: str | None = None,
         lease_seconds: float = _LEASE_SECONDS,
+        tenant_env: Callable[[str, str], Mapping[str, str] | Awaitable[Mapping[str, str]]]
+        | None = None,
     ):
         """Create a pool over a store and a backend.
 
@@ -91,6 +96,10 @@ class Pool:
                 store (raises ValueError otherwise); reusing an old name after a
                 restart reclaims its leases at once.
             lease_seconds: Lease length without renewal; renewed at a third of this.
+            tenant_env: ``(tenant_id, machine_type) -> env``, sync or async: variables a
+                machine started for that tenant boots with, over the type's ``env``. Used
+                for that boot only, never stored or logged. Raising fails the start as a
+                backend failure does.
         """
         if store.shared and instance_id is None:
             raise ValueError("a pool over a shared store needs its own instance_id")
@@ -114,6 +123,7 @@ class Pool:
         # out the old leases instead, which is the safe direction.
         self.instance_id = instance_id or f"{socket.gethostname()}:{os.getpid()}:{new_id('p')}"
         self.lease_seconds = lease_seconds
+        self._tenant_env = tenant_env
         self._tasks: set[asyncio.Task] = set()
         # worker id -> consecutive failed probes. In memory: recover() re-checks everything
         # on restart, and a persisted count would let one stale bad reading survive it.
@@ -457,9 +467,13 @@ class Pool:
         # The token must reach the machine before it accepts anything, so it goes in the
         # boot environment. Minted per worker: one machine's credential must not open another's.
         assert worker.auth_token is not None
-        env = {**spec.env, WORKER_TOKEN_ENV: worker.auth_token}
         try:
             async with self._holding(worker_id=worker.id):
+                tenant_env: Mapping[str, str] = {}
+                if self._tenant_env is not None:
+                    answer = self._tenant_env(worker.tenant_id, spec.name)
+                    tenant_env = await answer if inspect.isawaitable(answer) else answer
+                env = {**spec.env, **tenant_env, WORKER_TOKEN_ENV: worker.auth_token}
                 provisioned = await self.backend.start(spec, env)
         except Exception:
             logger.exception(

@@ -62,6 +62,16 @@ right for a single-tenant pool and wrong for a hosted one. Hitting the
 ceiling logs a warning: a capped fleet looks exactly like a slow queue from
 the outside.
 
+Since a machine serves one tenant, it can boot with that tenant's own secrets.
+`Pool(tenant_env=...)` takes a callable, sync or async,
+`(tenant_id, machine_type) -> dict[str, str]`, asked each time a machine
+starts for a tenant. Its variables go over the type's `env`, and the worker
+token wins over both. The answer is used for that boot only: it is never
+stored, logged or put on a span. A callable that raises fails the start as a
+backend failure does, and the job stays queued. A worker reads
+`STRATA_NOTEBOOK_CREDENTIALS` and `STRATA_NOTEBOOK_MOUNT_CREDENTIALS` there
+and keeps them from its cells, so a tenant's mounts work on its machines.
+
 Still missing: any restriction on the container's own network access.
 
 ## Several processes over one store
