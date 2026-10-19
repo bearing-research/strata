@@ -221,10 +221,10 @@ exhaustive commit history.
   `scan@v1` through `/v1/materialize`, a `/v1/cache/warm` request and a
   transform build reading a table planned without the tenant, so their row
   groups were cached under the default tenant: shared with every other tenant,
-  and missed by the tenant's own background warm jobs. (#PR)
+  and missed by the tenant's own background warm jobs. (#1220)
 - **A `scan@v1` returns its columns in the order requested.** Its artifact
   was keyed by the columns sorted, so the same columns in another order were
-  served the first request's artifact, in the first request's order. (#PR)
+  served the first request's artifact, in the first request's order. (#1220)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk
