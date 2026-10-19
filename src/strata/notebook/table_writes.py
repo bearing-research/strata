@@ -58,6 +58,71 @@ def _request_scope() -> tuple[str | None, str | None]:
     return (principal.id if principal is not None else None), tenant
 
 
+def _authorize_service_write() -> None:
+    """Service mode's gates, as an export passes them: writes enabled, ``artifacts:write``."""
+    server = running_server_config()
+    if server is None or server.writes_enabled:
+        return
+    if not server.service_writes_enabled:
+        raise TableWriteError(
+            "@write_table: this server does not write in service mode "
+            "(STRATA_SERVICE_WRITES_ENABLED)"
+        )
+    from fastapi import HTTPException
+
+    from strata.server import _authorize_artifact_write
+
+    try:
+        _authorize_artifact_write()
+    except HTTPException as exc:
+        detail = exc.detail.get("message") if isinstance(exc.detail, dict) else exc.detail
+        raise TableWriteError(f"@write_table: not allowed ({detail})") from exc
+
+
+def _authorize_credential(table: str, config: Any, env: dict[str, str], notebook: Path) -> None:
+    """A catalog's ``strata_credential`` writes only for a principal its writers list."""
+    from strata.auth.principal import get_principal
+    from strata.iceberg.catalog import named_catalog
+    from strata.notebook.credentials import (
+        CATALOG_CREDENTIAL_KEY,
+        CredentialError,
+        CredentialResolver,
+    )
+
+    catalog, _ = named_catalog(table, config)
+    name = config.catalogs[catalog].get(CATALOG_CREDENTIAL_KEY) if catalog is not None else None
+    if not name:
+        return
+    principal = get_principal()
+    credentials = CredentialResolver.from_config(
+        config,
+        env,
+        notebook=notebook,
+        principal=principal.id if principal is not None else None,
+    )
+    try:
+        credentials.ensure_may_write(name)
+    except CredentialError as exc:
+        raise TableWriteError(f"@write_table {table}: {exc}") from exc
+
+
+def authorize_table_writes(
+    specs: list[TableWriteSpec], *, config: Any, env: dict[str, str], notebook: Path
+) -> None:
+    """Whether this run may write its tables at all; checked before it runs and again before
+    writing.
+
+    Raises:
+        TableWriteError: naming why.
+    """
+    if not specs:
+        return
+    _authorize_service_write()
+    for spec in specs:
+        _authorize_credential(spec.table, config, env, notebook)
+        _authorize(spec.table, config)
+
+
 def _authorize(table: str, config: Any) -> None:
     """The table ACL, as an export checks it: a principal denied a table cannot write it."""
     if running_server_config() is None:
@@ -110,8 +175,7 @@ def write_cell_tables(
 
     # Every value is read and every table authorized before the first write.
     tables = [(spec, _table(spec, outputs.get(spec.variable))) for spec in specs]
-    for spec, _ in tables:
-        _authorize(spec.table, config)
+    authorize_table_writes(specs, config=config, env=env, notebook=notebook)
     principal, tenant = _request_scope()
     writer = IcebergWriter(PyIcebergCatalog(config, env, notebook=notebook))
     written: list[TableWrite] = []

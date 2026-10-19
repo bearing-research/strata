@@ -983,7 +983,7 @@ once you've thrown away the intermediates.
 - Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.
 - Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.
 
-A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell.
+A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell. A `@write_table` on a loop cell writes the final value once, after the last iteration.
 
 Reach for loop cells when **being able to inspect or fork from iteration k matters**. That's the feature you're paying for.
 

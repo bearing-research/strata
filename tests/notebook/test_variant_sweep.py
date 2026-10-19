@@ -695,6 +695,17 @@ class TestPerVariantValidation:
         codes = _codes(consumer, self._nb(members, consumer, {"model": "sweep"}))
         assert "per_variant_group_of_one" in codes
 
+    @pytest.mark.parametrize(("mode", "flagged"), [("overwrite", True), ("append", False)])
+    def test_an_overwriting_write_table_is_flagged(self, mode, flagged):
+        """Every variant writes the same table, so an overwrite keeps only the last one."""
+        members = [_sweep_member("model", "logreg"), _sweep_member("model", "rf")]
+        consumer = _consumer(
+            f"# @per_variant\n# @write_table score lake:lab.scores {mode}\nscore = ev(preds)\n",
+            ["preds"],
+        )
+        codes = _codes(consumer, self._nb(members, consumer, {"model": "sweep"}))
+        assert ("per_variant_write_table_overwrite" in codes) is flagged
+
 
 class TestPerVariantDag:
     """DAG fan-out: a @per_variant cell's outputs become a fan-out SweepProducer."""
