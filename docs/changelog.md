@@ -117,6 +117,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   callable asked at each start, over the machine type's `env`. They are never
   stored or logged, and a callable that raises fails the start, leaving the
   job queued. (#1232)
+- **Keyless `gs` and `az` mounts.** A named credential whose `token` names a
+  workload identity federation file (`external_account`) reads GCS through it,
+  and one with `tenant_id`, `client_id` and `federated_token_file` reads Azure
+  through an Entra ID app, each with no stored key. Both read the token file
+  again at every exchange, so a rewritten token needs no restart. (#1237)
 
 ### Changed
 

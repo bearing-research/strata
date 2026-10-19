@@ -619,6 +619,7 @@ def _mount_filesystem(protocol: str, storage_options: dict[str, Any]) -> Any:
     """
     import fsspec
 
+    storage_options = _keyless(protocol, storage_options)
     if protocol in ("gcs", "gs"):
         endpoint = str(
             storage_options.get("endpoint_url") or os.environ.get("STORAGE_EMULATOR_HOST") or ""
@@ -629,6 +630,47 @@ def _mount_filesystem(protocol: str, storage_options: dict[str, Any]) -> Any:
 
             return GCSFileSystem(**storage_options)
     return fsspec.filesystem(protocol, **storage_options)
+
+
+def _keyless(protocol: str, storage_options: dict[str, Any]) -> dict[str, Any]:
+    """*storage_options* with a federated token file made into the credential fsspec takes.
+
+    gcsfs cannot load a workload-identity (``external_account``) file, and adlfs has no
+    field for a federated token file. Both credentials re-read the file at each refresh,
+    so a rewritten token is used without a restart.
+    """
+    if protocol in ("gcs", "gs"):
+        token = storage_options.get("token")
+        info = _external_account(token) if isinstance(token, str) else None
+        if info is not None:
+            from google.auth import identity_pool
+
+            access = storage_options.get("access", "full_control")
+            scope = f"https://www.googleapis.com/auth/devstorage.{access}"
+            credentials = identity_pool.Credentials.from_info(info, scopes=[scope])
+            return {**storage_options, "token": credentials}
+    elif protocol in ("abfs", "az") and "federated_token_file" in storage_options:
+        from azure.identity.aio import ClientAssertionCredential
+
+        options = dict(storage_options)
+        token_file = Path(options.pop("federated_token_file"))
+        tenant_id, client_id = options.pop("tenant_id", None), options.pop("client_id", None)
+        if not tenant_id or not client_id:
+            raise ValueError("an az mount's federated_token_file needs tenant_id and client_id")
+        # WorkloadIdentityCredential's exchange, minus its ten minutes of caching the file.
+        credential = ClientAssertionCredential(tenant_id, client_id, token_file.read_text)
+        return {**options, "credential": credential}
+    return storage_options
+
+
+def _external_account(token: str) -> dict[str, Any] | None:
+    """The workload-identity configuration in the file *token* names, if it is one."""
+    try:
+        info = json.loads(Path(token).read_text())
+    except (OSError, ValueError):
+        # A raw token, which gcsfs takes as it is.
+        return None
+    return info if isinstance(info, dict) and info.get("type") == "external_account" else None
 
 
 def _assert_within(candidate: Path, root: Path, mount_name: str, remote_name: str) -> None:
