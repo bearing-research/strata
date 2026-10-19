@@ -126,7 +126,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | --- | --- |
 | `200` | Success |
 | `307` | `GET /v1/streams/{id}` on a node that does not hold the stream, redirecting to the one that does (`STRATA_NODE_ADVERTISED_URL`) |
-| `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have, a transform param key starting with `_`, which is reserved for the server's own marks) |
+| `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have, a transform param key starting with `_` at any depth, which is reserved for the server's own marks) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode; also a browser write whose `Origin` the server does not allow. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
 | `404` | Notebook session not found (or another tenant's), a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above) |
