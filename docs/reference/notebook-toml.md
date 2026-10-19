@@ -144,6 +144,28 @@ So a credential is read-only in fact when its values come from the server's envi
 
 The `@mount` annotation takes the name too: `# @mount raw s3://lab-bucket/raw ro credential=lab-bucket`.
 
+A name can be keyless, so each source gets its own short-lived identity from a
+token file the host keeps fresh, rather than a stored key:
+
+```bash
+STRATA_NOTEBOOK_CREDENTIALS='{
+  "lab-s3":  {"profile": "lab-s3"},
+  "lab-gcs": {"token": "/run/creds/lab-gcs/external-account.json"},
+  "lab-az":  {"account_name": "labdata", "tenant_id": "<tenant>", "client_id": "<app>",
+              "federated_token_file": "/run/creds/lab-az/token"}
+}'
+```
+
+- **`s3`**: a profile in `AWS_CONFIG_FILE` with a `web_identity_token_file`.
+- **`gs`**: a `token` naming a workload identity federation file (`"type":
+  "external_account"`, sourced from a file or a URL). Strata loads it and hands
+  gcsfs the credentials; any other `token` reaches gcsfs as given.
+- **`az`**: `tenant_id`, `client_id` and `federated_token_file` exchange the
+  file's token for the app's, in place of an account key.
+
+Each exchange reads the file again, so a rewritten token is used at the next
+refresh without a restart. This holds on a server and on a worker alike.
+
 A named catalog in the server's `STRATA_CATALOGS` takes one as
 `strata_credential`, so the catalog's secrets (a SQL catalog's database URI, a
 REST token, `s3.*` keys) stay out of the catalog config. Not `credential`: that

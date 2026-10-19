@@ -30,6 +30,7 @@ from strata.notebook.writer import (
     write_cell,
 )
 from tests.conftest import start_container_or_skip
+from tests.notebook.test_keyless_mounts import _TokenService, external_account_file
 
 
 def _docker_daemon_reachable() -> bool:
@@ -240,3 +241,39 @@ async def test_toml_mount_options_carry_endpoint_credentials(
 
     assert result.success, f"cell errored: {result.error}"
     assert result.outputs["content"]["preview"] == "hello from toml options"
+
+
+@pytest.mark.asyncio
+async def test_a_keyless_mount_reads_through_workload_identity_federation(
+    tmp_path: Path, fake_gcs_container, fresh_bucket: str
+) -> None:
+    """Amber item 91: a ``token`` naming an ``external_account`` file reads the bucket.
+
+    The emulator checks no token, so the token service shows the federated one was used.
+    """
+    _put(fake_gcs_container, fresh_bucket, "data/hello.txt", b"hello, keyless")
+    service = _TokenService()
+    try:
+        token_file = tmp_path / "token"
+        token_file.write_text("org-token-1")
+        options = {
+            **_gcsfs_options(fake_gcs_container),
+            "token": str(external_account_file(tmp_path, token_file, service.port)),
+        }
+        source = textwrap.dedent(
+            f"""
+            # @mount data gs://{fresh_bucket}/data ro
+            content = (data / "hello.txt").read_text()
+            """
+        ).strip()
+        session = _make_session(tmp_path / "nb", [("c1", source)])
+
+        result = await CellExecutor(session, mount_credentials={"gs": options}).execute_cell(
+            "c1", source
+        )
+    finally:
+        service.server.shutdown()
+
+    assert result.success, f"cell errored: {result.error}"
+    assert result.outputs["content"]["preview"] == "hello, keyless"
+    assert set(service.seen) == {"org-token-1"}
