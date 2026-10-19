@@ -14,6 +14,7 @@ import {
   workerTransportLabel,
   workerWarningForEntry,
 } from '../utils/notebookWorkers'
+import { inputWeightBadge } from '../utils/inputWeights'
 import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
 import { renderMarkdownToHtml } from '../utils/markdown'
 import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
@@ -226,6 +227,15 @@ const dispatchBadge = computed(() =>
     remoteBuildState: props.cell.remoteBuildState,
     remoteQueuePosition: props.cell.remoteQueuePosition,
     remoteQueueDetail: props.cell.remoteQueueDetail,
+  }),
+)
+
+// What the cell's inputs weigh, and while it runs, what moves onto its machine (Amber item 89).
+const inputsBadge = computed(() =>
+  inputWeightBadge({
+    status: props.cell.status,
+    machine: props.cell.inputsMachine,
+    inputs: props.cell.inputWeights,
   }),
 )
 
@@ -886,6 +896,9 @@ function outputKey(output: CellOutput, index: number): string {
           </span>
           <span v-if="dispatchBadge" class="dispatch-badge" :title="dispatchBadge.title">
             {{ dispatchBadge.label }}
+          </span>
+          <span v-if="inputsBadge" class="inputs-badge" :title="inputsBadge.title">
+            {{ inputsBadge.label }}
           </span>
           <span
             v-if="effectiveWorkerTransportLabel"
@@ -1829,6 +1842,13 @@ function outputKey(output: CellOutput, index: number): string {
   font-size: 10px;
   font-weight: 600;
   animation: dispatch-pulse 1.2s ease-in-out infinite;
+}
+.inputs-badge {
+  background: var(--tint-info);
+  color: var(--accent-info);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
 }
 @keyframes dispatch-pulse {
   0%,

@@ -221,6 +221,32 @@ names, or `null` for a warehouse path or the server's default catalog
 yet. A failed run leaves the cell's entry as it was, and a
 cell that stops reading tables, or is deleted, drops out.
 
+## What a run moved
+
+`.strata/reads/index.json` lists, for each cell, the bytes its last successful
+run moved onto the machine for each `@mount`, `@table` and `@fetch` input, and
+the machine it ran on (`local` for the server itself), so a host can count the
+data a notebook moved:
+
+```json
+{
+  "c1a2b3c4": {
+    "machine": "local",
+    "ran_at": 1760889600000,
+    "inputs": [
+      {"kind": "mount", "name": "data", "uri": "s3://bucket/data", "credential": null, "bytes_moved": 5368709120},
+      {"kind": "table", "name": "orders", "uri": "file:///tmp/strata-demo/warehouse#shop.orders", "credential": null, "bytes_moved": null},
+      {"kind": "fetch", "name": "zones", "uri": "https://example.com/zones.csv", "credential": null, "bytes_moved": 0}
+    ]
+  }
+}
+```
+
+`bytes_moved` is 0 for an input already on the machine, a cache hit included,
+and `null` where it is not known yet: a table's scan, and a mount read on a
+remote worker. It follows the table index's rules: a failed run leaves the
+entry, and a cell that stops reading these inputs, or is deleted, drops out.
+
 ## Gotchas
 
 - **Injected vars don't flow downstream.** `orders` and `orders_snapshot` live

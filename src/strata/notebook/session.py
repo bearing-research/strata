@@ -51,6 +51,7 @@ from strata.notebook.models import (
     CellState,
     CellStatus,
     DatasetSpec,
+    InputWeight,
     MountMode,
     NotebookState,
     StalenessReason,
@@ -539,9 +540,11 @@ class NotebookSession:
             _set_variant_active(self.path, group_id, promote_to)
 
         self.reload()
-        from strata.notebook import table_index
+        from strata.notebook import reads_index, table_index
 
-        table_index.record(self.path, cell_id, [], (c.id for c in self.notebook_state.cells))
+        live = [c.id for c in self.notebook_state.cells]
+        table_index.record(self.path, cell_id, [], live)
+        reads_index.record(self.path, cell_id, None, live)
 
     def add_variant(self, group: str, author: str | None = None) -> tuple[str, str]:
         """Add a sibling variant to ``group`` by cloning the active variant.
@@ -1292,13 +1295,15 @@ class NotebookSession:
         env_hash: str,
         *,
         table_reads: list[dict[str, Any]],
+        reads: dict[str, Any] | None,
     ) -> None:
         """Persist the last successful execution provenance for uncached cells.
 
         Also writes ``.strata/runtime.json`` so ``compute_staleness`` classifies the
-        cell correctly after a reopen, and records *table_reads* in the table index.
+        cell correctly after a reopen, records *table_reads* in the table index, and
+        *reads*, what the run moved, in the reads index.
         """
-        from strata.notebook import table_index
+        from strata.notebook import reads_index, table_index
         from strata.notebook.runtime_state import persist_cell_provenance
 
         cell = self.notebook_state.get_cell(cell_id)
@@ -1318,9 +1323,25 @@ class NotebookSession:
             last_env_hash=env_hash,
             last_reopen_identity=cell.last_reopen_identity,
         )
-        table_index.record(
-            self.path, cell_id, table_reads, (c.id for c in self.notebook_state.cells)
+        live = [c.id for c in self.notebook_state.cells]
+        table_index.record(self.path, cell_id, table_reads, live)
+        reads_index.record(self.path, cell_id, reads, live)
+
+    def record_cell_inputs(self, cell_id: str, machine: str, weights: list[InputWeight]) -> bool:
+        """Keep what *cell_id*'s inputs weigh, for its badge after a reopen; True if changed."""
+        from strata.notebook.runtime_state import persist_cell_inputs
+
+        cell = self.notebook_state.get_cell(cell_id)
+        on = machine if weights else None
+        if cell is None or (cell.inputs == weights and cell.inputs_machine == on):
+            return False
+        cell.inputs, cell.inputs_machine = list(weights), on
+        persist_cell_inputs(
+            self.path,
+            cell_id,
+            {"machine": on, "inputs": [w.model_dump() for w in weights]} if weights else None,
         )
+        return True
 
     def reopen_identity(self, cell: CellState) -> str | None:
         """What this cell's cache scheme rests on beyond the generic triplet.

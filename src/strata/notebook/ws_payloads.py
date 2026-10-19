@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from strata.notebook.models import CellTestCase
+from strata.notebook.models import CellTestCase, InputWeight
 from strata.notebook.protocol import MessageType
 
 
@@ -38,8 +38,9 @@ class CellStatusPayload(WsPayload):
     # ``starting`` while a remote job is provisioned, ``running`` once it is, for a
     # worker that runs cells asynchronously.
     remote_build_state: str | None = None
-    # What a dispatcher says about a queued job: its place in line and a sentence for the
-    # badge ("Behind 2 cells for a slot on team-a100."). Only while ``starting``.
+    # What a dispatcher says about a job: while ``starting``, its place in line and a
+    # sentence for the badge ("Behind 2 cells for a slot on team-a100."); while ``running``,
+    # only the sentence ("Runs on team-cpu, slot 1.").
     remote_queue_position: int | None = None
     remote_queue_detail: str | None = None
     staleness_reasons: list[str] | None = None
@@ -126,6 +127,25 @@ class CellVariantProgressPayload(WsPayload):
     success: bool
     duration_ms: int
     error: str | None = None
+
+
+class CellInputsPayload(WsPayload):
+    """``cell_inputs``: what a cell's declared inputs weigh, for the badge.
+
+    Sent once a run has resolved its inputs, before it starts. ``machine`` is the worker
+    the cell runs on (``local`` for this server).
+    """
+
+    cell_id: str
+    machine: str
+    inputs: list[InputWeight]
+
+
+def cell_inputs_payload(cell_id: str, machine: str, weights: list[InputWeight]) -> dict[str, Any]:
+    """Build a validated ``cell_inputs`` wire payload."""
+    return CellInputsPayload(cell_id=cell_id, machine=machine, inputs=weights).model_dump(
+        exclude_none=True
+    )
 
 
 class CascadePromptPayload(WsPayload):
@@ -498,6 +518,7 @@ FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.CASCADE_PROGRESS: CascadeProgressPayload,
     MessageType.CASCADE_PROMPT: CascadePromptPayload,
     MessageType.CELL_CONSOLE: CellConsolePayload,
+    MessageType.CELL_INPUTS: CellInputsPayload,
     MessageType.CELL_ITERATION_PROGRESS: CellIterationProgressPayload,
     MessageType.CELL_OUTPUT_DELTA: CellOutputDeltaPayload,
     MessageType.CELL_STATUS: CellStatusPayload,

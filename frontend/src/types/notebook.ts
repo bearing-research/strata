@@ -1,4 +1,4 @@
-import type { TypedWsFrame, WsServerPayloadMap } from './ws-payloads.generated'
+import type { InputWeight, TypedWsFrame, WsServerPayloadMap } from './ws-payloads.generated'
 
 export type CellId = string
 
@@ -300,6 +300,10 @@ export interface Cell {
   shadowWarnings?: string[]
   /** Annotation validation diagnostics (set on open/reload, never during typing) */
   annotationDiagnostics?: AnnotationDiagnostic[]
+  /** What the inputs weighed when the cell last started, from ``cell_inputs`` */
+  inputWeights?: InputWeight[]
+  /** The machine those inputs are read on */
+  inputsMachine?: string
   /** Live loop-cell progress, hydrated from WS ``cell_iteration_progress`` messages */
   loopProgress?: LoopProgress
   /** Live @per_variant fan-out progress from ``cell_variant_progress``;
@@ -750,6 +754,7 @@ export type WsServerMessageType =
   | 'cell_output_delta' // Streamed partial output while running (prompt cells)
   | 'cell_console' // Incremental console output (stdout/stderr)
   | 'cell_error' // Cell execution failed
+  | 'cell_inputs' // What a run's mounts, tables and fetches weigh
   | 'cell_iteration_progress' // Loop cell completed one iteration
   | 'cell_variant_progress' // @per_variant fan-out completed one variant
   | 'cell_test_status' // Cell unit-test run lifecycle (running/ready/error)

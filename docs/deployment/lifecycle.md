@@ -38,6 +38,7 @@ mynotebook/
     ├── console/              # per-cell stdout/stderr (one JSON per cell)
     ├── fetch/                # the bytes each @fetch last read
     ├── tables/index.json     # the tables each cell's last good run read
+    ├── reads/index.json      # the bytes each cell's last good run moved, per input
     └── artifacts/            # SQLite + blobs (cached cell outputs)
 └── .venv/                    # uv-materialized venv - gitignored, host-specific
 ```

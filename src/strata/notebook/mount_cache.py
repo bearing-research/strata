@@ -109,6 +109,20 @@ class MountCache:
             return None
         return view / "data"
 
+    def cached_bytes(self, key: str, objects: list[tuple[str | None, int]]) -> int:
+        """How many of a listing's bytes are here: all of them when the view *key* is built,
+        else those of the ``(object key, size)`` entries already in ``objects/``.
+
+        Looks without marking anything used.
+        """
+        if (self.views / key / _LOCK).exists():
+            return sum(size for _okey, size in objects)
+        return sum(
+            size
+            for okey, size in objects
+            if okey is not None and (self.objects / okey[:2] / okey).exists()
+        )
+
     def hold(self, owner: object, data: Path) -> None:
         """Spare the view whose data directory is *data* from sweeps while *owner* lives."""
         view = data.parent
@@ -121,12 +135,12 @@ class MountCache:
         key: str,
         files: list[tuple[Path, str | None, str]],
         fetch: Callable[[str, Path], None],
-    ) -> Path:
+    ) -> tuple[Path, int]:
         """Assemble the view *key* from ``(relative path, object key, remote name)`` entries.
 
         Downloads only the objects not already here, through ``fetch(remote name, dest)``. A
         file with no object key is downloaded into the view itself. Callers validate the
-        relative paths.
+        relative paths. Returns the view and the bytes downloaded for it.
         """
         _mkdir_unlisted(self.views)
         building = self.views / f".tmp-{uuid.uuid4().hex}"
@@ -142,7 +156,7 @@ class MountCache:
                 if okey is None:
                     fetch(remote_name, dest)
                     _make_read_only(dest)
-                    downloaded += 1
+                    downloaded += dest.stat().st_size
                 else:
                     downloaded += self._link_object(okey, remote_name, dest, fetch)
             (building / _LOCK).touch()
@@ -158,24 +172,26 @@ class MountCache:
         except BaseException:
             _rmtree(building)
             raise
-        logger.info("mount view %s: %d of %d files downloaded", key[:12], downloaded, len(files))
+        logger.info(
+            "mount view %s: %d bytes downloaded for %d files", key[:12], downloaded, len(files)
+        )
         self._grew = self._grew or downloaded > 0
         found = self.find_view(key)
         if found is None:
             raise RuntimeError("the mount cache removed a view as it was built")
-        return found
+        return found, downloaded
 
     def _link_object(
         self, okey: str, remote_name: str, dest: Path, fetch: Callable[[str, Path], None]
     ) -> int:
-        """Hard-link object *okey* to *dest*, downloading it if absent; 1 if downloaded."""
+        """Hard-link object *okey* to *dest*, downloading it if absent; the bytes downloaded."""
         path = self.objects / okey[:2] / okey
         downloaded = 0
         # A sweep can remove an object between its download and the link.
         for _ in range(3):
             if not path.exists():
                 self._download(path, remote_name, fetch)
-                downloaded = 1
+                downloaded += path.stat().st_size
             try:
                 os.link(path, dest)
                 return downloaded

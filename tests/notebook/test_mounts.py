@@ -1010,7 +1010,7 @@ class TestSharedMountCache:
         contents = {"remote/A": b"first", "remote/B": b"second"}
         cache = MountCache(tmp_path / "mc")
 
-        view = cache.build_view(
+        view, _ = cache.build_view(
             "k",
             [(Path("same"), "a" * 64, "remote/A"), (Path("same"), "b" * 64, "remote/B")],
             lambda name, dest: dest.write_bytes(contents[name]),
@@ -1030,7 +1030,7 @@ class TestSharedMountCache:
         monkeypatch.setattr(mount_cache.os, "link", no_links)
         cache = MountCache(tmp_path / "mc")
 
-        view = cache.build_view(
+        view, _ = cache.build_view(
             "k", [(Path("a"), "a" * 64, "remote/a")], lambda name, dest: dest.write_bytes(b"aa")
         )
 

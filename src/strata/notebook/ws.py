@@ -2411,11 +2411,12 @@ async def _run_partition_batch(
         # Batched cells may have RO mounts (never RW); materialize them.
         mount_specs = executor._resolve_cell_mount_specs(cell.id, cell.source)
         mount_manifest: dict[str, dict[str, str]] = {}
+        executor.forget_mounts_moved(cell.id)
         if mount_specs:
             try:
                 # Not the resolver directly: ``_prepare_mounts`` loads
                 # credentials first.
-                resolved_mounts = await executor._prepare_mounts(mount_specs)
+                resolved_mounts = await executor._prepare_mounts(mount_specs, cell.id)
             except Exception as exc:
                 mount_failed_cells.append((cell.id, exc))
                 continue

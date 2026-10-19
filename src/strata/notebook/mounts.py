@@ -45,6 +45,8 @@ class ResolvedMount:
     staging_dir: Path | None = None
     # RW only: each file's (size, mtime_ns) before the cell ran, to tell what it wrote.
     baseline: dict[str, tuple[int, int]] | None = None
+    # Remote RO only: the bytes downloaded to build the view (0 when it was cached).
+    bytes_moved: int | None = None
 
 
 class WrittenFile(BaseModel):
@@ -308,14 +310,16 @@ class MountResolver:
         protocol = _scheme_to_fsspec_protocol(scheme)
         storage_options = self.storage_options(mount)
         try:
-            fingerprint, local_path = await asyncio.to_thread(
+            fingerprint, local_path, moved = await asyncio.to_thread(
                 self._prepare_view, mount, protocol, remote_path, storage_options
             )
         except Exception as e:
             raise RuntimeError(
                 f"Failed to materialize remote mount '{mount.name}' from {mount.uri}: {e}"
             ) from e
-        resolved = ResolvedMount(spec=mount, local_path=local_path, fingerprint=fingerprint)
+        resolved = ResolvedMount(
+            spec=mount, local_path=local_path, fingerprint=fingerprint, bytes_moved=moved
+        )
         # Held as long as the run keeps its resolved mounts, however long it runs.
         self.mount_cache.hold(resolved, local_path)
         return resolved
@@ -326,28 +330,21 @@ class MountResolver:
         protocol: str,
         remote_path: str,
         storage_options: dict[str, Any],
-    ) -> tuple[str, Path]:
-        """The mount's fingerprint and its view, built from one listing so the two agree."""
+    ) -> tuple[str, Path, int]:
+        """The mount's fingerprint, its view and the bytes downloaded for it, from one listing."""
         fs = _mount_filesystem(protocol, storage_options)
-        # The options key the view and its objects: neither is handed to a caller that reaches
-        # the store another way, so a credential that may list a prefix but not read it never
-        # gets another notebook's bytes. A rotated secret starts a fresh copy.
-        options_digest = hashlib.sha256(
-            json.dumps(storage_options, sort_keys=True, default=str).encode()
-        ).hexdigest()
+        options_digest = _options_digest(storage_options)
         listing: dict[str, dict[str, Any]] | None = None
         if mount.pin is not None:
             fingerprint = hashlib.sha256(f"pin:{mount.pin}".encode()).hexdigest()
         else:
             listing = _list_remote_file_info(fs, protocol, remote_path)
             fingerprint = _fingerprint_listing(listing)
-        key = hashlib.sha256(
-            "\0".join([protocol, remote_path, options_digest, fingerprint]).encode()
-        ).hexdigest()
+        key = _view_key(protocol, remote_path, options_digest, fingerprint)
 
         found = self.mount_cache.find_view(key)
         if found is not None:
-            return fingerprint, found
+            return fingerprint, found, 0
         if listing is None:
             listing = _list_remote_file_info(fs, protocol, remote_path)
         files = []
@@ -357,10 +354,10 @@ class MountResolver:
             files.append(
                 (rel, object_key(protocol, options_digest, remote_name, info), remote_name)
             )
-        view = self.mount_cache.build_view(
+        view, moved = self.mount_cache.build_view(
             key, files, lambda name, dest: fs.get(f"{protocol}://{name}", str(dest))
         )
-        return fingerprint, view
+        return fingerprint, view, moved
 
     async def _resolve_remote_rw(
         self,
@@ -496,10 +493,20 @@ class MountFingerprinter:
         storage_options: dict[str, Any] | None = None,
     ) -> str:
         """Fingerprint a remote path from listing metadata (ETags, sizes, mtimes); no download."""
+        return MountFingerprinter.remote_listing_sync(scheme, remote_path, storage_options)[0]
+
+    @staticmethod
+    def remote_listing_sync(
+        scheme: str,
+        remote_path: str,
+        storage_options: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, dict[str, Any]] | None]:
+        """A remote path's fingerprint and the listing it came from, ``None`` if unlisted."""
         try:
             protocol = _scheme_to_fsspec_protocol(scheme)
             fs = _mount_filesystem(protocol, storage_options or {})
-            return _fingerprint_listing(_list_remote_file_info(fs, protocol, remote_path))
+            listing = _list_remote_file_info(fs, protocol, remote_path)
+            return _fingerprint_listing(listing), listing
 
         except ImportError as exc:
             # fsspec or the backend driver is missing. A deterministic hash here would
@@ -511,7 +518,7 @@ class MountFingerprinter:
                 remote_path,
                 exc,
             )
-            return hashlib.sha256(os.urandom(32)).hexdigest()
+            return hashlib.sha256(os.urandom(32)).hexdigest(), None
         except Exception as e:
             logger.warning(
                 "Failed to fingerprint remote mount %s://%s: %s",
@@ -520,7 +527,7 @@ class MountFingerprinter:
                 e,
             )
             # Unique per call: forces re-execution.
-            return hashlib.sha256(os.urandom(32)).hexdigest()
+            return hashlib.sha256(os.urandom(32)).hexdigest(), None
 
     @staticmethod
     async def fingerprint_remote(
@@ -572,6 +579,24 @@ class MountFingerprinter:
 
 
 # --- Helpers ---
+
+
+def _options_digest(storage_options: dict[str, Any]) -> str:
+    """What keys a view and its objects to the options that reached the store.
+
+    Neither is handed to a caller that reaches the store another way, so a credential that
+    may list a prefix but not read it never gets another notebook's bytes. A rotated secret
+    starts a fresh copy.
+    """
+    return hashlib.sha256(
+        json.dumps(storage_options, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
+def _view_key(protocol: str, remote_path: str, options_digest: str, fingerprint: str) -> str:
+    return hashlib.sha256(
+        "\0".join([protocol, remote_path, options_digest, fingerprint]).encode()
+    ).hexdigest()
 
 
 def _fingerprint_listing(listing: dict[str, dict[str, Any]]) -> str:
@@ -790,6 +815,17 @@ def ensure_writable(credentials: CredentialResolver, mounts: list[MountSpec]) ->
             credentials.ensure_writable(parse_mount_uri(mount.uri)[0], mount.credential)
 
 
+@dataclass(frozen=True)
+class MountWeight:
+    """A remote read-only mount's bytes, and how many are already where the cell runs.
+
+    ``None`` is unknown: a pinned mount is not listed, and a share needs the cache.
+    """
+
+    bytes: int | None
+    cached_bytes: int | None
+
+
 def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | None:
     """The provenance component for one mount, shared by execution and staleness.
 
@@ -799,22 +835,64 @@ def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | N
     An unresolvable credential gives a unique fingerprint: the cell shows stale,
     runs, and fails naming the credential.
     """
+    return weigh_mount_sync(resolver, mount, None)[0]
+
+
+def weigh_mount_sync(
+    resolver: MountResolver, mount: MountSpec, cache: MountCache | None
+) -> tuple[str | None, MountWeight | None]:
+    """:func:`mount_fingerprint_sync`'s component, with the mount's weight from the same
+    listing: its share already in *cache*, the one the cell runs against.
+
+    The weight is ``None`` for a mount that moves nothing to read (``file://``) or that a
+    run does not read through a view (``rw``).
+    """
     try:
         storage_options = resolver.storage_options(mount)
     except CredentialError as exc:
         logger.warning("mount %s: %s", mount.name, exc)
-        return f"{mount.name}:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
-    fingerprint = MountFingerprinter.fingerprint_mount_sync(
-        mount, storage_options=storage_options or None
-    )
+        unresolved = f"{mount.name}:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
+        return unresolved, None
+    scheme, path = parse_mount_uri(mount.uri)
+    weight: MountWeight | None = None
+    if scheme == "file" or mount.mode == MountMode.READ_WRITE or mount.pin is not None:
+        fingerprint = MountFingerprinter.fingerprint_mount_sync(
+            mount, storage_options=storage_options or None
+        )
+        if mount.pin is not None and scheme != "file":
+            weight = MountWeight(bytes=None, cached_bytes=None)
+    else:
+        fingerprint, listing = MountFingerprinter.remote_listing_sync(
+            scheme, path, storage_options or None
+        )
+        weight = _weigh_listing(scheme, path, storage_options, fingerprint, listing, cache)
     if fingerprint is None:
-        return None
+        return None, weight
     identity = credential_identity(mount.credential)
     if identity:
-        return f"{mount.name}:{mount.uri}:{identity}:{fingerprint}"
-    return f"{mount.name}:{mount.uri}:{fingerprint}"
+        return f"{mount.name}:{mount.uri}:{identity}:{fingerprint}", weight
+    return f"{mount.name}:{mount.uri}:{fingerprint}", weight
 
 
-async def mount_fingerprint(resolver: MountResolver, mount: MountSpec) -> str | None:
-    """Async form of :func:`mount_fingerprint_sync`, for the executor."""
-    return mount_fingerprint_sync(resolver, mount)
+def _weigh_listing(
+    scheme: str,
+    path: str,
+    storage_options: dict[str, Any],
+    fingerprint: str,
+    listing: dict[str, dict[str, Any]] | None,
+    cache: MountCache | None,
+) -> MountWeight:
+    if listing is None:
+        return MountWeight(bytes=None, cached_bytes=None)
+    sizes = {name: int(info.get("size") or 0) for name, info in listing.items()}
+    if cache is None:
+        return MountWeight(bytes=sum(sizes.values()), cached_bytes=None)
+    protocol = _scheme_to_fsspec_protocol(scheme)
+    digest = _options_digest(storage_options)
+    objects = [
+        (object_key(protocol, digest, name, info), sizes[name]) for name, info in listing.items()
+    ]
+    return MountWeight(
+        bytes=sum(sizes.values()),
+        cached_bytes=cache.cached_bytes(_view_key(protocol, path, digest, fingerprint), objects),
+    )

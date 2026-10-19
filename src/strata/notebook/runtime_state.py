@@ -52,6 +52,8 @@ class CellRuntime:
     # Token of the loop cell's latest run, recorded before iteration 0 so a run that
     # stores no step still marks the older run's steps as left over.
     loop_run: str | None = None
+    # What the inputs weighed when the cell last started, ``{machine, inputs}``.
+    inputs: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # Older builds persisted NaN/inf control values, which the open payload
@@ -76,6 +78,7 @@ class CellRuntime:
             or self.widget_values
             or self.execution_samples
             or self.loop_run
+            or self.inputs
         )
 
 
@@ -299,6 +302,14 @@ def persist_cell_loop_run(notebook_dir: Path, cell_id: str, loop_run: str | None
     if entry.loop_run == loop_run:
         return
     entry.loop_run = loop_run
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_cell_inputs(notebook_dir: Path, cell_id: str, inputs: dict[str, Any] | None) -> None:
+    """Record what *cell_id*'s inputs weighed when it last started; ``None`` clears."""
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.inputs = inputs
     save_runtime_state(notebook_dir, state)
 
 

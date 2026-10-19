@@ -234,6 +234,7 @@ notebook_dir/
     ├── console/           # per-cell stdout/stderr ({cell_id}.json)
     ├── fetch/             # bytes each @fetch last read
     ├── tables/index.json  # tables each cell's last good run read (table_index.py)
+    ├── reads/index.json   # bytes each cell's last good run moved, per input (reads_index.py)
     └── artifacts/         # SQLite + blobs (nb_…@v=N.arrow)
 ```
 
