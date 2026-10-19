@@ -1459,6 +1459,13 @@ async def test_inspect_repl_round_trip(notebook_session):
     assert "ZeroDivisionError" in failed["error"]
     assert "result" not in failed
 
+    # A JSON line written straight to fd 1 is not mistaken for the REPL's reply,
+    # and the next answer still belongs to the next expression.
+    echoed = await evaluate("__import__('os').system('echo {\"a\": 1}')")
+    assert (echoed["ok"], echoed["result"]) == (True, "0")
+    after = await evaluate("x + 2")
+    assert (after["ok"], after["result"]) == (True, "3")
+
     await _handle_inspect_close(
         cast(WebSocket, fake),
         session,
@@ -1469,6 +1476,38 @@ async def test_inspect_repl_round_trip(notebook_session):
     closed = fake.frames_of("inspect_result")[-1]["payload"]
     assert closed["action"] == "close"
     assert closed["ok"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [{"a": 1}, [1, 2], None])
+async def test_inspect_eval_answers_a_malformed_reply_with_an_error(
+    notebook_session, monkeypatch, reply
+):
+    """A reply that is not an inspect answer becomes ``ok: false``, not a socket-closing raise."""
+    from strata.notebook.inspect_repl import InspectManager
+    from strata.notebook.ws import _handle_inspect_eval
+
+    async def evaluate(expr):
+        return reply
+
+    async def fake_get_session(self, cell_id):
+        return SimpleNamespace(evaluate=evaluate)
+
+    monkeypatch.setattr(InspectManager, "get_session", fake_get_session)
+    _, session = notebook_session
+    fake, execution_state = _make_fake_ws(session)
+
+    await _handle_inspect_eval(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "c1", "expr": "x"},
+        execution_state,
+        session.id,
+    )
+
+    answer = fake.frames_of("inspect_result")[-1]["payload"]
+    assert (answer["cell_id"], answer["action"], answer["ok"]) == ("c1", "eval", False)
+    assert "Malformed inspect reply" in answer["error"]
 
 
 def _patch_inspect_manager(monkeypatch, *, close_counter):

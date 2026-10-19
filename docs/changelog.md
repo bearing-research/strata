@@ -271,9 +271,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   runner read the 50 oldest pending builds, so one tenant's backlog hid every
   other tenant's, and a build waiting for its tenant's turn held a global slot
   meanwhile. It now takes the oldest few of each tenant and waits for the
-  tenant slot first. A client can no longer send transform params starting
-  with `_` (now a 400): `_dispatch_mode` set a build aside where nothing ran
-  it, filling the runner's window for good. (#1166)
+  tenant slot first. A client can no longer send a transform param key
+  starting with `_`, at any depth (now a 400): `_dispatch_mode` set a build
+  aside where nothing ran it, filling the runner's window for good. (#1166)
 - **A filter no longer drops rows after a restart.** Parquet min/max statistics
   that are not plain JSON (timestamps, dates, Decimals, bytes) were saved as
   text, so once a server had restarted, a filter such as

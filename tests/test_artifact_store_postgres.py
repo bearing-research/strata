@@ -1058,13 +1058,15 @@ class TestBuildStoreSharesTheBackend:
                 )
 
             queue("external", "busy", params={"_dispatch_mode": "external"})
+            # ``_`` in the mark is literal, not LIKE's any-one-character.
+            queue("lookalike", "other", params={"xdispatch_mode": "external"})
             for i in range(4):
                 queue(f"busy-{i}", "busy")
             queue("quiet-0", "quiet")
 
             listed = builds.list_runnable_builds(limit=50, per_tenant=2)
 
-            assert [b.build_id for b in listed] == ["busy-0", "busy-1", "quiet-0"]
+            assert [b.build_id for b in listed] == ["lookalike", "busy-0", "busy-1", "quiet-0"]
         finally:
             dialect.close()
 

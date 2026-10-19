@@ -179,6 +179,18 @@ def _find_existing(
     return store.find_by_provenance(provenance_hash, tenant=tenant)
 
 
+def _reserved_keys(value: object) -> set[str]:
+    """Every key starting with ``_`` in ``value``'s dicts, at any depth."""
+    if isinstance(value, dict):
+        found = {key for key in value if key.startswith("_")}
+        for item in value.values():
+            found |= _reserved_keys(item)
+        return found
+    if isinstance(value, list):
+        return set().union(*map(_reserved_keys, value))
+    return set()
+
+
 def _authorize_name_write() -> None:
     """Gate ``name`` on a materialize request with the ``POST /v1/names`` write gate.
 
@@ -210,11 +222,13 @@ async def materialize_artifact(request: MaterializeRequest):
     transform = request.transform
     executor_ref = transform.executor
     # The server's own marks, such as the notebook's `_dispatch_mode`, which takes a build
-    # away from the runner: from a client it would park the build forever.
-    reserved = sorted(key for key in transform.params if key.startswith("_"))
+    # away from the runner: from a client it would park the build forever. At any depth,
+    # since the runner finds the mark by matching the params' JSON text.
+    reserved = sorted(_reserved_keys(transform.params))
     if reserved:
         raise HTTPException(
-            status_code=400, detail=f"Transform params starting with '_' are reserved: {reserved}"
+            status_code=400,
+            detail=f"Transform param keys starting with '_' are reserved: {reserved}",
         )
 
     transform_defn = _validate_transform_allowed(executor_ref, principal=principal)

@@ -908,6 +908,25 @@ class TestTransformValidation:
         assert response.status_code == 400
         assert "_dispatch_mode" in response.json()["detail"]
 
+    def test_a_reserved_param_nested_in_another_is_refused(self, server_mode_app):
+        """The runner skips a build whose params hold the mark at any depth."""
+        response = server_mode_app.post(
+            "/v1/artifacts/materialize",
+            json={
+                "inputs": ["file:///fake/wh#db.events"],
+                "transform": {
+                    "executor": "local://duckdb_sql@v1",
+                    "params": {
+                        "sql": "SELECT 1",
+                        "cfg": [{"_dispatch_mode": "external"}],
+                    },
+                },
+            },
+        )
+
+        assert response.status_code == 400
+        assert "_dispatch_mode" in response.json()["detail"]
+
     def test_unregistered_transform_rejected(self, server_mode_app):
         """An unregistered transform returns 403."""
         response = server_mode_app.post(

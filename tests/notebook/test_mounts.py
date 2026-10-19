@@ -783,6 +783,66 @@ class TestSharedMountCache:
         with pytest.raises(PermissionError):
             (view / "a").write_bytes(b"changed")
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="views are made read-only on POSIX")
+    @pytest.mark.asyncio
+    async def test_a_cell_cannot_remove_or_add_files_in_the_shared_view(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every notebook reading the prefix sees the view; eviction still removes it."""
+        import os
+        import time
+
+        from strata.notebook.mount_cache import MountCache
+
+        if os.geteuid() == 0:
+            pytest.skip("root ignores file modes")
+        files = self._files("bucket/data", {"a": b"aa", "sub/b": b"bb"})
+        # No etag or mtime: downloaded into the view itself, not shared from objects/.
+        files["bucket/data/c"] = {"name": "bucket/data/c", "size": 2, "content": b"cc"}
+        fs = _FakeRemoteFS(files)
+        _install_fake_fsspec(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc", max_idle_days=1)
+        view = (await MountResolver(mount_cache=cache).prepare_mounts([self._spec()]))[
+            "data"
+        ].local_path
+
+        for path in (view / "a", view / "sub" / "b", view / "c"):
+            with pytest.raises(PermissionError):
+                path.unlink()
+        with pytest.raises(PermissionError):
+            (view / "new").write_bytes(b"new")
+        with pytest.raises(PermissionError):
+            (view / "c").write_bytes(b"changed")
+        assert sorted(p.name for p in view.rglob("*")) == ["a", "b", "c", "sub"]
+
+        cache.sweep(force=True, now=time.time() + 86400 + 60)
+        assert not view.parent.exists()
+        assert list(cache.views.iterdir()) == []
+
+    @pytest.mark.asyncio
+    async def test_a_view_a_run_holds_is_kept_however_long_it_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Its lock is touched when the run starts; a sweep after an hour must still spare it."""
+        import gc
+
+        from strata.notebook.mount_cache import MountCache
+
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"x" * 10}))
+        _install_fake_fsspec(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc", max_bytes=5)
+        resolved = await MountResolver(mount_cache=cache).prepare_mounts([self._spec()])
+        view = resolved["data"].local_path
+        self._age_view(view, 3 * 3600)
+
+        cache.sweep(force=True)
+        assert (view / "a").read_bytes() == b"x" * 10
+
+        del resolved
+        gc.collect()
+        cache.sweep(force=True)
+        assert not view.exists()
+
     @staticmethod
     def _age_view(view_data: Path, seconds: float) -> None:
         import os

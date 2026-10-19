@@ -3,12 +3,13 @@
 ``objects/`` holds each remote file once, keyed by its URI and version (etag, size,
 mtime). ``views/<key>/data`` is one mount's listing at one fingerprint, assembled from
 hard links into ``objects/``, so notebooks reading the same prefix share bytes, and a
-prefix with one new file costs one download. Objects are read-only on POSIX: a hard link
-shares the file, so a cell writing into one would change it for every view.
+prefix with one new file costs one download. Objects and views are read-only on POSIX: a
+hard link shares the file, so a cell writing into one would change it for every view, and
+one removing a file from a view would remove it for every notebook reading that view.
 
 A sweep keeps the objects under ``max_bytes`` and drops views unused for
-``max_idle_days``, least recently used first. A view used within the last hour is kept
-even over the bound, since a running cell may still be reading it.
+``max_idle_days``, least recently used first. A view used within the last hour, or held
+by a run in this process (:meth:`MountCache.hold`), is kept even over the bound.
 """
 
 from __future__ import annotations
@@ -18,8 +19,11 @@ import logging
 import os
 import shutil
 import stat
+import threading
 import time
 import uuid
+import weakref
+from collections import Counter
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -37,6 +41,9 @@ _STALE_TEMP_SECONDS = 86400.0
 _LOCK = ".lock"  # its mtime is the view's last use
 
 _last_sweep: dict[Path, float] = {}
+# Views a live run in this process reads: a run can outlast _MIN_IDLE_SECONDS.
+_held: Counter[Path] = Counter()
+_held_lock = threading.Lock()
 
 
 def default_root() -> Path:
@@ -101,6 +108,13 @@ class MountCache:
             return None
         return view / "data"
 
+    def hold(self, owner: object, data: Path) -> None:
+        """Spare the view whose data directory is *data* from sweeps while *owner* lives."""
+        view = data.parent
+        with _held_lock:
+            _held[view] += 1
+        weakref.finalize(owner, _release, view)
+
     def build_view(
         self,
         key: str,
@@ -126,17 +140,19 @@ class MountCache:
                 dest.unlink(missing_ok=True)
                 if okey is None:
                     fetch(remote_name, dest)
+                    _make_read_only(dest)
                     downloaded += 1
                 else:
                     downloaded += self._link_object(okey, remote_name, dest, fetch)
             (building / _LOCK).touch()
+            _seal(building)
             try:
                 building.rename(self.views / key)
             except OSError:
                 # Another process built the same view first; theirs is identical.
-                shutil.rmtree(building, ignore_errors=True)
+                _rmtree(building)
         except BaseException:
-            shutil.rmtree(building, ignore_errors=True)
+            _rmtree(building)
             raise
         logger.info("mount view %s: %d of %d files downloaded", key[:12], downloaded, len(files))
         self._grew = self._grew or downloaded > 0
@@ -236,6 +252,8 @@ class MountCache:
                 break
             if idle <= _MIN_IDLE_SECONDS:
                 break
+            if view in _held:
+                continue
             for ino in _remove_view(view, self.views):
                 found = objects.get(ino)
                 if found is None:
@@ -281,8 +299,32 @@ def _remove_view(view: Path, views: Path) -> set[int]:
     except OSError as exc:
         logger.warning("could not evict mount view %s: %s", view.name, exc)
         return set()
-    shutil.rmtree(trash, ignore_errors=True)
+    _rmtree(trash)
     return inodes
+
+
+def _release(view: Path) -> None:
+    with _held_lock:
+        _held[view] -= 1
+        if _held[view] <= 0:
+            del _held[view]
+
+
+def _seal(view: Path) -> None:
+    """Clear the write bits on *view*'s directories (POSIX): no file is added or removed."""
+    for dirpath, _dirs, _names in os.walk(view):
+        _make_read_only(Path(dirpath))
+
+
+def _rmtree(path: Path) -> None:
+    """Remove *path*, giving its sealed directories their write bits back first."""
+    if os.name != "nt":
+        for dirpath, _dirs, _names in os.walk(path):
+            try:
+                os.chmod(dirpath, 0o700)
+            except FileNotFoundError:
+                continue  # a concurrent sweep is removing it
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def _make_read_only(path: Path) -> None:
@@ -298,6 +340,6 @@ def _remove_if_stale(path: Path, now: float) -> None:
     except FileNotFoundError:
         return
     if path.is_dir():
-        shutil.rmtree(path, ignore_errors=True)
+        _rmtree(path)
     else:
         path.unlink(missing_ok=True)

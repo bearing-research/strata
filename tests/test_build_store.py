@@ -492,3 +492,11 @@ class TestRunnableBuilds:
         listed = store.list_runnable_builds(limit=50, per_tenant=2)
 
         assert [b.build_id for b in listed] == runnable
+
+    def test_a_key_that_only_looks_like_the_mark_is_picked_up(self, store):
+        """``_`` in the mark is literal, not LIKE's any-one-character."""
+        lookalike = self._queue(store, "t", params={"xdispatch_mode": "external"})
+
+        listed = store.list_runnable_builds(limit=50, per_tenant=2)
+
+        assert [b.build_id for b in listed] == [lookalike]

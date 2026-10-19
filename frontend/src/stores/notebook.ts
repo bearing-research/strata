@@ -2507,6 +2507,8 @@ function initializeWebSocket() {
     // Each step's own cell_status already shows a cascade here; this frame is
     // for viewers without per-cell state (the terminal viewer's banner).
     wsInstance.onMessage('cascade_progress', () => {})
+    // MCP tool actions and agent notes; the terminal viewer's Agent tab shows them.
+    wsInstance.onMessage('agent_note', () => {})
 
     wsInstance.connect()
   }
