@@ -3917,11 +3917,22 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>GET /v1/cache/stats</code> needs <code>admin:cache</code>.</strong> Its counts per table cover
+<li>
+<p><strong><code>GET /v1/cache/stats</code> needs <code>admin:cache</code>.</strong> Its counts per table cover
   every tenant's cached data, like <code>/v1/cache/entries</code>, which
   already needed the scope; under principal auth any caller could read them.
   It also no longer walks the cache directory on the event loop. Personal mode
-  is unchanged. (#1167)</li>
+  is unchanged. (#1167)</p>
+</li>
+<li>
+<p><strong>A process a cell leaves running as the harness user is stopped.</strong> Before a
+  run is handed a directory, a Linux server kills every process of
+  <code>STRATA_NOTEBOOK_HARNESS_USER</code> that no run holds: one that left its cell's
+  session with <code>setsid</code>, or outlived its cell. It could otherwise watch and
+  change what later runs of any notebook were handed. The harness user must now
+  serve one server's cells alone, and a server running as PID 1 stops nothing
+  and says so. (#1249)</p>
+</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
