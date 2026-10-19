@@ -311,7 +311,7 @@ def collect(
                 if seen is not None and key is not None:
                     seen[rel] = (key, files[rel])
             except UnsafeRunFile:
-                logger.warning("output folder %s: not keeping %s, a link", name, rel)
+                logger.warning("output folder %s: not keeping %s, a link", folder.name, rel)
     return json.dumps({"cell_id": cell_id, "files": files}, sort_keys=True).encode("utf-8")
 
 
