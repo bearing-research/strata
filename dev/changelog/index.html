@@ -3875,6 +3875,12 @@ exhaustive commit history.</p>
 <li><strong>A <code>scan@v1</code> returns its columns in the order requested.</strong> Its artifact
   was keyed by the columns sorted, so the same columns in another order were
   served the first request's artifact, in the first request's order. (#1220)</li>
+<li><strong>Handing a run directory to the harness user never follows a link.</strong> The
+  root server gave a cell's per-run directories to <code>STRATA_NOTEBOOK_HARNESS_USER</code>
+  by walking their paths, so a process a cell left running could swap a
+  directory it owned for a symlink mid-walk and be given whatever the link
+  named, such as <code>/etc</code>. The walk now holds each directory open and changes
+  the run directory's own owner last. (#1219)</li>
 <li><strong>strata-pool's Docker backend removes a stopped worker's volumes.</strong> It
   removed the container but kept its anonymous volumes, so a worker image that
   declares <code>VOLUME</code> directories left one behind per worker until the disk
