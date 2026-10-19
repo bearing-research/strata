@@ -1693,7 +1693,10 @@ class CellExecutor:
                 return CellExecutionResult(
                     cell_id=cell_id, success=False, error=refusal, execution_method="error"
                 )
-            with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                tempfile.TemporaryDirectory() as tmpdir,
+                tempfile.TemporaryDirectory() as result_tmpdir,
+            ):
                 output_dir = Path(tmpdir)
                 remote_build_id = (
                     f"nbbuild-{uuid.uuid4().hex[:12]}"
@@ -1706,12 +1709,15 @@ class CellExecutor:
                 )
 
                 # Force may skip upstream materialization, so missing inputs are allowed to surface
-                # at execution time.
-                input_specs = self._load_input_blobs(
-                    cell_id,
-                    output_dir,
-                    fanout_group=fanout_group,
-                    fanout_variant=fanout_variant,
+                # at execution time. Off the loop: an input folder can hold gigabytes.
+                input_specs = await anyio.to_thread.run_sync(
+                    functools.partial(
+                        self._load_input_blobs,
+                        cell_id,
+                        output_dir,
+                        fanout_group=fanout_group,
+                        fanout_variant=fanout_variant,
+                    )
                 )
                 if fetches_as_inputs:
                     _add_fetch_inputs(input_specs, prov.fetched, output_dir)
@@ -1730,6 +1736,7 @@ class CellExecutor:
                     input_specs,
                     mount_specs,
                     output_dir,
+                    Path(result_tmpdir),
                     venv_path,
                     runtime_env,
                     timeout_seconds,
@@ -1749,9 +1756,12 @@ class CellExecutor:
                     duration_ms,
                     execution_method,
                 ).apply_remote_metadata(**remote_metadata)
+                collected = await self._collect_output_dirs_off_loop(
+                    cell_id, source, result_output_dir
+                )
                 if not exec_result.success:
                     self._keep_failed_output_dirs(
-                        cell_id, source, result_output_dir, provenance_hash, env_hash
+                        cell_id, source, result_output_dir, provenance_hash, env_hash, collected
                     )
 
                 # ⑤ Store artifacts for consumed variables.
@@ -1802,6 +1812,7 @@ class CellExecutor:
                             # What a teammate is told they saved; they never ran the cell, so it
                             # travels with the bytes.
                             build_duration_ms=exec_result.duration_ms,
+                            collected=collected,
                         )
                     except TableWriteError as exc:
                         stored_ok, store_error = False, str(exc)
@@ -2362,7 +2373,10 @@ class CellExecutor:
                 )
             with tempfile.TemporaryDirectory() as tmpdir:
                 output_dir = Path(tmpdir)
-                input_specs = self._load_input_blobs(cell_id, output_dir)
+                # Off the loop: an input folder can hold gigabytes.
+                input_specs = await anyio.to_thread.run_sync(
+                    self._load_input_blobs, cell_id, output_dir
+                )
                 result_output_dir = output_dir
                 if remote is not None:
                     remote_build_id = (
@@ -2434,9 +2448,12 @@ class CellExecutor:
                 exec_result = self._parse_result(
                     cell_id, result, duration_ms, execution_method
                 ).apply_remote_metadata(**remote_metadata)
+                collected = await self._collect_output_dirs_off_loop(
+                    cell_id, source, result_output_dir
+                )
                 if not exec_result.success:
                     self._keep_failed_output_dirs(
-                        cell_id, source, result_output_dir, provenance_hash, env_hash
+                        cell_id, source, result_output_dir, provenance_hash, env_hash, collected
                     )
 
                 if exec_result.success:
@@ -2460,6 +2477,7 @@ class CellExecutor:
                             # Reported by whatever ran the cell; empty for a local run.
                             build_env=str(result.get("build_env") or ""),
                             hardware=result.get("hardware") or {},
+                            collected=collected,
                         )
                     except TableWriteError as exc:
                         stored_ok, store_error = False, str(exc)
@@ -2594,6 +2612,7 @@ class CellExecutor:
         input_specs: dict[str, dict[str, str]],
         mount_specs: list[MountSpec],
         output_dir: Path,
+        result_dir: Path,
         venv_path: Path | None,
         runtime_env: dict[str, str],
         timeout_seconds: float,
@@ -2603,7 +2622,11 @@ class CellExecutor:
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
-        """Dispatch one cell execution through the selected worker backend."""
+        """Dispatch one cell execution through the selected worker backend.
+
+        *result_dir* is an empty server-only directory an embedded worker's result is
+        unpacked into.
+        """
         if worker_spec.backend == WorkerBackendType.LOCAL:
             return await self._dispatch_local(
                 source,
@@ -2624,6 +2647,7 @@ class CellExecutor:
                 input_specs,
                 mount_specs,
                 output_dir,
+                result_dir,
                 venv_path,
                 runtime_env,
                 timeout_seconds,
@@ -2725,6 +2749,7 @@ class CellExecutor:
         input_specs: dict[str, dict[str, str]],
         mount_specs: list[MountSpec],
         output_dir: Path,
+        result_dir: Path,
         venv_path: Path | None,
         runtime_env: dict[str, str],
         timeout_seconds: float,
@@ -2732,7 +2757,11 @@ class CellExecutor:
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
-        """Run the bundle-based executor path locally for supported executor workers."""
+        """Run the bundle-based executor path locally for supported executor workers.
+
+        The result is unpacked into *result_dir*, a server-only directory: output_dir
+        still holds the folders' files, and the cell can redirect anything under it.
+        """
         resolved_mounts = await self._prepare_mounts(mount_specs)
         with self._run_token(timeout_seconds) as run_token:
             manifest_path = self._write_manifest(
@@ -2751,12 +2780,12 @@ class CellExecutor:
             )
 
         # A process the cell left running still owns output_dir and can swap any path under
-        # it for a link: tar into an unnamed file, unpack through the run-file helpers.
+        # it for a link: tar into an unnamed file, unpack where the cell cannot reach.
         with tempfile.TemporaryFile() as bundle:
             pack_notebook_output_bundle(bundle, result, output_dir)
             bundle.seek(0)
-            unpacked_result = unpack_notebook_output_bundle(bundle, output_dir)
-        return unpacked_result, output_dir, "executor", resolved_mounts
+            unpacked_result = unpack_notebook_output_bundle(bundle, result_dir)
+        return unpacked_result, result_dir, "executor", resolved_mounts
 
     async def _locked_environment(
         self, worker_spec: Any, language: str = "python"
@@ -4916,10 +4945,12 @@ class CellExecutor:
         build_env: str = "",
         build_duration_ms: float = 0.0,
         hardware: dict[str, Any] | None = None,
+        collected: dict[str, bytes | Exception] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
         With ``store_leaf_outputs``, a leaf cell's variables are stored too, best-effort.
+        *collected* holds folders already collected by :meth:`_collect_output_dirs`.
 
         With ``variant`` set, ids get an ``@variant={name}`` suffix so fan-out
         instances do not collide.
@@ -4993,6 +5024,7 @@ class CellExecutor:
                             source=source,
                             env_hash=env_hash,
                             variant=variant,
+                            collected=(collected or {}).get(var_name),
                         )
                     )
                 except UnsafeRunFile:
@@ -5127,6 +5159,51 @@ class CellExecutor:
             folder = path.with_name(path.name.removesuffix(output_dirs.EXTENSION) + ".dir")
             output_dirs.materialize(self.session.get_artifact_manager(), blob, folder)
 
+    def _collect_output_dir(self, cell_id: str, name: str, output_dir: Path | None) -> bytes:
+        """Store a ``# @output_dir`` folder's files and return its manifest.
+
+        Files a worker uploaded during the run are in already; its result lists which of
+        them the folder still holds, and without a result (a lost worker) all count.
+        """
+        received = self._received_output_files.get(cell_id, {}).get(name, {})
+        streamed = output_dirs.read_streamed(output_dir) if output_dir is not None else None
+        if streamed is not None:
+            listed = set(streamed.get(name, ()))
+            received = {rel: entry for rel, entry in received.items() if rel in listed}
+        return output_dirs.collect(
+            self.session.get_artifact_manager(),
+            cell_id,
+            output_dir / output_dirs.OUTPUT_DIRS / name if output_dir is not None else None,
+            received,
+        )
+
+    async def _collect_output_dirs_off_loop(
+        self, cell_id: str, source: str, output_dir: Path
+    ) -> dict[str, bytes | Exception] | None:
+        """:meth:`_collect_output_dirs` in a thread, or ``None`` for a cell with no folder.
+
+        Called before the run's provenance is recorded and its outputs stored, since
+        nothing may see those two apart.
+        """
+        if not parse_annotations(source).output_dirs:
+            return None
+        return await anyio.to_thread.run_sync(
+            self._collect_output_dirs, cell_id, source, output_dir
+        )
+
+    def _collect_output_dirs(
+        self, cell_id: str, source: str, output_dir: Path
+    ) -> dict[str, bytes | Exception]:
+        """Each folder's manifest, or what collecting it raised: run in a thread, since a
+        folder can hold gigabytes. Staging reports a failure as if it had collected it."""
+        collected: dict[str, bytes | Exception] = {}
+        for name in parse_annotations(source).output_dirs:
+            try:
+                collected[name] = self._collect_output_dir(cell_id, name, output_dir)
+            except Exception as exc:
+                collected[name] = exc
+        return collected
+
     def _stage_output_dir(
         self,
         cell_id: str,
@@ -5139,23 +5216,19 @@ class CellExecutor:
         source: str,
         env_hash: str,
         variant: str | None = None,
+        collected: bytes | Exception | None = None,
     ) -> StagedVersion:
         """Keep a ``# @output_dir`` folder's files and stage its manifest as the output.
 
-        Files a worker uploaded during the run are in already; its result lists which of
-        them the folder still holds, and without a result (a lost worker) all count.
+        *collected* is the folder already collected by :meth:`_collect_output_dirs`.
         """
         artifact_mgr = self.session.get_artifact_manager()
-        received = self._received_output_files.get(cell_id, {}).get(name, {})
-        streamed = output_dirs.read_streamed(output_dir) if output_dir is not None else None
-        if streamed is not None:
-            listed = set(streamed.get(name, ()))
-            received = {rel: entry for rel, entry in received.items() if rel in listed}
-        manifest = output_dirs.collect(
-            artifact_mgr,
-            cell_id,
-            output_dir / output_dirs.OUTPUT_DIRS / name if output_dir is not None else None,
-            received,
+        if isinstance(collected, Exception):
+            raise collected
+        manifest = (
+            collected
+            if collected is not None
+            else self._collect_output_dir(cell_id, name, output_dir)
         )
         self._folder_listings.setdefault(cell_id, {})[name] = output_dirs.listing(name, manifest)
         return artifact_mgr.stage_cell_output(
@@ -5178,10 +5251,12 @@ class CellExecutor:
         output_dir: Path | None,
         provenance_hash: str,
         env_hash: str,
+        collected: dict[str, bytes | Exception] | None = None,
     ) -> None:
         """Keep what a failed run left in its ``# @output_dir`` folders, as failed versions.
 
         ``output_dir`` is ``None`` when no result came back: what a worker uploaded is all.
+        *collected* holds folders already collected by :meth:`_collect_output_dirs`.
 
         A failed version is never a cache hit or an input; lineage shows it, and it can be
         read by its ``<id>@v=<n>``. Best effort: the run has already failed.
@@ -5202,6 +5277,7 @@ class CellExecutor:
                     source_hash=compute_source_hash(source),
                     source=source,
                     env_hash=env_hash,
+                    collected=(collected or {}).get(name),
                 )
                 artifact_mgr.discard_cell_outputs([staged])
             except Exception:

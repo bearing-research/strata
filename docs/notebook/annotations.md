@@ -536,7 +536,9 @@ worker too old to take one is refused before the cell runs.
 **In a `# @loop` cell the folder lasts the whole loop**, and each iteration's
 contents are stored as its `@iter=k` version ([loop cells](cells.md#output-folders)).
 
-For now run-all runs a cell with a folder on its own rather than in a batch.
+For now run-all runs a cell with a folder on its own rather than in a batch,
+and the [team cache](../deployment/service-mode.md#the-team-cache-sharing-results-nobody-named)
+neither offers nor serves a cell with a folder: it runs locally.
 An R cell gets the folder as a path string and its folder is kept, but cannot
 read another cell's folder yet.
 

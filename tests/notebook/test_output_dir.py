@@ -7,8 +7,10 @@ path. A failed run keeps its files under a failed version that is never a cache 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -339,6 +341,28 @@ class TestTheFileSweep:
 
         assert self._stored(session, b"o")
 
+    async def test_a_failed_manifest_a_crash_left_without_bytes_does_not_stop_the_sweep(
+        self, tmp_path
+    ):
+        from strata.artifact.store import TransformSpec
+
+        session, _ = await self._two_runs(tmp_path)
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        artifact_id = manager.cell_artifact_id("w", "ckpt")
+        spec = TransformSpec(
+            executor="notebook/cell@v1",
+            params={"content_type": output_dirs.CONTENT_TYPE},
+            inputs=[],
+        )
+        version = store.create_artifact(artifact_id, provenance_hash="crash", transform_spec=spec)
+        store.fail_artifact(artifact_id, version)
+
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+
+        assert store.get_artifact(artifact_id, version) is not None  # the newest is spared
+        assert not self._stored(session, b"o")
+
     async def test_a_file_swept_while_a_run_reuses_it_is_stored_again(self, tmp_path, monkeypatch):
         session = _session(tmp_path)
         executor = CellExecutor(session)
@@ -360,6 +384,54 @@ class TestTheFileSweep:
         for entry in manifest["files"].values():
             artifact_id = output_dirs.file_artifact_id(manager, "w", entry["sha256"])
             assert store.get_artifact(artifact_id, entry["version"]).state == "ready"
+
+    async def test_two_cells_holding_the_same_bytes_each_keep_their_file(self, tmp_path):
+        first = "# @output_dir a\n(a / 'x.txt').write_text('same')\n"
+        second = "# @output_dir b\n(b / 'x.txt').write_text('same')\n"
+        reader = "seen = (b / 'x.txt').read_text()\n"
+        nb = create_notebook(tmp_path, "Folders")
+        for cell_id, after, source in (("a", None, first), ("b", "a", second), ("r", "b", reader)):
+            add_cell_to_notebook(nb, cell_id, after)
+            write_cell(nb, cell_id, source)
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("a", first)).success
+        assert (await executor.execute_cell("b", second)).success
+        # Each failed run would store the file again if it were not ready under b's id.
+        failing = second + "raise RuntimeError\n"
+        cell = session.notebook_state.get_cell("b")
+        cell.source = failing
+        session.re_analyze_cell("b")
+        for _ in range(3):
+            assert not (await executor.execute_cell("b", failing)).success
+
+        session.get_artifact_manager().prune(keep_superseded=0, min_idle_seconds=0)
+
+        cell.source = second
+        session.re_analyze_cell("b")
+        read = await executor.execute_cell("r", reader)
+        assert read.success, read.error
+        assert read.outputs["seen"]["preview"] == "same"
+
+    async def test_a_file_a_kept_manifest_names_stays_though_stored_again(
+        self, tmp_path, monkeypatch
+    ):
+        session = _session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("w", WRITER)).success
+        manager = session.get_artifact_manager()
+        manager.artifact_store.pin_artifact(manager.cell_artifact_id("w", "ckpt"), 1, "review")
+        # A second copy of each file under the same id, as two runs storing it at once make.
+        monkeypatch.setattr(output_dirs, "_reused", lambda store, artifact_id: None)
+        assert (await executor.execute_cell_rerun("w", WRITER)).success
+
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+
+        pinned, _ = _manifest(session, version=1)
+        for entry in pinned["files"].values():
+            artifact_id = output_dirs.file_artifact_id(manager, "w", entry["sha256"])
+            assert manager.artifact_store.get_artifact(artifact_id, entry["version"]) is not None
 
 
 LOOP = (
@@ -492,6 +564,64 @@ class TestALoopCell:
         assert result.success, result.error
         manifest, _ = _manifest(session)
         assert sorted(manifest["files"]) == ["e1.bin", "latest.txt"]
+
+
+def _held_until_the_loop_runs(monkeypatch, name: str) -> list[bool]:
+    """Patch ``output_dirs.<name>`` to wait, while it runs, for a coroutine to run.
+
+    It cannot while the call blocks the event loop, so the wait then ends unanswered.
+    Returns, per call, whether the loop ran meanwhile; :func:`_beat` is the coroutine.
+    """
+    real = getattr(output_dirs, name)
+    answered: list[bool] = []
+
+    def held(*args, **kwargs):
+        _started.set()
+        answered.append(_loop_ran.wait(timeout=10))
+        return real(*args, **kwargs)
+
+    _started.clear()
+    _loop_ran.clear()
+    monkeypatch.setattr(output_dirs, name, held)
+    return answered
+
+
+_started = threading.Event()
+_loop_ran = threading.Event()
+
+
+async def _beat() -> None:
+    while not _started.is_set():
+        await asyncio.sleep(0.01)
+    _loop_ran.set()
+
+
+class TestOffTheLoop:
+    """A folder can hold gigabytes, so storing or rebuilding one leaves the loop free."""
+
+    async def test_a_folder_is_stored_off_the_loop(self, tmp_path, monkeypatch):
+        session = _session(tmp_path, reader=None)
+        answered = _held_until_the_loop_runs(monkeypatch, "collect")
+
+        beat = asyncio.create_task(_beat())
+        written = await CellExecutor(session).execute_cell("w", WRITER)
+        await beat
+
+        assert written.success, written.error
+        assert answered == [True]
+
+    async def test_an_input_folder_is_rebuilt_off_the_loop(self, tmp_path, monkeypatch):
+        session = _session(tmp_path)
+        executor = CellExecutor(session)
+        assert (await executor.execute_cell("w", WRITER)).success
+        answered = _held_until_the_loop_runs(monkeypatch, "materialize")
+
+        beat = asyncio.create_task(_beat())
+        read = await executor.execute_cell("r", READER)
+        await beat
+
+        assert read.success, read.error
+        assert answered == [True]
 
 
 class TestNotYet:
@@ -639,6 +769,20 @@ class TestOnAWorker:
         assert read.success, read.error
         assert read.outputs["seen"]["preview"] == ["epochs/e0.bin", "epochs/e1.bin", "final.txt"]
         assert written.display_outputs[0]["markdown_text"] == LISTING
+
+    async def test_an_embedded_worker_returns_the_folder(self, tmp_path):
+        writer = "# @worker remote\n" + WRITER
+        session = _session(tmp_path, writer=writer)
+        _remote(session, {"url": "embedded://local"})
+        executor = CellExecutor(session)
+
+        written = await executor.execute_cell("w", writer)
+        assert written.success, written.error
+        assert written.execution_method == "executor"
+        read = await executor.execute_cell("r", READER)
+
+        assert read.success, read.error
+        assert read.outputs["seen"]["preview"] == ["epochs/e0.bin", "epochs/e1.bin", "final.txt"]
 
     async def test_a_failed_run_on_a_worker_keeps_what_it_wrote(
         self, tmp_path, notebook_executor_server
@@ -868,6 +1012,39 @@ class TestTheUploadRoute:
         file_id = manager.cell_artifact_id("w", f"__file__{entry['sha256']}")
         assert manager.artifact_store.read_blob(file_id, entry["version"]) == b"x" * 7
         assert list((tmp_path / "uploads").iterdir()) == []
+
+    def test_an_older_upload_stored_last_does_not_replace_a_newer_one(self, tmp_path):
+        import hashlib
+
+        _, receiver = self._receiver(tmp_path)
+        older, newer = receiver.begin(), receiver.begin()
+        for begun, body in ((newer, b"new"), (older, b"old")):
+            path = tmp_path / f"upload-{begun}"
+            path.write_bytes(body)
+            sha256 = hashlib.sha256(body).hexdigest()
+            receiver.accept("ckpt", "e.bin", path, sha256, len(body), begun)
+
+        entry = receiver.received()["ckpt"]["e.bin"]
+        assert entry["sha256"] == hashlib.sha256(b"new").hexdigest()
+
+    def test_opening_the_notebook_removes_what_a_crash_left_mid_upload(self, tmp_path):
+        import os
+
+        from strata.notebook import output_file_relay
+
+        session = _session(tmp_path, reader=None)
+        uploads = session.path / ".strata" / "uploads"
+        uploads.mkdir()
+        crashed, running = uploads / ".upload-crashed", uploads / ".upload-running"
+        crashed.write_bytes(b"x")
+        running.write_bytes(b"y")
+        before = output_file_relay._STARTED - 60
+        os.utime(crashed, (before, before))
+
+        NotebookSession(parse_notebook(session.path), session.path)
+
+        assert not crashed.exists()
+        assert running.exists()
 
     @pytest.mark.parametrize(
         ("build", "params", "status"),

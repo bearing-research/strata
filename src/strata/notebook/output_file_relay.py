@@ -9,7 +9,9 @@ worker sends that file in its result instead.
 
 from __future__ import annotations
 
+import contextlib
 import threading
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -30,11 +32,26 @@ class Receiver:
     folders: frozenset[str] = frozenset()  # the cell's ``# @output_dir`` names
     files: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _begun: int = 0
+    _newest: dict[tuple[str, str], int] = field(default_factory=dict)
 
-    def accept(self, folder: str, rel: str, path: Path, sha256: str, size: int) -> None:
-        """Store an uploaded file and record it as the folder's *rel*; a later upload wins."""
+    def begin(self) -> int:
+        """Number an upload as it starts, for :meth:`accept`."""
+        with self._lock:
+            self._begun += 1
+            return self._begun
+
+    def accept(self, folder: str, rel: str, path: Path, sha256: str, size: int, begun: int) -> None:
+        """Store an uploaded file and record it as the folder's *rel*.
+
+        The upload that began later wins, not the one stored last: a worker resends a file
+        that changed while an earlier upload of it may still be storing.
+        """
         entry = output_dirs.store_received(self.artifact_mgr, self.cell_id, path, sha256, size)
         with self._lock:
+            if self._newest.get((folder, rel), 0) > begun:
+                return
+            self._newest[(folder, rel)] = begun
             self.files.setdefault(folder, {})[rel] = entry
 
     def received(self) -> dict[str, dict[str, dict[str, Any]]]:
@@ -43,6 +60,15 @@ class Receiver:
 
 
 _receivers: dict[str, Receiver] = {}
+_STARTED = time.time()  # every upload this process writes is written after this
+
+
+def remove_crashed_uploads(upload_dir: Path) -> None:
+    """Remove partial uploads an earlier server process left, written before this one began."""
+    for path in upload_dir.glob(".upload-*"):
+        with contextlib.suppress(FileNotFoundError):
+            if path.lstat().st_mtime < _STARTED:
+                path.unlink()
 
 
 @contextmanager

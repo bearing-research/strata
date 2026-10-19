@@ -230,6 +230,20 @@ async def test_r_cell_output_dir_is_kept(r_notebook):
 
 
 @pytest.mark.asyncio
+async def test_an_r_cell_reading_another_cells_folder_says_it_cannot_yet(r_notebook):
+    py_src = "# @output_dir ckpt\n(ckpt / 'a.txt').write_text('a')\n"
+    r_src = "n <- length(ckpt)\n"
+    _, session = r_notebook(cells=[("c1", None, py_src, "python"), ("c2", "c1", r_src, "r")])
+    executor = CellExecutor(session)
+    assert (await executor.execute_cell("c1", py_src)).success
+
+    result = await executor.execute_cell("c2", r_src)
+
+    assert result.success is False
+    assert "cannot read another cell's output folder yet" in (result.error or "")
+
+
+@pytest.mark.asyncio
 async def test_r_cell_shows_its_folder_and_not_a_failed_runs(r_notebook):
     """The cell shows the folder's files; a failed run's folder is not shown by the next run."""
     failing = '# @output_dir old\nwriteLines("x", file.path(old, "x.txt"))\nstop("no")\n'

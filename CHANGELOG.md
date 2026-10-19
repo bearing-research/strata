@@ -50,8 +50,8 @@ exhaustive commit history.
   gets an empty folder; what is in it when the run ends is stored file by file
   (once per digest) with a manifest output that has the run's provenance, and a
   downstream cell gets the folder back as a local path. A failed run keeps its
-  files as a failed version, never a cache hit. Local cells only for now: a
-  remote worker or a `# @loop` cell is refused. (#1203)
+  files as a failed version, never a cache hit. The team cache neither offers
+  nor serves a cell with a folder: it runs locally. (#1203)
 - **`# @output_dir` on a remote worker.** The worker returns the folder with
   the run's result, each file streamed past the bundle's member cap, and a
   failed run on a worker keeps its files. A worker too old to return folders is

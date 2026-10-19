@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from strata.notebook import output_dirs
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.provenance import derive_subkey
 from strata.observability.logging import get_logger
@@ -298,6 +299,10 @@ async def pull_cell_outputs(
         for var, artifact in zip(ordered, fetched, strict=True)
         if artifact is not None
     ]
+    if any(artifact.content_type == output_dirs.CONTENT_TYPE for _, artifact in pulled):
+        # Its files are artifacts of their own, which the team store does not hold.
+        logger.debug("Cell %s keeps an output folder; running it locally", cell_id)
+        return None
 
     # The publisher's env_hash, kept rather than restamped. Provenance folds in env_hash,
     # so an honest pull cannot disagree. If it does, importing it would make
@@ -397,13 +402,16 @@ async def publish_cell_outputs(
         stored = artifact_mgr.artifact_store.get_latest_version(artifact_id)
         if stored is None or stored.state not in ("ready", "superseded"):
             continue
+        content_type = _spec_param(stored, "content_type")
+        if content_type == output_dirs.CONTENT_TYPE:
+            continue  # a manifest without its files, which a pull refuses
         blob = artifact_mgr.artifact_store.read_blob(artifact_id, stored.version)
         if blob is None:
             continue
         if await store.publish(
             stored.provenance_hash,
             blob,
-            content_type=_spec_param(stored, "content_type"),
+            content_type=content_type,
             variable_name=var,
             build_env=_spec_param(stored, "build_env"),
             build_duration_ms=_spec_int(stored, "build_duration_ms"),
