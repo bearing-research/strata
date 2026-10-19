@@ -819,6 +819,37 @@ class TestSharedMountCache:
         assert not view.parent.exists()
         assert list(cache.views.iterdir()) == []
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="views are made read-only on POSIX")
+    @pytest.mark.asyncio
+    async def test_a_view_is_built_and_evicted_where_a_directory_moves_only_with_its_write_bit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Blacksmith macOS runner's filesystem refuses that move; APFS and ext4 allow it."""
+        import os
+        import stat
+        import time
+
+        from strata.notebook.mount_cache import MountCache
+
+        rename = os.rename
+
+        def strict_rename(src: str, dst: str) -> None:
+            if os.path.isdir(src) and not os.stat(src).st_mode & stat.S_IWUSR:
+                raise PermissionError(13, "Permission denied", src)
+            rename(src, dst)
+
+        monkeypatch.setattr(os, "rename", strict_rename)
+        fs = _FakeRemoteFS(self._files("bucket/data", {"a": b"aa"}))
+        _install_fake_fsspec(monkeypatch, fs)
+        cache = MountCache(tmp_path / "mc", max_idle_days=1)
+        view = (await MountResolver(mount_cache=cache).prepare_mounts([self._spec()]))[
+            "data"
+        ].local_path
+
+        assert (view / "a").read_bytes() == b"aa"
+        cache.sweep(force=True, now=time.time() + 86400 + 60)
+        assert list(cache.views.iterdir()) == []
+
     @pytest.mark.asyncio
     async def test_a_view_a_run_holds_is_kept_however_long_it_runs(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
