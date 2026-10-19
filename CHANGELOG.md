@@ -40,12 +40,6 @@ exhaustive commit history.
   `STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true`. In service mode a write needs
   what an export needs, `STRATA_SERVICE_WRITES_ENABLED=true` and the
   `artifacts:write` scope, and is refused before the cell runs otherwise. (#1202)
-- **A read-write mount works under the harness user.** A remote `rw` mount's
-  staging copy is handed to `STRATA_NOTEBOOK_HARNESS_USER`, which got
-  `PermissionError` writing into the server's directory. The sync back, and the
-  record of what the cell wrote, read each file without following links, so a
-  link or hard link the cell leaves there is skipped with a warning instead of
-  uploading what it points to. (#1201)
 - **`# @output_dir <name>`: a folder whose contents are an output.** The cell
   gets an empty folder; what is in it when the run ends is stored file by file
   (once per digest) with a manifest output that has the run's provenance, and a
@@ -263,6 +257,12 @@ exhaustive commit history.
   that a loop cell runs on the notebook's own server and to add
   `# @worker local` or move the work that needs the worker into an ordinary
   cell. (#1225)
+- **A read-write mount works under the harness user.** A remote `rw` mount's
+  staging copy is handed to `STRATA_NOTEBOOK_HARNESS_USER`, which got
+  `PermissionError` writing into the server's directory. The sync back, and the
+  record of what the cell wrote, read each file without following links, so a
+  link or hard link the cell leaves there is skipped with a warning instead of
+  uploading what it points to. (#1201)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk

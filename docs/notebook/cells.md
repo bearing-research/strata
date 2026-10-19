@@ -219,6 +219,8 @@ A cell on a [worker](workers.md) runs in a `work/` of its own, made for the run 
 | `# @table …`       | Declare an Iceberg table input; its snapshot joins the provenance |
 | `# @fetch …`       | Download a URL as a recorded input; its digest joins the provenance |
 | `# @dataset …`     | Bind a registry name as a recorded input; its version joins the provenance |
+| `# @write_table …` | Write a variable into an Iceberg table when the run succeeds (see [`@write_table`](annotations.md#write_table)) |
+| `# @output_dir X`  | Give the cell a folder whose contents are an output (see [`@output_dir`](annotations.md#output_dir)) |
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
 | `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)    |
 

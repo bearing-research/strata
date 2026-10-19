@@ -666,6 +666,8 @@ The worker annotation is the **only** change needed; the cell code itself is ide
 
 A [loop cell](cells.md#loop-cells) is the exception: it runs only on the notebook's own server, so a `# @loop` cell sent to a remote worker (by its `# @worker` or the notebook's default) fails before it starts. Give it `# @worker local`, or run the part that needs the worker in an ordinary cell.
 
+A worker cell runs in a `work/` directory made for the run and removed with it, so a file it writes by a relative path does not come back. To keep files from a worker run, write them to an [`# @output_dir`](annotations.md#output_dir) folder, which the worker returns with the result.
+
 ### Precedence
 
 When multiple levels define a worker, the most specific wins:

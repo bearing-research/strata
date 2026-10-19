@@ -428,7 +428,7 @@ auth (`admin:*` satisfies any of them):
 
 | Scope | Gates |
 |---|---|
-| `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` |
+| `admin:cache` | `POST /v1/cache/clear`, `GET /v1/cache/stats`, `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` |
 | `admin:tenants` | `GET /v1/admin/tenants` and `GET /v1/admin/tenants/{tenant_id}` |
 | `admin:notebook-workers` | The server-managed worker registry, every `/v1/admin/notebook-workers*` route (list, replace, add, update, delete, refresh, reload); a personal server, which has no principal auth, serves them to whoever can reach it |
 | `admin:notebooks` | Quiescing a notebook or project and releasing it (`POST /v1/notebooks/{id}/quiesce` and `/release`, `POST /v1/projects/{path}/quiesce` and `/release`) |
@@ -807,7 +807,8 @@ than that wants a worker on another machine.
 A cell's ambient `strata` client reaches this server with a token the server
 hands each run on the harness's stdin (see
 [the ambient client](../notebook/cells.md#the-ambient-strata-client)), which
-stands in for the proxy token on the client's routes only and stops working when
+stands in for the proxy token (or, under `api_key`, the key) on the client's
+routes only and stops working when
 the run ends. Every cell runs as the one harness user, so keep the host's
 `kernel.yama.ptrace_scope` at 1 or higher: at 0, a cell can read the memory of
 another running cell, its token included.
@@ -884,6 +885,10 @@ refused in the same three places.
 A `${VAR}` in a connection's `auth` reads the notebook's env, never the server's
 environment, which would otherwise go to whatever host the notebook names; a
 secret the server holds reaches a connection only as a named `credential`.
+`STRATA_NOTEBOOK_CREDENTIAL_PATHS` keeps a named credential to the notebooks
+under some directories, and `STRATA_NOTEBOOK_CREDENTIAL_WRITERS` says who may
+mount one read-write (see [Configuration](../reference/configuration.md#notebook)
+and [Named credentials](../reference/notebook-toml.md#named-credentials)).
 
 Prompt cells call their model from the server process too, and show the author
 what came back. A `base_url` from the notebook's `[ai]` section is checked like

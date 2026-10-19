@@ -10,7 +10,7 @@ A Strata deployment has three persistent locations:
 
 | Location | Default | Contents | When to back up |
 | --- | --- | --- | --- |
-| **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/*.py`, `pyproject.toml`, `uv.lock`, `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
+| **Notebook storage** | `~/.strata/notebooks/` | One subdirectory per notebook: `notebook.toml`, `cells/*.py`, `pyproject.toml`, `uv.lock`, `work/` (where cells write files), `.strata/` (per-notebook runtime), `.venv/` (per-notebook venv) | Always - this is your work |
 | **Iceberg row-group cache** | `~/.strata/cache/` | Arrow-IPC files keyed by Parquet row-group, and the Parquet/Iceberg metadata cache in `metadata.sqlite` inside it (a cache clear keeps it) | Optional - purely a perf cache, safe to delete |
 | **Server-side artifact store** | `~/.strata/artifacts/` (or `STRATA_ARTIFACT_DIR`) | The Core SDK's artifact blobs + metadata SQLite (the metadata moves to Postgres with `STRATA_ARTIFACT_METADATA_DSN`, and `strata migrate` copies an existing SQLite store across). **Distinct from the per-notebook `.strata/artifacts/`** below. | If you use `StrataClient.materialize`, named artifact pointers, publications or pins you care about, API keys, or the service-mode worker registry (they live in the same database) |
 
@@ -18,6 +18,11 @@ A personal server that reads an object-store warehouse with no catalog `uri` kee
 that warehouse's Iceberg catalog in SQLite at `~/.strata/meta.sqlite` (or
 `STRATA_METADATA_DB`). It holds those tables' definitions, not a cache: back it
 up if you write tables that way.
+
+Read-only remote mounts are kept once per machine in the mount cache,
+`STRATA_NOTEBOOK_MOUNT_CACHE_DIR` (by default `mount_cache` beside the notebook
+storage directory, so `~/.strata/mount_cache/`). It is a cache, safe to delete
+while the server is stopped. See [Configuration](../reference/configuration.md#notebook).
 
 Inside each notebook directory:
 
@@ -27,9 +32,12 @@ mynotebook/
 ├── pyproject.toml            # uv-managed deps for this notebook
 ├── uv.lock                   # pinned versions
 ├── cells/                    # one .py per cell - committed source
+├── work/                     # where cells run and write files - gitignored
 └── .strata/                  # runtime state - gitignored
     ├── runtime.json          # display outputs, provenance hashes, env metadata
     ├── console/              # per-cell stdout/stderr (one JSON per cell)
+    ├── fetch/                # the bytes each @fetch last read
+    ├── tables/index.json     # the tables each cell's last good run read
     └── artifacts/            # SQLite + blobs (cached cell outputs)
 └── .venv/                    # uv-materialized venv - gitignored, host-specific
 ```
@@ -240,16 +248,18 @@ Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; ser
 
 ## Disk-usage budgeting
 
-There are **two** caps to understand, and they don't cover everything.
+There are **three** caps to understand, and they don't cover everything.
 
 | Knob | Default | What it caps | What it doesn't cap |
 | --- | --- | --- | --- |
 | `STRATA_MAX_CACHE_SIZE_BYTES` | 10 GB | The Iceberg row-group cache (`~/.strata/cache/`) - LRU-evicted to stay under the cap | Anything else |
 | `STRATA_ARTIFACT_GC_MAX_BYTES` | 20 GiB in personal mode, off in service mode | The Core artifact store (`~/.strata/artifacts/`), least recently used first, on the hourly sweep | The notebook-scoped artifact stores, and anything named, pinned or published |
+| `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES` | 20 GiB | The mount cache (`~/.strata/mount_cache/`), least recently used views first; views unused for `STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS` (30) go too | Read-write mounts, which are not cached |
 
 Things with **no built-in size limit**:
 
 - `~/.strata/notebooks/*/​.strata/artifacts/` - per-notebook artifact stores. Each cell output keeps its current value and a few earlier ones (`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`), so a store grows with the number and size of a notebook's outputs rather than with every run.
+- `~/.strata/notebooks/*/work/` - what cells write by a relative path, kept between runs. Delete files there once you no longer need them.
 - `~/.strata/notebooks/*/​.venv/` - per-notebook venvs. Grow with each `uv add`; the heaviest notebooks (torch + cuda) can run to several GB each. Use shared system packages or smaller deps if disk is tight.
 
 Practical guidance:

@@ -648,9 +648,9 @@ def add_new_arguments(parser: argparse.ArgumentParser) -> None:
         "--no-git",
         action="store_true",
         help=(
-            "Skip writing .gitignore. The default one keeps .strata/, .venv/ "
-            "and renv/library/ out of version control; an existing .gitignore "
-            "is never replaced either way"
+            "Skip writing .gitignore. The default one keeps .strata/, .venv/, "
+            "renv/library/, work/, .mcp.json and CLAUDE.md out of version "
+            "control; an existing .gitignore is never replaced either way"
         ),
     )
     parser.add_argument(

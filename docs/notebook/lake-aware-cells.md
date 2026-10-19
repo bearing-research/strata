@@ -216,8 +216,9 @@ reads this file rather than parsing cell sources:
 
 `uri` is as the cell wrote it; a SQL cell's table appears as
 `<catalog>:<namespace>.<table>`. `catalog` is the configured catalog the URI
-names, or `null` for a warehouse path. `snapshot_id` is `null` for a table
-with no snapshots yet. A failed run leaves the cell's entry as it was, and a
+names, or `null` for a warehouse path or the server's default catalog
+(`STRATA_CATALOG_NAME`). `snapshot_id` is `null` for a table with no snapshots
+yet. A failed run leaves the cell's entry as it was, and a
 cell that stops reading tables, or is deleted, drops out.
 
 ## Gotchas

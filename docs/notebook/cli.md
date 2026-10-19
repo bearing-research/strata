@@ -169,9 +169,10 @@ strata new "My Analysis" [--parent DIR] [--python 3.12] [--no-env] [--no-git] [-
 
 Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
 (pre-seeded with the notebook runtime packages), an empty `cells/`
-directory and a `.gitignore` that keeps `.strata/`, `.venv/` and
-`renv/library/` out of version control (skip it with `--no-git`; an existing
-`.gitignore` is never replaced), then syncs the venv (skip with `--no-env`;
+directory and a `.gitignore` (skip it with `--no-git`; an existing
+`.gitignore` is never replaced). The `.gitignore` keeps `.strata/`, `.venv/`,
+`renv/library/`, `work/`, and the `.mcp.json` and `CLAUDE.md` that
+`strata agent` writes, out of version control. It then syncs the venv (skip with `--no-env`;
 `strata run` syncs it later). Idempotent on an existing notebook directory:
 the notebook is left as it is (its id, cells, configuration and
 dependencies), and only missing scaffolding is added, so re-running it never
@@ -180,8 +181,7 @@ orphans artifacts or loses settings.
 `--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
 (the project directory) as a `Path` variable `NAME` (default `project`) in every
 cell, so cells read project files as `open(project / "file")` without absolute
-paths, even though a cell runs with its working directory set to the notebook
-dir. The mount is **pinned**, so it never gets fingerprinted (no directory
+paths, even though a cell runs in the notebook's `work/` directory. The mount is **pinned**, so it never gets fingerprinted (no directory
 hashing, and the project's own churn never re-stales cells). This is the
 scratchpad-friendly default when the notebook lives in a subdirectory of a
 project (see [the notebook as an agent's scratchpad](scratchpad.md)).

@@ -103,7 +103,8 @@ Four middleware responses are plain text, not JSON: the host check's `400` (a
 check's `400` (missing or invalid tenant header) and `403` (tenant not
 enabled), and the rate limiter's `429`, which also sets `Retry-After` (whole
 seconds) and `X-RateLimit-Limit-Type`. A stream refused by QoS admission is a
-JSON `429` (`{"error", "tier"}`) with `Retry-After`.
+JSON `429` (`{"error", "tier"}`) with `Retry-After`, and an unreachable object
+store is a JSON `503` with `Retry-After`.
 
 Validation errors (`422`) come from Pydantic and contain structured field info:
 
@@ -125,7 +126,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | --- | --- |
 | `200` | Success |
 | `307` | `GET /v1/streams/{id}` on a node that does not hold the stream, redirecting to the one that does (`STRATA_NODE_ADVERTISED_URL`) |
-| `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have) |
+| `400` | Malformed request (invalid path, bad enum value, a table URI that names no `namespace.table`, a scan of a column the table does not have, a transform param key starting with `_` at any depth, which is reserved for the server's own marks) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
 | `403` | Authenticated, but missing the required scope (e.g. `admin:cache`), or a personal-mode-only endpoint called in service mode; also a browser write whose `Origin` the server does not allow. A table the ACL denies, or another tenant's artifact, build or stream, is `404` instead while `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
 | `404` | Notebook session not found (or another tenant's), a table its catalog does not have, a local warehouse directory that does not exist, a snapshot id the table does not have, or a hidden 403 (see above) |
@@ -134,7 +135,7 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | `422` | Pydantic validation error on the request body, or a table input Strata refuses to read (an unreadable delete file, too many pending equality deletes); the detail says which. A table the ACL denies is refused first, so its caller gets the `403`/`404` instead |
 | `429` | Rate limit exceeded - global, per-client, or per-tenant |
 | `500` | Server bug - captured to logs with the request ID |
-| `503` | The server is draining for shutdown and takes no new materialize requests |
+| `503` | The server is draining for shutdown and takes no new materialize requests, or the object store holding a table could not be reached while planning a scan or resolving a transform's table input (with `Retry-After: 5`; access denied and missing files are not reported this way) |
 | `504` | Planning a scan exceeded its timeout |
 
 ### Request IDs
@@ -744,7 +745,9 @@ PUT /v1/notebooks/{session_id}/workers
 ```
 
 Replaces the notebook's `[[workers]]`. A worker named `local` is refused with
-`400`: the name is reserved for the built-in worker.
+`400`: the name is reserved for the built-in worker. In service mode, or with
+`STRATA_NOTEBOOK_WORKERS_EDITABLE=false`, the server manages workers and the
+request is refused with `403`.
 
 ### SSH Workers
 

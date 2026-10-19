@@ -126,11 +126,14 @@ Auth: trusted-proxy model. Strata does not authenticate, only the proxy can
 reach it (network-layer enforced). Proxy injects `X-Strata-Principal`,
 `X-Tenant-ID` (the configurable `tenant_header`), `X-Strata-Scopes`,
 `X-Strata-Proxy-Token`. A local cell run's token (`auth/run_tokens.py`, sent on the
-harness's stdin) stands in for the proxy token on the ambient client's routes,
+harness's stdin) stands in for the proxy token (or the `api_key` bearer) on the
+ambient client's routes,
 as the run's principal minus `admin:` scopes, until the run ends. ACL evaluation
 is **deny-first** (deny rules → allow rules → default). Enforcement points:
 `POST /v1/materialize` (table/artifact), `GET /v1/streams/{id}` (stream
-ownership), `POST /v1/cache/clear` (`admin:cache` scope). Table ACL lives in
+ownership), the cache admin routes (`admin:cache` scope: `/v1/cache/clear`,
+`stats`, `entries`, `histogram`, `/v1/debug/cache/inspect`,
+`/v1/metadata/cleanup`). Table ACL lives in
 `auth/principal.py` (`AclEvaluator`); tenant scoping of a concrete record is the
 `CurrentTenant` dependency plus `_ensure_artifact_access` in `server.py`.
 **Cache stays shared across principals**: ACL gates request admission and
@@ -160,7 +163,9 @@ gates); per-domain routers in `api/routers/` (`materialize`, `streams`,
 `cache`, `debug`, `registry`, `metrics_health`, `admin`, `artifacts`,
 `names`, `builds`, `logs`, `metadata`, `publications`); typed
 mode/auth/tenant gates in `api/dependencies.py`;
-pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
+pure request-shaping logic in `services/` (`artifact`, `registry`, `build`,
+`materialize`); the scan streaming runtime in `streaming/` (stream `registry`,
+`scan_builds` prefetch, `ownership`, `qos` admission).
 Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`, `iceberg/` (`catalog`,
 `schema` evolution, position `deletes`, `equality` deletes, `lake_files`).
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
@@ -168,7 +173,8 @@ metadata, `warmer`, `metrics` evictions, `stats` hit rates).
 Artifact / build: `artifact/` (`store`, `blob_store`, `transfer`, `uris`,
 `table_export`, `cli`), `transforms/`.
 Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
-`api_key_cli`), `tenancy/` (`tenant` config and context, `registry`).
+`api_key_cli`, `run_tokens` for a cell run's own token), `tenancy/` (`tenant`
+config and context, `registry`).
 Observability: `observability/` (`tracing`, `logging`, `log_buffer`, `health`, `metrics`,
 `pool_metrics`, `gc_tracker`, `memory_profiler`, `slow_ops`); `rate_limiter.py`.
 
@@ -222,10 +228,12 @@ notebook_dir/
 ├── uv.lock
 ├── cells/{cell_id}.py     # cell source (8-char UUID prefix)
 ├── cells/{cell_id}.test.py  # the cell's pytest tests, if any
+├── work/                  # gitignored; cells run here (layout.WORK_DIR)
 └── .strata/               # gitignored runtime state
     ├── runtime.json       # display outputs, provenance hashes, env metadata
     ├── console/           # per-cell stdout/stderr ({cell_id}.json)
     ├── fetch/             # bytes each @fetch last read
+    ├── tables/index.json  # tables each cell's last good run read (table_index.py)
     └── artifacts/         # SQLite + blobs (nb_…@v=N.arrow)
 ```
 
@@ -339,7 +347,9 @@ always win over persisted config**: they are the single per-cell
 configuration surface.
 
 Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
-`mount <name> <uri> [ro|rw]`, `loop max_iter= carry= [start_from=]`,
+`mount <name> <uri> [ro|rw]`, `table`, `fetch`, `dataset`,
+`write_table <var> <table> append|overwrite|merge`, `output_dir <name>`,
+`nocache`, `after`, `loop max_iter= carry= [start_from=]`,
 `loop_until <expr>`.
 
 Prompt cells: `name`, `model`, `temperature`, `max_tokens`, `system`,
@@ -370,9 +380,9 @@ REST `/v1/notebooks`: `POST /create`, `POST /open`, `GET /{id}/cells`,
 
 WebSocket `/v1/notebooks/ws/{notebook_id}`. Frame-type strings are owned by the `MessageType` StrEnum in
 `src/strata/notebook/protocol.py`. The full client-author reference
-(bootstrap, auth model, reconnect grace, cold-start payload, every
-message type) is `docs/reference/notebook-protocol.md`; keep that doc
-in sync when adding routes / frames.
+(bootstrap, auth model, reconnect grace, cold-start payload) is
+`docs/reference/notebook-protocol.md`, and every message type is in
+`docs/reference/websocket.md`; keep both in sync when adding routes / frames.
 
 ### Frontend (`frontend/`)
 

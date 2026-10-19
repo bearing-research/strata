@@ -101,7 +101,11 @@ whether an un-primed session uses the notebook at all. See
 - **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
 - **Iceberg as other engines write it:** scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly, from SQL, REST, Glue, GCS and Azure catalogs
 - **every input recorded:** `# @fetch` makes bytes from a URL an input, `# @dataset` makes a registry name one, both content-addressed
+- **folders as outputs:** `# @output_dir ckpt` gives a cell a folder whose files are stored as an output, kept even when the run fails, and handed to the next cell as a `Path`
+- **write back to the lake:** `# @write_table readings lake:lab.readings append` writes a variable into an Iceberg table when the run succeeds, and each snapshot names the result that made it
+- **an append keeps the cache:** cached row groups are keyed by data file, not snapshot, so after an append a scan reads only the new files
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3, GCS or Azure prefix a local `pathlib.Path`
+- **one mount cache per machine:** every notebook shares one bounded copy of each remote file, so a prefix with one new file downloads only that file
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution, same DAG and same cache
 
