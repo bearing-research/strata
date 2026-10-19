@@ -32,6 +32,9 @@ class FakeBackend:
         self.never_healthy = never_healthy
         self.fail_start = fail_start
         self.started: list[str] = []
+        self.envs: list[dict[str, str]] = []
+        """Each started machine's boot environment, in start order."""
+
         self.stopped: list[str] = []
         self.dead: set[str] = set()
         """Endpoints that stop answering, simulating a machine that vanished."""
@@ -49,6 +52,7 @@ class FakeBackend:
         self._counter += 1
         backend_id = f"{self.id_prefix}-{self._counter}"
         self.started.append(backend_id)
+        self.envs.append(dict(env or {}))
         return ProvisionedWorker(
             backend_id=backend_id,
             endpoint=f"http://{backend_id}.test",

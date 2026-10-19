@@ -110,6 +110,11 @@ exhaustive commit history.
   each focus change posts `{type: 'strata:frame:focus', sessionId, cellId}` to
   the parent, so a platform's panel beside the frame can follow the member's
   cell. (#1231)
+- **`Pool(tenant_env=...)`** in `strata-pool` boots each machine with its
+  tenant's own variables, such as `STRATA_NOTEBOOK_CREDENTIALS`, from a
+  callable asked at each start, over the machine type's `env`. They are never
+  stored or logged, and a callable that raises fails the start, leaving the
+  job queued. (#1232)
 
 ### Changed
 

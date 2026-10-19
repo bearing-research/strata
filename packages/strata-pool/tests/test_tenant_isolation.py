@@ -6,6 +6,7 @@ memory is not reliably zeroed between processes.
 
 from conftest import FakeBackend
 from strata_pool import JobState, MachineType, WorkerState
+from strata_pool.pool import WORKER_TOKEN_ENV
 
 
 async def test_a_warm_machine_is_never_handed_to_another_tenant(make_pool):
@@ -109,3 +110,65 @@ async def test_recovery_places_queued_work_for_every_waiting_tenant(make_pool):
 
     assert (await restarted.wait("job-acme")).state is JobState.COMPLETED
     assert (await restarted.wait("job-globex")).state is JobState.COMPLETED
+
+
+async def test_each_tenants_machine_boots_with_that_tenants_own_variables(
+    make_pool, tmp_path, caplog
+):
+    """Amber item 92: `tenant_env` adds a tenant's variables over the type's, the token last."""
+    secrets = {"acme": "acme-key-5f1c", "globex": "globex-key-9e2a"}
+
+    async def tenant_env(tenant_id: str, machine_type: str) -> dict[str, str]:
+        assert machine_type == "cpu"
+        return {
+            "STRATA_NOTEBOOK_CREDENTIALS": secrets[tenant_id],
+            "REGION": tenant_id,
+            "STRATA_WORKER_TOKEN": "forged",
+        }
+
+    backend = FakeBackend()
+    pool = make_pool(
+        backend=backend,
+        machine_types=[MachineType(name="cpu", image="w", env={"REGION": "default", "A": "1"})],
+        tenant_env=tenant_env,
+    )
+    caplog.set_level("DEBUG")
+
+    for tenant_id in ("acme", "globex"):
+        job = await pool.submit(tenant_id=tenant_id, machine_type="cpu", payload=b"work")
+        assert (await pool.wait(job.id)).state is JobState.COMPLETED
+
+    tokens = [w.auth_token for w in pool.store.list_workers()]
+    assert [{k: v for k, v in env.items() if k != WORKER_TOKEN_ENV} for env in backend.envs] == [
+        {"STRATA_NOTEBOOK_CREDENTIALS": "acme-key-5f1c", "REGION": "acme", "A": "1"},
+        {"STRATA_NOTEBOOK_CREDENTIALS": "globex-key-9e2a", "REGION": "globex", "A": "1"},
+    ]
+    assert sorted(env[WORKER_TOKEN_ENV] for env in backend.envs) == sorted(tokens)
+    stored = b"".join(path.read_bytes() for path in tmp_path.rglob("*") if path.is_file())
+    for secret in secrets.values():
+        assert secret.encode() not in stored
+        assert secret not in caplog.text
+
+
+async def test_a_sync_tenant_env_is_used_too(make_pool):
+    backend = FakeBackend()
+    pool = make_pool(backend=backend, tenant_env=lambda tenant_id, _type: {"T": tenant_id})
+
+    job = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+    await pool.wait(job.id)
+
+    assert backend.envs[0]["T"] == "acme"
+
+
+async def test_a_tenant_env_that_raises_fails_the_start_and_the_job_waits(make_pool):
+    def tenant_env(tenant_id: str, machine_type: str) -> dict[str, str]:
+        raise RuntimeError("the organization's sources are unreachable")
+
+    backend = FakeBackend()
+    pool = make_pool(backend=backend, tenant_env=tenant_env)
+
+    job = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+
+    assert backend.started == []
+    assert pool.store.list_workers() == []
+    assert pool.store.get_job(job.id).state is JobState.QUEUED
