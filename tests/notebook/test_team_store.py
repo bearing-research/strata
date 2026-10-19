@@ -11,7 +11,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from strata.artifact.store import ArtifactStore, TransformSpec
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import ArtifactStore
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.provenance import derive_subkey
 from strata.notebook.team_store import TeamStore, pull_cell_outputs

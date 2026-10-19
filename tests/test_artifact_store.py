@@ -4,13 +4,8 @@ import json
 
 import pytest
 
-from strata.artifact.store import (
-    ArtifactNotFoundError,
-    ArtifactStore,
-    TransformSpec,
-    compute_provenance_hash,
-    reset_artifact_store,
-)
+from strata.artifact.provenance import TransformSpec, compute_provenance_hash
+from strata.artifact.store import ArtifactNotFoundError, ArtifactStore, reset_artifact_store
 from tests.conftest import race_after_pending_read
 
 

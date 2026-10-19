@@ -10,11 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from strata.artifact.store import (
-    TransformSpec,
-    get_artifact_store,
-    reset_artifact_store,
-)
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import get_artifact_store, reset_artifact_store
 from strata.transforms.build_store import reset_build_store
 from strata.transforms.registry import (
     TransformDefinition,

@@ -363,7 +363,7 @@ class TestCascadeAfterEdit:
                 cell_prov = compute_provenance_hash([], source_hash, env_hash)
                 var_prov = hashlib.sha256(f"{cell_prov}:x".encode()).hexdigest()
 
-                from strata.artifact.store import TransformSpec
+                from strata.artifact.provenance import TransformSpec
 
                 foreign_id = f"nb_{notebook_id}_cell_GHOST_var_x"
                 fv = artifact_mgr.artifact_store.create_artifact(

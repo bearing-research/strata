@@ -793,7 +793,7 @@ class TestTheBytesAreServedAsData:
         return TestClient(app), get_artifact_store(artifact_dir)
 
     def _published_data(self, monkeypatch, tmp_path, content_type):
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         client, store = self._client(monkeypatch, tmp_path)
         version = store.create_artifact(
@@ -1117,7 +1117,7 @@ class TestImportAcrossStores:
         """
         import json
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
         from strata.artifact.transfer import copy_chain
         from strata.services.artifact import ArtifactService
 
@@ -1963,7 +1963,7 @@ class TestWhatPublishingRequires:
 
 
 def _scan_of(table_uri: str):
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
 
     return TransformSpec(executor="scan@v1", params={"table": table_uri}, inputs=[table_uri])
 

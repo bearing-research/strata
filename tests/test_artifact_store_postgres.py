@@ -16,7 +16,8 @@ import pytest
 from testcontainers.community.postgres import PostgresContainer
 
 from strata.artifact.cli import _server_store as _configured_server_store
-from strata.artifact.store import ArtifactStore, TransformSpec
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import ArtifactStore
 from strata.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
 from tests.conftest import race_after_pending_read
 

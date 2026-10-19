@@ -313,8 +313,8 @@ def _store_put(
         except Exception:
             input_versions[input_uri] = input_uri
 
-    from strata.artifact.store import TransformSpec as ArtifactTransformSpec
-    from strata.artifact.store import compute_provenance_hash
+    from strata.artifact.provenance import TransformSpec as ArtifactTransformSpec
+    from strata.artifact.provenance import compute_provenance_hash
 
     artifact_transform = ArtifactTransformSpec(
         executor=executor,
@@ -799,7 +799,7 @@ def _store_put_by_provenance(
     byte_size: int,
 ) -> PutArtifactResponse:
     """The by-provenance PUT's store work, in one thread: none of it may run on the loop."""
-    from strata.artifact.store import TransformSpec as ArtifactTransformSpec
+    from strata.artifact.provenance import TransformSpec as ArtifactTransformSpec
 
     tenant_id = principal.tenant if principal else None
 

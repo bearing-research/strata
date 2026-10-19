@@ -269,7 +269,7 @@ class TestAVersionOvertakenByADuplicate:
     """A version dedup overtook keeps no bytes and reads its canonical's through the store."""
 
     def _overtaken(self, manager, artifact_id: str) -> int:
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         store = manager.artifact_store
         spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])

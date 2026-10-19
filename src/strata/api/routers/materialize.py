@@ -211,7 +211,7 @@ async def materialize_artifact(request: MaterializeRequest):
     """
     import uuid
 
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
     from strata.auth.principal import get_principal
     from strata.server import _get_artifact_store, _retry_after_header, get_state
 
@@ -436,7 +436,7 @@ async def _handle_identity_materialize(
     """
     import uuid
 
-    from strata.artifact.store import TransformSpec as ArtifactTransformSpec
+    from strata.artifact.provenance import TransformSpec as ArtifactTransformSpec
     from strata.artifact.store import get_artifact_store
     from strata.auth.principal import get_principal
     from strata.server import _retry_after_header, get_state

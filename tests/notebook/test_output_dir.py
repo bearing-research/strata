@@ -363,7 +363,7 @@ class TestTheFileSweep:
     async def test_a_failed_manifest_a_crash_left_without_bytes_does_not_stop_the_sweep(
         self, tmp_path
     ):
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         session, _ = await self._two_runs(tmp_path)
         manager = session.get_artifact_manager()

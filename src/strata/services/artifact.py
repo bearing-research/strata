@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, NamedTuple
 
-from strata.artifact.store import TransformSpec
+from strata.artifact.provenance import TransformSpec
 from strata.types import (
     ArtifactDependentsResponse,
     ArtifactLineageResponse,

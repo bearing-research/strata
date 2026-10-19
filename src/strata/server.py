@@ -1752,7 +1752,7 @@ def _authorize_spec_tables(spec_json: str | None) -> None:
     if not spec_json:
         return
 
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
 
     try:
         spec = TransformSpec.from_json(spec_json)

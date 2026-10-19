@@ -488,7 +488,7 @@ class TestArtifactReadAcl:
     def _artifact(table_uri):
         from unittest.mock import MagicMock
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         art = MagicMock()
         art.transform_spec = TransformSpec(
@@ -549,7 +549,7 @@ class TestArtifactReadAcl:
         # scoping is the gate.
         from unittest.mock import MagicMock
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
         art = MagicMock()
@@ -616,7 +616,7 @@ class TestDerivedResultsInheritTheAcl:
 
         import pyarrow as pa
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         version = store.create_artifact(
             artifact_id,

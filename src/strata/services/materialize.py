@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from pyiceberg.exceptions import NoSuchTableError
 
-from strata.artifact.store import TransformSpec, compute_provenance_hash
+from strata.artifact.provenance import TransformSpec, compute_provenance_hash
 from strata.iceberg.catalog import WarehouseNotFound, object_store_unreachable
 from strata.iceberg.schema import UnsupportedTableFormatError
 from strata.types import (

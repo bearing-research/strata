@@ -207,7 +207,7 @@ def _store_opened(
         return {"sha256": sha256, "size": size, "version": reused}
 
     # Here, not at the top: a worker imports this module and has no artifact store.
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,
@@ -247,7 +247,7 @@ def store_received(
     reused = _reused(store, artifact_id)
     if reused is not None:
         return {"sha256": sha256, "size": size, "version": reused}
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,
