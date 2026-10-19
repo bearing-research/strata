@@ -170,8 +170,8 @@ Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`, `iceberg/` (`c
 `schema` evolution, position `deletes`, `equality` deletes, `lake_files`).
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
-Artifact / build: `artifact/` (`store`, `blob_store`, `transfer`, `uris`,
-`table_export`, `cli`), `transforms/`.
+Artifact / build: `artifact/` (`store`, `provenance` transform spec and hash,
+`blob_store`, `transfer`, `uris`, `table_export`, `cli`), `transforms/`.
 Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
 `api_key_cli`, `run_tokens` for a cell run's own token), `tenancy/` (`tenant`
 config and context, `registry`).
@@ -294,7 +294,7 @@ deliberately do not share the entry point, only the artifact-store substrate.
 | ----------------- | -------------------------------------- | ----------------------------------------- |
 | Entry point       | HTTP `POST /v1/materialize`            | In-process method call                    |
 | Unit of work      | One *transform* (e.g. `scan@v1`)       | One *cell* (ad-hoc Python source)         |
-| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.to_json() + sorted input hashes` for others; `transform_spec` itself carries the inputs **in order**, so input order is significant (positional `input0`/`input1` transforms don't dedup under reordering) | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
+| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.canonical_json + sorted input hashes` for others; `transform_spec` itself carries the inputs **in order**, so input order is significant (positional `input0`/`input1` transforms don't dedup under reordering) | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
 | Inputs            | List of table / artifact URIs          | Upstream cell variables (resolved via DAG) |
 | Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out, one artifact per consumed variable via `derive_subkey` |
 | Execution         | Server dispatches to registered HTTP executors (v1-push / v2-pull) or built-in scan planner | Local subprocess harness in notebook venv, or HTTP executor |
