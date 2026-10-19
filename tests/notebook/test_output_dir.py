@@ -166,6 +166,25 @@ class TestAFolderOutput:
         manifest, _ = _manifest(session)
         assert list(manifest["files"]) == ["mine.txt"]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+    async def test_a_folder_swapped_for_a_link_keeps_nothing_it_points_at(self, tmp_path):
+        """The harness user owns the run directory, so it can turn ``output_dirs`` into a link."""
+        server = tmp_path / "server-only"
+        (server / "ckpt").mkdir(parents=True)
+        (server / "ckpt" / "secret.txt").write_text("secret")
+        writer = (
+            "# @output_dir ckpt\n"
+            "import os\n"
+            "os.rename(ckpt.parent, ckpt.parent.with_name('moved'))\n"
+            f"os.symlink({str(server)!r}, ckpt.parent)\n"
+        )
+        session = _session(tmp_path, writer=writer, reader=None)
+
+        assert (await CellExecutor(session).execute_cell("w", writer)).success
+
+        manifest, _ = _manifest(session)
+        assert manifest["files"] == {}
+
 
 def _listings(displays) -> list[str]:
     """The markdown displays: a trailing ``write_text`` call shows its return value too."""
@@ -1029,6 +1048,7 @@ class TestTheUploadRoute:
 
     def test_opening_the_notebook_removes_what_a_crash_left_mid_upload(self, tmp_path):
         import os
+        import time
 
         from strata.notebook import output_file_relay
 
@@ -1038,7 +1058,7 @@ class TestTheUploadRoute:
         crashed, running = uploads / ".upload-crashed", uploads / ".upload-running"
         crashed.write_bytes(b"x")
         running.write_bytes(b"y")
-        before = output_file_relay._STARTED - 60
+        before = time.time() - output_file_relay._STALE_UPLOAD_SECONDS - 60
         os.utime(crashed, (before, before))
 
         NotebookSession(parse_notebook(session.path), session.path)

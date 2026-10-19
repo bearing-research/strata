@@ -60,14 +60,17 @@ class Receiver:
 
 
 _receivers: dict[str, Receiver] = {}
-_STARTED = time.time()  # every upload this process writes is written after this
+# A partial upload untouched this long was left by a crash. Another process with the
+# notebook open (a server beside the CLI) may be writing one, so its start time is no bound.
+_STALE_UPLOAD_SECONDS = 3600
 
 
 def remove_crashed_uploads(upload_dir: Path) -> None:
-    """Remove partial uploads an earlier server process left, written before this one began."""
+    """Remove partial uploads a crash left, untouched for an hour."""
+    stale_before = time.time() - _STALE_UPLOAD_SECONDS
     for path in upload_dir.glob(".upload-*"):
         with contextlib.suppress(FileNotFoundError):
-            if path.lstat().st_mtime < _STARTED:
+            if path.lstat().st_mtime < stale_before:
                 path.unlink()
 
 
