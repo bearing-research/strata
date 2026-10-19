@@ -3824,12 +3824,12 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_NOTEBOOK_MOUNT_CACHE_DIR</code></td>
 <td><code>mount_cache</code> beside <code>STRATA_NOTEBOOK_STORAGE_DIR</code></td>
-<td>Where read-only remote mounts are kept, one copy per machine shared by every notebook: <code>objects/</code> holds each remote file once, by URI and version, and <code>views/</code> holds each mount's prefix as hard links to them. A harness user must be able to pass through it. On a worker, <code>~/.strata/mount_cache</code>, kept across jobs. See <a href="../../notebook/annotations/#mount"><code>@mount</code></a>.</td>
+<td>Where read-only remote mounts are kept, one copy per machine shared by every notebook: <code>objects/</code> holds each remote file once, by URI and version, and <code>views/</code> holds each mount's prefix as hard links to them. A harness user must be able to pass through it. Its files and view directories are read-only, so removing it by hand takes <code>chmod -R u+w</code> first. On a worker, <code>~/.strata/mount_cache</code>, kept across jobs. See <a href="../../notebook/annotations/#mount"><code>@mount</code></a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_MOUNT_CACHE_MAX_BYTES</code></td>
 <td><code>21474836480</code> (20 GiB)</td>
-<td>Once the mount cache's copies pass this, the least recently used views are removed, with the copies only they held, until it fits. A view used in the last hour is kept, since a cell may still be reading it. <code>0</code> turns the cap off.</td>
+<td>Once the mount cache's copies pass this, the least recently used views are removed, with the copies only they held, until it fits. A view used in the last hour, or one a running cell still holds, is kept. <code>0</code> turns the cap off.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_MOUNT_CACHE_MAX_IDLE_DAYS</code></td>
