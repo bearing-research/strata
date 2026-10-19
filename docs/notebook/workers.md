@@ -664,6 +664,8 @@ embeddings = model.encode(abstracts, batch_size=256)
 
 The worker annotation is the **only** change needed; the cell code itself is identical to local execution. On a worker that runs locked environments the cell gets the notebook's own packages; on one that does not, the worker's image needs them installed.
 
+A [loop cell](cells.md#loop-cells) is the exception: it runs only on the notebook's own server, so a `# @loop` cell sent to a remote worker (by its `# @worker` or the notebook's default) fails before it starts. Give it `# @worker local`, or run the part that needs the worker in an ordinary cell.
+
 ### Precedence
 
 When multiple levels define a worker, the most specific wins:

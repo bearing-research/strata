@@ -402,7 +402,9 @@ the snapshot is re-resolved every time staleness is evaluated.
 Like mount variables, the injected names live only in the declaring cell's
 namespace - they are not cell *defines* and do not flow to downstream cells.
 To use the snapshot id downstream, export it as a real variable:
-`scanned_snapshot = trips_snapshot`.
+`scanned_snapshot = trips_snapshot`. A `@loop` cell gets them in every
+iteration. An R cell cannot declare `@table`; read the table in an upstream
+Python cell.
 
 If the catalog is unreachable when provenance is computed, the cell is
 conservatively treated as out of date; if it is still unreachable at execution time,

@@ -133,9 +133,10 @@ exhaustive commit history.
   its bytes as it writes, from one walk at startup, and walks only to evict
   once the count passes `STRATA_MAX_CACHE_SIZE_BYTES`. (#1213)
 - **A cell runs in its notebook's `work/`, not beside `notebook.toml`.** Python
-  and R cells, Run All, the warm pool and the inspect REPL all start there, so a
-  relative path a cell writes lands in `work/` and a file beside the notebook is
-  `../<path>`; a Python cell that misses one gets a hint naming it. Under
+  and R cells, Run All, the warm pool, the inspect REPL and a cell's tests all
+  start there, so a relative path a cell writes lands in `work/` and a file
+  beside the notebook is `../<path>`; a Python cell that misses one gets a hint
+  naming it. Under
   `STRATA_NOTEBOOK_HARNESS_USER`, where a relative write failed with
   `PermissionError` in the server's directory, `work/` is handed to the cell's
   user and the notebook's own files stay the server's. A worker cell gets a
@@ -252,6 +253,16 @@ exhaustive commit history.
 - **`GET /v1/cache/entries` and `POST /v1/cache/clear` run off the event
   loop.** Listing read every entry's sidecar, and clearing deleted every cached
   file, on the event loop, stalling other requests on a large cache. (#1222)
+- **A `# @loop` cell gets its `# @table` names.** Each iteration failed with a
+  `NameError` on `<name>_snapshot`, though the table's snapshot was in the
+  cell's provenance. Every iteration now gets `<name>` and `<name>_snapshot`,
+  at the snapshot the provenance records. An R cell, whose harness binds no
+  table names, now refuses `# @table` rather than run without them. (#1225)
+- **A `# @loop` cell sent to a remote worker says where loops run.** It
+  failed with "Remote-worker loops are not in the Phase 1 scope"; it now says
+  that a loop cell runs on the notebook's own server and to add
+  `# @worker local` or move the work that needs the worker into an ordinary
+  cell. (#1225)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk

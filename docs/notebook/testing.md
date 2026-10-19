@@ -65,7 +65,12 @@ run of the cell would (an unchanged upstream is a cache hit), so `cell.sales`
 is current. The cell's `@fetch` files, `@mount` paths, `@dataset` values,
 `@table` names (and their `_snapshot` ids) and notebook and `@env` variables
 are bound as they are in a run. A fetch, dataset or table that cannot be
-resolved fails the run with one errored result naming it.
+resolved fails the run with one errored result naming it. The cell runs in the
+notebook's `work/`, as in a run, so its relative paths read and write the same
+files. Each `# @output_dir` name is a fresh, empty folder for the test run;
+nothing a test writes there is stored. There is no ambient `strata` client: a
+cell or test that uses it errors with a note saying so, so do a scan or read in
+an upstream cell and test with its result.
 
 ![A Python cell with its results table above an open Tests panel: the test
 source, a green "2 passed" summary, and a tick beside each test name. The flask

@@ -2961,6 +2961,65 @@ class TestLoopCellExecution:
         assert "boom" in (result.error or "")
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="pyiceberg's local warehouse paths fail on Windows"
+    )
+    async def test_each_iteration_gets_the_tables_names(self, loop_notebook, tmp_path):
+        import pyarrow as pa
+        from pyiceberg.catalog.sql import SqlCatalog
+        from pyiceberg.schema import Schema
+        from pyiceberg.types import LongType, NestedField
+
+        from strata.notebook.writer import write_cell
+
+        warehouse = tmp_path / "warehouse"
+        warehouse.mkdir()
+        catalog = SqlCatalog(
+            "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
+        )
+        catalog.create_namespace("db")
+        table = catalog.create_table("db.events", Schema(NestedField(1, "id", LongType())))
+        table.append(pa.table({"id": pa.array([1], type=pa.int64())}))
+        uri = f"file://{warehouse}#db.events"
+        notebook_dir, session = loop_notebook
+        loop_source = (
+            "# @loop max_iter=2 carry=state\n"
+            f"# @table events {uri}\n"
+            "state = {**state, 'n': state['n'] + 1, 'read': [events, events_snapshot]}\n"
+        )
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+
+        executor = CellExecutor(session)
+        await executor.execute_cell("seed", "state = {'n': 0, 'history': []}")
+        result = await executor.execute_cell("loop", loop_source)
+
+        assert result.success, result.error
+        artifact = session.get_artifact_manager().get_iteration_artifact("loop", "state", 1)
+        state = json.loads(
+            session.get_artifact_manager().artifact_store.read_blob(artifact.id, artifact.version)
+        )
+        assert state["read"] == [uri, table.current_snapshot().snapshot_id]
+
+    @pytest.mark.asyncio
+    async def test_a_loop_set_to_a_remote_worker_says_where_loops_run(self, loop_notebook):
+        from strata.notebook.writer import write_cell
+
+        notebook_dir, session = loop_notebook
+        loop_source = "# @loop max_iter=2 carry=state\n# @worker gpu\nstate = state\n"
+        write_cell(notebook_dir, "loop", loop_source)
+        session.reload()
+
+        result = await CellExecutor(session).execute_cell("loop", loop_source)
+
+        assert not result.success
+        assert result.error == (
+            "A loop cell runs on the notebook's own server, not on worker 'gpu'. Add "
+            "`# @worker local` to run the loop here, or move the work that needs 'gpu' "
+            "into an ordinary cell."
+        )
+
+    @pytest.mark.asyncio
     async def test_loop_start_from_seeds_from_prior_iteration(self, tmp_path):
         """Forking a loop cell: duplicate cell with ``start_from`` seeds
         iter 0 from the donor cell's persisted iteration artifact."""

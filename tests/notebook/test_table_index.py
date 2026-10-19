@@ -126,6 +126,56 @@ class TestATableCell:
         assert _index(session) == before
 
     @pytest.mark.asyncio
+    async def test_a_failed_table_write_leaves_the_last_good_runs_reads(self, tmp_path):
+        table, uri = _warehouse(tmp_path)
+        target = f"file://{tmp_path / 'out'}#lab.out"
+        head = f"# @table events {uri}\n# @write_table rows {target} append\n"
+        session = _session(
+            tmp_path, {"c1": head + "import pyarrow as pa\nrows = pa.table({'id': [1]})\n"}
+        )
+        await _run(session, "c1")
+        before = _index(session)
+
+        table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+        cell = session.notebook_state.get_cell("c1")
+        cell.source = head + "rows = {'not': 'a table'}\n"
+        session.re_analyze_cell("c1")
+        failed = await CellExecutor(session).execute_cell("c1", cell.source)
+
+        assert not failed.success
+        assert _index(session) == before
+
+    @pytest.mark.asyncio
+    async def test_a_run_all_cache_hit_records_its_reads(self, tmp_path):
+        from tests.notebook.test_executor_batch import _cell_spec
+
+        _, uri = _warehouse(tmp_path)
+        source = f"# @table events {uri}\nsnap = events_snapshot\n"
+        session = _session(tmp_path, {"c1": source})
+        await _run(session, "c1")
+        recorded = _index(session)
+        table_index.index_path(session.path).unlink()
+
+        batch = await CellExecutor(session).execute_batch([_cell_spec("c1", source)])
+
+        assert [r.status for r in batch.cell_results] == ["cache_hit"]
+        assert _index(session) == recorded
+
+    @pytest.mark.asyncio
+    async def test_a_loop_cache_hit_records_its_reads(self, tmp_path):
+        _, uri = _warehouse(tmp_path)
+        loop = f"# @loop max_iter=1 carry=state\n# @table events {uri}\nstate = state + 1\n"
+        session = _session(tmp_path, {"seed": "state = 0\n", "loop": loop})
+        await _run(session, "loop")
+        recorded = _index(session)
+        table_index.index_path(session.path).unlink()
+
+        hit = await _run(session, "loop")
+
+        assert hit.cache_hit is True
+        assert _index(session) == recorded
+
+    @pytest.mark.asyncio
     async def test_dropping_the_annotation_or_the_cell_drops_its_entry(self, tmp_path):
         _, uri = _warehouse(tmp_path)
         source = f"# @table events {uri}\nsnap = events_snapshot\n"

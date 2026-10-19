@@ -9,6 +9,7 @@ name gets native collection and assertion rewriting. Not on the keystroke path.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -60,6 +61,8 @@ def run_cell_tests_in_dir(
     input_dir: Path,
     mounts: dict[str, str] | None = None,
     tables: dict[str, dict[str, Any]] | None = None,
+    notebook_dir: Path | None = None,
+    work_dir: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     env: dict[str, str] | None = None,
     run_as: HarnessUser | None = None,
@@ -69,7 +72,8 @@ def run_cell_tests_in_dir(
     ``inputs`` maps each upstream variable to its ``{content_type, file}`` spec, the
     file in *input_dir*. The test process deserializes them: the server never does.
     ``mounts`` maps each mount and ``@fetch`` name to the local path bound to it, and
-    ``tables`` each ``@table`` name to its ``{uri, snapshot_id}``.
+    ``tables`` each ``@table`` name to its ``{uri, snapshot_id}``. With *notebook_dir*,
+    pytest starts there and the cell runs in *work_dir*, relative to it, as a harness does.
 
     The dict has totals (``passed``/``failed``/``errored``/``skipped``) plus a
     ``tests`` list of ``{name, nodeid, outcome, message}``. ``env`` and ``run_as``
@@ -90,6 +94,7 @@ def run_cell_tests_in_dir(
         "inputs": inputs,
         "mounts": mounts or {},
         "tables": tables or {},
+        "work_dir": work_dir,
     }
     (rundir / "inputs.json").write_text(json.dumps(manifest), encoding="utf-8")
     test_file = rundir / "test_cell.py"
@@ -108,11 +113,13 @@ def run_cell_tests_in_dir(
             "no:cacheprovider",
             "-q",
         ],
-        cwd=rundir,
+        cwd=notebook_dir or rundir,
         capture_output=True,
         text=True,
         timeout=timeout_seconds,
-        env=env,
+        # Keeps the notebook's directory, the start directory, off ``sys.path``. Not ``-P``,
+        # which a notebook's Python before 3.11 refuses; this it ignores.
+        env={**(os.environ if env is None else env), "PYTHONSAFEPATH": "1"},
         **spawn_kwargs(run_as),
     )
 

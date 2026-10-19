@@ -24,7 +24,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Generator
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -757,7 +757,9 @@ class CellExecutor:
         harness_user = None
         try:
             harness_user = resolve_harness_user()
-        except LocalExecutionRefused as exc:
+            # The cell runs where a run of it does, its notebook's work/.
+            prepare_work_dir(self.session.path, harness_user)
+        except (LocalExecutionRefused, UnsafeRunFile) as exc:
             problem = str(exc)
         if problem is not None:
             refused = {
@@ -784,15 +786,23 @@ class CellExecutor:
             hand_over(blob_dir, harness_user)
 
             def _run(rundir_name: str) -> dict[str, Any]:
+                rundir = Path(tmp) / rundir_name
+                # Each ``# @output_dir`` is a fresh folder; nothing a test writes is stored.
+                folders = output_dirs.mount_entries(source, rundir)
                 return run_cell_tests_in_dir(
-                    rundir=Path(tmp) / rundir_name,
+                    rundir=rundir,
                     venv_python=venv_python,
                     cell_source=source,
                     test_source=test_source,
                     inputs=input_specs,
                     input_dir=blob_dir,
-                    mounts={name: str(rm.local_path) for name, rm in resolved_mounts.items()},
+                    mounts={
+                        **{name: str(rm.local_path) for name, rm in resolved_mounts.items()},
+                        **{name: entry["local_path"] for name, entry in folders.items()},
+                    },
                     tables=tables,
+                    notebook_dir=self.session.path,
+                    work_dir=WORK_DIR,
                     env=identity_env(self._harness_env(runtime_env), harness_user),
                     run_as=harness_user,
                 )
@@ -1787,13 +1797,6 @@ class CellExecutor:
                         ).apply_remote_metadata(**remote_metadata)
 
                 if exec_result.success:
-                    self.session.record_successful_execution_provenance(
-                        cell_id,
-                        provenance_hash,
-                        source_hash,
-                        env_hash,
-                        table_reads=prov.table_reads,
-                    )
                     store_error: str | None = None
                     try:
                         stored_ok = self._store_outputs(
@@ -1840,6 +1843,14 @@ class CellExecutor:
                         # Only once artifacts are on disk: the publish reads them back, so a pull
                         # reproduces exactly what a local run stored.
                         await self._push_to_team_store(cell_id=cell_id, variant=fanout_variant)
+                        # Not before: a failed store or table write is not the cell's last good run.
+                        self.session.record_successful_execution_provenance(
+                            cell_id,
+                            provenance_hash,
+                            source_hash,
+                            env_hash,
+                            table_reads=prov.table_reads,
+                        )
 
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
@@ -2192,6 +2203,15 @@ class CellExecutor:
                     "Python cell upstream",
                     execution_method="error",
                 )
+            # harness.R binds no table names, so the cell would run without what it declared.
+            if prov.annotations.tables:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@table is not supported on R cells; read the table in a "
+                    "Python cell upstream",
+                    execution_method="error",
+                )
             # As in Python: an unchecked fetch fails the run, and each fetched file arrives as a
             # read-only mount that harness.R binds to its name as a path string.
             if prov.fetch_error is not None:
@@ -2457,13 +2477,6 @@ class CellExecutor:
                     )
 
                 if exec_result.success:
-                    self.session.record_successful_execution_provenance(
-                        cell_id,
-                        provenance_hash,
-                        source_hash,
-                        env_hash,
-                        table_reads=prov.table_reads,
-                    )
                     store_error = None
                     try:
                         stored_ok = self._store_outputs(
@@ -2503,6 +2516,14 @@ class CellExecutor:
 
                     if stored_ok:
                         await self._push_to_team_store(cell_id=cell_id)
+                        # Not before: a failed store or table write is not the cell's last good run.
+                        self.session.record_successful_execution_provenance(
+                            cell_id,
+                            provenance_hash,
+                            source_hash,
+                            env_hash,
+                            table_reads=prov.table_reads,
+                        )
 
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
@@ -2519,7 +2540,8 @@ class CellExecutor:
                             exec_result.display_outputs[-1] if exec_result.display_outputs else None
                         )
 
-                    mount_writes: list[MountWrite] = []
+                    # A worker syncs its own and reports what was written in its result.
+                    mount_writes = _worker_mount_writes(result, mount_specs)
                     if exec_result.success and resolved_mounts:
                         try:
                             mount_writes = await self._mount_resolver.sync_back(resolved_mounts)
@@ -2733,7 +2755,10 @@ class CellExecutor:
                         manifest_path.parent.name,
                     )
 
-            if result is None:
+        if result is None:
+            # A token of its own: a warm process that died late in the cell spent the first
+            # one's time, and anything it left running keeps no live token.
+            with self._run_token(timeout_seconds) as run_token:
                 result = await self._run_harness(
                     manifest_path,
                     venv_path,
@@ -5990,9 +6015,9 @@ class CellExecutor:
                 cell_id=cell_id,
                 success=False,
                 error=(
-                    f"Loop cells currently run only on worker 'local'; got "
-                    f"'{effective_worker}'. Remote-worker loops are not in "
-                    f"the Phase 1 scope."
+                    f"A loop cell runs on the notebook's own server, not on worker "
+                    f"'{effective_worker}'. Add `# @worker local` to run the loop here, or "
+                    f"move the work that needs '{effective_worker}' into an ordinary cell."
                 ),
                 execution_method="loop",
             )
@@ -6055,6 +6080,16 @@ class CellExecutor:
         env_hash = prov.env_hash
         source_hash = prov.source_hash
         carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
+        # Every iteration reads the snapshots the provenance names, as a single run does.
+        try:
+            loop_tables = self._manifest_tables(annotations.tables, prov.table_snapshots)
+        except RuntimeError as exc:
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=str(exc),
+                execution_method="loop",
+            )
         if use_cache:
             cached = self._cached_loop_result(cell_id, loop, cell_provenance, start_time)
             if cached is not None:
@@ -6063,6 +6098,13 @@ class CellExecutor:
                 # A hit serves an earlier run, not the one last started; let the steps on
                 # disk speak for themselves again.
                 persist_cell_loop_run(self.session.path, cell_id, None)
+                self.session.record_successful_execution_provenance(
+                    cell_id,
+                    cell_provenance,
+                    source_hash,
+                    env_hash,
+                    table_reads=prov.table_reads,
+                )
                 return cached
 
         refusal = self._table_write_refusal(source)
@@ -6163,6 +6205,7 @@ class CellExecutor:
                         resolved_mounts,
                         mutation_defines=mutation_defines,
                         loop_config=loop_config,
+                        tables=loop_tables,
                         cell_id=cell_id,
                         folder_mounts=folder_mounts,
                         run_token=run_token,
@@ -6779,10 +6822,12 @@ class CellExecutor:
         end_reason = "subprocess_died"
         failed_cell_id: str | None = None
 
-        # One token for the batch: Run All acts as whoever started it.
-        with self._run_token(batch_timeout_seconds) as run_token:
+        with ExitStack() as token_scope:
             try:
                 upstream_inputs = self._batch_resolve_upstream_inputs(cell_specs, batch_tmpdir)
+                # One token for the batch: Run All acts as whoever started it. Minted after the
+                # inputs are staged, since the batch's timeout runs from the spawn.
+                run_token = token_scope.enter_context(self._run_token(batch_timeout_seconds))
                 manifest = {
                     "cells": cell_specs,
                     "upstream_inputs": upstream_inputs,
@@ -7374,6 +7419,14 @@ class CellExecutor:
         if cached_display_models:
             cell.display_outputs = list(cached_display_models)
             cell.display_output = cached_display_models[-1]
+        # As a single-cell hit does, so the table index names the reads behind these outputs.
+        self.session.record_successful_execution_provenance(
+            cell_id,
+            provenance_hash,
+            prov.source_hash,
+            prov.env_hash,
+            table_reads=prov.table_reads,
+        )
 
         return {
             "cache_hit": True,

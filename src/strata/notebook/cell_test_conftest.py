@@ -7,13 +7,15 @@ holds ``inputs.json`` (the serializer's path, the input dir, a
 mounts and fetches and a ``{name: {uri, snapshot_id}}`` map of tables),
 ``cell_source.py``, the
 user's tests staged as ``test_<cell>.py`` (so pytest rewrites their asserts),
-and the ``results.json`` this plugin writes on session finish.
+and the ``results.json`` this plugin writes on session finish. ``inputs.json``
+may name a ``work_dir``, relative to where pytest started, for the cell to run in.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -21,6 +23,14 @@ from pathlib import Path
 import pytest
 
 _RUNDIR = Path(__file__).resolve().parent
+
+# A run's ``strata`` is the server's client; a test run has none.
+_NO_CLIENT = "NameError: name 'strata' is not defined"
+_NO_CLIENT_HINT = (
+    "A cell's tests have no ambient `strata` client, so they cannot scan or read "
+    "artifacts through the notebook's server. Do that in an upstream cell and test "
+    "with its result here."
+)
 
 
 def _load_inputs() -> dict[str, object]:
@@ -62,6 +72,9 @@ def cell():
     namespace.update(_load_inputs())
 
     cell_source = (_RUNDIR / "cell_source.py").read_text()
+    work_dir = json.loads((_RUNDIR / "inputs.json").read_text()).get("work_dir")
+    if work_dir:
+        os.chdir(work_dir)
     try:
         exec(compile(cell_source, "cell_source.py", "exec"), namespace)  # noqa: S102
     except Exception as exc:  # noqa: BLE001 - any cell error → a readable setup error
@@ -85,6 +98,8 @@ def pytest_runtest_logreport(report) -> None:  # noqa: ANN001 - pytest Report
             text = f"{text}\n\n--- Captured stdout ---\n{report.capstdout.rstrip()}"
         if report.capstderr:
             text = f"{text}\n\n--- Captured stderr ---\n{report.capstderr.rstrip()}"
+        if _NO_CLIENT in text:
+            text = f"{text}\n\n{_NO_CLIENT_HINT}"
     _phase_reports.setdefault(report.nodeid, {})[report.when] = (report.outcome, text)
 
 

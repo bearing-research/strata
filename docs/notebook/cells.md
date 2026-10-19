@@ -983,7 +983,9 @@ once you've thrown away the intermediates.
 - Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.
 - Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.
 
-A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell. A `@write_table` on a loop cell writes the final value once, after the last iteration.
+A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare `@fetch` or `@dataset`; read those in an upstream cell. Its `@table` names are bound in every iteration, at the snapshot its provenance records. A `@write_table` on a loop cell writes the final value once, after the last iteration.
+
+A loop cell runs on the notebook's own server, never on a [remote worker](workers.md): one whose `# @worker`, or the notebook's default worker, names another fails before it starts. Add `# @worker local` to the loop cell, or put the work that needs the worker in an ordinary cell upstream.
 
 Reach for loop cells when **being able to inspect or fork from iteration k matters**. That's the feature you're paying for.
 
@@ -1058,7 +1060,7 @@ library (see [Workers](workers.md)). An `@fetch` on an R cell
 is read on this machine, so an R cell with both `@fetch` and `@worker` fails;
 run it locally, or fetch in an upstream Python cell.
 
-Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells, and an R cell that declares `@dataset` fails; read the dataset in an upstream Python cell.
+Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells, and an R cell that declares `@dataset` or `@table` fails; read the dataset or table in an upstream Python cell.
 
 ### What if Rscript isn't installed?
 

@@ -179,6 +179,41 @@ class TestAWorkersReport:
         assert _worker_mount_writes({}, specs) == []
         assert _worker_mount_writes(None, specs) == []
 
+    async def test_an_r_cell_on_a_worker_records_what_it_reports(self, tmp_path, monkeypatch):
+        """No R needed: the worker's answer is what any worker returns for an R cell."""
+        from strata.notebook.models import CellLanguage, WorkerBackendType, WorkerSpec
+
+        source = "# @mount out s3://bucket/out rw\n# @worker r-worker\nx <- 1\n"
+        nb = create_notebook(tmp_path, "R writes", initialize_environment=False)
+        add_cell_to_notebook(nb, "c1", None, language="r")
+        write_cell(nb, "c1", source)
+        state = parse_notebook(nb)
+        state.cells[0].language = CellLanguage.R
+        state.workers = [
+            WorkerSpec(
+                name="r-worker",
+                backend=WorkerBackendType.EXECUTOR,
+                config={"url": "http://worker.invalid/v1/notebook-execute"},
+            )
+        ]
+        session = NotebookSession(state, nb)
+        files = [{"path": "a.txt", "size": 2, "sha256": _sha(b"aa")}]
+
+        async def worker(self, worker, source, input_specs, mount_specs, output_dir, *a, **k):
+            report = [{"mount": "out", "uri": "s3://bucket/out", "files": files}]
+            result = {"success": True, "variables": {}, "mount_writes": report}
+            return result, output_dir, "executor", {}
+
+        monkeypatch.setattr(CellExecutor, "_dispatch_http_executor", worker)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+        manager = session.get_artifact_manager()
+        artifact = dict(manager.list_cell_artifacts("c1"))["__mount__out"]
+        content = json.loads(manager.artifact_store.read_blob(artifact.id, artifact.version))
+        assert content == {"uri": "s3://bucket/out", "files": files}
+
 
 class TestAnAgentFindsIt:
     async def test_the_lineage_tool_reads_it_and_names_it_when_asked_wrongly(
