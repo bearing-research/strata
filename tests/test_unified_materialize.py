@@ -822,3 +822,92 @@ class TestTransformOverATable:
         )
         assert response.status_code == 422
         assert "AVRO equality delete file" in response.json()["detail"]
+
+
+def _mapped_table(warehouse, tmp_path):
+    """``test_db.mapped``: one file without field ids (a=1, b=2), read by the name mapping."""
+    import pyarrow.parquet as pq
+
+    table = warehouse["catalog"].create_table(
+        "test_db.mapped",
+        Schema(
+            NestedField(1, "a", LongType(), required=False),
+            NestedField(2, "b", LongType(), required=False),
+        ),
+    )
+    path = tmp_path / "plain.parquet"
+    pq.write_table(pa.table({"a": pa.array([1], pa.int64()), "b": pa.array([2], pa.int64())}), path)
+    table.add_files([path.as_uri()])
+    return table, f"file://{warehouse['warehouse_path']}#test_db.mapped"
+
+
+def _swap_name_mapping(table) -> None:
+    """Map field 1 to ``b`` and field 2 to ``a``: a property change, so no new snapshot."""
+    from pyiceberg.table.name_mapping import MappedField, NameMapping
+
+    swapped = NameMapping(
+        [MappedField(field_id=1, names=["b"]), MappedField(field_id=2, names=["a"])]
+    )
+    with table.transaction() as transaction:
+        transaction.set_properties({"schema.name-mapping.default": swapped.model_dump_json()})
+
+
+class TestWhatMakesNoSnapshot:
+    """A name-mapping change makes no snapshot, so an artifact built before it is not reused."""
+
+    def test_a_scan_after_a_name_mapping_change_is_rebuilt(
+        self, server_with_personal_mode, tmp_path
+    ):
+        from strata_client.client import StrataClient
+
+        table, uri = _mapped_table(server_with_personal_mode["warehouse"], tmp_path)
+        scan = {"executor": "scan@v1", "params": {}}
+        client = StrataClient(base_url=server_with_personal_mode["base_url"])
+        try:
+            first = client.materialize(inputs=[uri], transform=scan)
+            assert client.fetch(first.uri).to_pylist() == [{"a": 1, "b": 2}]
+
+            _swap_name_mapping(table)
+            second = client.materialize(inputs=[uri], transform=scan)
+
+            assert second.cache_hit is False
+            assert client.fetch(second.uri).to_pylist() == [{"a": 2, "b": 1}]
+        finally:
+            client.close()
+
+    def test_a_transform_after_a_name_mapping_change_is_rebuilt(
+        self, server_with_personal_mode, tmp_path
+    ):
+        from strata_client.client import StrataClient
+
+        table, uri = _mapped_table(server_with_personal_mode["warehouse"], tmp_path)
+        sql = {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT a, b FROM input0"}}
+        client = StrataClient(base_url=server_with_personal_mode["base_url"])
+        try:
+            first = client.materialize(inputs=[uri], transform=sql, name="mapped_sql")
+            assert client.fetch(first.uri).to_pylist() == [{"a": 1, "b": 2}]
+
+            _swap_name_mapping(table)
+
+            assert client.get_name_status("mapped_sql")["is_stale"] is True
+            second = client.materialize(inputs=[uri], transform=sql)
+            assert second.cache_hit is False
+            assert client.fetch(second.uri).to_pylist() == [{"a": 2, "b": 1}]
+        finally:
+            client.close()
+
+
+def test_a_scan_keeps_each_requests_column_order(server_with_personal_mode):
+    """The result keeps the requested order, so another order is another artifact."""
+    from strata_client.client import StrataClient
+
+    uri = server_with_personal_mode["warehouse"]["table_uri"]
+    client = StrataClient(base_url=server_with_personal_mode["base_url"])
+    try:
+        for columns in (["name", "id"], ["id", "name"]):
+            artifact = client.materialize(
+                inputs=[uri], transform={"executor": "scan@v1", "params": {"columns": columns}}
+            )
+            assert client.fetch(artifact.uri).column_names == columns
+    finally:
+        client.close()

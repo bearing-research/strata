@@ -15,13 +15,15 @@ The original Strata value prop: identical scans hit the same cache.
 The key is content-addressed:
 
 ```
-hash(tenant | table_identity | file_path | file_size | row_group_id | projection_fingerprint
-     | schema_id | deletes | reading)
+hash(tenant | table_identity | table_uuid | file_path | file_size | row_group_id
+     | projection_fingerprint | schema_id | deletes | reading)
 ```
 
 No snapshot id: a data file never changes, so a row group stays cached
 across appends. `deletes` names the rows a snapshot deletes from that
-row group, and `reading` the table's format version and name mapping.
+row group, `reading` the table's format version and name mapping, and
+`table_uuid` the table itself, so a dropped and recreated table never
+reads the old one's entries.
 
 If Alice ran a scan an hour ago and Bob runs the same scan now, Bob
 hits Alice's cached result. **This is intentional**: it's the

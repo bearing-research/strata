@@ -233,6 +233,7 @@ def test_the_scan_provenance_names_a_schema_that_is_not_the_snapshots():
             columns=None,
             filters=[],
             schema_id=schema_id,
+            reading="",
         )
 
     assert provenance(None) != provenance(2)

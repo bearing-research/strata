@@ -7,6 +7,7 @@ server-private gates through lazy ``from strata.server import ...``, so this mod
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import time
 from typing import TYPE_CHECKING
@@ -492,8 +493,11 @@ async def _handle_identity_materialize(
 
     try:
         with get_pool_tracker().track("planning"):
+            # run_in_executor drops contextvars: the plan keys row groups by the request's tenant.
             plan = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(state._planning_executor, do_plan),
+                asyncio.get_event_loop().run_in_executor(
+                    state._planning_executor, contextvars.copy_context().run, do_plan
+                ),
                 timeout=plan_timeout,
             )
     except TimeoutError:
@@ -559,6 +563,7 @@ async def _handle_identity_materialize(
         columns=identity_params.columns,
         filters=filters,
         schema_id=plan.schema_id,
+        reading=plan.reading,
     )
     store = get_artifact_store(state.config.artifact_dir)
 

@@ -345,11 +345,11 @@ class ReadPlanner:
         )
         self.manifest_cache = manifest_cache or get_manifest_cache(cache_dir=cache_dir)
         self._deleted_rows = DeletedRows()
-        # Per (table, schema id, reading fingerprint, file): column layout (None when it needs
-        # none), columns by field id, identity-partition values. Safe to cache: data files
-        # never change.
+        # Per (table, table UUID, schema id, reading fingerprint, file): column layout (None
+        # when it needs none), columns by field id, identity-partition values. Safe to cache:
+        # data files never change.
         self._file_columns: LRUCache[
-            tuple[str, int, str, str],
+            tuple[str, str, int, str, str],
             tuple[tuple[Column, ...] | None, dict[int, str], dict[int, Any]],
         ] = LRUCache(10_000)
 
@@ -493,6 +493,8 @@ class ReadPlanner:
         plan.schema_id = snapshot_schema.schema_id
         name_mapping = table.name_mapping()
         reading = _reading_fingerprint(table.metadata.format_version, name_mapping)
+        plan.reading = reading
+        table_uuid = str(table.metadata.table_uuid)
         initial_defaults = {
             field.field_id: field.initial_default for field in snapshot_schema.fields
         }
@@ -521,7 +523,13 @@ class ReadPlanner:
             # Schema evolution rewrites no files, so an older file may name, hold or type a
             # column differently. Columns match by field id; ``layout`` says how to read
             # this file as the snapshot's schema (None when it already is).
-            layout_key = (table_identity_str, snapshot_schema.schema_id, reading, actual_path)
+            layout_key = (
+                table_identity_str,
+                table_uuid,
+                snapshot_schema.schema_id,
+                reading,
+                actual_path,
+            )
             cached_layout = self._file_columns.get(layout_key)
             if cached_layout is None:
                 partition = _decode_partition_values(entry.partition_values)
@@ -629,6 +637,7 @@ class ReadPlanner:
                     schema_id=plan.schema_id,
                     deletes=_deletes_fingerprint(deleted_rows, equality),
                     reading=reading,
+                    table_uuid=table_uuid,
                 )
 
                 # Projection-aware; takes our RowGroupMeta or PyArrow's RowGroupMetaData.

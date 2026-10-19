@@ -234,9 +234,9 @@ class CacheGranularity(Enum):
 class CacheKey:
     """Immutable cache key for one row group, as a snapshot reads it.
 
-    SHA-256 over ``tenant|table_identity|file|size|row_group[|projection]|schema=|deletes=|
-    reading=``; the projection is included only under ``ROW_GROUP_PROJECTION``. Keyed by the
-    canonical ``TableIdentity``, not the URI, so URI spellings share entries.
+    SHA-256 over ``tenant|table_identity|table_uuid|file|size|row_group[|projection]|schema=|
+    deletes=|reading=``; the projection is included only under ``ROW_GROUP_PROJECTION``. Keyed
+    by the canonical ``TableIdentity``, not the URI, so URI spellings share entries.
 
     No snapshot: a data file never changes, so its row group stays cached across every
     snapshot that reads it the same way, and an append misses only the new files. What a
@@ -258,6 +258,9 @@ class CacheKey:
     deletes: str = ""
     # How the table reads its files (format version, name mapping); no snapshot records it.
     reading: str = ""
+    # The table's metadata UUID: a dropped and recreated table, or another warehouse's table
+    # of the same name, can list the same path for other bytes.
+    table_uuid: str = ""
 
     @property
     def table_id(self) -> str:
@@ -267,8 +270,8 @@ class CacheKey:
     def to_hex(self, granularity: CacheGranularity = CacheGranularity.ROW_GROUP_PROJECTION) -> str:
         """Return the key's SHA-256 hex digest; ``granularity`` decides if projection counts."""
         key_str = (
-            f"{self.tenant_id}|{self.table_identity}|{self.file_path}|{self.file_size}|"
-            f"{self.row_group_id}"
+            f"{self.tenant_id}|{self.table_identity}|{self.table_uuid}|{self.file_path}|"
+            f"{self.file_size}|{self.row_group_id}"
         )
         if granularity != CacheGranularity.ROW_GROUP:
             key_str += f"|{self.projection_fingerprint}"
@@ -340,6 +343,10 @@ class ReadPlan:
 
     # The Iceberg schema the scan read (a schema change makes no snapshot).
     schema_id: int | None = None
+
+    # How the table reads its files (format version, name mapping), which makes no snapshot
+    # either; empty for a table with no snapshots.
+    reading: str = ""
 
     scan_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
 

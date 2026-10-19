@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from strata.filters import serialize_filter_value
+from strata.filters import deserialize_filter_value, serialize_filter_value
 
 if TYPE_CHECKING:
     import pyarrow.fs as pafs
@@ -71,8 +71,8 @@ def _stat_identity(file_path: str) -> tuple[float | None, int | None]:
 
 # Bump when a table's layout or a stored value's meaning changes; a store in another
 # version is discarded. Manifest entries carry delete files (1), equality deletes (2),
-# identity-partition values (3), file sizes (4).
-METADATA_STORE_VERSION = 4
+# identity-partition values (3), file sizes (4), nanosecond timestamp stats (5).
+METADATA_STORE_VERSION = 5
 
 
 class MetadataStore:
@@ -464,13 +464,14 @@ def persisted_column_stats(stats: Any) -> dict[str, object]:
 
     Min/max use the filter-value encoding (``__datetime__:...``), so a restored stat
     compares with a filter as the live one does; ``typed`` marks the encoding. A value
-    it cannot encode is left out, and missing stats never prune.
+    it cannot encode is left out, and missing stats never prune. :func:`restored_stat`
+    reads one back.
     """
     stat_dict: dict[str, object] = {}
     if getattr(stats, "has_min_max", False):
         try:
-            low = serialize_filter_value(_as_py(stats.min))
-            high = serialize_filter_value(_as_py(stats.max))
+            low = _persisted_stat(_as_py(stats.min))
+            high = _persisted_stat(_as_py(stats.max))
         except TypeError:
             pass
         else:
@@ -479,6 +480,27 @@ def persisted_column_stats(stats: Any) -> dict[str, object]:
     if null_count is not None:
         stat_dict["null_count"] = null_count
     return stat_dict
+
+
+# A timestamp(ns) stat is a pandas Timestamp; as ISO text it would read back through datetime,
+# which drops the nanoseconds, so a max just above a filter value would prune the row group.
+_TIMESTAMP_NS = "__timestamp_ns__"
+
+
+def _persisted_stat(value: Any) -> str | bool | int | float:
+    if getattr(value, "nanosecond", 0):
+        return f"{_TIMESTAMP_NS}:{value.value}:{value.tz or ''}"
+    return serialize_filter_value(value)
+
+
+def restored_stat(value: Any) -> Any:
+    """A min/max :func:`persisted_column_stats` saved, back as the type it was read as."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.startswith(f"{_TIMESTAMP_NS}:"):
+        _, nanos, tz = value.split(":", 2)
+        return pa.scalar(int(nanos), pa.timestamp("ns", tz=tz or None)).as_py()
+    return deserialize_filter_value(value)
 
 
 def _as_py(value: Any) -> Any:

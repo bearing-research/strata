@@ -29,7 +29,7 @@ CACHE_META_EXTENSION = ".meta.json"
 
 # Bump when the cache format changes. Baked into the directory layout; a DiskCache deletes other
 # versions' directories at startup, since nothing else would evict them.
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 
 # A cache directory of some version, current or not: ``v`` and digits only.
 _VERSION_DIR = re.compile(r"v\d+")

@@ -28,15 +28,16 @@ if TYPE_CHECKING:
 
 
 def table_input_version(plan: ReadPlan) -> str:
-    """The version a table input records: its snapshot and schema id.
+    """The version a table input records: its snapshot, schema id and reading fingerprint.
 
-    A schema change makes no snapshot, so the snapshot alone would let a transform
-    hit an artifact built against the old columns. A table with no snapshots has no
-    version, so it gets a fresh one each time and nothing built from it dedups.
+    A schema, name-mapping or format-version change makes no snapshot, so the snapshot
+    alone would let a transform hit an artifact built against the old columns. A table
+    with no snapshots has no version, so it gets a fresh one each time and nothing built
+    from it dedups.
     """
     if plan.snapshot_id is None:
         return f"empty:{uuid.uuid4().hex}:{plan.schema_id}"
-    return f"{plan.snapshot_id}:{plan.schema_id}"
+    return f"{plan.snapshot_id}:{plan.schema_id}:{plan.reading}"
 
 
 class InputResolutionError(Exception):
@@ -157,13 +158,16 @@ class MaterializeService:
         columns: list[str] | None,
         filters: list,
         schema_id: int | None,
+        reading: str,
     ) -> str:
         """Provenance hash for a ``scan@v1`` identity transform.
 
-        Covers table identity, snapshot, ``schema_id`` (a schema change makes no
-        snapshot), the sorted projection and the normalized filters, so the same query
-        dedups to the same artifact. A table with no snapshots (``snapshot_id`` None)
-        has nothing to key a result on, so its hash is unique per call and never dedups.
+        Covers table identity, snapshot, ``schema_id`` and ``reading`` (the planner's
+        format-version and name-mapping fingerprint: neither change makes a snapshot),
+        the projection in request order (the result keeps it) and the normalized filters,
+        so the same query dedups to the same artifact. A table with no snapshots
+        (``snapshot_id`` None) has nothing to key a result on, so its hash is unique per
+        call and never dedups.
         """
         import hashlib
 
@@ -173,9 +177,10 @@ class MaterializeService:
         snapshot = snapshot_id if snapshot_id is not None else f"empty:{uuid.uuid4().hex}"
         hasher.update(f"table:{table_identity}@{snapshot}".encode())
         hasher.update(f"schema:{schema_id}".encode())
+        hasher.update(f"reading:{reading}".encode())
         hasher.update(b"executor:scan@v1")
         if columns:
-            hasher.update(f"columns:{sorted(columns)}".encode())
+            hasher.update(f"columns:{columns}".encode())
         else:
             hasher.update(b"columns:*")
         filter_fp = compute_filter_fingerprint(filters)

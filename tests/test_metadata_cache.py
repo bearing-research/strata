@@ -1326,12 +1326,12 @@ class TestPersistedStatsKeepTheirTypes:
         )
         return fp
 
-    def _after_restart(self, tmp_path: Path, monkeypatch):
+    def _after_restart(self, tmp_path: Path, monkeypatch, file: Path | None = None):
         """The file's metadata as a fresh process gets it: from the store, not the footer."""
         from strata.cache.metadata import ParquetMetadataCache
         from strata.cache.metadata_store import MetadataStore
 
-        fp = str(self._file(tmp_path))
+        fp = str(file or self._file(tmp_path))
         store = MetadataStore(tmp_path / "meta.sqlite")
         ParquetMetadataCache(store=store).get_or_load(fp)
 
@@ -1373,6 +1373,23 @@ class TestPersistedStatsKeepTheirTypes:
 
         assert self._prunes(meta, Filter("ts", FilterOp.GT, datetime(2025, 1, 1)))
         assert not self._prunes(meta, Filter("ts", FilterOp.EQ, datetime(2024, 1, 1, 12)))
+
+    @pytest.mark.parametrize("tz", [None, "UTC"])
+    def test_a_nanosecond_timestamp_keeps_its_nanoseconds(self, tmp_path, monkeypatch, tz):
+        """A max 999 ns past noon still holds a row for ``ts > noon`` after a restart."""
+        from datetime import UTC, datetime
+
+        from strata.filters import Filter, FilterOp
+
+        fp = tmp_path / "ns.parquet"
+        noon_ns = 1_704_110_400 * 10**9
+        ts = pa.array([noon_ns + 999], type=pa.timestamp("ns", tz=tz))
+        pq.write_table(pa.table({"ts": ts}), fp)
+        noon = datetime(2024, 1, 1, 12, tzinfo=UTC if tz else None)
+
+        meta = self._after_restart(tmp_path, monkeypatch, fp)
+
+        assert not self._prunes(meta, Filter("ts", FilterOp.GT, noon))
 
     @pytest.mark.parametrize(
         ("stats", "untyped"),

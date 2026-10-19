@@ -331,6 +331,83 @@ class TestCacheKeyTenantIsolation:
         assert key.tenant_id == "my-tenant"
 
 
+class TestPlanningRunsAsTheRequestsTenant:
+    """A route plans on a thread pool; the plan keys each row group by the request's tenant.
+
+    ``run_in_executor`` does not carry contextvars, so the plan saw the default tenant and a
+    tenant's scans shared the default tenant's cache entries.
+    """
+
+    @pytest.fixture
+    def tenant_state(self, tmp_path):
+        import strata.server as server_module
+        from strata.artifact.store import reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import ServerState
+
+        config = StrataConfig(
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            multi_tenant_enabled=True,
+            cache_dir=tmp_path / "cache",
+            artifact_dir=tmp_path / "artifacts",
+        )
+        reset_artifact_store()
+        original = server_module._state
+        state = ServerState(config)
+        server_module._state = state
+        try:
+            yield state
+        finally:
+            server_module._state = original
+            reset_artifact_store()
+
+    @staticmethod
+    def _recording_planner(state) -> list[str]:
+        from pyiceberg.exceptions import NoSuchTableError
+
+        tenants: list[str] = []
+
+        class _Planner:
+            def plan(self, *args, **kwargs):
+                tenants.append(get_tenant_id())
+                raise NoSuchTableError("db.t")
+
+        state.planner = _Planner()
+        return tenants
+
+    @pytest.mark.parametrize(
+        ("path", "body"),
+        [
+            (
+                "/v1/materialize",
+                {"inputs": ["file:///wh#db.t"], "transform": {"executor": "scan@v1"}},
+            ),
+            ("/v1/cache/warm", {"tables": ["file:///wh#db.t"]}),
+        ],
+        ids=["scan", "warm"],
+    )
+    @pytest.mark.asyncio
+    async def test_the_plan_sees_the_requests_tenant(self, tenant_state, path, body):
+        from httpx import ASGITransport, AsyncClient
+
+        from strata.server import app
+
+        tenants = self._recording_planner(tenant_state)
+        headers = {
+            "X-Strata-Proxy-Token": "test-token",
+            "X-Strata-Principal": "analyst",
+            "X-Tenant-ID": "team-a",
+        }
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            await client.post(path, json=body, headers=headers)
+
+        assert tenants == ["team-a"]
+
+
 class TestTenantIdValidation:
     @pytest.mark.parametrize(
         "tenant_id",

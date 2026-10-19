@@ -198,6 +198,7 @@ class _FakePlanner:
         return SimpleNamespace(
             snapshot_id=self._snapshot_id,
             schema_id=self._schema_id,
+            reading="r",
             table_identity=self._table_identity,
         )
 
@@ -240,8 +241,8 @@ class TestResolveInputVersion:
         resolved = service.resolve_input_version(
             "file:///wh#db.t", store=_FakeResolveStore(), planner=planner
         )
-        # The schema id too: a schema change makes no snapshot.
-        assert resolved.version == "4242:3"
+        # The schema id and reading too: neither change makes a snapshot.
+        assert resolved.version == "4242:3:r"
         # The identity is surfaced so the wrapper can ACL-gate the table input.
         assert resolved.table_identity == "cat.ns.t"
 
@@ -283,30 +284,36 @@ class TestResolveInputVersion:
             table_uri, store=_FakeResolveStore(), planner=planner
         )
         assert planner.calls == [table_uri]
-        assert resolved.version == "7:1"
+        assert resolved.version == "7:1:r"
         assert resolved.table_identity == "cat.ns.t"
 
 
 class TestComputeIdentityProvenance:
     def test_same_query_same_hash(self, service):
-        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], schema_id=0)
-        b = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], schema_id=0)
+        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], 0, "r")
+        b = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], 0, "r")
         assert a == b
 
-    def test_column_order_independent(self, service):
-        # Columns are sorted before hashing; projection order must not matter.
-        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], schema_id=0)
-        b = service.compute_identity_provenance("cat.ns.t", 42, ["y", "x"], [], schema_id=0)
-        assert a == b
+    def test_column_order_changes_hash(self, service):
+        # The result keeps the requested order, so another order is another artifact.
+        a = service.compute_identity_provenance("cat.ns.t", 42, ["x", "y"], [], 0, "r")
+        b = service.compute_identity_provenance("cat.ns.t", 42, ["y", "x"], [], 0, "r")
+        assert a != b
+
+    def test_reading_change_changes_hash(self, service):
+        # A name-mapping or format-version change makes no snapshot.
+        a = service.compute_identity_provenance("cat.ns.t", 42, None, [], 0, "r1")
+        b = service.compute_identity_provenance("cat.ns.t", 42, None, [], 0, "r2")
+        assert a != b
 
     def test_snapshot_change_changes_hash(self, service):
-        a = service.compute_identity_provenance("cat.ns.t", 42, None, [], schema_id=0)
-        b = service.compute_identity_provenance("cat.ns.t", 43, None, [], schema_id=0)
+        a = service.compute_identity_provenance("cat.ns.t", 42, None, [], 0, "r")
+        b = service.compute_identity_provenance("cat.ns.t", 43, None, [], 0, "r")
         assert a != b
 
     def test_all_columns_differs_from_projection(self, service):
-        star = service.compute_identity_provenance("cat.ns.t", 42, None, [], schema_id=0)
-        projected = service.compute_identity_provenance("cat.ns.t", 42, ["x"], [], schema_id=0)
+        star = service.compute_identity_provenance("cat.ns.t", 42, None, [], 0, "r")
+        projected = service.compute_identity_provenance("cat.ns.t", 42, ["x"], [], 0, "r")
         assert star != projected
 
 

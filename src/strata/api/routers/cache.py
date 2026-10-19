@@ -7,6 +7,7 @@ this module stays a leaf.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import logging
 import time
@@ -205,10 +206,11 @@ async def warm_cache_v1(request: WarmRequest):
                 filters=[],
             )
             # A plan reads the catalog and manifests; on the loop it would stall every request.
+            # run_in_executor drops contextvars: the plan keys row groups by the request's tenant.
             with get_pool_tracker().track("planning"):
                 plan = await asyncio.wait_for(
                     asyncio.get_running_loop().run_in_executor(
-                        state._planning_executor, plan_table
+                        state._planning_executor, contextvars.copy_context().run, plan_table
                     ),
                     timeout=state.config.plan_timeout_seconds,
                 )

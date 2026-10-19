@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, overload
 
 import pyarrow as pa
 
-from strata.filters import deserialize_filter_value
+from strata.cache.metadata_store import restored_stat
 
 logger = logging.getLogger(__name__)
 
@@ -367,11 +367,6 @@ def _persisted_stats_are_untyped(persisted: "PersistedParquetMeta") -> bool:
     )
 
 
-def _restored_stat(value: Any) -> Any:
-    """A persisted min/max back as the type it was written from."""
-    return None if value is None else deserialize_filter_value(value)
-
-
 class ParquetMetadataCache:
     """Parquet footer cache keyed by file path, with optional SQLite persistence.
 
@@ -529,8 +524,8 @@ class ParquetMetadataCache:
                         stats_dict = rg.column_stats[col_name]
                         stats = ColumnStatistics(
                             has_min_max="min" in stats_dict and "max" in stats_dict,
-                            min=_restored_stat(stats_dict.get("min")),
-                            max=_restored_stat(stats_dict.get("max")),
+                            min=restored_stat(stats_dict.get("min")),
+                            max=restored_stat(stats_dict.get("max")),
                             null_count=stats_dict.get("null_count"),
                         )
                         columns[idx] = ColumnChunkMeta(
@@ -589,8 +584,8 @@ class ParquetMetadataCache:
                         stats_dict = rg.column_stats[col_name]
                         stats = ColumnStatistics(
                             has_min_max="min" in stats_dict and "max" in stats_dict,
-                            min=_restored_stat(stats_dict.get("min")),
-                            max=_restored_stat(stats_dict.get("max")),
+                            min=restored_stat(stats_dict.get("min")),
+                            max=restored_stat(stats_dict.get("max")),
                             null_count=stats_dict.get("null_count"),
                         )
                         columns[idx] = ColumnChunkMeta(
