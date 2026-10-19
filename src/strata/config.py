@@ -456,6 +456,19 @@ class StrataConfig(BaseSettings):
         DEFAULT_MOUNT_CACHE_MAX_IDLE_DAYS
     )
 
+    # Asking before a large read. Before a notebook run, a cell whose inputs would move more
+    # than notebook_confirm_read_bytes onto its machine (what its cache does not hold), or
+    # cost more than notebook_confirm_read_cost dollars at notebook_credential_read_cost's
+    # rate per GB (10^9 bytes) for each credential name, asks first, showing
+    # notebook_confirm_read_message. Unset never asks. A run that cannot ask (headless,
+    # API) goes ahead and records so in the reads index.
+    notebook_confirm_read_bytes: Annotated[int | None, Field(ge=0)] = None
+    notebook_confirm_read_cost: Annotated[float | None, Field(ge=0)] = None
+    notebook_credential_read_cost: Annotated[dict[str, float], NoDecode] = Field(
+        default_factory=dict
+    )
+    notebook_confirm_read_message: str | None = None
+
     # Hosts ``@fetch``, and a prompt cell's ``[ai] base_url`` from
     # notebook.toml, may reach even on a private address, e.g. an internal data
     # or model server. Public hosts need no entry; private, loopback and
@@ -650,6 +663,7 @@ class StrataConfig(BaseSettings):
         "notebook_credentials",
         "notebook_mount_credentials",
         "notebook_credential_paths",
+        "notebook_credential_read_cost",
         mode="before",
     )
     @classmethod

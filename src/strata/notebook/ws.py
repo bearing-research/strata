@@ -11,6 +11,7 @@ import inspect
 import json
 import logging
 import time
+import uuid
 import weakref
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from dataclasses import asdict, dataclass, field
@@ -46,6 +47,8 @@ from strata.notebook.models import (
 )
 from strata.notebook.presence import lock_window_seconds
 from strata.notebook.protocol import MessageType
+from strata.notebook.read_confirm import ReadEstimate, over_threshold
+from strata.notebook.read_confirm import asks as read_confirm_asks
 from strata.notebook.scopes import (
     NOTEBOOK_SCOPE_READ,
     required_scope_for_frame,
@@ -70,6 +73,8 @@ from strata.notebook.ws_payloads import (
     CellTestStatusPayload,
     CellVariantProgressPayload,
     PresencePayload,
+    ReadConfirmCell,
+    ReadConfirmPromptPayload,
     cell_status_payload,
     dag_update_payload,
     error_payload,
@@ -92,6 +97,15 @@ _notebook_connections: dict[str, list[WebSocket]] = {}
 
 
 @dataclass
+class _PendingReads:
+    """A ``read_confirm_prompt``: what it asked about, and the request to send again on Run."""
+
+    prompt_id: str
+    reads: list[ReadEstimate]
+    replay: Callable[[], Awaitable[None]]
+
+
+@dataclass
 class NotebookExecutionState:
     """Per-notebook WebSocket execution bookkeeping.
 
@@ -103,6 +117,9 @@ class NotebookExecutionState:
     running_cell: str | None = None
     requested_cell: str | None = None
     cascade_plan: CascadePlan | None = None
+    # A read_confirm_prompt waiting for its answer. Not cleared with the execution: a
+    # run that ends meanwhile does not answer it.
+    read_confirm: _PendingReads | None = None
     # WS runs resolve to None; REST/MCP exclusive runs to a CellExecutionResult.
     execution_task: asyncio.Task[Any] | None = None
     control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -934,6 +951,113 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
 # --- Message Handlers ---
 
 
+async def reads_to_confirm(
+    session: NotebookSession, cell_ids: Iterable[str], *, force: bool = False
+) -> list[ReadEstimate]:
+    """The cells about to run that read past a threshold with no yes kept for them.
+
+    Empty with no threshold set. A ready cell is left out unless *force*, since its run
+    is a cache hit. A cell that cannot be weighed runs unasked, and its reads index
+    entry says so.
+    """
+    executor = CellExecutor(session)
+    config = executor._lake_config()
+    if not read_confirm_asks(config):
+        return []
+    asking: list[ReadEstimate] = []
+    for cell_id in dict.fromkeys(cell_ids):
+        cell = session.notebook_state.get_cell(cell_id)
+        if cell is None or (not force and cell.status == CellStatus.READY):
+            continue
+        try:
+            read = await executor.estimate_reads(cell_id, cell.source)
+        except Exception:
+            logger.warning("Could not weigh the reads of cell %s", cell_id, exc_info=True)
+            continue
+        if over_threshold(read, config) and not session.reads_approved(
+            cell_id, read.machine, read.fingerprint
+        ):
+            asking.append(read)
+    return asking
+
+
+def run_cells(
+    session: NotebookSession, cell_id: str, mode: Literal["normal", "force", "rerun"]
+) -> list[str]:
+    """The cells a single-cell run in *mode* runs: stale upstreams first, unless forced."""
+    if mode == "force":
+        return [cell_id]
+    plan = CascadePlanner(session).plan(cell_id)
+    upstream = [step.cell_id for step in plan.steps if not step.skip] if plan else []
+    return [*upstream, cell_id]
+
+
+def large_read_message(session: NotebookSession) -> str:
+    """The host's sentence for a large read, or a plain one."""
+    message = CellExecutor(session)._lake_config().notebook_confirm_read_message
+    return message or "This run reads more than this server runs without asking."
+
+
+async def _ask_before_reading(
+    websocket: WebSocket,
+    session: NotebookSession,
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+    cell_ids: Iterable[str],
+    replay: Callable[[], Awaitable[None]],
+    *,
+    force: bool = False,
+) -> bool:
+    """Send a ``read_confirm_prompt`` when a cell about to run reads past a threshold.
+
+    True when sent: the caller then starts nothing (``reads_to_confirm``).
+    """
+    asking = await reads_to_confirm(session, cell_ids, force=force)
+    if not asking:
+        return False
+    prompt_id = uuid.uuid4().hex
+    execution_state.read_confirm = _PendingReads(prompt_id, asking, replay)
+    await _send_message(
+        websocket,
+        _make_message(
+            MessageType.READ_CONFIRM_PROMPT,
+            next_notebook_sequence(notebook_id),
+            ReadConfirmPromptPayload(
+                prompt_id=prompt_id,
+                cells=[ReadConfirmCell.model_validate(read.payload()) for read in asking],
+                message=CellExecutor(session)._lake_config().notebook_confirm_read_message,
+            ).model_dump(mode="json", exclude_none=True),
+        ),
+    )
+    return True
+
+
+async def _handle_read_confirm(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Handle read_confirm: keep each yes, then send the asking request again."""
+    pending = execution_state.read_confirm
+    if pending is None or payload.get("prompt_id") != pending.prompt_id:
+        await websocket.send_text(
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR,
+                    next_notebook_sequence(notebook_id),
+                    error_payload("Read confirmation not found or expired"),
+                )
+            )
+        )
+        return
+    execution_state.read_confirm = None
+    for read in pending.reads:
+        session.approve_reads(read.cell_id, read.machine, read.fingerprint)
+    await pending.replay()
+
+
 async def _handle_cell_execute(
     websocket: WebSocket,
     session: NotebookSession,
@@ -1040,6 +1164,18 @@ async def _handle_cell_execute_reserved(
         )
         await _release_execution_request(execution_state, cell_id)
     else:
+        if await _ask_before_reading(
+            websocket,
+            session,
+            execution_state,
+            notebook_id,
+            [cell_id],
+            lambda: _handle_cell_execute(
+                websocket, session, {"cell_id": cell_id}, execution_state, notebook_id
+            ),
+        ):
+            await _release_execution_request(execution_state, cell_id)
+            return
         scheduled = await _schedule_execution(
             websocket,
             execution_state,
@@ -1091,6 +1227,17 @@ async def _handle_notebook_run_all(
                 )
             )
         )
+        return
+
+    if await _ask_before_reading(
+        websocket,
+        session,
+        execution_state,
+        notebook_id,
+        runnable_cells,
+        lambda: _handle_notebook_run_all(websocket, session, execution_state, notebook_id, payload),
+    ):
+        await _release_execution_request(execution_state, requested_cell)
         return
 
     scheduled = await _schedule_execution(
@@ -1147,6 +1294,20 @@ async def _handle_notebook_rerun_all(
                 )
             )
         )
+        return
+
+    if await _ask_before_reading(
+        websocket,
+        session,
+        execution_state,
+        notebook_id,
+        runnable_cells,
+        lambda: _handle_notebook_rerun_all(
+            websocket, session, execution_state, notebook_id, payload
+        ),
+        force=True,
+    ):
+        await _release_execution_request(execution_state, requested_cell)
         return
 
     scheduled = await _schedule_execution(
@@ -1224,6 +1385,19 @@ async def _handle_cell_execute_cascade(
         )
         return
 
+    if await _ask_before_reading(
+        websocket,
+        session,
+        execution_state,
+        notebook_id,
+        [step.cell_id for step in plan.steps if not step.skip],
+        lambda: _handle_cell_execute_cascade(
+            websocket, session, payload, execution_state, notebook_id
+        ),
+    ):
+        await _release_execution_request(execution_state, cell_id)
+        return
+
     # In the background so this socket can still receive cancel.
     scheduled = await _schedule_execution(
         websocket,
@@ -1274,6 +1448,20 @@ async def _handle_cell_execute_force(
                 )
             )
         )
+        return
+
+    if await _ask_before_reading(
+        websocket,
+        session,
+        execution_state,
+        notebook_id,
+        [cell_id],
+        lambda: _handle_cell_execute_force(
+            websocket, session, payload, execution_state, notebook_id
+        ),
+        force=True,
+    ):
+        await _release_execution_request(execution_state, cell_id)
         return
 
     scheduled = await _schedule_execution(
@@ -1350,6 +1538,20 @@ async def _handle_cell_execute_rerun_reserved(
     # Stale upstreams go through the cascade so every step broadcasts frames.
     planner = CascadePlanner(session)
     plan = planner.plan(cell_id)
+
+    if await _ask_before_reading(
+        websocket,
+        session,
+        execution_state,
+        notebook_id,
+        run_cells(session, cell_id, "rerun"),
+        lambda: _handle_cell_execute_rerun(
+            websocket, session, {"cell_id": cell_id}, execution_state, notebook_id
+        ),
+        force=True,
+    ):
+        await _release_execution_request(execution_state, cell_id)
+        return
 
     if plan is not None:
         scheduled = await _schedule_execution(
@@ -3484,6 +3686,7 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
     MessageType.NOTEBOOK_RERUN_ALL: _handle_notebook_rerun_all,
     MessageType.CELL_SOURCE_UPDATE: _handle_cell_source_update,
     MessageType.CELL_FOCUS: _handle_cell_focus,
+    MessageType.READ_CONFIRM: _handle_read_confirm,
     MessageType.CELL_RUN_TESTS: _handle_cell_run_tests,
     MessageType.NOTEBOOK_SYNC: _handle_notebook_sync,
     MessageType.IMPACT_PREVIEW_REQUEST: _handle_impact_preview_request,

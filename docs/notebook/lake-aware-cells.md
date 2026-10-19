@@ -254,6 +254,37 @@ stored is answered with that stored result, so its entry repeats the first run's
 figures. It follows the table index's rules: a failed run leaves the
 entry, and a cell that stops reading these inputs, or is deleted, drops out.
 
+With a [read threshold](#asking-before-a-large-read) set, each entry also has
+`confirmation`: `under_threshold`, `approved` (someone said Run, now or for the
+same inputs on that machine before), or `not_asked` (a run that could not ask,
+such as a headless `strata run`, went ahead over it).
+
+## Asking before a large read
+
+A host can have the notebook ask before a run moves a lot of data onto a
+machine. Before a run, each cell about to run is weighed as its badge is, on
+the machine it will run on, except that a `@fetch` is asked with a `HEAD` rather
+than downloaded. What would move is what the machine does not hold yet, of the
+sizes that are known; a table counts its snapshot's files, an upper bound. When
+that passes `STRATA_NOTEBOOK_CONFIRM_READ_BYTES`, or its cost at
+`STRATA_NOTEBOOK_CREDENTIAL_READ_COST`'s rate per GB passes
+`STRATA_NOTEBOOK_CONFIRM_READ_COST`, nothing starts: the notebook lists those
+cells, their inputs, sizes and cost, and the host's
+`STRATA_NOTEBOOK_CONFIRM_READ_MESSAGE`, with Run and Cancel. One question covers
+the whole run, Run All included. A ready cell is left out, since its run is a
+cache hit.
+
+A Run is kept per cell, machine and inputs (the mount listings, table snapshots
+and fetch URLs), so a rerun on the same machine does not ask again, while new
+data, or another machine, does. A run that cannot ask goes ahead and its reads
+index entry says `not_asked`: a headless `strata run`, the CLI, and REST or MCP
+runs that do not pass `confirm_reads` (see
+[Execute Cell](../reference/rest-api.md#execute-cell-rest) and
+[MCP](mcp.md)). Nothing is ever refused for its size.
+
+The question comes before a cell's cache is checked, so a stale cell whose
+result turns out to be cached may still ask; asking is the safe direction.
+
 ## Gotchas
 
 - **Injected vars don't flow downstream.** `orders` and `orders_snapshot` live

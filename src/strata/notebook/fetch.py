@@ -190,6 +190,58 @@ class FetchCache:
             raise FetchPinMismatch(spec, fetched.sha256)
         return fetched
 
+    def probe(self, spec: FetchSpec) -> tuple[int | None, int | None]:
+        """``(size, cached bytes)`` a run's check of *spec* would find, read with a HEAD.
+
+        Asks the URL what ``resolve(max_age=0)`` would download without downloading it,
+        so a run can be weighed before it starts. ``None`` for what the answer did not
+        say, or when the URL could not be asked: the run reports why.
+        """
+        record = self._index().get(spec.url)
+        cached = self._cached(record)
+        cached_size = cached.path.stat().st_size if cached is not None else None
+        if cached is not None and (
+            (spec.sha256 and cached.sha256 == spec.sha256)
+            or (spec.refetch == "never" and not spec.sha256)
+        ):
+            return cached_size, cached_size
+        headers: dict[str, str] = {}
+        if spec.refetch == "stale" and record and cached is not None:
+            if record.get("etag"):
+                headers["If-None-Match"] = record["etag"]
+            if record.get("last_modified"):
+                headers["If-Modified-Since"] = record["last_modified"]
+        clients: dict[str | None, httpx.Client] = {}
+        try:
+            url = spec.url
+            for _ in range(MAX_REDIRECTS + 1):
+                if url_safety_problem(
+                    url,
+                    f"@fetch {spec.name}",
+                    allowed_hosts=self._allowed_hosts,
+                    allow_local=self._allow_local,
+                ):
+                    return None, None
+                response = self._client_for(url, clients).head(
+                    url, headers=headers, follow_redirects=False
+                )
+                location = response.headers.get("location")
+                if response.status_code in (301, 302, 303, 307, 308) and location:
+                    url = str(response.url.join(location))
+                    continue
+                if response.status_code == 304 and cached is not None:
+                    return cached_size, cached_size
+                length = response.headers.get("content-length", "")
+                if response.status_code != 200 or not length.isdigit():
+                    return None, None
+                return int(length), 0
+            return None, None
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError, ImportError):
+            return None, None
+        finally:
+            for client in clients.values():
+                client.close()
+
     def recorded(self, url: str) -> FetchedBytes | None:
         """The bytes last read from *url*, if they are still cached. No network."""
         return self._cached(self._index().get(url))

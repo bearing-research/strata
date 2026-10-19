@@ -147,6 +147,17 @@ exhaustive commit history.
   cache or a stored scan answered, `null` when the cell read the table some
   other way. Every local run now gets a run token, sent with the cell's id; on a
   server that does not authenticate callers it only counts. (#1247)
+- **A notebook asks before a large read.** With
+  `STRATA_NOTEBOOK_CONFIRM_READ_BYTES` or `STRATA_NOTEBOOK_CONFIRM_READ_COST`
+  set (the cost at `STRATA_NOTEBOOK_CREDENTIAL_READ_COST`'s rate per GB for each
+  credential), a run whose cells would move more than that onto their machine
+  shows them, their sizes and cost, and `STRATA_NOTEBOOK_CONFIRM_READ_MESSAGE`,
+  and starts on Run. A yes is kept per cell, machine and inputs. A `@fetch` is
+  weighed with a `HEAD`. New WebSocket frames `read_confirm_prompt` and
+  `read_confirm`; REST execute and MCP `run_cell` take `confirm_reads`
+  (answering `large_read` with the estimate) and `approve_reads`. A run that
+  cannot ask goes ahead, and the reads index records each run's
+  `confirmation`. (#1248)
 
 ### Changed
 

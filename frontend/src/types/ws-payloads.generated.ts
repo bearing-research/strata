@@ -256,6 +256,20 @@ export interface ProfilingSummaryPayload {
   cell_profiles: CellProfileModel[]
 }
 
+export interface ReadConfirmCell {
+  cell_id: string
+  machine: string
+  inputs: InputWeight[]
+  bytes_to_move: number
+  cost: number
+}
+
+export interface ReadConfirmPromptPayload {
+  prompt_id: string
+  cells: ReadConfirmCell[]
+  message?: string | null
+}
+
 export interface SessionClosedPayload {
   reason: 'idle' | 'session_limit' | 'memory' | 'closed' | 'deleted' | 'shutdown'
   message: string
@@ -282,6 +296,7 @@ export interface WsServerPayloadMap {
   inspect_result: InspectResultPayload
   presence: PresencePayload
   profiling_summary: ProfilingSummaryPayload
+  read_confirm_prompt: ReadConfirmPromptPayload
   session_closed: SessionClosedPayload
 }
 

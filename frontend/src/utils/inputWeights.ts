@@ -11,7 +11,7 @@ export function formatBytes(bytes: number): string {
   return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${units[unit]}`
 }
 
-function describe(input: InputWeight): string {
+export function describeInput(input: InputWeight): string {
   const source = `${input.kind} ${input.name} (${input.uri})`
   if (input.bytes == null) return `${source}: size unknown`
   // A table's size is its snapshot's data files; a scan may read less.
@@ -59,6 +59,6 @@ export function inputWeightBadge(params: {
   } else {
     label = 'read size unknown'
   }
-  const title = [`Reads on "${machine}"`, ...inputs.map(describe)].join('\n')
+  const title = [`Reads on "${machine}"`, ...inputs.map(describeInput)].join('\n')
   return { label, title }
 }

@@ -104,6 +104,14 @@ from strata.notebook.provenance import (
     derive_subkey,
     safe_filename_stem,
 )
+from strata.notebook.read_confirm import (
+    ReadConfirmation,
+    ReadEstimate,
+    confirmation,
+    estimate,
+    input_fingerprint,
+)
+from strata.notebook.read_confirm import asks as read_confirm_asks
 from strata.notebook.remote_bundle import (
     pack_notebook_output_bundle,
     read_notebook_output_bundle_manifest_path,
@@ -382,6 +390,8 @@ class _CellProvenance:
     table_reads: list[dict[str, Any]] = field(default_factory=list)
     # What each declared input weighs (Amber item 89), for the badge and the reads index.
     input_weights: list[InputWeight] = field(default_factory=list)
+    # Whether a large read was confirmed (Amber item 90); ``None`` with no threshold set.
+    read_confirmation: ReadConfirmation | None = None
 
     def reads(
         self, mounts_moved: dict[str, int | None], tables_moved: dict[str, int]
@@ -404,11 +414,14 @@ class _CellProvenance:
                     "bytes_moved": moved,
                 }
             )
-        return {
+        entry: dict[str, Any] = {
             "machine": self.effective_worker,
             "ran_at": int(time.time() * 1000),
             "inputs": inputs,
         }
+        if self.read_confirmation is not None:
+            entry["confirmation"] = self.read_confirmation
+        return entry
 
 
 @dataclass(kw_only=True)
@@ -1245,33 +1258,10 @@ class CellExecutor:
             runtime_identity=runtime_identity,
         )
         input_hashes = self._collect_input_hashes(cell_id)
-        # A DuckDB cell's catalog tables are inputs like its @table ones. Imported only for
-        # SQL cells: the SQL package needs the [sql] extra.
-        tables = list(annotations.tables)
-        config = None
-        if annotations.sql is not None:
-            from strata.notebook.sql.lake import lake_tables, with_notebook_catalogs
-
-            tables += lake_tables(self.session.notebook_state, source)
-            config = with_notebook_catalogs(self._lake_config(), self.session.notebook_state)
-        from strata.notebook.tables import table_credential
-
-        table_sizes: dict[str, int | None] = {}
-        table_fingerprints, table_snapshots = await self._fingerprint_tables(
-            tables, config, sizes=table_sizes
+        config, table_fingerprints, table_snapshots, table_weights = await self._weigh_tables(
+            annotations, source
         )
-        weights += [
-            InputWeight(
-                kind="table",
-                name=spec.name,
-                uri=spec.uri,
-                credential=table_credential(spec.uri, config or self._lake_config()),
-                bytes=table_sizes[spec.name],
-                cached_bytes=None,
-            )
-            for spec in annotations.tables
-            if spec.name in table_sizes
-        ]
+        weights += table_weights
         table_reads = []
         if annotations.tables:
             from strata.notebook.table_index import table_read
@@ -1301,6 +1291,14 @@ class CellExecutor:
         # An empty list is news too: it clears what the cell showed.
         if self.session.record_cell_inputs(cell_id, effective_worker, weights):
             await self._broadcast_cell_inputs(cell_id, effective_worker, weights)
+        read_confirmation = self._read_confirmation(
+            cell_id,
+            effective_worker,
+            weights,
+            input_fingerprint(
+                mount_fingerprints, table_fingerprints, [f.url for f in annotations.fetches]
+            ),
+        )
         provenance_hash = compute_provenance_hash(
             input_hashes
             + mount_fingerprints
@@ -1334,6 +1332,7 @@ class CellExecutor:
             dataset_error=dataset_error,
             table_reads=table_reads,
             input_weights=weights,
+            read_confirmation=read_confirmation,
         )
 
     # ------------------------------------------------------------------
@@ -4304,6 +4303,90 @@ class CellExecutor:
             **self._fetch_refs.get(cell_id, {}),
             **self._dataset_refs.get(cell_id, {}),
         }
+
+    async def _weigh_tables(
+        self, annotations: CellAnnotations, source: str
+    ) -> tuple[Any, list[str], dict[str, int | None], list[InputWeight]]:
+        """A cell's tables: the config they resolve in, fingerprints, snapshots, weights.
+
+        A DuckDB cell's catalog tables are inputs like its @table ones, though only the
+        @table ones are weighed.
+        """
+        tables = list(annotations.tables)
+        config = None
+        # Imported only for SQL cells: the SQL package needs the [sql] extra.
+        if annotations.sql is not None:
+            from strata.notebook.sql.lake import lake_tables, with_notebook_catalogs
+
+            tables += lake_tables(self.session.notebook_state, source)
+            config = with_notebook_catalogs(self._lake_config(), self.session.notebook_state)
+        from strata.notebook.tables import table_credential
+
+        sizes: dict[str, int | None] = {}
+        fingerprints, snapshots = await self._fingerprint_tables(tables, config, sizes=sizes)
+        weights = [
+            InputWeight(
+                kind="table",
+                name=spec.name,
+                uri=spec.uri,
+                credential=table_credential(spec.uri, config or self._lake_config()),
+                bytes=sizes[spec.name],
+                cached_bytes=None,
+            )
+            for spec in annotations.tables
+            if spec.name in sizes
+        ]
+        return config, fingerprints, snapshots, weights
+
+    async def estimate_reads(self, cell_id: str, source: str) -> ReadEstimate:
+        """What *cell_id*'s inputs would move onto its machine, weighed before it runs.
+
+        The weights its provenance makes, except that a ``@fetch`` is asked with a HEAD
+        rather than downloaded.
+        """
+        annotations = parse_annotations(source)
+        mount_specs = self._resolve_cell_mount_specs(cell_id, source)
+        machine = effective_worker_name(self.session.notebook_state, cell_id, annotations.worker)
+        weights: list[InputWeight] = []
+        cache = self._mount_cache_for(machine)
+        listings: dict[str, dict[str, dict[str, Any]]] = {}
+        mount_fingerprints, _ = await self._fingerprint_mounts(
+            mount_specs, weights=weights, cache=cache, listings=listings
+        )
+        if cache is None and listings:
+            weights = await self._ask_worker_cache(machine, mount_specs, weights, listings)
+        _, table_fingerprints, _, table_weights = await self._weigh_tables(annotations, source)
+        weights += table_weights
+        if annotations.fetches:
+            from strata.notebook.fetch import FetchCache, guard_settings
+
+            allowed_hosts, allow_local = guard_settings(self._lake_config())
+            fetches = FetchCache(
+                self.session.path, allowed_hosts=allowed_hosts, allow_local=allow_local
+            )
+            for spec in sorted(annotations.fetches, key=lambda item: item.name):
+                size, cached = await asyncio.to_thread(fetches.probe, spec)
+                weights.append(
+                    InputWeight(
+                        kind="fetch", name=spec.name, uri=spec.url, bytes=size, cached_bytes=cached
+                    )
+                )
+        fingerprint = input_fingerprint(
+            mount_fingerprints, table_fingerprints, [f.url for f in annotations.fetches]
+        )
+        return estimate(cell_id, machine, weights, fingerprint, self._lake_config())
+
+    def _read_confirmation(
+        self, cell_id: str, machine: str, weights: list[InputWeight], fingerprint: str
+    ) -> ReadConfirmation | None:
+        """What the reads index records about asking first, for the run about to start."""
+        config = self._lake_config()
+        if not read_confirm_asks(config):
+            return None
+        read = estimate(cell_id, machine, weights, fingerprint, config)
+        return confirmation(
+            read, config, self.session.reads_approved(cell_id, machine, fingerprint)
+        )
 
     async def _fingerprint_tables(
         self,

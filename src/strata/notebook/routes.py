@@ -3456,13 +3456,23 @@ def _format_dag(session) -> dict:
 
 @router.post("/{notebook_id}/cells/{cell_id}/execute")
 async def execute_cell(
-    notebook_id: str, session: SessionDep, cell_id: str, mode: str = "normal"
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    mode: str = "normal",
+    confirm_reads: bool = False,
+    approve_reads: bool = False,
 ) -> dict:
     """Execute a cell and return its outputs and stdout/stderr.
 
     ``mode`` mirrors the WS run modes: ``normal`` (cache on, cascade stale
     upstreams), ``rerun`` (bypass the target's cache, still cascade), or ``force``
     (run against existing upstream artifacts).
+
+    A run that reads past the host's threshold goes ahead and records it did unasked,
+    unless ``confirm_reads``: then it answers 409 ``large_read`` with the estimate.
+    ``approve_reads`` is the yes: it is kept, as a notebook's Run keeps it, and the cell
+    runs.
     """
 
     if mode not in ("normal", "rerun", "force"):
@@ -3486,7 +3496,29 @@ async def execute_cell(
     # The shared execute path, so REST/CLI/MCP runs broadcast the same frames to
     # WS spectators. The exclusive wrapper takes the WS handlers' reservation, so
     # a REST run can't race a browser Run click on the same session.
-    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
+    from strata.notebook.ws import (
+        NotebookBusyError,
+        execute_cell_exclusive,
+        large_read_message,
+        reads_to_confirm,
+        run_cells,
+    )
+
+    if confirm_reads or approve_reads:
+        asking = await reads_to_confirm(
+            session, run_cells(session, cell_id, mode), force=mode != "normal"
+        )
+        if asking and not approve_reads:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": large_read_message(session),
+                    "code": "large_read",
+                    "cells": [read.payload() for read in asking],
+                },
+            )
+        for read in asking:
+            session.approve_reads(read.cell_id, read.machine, read.fingerprint)
 
     try:
         result = await execute_cell_exclusive(

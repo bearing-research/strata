@@ -46,6 +46,7 @@ All messages are JSON with this shape:
 | `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell (see [Cancelling a SQL cell](#cancelling-a-sql-cell)); REST twin: [`POST …/cells/{cell_id}/cancel`](rest-api.md#cancel-cell-rest) |
 | `notebook_run_all`     | `{ "continue_on_error": true }`          | Run all cells in topological order (default continues on error) |
 | `notebook_rerun_all`   | `{ "continue_on_error": true }`          | Re-execute every cell with cache off                        |
+| `read_confirm`         | `{ "prompt_id": "..." }`                 | Run what a `read_confirm_prompt` asked about. Each cell's yes is kept for its machine and inputs. Cancel sends nothing |
 
 ### Cell Editing
 
@@ -124,6 +125,7 @@ A cell run as an upstream inside another cell's run may get its console and resu
 | ------------------ | ---------------------------------------------------------------------------- | ----------------------------- |
 | `cascade_prompt`   | `{ "cell_id": "...", "plan_id": "...", "cells_to_run": [...], "estimated_duration_ms": 0 }` | Upstream cells need execution. `cells_to_run` is the cells that will run, in order; ready upstreams are left out |
 | `cascade_progress` | `{ "plan_id": "...", "current_cell_id": "...", "completed": 1, "total": 3 }` | Sent as each cell starts. `completed` counts finished cells of the `total` that run; a cascade that succeeds ends with a frame where `completed` equals `total` |
+| `read_confirm_prompt` | `{ "prompt_id": "...", "cells": [{ "cell_id": "...", "machine": "local", "inputs": [...], "bytes_to_move": 12000000000, "cost": 1.08 }], "message": "..." }` | A run would read past the server's [threshold](../notebook/lake-aware-cells.md#asking-before-a-large-read), and nothing started. Each cell lists its inputs as `cell_inputs` does, the bytes its machine does not hold, and their cost in dollars. `message` is the host's sentence, when set. Answer with `read_confirm` |
 
 ### DAG
 

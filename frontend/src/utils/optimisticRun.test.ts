@@ -40,3 +40,12 @@ test('other errors and other cells are left alone', () => {
   assert.equal(runs.refused(null), null)
   assert.deepEqual(runs.refused(busy('b')), { cellId: 'b', status: 'ready' })
 })
+
+test('a run held back to ask first puts every clicked cell back, once', () => {
+  const runs = new OptimisticRuns()
+  runs.start('a', 'stale')
+  runs.start('b', 'idle')
+  runs.settle('b')
+  assert.deepEqual(runs.takeAll(), [{ cellId: 'a', status: 'stale' }])
+  assert.deepEqual(runs.takeAll(), [])
+})

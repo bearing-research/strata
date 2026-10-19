@@ -111,7 +111,7 @@ details stay in the server log.
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
-| `run_cell(session_id, cell_id, mode)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. |
+| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. With `confirm_reads`, a run over the server's read threshold returns `error_code: large_read` and the estimate instead; `approve_reads` runs it. |
 | `cancel_cell(session_id, cell_id)` | Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A `run_cell` waiting on it returns `status: error` with `error_code: cancelled`. Returns `{cell_id, cancelled, status}`; `cancelled` is `false` when the cell was not running. |
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
@@ -167,6 +167,13 @@ so retry once that run finishes.
 upstreams first; `rerun` bypasses the target's cache but still refreshes
 upstreams; `force` ("run this only") runs against whatever upstream artifacts
 already exist.
+
+On a server that [asks before a large read](lake-aware-cells.md#asking-before-a-large-read),
+pass `confirm_reads=true` so a run that would move more than the threshold
+returns `error_code: large_read` with each cell's inputs, `bytes_to_move` and
+`cost` rather than starting. Ask the user, then call again with
+`approve_reads=true`. Without either, the run goes ahead and the reads index
+records that it was not asked.
 
 `set_variant` drives [variant groups](annotations.md#variant-cells):
 `set_variant(session_id, "policy", active="service")` picks one variant,

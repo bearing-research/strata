@@ -231,6 +231,11 @@ export function useWebSocket(
     send('cell_execute_cascade', { cell_id: cellId, plan_id: planId })
   }
 
+  /** Run what a read_confirm_prompt asked about; the server keeps the yes. */
+  function confirmReads(promptId: string): void {
+    send('read_confirm', { prompt_id: promptId })
+  }
+
   /** Execute cell with stale inputs ("Run this only"). */
   function executeForce(cellId: string): void {
     send('cell_execute_force', { cell_id: cellId })
@@ -371,6 +376,7 @@ export function useWebSocket(
     executeCell,
     executeNotebookRunAll,
     executeCascade,
+    confirmReads,
     executeForce,
     executeRerun,
     executeNotebookRerunAll,

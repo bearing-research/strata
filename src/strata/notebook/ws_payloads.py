@@ -141,6 +141,32 @@ class CellInputsPayload(WsPayload):
     inputs: list[InputWeight]
 
 
+class ReadConfirmCell(WsPayload):
+    """One cell of a ``read_confirm_prompt``: its inputs on *machine* and what they'd move.
+
+    ``bytes_to_move`` is what the machine does not hold yet, of the sizes that are known;
+    ``cost`` is that at the host's rates, in dollars.
+    """
+
+    cell_id: str
+    machine: str
+    inputs: list[InputWeight]
+    bytes_to_move: int
+    cost: float
+
+
+class ReadConfirmPromptPayload(WsPayload):
+    """``read_confirm_prompt``: cells of a run would read more than the host allows unasked.
+
+    Nothing started. The client runs it by sending ``read_confirm`` with the ``prompt_id``;
+    each yes is kept for the cell's machine and inputs. ``message`` is the host's sentence.
+    """
+
+    prompt_id: str
+    cells: list[ReadConfirmCell]
+    message: str | None = None
+
+
 def cell_inputs_payload(cell_id: str, machine: str, weights: list[InputWeight]) -> dict[str, Any]:
     """Build a validated ``cell_inputs`` wire payload."""
     return CellInputsPayload(cell_id=cell_id, machine=machine, inputs=weights).model_dump(
@@ -533,5 +559,6 @@ FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
     MessageType.INSPECT_RESULT: InspectResultPayload,
     MessageType.PRESENCE: PresencePayload,
     MessageType.PROFILING_SUMMARY: ProfilingSummaryPayload,
+    MessageType.READ_CONFIRM_PROMPT: ReadConfirmPromptPayload,
     MessageType.SESSION_CLOSED: SessionClosedPayload,
 }

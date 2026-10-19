@@ -29,6 +29,7 @@ const ImpactPreview = defineAsyncComponent(() => import('../components/ImpactPre
 const InspectSwapConfirm = defineAsyncComponent(
   () => import('../components/InspectSwapConfirm.vue'),
 )
+const ReadConfirm = defineAsyncComponent(() => import('../components/ReadConfirm.vue'))
 
 const props = defineProps<{ sessionId: string }>()
 
@@ -587,6 +588,7 @@ function goHome() {
 <template>
   <div class="app" data-testid="notebook-page">
     <InspectSwapConfirm />
+    <ReadConfirm />
     <!-- Header -->
     <header class="header">
       <div v-if="chrome.brand" class="header-left">

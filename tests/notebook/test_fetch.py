@@ -24,12 +24,17 @@ class _Origin:
     def __init__(self):
         self.body = b"zone,borough\n1,Queens\n"
         self.requests: list[tuple[str, dict[str, str]]] = []
+        self.methods: list[str] = []
         self.redirect_to: str | None = None
         origin = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
+            def do_HEAD(self):  # noqa: N802
+                self.do_GET()
+
             def do_GET(self):  # noqa: N802
                 origin.requests.append((self.path, dict(self.headers)))
+                origin.methods.append(self.command)
                 if origin.redirect_to and self.path == "/redirect":
                     self.send_response(302)
                     self.send_header("Location", origin.redirect_to)
@@ -45,7 +50,8 @@ class _Origin:
                 self.send_header("ETag", etag)
                 self.send_header("Content-Length", str(len(origin.body)))
                 self.end_headers()
-                self.wfile.write(origin.body)
+                if self.command == "GET":
+                    self.wfile.write(origin.body)
 
             def log_message(self, *args):
                 return None

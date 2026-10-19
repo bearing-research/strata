@@ -466,6 +466,13 @@ cell's cache, still materialize upstreams), or `force` (run against whatever
 upstream artifacts already exist). An unrecognized mode returns `400`.
 While another cell in the notebook runs, the request is refused with `409`.
 
+A run whose inputs would move more than the server's
+[threshold](../notebook/lake-aware-cells.md#asking-before-a-large-read) goes ahead
+and records that it was not asked. With `confirm_reads=true` it does not start:
+it answers `409` with `{"code": "large_read", "message": "...", "cells": [...]}`,
+each cell as in the WebSocket `read_confirm_prompt`. Sending the request again with
+`approve_reads=true` keeps the yes, as the notebook's Run does, and runs.
+
 !!! tip
 For interactive use, prefer the WebSocket `cell_execute` message. The REST endpoint is for programmatic access.
 
