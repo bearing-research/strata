@@ -41,6 +41,10 @@ class CatalogProvider(Protocol):
         """
         ...
 
+    def forget_named_catalogs(self) -> None:
+        """Drop what was built from the named-catalog settings, which have changed."""
+        ...
+
 
 _NAMED = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(?!//)(.+)$")
 
@@ -374,6 +378,12 @@ class PyIcebergCatalog:
             catalog = self._build_catalog(warehouse_path)
             self._catalogs[cache_key] = catalog
             return catalog
+
+    def forget_named_catalogs(self) -> None:
+        """Drop every named catalog built, so the next use reads the current settings."""
+        with self._lock:
+            for key in [key for key in self._catalogs if key.startswith("catalog:")]:
+                del self._catalogs[key]
 
     def _invalidate_catalog(self, warehouse_path: str | None) -> None:
         """Drop a cached catalog so the next access rebuilds its connection."""

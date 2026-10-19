@@ -52,6 +52,27 @@ class TestResolution:
         with pytest.raises(CredentialError, match=r"'lab-bucket'.*LAB_KEY"):
             CredentialResolver(REGISTRY).resolve("lab-bucket")
 
+    def test_a_file_reference_reads_the_file_at_each_resolve(self, tmp_path):
+        """Amber item 88: a host rotates a secret by rewriting the file."""
+        token = tmp_path / "token"
+        resolver = CredentialResolver({"lab": {"token": f"${{file:{token}}}"}})
+
+        token.write_text("first\r\n")
+        first = resolver.resolve("lab")
+        token.write_text("second")
+
+        assert (first, resolver.resolve("lab")) == ({"token": "first"}, {"token": "second"})
+
+    @pytest.mark.parametrize(
+        ("path", "said"),
+        [("relative/token", "not an absolute path"), ("/nonexistent/token", "cannot be read")],
+    )
+    def test_a_file_reference_that_cannot_be_read_names_the_credential(self, path, said):
+        resolver = CredentialResolver({"lab": {"token": f"${{file:{path}}}"}})
+
+        with pytest.raises(CredentialError, match=rf"'lab'.*file:{path}.*{said}"):
+            resolver.resolve("lab")
+
     def test_mount_options_layer_default_then_credential_then_the_mounts_own(self):
         resolver = CredentialResolver(
             {"org": {"endpoint_url": "https://org", "key": "o"}, "lab": {"key": "l"}},

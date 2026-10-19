@@ -127,6 +127,7 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 
 - A mount's fields become fsspec storage options; a connection's become driver `auth`.
 - `${VAR}` resolves against the notebook's environment first, which is where a configured [secret manager](#secret_manager-external-secret-manager-wiring) puts what it fetches, and then the server's.
+- `${file:/path}` is the file's contents, read each time the name resolves, without trailing line breaks. The path must be absolute. A host that writes secrets as files rotates one by rewriting its file, with no restart and no call.
 - The **name** is part of a cell's provenance, because a different credential can see different data. The **values** never are, so rotating a secret invalidates nothing.
 - A name the server does not define, or a reference that is not set, fails the cell with a message naming the credential.
 - `STRATA_NOTEBOOK_MOUNT_CREDENTIALS='{"s3": "org-bucket"}'` applies a credential to every mount of a scheme that names none, so the organization's primary store works without editing notebooks.
@@ -165,6 +166,39 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 
 Each exchange reads the file again, so a rewritten token is used at the next
 refresh without a restart. This holds on a server and on a worker alike.
+
+### Changing them while the server runs
+
+`PUT /v1/admin/notebook-credentials` replaces `notebook_credentials`,
+`notebook_mount_credentials`, `notebook_credential_paths`,
+`notebook_credential_writers` and `catalogs` together, so a source a host
+connects, rotates, restricts or removes reaches a running server without
+closing its sessions:
+
+```bash
+curl -X PUT "$STRATA/v1/admin/notebook-credentials" -H 'Content-Type: application/json' -d '{
+  "notebook_credentials": {"lab-bucket": {"key": "${file:/run/creds/lab-bucket/key}",
+                                          "secret": "${file:/run/creds/lab-bucket/secret}"}},
+  "notebook_mount_credentials": {"s3": "lab-bucket"},
+  "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}}
+}'
+```
+
+- A setting left out of the body is replaced by its default, as if unset.
+- The next run uses the new settings, in a session opened before the call too. A
+  running cell keeps what it resolved. A removed name fails its next use naming
+  it, as an unknown name does.
+- A changed catalog is rebuilt from its new properties at its next use.
+- It is validated as the settings are at startup, and a refused body (`400`)
+  changes nothing.
+- `GET` returns the five settings. A credential's literal values, and a
+  catalog's `uri` and secret-looking keys, read `<redacted>`; a `${...}`
+  reference is shown, since it only says where a value lives.
+- It changes this process only. A restart goes back to the environment, and
+  each replica of a service takes its own call. A remote worker resolves names
+  from its own environment and is unaffected.
+- Under principal auth it needs the `admin:notebook-credentials` scope. A cell's
+  run token never carries an `admin:` scope.
 
 A named catalog in the server's `STRATA_CATALOGS` takes one as
 `strata_credential`, so the catalog's secrets (a SQL catalog's database URI, a

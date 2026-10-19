@@ -853,38 +853,7 @@ class StrataConfig(BaseSettings):
 
     @model_validator(mode="after")
     def validate_catalog_uris(self) -> StrataConfig:
-        """Reject an object-store warehouse whose SQL catalog has no ``uri``.
-
-        Without one the catalog is SQLite on this server's disk, invisible to
-        every other reader of the bucket. Also reject a ``credential`` that names a
-        Strata credential: it would reach pyiceberg as a REST OAuth secret.
-        """
-        configured = {"catalog_properties": self.catalog_properties}
-        configured.update({f"catalogs.{name}": props for name, props in self.catalogs.items()})
-        for where, props in configured.items():
-            # Only a defined name is echoed, never a value that may be a secret.
-            if props.get("credential") in self.notebook_credentials:
-                raise ValueError(
-                    f"{where} sets credential = {props['credential']!r}, which is pyiceberg's "
-                    "REST OAuth secret; to use the Strata credential of that name, set "
-                    "strata_credential instead."
-                )
-            warehouse = props.get("warehouse", "")
-            credential = self.notebook_credentials.get(props.get("strata_credential", ""), {})
-            if (
-                "://" in warehouse
-                and not warehouse.startswith("file://")
-                and props.get("type", "sql") == "sql"
-                and "uri" not in props
-                and "uri" not in credential
-            ):
-                raise ValueError(
-                    f"{where} has the object-store warehouse {warehouse} but no "
-                    "catalog uri, so its tables would live in a SQLite catalog on "
-                    "this server's disk. Set the catalog database's uri (for "
-                    "catalog_properties, STRATA_CATALOG_URI), e.g. "
-                    "postgresql+psycopg://user:pass@host/iceberg_catalog."
-                )
+        check_catalogs(self.catalog_properties, self.catalogs, self.notebook_credentials)
         return self
 
     @model_validator(mode="after")
@@ -1462,3 +1431,42 @@ def _get_env_overrides() -> dict[str, Any]:
         }
 
     return overrides
+
+
+def check_catalogs(
+    catalog_properties: dict[str, str],
+    catalogs: dict[str, dict[str, str]],
+    notebook_credentials: dict[str, dict[str, str]],
+) -> None:
+    """Reject an object-store warehouse whose SQL catalog has no ``uri``.
+
+    Without one the catalog is SQLite on this server's disk, invisible to
+    every other reader of the bucket. Also reject a ``credential`` that names a
+    Strata credential: it would reach pyiceberg as a REST OAuth secret.
+    """
+    configured = {"catalog_properties": catalog_properties}
+    configured.update({f"catalogs.{name}": props for name, props in catalogs.items()})
+    for where, props in configured.items():
+        # Only a defined name is echoed, never a value that may be a secret.
+        if props.get("credential") in notebook_credentials:
+            raise ValueError(
+                f"{where} sets credential = {props['credential']!r}, which is pyiceberg's "
+                "REST OAuth secret; to use the Strata credential of that name, set "
+                "strata_credential instead."
+            )
+        warehouse = props.get("warehouse", "")
+        credential = notebook_credentials.get(props.get("strata_credential", ""), {})
+        if (
+            "://" in warehouse
+            and not warehouse.startswith("file://")
+            and props.get("type", "sql") == "sql"
+            and "uri" not in props
+            and "uri" not in credential
+        ):
+            raise ValueError(
+                f"{where} has the object-store warehouse {warehouse} but no "
+                "catalog uri, so its tables would live in a SQLite catalog on "
+                "this server's disk. Set the catalog database's uri (for "
+                "catalog_properties, STRATA_CATALOG_URI), e.g. "
+                "postgresql+psycopg://user:pass@host/iceberg_catalog."
+            )
