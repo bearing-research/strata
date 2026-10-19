@@ -3791,6 +3791,12 @@ exhaustive commit history.</p>
   <code>POST /v1/mount-cache/cached</code>, and the worker's result carries <code>mount_bytes</code>,
   what each mount downloaded, for the reads index. A pool is not asked, since
   its machine is not known before dispatch. (#1246)</li>
+<li><strong>A cell's table scans count what they read from storage.</strong> The reads index
+  records, for each <code>@table</code>, the compressed Parquet bytes the cell's scans
+  through the ambient <code>strata</code> client read from storage: 0 when the row-group
+  cache or a stored scan answered, <code>null</code> when the cell read the table some
+  other way. Every local run now gets a run token, sent with the cell's id; on a
+  server that does not authenticate callers it only counts. (#1247)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
