@@ -10,7 +10,7 @@ import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useStrata } from '../composables/useStrata'
 import { embedSnippet } from '../utils/embedSnippet'
-import { editorChrome, editorQuery } from '../utils/framed'
+import { editorChrome, editorQuery, isFramed } from '../utils/framed'
 import { BASE_PATH } from '../utils/strataBase'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
@@ -79,7 +79,10 @@ const {
   toasts,
   dismissToast,
   pushToast,
+  setFramed,
 } = useNotebook()
+// Before the socket opens: it posts each focused cell to the framing page.
+setFramed(isFramed(route.query))
 
 // 'execution' is the DAG/Notes/Profiling stack; 'registry' needs registryEnabled.
 const bottomTab = ref<'execution' | 'registry'>('execution')
