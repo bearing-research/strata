@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from functools import cached_property
 
 
 @dataclass(frozen=True)
@@ -22,9 +23,11 @@ class TransformSpec:
     params: dict
     inputs: list[str]
 
-    def to_json(self) -> str:
-        """Serialize to JSON string.
+    @cached_property
+    def canonical_json(self) -> str:
+        """The spec as stored and hashed; cached, so ``params`` must not change after use.
 
+        These bytes feed every provenance hash, so their format must not change.
         Inputs keep their caller order: positional executors bind them as ``input0,
         input1, ...``, so ``f(a, b)`` must not dedup against ``f(b, a)``.
         """
@@ -59,6 +62,6 @@ def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSp
     for h in sorted_inputs:
         hasher.update(h.encode("utf-8"))
         hasher.update(b"\x00")  # Separator
-    hasher.update(transform_spec.to_json().encode("utf-8"))
+    hasher.update(transform_spec.canonical_json.encode("utf-8"))
 
     return hasher.hexdigest()

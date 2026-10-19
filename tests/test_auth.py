@@ -493,7 +493,7 @@ class TestArtifactReadAcl:
         art = MagicMock()
         art.transform_spec = TransformSpec(
             executor="scan@v1", params={}, inputs=[table_uri]
-        ).to_json()
+        ).canonical_json
         art.input_versions = None
         return art
 
@@ -557,7 +557,7 @@ class TestArtifactReadAcl:
             executor="duckdb_sql@v1",
             params={},
             inputs=["strata://artifact/abc@v=1"],
-        ).to_json()
+        ).canonical_json
         art.input_versions = None
         set_principal(Principal(id="intruder"))
         try:

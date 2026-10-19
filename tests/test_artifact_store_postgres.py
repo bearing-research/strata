@@ -180,7 +180,7 @@ class TestRoundTrip:
 
         specs = store.ancestor_transform_specs(store.get_artifact("top", 1), max_depth=10)
 
-        assert sorted(specs) == sorted([scan.to_json(), _spec().to_json()])
+        assert sorted(specs) == sorted([scan.canonical_json, _spec().canonical_json])
 
     def test_name_reads_are_listed_per_tenant(self, store):
         edges = {"strata://name/taxi/model@champion": "m@v=1"}

@@ -1131,7 +1131,7 @@ class ArtifactStore:
                     version,
                     provenance_hash,
                     time.time(),
-                    transform_spec.to_json() if transform_spec else None,
+                    transform_spec.canonical_json if transform_spec else None,
                     input_versions_json,
                     # Tenantless rows store '' (never NULL) so the uniqueness index treats them as
                     # equal, as names/aliases/tags do.

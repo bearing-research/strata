@@ -25,13 +25,13 @@ def store(artifact_dir):
 
 
 class TestTransformSpec:
-    def test_to_json(self):
+    def test_canonical_json(self):
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT * FROM input"},
             inputs=["strata://table/db.events"],
         )
-        json_str = spec.to_json()
+        json_str = spec.canonical_json
         data = json.loads(json_str)
         assert data["executor"] == "local://duckdb_sql@v1"
         assert data["params"] == {"sql": "SELECT * FROM input"}
@@ -56,7 +56,7 @@ class TestTransformSpec:
             params={"expr": "col('a') + 1"},
             inputs=["input1", "input2"],
         )
-        restored = TransformSpec.from_json(original.to_json())
+        restored = TransformSpec.from_json(original.canonical_json)
         assert restored.executor == original.executor
         assert restored.params == original.params
         assert restored.inputs == original.inputs
@@ -108,6 +108,23 @@ class TestProvenanceHash:
         hash2 = compute_provenance_hash(["abc"], spec2)
         assert hash1 != hash2
 
+    def test_spec_bytes_and_hash_are_pinned(self):
+        """Every stored provenance hash depends on these bytes: a format change orphans them all."""
+        spec = TransformSpec(
+            executor="local://duckdb_sql@v1",
+            params={"sql": "SELECT * FROM input0", "b": [1, 2], "a": {"z": 1, "y": None}},
+            inputs=["strata://artifact/b@v=2", "file:///wh#db.events"],
+        )
+        assert spec.canonical_json == (
+            '{"executor": "local://duckdb_sql@v1", '
+            '"inputs": ["strata://artifact/b@v=2", "file:///wh#db.events"], '
+            '"params": {"a": {"y": null, "z": 1}, "b": [1, 2], "sql": "SELECT * FROM input0"}}'
+        )
+        assert (
+            compute_provenance_hash(["h2", "h1"], spec)
+            == "c96cecb9766d0728d2fc1ac223f0026613001bfbbd6b475b80933c5bc62eb6ff"
+        )
+
 
 class TestArtifactCRUD:
     def test_create_artifact(self, store):
@@ -146,7 +163,7 @@ class TestArtifactCRUD:
             transform_spec=spec,
         )
         artifact = store.get_artifact("test-id", version)
-        assert artifact.transform_spec == spec.to_json()
+        assert artifact.transform_spec == spec.canonical_json
 
     def test_finalize_artifact(self, store):
         version = store.create_artifact("test-id", "hash123")
