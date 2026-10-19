@@ -211,8 +211,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Security
 
-- **`GET /v1/cache/stats` needs `admin:cache`.** Its counts per table and
-  snapshot cover every tenant's cached data, like `/v1/cache/entries`, which
+- **`GET /v1/cache/stats` needs `admin:cache`.** Its counts per table cover
+  every tenant's cached data, like `/v1/cache/entries`, which
   already needed the scope; under principal auth any caller could read them.
   It also no longer walks the cache directory on the event loop. Personal mode
   is unchanged. (#1167)
@@ -233,6 +233,19 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   directory it owned for a symlink mid-walk and be given whatever the link
   named, such as `/etc`. The walk now holds each directory open and changes
   the run directory's own owner last. (#1219)
+- **Concurrent cache writes over the size cap no longer fail scans.** Each
+  row-group write that found the cache over `STRATA_MAX_CACHE_SIZE_BYTES`
+  started its own eviction walk, and one walk deleting files another was
+  measuring made the write raise, failing the scan that read the row group.
+  One walk runs at a time now, a file gone mid-walk is skipped, an eviction
+  error is logged rather than failing the write, and bytes written during a
+  walk stay counted. (#1222)
+- **Cache warming plans its tables off the event loop.** An async warming job
+  read each table's catalog entry and manifests on the server's event loop, so
+  a slow object store stalled every other request while it planned. (#1222)
+- **`GET /v1/cache/entries` and `POST /v1/cache/clear` run off the event
+  loop.** Listing read every entry's sidecar, and clearing deleted every cached
+  file, on the event loop, stalling other requests on a large cache. (#1222)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk
@@ -246,7 +259,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 - **Smaller fixes from the core data-plane review.** A disk-cache read that hits
   an I/O error (such as running out of file handles) is a miss that keeps the
   entry, instead of deleting a valid one. Stopping cache warming waits for the
-  jobs it cancels. A legacy SQLite store's tenant normalization runs in one
+  jobs it cancels and for the row-group reads they started, which kept writing
+  to the cache after shutdown moved on. A legacy SQLite store's tenant
+  normalization runs in one
   write transaction, so a failure part way keeps the old uniqueness index and
   two processes upgrading together cannot interleave. (#1172)
 - **A failed upload to S3 or GCS no longer leaves a truncated blob.** PyArrow

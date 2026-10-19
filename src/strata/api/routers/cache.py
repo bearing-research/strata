@@ -46,8 +46,8 @@ router = APIRouter(tags=["cache"])
 def get_cache_stats_v1():
     """Disk cache statistics (requires ``admin:cache``).
 
-    Counts per table and snapshot cover every tenant, and the totals come from walking the
-    cache directory, so this is an operator route and a ``def`` (off the event loop).
+    Counts per table cover every tenant, and the totals come from walking the cache
+    directory, so this is an operator route and a ``def`` (off the event loop).
     """
     from strata.cache.disk import DiskCache
     from strata.server import get_state
@@ -97,11 +97,11 @@ async def get_cache_histogram_v1():
 
 
 @router.get("/v1/cache/entries", dependencies=[require_scope("admin:cache")])
-async def list_cache_entries_v1():
+def list_cache_entries_v1():
     """List all cache entries with metadata (requires ``admin:cache``).
 
-    Cache-wide across tenants (table identity, snapshot, projection, on-disk path), so it is
-    operator introspection gated like ``/v1/cache/clear``.
+    Cache-wide across tenants (table, data file, row group, size), so it is operator
+    introspection gated like ``/v1/cache/clear``. A ``def``: it reads every entry's sidecar.
     """
     from strata.cache.disk import DiskCache
     from strata.server import get_state
@@ -115,8 +115,11 @@ async def list_cache_entries_v1():
 
 
 @router.post("/v1/cache/clear", dependencies=[require_scope("admin:cache")])
-async def clear_cache_v1():
-    """Clear the disk cache (requires ``admin:cache`` under trusted-proxy auth)."""
+def clear_cache_v1():
+    """Clear the disk cache (requires ``admin:cache`` under trusted-proxy auth).
+
+    A ``def``: it deletes every cached file.
+    """
     from strata.server import get_state
 
     state = get_state()

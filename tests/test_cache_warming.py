@@ -753,3 +753,76 @@ async def test_stop_waits_for_the_jobs_it_cancels():
     await warmer.stop()
 
     assert finished == [job_id]
+
+
+def _one_table_warmer(fetch_impl):
+    """A warmer whose planner returns one row group, fetched by ``fetch_impl``."""
+    from types import SimpleNamespace
+
+    from strata.cache.warmer import CacheWarmer
+
+    task = SimpleNamespace(file_path="/w/f0.parquet", row_group_id=0, cached=False, bytes_read=1)
+    planner = SimpleNamespace(plan=lambda **kw: SimpleNamespace(tasks=[task]))
+    fetcher = SimpleNamespace(fetch_as_stream_bytes=fetch_impl)
+    metrics = SimpleNamespace(log_event=lambda *a, **k: None)
+    return CacheWarmer(planner=planner, fetcher=fetcher, metrics=metrics)
+
+
+@pytest.mark.asyncio
+async def test_stop_waits_for_the_fetches_it_cancels():
+    """A fetch runs in a thread that cancelling its job does not stop, so stop returned while
+    it was still reading and writing the cache."""
+    import threading
+
+    from strata.types import WarmAsyncRequest
+
+    loop = asyncio.get_running_loop()
+    entered, release = threading.Event(), threading.Event()
+    fetched = asyncio.Event()
+
+    def fetch(task):
+        entered.set()
+        # A guard, so a fetch nobody releases fails the test rather than hanging it.
+        release.wait(timeout=30)
+        # Marked on the loop, so only a stop that waits for this thread sees it.
+        loop.call_soon_threadsafe(fetched.set)
+        return b""
+
+    warmer = _one_table_warmer(fetch)
+    await warmer.start()
+    job_id = await warmer.start_job(WarmAsyncRequest(tables=["file:///wh#ns.t"]))
+    assert await asyncio.to_thread(entered.wait, 30)
+    # The fetch ends only once its job is cancelled and gone, where stop used to return.
+    warmer._jobs[job_id]._task.add_done_callback(lambda _task: release.set())
+
+    await warmer.stop()
+
+    assert fetched.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_warm_job_plans_off_the_loop_as_its_tenant(monkeypatch):
+    """A plan reads the catalog and manifests, which a remote store serves over the network."""
+    from strata.cache.warmer import WarmingJob
+    from strata.tenancy.tenant import get_tenant_id, reset_tenant_id, set_tenant_id
+    from strata.types import WarmAsyncRequest
+    from tests.conftest import hold, ran_while_held
+
+    warmer = _one_table_warmer(lambda task: b"")
+    planned_as: list[str] = []
+    plan = warmer._planner.plan
+    monkeypatch.setattr(
+        warmer._planner, "plan", lambda **kw: planned_as.append(get_tenant_id()) or plan(**kw)
+    )
+    gate = hold(monkeypatch, warmer._planner, "plan")
+    job = WarmingJob(job_id="job-test", request=WarmAsyncRequest(tables=["file:///w#ns.t"]))
+
+    token = set_tenant_id("team-a")
+    try:
+        ran_while_planning, _ = await ran_while_held(gate, warmer._execute_warming(job))
+    finally:
+        reset_tenant_id(token)
+
+    assert ran_while_planning
+    assert planned_as == ["team-a"]
+    assert job.row_groups_cached == 1

@@ -101,6 +101,8 @@ class CacheWarmer:
         self._job_semaphore = asyncio.Semaphore(max_concurrent_jobs)
 
         self._cleanup_task: asyncio.Task | None = None
+        # Row-group fetches running in threads, which cancelling their job does not stop.
+        self._fetches: set[asyncio.Future] = set()
 
     async def start(self) -> None:
         """Start background cleanup task."""
@@ -123,8 +125,10 @@ class CacheWarmer:
                     job.cancelled = True
                     task.cancel()
                     cancelled.append(task)
-        # Wait them out, so none is still fetching after shutdown moves on.
+        # Wait them out, and the fetches their threads are still running, so none is still
+        # fetching after shutdown moves on.
         await asyncio.gather(*cancelled, return_exceptions=True)
+        await asyncio.gather(*self._fetches, return_exceptions=True)
 
     async def start_job(
         self,
@@ -274,20 +278,27 @@ class CacheWarmer:
                 if job.cancelled:
                     return ("cancelled", 0, None)
 
-                try:
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(None, self._fetcher.fetch_as_stream_bytes, task)
-                    if task.cached:
-                        return ("skipped", 0, None)
-                    return ("cached", task.bytes_read, None)
-                except Exception as exc:
-                    logger.exception(
-                        "cache warm job %s failed for %s row group %s",
-                        job.job_id,
-                        task.file_path,
-                        task.row_group_id,
-                    )
-                    return ("failed", 0, str(exc))
+                loop = asyncio.get_event_loop()
+                fetch = loop.run_in_executor(None, fetch_row_group, task)
+                self._fetches.add(fetch)
+                fetch.add_done_callback(self._fetches.discard)
+                # Shielded: cancelling the job cannot stop the thread, so stop waits for it.
+                return await asyncio.shield(fetch)
+
+        def fetch_row_group(task: Task) -> tuple[str, int, str | None]:
+            try:
+                self._fetcher.fetch_as_stream_bytes(task)
+            except Exception as exc:
+                logger.exception(
+                    "cache warm job %s failed for %s row group %s",
+                    job.job_id,
+                    task.file_path,
+                    task.row_group_id,
+                )
+                return ("failed", 0, str(exc))
+            if task.cached:
+                return ("skipped", 0, None)
+            return ("cached", task.bytes_read, None)
 
         for table_uri in request.tables:
             if job.cancelled:
@@ -296,7 +307,10 @@ class CacheWarmer:
             job.current_table = table_uri
 
             try:
-                plan = self._planner.plan(
+                # Off the loop: planning reads the catalog and manifests from the object store.
+                # to_thread copies the context, so the plan runs as the job's tenant.
+                plan = await asyncio.to_thread(
+                    self._planner.plan,
                     table_uri=table_uri,
                     snapshot_id=request.snapshot_id,
                     columns=request.columns,

@@ -1615,6 +1615,47 @@ class TestServiceModeReviewFindings:
         assert "could not be reached" in response.json()["detail"]
         assert "00001.metadata.json" not in response.text
 
+    @pytest.mark.parametrize(
+        ("path", "transform"),
+        [
+            ("/v1/materialize", {"executor": "scan@v1", "params": {}}),
+            (
+                "/v1/artifacts/materialize",
+                {"executor": "duckdb_sql@v1", "params": {"sql": "SELECT 1"}},
+            ),
+        ],
+        ids=["scan", "transform-input"],
+    )
+    def test_an_unreachable_object_store_while_reading_a_footer_is_a_503(
+        self, server_mode_app, server_mode_config, temp_warehouse, monkeypatch, path, transform
+    ):
+        """The planner reads each data file's Parquet footer too; wrapping that read's error
+        hid the outage from the 503 check, so it came back as a 500 or a 400."""
+        import strata.server as server_module
+        from strata.cache.metadata import ParquetMetadataCache
+        from strata.planner import ReadPlanner
+
+        def unreachable(self, file_path):
+            raise OSError(
+                "When reading information for key 'wh/data/00000.parquet' in bucket 'lake': "
+                "AWS Error NETWORK_CONNECTION during HeadObject operation: curlCode: 7, "
+                "Couldn't connect to server"
+            )
+
+        monkeypatch.setattr(ParquetMetadataCache, "_load_metadata", unreachable)
+        server_module._state._draining = False  # a MagicMock attribute is truthy
+        server_module._state.planner = ReadPlanner(server_mode_config)
+
+        response = server_mode_app.post(
+            path,
+            json={"inputs": [temp_warehouse["table_uri"]], "transform": transform},
+            headers=_auth_headers(scopes="admin:*"),
+        )
+
+        assert response.status_code == 503, response.text
+        assert response.headers["Retry-After"] == "5"
+        assert "00000.parquet" not in response.text
+
     def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_auth_app):
         """The build carries input_uris and params, so the pull-model manifest is not empty."""
         # Artifact inputs resolve through the store (tenant-gated), so a fictional id is a

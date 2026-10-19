@@ -456,3 +456,111 @@ class TestEvictionWithoutWalkingOnEveryPut:
         self._put(cache, 3, sample_batch)
 
         assert cache.contains(self._key(3))
+
+    def _over_the_limit_on_next_put(self, cache: DiskCache, batch) -> int:
+        """Put entries 0-2 under a limit of 3.5 entries, so entry 3's put evicts; return a size."""
+        size = 0
+        for i in range(3):
+            size = self._put(cache, i, batch)
+        cache.max_size_bytes = int(size * 3.5)
+        return size
+
+    @staticmethod
+    def _on_stat_of(monkeypatch, path: Path, action) -> None:
+        """Run ``action`` the first time ``path`` is stat'ed, then stat it as before."""
+        original = Path.stat
+        fired = []
+
+        def stat(self, *args, **kwargs):
+            if self == path and not fired:
+                fired.append(True)
+                action()
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", stat)
+
+    def test_an_entry_gone_mid_walk_does_not_fail_the_put(
+        self, strata_config, sample_batch, monkeypatch
+    ):
+        """Another walk's eviction can remove an entry this walk listed; the put still lands."""
+        cache = DiskCache(strata_config)
+        size = self._over_the_limit_on_next_put(cache, sample_batch)
+        first = cache.get_path(self._key(0))
+        assert first is not None
+        self._on_stat_of(monkeypatch, first, lambda: cache._delete_entry_files(first))
+
+        cache.put(self._key(3), sample_batch)
+
+        assert [cache.contains(self._key(i)) for i in range(4)] == [False, False, True, True]
+        assert cache._size_bytes == cache.get_size_bytes() == 2 * size
+
+    def test_an_entry_gone_while_a_new_cache_counts_does_not_fail_it(
+        self, strata_config, sample_batch, monkeypatch
+    ):
+        """Another process sharing the cache can evict an entry this one is counting at start."""
+        cache = DiskCache(strata_config)
+        size = self._over_the_limit_on_next_put(cache, sample_batch)
+        first = cache.get_path(self._key(0))
+        assert first is not None
+        self._on_stat_of(monkeypatch, first, lambda: cache._delete_entry_files(first))
+
+        restarted = DiskCache(strata_config)
+
+        assert restarted._size_bytes == 2 * size
+
+    def test_a_put_during_the_walk_is_counted(self, strata_config, sample_batch, monkeypatch):
+        """The walk adjusts the count rather than overwriting what puts added meanwhile."""
+        cache = DiskCache(strata_config)
+        self._over_the_limit_on_next_put(cache, sample_batch)
+        first = cache.get_path(self._key(0))
+        assert first is not None
+        self._on_stat_of(monkeypatch, first, lambda: cache.put(self._key(9), sample_batch))
+
+        cache.put(self._key(3), sample_batch)
+
+        assert cache.contains(self._key(9))
+        assert cache._size_bytes == cache.get_size_bytes()
+
+    def test_a_failed_eviction_does_not_fail_the_put(
+        self, strata_config, sample_batch, monkeypatch
+    ):
+        """The entry is written by then; a scan should not fail its row group over eviction."""
+        cache = DiskCache(strata_config)
+
+        def evict():
+            raise PermissionError("cannot unlink")
+
+        monkeypatch.setattr(cache, "_evict_if_needed", evict)
+
+        cache.put(self._key(0), sample_batch)
+
+        assert cache.contains(self._key(0))
+
+
+class TestStaleTempFilesAreSwept:
+    """A crash between writing a put's temp file and renaming it leaves the temp file behind."""
+
+    @staticmethod
+    def _temp_file(cache_dir: Path, name: str, mtime: float) -> Path:
+        path = cache_dir / f"v{CACHE_VERSION}" / "0123abcd" / "ab" / "cd" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"partial")
+        os.utime(path, (mtime, mtime))
+        return path
+
+    def test_an_old_temp_file_is_removed_on_start(self, strata_config):
+        stale = self._temp_file(strata_config.cache_dir, "abcd.1234abcd.tmp", 0)
+
+        DiskCache(strata_config)
+
+        assert not stale.exists()
+
+    def test_a_fresh_temp_file_is_kept(self, strata_config):
+        """Another process sharing the cache may be about to rename it into place."""
+        import time
+
+        fresh = self._temp_file(strata_config.cache_dir, "abcd.1234abcd.tmp", time.time())
+
+        DiskCache(strata_config)
+
+        assert fresh.exists()
