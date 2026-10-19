@@ -3428,7 +3428,9 @@ local <code>Path</code> with the same name it has on the server before the cell 
 worker too old to take one is refused before the cell runs.</p>
 <p><strong>In a <code># @loop</code> cell the folder lasts the whole loop</strong>, and each iteration's
 contents are stored as its <code>@iter=k</code> version (<a href="../cells/#output-folders">loop cells</a>).</p>
-<p>For now run-all runs a cell with a folder on its own rather than in a batch.
+<p>For now run-all runs a cell with a folder on its own rather than in a batch,
+and the <a href="../../deployment/service-mode/#the-team-cache-sharing-results-nobody-named">team cache</a>
+neither offers nor serves a cell with a folder: it runs locally.
 An R cell gets the folder as a path string and its folder is kept, but cannot
 read another cell's folder yet.</p>
 <h2 id="nocache">@nocache<a class="headerlink" href="#nocache" title="Permanent link">&para;</a></h2>

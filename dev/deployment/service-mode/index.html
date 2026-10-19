@@ -3124,6 +3124,10 @@ exactly the case the shared store exists to create.</p>
   it does not look like the cache is simply empty.</li>
 <li><strong>It never fails a cell.</strong> A store that is unreachable, refusing, or missing
   one of a cell's outputs ends in "run it locally".</li>
+<li><strong>A cell with a <a href="../../notebook/annotations/#output_dir"><code># @output_dir</code></a>
+  folder is not shared.</strong> The folder's files are kept as artifacts of their own,
+  which the store does not hold, so the cell is neither offered nor served from
+  it: it runs locally.</li>
 <li><strong>A notebook whose environment does not match its lockfile will not publish.</strong>
   A failed <code>uv sync</code> keeps the previous venv and stays usable on purpose, so a
   transient network failure does not lock you out of your own notebook - but
