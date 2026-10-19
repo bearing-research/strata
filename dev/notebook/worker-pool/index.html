@@ -2291,6 +2291,15 @@ number times however many tenants show up. Unset means no ceiling, which is
 right for a single-tenant pool and wrong for a hosted one. Hitting the
 ceiling logs a warning: a capped fleet looks exactly like a slow queue from
 the outside.</p>
+<p>Since a machine serves one tenant, it can boot with that tenant's own secrets.
+<code>Pool(tenant_env=...)</code> takes a callable, sync or async,
+<code>(tenant_id, machine_type) -&gt; dict[str, str]</code>, asked each time a machine
+starts for a tenant. Its variables go over the type's <code>env</code>, and the worker
+token wins over both. The answer is used for that boot only: it is never
+stored, logged or put on a span. A callable that raises fails the start as a
+backend failure does, and the job stays queued. A worker reads
+<code>STRATA_NOTEBOOK_CREDENTIALS</code> and <code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code> there
+and keeps them from its cells, so a tenant's mounts work on its machines.</p>
 <p>Still missing: any restriction on the container's own network access.</p>
 <h2 id="several-processes-over-one-store">Several processes over one store<a class="headerlink" href="#several-processes-over-one-store" title="Permanent link">&para;</a></h2>
 <p><code>PoolStore</code> is a SQLite file, and one pool process on it is the simple

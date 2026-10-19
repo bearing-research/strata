@@ -3760,6 +3760,11 @@ exhaustive commit history.</p>
   each focus change posts <code>{type: 'strata:frame:focus', sessionId, cellId}</code> to
   the parent, so a platform's panel beside the frame can follow the member's
   cell. (#1231)</li>
+<li><strong><code>Pool(tenant_env=...)</code></strong> in <code>strata-pool</code> boots each machine with its
+  tenant's own variables, such as <code>STRATA_NOTEBOOK_CREDENTIALS</code>, from a
+  callable asked at each start, over the machine type's <code>env</code>. They are never
+  stored or logged, and a callable that raises fails the start, leaving the
+  job queued. (#1232)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
