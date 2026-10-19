@@ -264,7 +264,7 @@ test('applyWorkerHealth updates only the targeted remote worker entry', () => {
   assert.notEqual(after[1], before[1])
 })
 
-test("a queued remote cell shows its dispatcher's sentence, else its place in line", () => {
+test("a remote cell shows its dispatcher's sentence, else while queued its place in line", () => {
   const base = { status: 'running', remoteWorkerName: 'team-a100', remoteBuildState: 'starting' }
 
   assert.deepEqual(
@@ -281,9 +281,17 @@ test("a queued remote cell shows its dispatcher's sentence, else its place in li
   })
   // A dispatcher that says nothing about its queue leaves the badge as it was.
   assert.equal(remoteDispatchBadge(base)?.label, 'starting → team-a100')
+  assert.deepEqual(
+    remoteDispatchBadge({
+      ...base,
+      remoteBuildState: 'running',
+      remoteQueuePosition: 1,
+      remoteQueueDetail: 'Runs on team-cpu, slot 1.',
+    }),
+    { label: 'Runs on team-cpu, slot 1.', title: 'Running on "team-a100"' },
+  )
   assert.equal(
-    remoteDispatchBadge({ ...base, remoteBuildState: 'running', remoteQueueDetail: 'stale' })
-      ?.label,
+    remoteDispatchBadge({ ...base, remoteBuildState: 'running' })?.label,
     'dispatching → team-a100',
   )
   assert.equal(remoteDispatchBadge({ ...base, status: 'ready' }), null)

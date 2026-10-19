@@ -225,6 +225,35 @@ async def test_a_queued_jobs_place_reaches_the_badge_when_it_changes(run_cell):
     ]
 
 
+@pytest.mark.parametrize("transport", ["signed", "direct"])
+async def test_a_running_jobs_sentence_reaches_the_badge_when_it_changes(run_cell, transport):
+    """Amber item 94: where a running job runs stays on the badge; its position does not."""
+
+    def running(detail: str | None) -> dict:
+        return {"state": "running", "position": 1, "detail": detail}
+
+    result, _, phases = await run_cell(
+        [
+            {"state": "queued", "detail": "Starting a cpu-4x."},
+            running("Runs on a new cpu-4x, started for it."),
+            running("Runs on a new cpu-4x, started for it."),
+            running("Runs on team-cpu, slot 1."),
+            running(None),
+            "finished",
+        ],
+        transport=transport,
+    )
+
+    assert result.success, result.error
+    assert phases == [
+        "starting",
+        ("starting", None, "Starting a cpu-4x."),
+        ("running", None, "Runs on a new cpu-4x, started for it."),
+        ("running", None, "Runs on team-cpu, slot 1."),
+        "running",
+    ]
+
+
 @pytest.mark.parametrize(
     ("job", "expected"),
     [

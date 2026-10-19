@@ -195,8 +195,8 @@ export function summarizeRemoteExecutionIssue(
 }
 
 /**
- * The badge on a remote cell in flight: where it is dispatched, and, while a
- * dispatcher queues it, the dispatcher's own sentence or its place in line.
+ * The badge on a remote cell in flight: where it is dispatched, and the
+ * dispatcher's own sentence, or while it queues the cell, its place in line.
  */
 export function remoteDispatchBadge(params: {
   status: string
@@ -216,6 +216,9 @@ export function remoteDispatchBadge(params: {
       return { label: `queued #${position} → ${worker}`, title: `Queued for "${worker}"` }
     }
     return { label: `starting → ${worker}`, title: 'Cell is executing on a remote worker' }
+  }
+  if (remoteBuildState === 'running' && params.remoteQueueDetail) {
+    return { label: params.remoteQueueDetail, title: `Running on "${worker}"` }
   }
   return { label: `dispatching → ${worker}`, title: 'Cell is executing on a remote worker' }
 }
