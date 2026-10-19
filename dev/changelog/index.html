@@ -3783,9 +3783,10 @@ exhaustive commit history.</p>
   its bytes as it writes, from one walk at startup, and walks only to evict
   once the count passes <code>STRATA_MAX_CACHE_SIZE_BYTES</code>. (#1213)</li>
 <li><strong>A cell runs in its notebook's <code>work/</code>, not beside <code>notebook.toml</code>.</strong> Python
-  and R cells, Run All, the warm pool and the inspect REPL all start there, so a
-  relative path a cell writes lands in <code>work/</code> and a file beside the notebook is
-  <code>../&lt;path&gt;</code>; a Python cell that misses one gets a hint naming it. Under
+  and R cells, Run All, the warm pool, the inspect REPL and a cell's tests all
+  start there, so a relative path a cell writes lands in <code>work/</code> and a file
+  beside the notebook is <code>../&lt;path&gt;</code>; a Python cell that misses one gets a hint
+  naming it. Under
   <code>STRATA_NOTEBOOK_HARNESS_USER</code>, where a relative write failed with
   <code>PermissionError</code> in the server's directory, <code>work/</code> is handed to the cell's
   user and the notebook's own files stay the server's. A worker cell gets a
@@ -3902,6 +3903,16 @@ exhaustive commit history.</p>
 <li><strong><code>GET /v1/cache/entries</code> and <code>POST /v1/cache/clear</code> run off the event
   loop.</strong> Listing read every entry's sidecar, and clearing deleted every cached
   file, on the event loop, stalling other requests on a large cache. (#1222)</li>
+<li><strong>A <code># @loop</code> cell gets its <code># @table</code> names.</strong> Each iteration failed with a
+  <code>NameError</code> on <code>&lt;name&gt;_snapshot</code>, though the table's snapshot was in the
+  cell's provenance. Every iteration now gets <code>&lt;name&gt;</code> and <code>&lt;name&gt;_snapshot</code>,
+  at the snapshot the provenance records. An R cell, whose harness binds no
+  table names, now refuses <code># @table</code> rather than run without them. (#1225)</li>
+<li><strong>A <code># @loop</code> cell sent to a remote worker says where loops run.</strong> It
+  failed with "Remote-worker loops are not in the Phase 1 scope"; it now says
+  that a loop cell runs on the notebook's own server and to add
+  <code># @worker local</code> or move the work that needs the worker into an ordinary
+  cell. (#1225)</li>
 <li><strong>strata-pool's Docker backend removes a stopped worker's volumes.</strong> It
   removed the container but kept its anonymous volumes, so a worker image that
   declares <code>VOLUME</code> directories left one behind per worker until the disk

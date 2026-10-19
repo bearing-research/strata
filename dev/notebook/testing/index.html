@@ -2252,7 +2252,12 @@ run of the cell would (an unchanged upstream is a cache hit), so <code>cell.sale
 is current. The cell's <code>@fetch</code> files, <code>@mount</code> paths, <code>@dataset</code> values,
 <code>@table</code> names (and their <code>_snapshot</code> ids) and notebook and <code>@env</code> variables
 are bound as they are in a run. A fetch, dataset or table that cannot be
-resolved fails the run with one errored result naming it.</p>
+resolved fails the run with one errored result naming it. The cell runs in the
+notebook's <code>work/</code>, as in a run, so its relative paths read and write the same
+files. Each <code># @output_dir</code> name is a fresh, empty folder for the test run;
+nothing a test writes there is stored. There is no ambient <code>strata</code> client: a
+cell or test that uses it errors with a note saying so, so do a scan or read in
+an upstream cell and test with its result.</p>
 <p><img alt="A Python cell with its results table above an open Tests panel: the test
 source, a green &quot;2 passed&quot; summary, and a tick beside each test name. The flask
 toggle on the cell's left rail carries a green 2/2
