@@ -2946,6 +2946,10 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 <td>The server-managed worker registry, every <code>/v1/admin/notebook-workers*</code> route (list, replace, add, update, delete, refresh, reload); a personal server, which has no principal auth, serves them to whoever can reach it</td>
 </tr>
 <tr>
+<td><code>admin:notebook-credentials</code></td>
+<td><code>GET</code> and <code>PUT /v1/admin/notebook-credentials</code>, a running server's named credentials and catalogs (see <a href="../../reference/notebook-toml/#changing-them-while-the-server-runs">Changing them while the server runs</a>)</td>
+</tr>
+<tr>
 <td><code>admin:notebooks</code></td>
 <td>Quiescing a notebook or project and releasing it (<code>POST /v1/notebooks/{id}/quiesce</code> and <code>/release</code>, <code>POST /v1/projects/{path}/quiesce</code> and <code>/release</code>)</td>
 </tr>

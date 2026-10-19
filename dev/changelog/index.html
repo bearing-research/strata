@@ -3770,6 +3770,13 @@ exhaustive commit history.</p>
   and one with <code>tenant_id</code>, <code>client_id</code> and <code>federated_token_file</code> reads Azure
   through an Entra ID app, each with no stored key. Both read the token file
   again at every exchange, so a rewritten token needs no restart. (#1237)</li>
+<li><strong><code>PUT /v1/admin/notebook-credentials</code></strong> replaces a running server's named
+  credentials, their paths, writers and scheme defaults, and <code>STRATA_CATALOGS</code>
+  together, used from the next run in every open session; a changed catalog is
+  rebuilt. <code>GET</code> shows them with literal secrets redacted. It needs the
+  <code>admin:notebook-credentials</code> scope. A credential value can now be
+  <code>${file:/path}</code>, the file's contents at each use, so rewriting the file
+  rotates the secret. (#1244)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
