@@ -257,12 +257,12 @@ exhaustive commit history.
   `NameError` on `<name>_snapshot`, though the table's snapshot was in the
   cell's provenance. Every iteration now gets `<name>` and `<name>_snapshot`,
   at the snapshot the provenance records. An R cell, whose harness binds no
-  table names, now refuses `# @table` rather than run without them. (#PR)
+  table names, now refuses `# @table` rather than run without them. (#1225)
 - **A `# @loop` cell sent to a remote worker says where loops run.** It
   failed with "Remote-worker loops are not in the Phase 1 scope"; it now says
   that a loop cell runs on the notebook's own server and to add
   `# @worker local` or move the work that needs the worker into an ordinary
-  cell. (#PR)
+  cell. (#1225)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk
