@@ -290,7 +290,8 @@ jobs:
       # run as the harness user must not read the server's environment through
       # /proc, writes through a read-write mount it is handed, writes in its
       # notebook's work/ but not beside notebook.toml, and scans a table through
-      # a trusted_proxy server with its run's token. That user
+      # a trusted_proxy server with its run's token, and loses a process an earlier
+      # cell left running before the next run starts. That user
       # must reach the venv's interpreter and the checkout, so
       # every directory on both paths gets o+x.
       - name: Harness-user isolation (Linux, root)
@@ -305,10 +306,10 @@ jobs:
           set -o pipefail
           sudo env "PATH=$PATH" STRATA_TEST_HARNESS_USER=strata-cells \
             .venv/bin/python -m pytest tests/test_harness_isolation.py \
-            -k "cannot_read_the_servers_environment or writes_through_a_read_write_mount or writes_in_its_work_directory or scans_a_table_through_its_server" \
+            -k "cannot_read_the_servers_environment or writes_through_a_read_write_mount or writes_in_its_work_directory or scans_a_table_through_its_server or leaves_running" \
             -p no:cacheprovider --basetemp=/tmp/strata-harness-e2e -v | tee harness-e2e.log
           # A skip passes pytest; here it would mean nothing was checked.
-          grep -q " 4 passed" harness-e2e.log
+          grep -q " 5 passed" harness-e2e.log
 
   # E2E and integration tests, Ubuntu only for speed.
   e2e-tests:

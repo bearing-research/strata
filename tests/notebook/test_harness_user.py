@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -19,10 +20,14 @@ from strata.notebook.harness_user import (
     REFUSAL,
     HarnessUser,
     LocalExecutionRefused,
+    _process_table,
     hand_over,
     identity_env,
+    leftover_processes,
+    prepare_work_dir,
     resolve_harness_user,
     spawn_kwargs,
+    sweep_leftovers,
 )
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="OS users are POSIX here")
@@ -371,3 +376,155 @@ class TestEveryPlaceCellCodeStarts:
         asyncio.run(pool_module.WarmProcessPool(tmp_path, pool_size=1)._spawn_warm_process())
 
         assert spawned == []
+
+
+class TestLeftoverProcesses:
+    """Which harness-user processes a run no longer holds. A table is pid -> (parent, uid,
+    session); the server is 100, started by 50 (a supervisor that runs other workers)."""
+
+    CELLS, OTHER = 2000, 3000
+    BASE = {1: (0, 0, 1), 50: (1, 0, 50), 100: (50, 0, 50)}
+
+    def _leftovers(self, **procs: tuple[int, int, int]) -> list[int]:
+        table = dict(self.BASE)
+        table.update({int(pid[1:]): proc for pid, proc in procs.items()})
+        return sorted(leftover_processes(table, 100, self.CELLS))
+
+    def test_a_running_harness_and_its_children_are_held(self):
+        assert self._leftovers(p200=(100, self.CELLS, 200), p201=(200, self.CELLS, 200)) == []
+
+    def test_another_worker_of_the_same_server_holds_its_cells(self):
+        assert self._leftovers(p300=(50, 0, 50), p301=(300, self.CELLS, 301)) == []
+
+    def test_an_orphan_still_in_a_running_cells_session_is_held(self):
+        """``cmd &`` from a shell the cell ran: init adopts it, the session stays."""
+        assert self._leftovers(p200=(100, self.CELLS, 200), p202=(1, self.CELLS, 200)) == []
+
+    def test_a_process_that_left_its_session_is_a_leftover_while_its_cell_runs(self):
+        assert self._leftovers(p200=(100, self.CELLS, 200), p203=(1, self.CELLS, 203)) == [203]
+
+    def test_an_orphan_whose_cell_ended_is_a_leftover(self):
+        assert self._leftovers(p202=(1, self.CELLS, 200)) == [202]
+
+    def test_a_double_forked_daemon_and_its_children_are_leftovers(self):
+        assert self._leftovers(p400=(1, self.CELLS, 399), p401=(400, self.CELLS, 399)) == [
+            400,
+            401,
+        ]
+
+    def test_another_users_orphan_is_left_alone(self):
+        assert self._leftovers(p500=(1, self.OTHER, 500)) == []
+
+    def test_a_parent_loop_from_a_reused_pid_is_not_held(self):
+        assert self._leftovers(p600=(601, self.CELLS, 600), p601=(600, self.CELLS, 600)) == [
+            600,
+            601,
+        ]
+
+
+@posix_only
+class TestSweep:
+    CELLS = 2000
+
+    @pytest.fixture
+    def killed(self, monkeypatch) -> list[tuple[int, int]]:
+        from strata.notebook import harness_user
+
+        sent: list[tuple[int, int]] = []
+        monkeypatch.setattr(harness_user.sys, "platform", "linux")
+        monkeypatch.setattr(harness_user.os, "kill", lambda pid, sig: sent.append((pid, sig)))
+        server = os.getpid()
+        tables = iter(
+            [
+                {1: (0, 0, 1), server: (1, 0, server), 700: (1, self.CELLS, 700)},
+                {1: (0, 0, 1), server: (1, 0, server)},
+            ]
+        )
+        monkeypatch.setattr(harness_user, "_process_table", lambda: next(tables))
+        return sent
+
+    def _cells(self, uid: int = CELLS) -> HarnessUser:
+        return HarnessUser(name="cells", uid=uid, gid=uid, home="/")
+
+    def test_a_leftover_is_killed(self, killed):
+        import signal
+
+        sweep_leftovers(self._cells())
+
+        assert killed == [(700, signal.SIGKILL)]
+
+    @pytest.mark.parametrize("uid", ["root", "server"])
+    def test_root_or_the_servers_own_user_is_never_swept(self, killed, uid, monkeypatch):
+        """Every process of theirs outside the server would be a leftover: a login, init."""
+        from strata.notebook import harness_user
+
+        uid = 0 if uid == "root" else os.geteuid()
+        server = os.getpid()
+        table = {1: (0, 0, 1), server: (1, 0, server), 700: (1, uid, 700)}
+        monkeypatch.setattr(harness_user, "_process_table", lambda: table)
+
+        sweep_leftovers(self._cells(uid))
+
+        assert killed == []
+
+    def test_off_linux_nothing_is_swept(self, killed, monkeypatch):
+        from strata.notebook import harness_user
+
+        monkeypatch.setattr(harness_user.sys, "platform", "darwin")
+
+        sweep_leftovers(self._cells())
+
+        assert killed == []
+
+    def test_as_pid_1_nothing_is_swept(self, killed, monkeypatch):
+        """Every orphan is the server's child there, so none can be told from a cell."""
+        from strata.notebook import harness_user
+
+        monkeypatch.setattr(harness_user.os, "getpid", lambda: 1)
+
+        sweep_leftovers(self._cells())
+
+        assert killed == []
+
+    def test_a_directory_is_handed_over_only_after_a_sweep(self, tmp_path, monkeypatch):
+        from strata.notebook import harness_user
+
+        order: list[str] = []
+        monkeypatch.setattr(harness_user, "sweep_leftovers", lambda user: order.append("sweep"))
+        monkeypatch.setattr(harness_user.os, "chown", lambda *a, **k: order.append("chown"))
+
+        hand_over(tmp_path, self._cells(os.geteuid() + 1))
+
+        assert order[0] == "sweep" and "chown" in order
+
+    def test_work_is_handed_over_only_after_a_sweep(self, tmp_path, monkeypatch):
+        from strata.notebook import harness_user
+
+        order: list[str] = []
+        monkeypatch.setattr(harness_user, "sweep_leftovers", lambda user: order.append("sweep"))
+        monkeypatch.setattr(harness_user.os, "chown", lambda *a, **k: order.append("chown"))
+
+        prepare_work_dir(tmp_path, self._cells(os.geteuid() + 1))
+
+        assert order == ["sweep", "chown"]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="reads /proc")
+def test_the_process_table_is_read_from_proc_without_the_dead():
+    import subprocess
+    import time
+
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        deadline = time.monotonic() + 30
+        status = Path(f"/proc/{child.pid}/status")
+        while "\tZ" not in status.read_text().split("State:")[1][:3]:
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+
+        table = _process_table()  # imported before conftest stubs the module's
+
+        assert table[os.getpid()] == (os.getppid(), os.getuid(), os.getsid(0))
+        assert child.pid not in table
+    finally:
+        child.wait()

@@ -796,13 +796,23 @@ unpickles what a cell stored: prompt and SQL cells do not load a pickled value,
 and cell tests load their inputs in the test process.
 
 A cell run this way still shares the host's kernel and sees what any local user
-can. A process a cell starts in the background is not stopped when the cell
-finishes: it keeps running as the harness user, so the server never writes by
-path into a directory it has handed over. Such a process can still read and
-change what later runs of any notebook are handed (their per-run directories
-and staging copies) and read their environment through `/proc`. Strata does not
-stop it: `setsid` takes it out of the cell's process group, and killing by user
-would also kill other notebooks' running cells. A notebook that needs more isolation
+can. A process a cell leaves running is stopped before the next run is handed a
+directory, so it cannot read or change what later runs are given. On Linux,
+before each hand-over Strata kills (`SIGKILL`) every process of the harness user
+that no run holds. A run holds what descends from the server (or from a process
+that started the server, such as a supervisor running other workers of it), and
+what is still in the session of a running cell. So `cmd &` from a cell's shell
+lives until its cell ends, while a process that left with `setsid` is stopped at
+the next hand-over, even while its cell runs. Two things follow:
+
+- **The harness user is this server's alone.** Any other process of that user,
+  another server's cells or a login, is stopped too.
+- **The server must not be PID 1.** There, every orphan is the server's child,
+  so nothing is stopped and the server logs a warning. In a container, run it
+  under an init (`docker run --init`, or `init: true` in Compose).
+
+Until then the process runs as the harness user, so the server never writes by
+path into a directory it has handed over. A notebook that needs more isolation
 than that wants a worker on another machine.
 
 A cell's ambient `strata` client reaches this server with a token the server

@@ -13,11 +13,17 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import functools
+import logging
 import os
+import signal
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
+
+logger = logging.getLogger(__name__)
 
 REFUSAL = (
     "This server runs in service mode, where a cell run on the server's own host "
@@ -125,6 +131,98 @@ def identity_env(env: dict[str, str] | None, user: HarnessUser | None) -> dict[s
     return merged
 
 
+def leftover_processes(
+    table: dict[int, tuple[int, int, int]], server_pid: int, uid: int
+) -> list[int]:
+    """The processes of *uid* in *table* (pid -> (parent, uid, session)) no run holds.
+
+    A run holds what descends from the server, or from one of its ancestors (another
+    worker of the same server), and what is in the session of a live harness that
+    does: ``cmd &`` from a shell a cell ran is orphaned but stays in its cell's
+    session. A process that left it with ``setsid`` is held by nothing.
+    """
+    roots: set[int] = set()
+    pid = server_pid
+    while pid > 1 and pid in table and pid not in roots:
+        roots.add(pid)
+        pid = table[pid][0]
+
+    memo: dict[int, bool] = {}
+
+    def held(pid: int) -> bool:
+        chain: list[int] = []
+        while pid not in memo:
+            if pid in roots:
+                memo[pid] = True
+            elif pid <= 1 or pid not in table or pid in chain:
+                memo[pid] = False
+            else:
+                chain.append(pid)
+                pid = table[pid][0]
+        for seen in chain:
+            memo[seen] = memo[pid]
+        return memo[pid]
+
+    return [
+        pid
+        for pid, (_parent, owner, session) in table.items()
+        if owner == uid and not held(pid) and not (session in table and held(session))
+    ]
+
+
+def _process_table() -> dict[int, tuple[int, int, int]]:
+    """Every live process's (parent, real uid, session), from ``/proc``."""
+    table: dict[int, tuple[int, int, int]] = {}
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/status") as status:
+                fields = dict(line.split(":", 1) for line in status if ":" in line)
+        except OSError:
+            continue  # exited while listed
+        if fields["State"].split()[0] in ("Z", "X"):
+            continue  # dead, waiting to be reaped
+        table[int(name)] = (
+            int(fields["PPid"]),
+            int(fields["Uid"].split()[0]),
+            int(fields["NSsid"].split()[0]),
+        )
+    return table
+
+
+@functools.cache
+def _cannot_sweep_as_init() -> None:
+    logger.warning(
+        "Strata runs as PID 1, so every orphaned process is its child and a process a "
+        "cell left running cannot be told from a running one. It is not stopped; run "
+        "the server under an init (docker run --init)."
+    )
+
+
+def sweep_leftovers(user: HarnessUser | None) -> None:
+    """Stop every process the harness user has left running outside a live run.
+
+    Called before a directory is handed to a run, so a process an earlier cell left
+    behind cannot watch it. Any other process of that user is stopped too, which is
+    why the harness user must serve this server's cells only. Linux only.
+    """
+    if user is None or user.uid in (0, os.geteuid()) or sys.platform != "linux":
+        return
+    if os.getpid() == 1:
+        _cannot_sweep_as_init()
+        return
+    for _ in range(5):  # what a leftover forks while it is stopped is caught next pass
+        pids = leftover_processes(_process_table(), os.getpid(), user.uid)
+        if not pids:
+            return
+        logger.info("Stopping %d process(es) left running as %s", len(pids), user.name)
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+    logger.warning("Processes left running as %s keep forking; stopped what was there", user.name)
+
+
 def hand_over(path: Path, user: HarnessUser | None) -> None:
     """Give the harness user a per-run directory it has to write into.
 
@@ -133,6 +231,7 @@ def hand_over(path: Path, user: HarnessUser | None) -> None:
     """
     if user is None or user.uid == os.geteuid():
         return
+    sweep_leftovers(user)
     # By directory fd, never by path: the user can swap a directory it already owns for
     # a link between a path walk's link check and its descent. *path* goes last.
     for _root, dirs, files, root_fd in os.fwalk(path, follow_symlinks=False):
@@ -157,6 +256,7 @@ def prepare_work_dir(notebook_dir: Path, user: HarnessUser | None) -> Path:
     if not stat.S_ISDIR(mode):
         raise UnsafeRunFile(f"{work} is not a directory, so cells cannot run in it")
     if user is not None and user.uid != os.geteuid():
+        sweep_leftovers(user)
         os.chown(work, user.uid, user.gid, follow_symlinks=False)
     return work
 
