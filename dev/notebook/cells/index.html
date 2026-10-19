@@ -4447,7 +4447,7 @@ once you've thrown away the intermediates.</p>
 <li>Loops where intermediate state is genuinely disposable: store only the final answer in a regular Python cell.</li>
 <li>Anything that needs to branch out into multiple parallel runs: loop cells are sequential by design. Use separate cells, or model the fan-out in Python.</li>
 </ul>
-<p>A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare <code>@fetch</code> or <code>@dataset</code>; read those in an upstream cell.</p>
+<p>A loop cell checks the cache like any other cell, so running something downstream of a finished loop does not re-run it. A loop cell cannot declare <code>@fetch</code> or <code>@dataset</code>; read those in an upstream cell. A <code>@write_table</code> on a loop cell writes the final value once, after the last iteration.</p>
 <p>Reach for loop cells when <strong>being able to inspect or fork from iteration k matters</strong>. That's the feature you're paying for.</p>
 <hr />
 <h2 id="r-cells-020">R Cells <em>(0.2.0)</em><a class="headerlink" href="#r-cells-020" title="Permanent link">&para;</a></h2>

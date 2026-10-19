@@ -3680,11 +3680,16 @@ exhaustive commit history.</p>
 <li><strong>A cell writes a table: <code># @write_table &lt;var&gt; &lt;table&gt; append|overwrite|merge</code>.</strong>
   The server writes the variable into an Iceberg table when the run succeeds,
   before its outputs are kept: a failed write fails the cell and keeps nothing,
-  and a cache hit writes nothing. <code>merge</code> upserts on <code>on=&lt;col&gt;,...</code>. Each
-  snapshot names the output's artifact id, version and provenance hash; a
-  <code>@table</code> reader goes out of date after each write. Appending to or merging
-  into a table Strata did not create needs
-  <code>STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true</code>. (#1202)</li>
+  and a cache hit writes nothing. Going back to earlier source runs an
+  <code>overwrite</code> or <code>merge</code> cell again rather than hitting the cache, so the table
+  holds what the cell shows. <code>merge</code> upserts on <code>on=&lt;col&gt;,...</code>. A <code>@loop</code> cell
+  writes its final value once; a <code>@per_variant</code> cell may append or merge, not
+  overwrite. Each snapshot names the output's artifact id, version and
+  provenance hash; a <code>@table</code> reader goes out of date after each write.
+  Appending to or merging into a table Strata did not create needs
+  <code>STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true</code>. In service mode a write needs
+  what an export needs, <code>STRATA_SERVICE_WRITES_ENABLED=true</code> and the
+  <code>artifacts:write</code> scope, and is refused before the cell runs otherwise. (#1202)</li>
 <li><strong>A read-write mount works under the harness user.</strong> A remote <code>rw</code> mount's
   staging copy is handed to <code>STRATA_NOTEBOOK_HARNESS_USER</code>, which got
   <code>PermissionError</code> writing into the server's directory. The sync back, and the
@@ -3744,13 +3749,16 @@ exhaustive commit history.</p>
   member who started the run, without <code>admin:</code> scopes, on the ambient client's
   routes and its own session's promote, until the run ends. Run All shares one
   token. Personal mode is unchanged. (#1215)</li>
-<li><strong><code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code></strong> says who may mount a named
-  credential read-write, as globs over the principal who started the run.
-  Once it is set, even to <code>{}</code>, a name not listed is read-only: an <code>rw</code> mount
-  through it, from a cell or from <code>notebook.toml</code>, fails before anything is
-  staged, naming the credential, and so does one sent to a remote worker. An
-  <code>rw</code> mount on <code>s3</code>, <code>gs</code> or <code>az</code> that names no credential fails too, since it
-  would write as the server's own identity. Unset, nothing changes. (#1217)</li>
+<li><strong><code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code></strong> says who may write through a named
+  credential, as globs over the principal who started the run: an <code>rw</code> mount
+  (its scheme's default credential included), a <code># @sql ... write=true</code>
+  connection, or a <code># @write_table</code> catalog's <code>strata_credential</code>. Once it is
+  set, even to <code>{}</code>, a name not listed is read-only: such a write, from a cell
+  or from <code>notebook.toml</code>, fails before anything is staged or written, naming
+  the credential, and so does a mount sent to a remote worker. An <code>rw</code> mount on
+  <code>s3</code>, <code>gs</code> or <code>az</code> that names no credential fails too, since it would write
+  as the server's own identity; a <code>file://</code> mount is outside the setting.
+  Unset, nothing changes. (#1217)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>

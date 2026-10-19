@@ -3813,8 +3813,8 @@ carries upload and finalize capabilities; under any other auth mode it returns
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code></td>
-<td><code>{}</code></td>
-<td>Who may mount a credential read-write, as JSON <code>{name: [principal glob, ...]}</code> matched against the principal who started the run (<code>"*"</code> is anyone, and the only pattern a run with no principal matches). Once set, even to <code>{}</code>, a name not listed is read-only: an <code>rw</code> mount through it fails before the run, naming the credential, and an <code>rw</code> mount on <code>s3</code>, <code>gs</code> or <code>az</code> must name a credential. Unset, every name writes. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
+<td>unset (every name writes)</td>
+<td>Who may write through a credential, as JSON <code>{name: [principal glob, ...]}</code> matched against the principal who started the run (<code>"*"</code> is anyone, and the only pattern a run with no principal matches). It gates an <code>rw</code> mount, a <code># @sql ... write=true</code> cell whose connection names the credential, and a <code># @write_table</code> into a catalog whose <code>strata_credential</code> names it. A mount whose scheme has a default credential (<code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code>) names that one too. Once set, even to <code>{}</code> (every name read-only), a name not listed is read-only: a write through it fails before the run, naming the credential, and an <code>rw</code> mount on <code>s3</code>, <code>gs</code> or <code>az</code> must name a credential. A <code>file://</code> mount is outside the setting. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN</code></td>

@@ -3357,13 +3357,27 @@ as an export's does. A cell reading the table with <code>@table</code> goes out 
 after each write. With several <code>@write_table</code> lines the tables are written one
 after another; if a later one fails, earlier ones keep their new snapshot and
 the next run writes them again.</p>
+<p><strong>Going back to earlier source</strong> (or inputs) is a cache hit for an <code>append</code>
+cell, which writes nothing. An <code>overwrite</code> or <code>merge</code> cell runs again instead,
+since the later run replaced or merged rows that only a write puts back; the
+table then holds what the cell shows.</p>
+<p>A <code># @loop</code> cell writes its final values once, after the last iteration, and
+not each iteration's. A <code># @per_variant</code> cell writes once per variant into the
+same table, so <code>overwrite</code> is refused there (each variant would replace the one
+before it); append, or merge on a column that tells the variants apart.</p>
 <p>A cell should not also read the table it writes with <code>@table</code>: its own write
 changes the snapshot it read, so it would show out of date at once.</p>
 <p>A table Strata did not create (another writer's) is never overwritten, and is
 appended to or merged into only when the server sets
 <code>STRATA_NOTEBOOK_TABLE_WRITES_FOREIGN=true</code>. Under principal auth the table ACL
 applies, as for an export, and a table last written for another tenant is
-refused.</p>
+refused. In service mode a write also needs what an export needs:
+<code>STRATA_SERVICE_WRITES_ENABLED=true</code> and the <code>artifacts:write</code> scope. A catalog
+whose <code>strata_credential</code> the server's
+<a href="../../reference/notebook-toml/#named-credentials"><code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code></a>
+does not let the run's principal write through is refused too. Each of these
+fails the cell, naming why, before it runs (in a Run All batch, before its
+outputs are kept).</p>
 <h2 id="output_dir">@output_dir<a class="headerlink" href="#output_dir" title="Permanent link">&para;</a></h2>
 <p>Give the cell an empty folder whose contents are an output: checkpoints, a saved
 model, a set of figures.</p>
@@ -3762,8 +3776,9 @@ to fan out over - <code># @per_variant model</code> - and the others collapse to
 cell fans out over <strong>one</strong> group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: <code>per_variant_no_sweep_source</code>
 (nothing to fan out over), <code>per_variant_ambiguous_group</code> (bare form, ≥2 groups),
-<code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out).
-The named group is part of the cell's cache key, so switching it runs the
+<code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out),
+<code>per_variant_write_table_overwrite</code> (every variant would overwrite the same
+table). The named group is part of the cell's cache key, so switching it runs the
 instances again.</p>
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level
