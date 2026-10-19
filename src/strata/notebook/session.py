@@ -146,9 +146,7 @@ def stored_display(artifact: ArtifactVersion) -> tuple[dict[str, Any], int] | No
     ``None`` for an artifact written before displays recorded themselves; callers
     fall back to the cell's current description.
     """
-    if not artifact.transform_spec:
-        return None
-    params = json.loads(artifact.transform_spec).get("params", {})
+    params = artifact.params
     if "display" not in params or "display_count" not in params:
         return None
     return json.loads(params["display"]), int(params["display_count"])
@@ -1098,7 +1096,7 @@ class NotebookSession:
         if artifact is None or not artifact.transform_spec or not artifact.input_versions:
             return False
 
-        params = json.loads(artifact.transform_spec).get("params", {})
+        params = artifact.params
         if params.get("source_hash") != source_hash or params.get("env_hash") != env_hash:
             return False
 

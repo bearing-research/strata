@@ -13,7 +13,8 @@ from types import SimpleNamespace
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact.store import TransformSpec, get_artifact_store
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import get_artifact_store
 from tests.conftest import hold, ran_while_held
 
 PROTECTED = ["gold", "silver", "bronze"]

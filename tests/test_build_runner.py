@@ -10,11 +10,8 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from strata.artifact.store import (
-    TransformSpec,
-    get_artifact_store,
-    reset_artifact_store,
-)
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import get_artifact_store, reset_artifact_store
 from strata.transforms.build_qos import (
     BuildQoS,
     BuildQoSConfig,

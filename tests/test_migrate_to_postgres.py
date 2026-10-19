@@ -10,7 +10,8 @@ import docker
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
-from strata.artifact.store import ArtifactStore, TransformSpec
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import ArtifactStore
 from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
 from strata.sql_backend import PostgresDialect, SqliteDialect
 

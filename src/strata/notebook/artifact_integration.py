@@ -17,7 +17,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from strata.artifact.store import ArtifactStore, StagedVersion, TransformSpec
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import ArtifactStore, StagedVersion
 from strata.auth.principal import get_principal
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
@@ -334,13 +335,7 @@ class NotebookArtifactManager:
         if artifact is None:
             raise ValueError(f"Artifact {artifact_id}@v={version} not found")
 
-        content_type = "unknown"
-        if artifact.transform_spec:
-            try:
-                spec = json.loads(artifact.transform_spec)
-                content_type = spec.get("params", {}).get("content_type", "unknown")
-            except (ValueError, KeyError):
-                pass
+        content_type = artifact.params.get("content_type", "unknown")
 
         return {
             "id": artifact.id,
@@ -389,13 +384,7 @@ class NotebookArtifactManager:
         if artifact is None:
             return None
 
-        content_type = "unknown"
-        if artifact.transform_spec:
-            try:
-                spec = json.loads(artifact.transform_spec)
-                content_type = spec.get("params", {}).get("content_type", "unknown")
-            except (ValueError, KeyError):
-                pass
+        content_type = artifact.params.get("content_type", "unknown")
 
         return ArtifactInfo(
             id=artifact.id,

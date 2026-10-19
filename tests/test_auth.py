@@ -488,12 +488,12 @@ class TestArtifactReadAcl:
     def _artifact(table_uri):
         from unittest.mock import MagicMock
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         art = MagicMock()
         art.transform_spec = TransformSpec(
             executor="scan@v1", params={}, inputs=[table_uri]
-        ).to_json()
+        ).canonical_json
         art.input_versions = None
         return art
 
@@ -549,7 +549,7 @@ class TestArtifactReadAcl:
         # scoping is the gate.
         from unittest.mock import MagicMock
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
         art = MagicMock()
@@ -557,7 +557,7 @@ class TestArtifactReadAcl:
             executor="duckdb_sql@v1",
             params={},
             inputs=["strata://artifact/abc@v=1"],
-        ).to_json()
+        ).canonical_json
         art.input_versions = None
         set_principal(Principal(id="intruder"))
         try:
@@ -616,7 +616,7 @@ class TestDerivedResultsInheritTheAcl:
 
         import pyarrow as pa
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         version = store.create_artifact(
             artifact_id,

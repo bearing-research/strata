@@ -10,7 +10,8 @@ import pyarrow.ipc as ipc
 import pytest
 
 from strata.artifact.cli import cmd_lineage, cmd_list, cmd_pull, cmd_show
-from strata.artifact.store import ArtifactStore, TransformSpec, reset_artifact_store
+from strata.artifact.provenance import TransformSpec
+from strata.artifact.store import ArtifactStore, reset_artifact_store
 
 
 def _ipc_bytes(num_rows: int) -> bytes:

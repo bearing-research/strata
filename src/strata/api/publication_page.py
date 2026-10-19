@@ -390,16 +390,7 @@ def content_type_of(artifact) -> str:
     Only notebook cells declare a type. Core results (scan, transforms, client puts) are always
     Arrow IPC and record its schema. '' when neither says anything.
     """
-    import json
-
-    declared = ""
-    if artifact.transform_spec:
-        try:
-            params = json.loads(artifact.transform_spec).get("params", {})
-        except (json.JSONDecodeError, ValueError):
-            params = {}
-        if isinstance(params, dict):
-            declared = str(params.get("content_type") or "")
+    declared = str(artifact.params.get("content_type") or "")
     if not declared and artifact.schema_json:
         return "arrow/ipc"
     return declared

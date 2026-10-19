@@ -3269,7 +3269,7 @@ class TestLoopCellExecution:
 
     def test_a_start_from_seed_overtaken_by_a_duplicate_reads_its_canonical(self, loop_notebook):
         """A seed version dedup overtook has no bytes of its own; the seed reads through it."""
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
         from strata.notebook.annotations import LoopAnnotation
 
         _, session = loop_notebook

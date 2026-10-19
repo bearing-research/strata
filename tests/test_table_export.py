@@ -459,7 +459,7 @@ class TestWhoMayExport:
         """A ready tabular version, stamped with a tenant as a notebook write-back is."""
         import hashlib
 
-        from strata.artifact.store import TransformSpec
+        from strata.artifact.provenance import TransformSpec
 
         version = store.create_artifact(
             artifact_id,

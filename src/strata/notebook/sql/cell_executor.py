@@ -1045,14 +1045,7 @@ def _load_upstream_variables(
 
 
 def _content_type_of(artifact: Any) -> str:
-    spec = getattr(artifact, "transform_spec", None)
-    if not spec:
-        return "json/object"
-    try:
-        parsed = json.loads(spec)
-        return parsed.get("params", {}).get("content_type", "json/object")
-    except (ValueError, KeyError):
-        return "json/object"
+    return artifact.params.get("content_type", "json/object")
 
 
 class PickledObject:
@@ -1111,12 +1104,9 @@ def _run_probes(
 def _previous_pin(artifact_mgr: Any, canonical_id: str, basis: str) -> SnapshotPin | None:
     """The timestamp the last run of this same query was pinned to, if any."""
     canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-    if canonical is None or not canonical.transform_spec:
+    if canonical is None:
         return None
-    try:
-        params = json.loads(canonical.transform_spec).get("params") or {}
-    except ValueError:
-        return None
+    params = canonical.params
     if params.get(PARAM_BASIS) != basis or not params.get(PARAM_AT):
         return None
     return SnapshotPin(at=params[PARAM_AT], valid_until=params.get(PARAM_VALID_UNTIL))
@@ -1127,10 +1117,10 @@ def _previous_snapshots(
 ) -> dict[tuple[str, str], int] | None:
     """The catalog snapshots the last run of this same query read, if any."""
     canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
-    if canonical is None or not canonical.transform_spec:
+    if canonical is None:
         return None
+    params = canonical.params
     try:
-        params = json.loads(canonical.transform_spec).get("params") or {}
         rows = json.loads(params.get(PARAM_SNAPSHOT_IDS) or "null")
     except ValueError:
         return None

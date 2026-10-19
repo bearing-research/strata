@@ -305,11 +305,11 @@ def _walk_lineage(
     seen = _seen if _seen is not None else set()
     seen.add((artifact.id, artifact.version))
 
-    transform = json.loads(artifact.transform_spec) if artifact.transform_spec else {}
+    spec = artifact.spec
     node: dict = {
         "artifact_id": artifact.id,
         "version": artifact.version,
-        "executor": transform.get("executor"),
+        "executor": spec.executor if spec is not None else None,
         "names": _names_for(store, artifact.id, artifact.version),
         "inputs": [],
     }

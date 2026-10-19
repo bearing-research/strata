@@ -3103,20 +3103,13 @@ async def get_cell_iterations(
     artifact_mgr = session.get_artifact_manager()
     iterations_payload: list[dict] = []
     for iteration, artifact in artifact_mgr.list_iterations(cell_id, variable_name):
-        content_type = "unknown"
-        if artifact.transform_spec:
-            try:
-                spec = json.loads(artifact.transform_spec)
-                content_type = spec.get("params", {}).get("content_type") or "unknown"
-            except (ValueError, KeyError):
-                pass
         iterations_payload.append(
             {
                 "iteration": iteration,
                 "artifact_uri": (f"strata://artifact/{artifact.id}@v={artifact.version}"),
                 "artifact_id": artifact.id,
                 "version": artifact.version,
-                "content_type": content_type,
+                "content_type": artifact.params.get("content_type") or "unknown",
                 "byte_size": artifact.byte_size or 0,
                 "row_count": artifact.row_count,
                 "created_at": artifact.created_at,

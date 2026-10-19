@@ -83,13 +83,7 @@ def content_type_of(record: ArtifactVersion) -> str:
 
     A record with no content type (written outside a notebook) is Arrow IPC.
     """
-    content_type = "arrow/ipc"
-    if record.transform_spec:
-        try:
-            params = json.loads(record.transform_spec).get("params") or {}
-        except (ValueError, AttributeError):
-            params = {}
-        content_type = params.get("content_type") or content_type
+    content_type = record.params.get("content_type") or "arrow/ipc"
     return content_type if content_type in VALUE_CONTENT_TYPES else "file/path"
 
 

@@ -4,11 +4,15 @@ import json
 
 import pytest
 
+from strata.artifact.provenance import (
+    TransformSpec,
+    compute_provenance_hash,
+    parse_transform_spec,
+)
 from strata.artifact.store import (
     ArtifactNotFoundError,
     ArtifactStore,
-    TransformSpec,
-    compute_provenance_hash,
+    ArtifactVersion,
     reset_artifact_store,
 )
 from tests.conftest import race_after_pending_read
@@ -30,19 +34,19 @@ def store(artifact_dir):
 
 
 class TestTransformSpec:
-    def test_to_json(self):
+    def test_canonical_json(self):
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT * FROM input"},
             inputs=["strata://table/db.events"],
         )
-        json_str = spec.to_json()
+        json_str = spec.canonical_json
         data = json.loads(json_str)
         assert data["executor"] == "local://duckdb_sql@v1"
         assert data["params"] == {"sql": "SELECT * FROM input"}
         assert data["inputs"] == ["strata://table/db.events"]
 
-    def test_from_json(self):
+    def test_parse(self):
         json_str = json.dumps(
             {
                 "executor": "local://duckdb_sql@v1",
@@ -50,10 +54,8 @@ class TestTransformSpec:
                 "inputs": [],
             }
         )
-        spec = TransformSpec.from_json(json_str)
-        assert spec.executor == "local://duckdb_sql@v1"
-        assert spec.params == {"sql": "SELECT 1"}
-        assert spec.inputs == []
+        spec = parse_transform_spec(json_str)
+        assert spec == TransformSpec("local://duckdb_sql@v1", {"sql": "SELECT 1"}, [])
 
     def test_roundtrip(self):
         original = TransformSpec(
@@ -61,10 +63,36 @@ class TestTransformSpec:
             params={"expr": "col('a') + 1"},
             inputs=["input1", "input2"],
         )
-        restored = TransformSpec.from_json(original.to_json())
-        assert restored.executor == original.executor
-        assert restored.params == original.params
-        assert restored.inputs == original.inputs
+        assert parse_transform_spec(original.canonical_json) == original
+
+    @pytest.mark.parametrize("text", [None, "", "{not json", "[1, 2]", "null"])
+    def test_an_absent_or_unreadable_spec_parses_to_none(self, text):
+        """Rows arrive from other servers too, so an unreadable spec reads as unrecorded."""
+        assert parse_transform_spec(text) is None
+
+    def test_missing_or_mistyped_fields_read_as_empty(self):
+        spec = parse_transform_spec(json.dumps({"params": "oops", "inputs": {"a": 1}}))
+        assert spec == TransformSpec(executor="", params={}, inputs=[])
+
+    def test_an_artifact_version_reads_its_spec_and_params(self):
+        stored = TransformSpec("notebook/cell@v1", {"content_type": "json/object"}, ["u"])
+        version = ArtifactVersion(
+            id="a",
+            version=1,
+            state="ready",
+            provenance_hash="p",
+            transform_spec=stored.canonical_json,
+        )
+        assert version.spec == stored
+        assert version.params == {"content_type": "json/object"}
+
+    @pytest.mark.parametrize("transform_spec", [None, "{not json"])
+    def test_an_artifact_version_without_a_readable_spec_has_empty_params(self, transform_spec):
+        version = ArtifactVersion(
+            id="a", version=1, state="ready", provenance_hash="p", transform_spec=transform_spec
+        )
+        assert version.spec is None
+        assert version.params == {}
 
 
 class TestProvenanceHash:
@@ -113,6 +141,23 @@ class TestProvenanceHash:
         hash2 = compute_provenance_hash(["abc"], spec2)
         assert hash1 != hash2
 
+    def test_spec_bytes_and_hash_are_pinned(self):
+        """Every stored provenance hash depends on these bytes: a format change orphans them all."""
+        spec = TransformSpec(
+            executor="local://duckdb_sql@v1",
+            params={"sql": "SELECT * FROM input0", "b": [1, 2], "a": {"z": 1, "y": None}},
+            inputs=["strata://artifact/b@v=2", "file:///wh#db.events"],
+        )
+        assert spec.canonical_json == (
+            '{"executor": "local://duckdb_sql@v1", '
+            '"inputs": ["strata://artifact/b@v=2", "file:///wh#db.events"], '
+            '"params": {"a": {"y": null, "z": 1}, "b": [1, 2], "sql": "SELECT * FROM input0"}}'
+        )
+        assert (
+            compute_provenance_hash(["h2", "h1"], spec)
+            == "c96cecb9766d0728d2fc1ac223f0026613001bfbbd6b475b80933c5bc62eb6ff"
+        )
+
 
 class TestArtifactCRUD:
     def test_create_artifact(self, store):
@@ -151,7 +196,7 @@ class TestArtifactCRUD:
             transform_spec=spec,
         )
         artifact = store.get_artifact("test-id", version)
-        assert artifact.transform_spec == spec.to_json()
+        assert artifact.transform_spec == spec.canonical_json
 
     def test_finalize_artifact(self, store):
         version = store.create_artifact("test-id", "hash123")

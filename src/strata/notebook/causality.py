@@ -227,15 +227,12 @@ def _get_stored_hash(session: NotebookSession, cell_id: str, key: str) -> str | 
         return None
 
     try:
-        import json as _json
-
         # Last ``@v=``: a fan-out instance's id has an ``@`` of its own.
         artifact_id, _, raw_version = cell.artifact_uri.split("/")[-1].rpartition("@v=")
         version = int(raw_version)
         artifact = session.artifact_manager.artifact_store.get_artifact(artifact_id, version)
-        if artifact and artifact.transform_spec:
-            spec = _json.loads(artifact.transform_spec)
-            return spec.get("params", {}).get(key)
+        if artifact is not None:
+            return artifact.params.get(key)
     except (IndexError, ValueError, KeyError):
         pass
     return None

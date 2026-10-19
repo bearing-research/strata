@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, NamedTuple
 
-from strata.artifact.store import TransformSpec
+from strata.artifact.provenance import parse_transform_spec
 from strata.types import (
     ArtifactDependentsResponse,
     ArtifactLineageResponse,
@@ -64,12 +64,8 @@ def _transform_ref(transform_spec: str | None) -> str | None:
     ``transform_spec`` is client-opaque, so a parse failure means "no known
     transform", not an error.
     """
-    if not transform_spec:
-        return None
-    try:
-        return TransformSpec.from_json(transform_spec).executor
-    except (json.JSONDecodeError, KeyError):
-        return None
+    spec = parse_transform_spec(transform_spec)
+    return spec.executor if spec is not None and spec.executor else None
 
 
 class BuildMetadata(NamedTuple):
@@ -92,14 +88,10 @@ class BuildMetadata(NamedTuple):
 
 def _build_metadata(transform_spec: str | None) -> BuildMetadata:
     """Read the producing run's self-report out of a stored transform_spec."""
-    if not transform_spec:
+    spec = parse_transform_spec(transform_spec)
+    if spec is None:
         return BuildMetadata()
-    try:
-        params = json.loads(transform_spec).get("params", {})
-    except (json.JSONDecodeError, ValueError):
-        return BuildMetadata()
-    if not isinstance(params, dict):
-        return BuildMetadata()
+    params = spec.params
     try:
         duration = int(params.get("build_duration_ms") or 0)
     except (TypeError, ValueError):

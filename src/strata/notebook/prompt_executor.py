@@ -244,12 +244,7 @@ async def execute_prompt_cell(
             if canonical is not None and canonical.provenance_hash == var_provenance:
                 duration_ms = (time.time() - start_time) * 1000
                 blob = artifact_mgr.load_artifact_data(canonical.id, canonical.version)
-                content_type = "json/object"
-                try:
-                    spec = json.loads(canonical.transform_spec or "{}")
-                    content_type = spec.get("params", {}).get("content_type", content_type)
-                except Exception:
-                    pass
+                content_type = canonical.params.get("content_type", "json/object")
 
                 value = _parse_output(blob, content_type)
                 uri = f"strata://artifact/{canonical.id}@v={canonical.version}"
@@ -420,7 +415,8 @@ async def execute_prompt_cell(
     blob = json.dumps(content, indent=2, default=str).encode()
 
     try:
-        from strata.artifact.store import StagedVersion, TransformSpec
+        from strata.artifact.provenance import TransformSpec
+        from strata.artifact.store import StagedVersion
         from strata.notebook.artifact_integration import caller_principal_id
 
         version = artifact_mgr.artifact_store.create_artifact(
@@ -630,15 +626,7 @@ def _load_upstream_variables(
                 if artifact is None:
                     continue
                 blob = artifact_mgr.load_artifact_data(canonical_id, artifact.version)
-                content_type = "json/object"
-                if artifact.transform_spec:
-                    try:
-                        spec = json.loads(artifact.transform_spec)
-                        ct = spec.get("params", {}).get("content_type")
-                        if ct:
-                            content_type = ct
-                    except (ValueError, KeyError):
-                        pass
+                content_type = artifact.params.get("content_type") or "json/object"
                 variables[var_name] = _parse_output(blob, content_type)
                 input_hashes[var_name] = artifact.provenance_hash
             except Exception as e:

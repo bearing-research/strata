@@ -35,12 +35,12 @@ import httpx
 from pydantic import ValidationError
 
 from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.artifact.provenance import TransformSpec as ArtifactTransformSpec
 
 # Stdlib json, not orjson: executor.py is imported via ``strata.config`` and must load
 # with core deps only (orjson is in the ``[notebook]`` extra, absent from the Docker
 # image). Batch frames are small dicts.
 from strata.artifact.store import ArtifactVersion, StagedVersion, get_artifact_store
-from strata.artifact.store import TransformSpec as ArtifactTransformSpec
 from strata.notebook import console_relay, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
@@ -267,14 +267,7 @@ def _detect_missing_module(error: str, stderr: str) -> tuple[str, str] | None:
 
 def _artifact_content_type(artifact: Any) -> str:
     """Read an artifact's stored content_type from its transform_spec params."""
-    spec_json = getattr(artifact, "transform_spec", None)
-    if not spec_json:
-        return "pickle/object"
-    try:
-        spec = json.loads(spec_json)
-    except (ValueError, TypeError):
-        return "pickle/object"
-    ct = spec.get("params", {}).get("content_type")
+    ct = artifact.params.get("content_type")
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
 
 
@@ -294,8 +287,7 @@ def _loop_folders(names: list[str]) -> Generator[Path | None]:
 
 def _loop_run_token(artifact: Any) -> str:
     """The token of the loop run that stored an ``@iter=k`` artifact."""
-    spec = json.loads(artifact.transform_spec or "{}")
-    return str(spec.get("params", {}).get("loop_run", ""))
+    return str(artifact.params.get("loop_run", ""))
 
 
 def _add_harness_params(
@@ -2005,8 +1997,7 @@ class CellExecutor:
                 artifact_mgr.cell_artifact_id(cell_id, "__console__"),
                 derive_subkey(provenance_hash, "__console__"),
             )
-            spec = console.transform_spec if console is not None else None
-            params = json.loads(spec).get("params", {}) if spec else {}
+            params = console.params if console is not None else {}
             recorded = params.get("display_count")
             display_count = int(recorded) if recorded is not None else current_display_count
         labels = ["__console__", *(f"__display__{index}" for index in range(display_count))]
@@ -4771,13 +4762,7 @@ class CellExecutor:
             if artifact is None:
                 return None
             blob_data = artifact_mgr.load_artifact_data(artifact_id, artifact.version)
-            content_type = "pickle/object"
-            if artifact.transform_spec:
-                try:
-                    params = json.loads(artifact.transform_spec).get("params", {})
-                except ValueError:
-                    params = {}  # malformed transform_spec → default content type
-                content_type = params.get("content_type") or content_type
+            content_type = artifact.params.get("content_type") or "pickle/object"
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
             self._write_input_file(input_file, blob_data, content_type)
@@ -4800,13 +4785,7 @@ class CellExecutor:
             artifact = artifact_mgr.artifact_store.get_artifact(art_id, version)
             if artifact is None:
                 return None
-            content_type = "pickle/object"
-            if artifact.transform_spec:
-                try:
-                    params = json.loads(artifact.transform_spec).get("params", {})
-                except ValueError:
-                    params = {}
-                content_type = params.get("content_type") or content_type
+            content_type = artifact.params.get("content_type") or "pickle/object"
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
             self._write_input_file(

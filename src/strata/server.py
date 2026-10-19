@@ -1749,14 +1749,10 @@ def _authorize_artifact_read(artifact, store) -> None:
 
 def _authorize_spec_tables(spec_json: str | None) -> None:
     """Check the table ACL for each table input a stored transform spec names."""
-    if not spec_json:
-        return
+    from strata.artifact.provenance import parse_transform_spec
 
-    from strata.artifact.store import TransformSpec
-
-    try:
-        spec = TransformSpec.from_json(spec_json)
-    except Exception:
+    spec = parse_transform_spec(spec_json)
+    if spec is None:
         return  # unparseable spec → no table inputs to gate
 
     for input_uri in spec.inputs:

@@ -16,9 +16,11 @@ import secrets
 import time
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from strata.artifact.provenance import TransformSpec, parse_transform_spec
 from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
@@ -131,11 +133,8 @@ def _split_ref(ref: str) -> tuple[str, int]:
 
 def _declared_content_type(transform_spec: str | None) -> str:
     """The ``content_type`` a version's transform params declare, or ``""`` for none."""
-    try:
-        params = json.loads(transform_spec or "{}").get("params") or {}
-    except (ValueError, AttributeError):
-        return ""
-    content_type = params.get("content_type") if isinstance(params, dict) else None
+    spec = parse_transform_spec(transform_spec)
+    content_type = spec.params.get("content_type") if spec is not None else None
     return content_type if isinstance(content_type, str) else ""
 
 
@@ -170,6 +169,17 @@ class ArtifactVersion:
     # SHA-256 of the stored bytes, recorded at finalize. None on rows written
     # before the column existed, until something asks (``content_digest``).
     content_sha256: str | None = None
+
+    @cached_property
+    def spec(self) -> TransformSpec | None:
+        """``transform_spec`` parsed, or ``None`` when absent or unreadable."""
+        return parse_transform_spec(self.transform_spec)
+
+    @property
+    def params(self) -> dict:
+        """The spec's params, or ``{}`` without a readable spec."""
+        spec = self.spec
+        return spec.params if spec is not None else {}
 
 
 @dataclass(frozen=True)
@@ -292,63 +302,6 @@ class NameStatus:
     is_stale: bool = False
     stale_reason: str | None = None
     changed_inputs: list[InputChange] | None = None
-
-
-@dataclass(frozen=True)
-class TransformSpec:
-    """Transform specification: stored by the server, interpreted only by the executor.
-
-    ``executor`` is a URI such as ``local://duckdb_sql@v1``; ``inputs`` are table
-    or artifact URIs.
-    """
-
-    executor: str
-    params: dict
-    inputs: list[str]
-
-    def to_json(self) -> str:
-        """Serialize to JSON string.
-
-        Inputs keep their caller order: positional executors bind them as ``input0,
-        input1, ...``, so ``f(a, b)`` must not dedup against ``f(b, a)``.
-        """
-        return json.dumps(
-            {
-                "executor": self.executor,
-                "params": self.params,
-                "inputs": list(self.inputs),
-            },
-            sort_keys=True,
-        )
-
-    @classmethod
-    def from_json(cls, json_str: str) -> TransformSpec:
-        """Deserialize from JSON string."""
-        data = json.loads(json_str)
-        return cls(
-            executor=data["executor"],
-            params=data["params"],
-            inputs=data["inputs"],
-        )
-
-
-# --- Provenance hash ---
-
-
-def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSpec) -> str:
-    """SHA-256 of the sorted input hashes plus the transform spec JSON, for dedup.
-
-    Input hashes are sorted, but the spec's own ``inputs`` keep caller order.
-    """
-    sorted_inputs = sorted(input_hashes)
-
-    hasher = hashlib.sha256()
-    for h in sorted_inputs:
-        hasher.update(h.encode("utf-8"))
-        hasher.update(b"\x00")  # Separator
-    hasher.update(transform_spec.to_json().encode("utf-8"))
-
-    return hasher.hexdigest()
 
 
 # --- Artifact store ---
@@ -1187,7 +1140,7 @@ class ArtifactStore:
                     version,
                     provenance_hash,
                     time.time(),
-                    transform_spec.to_json() if transform_spec else None,
+                    transform_spec.canonical_json if transform_spec else None,
                     input_versions_json,
                     # Tenantless rows store '' (never NULL) so the uniqueness index treats them as
                     # equal, as names/aliases/tags do.

@@ -195,7 +195,7 @@ class TestTheCrate:
 
 def _chain(store, steps: int, principal: str | None = None) -> str:
     """``steps`` artifacts, each computed from the one before; returns the last id."""
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
 
     previous = None
     for i in range(steps):

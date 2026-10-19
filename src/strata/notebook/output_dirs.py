@@ -149,8 +149,7 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
     versions = store.list_versions_by_id_prefix(f"nb_{artifact_mgr.notebook_id}_cell_")
     named: set[tuple[str, int]] = set()
     for version in versions:
-        params = json.loads(version.transform_spec or "{}").get("params") or {}
-        if params.get("content_type") != CONTENT_TYPE:
+        if version.params.get("content_type") != CONTENT_TYPE:
             continue
         # Housekeeping: a read that counted as a use would keep old manifests forever.
         blob = store.read_blob(version.id, version.version, note_use=False)
@@ -207,7 +206,7 @@ def _store_opened(
         return {"sha256": sha256, "size": size, "version": reused}
 
     # Here, not at the top: a worker imports this module and has no artifact store.
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,
@@ -247,7 +246,7 @@ def store_received(
     reused = _reused(store, artifact_id)
     if reused is not None:
         return {"sha256": sha256, "size": size, "version": reused}
-    from strata.artifact.store import TransformSpec
+    from strata.artifact.provenance import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,

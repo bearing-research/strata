@@ -10,7 +10,7 @@ import types
 import pyarrow as pa
 import pytest
 
-from strata.artifact.store import TransformSpec
+from strata.artifact.provenance import TransformSpec
 from strata.notebook import datasets as datasets_module
 from strata.notebook.annotations import parse_annotations
 
