@@ -42,6 +42,8 @@ class MessageType(StrEnum):
     WIDGET_UPDATE = "widget_update"
     # The cell this client is on, or null. Payload: ``{cell_id, author?}``.
     CELL_FOCUS = "cell_focus"
+    # Run after a read_confirm_prompt. Payload: ``{prompt_id}``. Cancel sends nothing.
+    READ_CONFIRM = "read_confirm"
 
     # Server → Client
     ERROR = "error"
@@ -68,6 +70,9 @@ class MessageType(StrEnum):
     DAG_UPDATE = "dag_update"
     NOTEBOOK_STATE = "notebook_state"
     CASCADE_PROMPT = "cascade_prompt"
+    # A run would read more than the host's threshold; nothing started. Payload:
+    # ``{prompt_id, cells: [{cell_id, machine, inputs, bytes_to_move, cost}], message?}``.
+    READ_CONFIRM_PROMPT = "read_confirm_prompt"
     CASCADE_PROGRESS = "cascade_progress"
     IMPACT_PREVIEW = "impact_preview"
     INSPECT_RESULT = "inspect_result"

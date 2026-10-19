@@ -49,6 +49,7 @@ import type {
   InspectResultPayload,
   PresenceEntryModel,
   PresencePayload,
+  ReadConfirmPromptPayload,
   SessionClosedPayload,
 } from '../types/ws-payloads.generated'
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
@@ -1910,6 +1911,8 @@ function parseBackendTestResult(raw: any): CellTestResult {
 }
 
 let wsInstance: ReturnType<typeof useWebSocket> | null = null
+// A run the server held back because it reads more than the host allows unasked.
+const pendingReadConfirm = ref<ReadConfirmPromptPayload | null>(null)
 let stopConnectedWatch: (() => void) | null = null
 const optimisticRuns = new OptimisticRuns<CellStatus>()
 
@@ -2271,6 +2274,12 @@ function initializeWebSocket() {
       if (planId) {
         executeCascadeWebSocket(cellId, planId)
       }
+    })
+
+    wsInstance.onMessage('read_confirm_prompt', (msg: WsMessage) => {
+      // Nothing started: the clicked cells go back to what they showed.
+      for (const run of optimisticRuns.takeAll()) setCellStatus(run.cellId, run.status)
+      pendingReadConfirm.value = msg.payload as ReadConfirmPromptPayload
     })
 
     wsInstance.onMessage('notebook_state', (msg: WsMessage) => {
@@ -3515,6 +3524,19 @@ function confirmInspectSwap() {
   pendingInspectRequest.value = null
 }
 
+function confirmReads() {
+  const prompt = pendingReadConfirm.value
+  pendingReadConfirm.value = null
+  if (prompt && wsInstance && wsInstance.connected()) {
+    for (const cell of prompt.cells) showRunStarted(cell.cell_id as CellId)
+    wsInstance.confirmReads(prompt.prompt_id)
+  }
+}
+
+function cancelReads() {
+  pendingReadConfirm.value = null
+}
+
 function cancelInspectSwap() {
   pendingInspectRequest.value = null
 }
@@ -3627,6 +3649,9 @@ export function useNotebook() {
     setMaxInspectPanels,
     pendingInspectRequest,
     confirmInspectSwap,
+    pendingReadConfirm,
+    confirmReads,
+    cancelReads,
     cancelInspectSwap,
     openInspect,
     evalInspect,

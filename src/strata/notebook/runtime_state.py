@@ -54,6 +54,9 @@ class CellRuntime:
     loop_run: str | None = None
     # What the inputs weighed when the cell last started, ``{machine, inputs}``.
     inputs: dict[str, Any] | None = None
+    # A yes to a large read, ``{machine: input fingerprint}``: the same inputs on that
+    # machine do not ask again (``read_confirm``).
+    read_approvals: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Older builds persisted NaN/inf control values, which the open payload
@@ -79,6 +82,7 @@ class CellRuntime:
             or self.execution_samples
             or self.loop_run
             or self.inputs
+            or self.read_approvals
         )
 
 
@@ -310,6 +314,13 @@ def persist_cell_inputs(notebook_dir: Path, cell_id: str, inputs: dict[str, Any]
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
     entry.inputs = inputs
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_read_approval(notebook_dir: Path, cell_id: str, machine: str, fingerprint: str) -> None:
+    """Remember a yes to *cell_id*'s large read of these inputs on *machine*."""
+    state = load_runtime_state(notebook_dir)
+    state.get_or_create_cell(cell_id).read_approvals[machine] = fingerprint
     save_runtime_state(notebook_dir, state)
 
 

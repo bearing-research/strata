@@ -211,15 +211,25 @@ async def _run_cell(
     session_id: str,
     cell_id: str,
     mode: str = "normal",
+    *,
+    confirm_reads: bool = False,
+    approve_reads: bool = False,
 ) -> dict[str, Any]:
     """Execute a cell in the warm session, broadcasting live frames to spectators.
 
     Goes through ``execute_cell_and_broadcast`` (not the silent
     ``LocalNotebookOps.run_cell``) so an attached browser or TUI sees the run live.
-    Returns the agent-facing ``RunResult`` view.
+    Returns the agent-facing ``RunResult`` view, or with *confirm_reads* the large
+    reads that stopped it (as the REST route's 409).
     """
     from strata.notebook.ops import NotebookOpsError, _run_result_from_wire
-    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
+    from strata.notebook.ws import (
+        NotebookBusyError,
+        execute_cell_exclusive,
+        large_read_message,
+        reads_to_confirm,
+        run_cells,
+    )
 
     if mode not in ("normal", "rerun", "force"):
         raise ValueError(f"unknown run mode {mode!r} (normal|rerun|force)")
@@ -231,6 +241,23 @@ async def _run_cell(
     block_reason = session.environment_execution_block_message()
     if block_reason:
         raise ValueError(block_reason)
+
+    if confirm_reads or approve_reads:
+        asking = await reads_to_confirm(
+            session,
+            run_cells(session, cell_id, mode),  # type: ignore[arg-type]
+            force=mode != "normal",
+        )
+        if asking and not approve_reads:
+            return {
+                "cell_id": cell_id,
+                "status": "error",
+                "error_code": "large_read",
+                "error": large_read_message(session),
+                "reads": [read.payload() for read in asking],
+            }
+        for read in asking:
+            session.approve_reads(read.cell_id, read.machine, read.fingerprint)
 
     # Same reservation as the WS handlers, so an agent run can't race a browser.
     try:
@@ -1021,7 +1048,13 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         return _status(session_manager, session_id)
 
     @mcp.tool()
-    async def run_cell(session_id: str, cell_id: str, mode: str = "normal") -> dict[str, Any]:
+    async def run_cell(
+        session_id: str,
+        cell_id: str,
+        mode: str = "normal",
+        confirm_reads: bool = False,
+        approve_reads: bool = False,
+    ) -> dict[str, Any]:
         """Execute a cell in a warm session and return the run outcome.
 
         ``mode`` is one of: ``normal`` (use the cache, re-run stale upstreams
@@ -1031,8 +1064,21 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         viewer attached to the session watches it happen. Returns status
         (ok / error), cache hit, duration, and captured stdout / stderr; call
         get_cell afterwards for the rendered outputs.
+
+        With ``confirm_reads``, a run whose inputs would move more data than the
+        server's threshold does not start: it returns error_code ``large_read`` with
+        each cell's inputs, ``bytes_to_move`` and ``cost``. Ask the user, then call
+        again with ``approve_reads`` to run; the yes is kept for that cell, machine
+        and inputs. Without either, such a run goes ahead.
         """
-        return await _run_cell(session_manager, session_id, cell_id, mode)
+        return await _run_cell(
+            session_manager,
+            session_id,
+            cell_id,
+            mode,
+            confirm_reads=confirm_reads,
+            approve_reads=approve_reads,
+        )
 
     @mcp.tool()
     async def cancel_cell(session_id: str, cell_id: str) -> dict[str, Any]:

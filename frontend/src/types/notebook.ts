@@ -732,6 +732,7 @@ export type WsClientMessageType =
   | 'cell_cancel' // Cancel a running cell
   | 'cell_source_update' // Cell source changed (debounced)
   | 'cell_focus' // The cell this client is on, or null
+  | 'read_confirm' // Run after a read_confirm_prompt
   | 'cell_run_tests' // Persist + run a cell's unit tests (Python only)
   | 'notebook_run_all' // Run all cells (or just stale ones)
   | 'notebook_rerun_all' // Force re-execute every cell (cache off)
@@ -761,6 +762,7 @@ export type WsServerMessageType =
   | 'cell_test_results' // Cell unit-test per-test outcomes + totals
   | 'dag_update' // Authoritative DAG from backend AST analysis
   | 'cascade_prompt' // "This cell needs N upstream cells to run first"
+  | 'read_confirm_prompt' // A run would read more than the host allows unasked
   | 'cascade_progress' // During cascade, reports which cell is running
   | 'impact_preview' // Run impact preview (upstream + downstream effects)
   | 'profiling_summary' // Notebook profiling summary

@@ -56,6 +56,7 @@ _EXECUTE_FRAMES = frozenset(
         MessageType.NOTEBOOK_RUN_ALL,
         MessageType.NOTEBOOK_RERUN_ALL,
         MessageType.CELL_CANCEL,
+        MessageType.READ_CONFIRM,
         MessageType.WIDGET_UPDATE,
         MessageType.INSPECT_OPEN,
         MessageType.INSPECT_EVAL,

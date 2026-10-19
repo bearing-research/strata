@@ -1343,6 +1343,19 @@ class NotebookSession:
         )
         return True
 
+    def reads_approved(self, cell_id: str, machine: str, fingerprint: str) -> bool:
+        """Whether a yes was given to *cell_id* reading these inputs on *machine*."""
+        from strata.notebook.runtime_state import load_runtime_state
+
+        entry = load_runtime_state(self.path).cells.get(cell_id)
+        return entry is not None and entry.read_approvals.get(machine) == fingerprint
+
+    def approve_reads(self, cell_id: str, machine: str, fingerprint: str) -> None:
+        """Remember a yes to *cell_id* reading these inputs on *machine*."""
+        from strata.notebook.runtime_state import persist_read_approval
+
+        persist_read_approval(self.path, cell_id, machine, fingerprint)
+
     def reopen_identity(self, cell: CellState) -> str | None:
         """What this cell's cache scheme rests on beyond the generic triplet.
 

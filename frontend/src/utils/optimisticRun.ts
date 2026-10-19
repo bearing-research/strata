@@ -17,6 +17,13 @@ export class OptimisticRuns<S extends string = string> {
     this.before.delete(cellId)
   }
 
+  /** Every run still waiting on the server, with what to restore; forgets them. */
+  takeAll(): { cellId: string; status: S }[] {
+    const pending = [...this.before].map(([cellId, status]) => ({ cellId, status }))
+    this.before.clear()
+    return pending
+  }
+
   /** The status to restore when `payload` refuses one of these runs, else null. */
   refused(payload: unknown): { cellId: string; status: S } | null {
     if (!payload || typeof payload !== 'object') return null
