@@ -18,7 +18,10 @@ interface MessageHandler {
   (msg: WsMessage): void
 }
 
-export function useWebSocket(notebookId: string, options: { role?: string } = {}) {
+export function useWebSocket(
+  notebookId: string,
+  options: { role?: string; framed?: boolean } = {},
+) {
   const connection = shallowRef<WebSocket | null>(null)
   const state = ref<WsConnectionState>('disconnected')
   const error = ref<string | null>(null)
@@ -254,9 +257,16 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     )
   }
 
-  /** Report this client's current cell (or null) for presence. */
+  /**
+   * Report this client's current cell (or null) for presence, and to a framing
+   * platform's page, which cannot read the frame. A cell id is not secret, and
+   * the frame-ancestors setting limits who frames the editor, so `*` is safe.
+   */
   function focusCell(cellId: string | null): void {
     send('cell_focus', { cell_id: cellId })
+    if (options.framed && window.parent !== window) {
+      window.parent.postMessage({ type: 'strata:frame:focus', sessionId: notebookId, cellId }, '*')
+    }
   }
 
   function inspectOpen(cellId: string): void {

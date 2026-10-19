@@ -20,7 +20,7 @@ const FRAMED: EditorChrome = {
   deleteNotebook: false,
 }
 
-function isFramed(query: Record<string, unknown>): boolean {
+export function isFramed(query: Record<string, unknown>): boolean {
   const raw = query.framed
   const value = Array.isArray(raw) ? raw[0] : raw
   return value === '1' || value === 'true'

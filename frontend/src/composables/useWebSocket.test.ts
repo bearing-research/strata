@@ -187,3 +187,34 @@ test('a socket closed by the client does not probe the session', async () => {
   await settle()
   assert.deepEqual(calls, [])
 })
+
+test('a framed editor posts the focused cell to its page; an unframed one does not', () => {
+  const posted: Array<[unknown, string]> = []
+  const parent = {
+    postMessage: (message: unknown, origin: string) => posted.push([message, origin]),
+  }
+  const win = globalThis as { window?: unknown }
+  win.window = { parent }
+  try {
+    const framed = useWebSocket('s1', { framed: true })
+    framed.connect()
+    FakeSocket.all[0]!.onopen?.()
+    framed.focusCell('c1')
+    framed.focusCell(null)
+    assert.deepEqual(FakeSocket.all[0]!.sentTypes(), ['notebook_sync', 'cell_focus', 'cell_focus'])
+    assert.deepEqual(posted, [
+      [{ type: 'strata:frame:focus', sessionId: 's1', cellId: 'c1' }, '*'],
+      [{ type: 'strata:frame:focus', sessionId: 's1', cellId: null }, '*'],
+    ])
+
+    posted.length = 0
+    const unframed = useWebSocket('s2')
+    unframed.connect()
+    FakeSocket.all[1]!.onopen?.()
+    unframed.focusCell('c1')
+    assert.deepEqual(FakeSocket.all[1]!.sentTypes(), ['notebook_sync', 'cell_focus'])
+    assert.deepEqual(posted, [])
+  } finally {
+    delete win.window
+  }
+})

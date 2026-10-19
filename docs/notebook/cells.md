@@ -830,6 +830,18 @@ wants deletes to go through its own records refuses `DELETE
 /v1/notebooks/{session_id}` and `POST /v1/notebooks/delete-by-path` itself. The
 same `embed_frame_ancestors` rule decides which hosts may frame it.
 
+A framed editor posts the cell the member is on to the parent page, each time
+it changes, so a panel beside the frame can follow it:
+
+```js
+window.addEventListener('message', (e) => {
+  if (e.source !== frame.contentWindow || e.origin !== strataOrigin) return
+  if (e.data && e.data.type === 'strata:frame:focus') {
+    // e.data.sessionId, and e.data.cellId, which is null when no cell has focus
+  }
+})
+```
+
 ---
 
 ## Markdown Cells

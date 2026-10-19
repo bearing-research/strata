@@ -1925,12 +1925,22 @@ function setViewerMode(on: boolean) {
   viewerMode.value = on
 }
 
+// Editor framed by a platform (`?framed=1`): the focused cell is posted to its page.
+const framed = ref(false)
+
+function setFramed(on: boolean) {
+  framed.value = on
+}
+
 function initializeWebSocket() {
   if (!wsInstance) {
     const notebookId = (notebook as any).sessionId
     if (!notebookId) return
 
-    wsInstance = useWebSocket(notebookId, { role: viewerMode.value ? 'viewer' : undefined })
+    wsInstance = useWebSocket(notebookId, {
+      role: viewerMode.value ? 'viewer' : undefined,
+      framed: framed.value,
+    })
 
     // The header and the run buttons follow the socket through drops and reconnects.
     stopConnectedWatch = watch(wsInstance.state, (state) => {
@@ -3584,6 +3594,7 @@ export function useNotebook() {
     setVariantActive,
     updateWidgetValues,
     setViewerMode,
+    setFramed,
     selectVariantDisplay,
     variantDisplayCellId,
     addVariant,
