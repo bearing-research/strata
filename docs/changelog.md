@@ -239,13 +239,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   measuring made the write raise, failing the scan that read the row group.
   One walk runs at a time now, a file gone mid-walk is skipped, an eviction
   error is logged rather than failing the write, and bytes written during a
-  walk stay counted. (#PR)
+  walk stay counted. (#1222)
 - **Cache warming plans its tables off the event loop.** An async warming job
   read each table's catalog entry and manifests on the server's event loop, so
-  a slow object store stalled every other request while it planned. (#PR)
+  a slow object store stalled every other request while it planned. (#1222)
 - **`GET /v1/cache/entries` and `POST /v1/cache/clear` run off the event
   loop.** Listing read every entry's sidecar, and clearing deleted every cached
-  file, on the event loop, stalling other requests on a large cache. (#PR)
+  file, on the event loop, stalling other requests on a large cache. (#1222)
 - **strata-pool's Docker backend removes a stopped worker's volumes.** It
   removed the container but kept its anonymous volumes, so a worker image that
   declares `VOLUME` directories left one behind per worker until the disk
