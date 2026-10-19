@@ -88,6 +88,8 @@ from strata.notebook.mounts import (
     MountWrite,
     ResolvedMount,
     ensure_writable,
+    listing_entries,
+    parse_mount_uri,
     resolve_cell_mounts,
     weigh_mount_sync,
 )
@@ -132,6 +134,7 @@ from strata.notebook.workers import (
     one_policy_read,
     read_worker_policy,
     resolve_worker_spec,
+    worker_cached_bytes,
     worker_runtime_identity,
     worker_supports_notebook_execution,
     worker_transport,
@@ -379,17 +382,15 @@ class _CellProvenance:
     table_reads: list[dict[str, Any]] = field(default_factory=list)
     # What each declared input weighs (Amber item 89), for the badge and the reads index.
     input_weights: list[InputWeight] = field(default_factory=list)
-    # Whether the cell reads its mounts through this server's mount cache.
-    reads_here: bool = False
 
-    def reads(self, mounts_moved: dict[str, int]) -> dict[str, Any] | None:
+    def reads(self, mounts_moved: dict[str, int | None]) -> dict[str, Any] | None:
         """The reads index entry for a good run: what each input moved, if known."""
         if not self.input_weights:
             return None
         inputs = []
         for weight in self.input_weights:
             moved: int | None = None
-            if weight.kind == "mount" and self.reads_here:
+            if weight.kind == "mount":
                 moved = mounts_moved.get(weight.name, 0)
             elif weight.kind == "fetch" and weight.bytes is not None:
                 moved = weight.bytes - (weight.cached_bytes or 0)
@@ -616,6 +617,23 @@ def _worker_mount_writes(result: Any, mount_specs: list[MountSpec]) -> list[Moun
     return writes
 
 
+def _worker_mount_bytes(result: Any, mount_specs: list[MountSpec]) -> dict[str, int | None]:
+    """What a remote worker reports its read-only remote mounts downloaded.
+
+    ``None`` for a mount it does not report (a worker older than the report).
+    """
+    raw = result.get("mount_bytes") if isinstance(result, dict) else None
+    reported = raw if isinstance(raw, dict) else {}
+    moved: dict[str, int | None] = {}
+    for mount in mount_specs:
+        if mount.mode == MountMode.READ_WRITE or parse_mount_uri(mount.uri)[0] == "file":
+            continue
+        value = reported.get(mount.name)
+        ok = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        moved[mount.name] = value if ok else None
+    return moved
+
+
 class CellExecutor:
     """Materialize notebook cells (cache-or-build per cell).
 
@@ -653,10 +671,11 @@ class CellExecutor:
         # Same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``.
         self._dataset_refs: dict[str, dict[str, str]] = {}
         # Bytes each read-only remote mount downloaded on this server during a cell's run,
-        # ``{mount name: bytes}``, for the reads index. Reset as a run starts
+        # ``{mount name: bytes}`` (``None``: a worker did not say), for the reads index.
+        # A mount missing from it moved nothing: the run did not prepare it. Reset as a run starts
         # (``forget_mounts_moved``), not as provenance is made: a batch prepares mounts
         # first, and a fan-out cell makes its provenance again after its variants ran.
-        self._mounts_moved: dict[str, dict[str, int]] = {}
+        self._mounts_moved: dict[str, dict[str, int | None]] = {}
         # ``# @output_dir`` files a worker uploaded during a cell's last remote run, by cell:
         # ``{folder: {path: entry}}``. Taken by the run's staging, success or failure.
         self._received_output_files: dict[str, dict[str, dict[str, dict[str, Any]]]] = {}
@@ -1191,10 +1210,13 @@ class CellExecutor:
         )
         weights: list[InputWeight] = []
         machine_cache = self._mount_cache_for(effective_worker)
+        listings: dict[str, dict[str, dict[str, Any]]] = {}
         if mount_fingerprints is None or has_rw_mount is None:
             mount_fingerprints, has_rw_mount = await self._fingerprint_mounts(
-                mount_specs, weights=weights, cache=machine_cache
+                mount_specs, weights=weights, cache=machine_cache, listings=listings
             )
+        if machine_cache is None and listings:
+            weights = await self._ask_worker_cache(effective_worker, mount_specs, weights, listings)
 
         source_hash = compute_source_hash(source)
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
@@ -1304,7 +1326,6 @@ class CellExecutor:
             dataset_error=dataset_error,
             table_reads=table_reads,
             input_weights=weights,
-            reads_here=machine_cache is not None,
         )
 
     # ------------------------------------------------------------------
@@ -2980,7 +3001,7 @@ class CellExecutor:
         worker_token = _resolve_worker_token(worker_spec)
         transport = str(worker_spec.config.transport or "direct").strip().lower()
         if transport in SIGNED_TRANSPORTS:
-            return await self._dispatch_http_executor_with_manifest(
+            signed = await self._dispatch_http_executor_with_manifest(
                 worker_spec,
                 source,
                 input_specs,
@@ -2995,6 +3016,8 @@ class CellExecutor:
                 cell_provenance_hash=cell_provenance_hash,
                 language=language,
             )
+            self._note_worker_mount_bytes(cell_id, signed[0], mount_specs)
+            return signed
 
         metadata_inputs: list[dict[str, Any]] = []
         for var_name, spec in sorted(input_specs.items()):
@@ -3171,6 +3194,7 @@ class CellExecutor:
 
         unpacked_dir = output_dir / "_executor_result"
         unpacked_result = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
+        self._note_worker_mount_bytes(cell_id, unpacked_result, mount_specs)
         return unpacked_result, unpacked_dir, "executor", {}
 
     async def _dispatch_http_executor_with_manifest(
@@ -3779,6 +3803,40 @@ class CellExecutor:
             return MountCache.from_config(self._lake_config())
         return None
 
+    async def _ask_worker_cache(
+        self,
+        worker_name: str,
+        mount_specs: list[MountSpec],
+        weights: list[InputWeight],
+        listings: dict[str, dict[str, dict[str, Any]]],
+    ) -> list[InputWeight]:
+        """*weights* with the mounts' cached shares a remote worker reports, if it does."""
+        worker = resolve_worker_spec(self.session.notebook_state, worker_name)
+        if worker is None:
+            return weights
+        specs = {m.name: m for m in mount_specs}
+        names = sorted(listings)
+        answer = await worker_cached_bytes(
+            worker,
+            _resolve_worker_token(worker),
+            [
+                {
+                    "spec": specs[name].model_dump(mode="json"),
+                    "entries": listing_entries(listings[name]),
+                }
+                for name in names
+            ],
+        )
+        if answer is None:
+            return weights
+        shares = dict(zip(names, answer, strict=True))
+        return [
+            w.model_copy(update={"cached_bytes": shares[w.name]})
+            if w.kind == "mount" and w.name in shares
+            else w
+            for w in weights
+        ]
+
     async def _broadcast_cell_inputs(
         self, cell_id: str, machine: str, weights: list[InputWeight]
     ) -> None:
@@ -4007,17 +4065,21 @@ class CellExecutor:
         *,
         weights: list[InputWeight] | None = None,
         cache: MountCache | None = None,
+        listings: dict[str, dict[str, dict[str, Any]]] | None = None,
     ) -> tuple[list[str], bool]:
         """Compute mount fingerprints without preparing local materializations.
 
         *weights*, when given, gets each remote read-only mount's weight from the same
-        listing, its cached share counted in *cache* (``None``: unknown).
+        listing, its cached share counted in *cache* (``None``: unknown). *listings* gets
+        the listing of each mount whose share is unknown, for the machine to be asked.
         """
         self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
         has_rw_mount = False
         for mount in sorted(mount_specs, key=lambda item: item.name):
             fingerprint, weight = weigh_mount_sync(self._mount_resolver, mount, cache)
+            if listings is not None and weight is not None and weight.listing is not None:
+                listings[mount.name] = weight.listing
             if weights is not None and weight is not None:
                 weights.append(
                     InputWeight(
@@ -4052,6 +4114,15 @@ class CellExecutor:
             principal=principal.id if principal is not None else None,
         )
 
+    def _note_worker_mount_bytes(
+        self, cell_id: str | None, result: dict[str, Any], mount_specs: list[MountSpec]
+    ) -> None:
+        """A worker prepared the cell's mounts: keep what it reports they downloaded."""
+        if cell_id is not None:
+            self._mounts_moved.setdefault(cell_id, {}).update(
+                _worker_mount_bytes(result, mount_specs)
+            )
+
     def forget_mounts_moved(self, cell_id: str) -> None:
         """A run of *cell_id* starts: what an earlier one downloaded is not its own."""
         self._mounts_moved.pop(cell_id, None)
@@ -4075,7 +4146,7 @@ class CellExecutor:
             moved = self._mounts_moved.setdefault(cell_id, {})
             for name, mount in resolved.items():
                 if mount.bytes_moved is not None:
-                    moved[name] = moved.get(name, 0) + mount.bytes_moved
+                    moved[name] = (moved.get(name) or 0) + mount.bytes_moved
         staged = [rm.staging_dir for rm in resolved.values() if rm.staging_dir is not None]
         if staged:
             try:

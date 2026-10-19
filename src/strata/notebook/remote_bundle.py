@@ -151,6 +151,9 @@ def pack_notebook_output_bundle(
     # What the worker wrote through read-write mounts; the server records it.
     if result_manifest.get("mount_writes"):
         bundle_manifest["mount_writes"] = result_manifest["mount_writes"]
+    # What its read-only mounts downloaded; absent from a local bundle and an older worker's.
+    if "mount_bytes" in result_manifest:
+        bundle_manifest["mount_bytes"] = result_manifest["mount_bytes"]
 
     variables = result_manifest.get("variables", {})
     if not isinstance(variables, dict):
@@ -266,6 +269,8 @@ def unpack_notebook_output_bundle(
             "hardware": manifest_data.get("hardware") or {},
             "mount_writes": manifest_data.get("mount_writes") or [],
         }
+        if "mount_bytes" in manifest_data:
+            result["mount_bytes"] = manifest_data["mount_bytes"]
         _unpack_output_dirs(tar, manifest_data.get("output_dirs") or {}, output_dir)
         streamed = manifest_data.get("output_dirs_streamed")
         if streamed is not None:

@@ -23,12 +23,13 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook import output_dirs
 from strata.notebook.annotations import parse_annotations
-from strata.notebook.credentials import CredentialResolver
+from strata.notebook.credentials import CredentialError, CredentialResolver
 from strata.notebook.hardware import hardware_report
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 from strata.notebook.layout import WORK_DIR
@@ -39,7 +40,7 @@ from strata.notebook.mount_cache import (
     MountCache,
     default_root,
 )
-from strata.notebook.mounts import MountResolver, parse_mount_uri
+from strata.notebook.mounts import MountResolver, cached_share, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
 from strata.observability.tracing import trace_span_from
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
@@ -623,6 +624,19 @@ def _worker_credentials() -> CredentialResolver:
     )
 
 
+class ProbedMount(BaseModel):
+    """One mount a server asks about: its spec and the listing it made."""
+
+    spec: MountSpec
+    entries: list[dict[str, Any]]
+
+
+class MountCacheProbe(BaseModel):
+    """``POST /v1/mount-cache/cached``: the mounts, as ``listing_entries`` made them."""
+
+    mounts: list[ProbedMount]
+
+
 def _worker_mount_cache() -> MountCache:
     """The machine's read-only mount cache, kept across jobs while the worker is warm.
 
@@ -1027,6 +1041,12 @@ def create_notebook_executor_app(
                         # bundle carries them all.
                         logger.warning("Sending output folders failed", exc_info=True)
                 if result.get("success", False):
+                    # What each read-only mount downloaded here, for the reads index.
+                    result["mount_bytes"] = {
+                        name: rm.bytes_moved
+                        for name, rm in resolved_mounts.items()
+                        if rm.bytes_moved is not None
+                    }
                     # The server records these; it never sees this machine's staging copy.
                     result["mount_writes"] = [
                         write.model_dump()
@@ -1158,6 +1178,8 @@ def create_notebook_executor_app(
                     # Restoring an renv.lock needs renv, so probe for it as for uv.
                     "locked_r_environments": rscript is not None
                     and await asyncio.to_thread(renv_available, rscript),
+                    # ``POST /v1/mount-cache/cached`` answers what this machine holds.
+                    "mount_cache_probe": True,
                 },
             },
             "version": "1.0.0",
@@ -1172,6 +1194,29 @@ def create_notebook_executor_app(
             # Missing fields mean unknown.
             "hardware": await asyncio.to_thread(hardware_report),
         }
+
+    @app.post("/v1/mount-cache/cached", dependencies=[Depends(require_worker_token)])
+    async def mount_cache_cached(probe: MountCacheProbe) -> dict[str, Any]:
+        """How many bytes of each listed read-only mount this machine's cache holds.
+
+        The server lists the mount (Amber item 89); the object keys hash this machine's
+        own storage options, so it computes them. ``null`` is a share it cannot tell: a
+        credential it does not have, or a mount not read through a view.
+        """
+        credentials = _worker_credentials()
+        cache = _worker_mount_cache()
+
+        def share(mount: ProbedMount) -> int | None:
+            scheme, _ = parse_mount_uri(mount.spec.uri)
+            try:
+                options = credentials.storage_options(
+                    scheme, mount.spec.credential, mount.spec.options
+                )
+            except CredentialError:
+                return None
+            return cached_share(mount.spec, options, mount.entries, cache)
+
+        return {"cached_bytes": [await asyncio.to_thread(share, mount) for mount in probe.mounts]}
 
     @app.post("/v1/executions/{build_id}/cancel", dependencies=[Depends(require_worker_token)])
     async def cancel_execution(build_id: str) -> dict[str, Any]:
