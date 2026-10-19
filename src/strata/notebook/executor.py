@@ -5173,7 +5173,8 @@ class CellExecutor:
         return output_dirs.collect(
             self.session.get_artifact_manager(),
             cell_id,
-            output_dir / output_dirs.OUTPUT_DIRS / name if output_dir is not None else None,
+            output_dir,
+            name,
             received,
         )
 
@@ -6321,7 +6322,8 @@ class CellExecutor:
                         folder_manifests[name] = output_dirs.collect(
                             artifact_mgr,
                             cell_id,
-                            folders / output_dirs.OUTPUT_DIRS / name,
+                            folders,
+                            name,
                             seen=folder_seen[name],
                         )
                         artifact_mgr.store_cell_output(
