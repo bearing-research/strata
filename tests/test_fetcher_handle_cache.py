@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -87,6 +88,13 @@ def test_close_forgets_the_footers(tmp_path):
     assert not fetcher._file_cache
 
 
+class _NoChunks:
+    """A footer whose row groups name no column chunks."""
+
+    def row_group(self, i):
+        return SimpleNamespace(num_columns=0)
+
+
 class _RecordingParquetFile:
     """Stands in for a ParquetFile and records how it is used."""
 
@@ -96,7 +104,7 @@ class _RecordingParquetFile:
     def __init__(self, path, filesystem=None, metadata=None):
         self.path = path
         self.given_metadata = metadata
-        self.metadata = metadata or object()
+        self.metadata = metadata or _NoChunks()
         self.closed = False
         self.active = 0
         self.max_active = 0

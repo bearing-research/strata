@@ -79,6 +79,10 @@ the run, minus any `admin:` scope, on the client's own routes (materialize,
 streams, artifact reads, `put`, tags, names and aliases, the registry audit) and
 on promote for its own notebook session; any other route answers 403. The token
 stops working when the run ends. Run All uses one token for the whole batch.
+On any server the client also sends the run's token and its cell id so the
+server can count what the cell's scans read from storage for the
+[reads index](lake-aware-cells.md#what-a-run-moved); where callers are not
+authenticated, the token grants nothing.
 
 `strata.promote()` sends an upstream result, and the whole chain behind it, to
 the team store - by the variable name the cell reads it under, not by an

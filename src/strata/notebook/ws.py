@@ -2411,7 +2411,7 @@ async def _run_partition_batch(
         # Batched cells may have RO mounts (never RW); materialize them.
         mount_specs = executor._resolve_cell_mount_specs(cell.id, cell.source)
         mount_manifest: dict[str, dict[str, str]] = {}
-        executor.forget_mounts_moved(cell.id)
+        executor.forget_moved(cell.id)
         if mount_specs:
             try:
                 # Not the resolver directly: ``_prepare_mounts`` loads

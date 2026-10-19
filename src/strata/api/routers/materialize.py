@@ -13,7 +13,7 @@ import time
 from typing import TYPE_CHECKING
 
 import anyio.to_thread
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pyiceberg.exceptions import NoSuchTableError
 
@@ -403,7 +403,7 @@ async def materialize_artifact(request: MaterializeRequest):
 
 
 @router.post("/v1/materialize", response_model=MaterializeResponse)
-async def unified_materialize(request: MaterializeRequest):
+async def unified_materialize(request: MaterializeRequest, http_request: Request):
     """Materialize data: the single entry point, with table scans expressed as ``scan@v1``.
 
     ``stream`` mode (default) streams data while the artifact builds; ``artifact`` mode
@@ -421,18 +421,24 @@ async def unified_materialize(request: MaterializeRequest):
         )
 
     if transform.executor == "scan@v1":
-        return await _handle_identity_materialize(request)
+        from strata.auth.run_tokens import RUN_CELL_HEADER, RUN_TOKEN_HEADER, run_reader
+
+        reader = run_reader(
+            http_request.headers.get(RUN_TOKEN_HEADER), http_request.headers.get(RUN_CELL_HEADER)
+        )
+        return await _handle_identity_materialize(request, reader)
 
     return await _handle_transform_materialize(request)
 
 
 async def _handle_identity_materialize(
     request: MaterializeRequest,
+    reader: tuple[str, str] | None,
 ) -> MaterializeResponse | JSONResponse:
     """Handle ``scan@v1`` in-process: plan one table scan, return a cache hit or start a stream.
 
     On a miss creates the artifact record and stream state, then returns ``stream_url`` or
-    ``build_id`` by mode.
+    ``build_id`` by mode. A *reader* (``run_tokens.run_reader``) counts what it reads.
     """
     import uuid
 
@@ -567,6 +573,8 @@ async def _handle_identity_materialize(
 
         plan.owner_principal = principal.id
         plan.owner_tenant = principal.tenant
+
+    plan.read_by = reader
 
     from strata.services.materialize import materialize_service, table_input_version
     from strata.streaming.scan_builds import record_scan_complete

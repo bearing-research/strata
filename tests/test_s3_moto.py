@@ -3,6 +3,8 @@
 PyArrow's S3FileSystem bypasses boto3, so moto cannot mock it; test_s3_integration.py uses MinIO.
 """
 
+from types import SimpleNamespace
+
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -207,6 +209,13 @@ class TestS3MetadataCache:
             assert results[path].num_row_groups >= 1
 
 
+class _NoChunks:
+    """A footer whose row groups name no column chunks."""
+
+    def row_group(self, i):
+        return SimpleNamespace(num_columns=0)
+
+
 class TestS3Fetcher:
     """Fetcher with S3 paths."""
 
@@ -265,7 +274,7 @@ class TestS3Fetcher:
                 self.path = path
                 self.filesystem = filesystem
                 self.given_metadata = metadata
-                self.metadata = metadata or object()
+                self.metadata = metadata or _NoChunks()
                 self.closed = False
                 created.append(self)
 

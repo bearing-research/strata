@@ -212,7 +212,7 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
         return None
     # Path-loaded, not ``import strata``: the notebook venv has only pyarrow + stdlib.
     cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
-    # The run's token, when its server authenticates callers (read_run_token).
+    # The run's token (read_run_token).
     token = manifest.get("strata_run_token")
     headers = {_client_mod.RUN_TOKEN_HEADER: token} if token else None
     # Lets ``strata.promote("rows")`` name an input the way the cell reads it.

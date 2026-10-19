@@ -143,6 +143,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `POST /v1/mount-cache/cached`, and the worker's result carries `mount_bytes`,
   what each mount downloaded, for the reads index. A pool is not asked, since
   its machine is not known before dispatch. (#1246)
+- **A cell's table scans count what they read from storage.** The reads index
+  records, for each `@table`, the compressed Parquet bytes the cell's scans
+  through the ambient `strata` client read from storage: 0 when the row-group
+  cache or a stored scan answered, `null` when the cell read the table some
+  other way. Every local run now gets a run token, sent with the cell's id; on a
+  server that does not authenticate callers it only counts. (#1247)
 
 ### Changed
 

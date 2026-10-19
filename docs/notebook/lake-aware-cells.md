@@ -235,7 +235,7 @@ data a notebook moved:
     "ran_at": 1760889600000,
     "inputs": [
       {"kind": "mount", "name": "data", "uri": "s3://bucket/data", "credential": null, "bytes_moved": 5368709120},
-      {"kind": "table", "name": "orders", "uri": "file:///tmp/strata-demo/warehouse#shop.orders", "credential": null, "bytes_moved": null},
+      {"kind": "table", "name": "orders", "uri": "file:///tmp/strata-demo/warehouse#shop.orders", "credential": null, "bytes_moved": 41943040},
       {"kind": "fetch", "name": "zones", "uri": "https://example.com/zones.csv", "credential": null, "bytes_moved": 0}
     ]
   }
@@ -243,8 +243,12 @@ data a notebook moved:
 ```
 
 `bytes_moved` is 0 for an input already on the machine, a cache hit included,
-and `null` where it is not known yet: a table's scan, and a mount on a worker that
-does not report what it downloaded (a remote worker reports it in its result). On a
+and `null` where it is not known: a mount on a worker that does not report what
+it downloaded (a remote worker reports it in its result). A table counts what
+the cell's scans through the ambient `strata` client read from storage, the
+compressed Parquet column chunks: 0 when the row-group cache or a stored scan
+answered, and `null` when the cell read the table some other way or not at all,
+since the server only sees its own scans. On a
 worker reached through signed URLs, a forced rerun of a build the server already
 stored is answered with that stored result, so its entry repeats the first run's
 figures. It follows the table index's rules: a failed run leaves the
