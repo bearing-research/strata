@@ -2720,6 +2720,11 @@
 <td><code>{ "continue_on_error": true }</code></td>
 <td>Re-execute every cell with cache off</td>
 </tr>
+<tr>
+<td><code>read_confirm</code></td>
+<td><code>{ "prompt_id": "..." }</code></td>
+<td>Run what a <code>read_confirm_prompt</code> asked about. Each cell's yes is kept for its machine and inputs. Cancel sends nothing</td>
+</tr>
 </tbody>
 </table>
 <h3 id="cell-editing">Cell Editing<a class="headerlink" href="#cell-editing" title="Permanent link">&para;</a></h3>
@@ -2954,6 +2959,11 @@
 <td><code>cascade_progress</code></td>
 <td><code>{ "plan_id": "...", "current_cell_id": "...", "completed": 1, "total": 3 }</code></td>
 <td>Sent as each cell starts. <code>completed</code> counts finished cells of the <code>total</code> that run; a cascade that succeeds ends with a frame where <code>completed</code> equals <code>total</code></td>
+</tr>
+<tr>
+<td><code>read_confirm_prompt</code></td>
+<td><code>{ "prompt_id": "...", "cells": [{ "cell_id": "...", "machine": "local", "inputs": [...], "bytes_to_move": 12000000000, "cost": 1.08 }], "message": "..." }</code></td>
+<td>A run would read past the server's <a href="../../notebook/lake-aware-cells/#asking-before-a-large-read">threshold</a>, and nothing started. Each cell lists its inputs as <code>cell_inputs</code> does, the bytes its machine does not hold, and their cost in dollars. <code>message</code> is the host's sentence, when set. Answer with <code>read_confirm</code></td>
 </tr>
 </tbody>
 </table>

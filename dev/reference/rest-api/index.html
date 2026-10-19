@@ -4613,6 +4613,12 @@ use the cache and materialize stale upstreams), <code>rerun</code> (bypass the t
 cell's cache, still materialize upstreams), or <code>force</code> (run against whatever
 upstream artifacts already exist). An unrecognized mode returns <code>400</code>.
 While another cell in the notebook runs, the request is refused with <code>409</code>.</p>
+<p>A run whose inputs would move more than the server's
+<a href="../../notebook/lake-aware-cells/#asking-before-a-large-read">threshold</a> goes ahead
+and records that it was not asked. With <code>confirm_reads=true</code> it does not start:
+it answers <code>409</code> with <code>{"code": "large_read", "message": "...", "cells": [...]}</code>,
+each cell as in the WebSocket <code>read_confirm_prompt</code>. Sending the request again with
+<code>approve_reads=true</code> keeps the yes, as the notebook's Run does, and runs.</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 </div>

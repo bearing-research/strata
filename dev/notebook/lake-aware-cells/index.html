@@ -1022,6 +1022,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#asking-before-a-large-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asking before a large read
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gotchas" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2208,6 +2219,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#asking-before-a-large-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asking before a large read
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gotchas" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2455,6 +2477,32 @@ worker reached through signed URLs, a forced rerun of a build the server already
 stored is answered with that stored result, so its entry repeats the first run's
 figures. It follows the table index's rules: a failed run leaves the
 entry, and a cell that stops reading these inputs, or is deleted, drops out.</p>
+<p>With a <a href="#asking-before-a-large-read">read threshold</a> set, each entry also has
+<code>confirmation</code>: <code>under_threshold</code>, <code>approved</code> (someone said Run, now or for the
+same inputs on that machine before), or <code>not_asked</code> (a run that could not ask,
+such as a headless <code>strata run</code>, went ahead over it).</p>
+<h2 id="asking-before-a-large-read">Asking before a large read<a class="headerlink" href="#asking-before-a-large-read" title="Permanent link">&para;</a></h2>
+<p>A host can have the notebook ask before a run moves a lot of data onto a
+machine. Before a run, each cell about to run is weighed as its badge is, on
+the machine it will run on, except that a <code>@fetch</code> is asked with a <code>HEAD</code> rather
+than downloaded. What would move is what the machine does not hold yet, of the
+sizes that are known; a table counts its snapshot's files, an upper bound. When
+that passes <code>STRATA_NOTEBOOK_CONFIRM_READ_BYTES</code>, or its cost at
+<code>STRATA_NOTEBOOK_CREDENTIAL_READ_COST</code>'s rate per GB passes
+<code>STRATA_NOTEBOOK_CONFIRM_READ_COST</code>, nothing starts: the notebook lists those
+cells, their inputs, sizes and cost, and the host's
+<code>STRATA_NOTEBOOK_CONFIRM_READ_MESSAGE</code>, with Run and Cancel. One question covers
+the whole run, Run All included. A ready cell is left out, since its run is a
+cache hit.</p>
+<p>A Run is kept per cell, machine and inputs (the mount listings, table snapshots
+and fetch URLs), so a rerun on the same machine does not ask again, while new
+data, or another machine, does. A run that cannot ask goes ahead and its reads
+index entry says <code>not_asked</code>: a headless <code>strata run</code>, the CLI, and REST or MCP
+runs that do not pass <code>confirm_reads</code> (see
+<a href="../../reference/rest-api/#execute-cell-rest">Execute Cell</a> and
+<a href="../mcp/">MCP</a>). Nothing is ever refused for its size.</p>
+<p>The question comes before a cell's cache is checked, so a stale cell whose
+result turns out to be cached may still ask; asking is the safe direction.</p>
 <h2 id="gotchas">Gotchas<a class="headerlink" href="#gotchas" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Injected vars don't flow downstream.</strong> <code>orders</code> and <code>orders_snapshot</code> live

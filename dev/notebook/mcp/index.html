@@ -2266,8 +2266,8 @@ details stay in the server log.</p>
 <td>Per-cell status + staleness summary.</td>
 </tr>
 <tr>
-<td><code>run_cell(session_id, cell_id, mode)</code></td>
-<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live.</td>
+<td><code>run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)</code></td>
+<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live. With <code>confirm_reads</code>, a run over the server's read threshold returns <code>error_code: large_read</code> and the estimate instead; <code>approve_reads</code> runs it.</td>
 </tr>
 <tr>
 <td><code>cancel_cell(session_id, cell_id)</code></td>
@@ -2385,6 +2385,12 @@ so retry once that run finishes.</p>
 upstreams first; <code>rerun</code> bypasses the target's cache but still refreshes
 upstreams; <code>force</code> ("run this only") runs against whatever upstream artifacts
 already exist.</p>
+<p>On a server that <a href="../lake-aware-cells/#asking-before-a-large-read">asks before a large read</a>,
+pass <code>confirm_reads=true</code> so a run that would move more than the threshold
+returns <code>error_code: large_read</code> with each cell's inputs, <code>bytes_to_move</code> and
+<code>cost</code> rather than starting. Ask the user, then call again with
+<code>approve_reads=true</code>. Without either, the run goes ahead and the reads index
+records that it was not asked.</p>
 <p><code>set_variant</code> drives <a href="../annotations/#variant-cells">variant groups</a>:
 <code>set_variant(session_id, "policy", active="service")</code> picks one variant,
 <code>set_variant(session_id, "policy", mode="sweep")</code> runs them all, and either
