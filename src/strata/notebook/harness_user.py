@@ -133,10 +133,12 @@ def hand_over(path: Path, user: HarnessUser | None) -> None:
     """
     if user is None or user.uid == os.geteuid():
         return
-    os.chown(path, user.uid, user.gid)
-    for root, dirs, files in os.walk(path):
+    # By directory fd, never by path: the user can swap a directory it already owns for
+    # a link between a path walk's link check and its descent. *path* goes last.
+    for _root, dirs, files, root_fd in os.fwalk(path, follow_symlinks=False):
         for name in (*dirs, *files):
-            os.chown(os.path.join(root, name), user.uid, user.gid, follow_symlinks=False)
+            os.chown(name, user.uid, user.gid, dir_fd=root_fd, follow_symlinks=False)
+    os.chown(path, user.uid, user.gid, follow_symlinks=False)
 
 
 def prepare_work_dir(notebook_dir: Path, user: HarnessUser | None) -> Path:

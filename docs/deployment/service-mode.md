@@ -793,7 +793,11 @@ and cell tests load their inputs in the test process.
 A cell run this way still shares the host's kernel and sees what any local user
 can. A process a cell starts in the background is not stopped when the cell
 finishes: it keeps running as the harness user, so the server never writes by
-path into a directory it has handed over. A notebook that needs more isolation
+path into a directory it has handed over. Such a process can still read and
+change what later runs of any notebook are handed (their per-run directories
+and staging copies) and read their environment through `/proc`. Strata does not
+stop it: `setsid` takes it out of the cell's process group, and killing by user
+would also kill other notebooks' running cells. A notebook that needs more isolation
 than that wants a worker on another machine.
 
 A cell's ambient `strata` client reaches this server with a token the server

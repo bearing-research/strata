@@ -19,6 +19,7 @@ from strata.notebook.harness_user import (
     REFUSAL,
     HarnessUser,
     LocalExecutionRefused,
+    hand_over,
     identity_env,
     resolve_harness_user,
     spawn_kwargs,
@@ -127,6 +128,89 @@ class TestSpawnArguments:
     def test_no_user_changes_nothing(self):
         assert spawn_kwargs(None) == {}
         assert identity_env(None, None) is None
+
+
+@posix_only
+class TestHandOver:
+    """Chowning to another user needs root, so ``os.chown`` records what it would change."""
+
+    @staticmethod
+    def _record_chowns(monkeypatch, on_chown=None) -> set[tuple[int, int]]:
+        changed: set[tuple[int, int]] = set()
+
+        def _chown(path, uid, gid, *, dir_fd=None, follow_symlinks=True):
+            st = os.stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+            changed.add((st.st_dev, st.st_ino))
+            if on_chown is not None:
+                on_chown(st)
+
+        monkeypatch.setattr(os, "chown", _chown)
+        return changed
+
+    @staticmethod
+    def _ids(*paths) -> set[tuple[int, int]]:
+        return {(st.st_dev, st.st_ino) for st in (os.lstat(p) for p in paths)}
+
+    @staticmethod
+    def _cells() -> HarnessUser:
+        return HarnessUser(name="cells", uid=os.geteuid() + 1, gid=os.getegid(), home="/")
+
+    def test_every_entry_is_handed_over_and_no_link_is_followed(self, tmp_path, monkeypatch):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        run = tmp_path / "run"
+        (run / "a" / "b").mkdir(parents=True)
+        (run / "a" / "b" / "f").write_text("x")
+        (run / "g").write_text("y")
+        (run / "link").symlink_to(outside)
+        changed = self._record_chowns(monkeypatch)
+
+        hand_over(run, self._cells())
+
+        tree = [run, run / "a", run / "a" / "b", run / "a" / "b" / "f", run / "g", run / "link"]
+        assert changed == self._ids(*tree)
+
+    def test_a_directory_swapped_for_a_link_mid_walk_is_not_followed(self, tmp_path, monkeypatch):
+        """A harness-user process can rename a directory it owns and put a link in its place
+        while the walk is still in a sibling; root would then chown what the link names."""
+        outside = tmp_path / "outside"
+        (outside / "secret").mkdir(parents=True)
+        run = tmp_path / "run"
+        for name in ("a", "c"):
+            (run / name).mkdir(parents=True)
+            (run / name / "entry").write_text(name)
+        triggers = {os.lstat(run / name / "entry").st_ino: name for name in ("a", "c")}
+        swapped: list[str] = []
+
+        def _attack(st) -> None:
+            # Once the walk is inside one directory, swap the other, already listed, one.
+            inside = triggers.get(st.st_ino)
+            if inside is None or swapped:
+                return
+            other = "c" if inside == "a" else "a"
+            (run / other).rename(tmp_path / f"moved-{other}")
+            (run / other).symlink_to(outside)
+            swapped.append(other)
+
+        changed = self._record_chowns(monkeypatch, _attack)
+
+        hand_over(run, self._cells())
+
+        assert swapped
+        assert not changed & self._ids(outside, outside / "secret")
+
+    def test_a_run_directory_that_is_a_link_hands_over_nothing_it_names(
+        self, tmp_path, monkeypatch
+    ):
+        outside = tmp_path / "outside"
+        (outside / "secret").mkdir(parents=True)
+        run = tmp_path / "run"
+        run.symlink_to(outside)
+        changed = self._record_chowns(monkeypatch)
+
+        hand_over(run, self._cells())
+
+        assert not changed & self._ids(outside, outside / "secret")
 
 
 class TestEveryPlaceCellCodeStarts:
