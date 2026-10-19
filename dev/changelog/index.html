@@ -3780,11 +3780,17 @@ exhaustive commit history.</p>
 <li><strong>A cell says how much it reads, and what its run moved.</strong> A badge shows what
   its read-only remote mounts, <code>@table</code> inputs and <code>@fetch</code> URLs weigh, and while
   it runs, how much moves onto the machine after what its mount cache already
-  holds, with each input on hover; a table's size, or a remote worker's unasked
-  cache, makes a total an upper bound. The new <code>cell_inputs</code> WebSocket frame
-  carries the estimate, kept on the cell as <code>inputs</code>, and
+  holds, with each input on hover; a table's size makes a total an upper bound.
+  The new <code>cell_inputs</code> WebSocket frame carries the estimate, kept on the cell
+  as <code>inputs</code>, and
   <code>.strata/reads/index.json</code> records the bytes each input of a cell's last good
   run moved and where. (#1245)</li>
+<li><strong>A remote worker says what its cache holds, and what a run downloaded.</strong> A
+  cell bound to a worker shows the worker's own cached share of each read-only
+  mount, which a worker advertising <code>mount_cache_probe</code> answers on the new
+  <code>POST /v1/mount-cache/cached</code>, and the worker's result carries <code>mount_bytes</code>,
+  what each mount downloaded, for the reads index. A pool is not asked, since
+  its machine is not known before dispatch. (#1246)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
