@@ -233,6 +233,22 @@ async def test_the_cell_runs_in_work_with_its_output_dirs_writable():
 
 
 @pytest.mark.asyncio
+async def test_a_module_in_the_notebook_directory_is_not_importable():
+    """As in a run: pytest starts in the notebook's directory, which stays off ``sys.path``."""
+    session = _session_with([("cell1", "x = 1\n", None)])
+    (session.path / "shadow_mod.py").write_text("")
+
+    result = await CellExecutor(session).run_cell_tests(
+        "cell1",
+        "import importlib.util\n"
+        "def test_cell(cell):\n"
+        "    assert importlib.util.find_spec('shadow_mod') is None\n",
+    )
+
+    assert (result.passed, result.failed, result.errored) == (1, 0, 0), result.tests
+
+
+@pytest.mark.asyncio
 async def test_a_cell_that_uses_strata_is_told_its_tests_have_no_client():
     session = _session_with([("cell1", "rows = strata.materialize(inputs=[])\n", None)])
 

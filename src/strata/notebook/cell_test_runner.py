@@ -9,6 +9,7 @@ name gets native collection and assertion rewriting. Not on the keystroke path.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -103,8 +104,6 @@ def run_cell_tests_in_dir(
     proc = subprocess.run(
         [
             str(venv_python),
-            # Keeps the notebook's directory, the start directory, off ``sys.path``.
-            "-P",
             "-m",
             "pytest",
             str(test_file),
@@ -118,7 +117,9 @@ def run_cell_tests_in_dir(
         capture_output=True,
         text=True,
         timeout=timeout_seconds,
-        env=env,
+        # Keeps the notebook's directory, the start directory, off ``sys.path``. Not ``-P``,
+        # which a notebook's Python before 3.11 refuses; this it ignores.
+        env={**(os.environ if env is None else env), "PYTHONSAFEPATH": "1"},
         **spawn_kwargs(run_as),
     )
 
