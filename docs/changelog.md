@@ -275,6 +275,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   It also no longer walks the cache directory on the event loop. Personal mode
   is unchanged. (#1167)
 
+- **A process a cell leaves running as the harness user is stopped.** Before a
+  run is handed a directory, a Linux server kills every process of
+  `STRATA_NOTEBOOK_HARNESS_USER` that no run holds: one that left its cell's
+  session with `setsid`, or outlived its cell. It could otherwise watch and
+  change what later runs of any notebook were handed. The harness user must now
+  serve one server's cells alone, and a server running as PID 1 stops nothing
+  and says so. (#1249)
+
 ### Fixed
 
 - **A tenant's scans are cached as its own.** In multi-tenant mode, a

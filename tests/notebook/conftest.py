@@ -174,6 +174,9 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     # exercise the grace window.
     monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.0)
 
+    # A fake harness user's uid may be a real account's here: never sweep its processes.
+    monkeypatch.setattr("strata.notebook.harness_user._process_table", dict)
+
     if request.node.get_closest_marker("integration"):
         return
 

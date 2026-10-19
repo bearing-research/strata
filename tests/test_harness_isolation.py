@@ -7,6 +7,7 @@ The harness-user check needs root and a second OS user, named by ``STRATA_TEST_H
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -328,3 +329,75 @@ def test_a_cell_run_as_the_harness_user_scans_a_table_through_its_server(tmp_pat
 
     assert result.success, result.error
     assert "ROWS 500" in result.stdout
+
+
+def _running(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/status") as status:
+            states = [line.split()[1] for line in status if line.startswith("State:")]
+        return states != ["Z"]
+    except FileNotFoundError:
+        return False
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "linux" and _HARNESS_USER and os.geteuid() == 0),
+    reason="needs Linux, root, and STRATA_TEST_HARNESS_USER naming a second user",
+)
+def test_a_process_a_cell_leaves_running_is_stopped_before_the_next_run(tmp_path, monkeypatch):
+    """A daemon outlives its cell, as the harness user; the next run starts without it."""
+    import pwd
+    import signal
+
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+
+    nb = create_notebook(tmp_path, "Leftover", initialize_environment=False)
+    for directory in (tmp_path, *tmp_path.parents):
+        if directory == Path(tempfile.gettempdir()) or directory == directory.parent:
+            break
+        os.chmod(directory, 0o755)
+    leave = (
+        "import subprocess, sys\n"
+        "daemon = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(600)'], start_new_session=True,\n"
+        "    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n"
+        ")\n"
+        "print('DAEMON', daemon.pid)\n"
+        "del daemon\n"
+    )
+    add_cell_to_notebook(nb, "leave", None, language="python")
+    write_cell(nb, "leave", leave)
+    add_cell_to_notebook(nb, "look", "leave", language="python")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.venv_python = sys.executable
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(deployment_mode="service", notebook_harness_user=_HARNESS_USER)
+        ),
+    )
+    executor = CellExecutor(session)
+
+    result = asyncio.run(executor.execute_cell("leave", leave))
+    assert result.success, result.error
+    pid = int(result.stdout.split("DAEMON", 1)[1].split()[0])
+    try:
+        assert _running(pid)
+        assert os.stat(f"/proc/{pid}").st_uid == pwd.getpwnam(_HARNESS_USER).pw_uid
+
+        look = (
+            "from pathlib import Path\n"
+            f"status = Path('/proc/{pid}/status')\n"
+            "state = status.read_text().split('State:')[1].split()[0] if status.exists() else '-'\n"
+            "print('LEFTOVER', 'running' if state not in ('Z', 'X', '-') else 'gone')\n"
+        )
+        result = asyncio.run(executor.execute_cell("look", look))
+
+        assert result.success, result.error
+        assert "LEFTOVER gone" in result.stdout, result.stdout
+        assert not _running(pid)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
