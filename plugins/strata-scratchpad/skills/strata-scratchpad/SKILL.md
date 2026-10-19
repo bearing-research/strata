@@ -81,8 +81,8 @@ strata cell add ./scratch -c 'import numpy as np; print(np.arange(6).mean())' --
 
 ## Reading files from your project
 
-A cell executes with its **working directory set to the notebook dir** (e.g.
-`./scratch`), **not** the directory you launched from, so a bare
+A cell executes with its **working directory set to the notebook's `work/`**
+(e.g. `./scratch/work`), **not** the directory you launched from, so a bare
 `open("data.txt")` won't find a file in your project. If you created the
 scratchpad with `--project-mount` (above), read project files through the
 `project` Path variable, which points at the project root:

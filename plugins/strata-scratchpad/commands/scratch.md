@@ -13,7 +13,7 @@ scripts.
 2. From now on, run throwaway Python as a cell:
    `strata cell add ./scratch -c '<code>' --run`. It adds a cell and runs it in
    one call, returning `stdout`. Read project files via the `project` Path
-   (`open(project / "file")`); a cell runs in the notebook dir, so a bare relative
+   (`open(project / "file")`); a cell runs in the notebook's `work/` dir, so a bare relative
    path won't find them. Add third-party libs with `strata dep add ./scratch <pkg>` first.
 3. Reuse instead of recomputing: `strata status ./scratch` to see prior cells and
    their variables; reference an existing variable in a new cell rather than

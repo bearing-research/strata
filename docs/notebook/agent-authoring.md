@@ -48,7 +48,7 @@ is the file-format contract underneath both.
 
 ```
 my_analysis/
-├── .gitignore             # written by `strata new`: keeps .strata/ and .venv/ out of git
+├── .gitignore             # written by `strata new`: keeps .strata/, .venv/ and work/ out of git
 ├── notebook.toml          # committed config: cells, env, workers, mounts
 ├── pyproject.toml         # uv-managed dependencies
 ├── uv.lock                # written by uv; do not hand-edit
@@ -56,6 +56,7 @@ my_analysis/
 │   ├── load.py
 │   ├── notes.md
 │   └── stats.py
+├── work/                  # where cells run and write files - not committed
 └── .strata/               # runtime state - NEVER create, edit, or commit
 ```
 

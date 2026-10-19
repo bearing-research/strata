@@ -132,9 +132,12 @@ my_notebook/
 ├── cells/
 │   ├── a1b2c3d4.py        # Cell source files
 │   └── e5f6g7h8.py
+├── work/                  # Gitignored: where cells run and write their files
 └── .strata/               # Gitignored, runtime state, not committed
     ├── runtime.json           # Display outputs, provenance hashes, env metadata
     ├── console/               # Per-cell stdout/stderr ({cell_id}.json)
+    ├── fetch/                 # The bytes each @fetch last read
+    ├── tables/index.json      # The tables each cell's last good run read
     └── artifacts/
         ├── artifacts.sqlite   # Artifact metadata
         └── blobs/             # Serialized cell outputs
