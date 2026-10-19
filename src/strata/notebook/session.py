@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import anyio.to_thread
 
 from strata.file_modes import PASS_THROUGH_DIR, private_dir, private_file
-from strata.notebook import console_relay
+from strata.notebook import console_relay, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.causality import CausalityChain, compute_causality_on_staleness, skip_none
@@ -291,6 +291,7 @@ class NotebookSession:
         # The harness user passes through to its per-run directories and the
         # fetched and mounted inputs here; what else is here is the server's.
         private_dir(path / ".strata", PASS_THROUGH_DIR)
+        output_file_relay.remove_crashed_uploads(path / ".strata" / "uploads")
         # The directory this session opened, to tell it from one later put at the same path.
         self._directory_identity = _directory_identity(path)
         self.artifact_manager = NotebookArtifactManager(

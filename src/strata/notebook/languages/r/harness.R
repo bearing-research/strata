@@ -122,6 +122,7 @@ input_warnings <- character(0)
 #   pickle/object          → unreadable from R, raise with a clear message
 #                             so the user knows to re-export from Python as
 #                             a DataFrame for Arrow handoff
+#   dir/manifest           → another cell's output folder: not readable yet
 #   *                      → unknown: raise
 
 deserialize_input <- function(name, spec, output_dir) {
@@ -169,6 +170,15 @@ deserialize_input <- function(name, spec, output_dir) {
         "this value via pickle, which R cannot read. Re-export the upstream ",
         "as a pandas DataFrame / pyarrow Table (handed across as Arrow IPC) ",
         "or a JSON-serializable object for cross-language consumption."
+      ),
+      name
+    ))
+  }
+  if (identical(ct, "dir/manifest")) {
+    stop(sprintf(
+      paste0(
+        "Cannot read '%s', another cell's # @output_dir folder, from R: an R ",
+        "cell cannot read another cell's output folder yet."
       ),
       name
     ))

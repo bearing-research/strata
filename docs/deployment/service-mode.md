@@ -606,6 +606,10 @@ What to know before switching it on:
   it does not look like the cache is simply empty.
 - **It never fails a cell.** A store that is unreachable, refusing, or missing
   one of a cell's outputs ends in "run it locally".
+- **A cell with a [`# @output_dir`](../notebook/annotations.md#output_dir)
+  folder is not shared.** The folder's files are kept as artifacts of their own,
+  which the store does not hold, so the cell is neither offered nor served from
+  it: it runs locally.
 - **A notebook whose environment does not match its lockfile will not publish.**
   A failed `uv sync` keeps the previous venv and stays usable on purpose, so a
   transient network failure does not lock you out of your own notebook - but

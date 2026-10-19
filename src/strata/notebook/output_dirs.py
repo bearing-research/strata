@@ -102,7 +102,21 @@ def file_artifact_id(artifact_mgr: Any, cell_id: str, sha256: str) -> str:
     return artifact_mgr.cell_artifact_id(cell_id, f"__file__{sha256}")
 
 
+def _file_provenance(artifact_id: str, sha256: str) -> str:
+    """Unique to the file's id: the store dedups equal provenance across ids, which would
+    leave one cell's file reading another cell's bytes and swept with them."""
+    from strata.notebook.provenance import derive_subkey
+
+    return derive_subkey(sha256, artifact_id)
+
+
 _FILE_ID = re.compile(r"_var___file__[0-9a-f]{64}$")
+
+
+def is_file_id(artifact_id: str) -> bool:
+    return _FILE_ID.search(artifact_id) is not None
+
+
 _assembling = 0  # runs in this process whose stored files may not be in a manifest yet
 _assembling_lock = threading.Lock()
 
@@ -140,6 +154,8 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
             continue
         # Housekeeping: a read that counted as a use would keep old manifests forever.
         blob = store.read_blob(version.id, version.version, note_use=False)
+        if blob is None and version.state == "failed":
+            continue  # left by a crash, never to be read: it keeps no file
         if blob is None:
             return None  # being written, or lost: what it names is unknown
         manifest = json.loads(blob)
@@ -151,7 +167,7 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
     return [
         (version.id, version.version)
         for version in versions
-        if _FILE_ID.search(version.id) and (version.id, version.version) not in named
+        if is_file_id(version.id) and (version.id, version.version) not in named
     ]
 
 
@@ -195,7 +211,7 @@ def _store_opened(
 
     version = store.create_artifact(
         artifact_id=artifact_id,
-        provenance_hash=sha256,
+        provenance_hash=_file_provenance(artifact_id, sha256),
         transform_spec=TransformSpec(
             executor="notebook/cell@v1",
             params={"cell_id": cell_id, "content_type": "application/octet-stream"},
@@ -235,7 +251,7 @@ def store_received(
 
     version = store.create_artifact(
         artifact_id=artifact_id,
-        provenance_hash=sha256,
+        provenance_hash=_file_provenance(artifact_id, sha256),
         transform_spec=TransformSpec(
             executor="notebook/cell@v1",
             params={"cell_id": cell_id, "content_type": "application/octet-stream"},
@@ -254,27 +270,32 @@ def store_received(
 def collect(
     artifact_mgr: Any,
     cell_id: str,
-    folder: Path | None,
+    run_dir: Path | None,
+    name: str,
     received: dict[str, dict[str, Any]] | None = None,
     seen: dict[str, tuple[tuple[int, ...], dict[str, Any]]] | None = None,
 ) -> bytes:
-    """Store the folder's files and return its manifest: the writing cell and each file.
+    """Store folder *name*'s files in *run_dir* and return its manifest: the writing cell
+    and each file.
 
     *received* holds entries for files already stored as a worker uploaded them; a file
-    in *folder* too replaces its entry. A link, or a file with more than one hard link,
-    is left out with a warning.
+    in the folder too replaces its entry. A link, or a file with more than one hard link,
+    is left out with a warning. Each file is opened from *run_dir* down, following no
+    link: the harness user owns the run directory and could make ``output_dirs`` one.
 
     *seen* carries ``{path: (stat key, entry)}`` from one collect of a folder to the next,
     as a loop's iterations do: a file whose size, times and inode are unchanged is not
     read again, so a checkpoint per iteration is hashed once, not once per iteration.
     """
     files: dict[str, dict[str, Any]] = dict(received or {})
-    if folder is not None and folder.is_dir():
+    folder = run_dir / OUTPUT_DIRS / name if run_dir is not None else None
+    if run_dir is not None and folder is not None and folder.is_dir():
         for rel in regular_files(folder):
+            in_run = f"{OUTPUT_DIRS}/{name}/{rel}"
             try:
                 key = None
                 if seen is not None:
-                    with open_tree_file(folder, rel) as f:
+                    with open_tree_file(run_dir, in_run) as f:
                         st = os.fstat(f.fileno())
                     # ctime moves on any write and a cell cannot set it.
                     key = (st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
@@ -284,7 +305,7 @@ def collect(
                 files[rel] = _store_opened(
                     artifact_mgr,
                     cell_id,
-                    lambda rel=rel: open_tree_file(folder, rel),
+                    lambda in_run=in_run: open_tree_file(run_dir, in_run),
                     rel,
                 )
                 if seen is not None and key is not None:

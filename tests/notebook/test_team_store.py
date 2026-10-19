@@ -1332,3 +1332,50 @@ async def test_an_output_overtaken_by_a_duplicate_offers_its_canonical_bytes(loc
     )
     assert published == 1
     assert offered == [b"bytes"]
+
+
+async def test_a_cell_with_an_output_folder_is_neither_offered_nor_pulled(
+    team_store_server, local_manager
+):
+    """A folder's manifest names files kept as their own artifacts, which the store lacks."""
+    from strata.notebook.team_store import publish_cell_outputs
+
+    seed_team_result(
+        team_store_server["artifact_dir"],
+        variable="ckpt",
+        blob=b'{"cell_id": "zz", "files": {}}',
+        content_type="dir/manifest",
+    )
+    store = TeamStore(team_store_server["base_url"])
+    try:
+        pull = await pull_cell_outputs(
+            store,
+            local_manager,
+            cell_id=CELL_ID,
+            provenance_hash=CELL_PROVENANCE,
+            consumed_vars={"ckpt"},
+        )
+    finally:
+        await store.aclose()
+    assert pull is None
+    assert canonical_provenance(local_manager, "ckpt") is None
+
+    local_manager.store_cell_output(
+        cell_id=CELL_ID,
+        variable_name="ckpt",
+        blob_data=b'{"cell_id": "c1", "files": {}}',
+        content_type="dir/manifest",
+        provenance_hash=derive_subkey(CELL_PROVENANCE, "ckpt"),
+    )
+    offered: list[str] = []
+
+    class Recording:
+        async def publish(self, provenance_hash, blob, *, variable_name, **_):
+            offered.append(variable_name)
+            return True
+
+    published = await publish_cell_outputs(
+        Recording(), local_manager, cell_id=CELL_ID, consumed_vars={"ckpt"}
+    )
+    assert published == 0
+    assert offered == []

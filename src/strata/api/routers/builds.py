@@ -493,6 +493,7 @@ async def upload_output_file(
 
     # Hashed as it arrives and written off the loop, a megabyte at a time: a checkpoint can
     # be many GB, and the file is then stored as it is, read once.
+    begun = receiver.begin()
     body = _capped(request)
     upload = receiver.upload_dir / f".upload-{uuid.uuid4().hex}"
     digest = hashlib.sha256()
@@ -513,7 +514,7 @@ async def upload_output_file(
         finally:
             await anyio.to_thread.run_sync(out.close)
         await anyio.to_thread.run_sync(
-            receiver.accept, folder, rel, upload, digest.hexdigest(), size
+            receiver.accept, folder, rel, upload, digest.hexdigest(), size, begun
         )
     finally:
         upload.unlink(missing_ok=True)
