@@ -431,6 +431,15 @@ when it is present, otherwise `queued #<position>`; `position` must be a whole
 number from 1. A report is sent to the notebook only when it changes, and a
 waiting state without either field puts the badge back to "starting".
 
+A `running` job may keep a `detail`, such as where it runs:
+
+```json
+{"state": "running", "detail": "Runs on team-cpu, slot 1."}
+```
+
+The badge shows it while the cell runs, and a `running` state without one puts
+the badge back to "dispatching". A running job's `position` is ignored.
+
 **SSRF defenses on signed URLs:** Before fetching/posting, the worker validates each URL:
 
 - **Scheme allowlist**: only `http://` and `https://`. Blocks `file://`, `data:`, `javascript:`, etc.

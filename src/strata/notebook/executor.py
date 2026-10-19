@@ -530,7 +530,7 @@ _QUEUE_DETAIL_MAX_CHARS = 200
 
 
 def _queue_report(job: dict[str, Any]) -> tuple[int | None, str | None]:
-    """A waiting job's optional ``(position, detail)``; whatever is malformed is dropped."""
+    """A job's optional ``(position, detail)``; whatever is malformed is dropped."""
     position = job.get("position")
     if isinstance(position, bool) or not isinstance(position, int) or position < 1:
         position = None
@@ -3669,9 +3669,15 @@ class CellExecutor:
 
                 now = _monotonic()
                 if state == "running":
-                    if running_since is None:
-                        running_since = now
-                        await self._broadcast_remote_phase(cell_id, worker_spec, "running")
+                    # A running job has no place in line, but may say where it runs.
+                    shown = (None, _queue_report(job)[1])
+                    if running_since is None or shown != queue_shown:
+                        if running_since is None:
+                            running_since = now
+                        queue_shown = shown
+                        await self._broadcast_remote_phase(
+                            cell_id, worker_spec, "running", queue=shown
+                        )
                     if now - running_since > timeout_seconds:
                         await cancel()
                         raise RemoteExecutionError(
@@ -3707,7 +3713,7 @@ class CellExecutor:
     ) -> None:
         """Move the cell's badge between ``starting`` (provisioning) and ``running``.
 
-        *queue* is the job's ``(position, detail)`` while it waits, for the badge.
+        *queue* is the job's ``(position, detail)``, for the badge.
         Best effort: a failed broadcast must not fail the run.
         """
         if not cell_id:

@@ -103,6 +103,9 @@ exhaustive commit history.
   `s3`, `gs` or `az` that names no credential fails too, since it would write
   as the server's own identity; a `file://` mount is outside the setting.
   Unset, nothing changes. (#1217)
+- **A running remote cell's badge keeps its dispatcher's sentence.** A job
+  that reports `running` with a `detail`, such as where it runs, shows it on the
+  badge, as a waiting job's does, and a new one replaces it. (#1230)
 
 ### Changed
 
