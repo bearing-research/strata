@@ -120,6 +120,36 @@ async def test_provider_options_override_but_cannot_drop_the_credential():
     assert config["auto_destroy"] is True
 
 
+async def test_an_env_override_merges_under_the_pools_env():
+    """The type's and tenant's variables reach the machine, and win where both name one."""
+    fake = FakeFly()
+    backend, _ = _backend(fake)
+
+    await backend.start(
+        _spec(provider_options={"env": {"HF_HOME": "/data/hf", "REGION": "type"}}),
+        {"STRATA_WORKER_TOKEN": "tok", "STRATA_NOTEBOOK_CREDENTIALS": "acme", "REGION": "eu"},
+    )
+
+    assert fake.created_body()["config"]["env"] == {
+        "HF_HOME": "/data/hf",
+        "STRATA_NOTEBOOK_CREDENTIALS": "acme",
+        "REGION": "eu",
+        "STRATA_WORKER_TOKEN": "tok",
+    }
+
+
+async def test_the_credential_never_lands_in_the_shared_machine_type():
+    """One spec serves every machine of its type and is listed by the admin API."""
+    spec = _spec(provider_options={"env": {"HF_HOME": "/data/hf"}, "guest": {"cpus": 2}})
+    fake = FakeFly()
+    backend, _ = _backend(fake)
+
+    await backend.start(spec, {"STRATA_WORKER_TOKEN": "secret-a"})
+
+    assert spec.provider_options == {"env": {"HF_HOME": "/data/hf"}, "guest": {"cpus": 2}}
+    assert fake.created_body()["config"]["env"]["STRATA_WORKER_TOKEN"] == "secret-a"
+
+
 async def test_an_env_override_that_cannot_hold_the_credential_is_refused():
     fake = FakeFly()
     backend, _ = _backend(fake)

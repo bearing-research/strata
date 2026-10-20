@@ -12,7 +12,7 @@ import uuid
 import httpx
 
 from strata_pool.backend import ProvisionedWorker
-from strata_pool.types import WORKER_HEARTBEAT_ENV, WORKER_TOKEN_ENV, MachineType
+from strata_pool.types import WORKER_HEARTBEAT_ENV, MachineType
 
 logger = logging.getLogger(__name__)
 
@@ -147,16 +147,17 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
     if spec.disk_gb is not None:
         body["disk"] = spec.disk_gb
     # Last, so a deployment can correct any field above (even a wrong one) without a release.
-    # `gpu` and `cpu` merge, so adding `minCudaVersion` keeps the GPU type. Copied: the
-    # credential is written into the body's `env`, which must not be the shared spec's.
+    # `gpu` and `cpu` merge, so adding `minCudaVersion` keeps the GPU type, and `env` merges
+    # under the pool's. Copied: the shared spec must not alias what is sent.
     for key, value in copy.deepcopy(spec.provider_options).items():
         current = body.get(key)
         if key in ("gpu", "cpu") and isinstance(current, dict) and isinstance(value, dict):
             body[key] = {**current, **value}
+        elif key == "env":
+            body[key] = _merge_env(value, env)
         else:
             body[key] = value
-    _restore_credential(body, env)
-    # After the override, which replaces `env` whole: without it a long job fails at the proxy.
+    # After the override, so it can set another interval: without it a long job fails at the proxy.
     if isinstance(body.get("env"), dict):
         body["env"].setdefault(WORKER_HEARTBEAT_ENV, str(HEARTBEAT_SECONDS))
     return body
@@ -170,25 +171,18 @@ def _vcpu_count(cpus: float | None) -> int:
     return count
 
 
-def _restore_credential(body: dict, env: dict[str, str] | None) -> None:
-    """Put the worker credential back after a `provider_options` override, and nothing else.
+def _merge_env(declared: object, env: dict[str, str] | None) -> dict[str, str]:
+    """`provider_options`' `env` under the pool's: the type's, the tenant's and the credential.
 
     v2 takes `env` only as a map; anything else raises RunPodError.
     """
-    token = (env or {}).get(WORKER_TOKEN_ENV)
-    if token is None:
-        return
-
-    declared = body.get("env")
-    if isinstance(declared, dict):
-        declared[WORKER_TOKEN_ENV] = token
-        return
-
-    raise RunPodError(
-        f"provider_options set `env` to a {type(declared).__name__}, which the worker "
-        f"credential cannot be added to. A pod without it is an open execute endpoint "
-        f"on a public URL."
-    )
+    if not isinstance(declared, dict):
+        raise RunPodError(
+            f"provider_options set `env` to a {type(declared).__name__}, which the worker "
+            f"credential cannot be added to. A pod without it is an open execute endpoint "
+            f"on a public URL."
+        )
+    return {**declared, **(env or {})}
 
 
 def _orphaned(name: str, detail: str) -> RunPodError:

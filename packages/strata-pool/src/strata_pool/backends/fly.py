@@ -6,6 +6,7 @@ follow the Machines API docs and live in `_create_body`; `tests/test_fly_live.py
 checks them when run with a token.
 """
 
+import copy
 import logging
 import re
 import uuid
@@ -13,7 +14,7 @@ import uuid
 import httpx
 
 from strata_pool.backend import ProvisionedWorker
-from strata_pool.types import WORKER_TOKEN_ENV, MachineType
+from strata_pool.types import MachineType
 
 logger = logging.getLogger(__name__)
 
@@ -170,9 +171,12 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, region: str) -> 
     }
     if guest:
         config["guest"] = guest
-    # Last, so a deployment can correct any field above without a release.
-    config.update(spec.provider_options)
-    _restore_credential(config, env)
+    # Last, so a deployment can correct any field above without a release; `env` merges
+    # under the pool's. Copied: the shared spec must not alias what is sent.
+    options = copy.deepcopy(spec.provider_options)
+    if "env" in options:
+        options["env"] = _merge_env(options["env"], env)
+    config.update(options)
 
     return {
         # Unique in the app, and findable in `fly machines list` if an error
@@ -183,21 +187,17 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, region: str) -> 
     }
 
 
-def _restore_credential(config: dict, env: dict[str, str] | None) -> None:
-    """Put the worker credential back after a `provider_options` override.
+def _merge_env(declared: object, env: dict[str, str] | None) -> dict[str, str]:
+    """`provider_options`' `env` under the pool's: the type's, the tenant's and the credential.
 
-    Raises FlyError if the override made `env` something other than a dict.
+    Raises FlyError if it is something other than a dict.
     """
-    token = (env or {}).get(WORKER_TOKEN_ENV)
-    if token is None:
-        return
-    declared = config.get("env")
     if not isinstance(declared, dict):
         raise FlyError(
             f"provider_options set `env` to a {type(declared).__name__}, which the worker "
             "credential cannot be added to."
         )
-    declared[WORKER_TOKEN_ENV] = token
+    return {**declared, **(env or {})}
 
 
 def _orphaned(name: str, detail: str) -> FlyError:

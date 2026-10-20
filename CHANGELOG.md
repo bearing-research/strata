@@ -117,6 +117,21 @@ exhaustive commit history.
   `${file:...}` reference, a keyless `gs` `token` file or an `az`
   `federated_token_file` that named a FIFO or a device could hang or flood the
   read; it now fails naming the file. (#1265)
+- **A slow or broken strata-pool `tenant_env` no longer stalls the pool.** It
+  had no time limit and a sync one ran on the event loop, so a hung secrets
+  lookup held up that tenant's submit and every scaler pass, for every tenant.
+  It now runs in a thread and has `tenant_env_timeout_seconds` (default 30) to
+  answer. (#1267)
+- **A strata-pool `tenant_env` answer that is not string names and values
+  starts no machine.** It reached the provider as given. The start now fails,
+  logged as a `tenant_env` failure that never quotes the answer rather than as
+  a backend failure, and the job stays queued. (#1267)
+- **A RunPod or Fly machine type's `provider_options` `env` no longer drops
+  the pool's.** It replaced the machine's whole environment, so the machine
+  booted without the type's `env` and the tenant's `tenant_env`. It now merges
+  beneath them, and where both name a variable the type's and the tenant's
+  win. On Fly it also no longer wrote the worker token into the shared machine
+  type. (#1267)
 
 ### Security
 
