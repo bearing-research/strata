@@ -125,18 +125,29 @@ class WarmProcessPool:
             # skipping it would expose server secrets to most cells.
             allowlist = configured_allowlist()
             lifeline_fds, lifeline_vars = lifeline_handoff()
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.notebook_dir),
-                limit=SUBPROCESS_LINE_LIMIT,
-                env=identity_env(harness_env(allowlist, lifeline_vars), harness_user),
-                pass_fds=lifeline_fds,
-                **spawn_kwargs(harness_user),
-                **subprocess_kwargs_for_new_group(),
+            spawn = asyncio.create_task(
+                asyncio.create_subprocess_exec(
+                    *command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stdin=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(self.notebook_dir),
+                    limit=SUBPROCESS_LINE_LIMIT,
+                    env=identity_env(harness_env(allowlist, lifeline_vars), harness_user),
+                    pass_fds=lifeline_fds,
+                    **spawn_kwargs(harness_user),
+                    **subprocess_kwargs_for_new_group(),
+                )
             )
+            try:
+                process = await asyncio.shield(spawn)
+            except asyncio.CancelledError:
+                # Cancelled mid-spawn, asyncio would kill only the direct child (a
+                # lifeline_command wrapper) and orphan the worker under it.
+                await asyncio.wait([spawn])
+                if not spawn.cancelled() and spawn.exception() is None:
+                    await terminate_subprocess_tree(spawn.result())
+                raise
 
             try:
                 assert process.stdout is not None
