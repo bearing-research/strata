@@ -132,7 +132,6 @@ exhaustive commit history.
   beneath them, and where both name a variable the type's and the tenant's
   win. On Fly it also no longer wrote the worker token into the shared machine
   type. (#1267)
-  type. (#1267)
 - **A cell on a remote worker cannot read the variables a credential names.**
   The worker kept `STRATA_NOTEBOOK_CREDENTIALS` from its cells but not the
   variables its `${VAR}` values name, which hold the keys themselves. It now
