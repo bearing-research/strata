@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS workers (
     auth_token TEXT,
     image TEXT,
     lease_owner TEXT,
-    lease_expires_at REAL
+    lease_expires_at REAL,
+    hold_seconds REAL
 );
 
 -- Partial, because a worker row exists before backend.start() has told us the
@@ -76,7 +77,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     completed_at REAL,
     trace_context TEXT,
     lease_owner TEXT,
-    lease_expires_at REAL
+    lease_expires_at REAL,
+    hold_seconds REAL
 );
 
 -- No foreign key to workers(id): a worker row is deleted when its machine
@@ -126,6 +128,8 @@ _ADDED_COLUMNS = (
     ("jobs", "trace_context", "TEXT"),
     ("jobs", "lease_owner", "TEXT"),
     ("jobs", "lease_expires_at", "REAL"),
+    ("workers", "hold_seconds", "REAL"),
+    ("jobs", "hold_seconds", "REAL"),
 )
 
 # A row with no lease, a lease held by the caller, or a lease nobody renewed in
@@ -153,6 +157,7 @@ def _to_worker(row: Any) -> Worker:
         auth_token=row["auth_token"],
         lease_owner=row["lease_owner"],
         lease_expires_at=row["lease_expires_at"],
+        hold_seconds=row["hold_seconds"],
     )
 
 
@@ -175,6 +180,7 @@ def _to_job(row: Any) -> Job:
         trace_context=json.loads(row["trace_context"]) if row["trace_context"] else {},
         lease_owner=row["lease_owner"],
         lease_expires_at=row["lease_expires_at"],
+        hold_seconds=row["hold_seconds"],
     )
 
 
@@ -341,8 +347,8 @@ class _SqlStore:
                 INSERT INTO workers (id, machine_type, tenant_id, backend, backend_id,
                                      state, endpoint, region, session_id, current_job_id,
                                      created_at, last_active_at, auth_token, image,
-                                     lease_owner, lease_expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     lease_owner, lease_expires_at, hold_seconds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     backend_id = excluded.backend_id,
                     state = excluded.state,
@@ -353,7 +359,8 @@ class _SqlStore:
                     last_active_at = excluded.last_active_at,
                     auth_token = excluded.auth_token,
                     lease_owner = excluded.lease_owner,
-                    lease_expires_at = excluded.lease_expires_at
+                    lease_expires_at = excluded.lease_expires_at,
+                    hold_seconds = excluded.hold_seconds
                 """,
                 self._worker_values(worker),
             )
@@ -377,6 +384,7 @@ class _SqlStore:
             worker.image,
             worker.lease_owner,
             worker.lease_expires_at,
+            worker.hold_seconds,
         )
 
     def get_worker(self, worker_id: str) -> Worker | None:
@@ -536,8 +544,9 @@ class _SqlStore:
             with self._transaction():
                 if not self._changed(
                     "UPDATE workers SET state = 'busy', current_job_id = ?, session_id = ?, "
-                    "lease_owner = ?, lease_expires_at = ? WHERE id = ? AND state = 'warm'",
-                    (job.id, job.session_id, owner, lease_expires_at, worker.id),
+                    "hold_seconds = ?, lease_owner = ?, lease_expires_at = ? "
+                    "WHERE id = ? AND state = 'warm'",
+                    (job.id, job.session_id, job.hold_seconds, owner, lease_expires_at, worker.id),
                 ):
                     raise _Rollback
                 if not self._changed(
@@ -604,8 +613,8 @@ class _SqlStore:
                 INSERT INTO jobs (id, tenant_id, machine_type, priority, state,
                                   session_id, worker_id, timeout_seconds, payload,
                                   result, error, submitted_at, started_at, completed_at,
-                                  trace_context, lease_owner, lease_expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  trace_context, lease_owner, lease_expires_at, hold_seconds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     state = excluded.state,
                     worker_id = excluded.worker_id,
@@ -632,6 +641,7 @@ class _SqlStore:
                     json.dumps(job.trace_context) if job.trace_context else None,
                     job.lease_owner,
                     job.lease_expires_at,
+                    job.hold_seconds,
                 ),
             )
 

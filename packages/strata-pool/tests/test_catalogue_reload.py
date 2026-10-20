@@ -125,6 +125,7 @@ def test_a_store_from_before_images_were_recorded_gains_the_column(tmp_path):
 
     (worker,) = store.list_workers()
     assert worker.image is None
+    assert worker.hold_seconds is None
     store.close()
 
 

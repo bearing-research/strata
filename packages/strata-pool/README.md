@@ -130,7 +130,8 @@ cancelled before it reached a machine ran for no time and has none. What is bill
 and at what price, is decided above it.
 
 **It does not keep machines warm on purpose.** `start_scaler()` stops
-machines idle past their type's `cool_down_seconds`, and nothing else in the
+machines idle past their type's `cool_down_seconds`, or the `hold_seconds` of
+the last job they ran, and nothing else in the
 pool ever ends a machine that finished its work: a deployment that forgets
 that call bills for every machine it ever started. A machine whose stop fails
 keeps its row, still counted against the fleet cap, and the next pass tries
@@ -201,12 +202,16 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `GET /health` | Outside the token check, for load balancers |
 
 Both job submit routes take their options as query parameters: `machine_type`
-(required), `priority` (default 0, higher runs first; a 64-bit integer), `session_id` and
-`timeout_seconds` (both optional). `timeout_seconds` can shorten the machine type's
-`job_timeout_seconds` but not extend it. `POST /v1/jobs/sync` also takes
-`wait_seconds` (default 300), which bounds the wait and not the job, and is cut to
-the type's `boot_timeout_seconds` plus `job_timeout_seconds`. Both times must be
-positive and finite; anything else is a 422 and no job is queued.
+(required), `priority` (default 0, higher runs first; a 64-bit integer), `session_id`,
+`timeout_seconds` and `hold_seconds` (all optional). `timeout_seconds` can shorten the
+machine type's `job_timeout_seconds` but not extend it. `hold_seconds` is how long the
+machine that runs the job stays warm once idle, in place of the type's
+`cool_down_seconds`, until its next job names another hold or none; a host that sees a
+tenant's gaps between jobs can hold that tenant's machines longer or shorter than the
+type's. `POST /v1/jobs/sync` also takes `wait_seconds` (default 300), which bounds the
+wait and not the job, and is cut to the type's `boot_timeout_seconds` plus
+`job_timeout_seconds`. These times must be finite, and all but `hold_seconds` (which may
+be 0) positive; anything else is a 422 and no job is queued.
 
 A hint starts one machine of the type for the caller's tenant unless one is
 already warm or starting, so its boot overlaps the user's typing instead of

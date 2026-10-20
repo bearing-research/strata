@@ -214,6 +214,7 @@ class Pool:
         session_id: str | None = None,
         timeout_seconds: float | None = None,
         trace_context: dict[str, str] | None = None,
+        hold_seconds: float | None = None,
     ) -> Job:
         """Queue a job and place it, without waiting for it to run.
 
@@ -236,6 +237,7 @@ class Pool:
             session_id=session_id,
             timeout_seconds=timeout_seconds,
             trace_context=dict(trace_context or {}),
+            hold_seconds=hold_seconds,
         )
         self.store.save_job(job)
 
@@ -1035,8 +1037,8 @@ class Pool:
                 stopped += 1
         # Every warm machine, including those of types removed from the catalogue.
         for candidate in self.store.list_workers(states=[WorkerState.WARM]):
-            # Its type's cool-down, or the one it had when removed. A type forgotten across a
-            # restart has none.
+            # The hold its last job named, else its type's cool-down, or the one it had when
+            # removed. A type forgotten across a restart has none.
             spec = self.machine_types.get(candidate.machine_type) or self._retired_types.get(
                 candidate.machine_type
             )
@@ -1046,6 +1048,8 @@ class Pool:
             worker = self.store.get_worker(candidate.id)
             if worker is None or worker.state is not WorkerState.WARM:
                 continue
+            if worker.hold_seconds is not None:
+                cool_down = worker.hold_seconds
 
             # A machine that never ran a job ages from when it booted, so
             # one started for a job that then failed still gets reaped.

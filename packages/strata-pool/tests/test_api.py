@@ -102,6 +102,17 @@ async def test_an_async_submit_returns_an_id_to_collect_later(api):
     assert result.content == b"done:work"
 
 
+async def test_a_submitted_hold_reaches_the_machine_that_runs_the_job(api):
+    accepted = await api.post(
+        "/v1/jobs?machine_type=cpu&hold_seconds=30", content=b"work", headers=AUTH
+    )
+    assert accepted.json()["hold_seconds"] == 30
+
+    done = await api.pool.wait(accepted.json()["id"])
+
+    assert api.pool.store.get_worker(done.worker_id).hold_seconds == 30
+
+
 async def test_a_result_asked_for_too_early_is_a_conflict_not_a_lie(api):
     backend = FakeBackend(never_healthy=True)
     api.pool.backend = backend
@@ -465,6 +476,9 @@ class TestJobOptionValidation:
             "timeout_seconds=nan",
             "timeout_seconds=0",
             "timeout_seconds=-1",
+            "hold_seconds=-1",
+            "hold_seconds=inf",
+            "hold_seconds=nan",
             "priority=1000000000000000000000000000000",
         ],
     )

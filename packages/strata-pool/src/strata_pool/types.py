@@ -200,6 +200,10 @@ class Worker:
     lease_expires_at: float | None = None
     """Wall-clock time after which another instance may take the machine over."""
 
+    hold_seconds: float | None = None
+    """How long this machine stays warm once idle, from the last job that named
+    one; None uses its type's `cool_down_seconds`. Each job it takes replaces it."""
+
 
 @dataclass
 class Job:
@@ -232,6 +236,10 @@ class Job:
 
     lease_expires_at: float | None = None
     """Wall-clock time after which another instance may fail the job."""
+
+    hold_seconds: float | None = None
+    """How long the machine that runs this job stays warm afterwards, in place of
+    its type's `cool_down_seconds`, so a host can hold machines per tenant."""
 
 
 @dataclass(frozen=True)
