@@ -65,10 +65,20 @@ class DuckDBSQLTransform(Transform[DuckDBSQLParams]):
         input_names = self.get_input_names(len(inputs))
         for name, table in zip(input_names, inputs):
             conn.register(name, table)
-        conn.execute("SET lock_configuration = true")
+        lock_down(conn)
 
         result = conn.execute(params.sql).to_arrow_table()
         return result
+
+
+def lock_down(conn: Any) -> None:
+    """Cut *conn* off from files, network and extensions, and lock its configuration.
+
+    Call it after the connection's own setup, which may need that access; SQL run
+    after it cannot turn either back on.
+    """
+    conn.execute("SET enable_external_access = false")
+    conn.execute("SET lock_configuration = true")
 
 
 def build_duckdb_sql_transform(sql: str) -> dict[str, Any]:
