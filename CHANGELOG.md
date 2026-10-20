@@ -42,6 +42,25 @@ exhaustive commit history.
 - **The shortcuts list names the editor's real undo and redo keys.** It said
   Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
   Mac both use Cmd. (#1256)
+- **A scan with `columns: []` is a row count, not a full scan.** An
+  empty projection, the row-count idiom of pyarrow's `to_table(columns=[])`,
+  shared its artifact with the full scan of the same snapshot, so whichever
+  ran first answered both: a full scan could come back with no columns, or a
+  row count with every column. It now has its own artifact and returns every
+  row with no columns, cached or not. (#1261)
+- **A table recreated at the same file paths is no longer read with the old
+  files' Parquet footers.** Footers were cached by path alone, in memory and
+  on disk (where a remote file's was never checked again), so a filtered scan
+  could drop the new rows and an unfiltered one could fail reading a page.
+  They are now matched on the file size the Iceberg manifest records too.
+  (#1261)
+- **A cell's table read counts a column whose name holds a dot.** The bytes a
+  scan read from storage, in `.strata/reads/index.json`, left out a top-level
+  column such as `a.b`, taking it for field `b` of a struct `a`. (#1261)
+- **A row-group cache entry that fails to read is kept.** Any error reading a
+  cached row group deleted the entry, so running out of file handles, or a
+  read racing a write of the same row group, threw away a good entry. Only an
+  entry that fails to parse is removed now; a failed read is a miss. (#1261)
 
 ## 0.11.0 - 2026-10-19
 

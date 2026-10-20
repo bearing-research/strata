@@ -155,6 +155,36 @@ class TestDiskCacheStatsAndCleanup:
         assert not meta_path.exists()
         assert cache.get_stats().total_entries == 0
 
+    def test_a_truncated_entry_is_removed(self, strata_config, cache_key, sample_batch):
+        """pyarrow reports a stream cut short as an OSError, though the bytes are in memory."""
+        cache = DiskCache(strata_config)
+        cache.put(cache_key, sample_batch)
+        path = cache.get_path(cache_key)
+        assert path is not None
+        path.write_bytes(path.read_bytes()[: path.stat().st_size // 2])
+
+        assert cache.get(cache_key) is None
+        assert not path.exists()
+
+    def test_a_failed_read_is_a_miss_that_keeps_the_entry(
+        self, strata_config, cache_key, sample_batch, monkeypatch
+    ):
+        """Out of file handles, say: the entry is fine, so the next read serves it."""
+        cache = DiskCache(strata_config)
+        cache.put(cache_key, sample_batch)
+        path = cache.get_path(cache_key)
+        assert path is not None
+
+        def no_handles(self):
+            raise OSError(24, "Too many open files")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "read_bytes", no_handles)
+            assert cache.get(cache_key) is None
+
+        assert path.exists()
+        assert cache.get(cache_key) == sample_batch
+
     def test_other_cache_versions_are_removed_on_startup(
         self, strata_config, cache_key, sample_batch, caplog
     ):

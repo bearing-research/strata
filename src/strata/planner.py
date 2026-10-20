@@ -276,7 +276,7 @@ def _assert_projection_exists(
 
 def _project_schema(schema, columns: list[str] | None):
     """Return ``schema`` narrowed to ``columns``, in the requested order."""
-    if not columns or schema is None:
+    if columns is None or schema is None:
         return schema
     if list(schema.names) == columns:
         return schema
@@ -296,7 +296,7 @@ def _estimate_row_group_bytes(
     which can under-state Arrow's in-memory size for dictionary-encoded columns.
     """
     total = getattr(rg_meta, "total_byte_size", 0)
-    if not columns:
+    if columns is None:
         return total
 
     projected = 0
@@ -506,8 +506,12 @@ class ReadPlanner:
         arrow_schema = None
         estimated_bytes = 0
 
-        actual_paths = [entry.actual_path for entry in manifest_resolution.data_files]
-        pq_meta_batch = self.parquet_cache.get_or_load_many(actual_paths)
+        pq_meta_batch = self.parquet_cache.get_or_load_many(
+            {
+                entry.actual_path: entry.file_size_in_bytes
+                for entry in manifest_resolution.data_files
+            }
+        )
 
         for entry in manifest_resolution.data_files:
             file_path = entry.file_path

@@ -16,7 +16,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from strata.fetcher import PyArrowFetcher
-from strata.types import Task
+from strata.types import CacheKey, TableIdentity, Task
 
 
 def _write(tmp_path, name: str):
@@ -25,11 +25,18 @@ def _write(tmp_path, name: str):
     return str(fp)
 
 
-def _task(file_path: str) -> Task:
+def _task(file_path: str, file_size: int = 1) -> Task:
     return Task(
         file_path=file_path,
         row_group_id=0,
-        cache_key=None,  # type: ignore[arg-type] - unused by PyArrowFetcher.fetch
+        cache_key=CacheKey(
+            tenant_id="_default",
+            table_identity=TableIdentity.from_table_id("db.t"),
+            file_path=file_path,
+            file_size=file_size,
+            row_group_id=0,
+            projection_fingerprint="*",
+        ),
         num_rows=10,
     )
 
@@ -77,7 +84,20 @@ def test_concurrent_reads_of_one_path_keep_one_footer(tmp_path):
     with ThreadPoolExecutor(max_workers=6) as pool:
         list(pool.map(read, range(6)))
 
-    assert list(fetcher._file_cache) == [path]
+    assert list(fetcher._file_cache) == [(path, 1)]
+
+
+def test_a_file_rewritten_at_its_path_is_not_read_with_the_old_footer(tmp_path):
+    """A table recreated at the same paths: the manifest's size tells the files apart."""
+    fetcher = PyArrowFetcher()
+    path = tmp_path / "part-00000.parquet"
+    pq.write_table(pa.table({"id": pa.array([1, 2, 3])}), path)
+    fetcher.fetch(_task(str(path), path.stat().st_size))
+
+    pq.write_table(pa.table({"id": pa.array(range(100, 140))}), path)
+    batch = fetcher.fetch(_task(str(path), path.stat().st_size))
+
+    assert batch.column("id").to_pylist() == list(range(100, 140))
 
 
 def test_close_forgets_the_footers(tmp_path):

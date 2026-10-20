@@ -241,7 +241,7 @@ class DiskCache:
         """Return the cached record batch for ``key``, or ``None`` on a miss.
 
         Parses the stream; use :meth:`get_as_stream_bytes` for the zero-parse path. An entry that
-        fails to parse is treated as corrupt and removed.
+        fails to parse is treated as corrupt and removed; one that fails to read is a miss.
         """
         path = self._key_path(key)
         if not path.exists():
@@ -249,15 +249,21 @@ class DiskCache:
 
         try:
             stream_bytes = path.read_bytes()
+        except OSError:
+            # A miss, but keep the entry: the error may be the process's (out of file handles), or
+            # an eviction racing a put, whose fresh entry a delete here would remove.
+            return None
+
+        try:
             reader = ipc.open_stream(pa.BufferReader(stream_bytes))
             batches = list(reader)
-            if not batches:
-                return None
-            return batches[0]
-        except Exception:
-            # Corrupted: remove it.
+        except (pa.ArrowInvalid, OSError):
+            # The bytes are in memory, so either error is the entry's: corrupt, remove it.
             self._delete_entry_files(path)
             return None
+        if not batches:
+            return None
+        return batches[0]
 
     def get_as_stream_bytes(self, key: CacheKey) -> bytes | None:
         """Return cached Arrow IPC stream bytes, unparsed, or ``None`` on a miss or read failure."""
@@ -559,6 +565,9 @@ class CachedFetcher:
             return batch
         if batch.schema.names == columns:
             return batch
+        if not columns:
+            # ``from_arrays`` of nothing has no rows; a row count needs the batch's.
+            return batch.select([])
         # Index by NAME: ``get_field_index`` returns -1 for an unknown name, and
         # ``batch.column(-1)`` is the last column, so an unknown column would silently hold another
         # column's values.

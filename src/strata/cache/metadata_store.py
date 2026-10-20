@@ -178,12 +178,12 @@ class MetadataStore:
         finally:
             conn.close()
 
-    def get_parquet_meta(self, file_path: str) -> PersistedParquetMeta | None:
+    def get_parquet_meta(self, file_path: str, file_size: int) -> PersistedParquetMeta | None:
         """Get cached Parquet metadata, or None if not cached or stale.
 
-        Staleness is a changed local (mtime, size). Stale rows are left in place to
-        keep reads free of write locks; the next put or
-        :meth:`cleanup_stale_parquet_meta` replaces them.
+        Staleness is another ``file_size`` (the manifest's, so a remote file is checked
+        too) or a changed local (mtime, size). Stale rows are left in place to keep reads
+        free of write locks; the next put or :meth:`cleanup_stale_parquet_meta` replaces them.
         """
         with closing(self._get_conn()) as conn:
             row = conn.execute(
@@ -192,6 +192,11 @@ class MetadataStore:
             ).fetchone()
 
             if row is None:
+                self.parquet_meta_misses += 1
+                return None
+
+            if row["file_size"] != file_size:
+                self.stale_invalidations += 1
                 self.parquet_meta_misses += 1
                 return None
 
@@ -235,13 +240,12 @@ class MetadataStore:
                 column_names=json.loads(row["column_names_json"]),
             )
 
-    def put_parquet_meta(self, file_path: str, meta: PersistedParquetMeta) -> None:
-        """Store Parquet metadata."""
+    def put_parquet_meta(self, file_path: str, file_size: int, meta: PersistedParquetMeta) -> None:
+        """Store Parquet metadata for a file of ``file_size`` bytes."""
         try:
-            file_mtime, file_size = _stat_identity(file_path)
+            file_mtime = _stat_identity(file_path)[0]
         except OSError:
             file_mtime = None
-            file_size = None
 
         row_groups_json = json.dumps(
             [
@@ -276,21 +280,24 @@ class MetadataStore:
         finally:
             conn.close()
 
-    def get_parquet_meta_many(self, file_paths: list[str]) -> dict[str, PersistedParquetMeta]:
-        """Get cached, non-stale Parquet metadata for many files in one query, keyed by path."""
-        if not file_paths:
+    def get_parquet_meta_many(self, file_sizes: dict[str, int]) -> dict[str, PersistedParquetMeta]:
+        """Get cached, non-stale Parquet metadata for ``{path: size}`` in one query, by path."""
+        if not file_sizes:
             return {}
 
         result: dict[str, PersistedParquetMeta] = {}
         with closing(self._get_conn()) as conn:
-            placeholders = ",".join("?" * len(file_paths))
+            placeholders = ",".join("?" * len(file_sizes))
             rows = conn.execute(
                 f"SELECT * FROM parquet_meta WHERE file_path IN ({placeholders})",
-                file_paths,
+                list(file_sizes),
             ).fetchall()
 
             for row in rows:
                 file_path = row["file_path"]
+                if row["file_size"] != file_sizes[file_path]:
+                    self.stale_invalidations += 1
+                    continue
                 local_path = _local_path_for_stat(file_path)
 
                 # Remote URIs have no local stat identity to validate against.
@@ -327,21 +334,20 @@ class MetadataStore:
                     column_names=json.loads(row["column_names_json"]),
                 )
 
-        self.parquet_meta_misses += len(file_paths) - len(result)
+        self.parquet_meta_misses += len(file_sizes) - len(result)
         return result
 
-    def put_parquet_meta_many(self, items: list[tuple[str, PersistedParquetMeta]]) -> None:
-        """Store many ``(file_path, metadata)`` entries in one transaction."""
+    def put_parquet_meta_many(self, items: list[tuple[str, int, PersistedParquetMeta]]) -> None:
+        """Store many ``(file_path, file_size, metadata)`` entries in one transaction."""
         if not items:
             return
 
         rows = []
-        for file_path, meta in items:
+        for file_path, file_size, meta in items:
             try:
-                file_mtime, file_size = _stat_identity(file_path)
+                file_mtime = _stat_identity(file_path)[0]
             except OSError:
                 file_mtime = None
-                file_size = None
 
             row_groups_json = json.dumps(
                 [

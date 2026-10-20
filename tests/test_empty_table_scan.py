@@ -107,6 +107,15 @@ class TestScan:
         assert table.num_rows == 0
         assert table.schema.names == ["name", "id"]
 
+    def test_an_empty_projection_streams_no_column(self, client, empty_table):
+        uri, _ = empty_table
+
+        response = client.post("/v1/materialize", json=_scan(uri, columns=[]))
+
+        assert response.status_code == 200, response.text
+        table = _read(client, response.json()["stream_url"])
+        assert (table.num_rows, table.schema.names) == (0, [])
+
     def test_a_missing_column_is_still_400(self, client, empty_table):
         uri, _ = empty_table
 

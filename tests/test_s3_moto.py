@@ -3,6 +3,7 @@
 PyArrow's S3FileSystem bypasses boto3, so moto cannot mock it; test_s3_integration.py uses MinIO.
 """
 
+import os
 from types import SimpleNamespace
 
 import pyarrow as pa
@@ -160,7 +161,7 @@ class TestS3MetadataCache:
     def test_cache_loads_local_metadata(self, local_parquet_file):
         reset_caches()
         cache = ParquetMetadataCache(max_size=10)
-        metadata = cache.get_or_load(str(local_parquet_file))
+        metadata = cache.get_or_load(str(local_parquet_file), local_parquet_file.stat().st_size)
 
         assert metadata is not None
         assert metadata.num_row_groups >= 1
@@ -169,7 +170,7 @@ class TestS3MetadataCache:
     def test_cache_with_s3_filesystem_parameter(self, local_parquet_file):
         reset_caches()
         cache = ParquetMetadataCache(max_size=10, s3_filesystem=MockObject())
-        metadata = cache.get_or_load(str(local_parquet_file))
+        metadata = cache.get_or_load(str(local_parquet_file), local_parquet_file.stat().st_size)
 
         assert metadata is not None
         assert metadata.num_row_groups >= 1
@@ -185,9 +186,9 @@ class TestS3MetadataCache:
         store = MetadataStore(cache_dir / "metadata.sqlite")
 
         cache = ParquetMetadataCache(max_size=10, store=store)
-        cache.get_or_load(str(pq_path))
+        cache.get_or_load(str(pq_path), pq_path.stat().st_size)
 
-        persisted = store.get_parquet_meta(str(pq_path))
+        persisted = store.get_parquet_meta(str(pq_path), pq_path.stat().st_size)
         assert persisted is not None
         assert persisted.num_row_groups >= 1
 
@@ -201,7 +202,7 @@ class TestS3MetadataCache:
             paths.append(str(path))
 
         cache = ParquetMetadataCache(max_size=10)
-        results = cache.get_or_load_many(paths)
+        results = cache.get_or_load_many({path: os.path.getsize(path) for path in paths})
 
         assert len(results) == 3
         for path in paths:
@@ -232,7 +233,7 @@ class TestS3Fetcher:
         task = Task(
             file_path=str(local_parquet_file),
             row_group_id=0,
-            cache_key=None,  # type: ignore
+            cache_key=SimpleNamespace(file_size=1),  # type: ignore
             num_rows=5,
             columns=columns,
             estimated_bytes=0,
@@ -248,7 +249,7 @@ class TestS3Fetcher:
         task = Task(
             file_path=str(local_parquet_file),
             row_group_id=0,
-            cache_key=None,  # type: ignore
+            cache_key=SimpleNamespace(file_size=1),  # type: ignore
             num_rows=5,
             columns=None,
             estimated_bytes=0,
@@ -287,7 +288,8 @@ class TestS3Fetcher:
         monkeypatch.setattr(fetcher_module.pq, "ParquetFile", FakeParquetFile)
 
         fetcher = PyArrowFetcher(max_file_cache_size=4)
-        task = Task(file_path="/tmp/one.parquet", row_group_id=0, cache_key=None, num_rows=1)  # type: ignore[arg-type]
+        cache_key = SimpleNamespace(file_size=1)
+        task = Task(file_path="/tmp/one.parquet", row_group_id=0, cache_key=cache_key, num_rows=1)  # type: ignore[arg-type]
         fetcher.fetch(task)
         fetcher.fetch(task)
 
@@ -297,7 +299,7 @@ class TestS3Fetcher:
 
     def test_fetcher_close_forgets_the_cached_footers(self):
         fetcher = PyArrowFetcher(max_file_cache_size=2)
-        fetcher._file_cache["/tmp/one.parquet"] = object()  # type: ignore[assignment]
+        fetcher._file_cache[("/tmp/one.parquet", 1)] = object()  # type: ignore[assignment]
         fetcher.close()
         assert not fetcher._file_cache
 

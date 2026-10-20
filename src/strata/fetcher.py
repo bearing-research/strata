@@ -27,13 +27,20 @@ pc = cast(Any, _pc)
 _MAX_FILE_CACHE_SIZE = 128
 
 
+def _prefixes(path: str) -> set[str]:
+    """Every dotted prefix of a chunk's path: the names pyarrow reads it for."""
+    parts = path.split(".")
+    return {".".join(parts[:n]) for n in range(1, len(parts) + 1)}
+
+
 def _chunk_bytes(row_group: pq.RowGroupMetaData, columns: list[str] | None) -> int:
     """The compressed size of the row group's column chunks a read of *columns* fetches."""
     wanted = None if columns is None else set(columns)
+    # Not the first segment alone: a top-level name may hold a dot itself.
     return sum(
         chunk.total_compressed_size
         for chunk in (row_group.column(i) for i in range(row_group.num_columns))
-        if wanted is None or chunk.path_in_schema.split(".")[0] in wanted
+        if wanted is None or not wanted.isdisjoint(_prefixes(chunk.path_in_schema))
     )
 
 
@@ -63,11 +70,11 @@ class PyArrowFetcher:
         self._max_file_cache_size = max_file_cache_size
         self._s3_filesystem = s3_filesystem
         self._equality_deletes = EqualityDeleteSets(s3_filesystem, max_equality_delete_rows)
-        # Parsed footers, least recently used first. Footers, not open handles:
-        # the fetch pool reads row groups of one file in parallel, and a
+        # Parsed footers by (path, manifest size), least recently used first. Footers,
+        # not open handles: the fetch pool reads row groups of one file in parallel, and a
         # ParquetFile is not thread-safe (pyarrow 25 segfaults). An immutable
         # FileMetaData is shared; each read opens its own handle with it.
-        self._file_cache: OrderedDict[str, pq.FileMetaData] = OrderedDict()
+        self._file_cache: OrderedDict[tuple[str, int], pq.FileMetaData] = OrderedDict()
         self._file_cache_lock = threading.Lock()
 
     @staticmethod
@@ -77,22 +84,27 @@ class PyArrowFetcher:
         if callable(close):
             close()
 
-    def _open(self, file_path: str) -> pq.ParquetFile:
-        """Return a handle on *file_path* for one read, opened with its cached footer."""
+    def _open(self, file_path: str, file_size: int) -> pq.ParquetFile:
+        """Return a handle on *file_path* for one read, opened with its cached footer.
+
+        The footer is cached under the manifest's *file_size* too, so a table recreated at
+        the same paths does not read its new files with the old files' footers.
+        """
         from strata.iceberg.lake_files import open_parquet
 
+        key = (file_path, file_size)
         with self._file_cache_lock:
-            metadata = self._file_cache.get(file_path)
+            metadata = self._file_cache.get(key)
             if metadata is not None:
-                self._file_cache.move_to_end(file_path)
+                self._file_cache.move_to_end(key)
 
         # Open outside the lock: opening an S3 file is a network round-trip,
         # and holding the lock across it would serialize the whole fetch pool.
         pf = open_parquet(file_path, self._s3_filesystem, metadata=metadata)
         if metadata is None:
             with self._file_cache_lock:
-                self._file_cache[file_path] = pf.metadata
-                self._file_cache.move_to_end(file_path)
+                self._file_cache[key] = pf.metadata
+                self._file_cache.move_to_end(key)
                 while len(self._file_cache) > self._max_file_cache_size:
                     self._file_cache.popitem(last=False)
         return pf
@@ -113,7 +125,7 @@ class PyArrowFetcher:
                 if name is not None and name not in columns
             ]
             columns = [*columns, *keys_only]
-        pf = self._open(task.file_path)
+        pf = self._open(task.file_path, task.cache_key.file_size)
         try:
             table = pf.read_row_group(task.row_group_id, columns=columns)
             task.storage_bytes = _chunk_bytes(pf.metadata.row_group(task.row_group_id), columns)

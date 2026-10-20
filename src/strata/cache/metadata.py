@@ -368,7 +368,10 @@ def _persisted_stats_are_untyped(persisted: "PersistedParquetMeta") -> bool:
 
 
 class ParquetMetadataCache:
-    """Parquet footer cache keyed by file path, with optional SQLite persistence.
+    """Parquet footer cache keyed by file path and size, with optional SQLite persistence.
+
+    The size is the manifest's ``file_size_in_bytes``: a table recreated at the same paths
+    must not plan from the old files' footers.
 
     Roughly 10-50 MB per 1000 files, depending on schema. ``s3_filesystem``, when given, is
     used to open ``s3://`` paths.
@@ -381,49 +384,49 @@ class ParquetMetadataCache:
         s3_filesystem: "pa.fs.S3FileSystem | None" = None,
         max_workers: int = 8,
     ) -> None:
-        self._cache: LRUCache[str, ParquetMetadata] = LRUCache(max_size)
+        self._cache: LRUCache[tuple[str, int], ParquetMetadata] = LRUCache(max_size)
         self._store = store
         self._s3_filesystem = s3_filesystem
         self._max_workers = max_workers
 
-    def get(self, file_path: str) -> ParquetMetadata | None:
-        """Get cached metadata for a file."""
-        return self._cache.get(file_path)
+    def get(self, file_path: str, file_size: int) -> ParquetMetadata | None:
+        """Get cached metadata for a file of ``file_size`` bytes."""
+        return self._cache.get((file_path, file_size))
 
-    def get_or_load(self, file_path: str) -> ParquetMetadata:
+    def get_or_load(self, file_path: str, file_size: int) -> ParquetMetadata:
         """Get metadata from memory, then the SQLite store, then the Parquet file."""
-        cached = self._cache.get(file_path)
+        cached = self._cache.get((file_path, file_size))
         if cached is not None:
             return cached
 
         if self._store is not None:
-            persisted = self._load_from_store(file_path)
+            persisted = self._load_from_store(file_path, file_size)
             if persisted is not None:
-                self._cache.put(file_path, persisted)
+                self._cache.put((file_path, file_size), persisted)
                 return persisted
 
         metadata = self._load_metadata(file_path)
-        self._cache.put(file_path, metadata)
+        self._cache.put((file_path, file_size), metadata)
 
         if self._store is not None:
-            self._save_to_store(file_path, metadata)
+            self._save_to_store(file_path, file_size, metadata)
 
         return metadata
 
-    def get_or_load_many(self, file_paths: list[str]) -> dict[str, ParquetMetadata]:
-        """Get metadata for many files, keyed by path, loading misses in parallel.
+    def get_or_load_many(self, file_sizes: dict[str, int]) -> dict[str, ParquetMetadata]:
+        """Get metadata for many files, given as ``{path: size}``, keyed by path.
 
         Batches the SQLite lookups and reads missing footers on a thread pool; this dominates
         cold-table planning time.
         """
-        if not file_paths:
+        if not file_sizes:
             return {}
 
         result: dict[str, ParquetMetadata] = {}
         missing_from_memory: list[str] = []
 
-        for fp in file_paths:
-            cached = self._cache.get(fp)
+        for fp in file_sizes:
+            cached = self._cache.get((fp, file_sizes[fp]))
             if cached is not None:
                 result[fp] = cached
             else:
@@ -434,12 +437,14 @@ class ParquetMetadataCache:
 
         missing_from_store: list[str] = []
         if self._store is not None:
-            persisted_batch = self._store.get_parquet_meta_many(missing_from_memory)
+            persisted_batch = self._store.get_parquet_meta_many(
+                {fp: file_sizes[fp] for fp in missing_from_memory}
+            )
             for fp in missing_from_memory:
                 if fp in persisted_batch:
                     meta = self._convert_persisted(persisted_batch[fp])
                     if meta is not None:
-                        self._cache.put(fp, meta)
+                        self._cache.put((fp, file_sizes[fp]), meta)
                         result[fp] = meta
                     else:
                         missing_from_store.append(fp)
@@ -477,7 +482,7 @@ class ParquetMetadataCache:
                         errors[fp] = e
 
         for fp, metadata in loaded.items():
-            self._cache.put(fp, metadata)
+            self._cache.put((fp, file_sizes[fp]), metadata)
             result[fp] = metadata
 
         if errors:
@@ -490,7 +495,7 @@ class ParquetMetadataCache:
             ) from first_error
 
         if loaded and self._store is not None:
-            to_persist: list[tuple[str, PersistedParquetMeta]] = []
+            to_persist: list[tuple[str, int, PersistedParquetMeta]] = []
 
             for fp, metadata in loaded.items():
                 try:
@@ -498,7 +503,7 @@ class ParquetMetadataCache:
                 except _UNPERSISTABLE as exc:
                     logger.debug("Could not convert Parquet metadata for %s: %s", fp, exc)
                     continue
-                to_persist.append((fp, persisted))
+                to_persist.append((fp, file_sizes[fp], persisted))
 
             if to_persist:
                 try:
@@ -562,13 +567,13 @@ class ParquetMetadataCache:
         except Exception:
             return None
 
-    def _load_from_store(self, file_path: str) -> ParquetMetadata | None:
+    def _load_from_store(self, file_path: str, file_size: int) -> ParquetMetadata | None:
         """Load metadata from persistent store without reading the file."""
         from strata.cache.metadata_store import deserialize_arrow_schema
 
         if self._store is None:
             return None
-        persisted = self._store.get_parquet_meta(file_path)
+        persisted = self._store.get_parquet_meta(file_path, file_size)
         if persisted is None:
             return None
 
@@ -622,7 +627,7 @@ class ParquetMetadataCache:
         except Exception:
             return None
 
-    def _save_to_store(self, file_path: str, metadata: ParquetMetadata) -> None:
+    def _save_to_store(self, file_path: str, file_size: int, metadata: ParquetMetadata) -> None:
         """Save metadata to persistent store."""
         if self._store is None:
             return
@@ -633,7 +638,7 @@ class ParquetMetadataCache:
             logger.debug("Could not convert Parquet metadata for %s: %s", file_path, exc)
             return
         try:
-            self._store.put_parquet_meta(file_path, persisted)
+            self._store.put_parquet_meta(file_path, file_size, persisted)
         except sqlite3.Error as exc:
             # Persistence is best-effort: the in-memory entry serves this process.
             logger.debug("Could not persist Parquet metadata for %s: %s", file_path, exc)
@@ -656,9 +661,9 @@ class ParquetMetadataCache:
             parquet_schema=pq_file.metadata.schema,
         )
 
-    def put(self, file_path: str, metadata: ParquetMetadata) -> None:
+    def put(self, file_path: str, file_size: int, metadata: ParquetMetadata) -> None:
         """Manually put metadata in the cache."""
-        self._cache.put(file_path, metadata)
+        self._cache.put((file_path, file_size), metadata)
 
     def clear(self) -> None:
         """Clear all cached metadata."""
