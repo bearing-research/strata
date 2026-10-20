@@ -39,6 +39,21 @@ exhaustive commit history.
   again. A `duckdb_sql@v1` build over 11 or more inputs by an HTTP executor is
   rebuilt too, since an artifact's record does not say which runner built it.
   `parse_arrow_inputs` orders inputs by index the same way. (#1260)
+- **A process a cell leaves running is stopped, even under a supervisor that adopts
+  orphans.** Under `STRATA_NOTEBOOK_HARNESS_USER` on Linux, a process left by an
+  ended run was kept when `systemd --user` or `tini -s` above the server adopted
+  it; now only the server's own descendants and running cells' sessions hold one.
+  A daemon a running cell starts with `setsid`, such as `ray start`'s, is no longer
+  killed when another run starts: the process running the cell adopts it, so it
+  lives until its cell ends. Leftovers are all paused before any is killed, so one
+  that keeps forking cannot outrun the stop, and a leftover's process id reused by
+  another process is never signalled. (#1263)
+- **Handing a directory to the harness user no longer re-owns a hard-linked file.**
+  A file the harness user had hard-linked into a directory it owns (`renv/`, the
+  renv cache) could be handed to it, on a host with `fs.protected_hardlinks=0`, even
+  when the other link was a server file. Each entry now changes owner through a
+  handle opened on it, never by name; a file with another hard link, and a symlink,
+  keep their owner. (#1263)
 - **The shortcuts list names the editor's real undo and redo keys.** It said
   Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
   Mac both use Cmd. (#1256)

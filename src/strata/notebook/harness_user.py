@@ -115,7 +115,24 @@ def spawn_kwargs(user: HarnessUser | None) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"user": user.uid, "group": user.gid}
     if os.geteuid() == 0:
         kwargs["extra_groups"] = []
+    if sys.platform == "linux":
+        # What the run orphans (a `setsid` daemon) is reparented to it rather than to init,
+        # so it stays the server's descendant, held by the sweep, until the run ends.
+        kwargs["preexec_fn"] = functools.partial(_prctl(), _PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
     return kwargs
+
+
+_PR_SET_CHILD_SUBREAPER = 36
+
+
+@functools.cache
+def _prctl() -> Any:
+    # Resolved here, not in the forked child, where loading a library could deadlock.
+    import ctypes
+
+    prctl = ctypes.CDLL(None).prctl
+    prctl.argtypes = [ctypes.c_int, *[ctypes.c_ulong] * 4]
+    return prctl
 
 
 def identity_env(env: dict[str, str] | None, user: HarnessUser | None) -> dict[str, str] | None:
@@ -136,23 +153,18 @@ def leftover_processes(
 ) -> list[int]:
     """The processes of *uid* in *table* (pid -> (parent, uid, session)) no run holds.
 
-    A run holds what descends from the server, or from one of its ancestors (another
-    worker of the same server), and what is in the session of a live harness that
-    does: ``cmd &`` from a shell a cell ran is orphaned but stays in its cell's
-    session. A process that left it with ``setsid`` is held by nothing.
+    A run holds what descends from the server, and what is in the session of a live
+    harness that does: ``cmd &`` from a shell a cell ran stays in its cell's session.
+    A harness adopts what its run orphans (``spawn_kwargs``), so a ``setsid`` daemon
+    descends from it while it runs. The server's ancestors hold nothing: one may be a
+    subreaper (``systemd --user``, ``tini -s``) that adopts what an ended run left.
     """
-    roots: set[int] = set()
-    pid = server_pid
-    while pid > 1 and pid in table and pid not in roots:
-        roots.add(pid)
-        pid = table[pid][0]
-
     memo: dict[int, bool] = {}
 
     def held(pid: int) -> bool:
         chain: list[int] = []
         while pid not in memo:
-            if pid in roots:
+            if pid == server_pid:
                 memo[pid] = True
             elif pid <= 1 or pid not in table or pid in chain:
                 memo[pid] = False
@@ -212,15 +224,76 @@ def sweep_leftovers(user: HarnessUser | None) -> None:
     if os.getpid() == 1:
         _cannot_sweep_as_init()
         return
-    for _ in range(5):  # what a leftover forks while it is stopped is caught next pass
-        pids = leftover_processes(_process_table(), os.getpid(), user.uid)
-        if not pids:
-            return
-        logger.info("Stopping %d process(es) left running as %s", len(pids), user.name)
-        for pid in pids:
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
-    logger.warning("Processes left running as %s keep forking; stopped what was there", user.name)
+    # Everything is stopped (SIGSTOP) before anything is killed, so no leftover can fork
+    # past the sweep; the passes end when a scan finds nothing new.
+    stopped: dict[int, int | None] = {}
+    remaining: list[int] = []
+    try:
+        for _ in range(_SWEEP_PASSES):
+            remaining = [p for p in _leftovers(user) if p not in stopped]
+            if not remaining:
+                break
+            handles: dict[int, int | None] = {}
+            for pid in remaining:
+                try:
+                    handles[pid] = _pidfd(pid)
+                except ProcessLookupError:
+                    continue  # exited since the scan
+            # Rescanned with the handles open: a pid that was reused before its handle was
+            # taken is no longer a leftover here, and the handle of one that died is inert.
+            confirmed = set(_leftovers(user))
+            for pid, handle in handles.items():
+                if pid in confirmed and _signal(pid, handle, signal.SIGSTOP):
+                    stopped[pid] = handle
+                elif handle is not None:
+                    os.close(handle)
+        else:
+            remaining = [p for p in _leftovers(user) if p not in stopped]
+        if stopped:
+            logger.info("Stopping %d process(es) left running as %s", len(stopped), user.name)
+    finally:
+        for pid, handle in stopped.items():
+            _signal(pid, handle, signal.SIGKILL)
+            if handle is not None:
+                os.close(handle)
+    if remaining:
+        logger.warning(
+            "%d process(es) left running as %s kept forking past %d sweeps and still run",
+            len(remaining),
+            user.name,
+            _SWEEP_PASSES,
+        )
+
+
+_SWEEP_PASSES = 20
+
+
+def _leftovers(user: HarnessUser) -> list[int]:
+    return leftover_processes(_process_table(), os.getpid(), user.uid)
+
+
+def _pidfd(pid: int) -> int | None:
+    """A pidfd that only ever signals this process; ``None`` before Linux 5.3."""
+    if sys.platform != "linux":
+        return None
+    try:
+        return os.pidfd_open(pid)
+    except OSError as exc:
+        if exc.errno != errno.ENOSYS:
+            raise
+        return None
+
+
+def _signal(pid: int, handle: int | None, sig: int) -> bool:
+    """Whether *sig* reached the process, which has not exited."""
+    try:
+        if sys.platform == "linux" and handle is not None:
+            signal.pidfd_send_signal(handle, sig)
+        else:
+            os.kill(pid, sig)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def hand_over(path: Path, user: HarnessUser | None) -> None:
@@ -236,8 +309,33 @@ def hand_over(path: Path, user: HarnessUser | None) -> None:
     # a link between a path walk's link check and its descent. *path* goes last.
     for _root, dirs, files, root_fd in os.fwalk(path, follow_symlinks=False):
         for name in (*dirs, *files):
-            os.chown(name, user.uid, user.gid, dir_fd=root_fd, follow_symlinks=False)
-    os.chown(path, user.uid, user.gid, follow_symlinks=False)
+            _hand_over_entry(name, user, root_fd)
+    _hand_over_entry(path, user, None)
+
+
+def _hand_over_entry(name: str | Path, user: HarnessUser, dir_fd: int | None) -> None:
+    """Chown *name* through an fd of its own, so a link swapped in by name is never re-owned.
+
+    A symlink is left as it is (owning the directory, the user can replace it), and so
+    is a file with another hard link, which may be a server file the user linked in.
+    """
+    try:
+        # O_NONBLOCK so a planted FIFO cannot hang the open.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY, dir_fd=dir_fd)
+    except OSError as exc:
+        # A symlink, or a socket (ENXIO; EOPNOTSUPP on BSD): either keeps its owner.
+        if exc.errno in _LINK_ERRNOS or exc.errno in (errno.ENXIO, errno.EOPNOTSUPP):
+            return
+        raise
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISREG(st.st_mode) and st.st_nlink > 1:
+            if (st.st_uid, st.st_gid) != (user.uid, user.gid):
+                logger.warning("Not handing %s to %s: it has another hard link", name, user.name)
+            return
+        os.chown(fd, user.uid, user.gid)
+    finally:
+        os.close(fd)
 
 
 def prepare_work_dir(notebook_dir: Path, user: HarnessUser | None) -> Path:

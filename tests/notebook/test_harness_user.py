@@ -134,6 +134,43 @@ class TestSpawnArguments:
         assert spawn_kwargs(None) == {}
         assert identity_env(None, None) is None
 
+    @pytest.mark.skipif(sys.platform != "linux", reason="PR_SET_CHILD_SUBREAPER is Linux's")
+    def test_a_daemon_a_run_starts_with_setsid_stays_its_descendant(self):
+        """``ray start`` and the like fork, ``setsid`` and exit, orphaning their daemon. The run
+        adopts it rather than init, so the sweep holds it while the run lives."""
+        import pwd
+        import subprocess
+
+        me = HarnessUser(_me(), os.getuid(), os.getgid(), pwd.getpwuid(os.getuid()).pw_dir)
+        script = (
+            "import os, time\n"
+            "r, w = os.pipe()\n"
+            "middle = os.fork()\n"
+            "if middle == 0:\n"
+            "    os.setsid()\n"
+            "    mid = os.getpid()\n"
+            "    if os.fork() == 0:\n"
+            "        while os.getppid() == mid:\n"
+            "            time.sleep(0.01)\n"
+            "        os.write(w, str(os.getppid()).encode())\n"
+            "    os._exit(0)\n"
+            "os.waitpid(middle, 0)\n"
+            "os.close(w)\n"
+            "print(os.getpid(), os.read(r, 64).decode())\n"
+        )
+
+        run = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+            **spawn_kwargs(me),
+        )
+
+        harness, adopter = run.stdout.split()
+        assert adopter == harness
+
 
 @posix_only
 class TestHandOver:
@@ -160,7 +197,8 @@ class TestHandOver:
     def _cells() -> HarnessUser:
         return HarnessUser(name="cells", uid=os.geteuid() + 1, gid=os.getegid(), home="/")
 
-    def test_every_entry_is_handed_over_and_no_link_is_followed(self, tmp_path, monkeypatch):
+    def test_every_entry_but_a_link_is_handed_over(self, tmp_path, monkeypatch):
+        """A symlink is left as it is: the user owns its directory, so it can replace it."""
         outside = tmp_path / "outside"
         outside.mkdir()
         run = tmp_path / "run"
@@ -172,8 +210,42 @@ class TestHandOver:
 
         hand_over(run, self._cells())
 
-        tree = [run, run / "a", run / "a" / "b", run / "a" / "b" / "f", run / "g", run / "link"]
+        tree = [run, run / "a", run / "a" / "b", run / "a" / "b" / "f", run / "g"]
         assert changed == self._ids(*tree)
+
+    def test_a_file_with_another_hard_link_is_not_handed_over(self, tmp_path, monkeypatch, caplog):
+        """With ``fs.protected_hardlinks=0`` the user can link a server file into a directory it
+        already owns (``renv/``, the renv cache); chowning that entry would hand the file over."""
+        secret = tmp_path / "secret"
+        secret.write_text("server's")
+        run = tmp_path / "run"
+        run.mkdir()
+        os.link(secret, run / "planted")
+        (run / "mine").write_text("x")
+        changed = self._record_chowns(monkeypatch)
+
+        hand_over(run, self._cells())
+
+        assert changed == self._ids(run, run / "mine")
+        assert "planted" in caplog.text and "hard link" in caplog.text
+
+    def test_a_fifo_and_a_socket_the_user_left_do_not_stop_a_hand_over(self, tmp_path, monkeypatch):
+        """A FIFO is opened without blocking; a socket cannot be opened and is left as it is."""
+        import socket
+
+        run = tmp_path / "run"
+        run.mkdir()
+        os.mkfifo(run / "fifo")
+        monkeypatch.chdir(run)  # a socket path is capped near 100 bytes
+        sock = socket.socket(socket.AF_UNIX)
+        sock.bind("sock")
+        changed = self._record_chowns(monkeypatch)
+        try:
+            hand_over(run, self._cells())
+        finally:
+            sock.close()
+
+        assert changed == self._ids(run, run / "fifo")
 
     def test_a_directory_swapped_for_a_link_mid_walk_is_not_followed(self, tmp_path, monkeypatch):
         """A harness-user process can rename a directory it owns and put a link in its place
@@ -393,8 +465,17 @@ class TestLeftoverProcesses:
     def test_a_running_harness_and_its_children_are_held(self):
         assert self._leftovers(p200=(100, self.CELLS, 200), p201=(200, self.CELLS, 200)) == []
 
-    def test_another_worker_of_the_same_server_holds_its_cells(self):
-        assert self._leftovers(p300=(50, 0, 50), p301=(300, self.CELLS, 301)) == []
+    def test_an_orphan_a_subreaper_above_the_server_adopted_is_a_leftover(self):
+        """``systemd --user`` or ``tini -s`` adopts what an ended run left; the server's
+        ancestors hold nothing."""
+        assert self._leftovers(p300=(50, self.CELLS, 300), p301=(300, self.CELLS, 300)) == [
+            300,
+            301,
+        ]
+
+    def test_a_setsid_daemon_its_running_harness_adopted_is_held(self):
+        """A harness is a subreaper, so what its run orphans stays under it."""
+        assert self._leftovers(p200=(100, self.CELLS, 200), p203=(200, self.CELLS, 203)) == []
 
     def test_an_orphan_still_in_a_running_cells_session_is_held(self):
         """``cmd &`` from a shell the cell ran: init adopts it, the session stays."""
@@ -428,30 +509,125 @@ class TestSweep:
 
     @pytest.fixture
     def killed(self, monkeypatch) -> list[tuple[int, int]]:
+        """Every signal sent, as (pid, signal); a pidfd stands in for its pid."""
         from strata.notebook import harness_user
 
         sent: list[tuple[int, int]] = []
+        pids: dict[int, int] = {}
+
+        def _pidfd_open(pid: int) -> int:
+            fd = os.open(os.devnull, os.O_RDONLY)
+            pids[fd] = pid
+            return fd
+
         monkeypatch.setattr(harness_user.sys, "platform", "linux")
         monkeypatch.setattr(harness_user.os, "kill", lambda pid, sig: sent.append((pid, sig)))
-        server = os.getpid()
-        tables = iter(
-            [
-                {1: (0, 0, 1), server: (1, 0, server), 700: (1, self.CELLS, 700)},
-                {1: (0, 0, 1), server: (1, 0, server)},
-            ]
+        monkeypatch.setattr(harness_user.os, "pidfd_open", _pidfd_open, raising=False)
+        monkeypatch.setattr(
+            harness_user.signal,
+            "pidfd_send_signal",
+            lambda fd, sig: sent.append((pids[fd], sig)),
+            raising=False,
         )
-        monkeypatch.setattr(harness_user, "_process_table", lambda: next(tables))
+        self._tables(monkeypatch, lambda: {700: (1, self.CELLS, 700)})
         return sent
+
+    @staticmethod
+    def _tables(monkeypatch, procs) -> None:
+        """Each scan sees init, the server and what ``procs()`` returns then."""
+        from strata.notebook import harness_user
+
+        server = os.getpid()
+        monkeypatch.setattr(
+            harness_user,
+            "_process_table",
+            lambda: {1: (0, 0, 1), server: (1, 0, server), **procs()},
+        )
 
     def _cells(self, uid: int = CELLS) -> HarnessUser:
         return HarnessUser(name="cells", uid=uid, gid=uid, home="/")
 
-    def test_a_leftover_is_killed(self, killed):
+    def test_a_leftover_is_stopped_then_killed(self, killed):
         import signal
 
         sweep_leftovers(self._cells())
 
-        assert killed == [(700, signal.SIGKILL)]
+        assert killed == [(700, signal.SIGSTOP), (700, signal.SIGKILL)]
+
+    def test_what_a_leftover_forked_is_stopped_before_anything_is_killed(self, killed, monkeypatch):
+        """Killed a pass at a time, what the last pass missed would outlive the sweep."""
+        import signal
+
+        def _procs() -> dict[int, tuple[int, int, int]]:
+            procs = {700: (1, self.CELLS, 700)}
+            if (700, signal.SIGSTOP) in killed:
+                procs[701] = (700, self.CELLS, 700)  # forked just before it stopped
+            return procs
+
+        self._tables(monkeypatch, _procs)
+
+        sweep_leftovers(self._cells())
+
+        assert killed == [
+            (700, signal.SIGSTOP),
+            (701, signal.SIGSTOP),
+            (700, signal.SIGKILL),
+            (701, signal.SIGKILL),
+        ]
+
+    def test_a_leftover_that_outforks_the_sweep_is_named_and_what_stopped_is_killed(
+        self, killed, monkeypatch, caplog
+    ):
+        import signal
+
+        from strata.notebook import harness_user
+
+        newest = iter(range(1000, 2000))
+        running: list[int] = []
+
+        def _procs() -> dict[int, tuple[int, int, int]]:
+            # A new process every scan, so no scan comes up clean.
+            running.append(next(newest))
+            return {pid: (1, self.CELLS, pid) for pid in range(1000, running[-1] + 1)}
+
+        self._tables(monkeypatch, _procs)
+
+        sweep_leftovers(self._cells())
+
+        stops = [pid for pid, sig in killed if sig == signal.SIGSTOP]
+        kills = [pid for pid, sig in killed if sig == signal.SIGKILL]
+        assert stops and sorted(kills) == sorted(stops)
+        unstopped = len(running) - len(stops)
+        passes = harness_user._SWEEP_PASSES
+        assert f"{unstopped} process(es) left running as cells kept forking past {passes}" in (
+            caplog.text
+        )
+
+    def test_a_pid_reused_by_a_running_cell_is_not_signalled(self, killed, monkeypatch):
+        """A leftover can exit and its pid go to a new harness between the scan and the pidfd."""
+        server = os.getpid()
+        scans = iter([{700: (1, self.CELLS, 700)}])
+        self._tables(monkeypatch, lambda: next(scans, {700: (server, self.CELLS, 700)}))
+
+        sweep_leftovers(self._cells())
+
+        assert killed == []
+
+    def test_without_pidfds_a_leftover_is_signalled_by_pid(self, killed, monkeypatch):
+        """Linux before 5.3."""
+        import errno
+        import signal
+
+        from strata.notebook import harness_user
+
+        def _enosys(pid: int) -> int:
+            raise OSError(errno.ENOSYS, "pidfd_open")
+
+        monkeypatch.setattr(harness_user.os, "pidfd_open", _enosys, raising=False)
+
+        sweep_leftovers(self._cells())
+
+        assert killed == [(700, signal.SIGSTOP), (700, signal.SIGKILL)]
 
     @pytest.mark.parametrize("uid", ["root", "server"])
     def test_root_or_the_servers_own_user_is_never_swept(self, killed, uid, monkeypatch):

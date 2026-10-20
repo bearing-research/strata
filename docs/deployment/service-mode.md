@@ -795,7 +795,9 @@ each notebook's `work/`, where its cells run. The notebook's directory stays the
 server's, so a cell cannot change `notebook.toml`, its cells or its lockfiles,
 or put a file beside them. Strata makes `work/` itself, refuses one that is a
 link, and changes only that directory's owner, never that of the files an
-earlier run left in it. Also handed over is
+earlier run left in it. A hand-over changes each entry's owner through a handle
+opened on it, never by name, and leaves a symlink, or a file with another hard
+link, as it is. Also handed over is
 a remote `rw` mount's staging copy (which the server then uploads without
 following any link the cell left in it, so a link to a server file is skipped,
 not synced), the harness runs the venv's interpreter directly rather than
@@ -807,13 +809,17 @@ A cell run this way still shares the host's kernel and sees what any local user
 can. A process a cell leaves running is stopped before the next run is handed a
 directory, so it cannot read or change what later runs are given. On Linux,
 before each hand-over Strata kills (`SIGKILL`) every process of the harness user
-that no run holds. A run holds what descends from the server (or from a process
-that started the server, such as a supervisor running other workers of it), and
-what is still in the session of a running cell. So `cmd &` from a cell's shell
-is held while the process that ran its cell lives (a cold or warm harness runs
-one cell, the batch harness behind Run All several), and once that process
-exits it is stopped at the next hand-over. A process that left with `setsid` is
-stopped at the next hand-over, even while its cell runs. Two things follow:
+that no run holds. A run holds what descends from the server, and what is still
+in the session of a running cell. The process that runs a cell adopts what the
+cell orphans (it is a child subreaper), so a daemon a cell starts with `setsid`,
+such as `ray start`'s, stays under it. So that daemon, or `cmd &` from a cell's
+shell, is held while the process that ran its cell lives (a cold or warm harness
+runs one cell, the batch harness behind Run All several), and once that process
+exits it is stopped at the next hand-over. What started the server holds nothing,
+so a supervisor that adopts orphans (`systemd --user`, `tini -s`) does not keep
+what an ended run left. Every leftover is paused (`SIGSTOP`) before any is killed,
+so one that keeps forking cannot outrun the sweep; if one still does after 20
+passes, the server logs how many are left. Two things follow:
 
 - **The harness user is this server's alone.** Any other process of that user,
   another server's cells or a login, is stopped too.
