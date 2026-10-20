@@ -506,8 +506,12 @@ class ReadPlanner:
         arrow_schema = None
         estimated_bytes = 0
 
-        actual_paths = [entry.actual_path for entry in manifest_resolution.data_files]
-        pq_meta_batch = self.parquet_cache.get_or_load_many(actual_paths)
+        pq_meta_batch = self.parquet_cache.get_or_load_many(
+            {
+                entry.actual_path: entry.file_size_in_bytes
+                for entry in manifest_resolution.data_files
+            }
+        )
 
         for entry in manifest_resolution.data_files:
             file_path = entry.file_path

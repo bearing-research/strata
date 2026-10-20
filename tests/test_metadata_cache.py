@@ -20,6 +20,11 @@ from strata.cache.metadata import (
 )
 
 
+def _size(path) -> int:
+    """The file's size, as an Iceberg manifest records it."""
+    return Path(path).stat().st_size
+
+
 class TestLRUCache:
     def test_put_and_get(self):
         cache = LRUCache[str, int](max_size=10)
@@ -202,13 +207,13 @@ class TestParquetMetadataCache:
         stats_before = cache.stats()
         assert stats_before["misses"] == 0
 
-        meta1 = cache.get_or_load(sample_parquet_file)
+        meta1 = cache.get_or_load(sample_parquet_file, _size(sample_parquet_file))
 
         stats_after = cache.stats()
         assert stats_after["misses"] == 1
         assert stats_after["size"] == 1
 
-        meta2 = cache.get_or_load(sample_parquet_file)
+        meta2 = cache.get_or_load(sample_parquet_file, _size(sample_parquet_file))
 
         stats_final = cache.stats()
         assert stats_final["hits"] == 1
@@ -218,7 +223,7 @@ class TestParquetMetadataCache:
 
     def test_metadata_contains_expected_fields(self, sample_parquet_file):
         cache = ParquetMetadataCache(max_size=10)
-        meta = cache.get_or_load(sample_parquet_file)
+        meta = cache.get_or_load(sample_parquet_file, _size(sample_parquet_file))
 
         assert isinstance(meta, ParquetMetadata)
         assert meta.arrow_schema is not None
@@ -228,7 +233,7 @@ class TestParquetMetadataCache:
 
     def test_row_group_metadata_accessible(self, sample_parquet_file):
         cache = ParquetMetadataCache(max_size=10)
-        meta = cache.get_or_load(sample_parquet_file)
+        meta = cache.get_or_load(sample_parquet_file, _size(sample_parquet_file))
 
         for i, rg_meta in enumerate(meta.row_group_metadata):
             assert rg_meta.num_rows > 0
@@ -248,13 +253,13 @@ class TestParquetMetadataCache:
             pq.write_table(table, file_path)
             files.append(str(file_path))
 
-        cache.get_or_load(files[0])
-        cache.get_or_load(files[1])
-        cache.get_or_load(files[2])  # Evicts files[0]
+        cache.get_or_load(files[0], _size(files[0]))
+        cache.get_or_load(files[1], _size(files[1]))
+        cache.get_or_load(files[2], _size(files[2]))  # Evicts files[0]
 
-        assert cache.get(files[0]) is None
-        assert cache.get(files[1]) is not None
-        assert cache.get(files[2]) is not None
+        assert cache.get(files[0], _size(files[0])) is None
+        assert cache.get(files[1], _size(files[1])) is not None
+        assert cache.get(files[2], _size(files[2])) is not None
 
     def test_get_or_load_many_persists_without_rereading_file(
         self, sample_parquet_file, tmp_path, monkeypatch
@@ -270,10 +275,10 @@ class TestParquetMetadataCache:
 
         monkeypatch.setattr(metadata_store, "extract_parquet_meta", fail_extract)
 
-        result = cache.get_or_load_many([sample_parquet_file])
+        result = cache.get_or_load_many({sample_parquet_file: _size(sample_parquet_file)})
 
         assert sample_parquet_file in result
-        assert store.get_parquet_meta(sample_parquet_file) is not None
+        assert store.get_parquet_meta(sample_parquet_file, _size(sample_parquet_file)) is not None
 
     def test_a_failed_persist_keeps_the_memory_entry_and_logs(self, sample_parquet_file, caplog):
         """A SQLite failure on persist (locked file, read-only mount) is logged, not raised."""
@@ -281,13 +286,13 @@ class TestParquetMetadataCache:
         import sqlite3
 
         class _LockedStore:
-            def get_parquet_meta(self, file_path):
+            def get_parquet_meta(self, file_path, file_size):
                 return None
 
-            def get_parquet_meta_many(self, file_paths):
+            def get_parquet_meta_many(self, file_sizes):
                 return {}
 
-            def put_parquet_meta(self, file_path, meta):
+            def put_parquet_meta(self, file_path, file_size, meta):
                 raise sqlite3.OperationalError("database is locked")
 
             def put_parquet_meta_many(self, items):
@@ -295,9 +300,9 @@ class TestParquetMetadataCache:
 
         cache = ParquetMetadataCache(max_size=10, store=_LockedStore())
         with caplog.at_level(logging.DEBUG, logger="strata.cache.metadata"):
-            loaded = cache.get_or_load(sample_parquet_file)
+            loaded = cache.get_or_load(sample_parquet_file, _size(sample_parquet_file))
             cache.clear()
-            many = cache.get_or_load_many([sample_parquet_file])
+            many = cache.get_or_load_many({sample_parquet_file: _size(sample_parquet_file)})
 
         assert loaded.num_row_groups == 3
         assert many[sample_parquet_file].num_row_groups == 3
@@ -322,13 +327,13 @@ class TestParquetMetadataCache:
         store = metadata_store.MetadataStore(tmp_path / "metadata.sqlite")
         cache = ParquetMetadataCache(max_size=10, store=store)
         with caplog.at_level(logging.DEBUG, logger="strata.cache.metadata"):
-            loaded = cache.get_or_load(sample_parquet_file)
+            loaded = cache.get_or_load(sample_parquet_file, _size(sample_parquet_file))
             cache.clear()
-            many = cache.get_or_load_many([sample_parquet_file])
+            many = cache.get_or_load_many({sample_parquet_file: _size(sample_parquet_file)})
 
         assert loaded.num_row_groups == 3
         assert many[sample_parquet_file].num_row_groups == 3
-        assert store.get_parquet_meta(sample_parquet_file) is None
+        assert store.get_parquet_meta(sample_parquet_file, _size(sample_parquet_file)) is None
         converted = [r for r in caplog.records if "Could not convert" in r.getMessage()]
         assert len(converted) == 2
 
@@ -518,7 +523,7 @@ class TestGlobalCaches:
         pq_cache = get_parquet_cache()
         manifest_cache = get_manifest_cache()
 
-        pq_cache.get_or_load(str(file_path))
+        pq_cache.get_or_load(str(file_path), _size(file_path))
         manifest_cache.put("default", "table", 1, ManifestResolution(data_files=[]))
 
         assert len(pq_cache._cache) == 1
@@ -773,9 +778,9 @@ class TestMetadataStore:
         store.put_manifest("default", "ns.table", 1, [])
         store.get_manifest("default", "ns.table", 1)
         path = sample_parquet_files[0]
-        store.put_parquet_meta(path, extract_parquet_meta(path))
-        store.get_parquet_meta(path)
-        store.get_parquet_meta_many([path])
+        store.put_parquet_meta(path, _size(path), extract_parquet_meta(path))
+        store.get_parquet_meta(path, _size(path))
+        store.get_parquet_meta_many({path: _size(path)})
         store.stats()
         store.cleanup_stale_parquet_meta()
         store.clear()
@@ -816,9 +821,9 @@ class TestMetadataStore:
         file_path = sample_parquet_files[0]
         meta = extract_parquet_meta(file_path)
 
-        store.put_parquet_meta(file_path, meta)
+        store.put_parquet_meta(file_path, _size(file_path), meta)
 
-        result = store.get_parquet_meta(file_path)
+        result = store.get_parquet_meta(file_path, _size(file_path))
         assert result is not None
         assert result.num_row_groups == meta.num_row_groups
         assert result.column_names == meta.column_names
@@ -834,9 +839,9 @@ class TestMetadataStore:
         pq.write_table(table, file_path)
 
         meta = extract_parquet_meta(str(file_path))
-        store.put_parquet_meta(str(file_path), meta)
+        store.put_parquet_meta(str(file_path), _size(file_path), meta)
 
-        assert store.get_parquet_meta(str(file_path)) is not None
+        assert store.get_parquet_meta(str(file_path), _size(file_path)) is not None
         initial_stale = store.stale_invalidations
 
         # Sleep past the ~1s mtime resolution on Windows/FAT32 so the second write
@@ -845,7 +850,7 @@ class TestMetadataStore:
         table2 = pa.table({"x": [4, 5, 6, 7]})
         pq.write_table(table2, file_path)
 
-        result = store.get_parquet_meta(str(file_path))
+        result = store.get_parquet_meta(str(file_path), _size(file_path))
         assert result is None
         assert store.stale_invalidations == initial_stale + 1
 
@@ -854,9 +859,9 @@ class TestMetadataStore:
 
         for file_path in sample_parquet_files:
             meta = extract_parquet_meta(file_path)
-            store.put_parquet_meta(file_path, meta)
+            store.put_parquet_meta(file_path, _size(file_path), meta)
 
-        result = store.get_parquet_meta_many(sample_parquet_files)
+        result = store.get_parquet_meta_many({fp: _size(fp) for fp in sample_parquet_files})
 
         assert len(result) == 3
         for file_path in sample_parquet_files:
@@ -867,26 +872,26 @@ class TestMetadataStore:
         from strata.cache.metadata_store import extract_parquet_meta
 
         meta = extract_parquet_meta(sample_parquet_files[0])
-        store.put_parquet_meta(sample_parquet_files[0], meta)
+        store.put_parquet_meta(sample_parquet_files[0], _size(sample_parquet_files[0]), meta)
 
-        result = store.get_parquet_meta_many(sample_parquet_files)
+        result = store.get_parquet_meta_many({fp: _size(fp) for fp in sample_parquet_files})
 
         assert len(result) == 1
         assert sample_parquet_files[0] in result
 
     def test_get_parquet_meta_many_empty(self, store):
-        result = store.get_parquet_meta_many([])
+        result = store.get_parquet_meta_many({})
         assert result == {}
 
     def test_put_parquet_meta_many(self, store, sample_parquet_files):
         from strata.cache.metadata_store import extract_parquet_meta
 
-        items = [(fp, extract_parquet_meta(fp)) for fp in sample_parquet_files]
+        items = [(fp, _size(fp), extract_parquet_meta(fp)) for fp in sample_parquet_files]
 
         store.put_parquet_meta_many(items)
 
         for file_path in sample_parquet_files:
-            result = store.get_parquet_meta(file_path)
+            result = store.get_parquet_meta(file_path, _size(file_path))
             assert result is not None
 
     def test_put_parquet_meta_many_empty(self, store):
@@ -900,9 +905,9 @@ class TestMetadataStore:
         store.get_manifest("default", "ns.table", 1)  # hit
 
         meta = extract_parquet_meta(sample_parquet_files[0])
-        store.get_parquet_meta(sample_parquet_files[0])  # miss
-        store.put_parquet_meta(sample_parquet_files[0], meta)
-        store.get_parquet_meta(sample_parquet_files[0])  # hit
+        store.get_parquet_meta(sample_parquet_files[0], _size(sample_parquet_files[0]))  # miss
+        store.put_parquet_meta(sample_parquet_files[0], _size(sample_parquet_files[0]), meta)
+        store.get_parquet_meta(sample_parquet_files[0], _size(sample_parquet_files[0]))  # hit
 
         stats = store.stats()
 
@@ -922,7 +927,7 @@ class TestMetadataStore:
         pq.write_table(table, file_path)
 
         meta = extract_parquet_meta(str(file_path))
-        store.put_parquet_meta(str(file_path), meta)
+        store.put_parquet_meta(str(file_path), _size(file_path), meta)
 
         file_path.unlink()
 
@@ -942,12 +947,26 @@ class TestMetadataStore:
 
         meta = extract_parquet_meta(str(source_file))
         remote_path = "s3://bucket/path/remote_source.parquet"
-        store.put_parquet_meta(remote_path, meta)
+        size = _size(source_file)
+        store.put_parquet_meta(remote_path, size, meta)
 
-        assert store.get_parquet_meta(remote_path) is not None
-        assert remote_path in store.get_parquet_meta_many([remote_path])
+        assert store.get_parquet_meta(remote_path, size) is not None
+        assert remote_path in store.get_parquet_meta_many({remote_path: size})
         assert store.cleanup_stale_parquet_meta() == 0
         assert store.stats()["parquet_entries"] == 1
+
+    def test_remote_parquet_meta_of_another_size_is_stale(self, store, tmp_path):
+        """A remote file has no stat, so the manifest's size is what tells a rewrite apart."""
+        from strata.cache.metadata_store import extract_parquet_meta
+
+        source_file = tmp_path / "remote_source.parquet"
+        pq.write_table(pa.table({"x": [1, 2, 3]}), source_file)
+        remote_path = "s3://bucket/path/remote_source.parquet"
+        size = _size(source_file)
+        store.put_parquet_meta(remote_path, size, extract_parquet_meta(str(source_file)))
+
+        assert store.get_parquet_meta(remote_path, size + 1) is None
+        assert store.get_parquet_meta_many({remote_path: size + 1}) == {}
 
     def test_schema_migration(self, tmp_path):
         """Old databases migrate to the current schema."""
@@ -1209,9 +1228,9 @@ class TestPersistedColumnSizes:
             ],
             column_names=["a", "b"],
         )
-        store.put_parquet_meta(str(target), meta)
+        store.put_parquet_meta(str(target), _size(target), meta)
 
-        loaded = store.get_parquet_meta(str(target))
+        loaded = store.get_parquet_meta(str(target), _size(target))
         assert loaded.row_groups[0].column_sizes == {"a": 100, "b": 200}
 
     def test_a_row_written_without_sizes_still_loads(self, tmp_path):
@@ -1229,11 +1248,11 @@ class TestPersistedColumnSizes:
                (file_path, schema_ipc, num_row_groups, row_groups_json,
                 column_names_json, file_mtime, file_size)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (str(target), b"", 1, legacy, json.dumps(["a"]), None, None),
+            (str(target), b"", 1, legacy, json.dumps(["a"]), None, _size(target)),
         )
         conn.commit()
 
-        loaded = store.get_parquet_meta(str(target))
+        loaded = store.get_parquet_meta(str(target), _size(target))
         assert loaded.row_groups[0].column_sizes == {}
 
 
@@ -1333,7 +1352,7 @@ class TestPersistedStatsKeepTheirTypes:
 
         fp = str(file or self._file(tmp_path))
         store = MetadataStore(tmp_path / "meta.sqlite")
-        ParquetMetadataCache(store=store).get_or_load(fp)
+        ParquetMetadataCache(store=store).get_or_load(fp, _size(fp))
 
         restarted = ParquetMetadataCache(store=store)
 
@@ -1341,7 +1360,7 @@ class TestPersistedStatsKeepTheirTypes:
             raise AssertionError("served from the footer, not the store")
 
         monkeypatch.setattr(restarted, "_load_metadata", no_footer_read)
-        return restarted.get_or_load(fp)
+        return restarted.get_or_load(fp, _size(fp))
 
     def _prunes(self, meta, flt) -> bool:
         from strata.planner import ReadPlanner, _build_column_index_map
@@ -1428,9 +1447,67 @@ class TestPersistedStatsKeepTheirTypes:
         old.row_groups[0].column_stats["ts"].update(
             min="2024-01-01 12:00:00", max="2024-01-01 12:00:00"
         )
-        store.put_parquet_meta(fp, old)
+        store.put_parquet_meta(fp, _size(fp), old)
 
-        meta = ParquetMetadataCache(store=store).get_or_load(fp)
+        meta = ParquetMetadataCache(store=store).get_or_load(fp, _size(fp))
 
         col_idx = list(meta.arrow_schema.names).index("ts")
         assert meta.row_group_metadata[0].column(col_idx).statistics.min == datetime(2024, 1, 1, 12)
+
+
+@pytest.mark.parametrize("filtered", [False, True])
+def test_a_table_recreated_at_the_same_paths_plans_from_its_own_footers(tmp_path, filtered):
+    """The footer caches are keyed by the manifest's file size, not the path alone.
+
+    With the old footer a filtered scan pruned the new rows, and an unfiltered one read
+    the new file with the old one's offsets.
+    """
+    import sys
+
+    if sys.platform == "win32":
+        pytest.skip("pyiceberg + pyarrow LocalFileSystem path handling broken on Windows")
+
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField
+
+    from strata.cache.disk import CachedFetcher
+    from strata.config import StrataConfig
+    from strata.planner import ReadPlanner
+    from strata.types import Filter, FilterOp
+
+    warehouse = tmp_path / "warehouse"
+    warehouse.mkdir()
+    catalog = SqlCatalog(
+        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=warehouse.as_uri()
+    )
+    catalog.create_namespace("db")
+    uri = f"{warehouse.as_uri()}#db.t"
+    path = tmp_path / "part-00000.parquet"
+
+    def register(ids):
+        pq.write_table(pa.table({"id": pa.array(ids, pa.int64())}), path)
+        if catalog.table_exists("db.t"):
+            catalog.drop_table("db.t")
+        schema = Schema(NestedField(1, "id", LongType(), required=False))
+        catalog.create_table("db.t", schema=schema).add_files([path.as_uri()])
+
+    # Long-lived, as the server's are.
+    config = StrataConfig(cache_dir=tmp_path / "cache")
+    planner = ReadPlanner(config)
+    fetcher = CachedFetcher(config)
+
+    def scan(filters=None):
+        plan = planner.plan(uri, filters=filters)
+        return [row["id"] for task in plan.tasks for row in fetcher.fetch(task).to_pylist()]
+
+    register([1, 2, 3])
+    scan()  # Unfiltered, so the footer is read and cached.
+    register(list(range(100, 140)))
+
+    filters = [Filter("id", FilterOp.GT, 5)] if filtered else None
+    assert scan(filters) == list(range(100, 140))
+    # A restarted server reads the persisted footers.
+    reset_caches()
+    planner, fetcher = ReadPlanner(config), CachedFetcher(config)
+    assert scan(filters) == list(range(100, 140))

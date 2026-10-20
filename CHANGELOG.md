@@ -48,6 +48,12 @@ exhaustive commit history.
   ran first answered both: a full scan could come back with no columns, or a
   row count with every column. It now has its own artifact and returns every
   row with no columns, cached or not. (#TBD)
+- **A table recreated at the same file paths is no longer read with the old
+  files' Parquet footers.** Footers were cached by path alone, in memory and
+  on disk (where a remote file's was never checked again), so a filtered scan
+  could drop the new rows and an unfiltered one could fail reading a page.
+  They are now matched on the file size the Iceberg manifest records too.
+  (#TBD)
 
 ## 0.11.0 - 2026-10-19
 
