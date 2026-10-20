@@ -3744,6 +3744,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An exported link loses an unsafe target wherever it is defined.</strong> A
+  <code>javascript:</code>, <code>vbscript:</code> or non-image <code>data:</code> reference definition inside
+  a blockquote or list item, or under a label split across lines, kept its
+  target in a Markdown export; it now becomes <code>#</code> like the others. (#1259)</li>
 <li><strong>The shortcuts list names the editor's real undo and redo keys.</strong> It said
   Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
   Mac both use Cmd. (#1256)</li>
