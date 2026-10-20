@@ -14,6 +14,7 @@ from strata.notebook.sql import (
     known_drivers,
     register_adapter,
 )
+from strata.notebook.sql.adapter import resolve_env_var
 from strata.notebook.sql.registry import _reset_for_tests, _restore_defaults_for_tests
 
 # --- QualifiedTable -----------------------------------------------------
@@ -47,6 +48,24 @@ def test_identity_hash_changes_on_value_change():
     a = hash_connection_identity("postgresql", {"role": "reader"})
     b = hash_connection_identity("postgresql", {"role": "admin"})
     assert a != b
+
+
+# --- resolve_env_var ---------------------------------------------------
+
+
+def test_resolve_env_var_reads_the_environment(monkeypatch):
+    monkeypatch.setenv("PGUSER", "alice")
+    assert resolve_env_var("${PGUSER}") == "alice"
+    assert resolve_env_var("literal") == "literal"
+
+
+def test_resolve_env_var_names_an_unset_var(monkeypatch):
+    monkeypatch.delenv("PGUSER", raising=False)
+    with pytest.raises(RuntimeError) as exc_info:
+        resolve_env_var("${PGUSER}")
+    assert str(exc_info.value) == (
+        "Connection auth references ${PGUSER} but the environment variable is not set"
+    )
 
 
 # --- FreshnessToken / SchemaFingerprint -------------------------------

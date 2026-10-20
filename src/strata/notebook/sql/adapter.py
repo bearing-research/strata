@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -190,3 +191,20 @@ def hash_connection_identity(
         default=str,
     )
     return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def resolve_env_var(value: str) -> str:
+    """Resolve a single ``${VAR}`` indirection to its env-var value.
+
+    Literals pass through: the writer scrubs them on save, so one can only come
+    from unsaved in-memory state.
+    """
+    if value.startswith("${") and value.endswith("}"):
+        var = value[2:-1]
+        env_val = os.environ.get(var)
+        if env_val is None:
+            raise RuntimeError(
+                f"Connection auth references ${{{var}}} but the environment variable is not set"
+            )
+        return env_val
+    return value

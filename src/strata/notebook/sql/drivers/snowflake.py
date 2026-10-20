@@ -26,6 +26,7 @@ from strata.notebook.sql.adapter import (
     SchemaFingerprint,
     TableSchema,
     hash_connection_identity,
+    resolve_env_var,
 )
 from strata.notebook.sql.registry import register_adapter
 from strata.notebook.sql.time_travel import iso_utc, pin_tables, plus
@@ -122,25 +123,6 @@ def _parse_snowflake_uri(uri: str) -> dict[str, Any]:
     return out
 
 
-def _resolve_var(value: str) -> str:
-    """Resolve a single ``${VAR}`` indirection to its env-var value.
-
-    Literals pass through: the writer scrubs them on save, so one can only come
-    from unsaved in-memory state.
-    """
-    import os
-
-    if value.startswith("${") and value.endswith("}"):
-        var = value[2:-1]
-        env_val = os.environ.get(var)
-        if env_val is None:
-            raise RuntimeError(
-                f"Connection auth references ${{{var}}} but the environment variable is not set"
-            )
-        return env_val
-    return value
-
-
 class SnowflakeAdapter:
     """ADBC-backed driver adapter for Snowflake."""
 
@@ -204,7 +186,7 @@ class SnowflakeAdapter:
         auth_user = auth.get("user")
         if auth_user:
             try:
-                identity["user"] = _resolve_var(auth_user)
+                identity["user"] = resolve_env_var(auth_user)
             except RuntimeError:
                 # Env var unset: use the raw value so identity stays stable.
                 identity["user"] = auth_user
@@ -292,9 +274,9 @@ class SnowflakeAdapter:
         auth_user = auth_raw.get("user")
         auth_password = auth_raw.get("password")
         if auth_user:
-            auth_user = _resolve_var(auth_user)
+            auth_user = resolve_env_var(auth_user)
         if auth_password:
-            auth_password = _resolve_var(auth_password)
+            auth_password = resolve_env_var(auth_password)
 
         userinfo = ""
         if auth_user:
