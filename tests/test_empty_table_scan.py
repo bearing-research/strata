@@ -6,6 +6,7 @@ first request after the first write sees the data.
 
 from __future__ import annotations
 
+import gc
 import sys
 
 import pyarrow as pa
@@ -53,6 +54,10 @@ def _write(table, ids: list[int]) -> None:
 
 @pytest.fixture
 def client(tmp_path):
+    # Collect earlier tests' garbage now. pyiceberg's SqlCatalog never closes its init probe
+    # SELECT; a finalizer raising in a collection while it is open leaves pytest holding the
+    # traceback, whose frames keep that cursor and so a read lock that fails the test's write.
+    gc.collect()
     import strata.server as server_module
     from strata.artifact.store import reset_artifact_store
     from strata.config import StrataConfig
