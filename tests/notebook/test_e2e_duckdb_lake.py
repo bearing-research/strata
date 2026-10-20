@@ -104,6 +104,16 @@ def _configure(monkeypatch, config: StrataConfig) -> None:
     monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
 
 
+def _events_mount(uri: str, options: dict[str, Any], mode: str) -> tuple[MountSpec, dict]:
+    """The ``events`` mount and the server's credentials: a service-mode notebook may not
+    set endpoints or secrets itself, so there they come from a named credential."""
+    if mode == "service":
+        return MountSpec(name="events", uri=uri, credential="events-store"), {
+            "events-store": options
+        }
+    return MountSpec(name="events", uri=uri, options=options), {}
+
+
 async def _run(nb_dir: Path, session: NotebookSession) -> tuple[Any, list[dict[str, Any]]]:
     source = (nb_dir / "cells" / "c1.py").read_text()
     result = await CellExecutor(session).execute_cell("c1", source)
@@ -206,10 +216,6 @@ def test_the_query_reads_the_snapshot_its_provenance_names(
 # (tests/notebook/test_sql_duckdb_confine.py); the mount must stay readable.
 @pytest.mark.parametrize("mode", ["personal", "service"])
 async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path, monkeypatch, mode):
-    _configure(
-        monkeypatch,
-        StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode)),
-    )
     with MinioContainer(MINIO_IMAGE) as minio:
         minio_config = minio.get_config()
         client = minio.get_client()
@@ -224,20 +230,25 @@ async def test_an_s3_mount_is_a_view_read_with_its_storage_options(tmp_path, mon
             "# @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
             'driver = "duckdb"\npath = ":memory:"\nmounts = ["events"]',
         )
-        update_notebook_mounts(
-            nb_dir,
-            [
-                MountSpec(
-                    name="events",
-                    uri="s3://raw/events",
-                    options={
-                        "endpoint_url": f"http://{minio_config['endpoint']}",
-                        "key": minio_config["access_key"],
-                        "secret": minio_config["secret_key"],
-                    },
-                )
-            ],
+        mount, credentials = _events_mount(
+            "s3://raw/events",
+            {
+                "endpoint_url": f"http://{minio_config['endpoint']}",
+                "key": minio_config["access_key"],
+                "secret": minio_config["secret_key"],
+            },
+            mode,
         )
+        _configure(
+            monkeypatch,
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                deployment_mode=mode,
+                notebook_credentials=credentials,
+                **service_auth(mode),
+            ),
+        )
+        update_notebook_mounts(nb_dir, [mount])
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
         _, rows = await _run(nb_dir, session)
@@ -302,16 +313,22 @@ async def test_a_gcs_or_azure_mount_is_a_view_read_with_its_storage_options(
     tmp_path, monkeypatch, request, store, mode
 ):
     uri, options = request.getfixturevalue(store)
+    mount, credentials = _events_mount(uri, options, mode)
     _configure(
         monkeypatch,
-        StrataConfig(cache_dir=tmp_path / "cache", deployment_mode=mode, **service_auth(mode)),
+        StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode=mode,
+            notebook_credentials=credentials,
+            **service_auth(mode),
+        ),
     )
     nb_dir = _notebook(
         tmp_path,
         "# @sql connection=lake\nSELECT sum(k) AS total FROM events\n",
         'driver = "duckdb"\npath = ":memory:"\nmounts = ["events"]',
     )
-    update_notebook_mounts(nb_dir, [MountSpec(name="events", uri=uri, options=options)])
+    update_notebook_mounts(nb_dir, [mount])
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
 
     _, rows = await _run(nb_dir, session)
