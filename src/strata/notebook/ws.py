@@ -2717,24 +2717,38 @@ async def _run_partition_batch(
         )
 
     cells_by_id = {c.id: c for c in cells_in_run}
+    # Announced running by the harness's cell_start, its result not yet in.
+    in_flight: str | None = None
+
+    async def _start(cell_id: str) -> None:
+        nonlocal in_flight
+        cell = cells_by_id.get(cell_id)
+        if cell is None:
+            return
+        in_flight = cell_id
+        execution_state.running_cell = cell_id
+        await _announce_running(session, notebook_id, cell_id, cell.source)
 
     async def _emit(result: BatchCellResult) -> None:
+        nonlocal in_flight
         cell = cells_by_id.get(result.cell_id)
         if cell is None:
             return
 
-        execution_state.running_cell = result.cell_id
-
-        # So the frontend sees idle, running, ready in order.
-        session.mark_cell_running(result.cell_id)
-        await _broadcast_message(
-            notebook_id,
-            _make_message(
-                MessageType.CELL_STATUS,
-                next_notebook_sequence(notebook_id),
-                _running_payload(session, result.cell_id, cell.source),
-            ),
-        )
+        if result.cell_id == in_flight:
+            in_flight = None
+        else:
+            # Never started (a mount failure): so the frontend sees idle, running, ready in order.
+            execution_state.running_cell = result.cell_id
+            session.mark_cell_running(result.cell_id)
+            await _broadcast_message(
+                notebook_id,
+                _make_message(
+                    MessageType.CELL_STATUS,
+                    next_notebook_sequence(notebook_id),
+                    _running_payload(session, result.cell_id, cell.source),
+                ),
+            )
 
         synthetic = CellExecutionResult(
             cell_id=result.cell_id,
@@ -2777,11 +2791,24 @@ async def _run_partition_batch(
     from strata.notebook.executor import BatchExecutionResult
 
     if cell_specs:
-        batch_result = await executor.execute_batch(
-            cell_specs,
-            use_cache=not force,
-            on_cell_event=_emit,
-        )
+        try:
+            batch_result = await executor.execute_batch(
+                cell_specs,
+                use_cache=not force,
+                on_cell_event=_emit,
+                on_cell_start=_start,
+            )
+        except asyncio.CancelledError:
+            if in_flight is not None:
+                await _set_cell_idle(
+                    session, notebook_id, execution_state.next_sequence(), in_flight
+                )
+            raise
+        # A harness that died mid-cell sent no result for it; it did not run.
+        if in_flight is not None:
+            await _set_cell_idle(
+                session, notebook_id, next_notebook_sequence(notebook_id), in_flight
+            )
     else:
         # Every cell had a mount failure: skip the subprocess.
         batch_result = BatchExecutionResult(

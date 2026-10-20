@@ -153,6 +153,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   that cell's only while it was the first cell asked for or the last one to
   finish. A stop on any cell the run was asked to execute now cancels it,
   whether it comes over the WebSocket, REST, the CLI or MCP. (#1270)
+- **Run All shows the cell it is running.** Cells that Run All or Rerun All
+  ran together in one process were marked running only when their result
+  arrived, so the browser never showed a cell running or offered its stop
+  button. Each now shows running from the moment it starts, and a cell left
+  unfinished by a stop goes back to idle. (#1271)
 
 ### Security
 
