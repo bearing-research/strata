@@ -842,21 +842,24 @@ def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | N
 
 def weigh_mount_sync(
     resolver: MountResolver, mount: MountSpec, cache: MountCache | None
-) -> tuple[str | None, MountWeight | None]:
+) -> tuple[str | None, MountWeight | None, str | None]:
     """:func:`mount_fingerprint_sync`'s component, with the mount's weight from the same
     listing: its share already in *cache*, the one the cell runs against.
 
     The weight is ``None`` for a mount that moves nothing to read (``file://``) or that a
-    run does not read through a view (``rw``).
+    run does not read through a view (``rw``). The third is what a yes to a large read
+    is kept for (``read_confirm``): the component, without the per-call nonce an
+    unresolvable credential or a failed listing gets.
     """
     try:
         storage_options = resolver.storage_options(mount)
     except CredentialError as exc:
         logger.warning("mount %s: %s", mount.name, exc)
         unresolved = f"{mount.name}:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
-        return unresolved, None
+        return unresolved, None, f"{mount.name}:{mount.uri}:unresolved"
     scheme, path = parse_mount_uri(mount.uri)
     weight: MountWeight | None = None
+    unlisted = False
     if scheme == "file" or mount.mode == MountMode.READ_WRITE or mount.pin is not None:
         fingerprint = MountFingerprinter.fingerprint_mount_sync(
             mount, storage_options=storage_options or None
@@ -868,12 +871,13 @@ def weigh_mount_sync(
             scheme, path, storage_options or None
         )
         weight = _weigh_listing(scheme, path, storage_options, fingerprint, listing, cache)
+        unlisted = listing is None
     if fingerprint is None:
-        return None, weight
+        return None, weight, None
     identity = credential_identity(mount.credential)
-    if identity:
-        return f"{mount.name}:{mount.uri}:{identity}:{fingerprint}", weight
-    return f"{mount.name}:{mount.uri}:{fingerprint}", weight
+    prefix = f"{mount.name}:{mount.uri}:{identity}" if identity else f"{mount.name}:{mount.uri}"
+    component = f"{prefix}:{fingerprint}"
+    return component, weight, f"{prefix}:unlisted" if unlisted else component
 
 
 def _weigh_listing(

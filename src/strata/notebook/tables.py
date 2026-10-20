@@ -136,6 +136,19 @@ def without_empty_table_nonce(fingerprint: str) -> str:
     return fingerprint
 
 
+def without_table_nonce(fingerprint: str) -> str:
+    """``fingerprint`` with an empty or unresolved table's random part dropped.
+
+    What a yes to a large read is kept for (``read_confirm``): with the nonce in it, the
+    yes would never match the next run's question.
+    """
+    name, sep, rest = fingerprint.partition(":")
+    for state in ("empty", "unresolved"):
+        if sep and rest.startswith(f"table:{state}:"):
+            return f"{name}:table:{state}"
+    return fingerprint
+
+
 def random_fingerprint() -> str:
     """A fingerprint no other run shares, for a table whose state cannot be keyed."""
     return hashlib.sha256(os.urandom(32)).hexdigest()

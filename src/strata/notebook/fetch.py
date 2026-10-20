@@ -194,8 +194,9 @@ class FetchCache:
         """``(size, cached bytes)`` a run's check of *spec* would find, read with a HEAD.
 
         Asks the URL what ``resolve(max_age=0)`` would download without downloading it,
-        so a run can be weighed before it starts. ``None`` for what the answer did not
-        say, or when the URL could not be asked: the run reports why.
+        so a run can be weighed before it starts. A URL whose HEAD gives no size (a
+        pre-signed GET URL refuses one) is asked for its first byte instead. ``None`` for
+        what the answers did not say, or when the URL could not be asked: the run reports why.
         """
         record = self._index().get(spec.url)
         cached = self._cached(record)
@@ -213,34 +214,55 @@ class FetchCache:
                 headers["If-Modified-Since"] = record["last_modified"]
         clients: dict[str | None, httpx.Client] = {}
         try:
-            url = spec.url
-            for _ in range(MAX_REDIRECTS + 1):
-                if url_safety_problem(
-                    url,
-                    f"@fetch {spec.name}",
-                    allowed_hosts=self._allowed_hosts,
-                    allow_local=self._allow_local,
-                ):
-                    return None, None
-                response = self._client_for(url, clients).head(
-                    url, headers=headers, follow_redirects=False
+            return (
+                self._ask_size(spec, "HEAD", headers, clients, cached_size)
+                or self._ask_size(
+                    spec, "GET", {**headers, "Range": "bytes=0-0"}, clients, cached_size
                 )
-                location = response.headers.get("location")
-                if response.status_code in (301, 302, 303, 307, 308) and location:
-                    url = str(response.url.join(location))
-                    continue
-                if response.status_code == 304 and cached is not None:
-                    return cached_size, cached_size
-                length = response.headers.get("content-length", "")
-                if response.status_code != 200 or not length.isdigit():
-                    return None, None
-                return int(length), 0
-            return None, None
+                or (None, None)
+            )
         except (httpx.HTTPError, httpx.InvalidURL, ValueError, ImportError):
             return None, None
         finally:
             for client in clients.values():
                 client.close()
+
+    def _ask_size(
+        self,
+        spec: FetchSpec,
+        method: str,
+        headers: dict[str, str],
+        clients: dict[str | None, httpx.Client],
+        cached_size: int | None,
+    ) -> tuple[int, int] | None:
+        """One of :meth:`probe`'s asks, each hop guarded; ``None`` when it learnt no size."""
+        url = spec.url
+        for _ in range(MAX_REDIRECTS + 1):
+            if url_safety_problem(
+                url,
+                f"@fetch {spec.name}",
+                allowed_hosts=self._allowed_hosts,
+                allow_local=self._allow_local,
+            ):
+                return None
+            # Streamed so a GET's body is never read.
+            with self._client_for(url, clients).stream(
+                method, url, headers=headers, follow_redirects=False
+            ) as response:
+                location = response.headers.get("location")
+                if response.status_code in (301, 302, 303, 307, 308) and location:
+                    url = str(response.url.join(location))
+                    continue
+                if response.status_code == 304 and cached_size is not None:
+                    return cached_size, cached_size
+                if response.status_code == 206:
+                    total = response.headers.get("content-range", "").rpartition("/")[2]
+                    return (int(total), 0) if total.isdigit() else None
+                length = response.headers.get("content-length", "")
+                if response.status_code != 200 or not length.isdigit():
+                    return None
+                return int(length), 0
+        return None
 
     def recorded(self, url: str) -> FetchedBytes | None:
         """The bytes last read from *url*, if they are still cached. No network."""

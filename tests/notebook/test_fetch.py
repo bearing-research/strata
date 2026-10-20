@@ -26,10 +26,17 @@ class _Origin:
         self.requests: list[tuple[str, dict[str, str]]] = []
         self.methods: list[str] = []
         self.redirect_to: str | None = None
+        # As a pre-signed GET URL does: a HEAD is signed for another method, and fails.
+        self.refuse_head = False
         origin = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_HEAD(self):  # noqa: N802
+                if origin.refuse_head:
+                    origin.methods.append(self.command)
+                    self.send_response(403)
+                    self.end_headers()
+                    return
                 self.do_GET()
 
             def do_GET(self):  # noqa: N802
@@ -45,6 +52,14 @@ class _Origin:
                     self.send_response(304)
                     self.send_header("ETag", etag)
                     self.end_headers()
+                    return
+                if self.headers.get("Range") == "bytes=0-0":
+                    self.send_response(206)
+                    self.send_header("ETag", etag)
+                    self.send_header("Content-Range", f"bytes 0-0/{len(origin.body)}")
+                    self.send_header("Content-Length", "1")
+                    self.end_headers()
+                    self.wfile.write(origin.body[:1])
                     return
                 self.send_response(200)
                 self.send_header("ETag", etag)
