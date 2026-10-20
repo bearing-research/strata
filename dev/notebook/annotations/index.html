@@ -3163,6 +3163,8 @@ total an upper bound ("up to 2.0 GB to read"). A size that is not known, such as
 pinned mount's, is not guessed. After a successful run, <code>.strata/reads/index.json</code> records
 what each input moved and on which machine; see
 <a href="../lake-aware-cells/#what-a-run-moved">What a run moved</a>.</p>
+<p><img alt="A cell that scans the table lake:taxi.rides, with a badge in its header reading &quot;reads up to 26.3 MB&quot; beside its worker and cache badges." src="../../assets/input-weight-light.png#only-light" />
+<img alt="A cell that scans the table lake:taxi.rides, with a badge in its header reading &quot;reads up to 26.3 MB&quot; beside its worker and cache badges." src="../../assets/input-weight-dark.png#only-dark" /></p>
 <p>Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the <code>s3</code> extra for
 <code>s3://</code> (<code>s3fs</code>), <code>gcs</code> for <code>gs://</code> (<code>gcsfs</code>) and <code>azure</code> for <code>az://</code>
@@ -3412,6 +3414,8 @@ copy, so writing to it changes nothing upstream.</p>
 table of paths and sizes (the first 20 files, then a count of the rest), ahead
 of the cell's own output. It is a markdown display like any other, so a cache
 hit, a reopened notebook and an export show it too.</p>
+<p><img alt="A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: &quot;ckpt: 4 files, 3.0 MiB&quot; and a table of each file with its size." src="../../assets/output-dir-light.png#only-light" />
+<img alt="A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: &quot;ckpt: 4 files, 3.0 MiB&quot; and a table of each file with its size." src="../../assets/output-dir-dark.png#only-dark" /></p>
 <p><strong>A failed run keeps what it wrote.</strong> Its files are stored and its manifest is
 kept as a failed version: never a cache hit and never an input, but lineage
 shows it and <code>&lt;id&gt;@v=&lt;n&gt;</code> reads it. A link in the folder, or a file with more

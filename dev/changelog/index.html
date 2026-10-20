@@ -3936,6 +3936,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Keywords are readable in the dark editor.</strong> The light theme's syntax
+  colors stayed active in dark mode and outranked the dark theme's, so
+  <code>import</code>, <code>from</code>, <code>as</code> and <code>True</code> were dark purple on a dark background.
+  Each theme now brings its own. (#1253)</li>
 <li><strong>An exported link with an unsafe target loses all of it.</strong> A <code>javascript:</code>,
   <code>vbscript:</code> or <code>data:</code> link whose target held a space kept what followed the
   space, which a renderer that allows spaces read as the link. The whole target
