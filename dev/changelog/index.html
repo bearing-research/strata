@@ -536,6 +536,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -587,7 +598,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security" class="md-nav__link">
+  <a href="#security_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -648,7 +659,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_1" class="md-nav__link">
+  <a href="#security_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -709,7 +720,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_2" class="md-nav__link">
+  <a href="#security_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -781,7 +792,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_3" class="md-nav__link">
+  <a href="#security_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -831,7 +842,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_4" class="md-nav__link">
+  <a href="#security_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -1020,7 +1031,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#security_5" class="md-nav__link">
+  <a href="#security_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -1186,7 +1197,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_6" class="md-nav__link">
+  <a href="#security_7" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -1319,7 +1330,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_7" class="md-nav__link">
+  <a href="#security_8" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -2900,6 +2911,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2951,7 +2973,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security" class="md-nav__link">
+  <a href="#security_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3012,7 +3034,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_1" class="md-nav__link">
+  <a href="#security_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3073,7 +3095,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_2" class="md-nav__link">
+  <a href="#security_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3145,7 +3167,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_3" class="md-nav__link">
+  <a href="#security_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3195,7 +3217,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_4" class="md-nav__link">
+  <a href="#security_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3384,7 +3406,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#security_5" class="md-nav__link">
+  <a href="#security_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3550,7 +3572,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_6" class="md-nav__link">
+  <a href="#security_7" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3683,7 +3705,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_7" class="md-nav__link">
+  <a href="#security_8" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -3772,6 +3794,11 @@ exhaustive commit history.</p>
   after the upgrade every named artifact over a table reports stale once, and
   materializing a transform or scan over a table builds a new artifact rather
   than reusing the old one. (#1260)</li>
+<li><strong><code>PUT /v1/admin/notebook-credentials</code> requires <code>notebook_credential_paths</code>
+  and <code>notebook_credential_writers</code> in every body.</strong> Leaving one out used to
+  reset it, which lifted a restriction without anyone saying so; it is now
+  refused with <code>422</code> naming the field. Send <code>{}</code> for no path restrictions and
+  <code>null</code> for writers unset. (#1265)</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3858,6 +3885,48 @@ exhaustive commit history.</p>
   20 seconds, cache hits included. The question now gives up after 2 seconds,
   and a worker that failed to answer is not asked again for a minute; its share
   shows as unknown. (#1264)</li>
+<li><strong>A credential file must be a regular file of at most 64 KiB.</strong> A
+  <code>${file:...}</code> reference, a keyless <code>gs</code> <code>token</code> file or an <code>az</code>
+  <code>federated_token_file</code> that named a FIFO or a device could hang or flood the
+  read; it now fails naming the file. (#1265)</li>
+</ul>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A service-mode notebook's mount options can no longer name credentials, key
+  files or endpoints.</strong> On a server in service mode a mount's <code>options</code> may set
+  only a short list of non-secret keys per scheme (<code>anon</code>, <code>requester_pays</code>,
+  <code>version_aware</code>, block and cache settings, and <code>token = "anon"</code> on <code>gs</code>),
+  whether or not the mount names a credential. <code>endpoint_url</code>, <code>client_kwargs</code>,
+  <code>key</code>, <code>secret</code>, <code>token</code>, <code>profile</code>, <code>federated_token_file</code>, <code>tenant_id</code>,
+  <code>client_id</code>, <code>account_name</code> and every other key fail the cell naming the key,
+  and a mount bound for a remote worker is checked before it is sent. Before,
+  a notebook could send a named credential to a host of its choosing, or have
+  the server read any file it could and post it to a token service the author
+  picked. These settings now come only from the server's named credentials and
+  scheme defaults. Personal mode is unchanged. (#1265)</li>
+<li><strong>A remote worker holds a mount's options to the same list, whatever server
+  dispatched it.</strong> A worker's credentials are its operator's, and a personal
+  server's notebook could otherwise point them at its own host. A dispatch
+  whose mount sets another option is refused with <code>400</code> naming the key; put an
+  endpoint or a profile in the worker's own <code>STRATA_NOTEBOOK_CREDENTIALS</code>.
+  (#1265)</li>
+<li><strong><code>GET /v1/admin/notebook-credentials</code> shows a catalog's value only for keys
+  known to hold no secret.</strong> It redacted by a name pattern, which missed keys
+  such as <code>adls.connection-string</code> and <code>header.*</code>. Now <code>type</code>, <code>warehouse</code>,
+  <code>strata_credential</code>, the region keys, <code>glue.id</code>, <code>adls.account-name</code> and
+  <code>gcs.project-id</code> are shown and every other value reads <code>&lt;redacted&gt;</code>. (#1265)</li>
+<li><strong><code>PUT /v1/admin/notebook-credentials</code> reads files only under
+  <code>STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS</code>.</strong> A caller holding only the route's
+  scope could have the server read any environment variable or file it can
+  into a credential. A <code>${VAR}</code> reference through the route is now refused
+  with <code>400</code> naming the field. A <code>${file:...}</code> reference must resolve, with
+  symlinks followed, inside one of the directories in the new
+  <code>STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS</code>, or it is refused with <code>422</code> naming
+  the path and the setting; the setting is empty by default, which refuses
+  every one. Once roots are set, every <code>${file:...}</code> reference, startup ones
+  included, is checked again at each read, so a file swapped for a link out of
+  a root is not read, and a file rewritten in place is still used at the next
+  run with no call. (#1265)</li>
 </ul>
 <h2 id="0110-2026-10-19">0.11.0 - 2026-10-19<a class="headerlink" href="#0110-2026-10-19" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
@@ -4118,7 +4187,7 @@ exhaustive commit history.</p>
   are read with <code>Path.read_bytes()</code>. <code>STRATA_FAST_CONCAT</code> and
   <code>STRATA_MMAP_MIN_BYTES</code> are gone with it. (#1173, #1174)</li>
 </ul>
-<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<h3 id="security_1">Security<a class="headerlink" href="#security_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong><code>GET /v1/cache/stats</code> needs <code>admin:cache</code>.</strong> Its counts per table cover
@@ -4429,7 +4498,7 @@ strata-pool RunPod backend moves to RunPod's REST v2 ahead of v1's retirement.</
 <li><strong>strata-pool's RunPod backend speaks REST v2.</strong> A 422 from RunPod now names
   the field it refused, and the region is the pod's data center. (#1137)</li>
 </ul>
-<h3 id="security_1">Security<a class="headerlink" href="#security_1" title="Permanent link">&para;</a></h3>
+<h3 id="security_2">Security<a class="headerlink" href="#security_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Artifact ids cannot name a path.</strong> On the local blob store,
   <code>PUT /v1/artifacts/by-provenance</code> used a caller's id as a blob key, so
@@ -5118,7 +5187,7 @@ from outside the frontend.</p>
   the reason, then exit 1, on a refused configuration, instead of a
   traceback.</li>
 </ul>
-<h3 id="security_2">Security<a class="headerlink" href="#security_2" title="Permanent link">&para;</a></h3>
+<h3 id="security_3">Security<a class="headerlink" href="#security_3" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Service-mode SQL cells are confined to their own database and lake.</strong> SQL
   cells run inside the server process, and a DuckDB cell could read any file
@@ -5996,7 +6065,7 @@ environment pinned below them has to move before it can install 0.8.0.</p>
   read; delete it, since it holds whatever was typed into the chat. Drive a
   notebook with an external agent through MCP or the CLI instead.</li>
 </ul>
-<h3 id="security_3">Security<a class="headerlink" href="#security_3" title="Permanent link">&para;</a></h3>
+<h3 id="security_4">Security<a class="headerlink" href="#security_4" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A cell cannot read the server's secrets.</strong> The worker takes its token and
   credential map out of the process environment at startup and keeps them in
@@ -6472,7 +6541,7 @@ names.</p>
   casting. See <a href="../reference/notebook-protocol/">Notebook protocol</a>.</li>
 <li><strong>An empty notebook says what to do next</strong> instead of presenting a blank cell.</li>
 </ul>
-<h3 id="security_4">Security<a class="headerlink" href="#security_4" title="Permanent link">&para;</a></h3>
+<h3 id="security_5">Security<a class="headerlink" href="#security_5" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>The notebook WebSocket is authenticated</strong> and enforces notebook scopes; a
   connection could previously drive a notebook without one.</li>
@@ -7046,7 +7115,7 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   <code>TestClient</code>'s portal (a py3.12/macOS hang).</li>
 </ul>
 <h2 id="030-2026-06-17">0.3.0 - 2026-06-17<a class="headerlink" href="#030-2026-06-17" title="Permanent link">&para;</a></h2>
-<h3 id="security_5">Security<a class="headerlink" href="#security_5" title="Permanent link">&para;</a></h3>
+<h3 id="security_6">Security<a class="headerlink" href="#security_6" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong>Table ACL is enforced on transform inputs</strong> (service-mode hardening): under
@@ -7615,7 +7684,7 @@ rw</code> opt out automatically.</li>
   one retry (<code>tests/conftest.py</code>); Iceberg <code>temp_warehouse</code> fixture
   disposes its catalog engine before yield to close the related flake.</li>
 </ul>
-<h3 id="security_6">Security<a class="headerlink" href="#security_6" title="Permanent link">&para;</a></h3>
+<h3 id="security_7">Security<a class="headerlink" href="#security_7" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Phase A scorecard hygiene</strong> - <code>SECURITY.md</code>, Dependabot config,
   least-privilege workflow permissions.</li>
@@ -7779,7 +7848,7 @@ startup guard. The notebook app boots via <code>strata-notebook</code> (or
   replaced with a structural correctness check (no more CI flakes from
   runner load)</li>
 </ul>
-<h3 id="security_7">Security<a class="headerlink" href="#security_7" title="Permanent link">&para;</a></h3>
+<h3 id="security_8">Security<a class="headerlink" href="#security_8" title="Permanent link">&para;</a></h3>
 <ul>
 <li>read-only enforcement for SQL cells is layered (file-handle flag +
   session-level guard) rather than SQL-text keyword filtering - a SQL

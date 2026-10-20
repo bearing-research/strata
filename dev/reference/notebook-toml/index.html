@@ -1652,6 +1652,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="[[mounts]] - Filesystem mounts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mount-options-on-a-shared-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount options on a shared server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2223,6 +2240,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="[[mounts]] - Filesystem mounts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mount-options-on-a-shared-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount options on a shared server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2535,7 +2569,7 @@
 <tr>
 <td><code>options</code></td>
 <td>table</td>
-<td>Backend storage options passed through to fsspec. Common keys: <code>anon</code>, <code>endpoint_url</code>, <code>profile</code>.</td>
+<td>Backend storage options passed through to fsspec. Common keys: <code>anon</code>, <code>endpoint_url</code>, <code>profile</code>. On a service-mode server and on a remote worker only a few keys are allowed (<a href="#mount-options-on-a-shared-server">below</a>).</td>
 </tr>
 <tr>
 <td><code>credential</code></td>
@@ -2545,6 +2579,14 @@
 </tbody>
 </table>
 <p>Cell-level mounts (under <code>[[cells.mounts]]</code>) supplement notebook-level ones.</p>
+<h3 id="mount-options-on-a-shared-server">Mount options on a shared server<a class="headerlink" href="#mount-options-on-a-shared-server" title="Permanent link">&para;</a></h3>
+<p>On a server in service mode, a mount's <code>options</code> may set only these keys, whether or not the mount names a credential:</p>
+<ul>
+<li><strong><code>s3</code></strong>: <code>anon</code>, <code>requester_pays</code>, <code>version_aware</code>, <code>cache_regions</code>, <code>default_block_size</code>, <code>default_cache_type</code>, <code>default_fill_cache</code>, <code>use_listings_cache</code>.</li>
+<li><strong><code>gs</code></strong>: <code>requester_pays</code>, <code>version_aware</code>, <code>consistency</code>, <code>cache_timeout</code>, <code>block_size</code>, <code>use_listings_cache</code>, and <code>token = "anon"</code> for anonymous reads.</li>
+<li><strong><code>az</code></strong>: <code>anon</code>, <code>version_aware</code>, <code>blocksize</code>, <code>default_cache_type</code>, <code>default_fill_cache</code>, <code>use_listings_cache</code>.</li>
+</ul>
+<p>Anything else, such as a key, secret, token or token file (<code>token</code>, <code>federated_token_file</code>), a profile, a tenant or client id, an account name, or where requests go (<code>endpoint_url</code>, <code>client_kwargs</code>), comes only from the server's <a href="#named-credentials">named credentials</a> and scheme defaults. A notebook that sets one fails its cell with <code>mount option 'endpoint_url' cannot be set by a notebook on this server</code>, before anything is read. Otherwise a notebook could send the server's credentials to a host of its choosing, or have the server read a file and hand it to a token service the author picked. A mount bound for a remote worker is checked before it is sent. A remote worker also holds a mount's options to the same list, whatever mode the server that dispatched it runs in, since its credentials are its operator's: there, put an endpoint or a profile in the worker's own <code>STRATA_NOTEBOOK_CREDENTIALS</code>. A personal server's local mounts take any option.</p>
 <h2 id="named-credentials">Named credentials<a class="headerlink" href="#named-credentials" title="Permanent link">&para;</a></h2>
 <p>A mount or a connection can name a credential instead of carrying one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[[mounts]]</span>
@@ -2566,11 +2608,12 @@
 <ul>
 <li>A mount's fields become fsspec storage options; a connection's become driver <code>auth</code>.</li>
 <li><code>${VAR}</code> resolves against the notebook's environment first, which is where a configured <a href="#secret_manager-external-secret-manager-wiring">secret manager</a> puts what it fetches, and then the server's.</li>
-<li><code>${file:/path}</code> is the file's contents, read each time the name resolves, without trailing line breaks. The path must be absolute. A host that writes secrets as files rotates one by rewriting its file, with no restart and no call.</li>
+<li><code>${file:/path}</code> is the file's contents, read each time the name resolves, without trailing line breaks. The path must be absolute and name a regular file of at most 64 KiB, as must a keyless <code>token</code> or <code>federated_token_file</code> (below). When <code>STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS</code> is set, the path must also resolve inside one of its directories, checked at each read. A host that writes secrets as files rotates one by rewriting its file, with no restart and no call.</li>
 <li>The <strong>name</strong> is part of a cell's provenance, because a different credential can see different data. The <strong>values</strong> never are, so rotating a secret invalidates nothing.</li>
 <li>A name the server does not define, or a reference that is not set, fails the cell with a message naming the credential.</li>
 <li><code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS='{"s3": "org-bucket"}'</code> applies a credential to every mount of a scheme that names none, so the organization's primary store works without editing notebooks.</li>
 <li>A remote worker resolves names against its own <code>STRATA_NOTEBOOK_CREDENTIALS</code>; only the name travels in the dispatch.</li>
+<li>On a service-mode server, and on any remote worker, a mount's own <code>options</code> cannot override a credential's fields or name another secret, file or endpoint: see <a href="#mount-options-on-a-shared-server">Mount options on a shared server</a>.</li>
 <li><code>STRATA_NOTEBOOK_CREDENTIAL_PATHS='{"lab-a": ["/srv/projects/lab-a"]}'</code> keeps a name to the notebooks under those directories, for a server that hosts several projects. Anywhere else, the cell fails with <code>credential 'lab-a' is not available to this notebook</code>, naming the credential and none of its fields. Mounts, connections and catalogs are all checked, and so is a mount sent to a remote worker, before it is sent. A listed name is not usable outside a notebook at all, for example by a scan through a catalog that names it. Names not listed stay open to every notebook.</li>
 <li><code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'</code> says who may write through a name, as glob patterns over the principal who started the run (<code>["*"]</code> is anyone). It gates three writes: an <code>rw</code> mount, a <code># @sql connection=... write=true</code> cell whose connection names the credential, and a <a href="../../notebook/annotations/#write_table"><code># @write_table</code></a> into a catalog whose <code>strata_credential</code> names it. Once it is set, even to <code>{}</code>, a name not listed is read-only. A write through a name the run may not write with fails before the run with <code>credential 'lab-bucket' is read-only on this server</code> or <code>... is not writable by '&lt;principal&gt;'</code>, and nothing is staged or written. An <code>rw</code> mount from a cell or from <code>notebook.toml</code> is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (<code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code>) as well as when it names its own, and both are checked, since the write uses both. An <code>rw</code> mount on <code>s3</code>, <code>gs</code> or <code>az</code> that names no credential, and whose scheme has no default, fails with <code>a read-write s3 mount must name the source it writes to with credential=&lt;name&gt;</code>, since it would write as the server's own identity. A <code>file://</code> mount is outside the setting. A run with no principal (personal mode) matches only <code>*</code>. Unset, every name writes. Reads and provenance are unchanged.</li>
 </ul>
@@ -2611,20 +2654,40 @@ closing its sessions:</p>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="s1">  "notebook_credentials": {"lab-bucket": {"key": "${file:/run/creds/lab-bucket/key}",</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="s1">                                          "secret": "${file:/run/creds/lab-bucket/secret}"}},</span>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="s1">  "notebook_mount_credentials": {"s3": "lab-bucket"},</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="s1">  "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}}</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="s1">}'</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="s1">  "notebook_credential_paths": {},</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="s1">  "notebook_credential_writers": null,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="s1">  "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}}</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="s1">}'</span>
 </code></pre></div>
 <ul>
-<li>A setting left out of the body is replaced by its default, as if unset.</li>
+<li>A value is a literal or a <code>${file:...}</code> reference under one of the server's
+  <code>STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS</code> (here <code>/run/creds</code>). The path counts
+  as inside when it resolves there with every symlink followed; one outside, or
+  any <code>${file:...}</code> while the setting is empty (the default), is refused with
+  <code>422</code> naming the path and the setting. The check runs again at each read, so
+  a file swapped for a link out of the root afterwards is not read. A file
+  rewritten in place is used at the next run with no second call.</li>
+<li>A <code>${VAR}</code> reference is always refused with <code>400</code> naming the field: the
+  server's environment holds its own secrets, such as the proxy token. Variable
+  references keep working in the server's startup <code>STRATA_NOTEBOOK_CREDENTIALS</code>.</li>
+<li><code>notebook_credential_paths</code> and <code>notebook_credential_writers</code> are required in
+  every body, so leaving one out cannot lift a restriction unnoticed: such a
+  body is refused with <code>422</code> naming the field, and changes nothing. Paths <code>{}</code>
+  restricts no name; writers <code>null</code> is unset (every name writes), and <code>{}</code>
+  makes every name read-only.</li>
+<li>Any other setting left out of the body is replaced by its default, as if unset.</li>
 <li>The next run uses the new settings, in a session opened before the call too. A
   running cell keeps what it resolved. A removed name fails its next use naming
   it, as an unknown name does.</li>
 <li>A changed catalog is rebuilt from its new properties at its next use.</li>
 <li>It is validated as the settings are at startup, and a refused body (<code>400</code>)
   changes nothing.</li>
-<li><code>GET</code> returns the five settings. A credential's literal values, and a
-  catalog's <code>uri</code> and secret-looking keys, read <code>&lt;redacted&gt;</code>; a <code>${...}</code>
-  reference is shown, since it only says where a value lives.</li>
+<li><code>GET</code> returns the five settings. A credential's literal values read
+  <code>&lt;redacted&gt;</code>; a <code>${...}</code> reference is shown, since it only says where a value
+  lives. A catalog shows only the keys known to hold no secret (<code>type</code>,
+  <code>warehouse</code>, <code>strata_credential</code>, <code>s3.region</code>, <code>client.region</code>,
+  <code>glue.region</code>, <code>glue.id</code>, <code>adls.account-name</code>, <code>gcs.project-id</code>); every other
+  value, <code>uri</code> included, reads <code>&lt;redacted&gt;</code>.</li>
 <li>It changes this process only. A restart goes back to the environment, and
   each replica of a service takes its own call. A remote worker resolves names
   from its own environment and is unaffected.</li>
