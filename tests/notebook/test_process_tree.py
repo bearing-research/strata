@@ -35,6 +35,13 @@ def _is_alive(pid: int) -> bool:
         return False
 
 
+async def _wait_until_ready(proc: asyncio.subprocess.Process) -> None:
+    """Wait for the child's 'ready' line, printed once its SIGTERM handler is installed."""
+    assert proc.stdout is not None
+    line = await asyncio.wait_for(proc.stdout.readline(), timeout=5.0)
+    assert line == b"ready\n"
+
+
 @pytest.mark.asyncio
 async def test_graceful_termination_via_sigterm():
     """A SIGTERM-respecting process exits within the grace period, with no SIGKILL."""
@@ -44,6 +51,7 @@ async def test_graceful_termination_via_sigterm():
         "-c",
         "import signal, sys, time\n"
         "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "print('ready', flush=True)\n"
         "while True:\n"
         "    time.sleep(0.1)\n",
         stdout=asyncio.subprocess.PIPE,
@@ -51,11 +59,11 @@ async def test_graceful_termination_via_sigterm():
         **subprocess_kwargs_for_new_group(),
     )
     pid = proc.pid
+    await _wait_until_ready(proc)
 
-    # Let the child install its handler.
-    await asyncio.sleep(0.2)
-
-    await terminate_subprocess_tree(proc, grace_seconds=2.0)
+    # Returns as soon as the child exits; the long grace only keeps a loaded runner
+    # from reaching the SIGKILL fallback.
+    await terminate_subprocess_tree(proc, grace_seconds=30.0)
 
     # Exited via its SIGTERM handler (sys.exit(0)): the graceful path, not the
     # SIGKILL-after-grace fallback (which would leave returncode == -SIGKILL).
@@ -70,6 +78,7 @@ async def test_sigkill_fallback_when_sigterm_ignored():
         "-c",
         "import signal, time\n"
         "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "print('ready', flush=True)\n"
         "while True:\n"
         "    time.sleep(0.1)\n",
         stdout=asyncio.subprocess.PIPE,
@@ -77,7 +86,7 @@ async def test_sigkill_fallback_when_sigterm_ignored():
         **subprocess_kwargs_for_new_group(),
     )
     pid = proc.pid
-    await asyncio.sleep(0.2)
+    await _wait_until_ready(proc)
 
     await terminate_subprocess_tree(proc, grace_seconds=0.5)
 
