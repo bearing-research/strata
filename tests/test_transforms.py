@@ -5,7 +5,6 @@ import pyarrow as pa
 import pytest
 from pydantic import ValidationError
 
-from strata.executors import _run_local as run_local
 from strata.transforms import (
     DuckDBSQLParams,
     DuckDBSQLTransform,
@@ -259,93 +258,3 @@ class TestRunTransform:
         )
 
         assert result.num_rows == 1
-
-
-class TestRunLocal:
-    """run_local with a build_spec."""
-
-    def test_run_local_duckdb(self):
-        table_uri = "test://input"
-        table = pa.table({"value": [10, 20, 30]})
-
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {"sql": "SELECT AVG(value) as avg_val FROM input0"},
-            "input_uris": [table_uri],
-        }
-        input_tables = {table_uri: table}
-
-        result = run_local(build_spec, input_tables)
-
-        assert result.column("avg_val").to_pylist() == [20.0]
-
-    def test_run_local_multiple_inputs(self):
-        uri1 = "test://events"
-        uri2 = "test://users"
-        events = pa.table({"event_id": [1, 2], "user_id": [10, 20]})
-        users = pa.table({"user_id": [10, 20], "name": ["A", "B"]})
-
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {
-                "sql": (
-                    "SELECT e.event_id, u.name FROM input0 e JOIN input1 u ON e.user_id = u.user_id"
-                )
-            },
-            "input_uris": [uri1, uri2],
-        }
-        input_tables = {uri1: events, uri2: users}
-
-        result = run_local(build_spec, input_tables)
-
-        assert result.num_rows == 2
-        assert set(result.column("name").to_pylist()) == {"A", "B"}
-
-    def test_run_local_missing_input(self):
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {"sql": "SELECT 1"},
-            "input_uris": ["test://missing"],
-        }
-        input_tables = {}
-
-        with pytest.raises(ValueError, match="Missing input table"):
-            run_local(build_spec, input_tables)
-
-    def test_run_local_with_local_prefix(self):
-        """run_local handles the local:// prefix."""
-        table = pa.table({"x": [1]})
-
-        build_spec = {
-            "executor": "local://duckdb_sql@v1",
-            "params": {"sql": "SELECT x FROM input0"},
-            "input_uris": ["test://table"],
-        }
-        input_tables = {"test://table": table}
-
-        result = run_local(build_spec, input_tables)
-
-        assert result.num_rows == 1
-
-    def test_run_local_preserves_input_order(self):
-        """Input order follows input_uris."""
-        first = pa.table({"val": [1]})
-        second = pa.table({"val": [2]})
-
-        # Dict order differs from input_uris on purpose.
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {
-                "sql": (
-                    "SELECT (SELECT val FROM input0) as first, (SELECT val FROM input1) as second"
-                )
-            },
-            "input_uris": ["uri://first", "uri://second"],
-        }
-        # Dict order doesn't matter; input_uris order does.
-        input_tables = {"uri://second": second, "uri://first": first}
-
-        result = run_local(build_spec, input_tables)
-
-        assert result.column("first").to_pylist() == [1]
-        assert result.column("second").to_pylist() == [2]

@@ -17,6 +17,8 @@ from typing import Any
 from fastapi import Request as FastAPIRequest
 from starlette.datastructures import UploadFile
 
+from strata.transforms.duckdb_sql import run_sql
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,7 +98,7 @@ class DuckDBExecutor(BaseExecutor):
         params: dict[str, Any],
         inputs: list[ExecutorInput],
     ) -> ExecutionResult:
-        """Run ``params["sql"]`` in a fresh in-memory DuckDB; errors become a failed result."""
+        """Run ``params["sql"]`` as built-in ``duckdb_sql@v1`` does; errors fail the result."""
         import io
         import time
 
@@ -104,7 +106,6 @@ class DuckDBExecutor(BaseExecutor):
         logs_buffer = io.StringIO()
 
         try:
-            import duckdb
             import pyarrow.ipc as ipc
         except ImportError as e:
             return ExecutionResult(
@@ -124,21 +125,19 @@ class DuckDBExecutor(BaseExecutor):
 
             logs_buffer.write(f"Executing SQL: {sql[:100]}...\n")
 
-            conn = duckdb.connect(":memory:")
-            conn.execute(f"SET memory_limit='{self.max_memory_mb}MB'")
-
             # Sort by name for a stable input order.
             sorted_inputs = sorted(inputs, key=lambda x: x.name)
 
+            tables = {}
             for inp in sorted_inputs:
                 reader = ipc.open_stream(io.BytesIO(inp.data))
                 table = reader.read_all()
-                conn.register(inp.name, table)
+                tables[inp.name] = table
                 logs_buffer.write(
                     f"Registered {inp.name}: {table.num_rows} rows, {table.num_columns} columns\n"
                 )
 
-            result = conn.execute(sql).to_arrow_table()
+            result = run_sql(sql, tables, {"memory_limit": f"{self.max_memory_mb}MB"})
             logs_buffer.write(f"Result: {result.num_rows} rows\n")
 
             output_buffer = io.BytesIO()

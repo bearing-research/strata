@@ -49,26 +49,43 @@ class DuckDBSQLTransform(Transform[DuckDBSQLParams]):
 
     def execute(self, inputs: list[pa.Table], params: DuckDBSQLParams) -> pa.Table:
         """Execute the SQL and return the result as an Arrow table; DuckDB errors propagate."""
-        import duckdb
+        return run_sql(params.sql, dict(zip(self.get_input_names(len(inputs)), inputs)))
 
-        # Runs in the server process: no files, network or extensions, and the
-        # SQL cannot turn them back on. The registered inputs are all it reads.
-        conn = duckdb.connect(
-            ":memory:",
-            config={
-                "enable_external_access": False,
-                "autoinstall_known_extensions": False,
-                "autoload_known_extensions": False,
-            },
-        )
 
-        input_names = self.get_input_names(len(inputs))
-        for name, table in zip(input_names, inputs):
-            conn.register(name, table)
-        conn.execute("SET lock_configuration = true")
+def run_sql(
+    sql: str, tables: dict[str, pa.Table], config: dict[str, Any] | None = None
+) -> pa.Table:
+    """Run *sql* in a fresh in-memory DuckDB over *tables*, each registered under its key.
 
-        result = conn.execute(params.sql).to_arrow_table()
-        return result
+    *config* adds connect-time settings, such as a memory limit. DuckDB errors propagate.
+    """
+    import duckdb
+
+    # No files, network or extensions, and the SQL cannot turn them back on: the
+    # registered tables are all it reads, so its result is a function of its inputs.
+    conn = duckdb.connect(
+        ":memory:",
+        config={
+            "enable_external_access": False,
+            "autoinstall_known_extensions": False,
+            "autoload_known_extensions": False,
+            **(config or {}),
+        },
+    )
+    for name, table in tables.items():
+        conn.register(name, table)
+    lock_down(conn)
+    return conn.execute(sql).to_arrow_table()
+
+
+def lock_down(conn: Any) -> None:
+    """Cut *conn* off from files, network and extensions, and lock its configuration.
+
+    Call it after the connection's own setup, which may need that access; SQL run
+    after it cannot turn either back on.
+    """
+    conn.execute("SET enable_external_access = false")
+    conn.execute("SET lock_configuration = true")
 
 
 def build_duckdb_sql_transform(sql: str) -> dict[str, Any]:

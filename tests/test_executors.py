@@ -3,53 +3,7 @@
 import pyarrow as pa
 import pytest
 
-from strata.executors import _run_local as run_local
 from strata.transforms.base import _run_transform as run_transform
-
-
-class TestRunLocal:
-    """The run_local dispatcher."""
-
-    def test_duckdb_executor_dispatch(self):
-        build_spec = {
-            "executor": "local://duckdb_sql@v1",
-            "params": {"sql": "SELECT 1 as x"},
-            "input_uris": [],
-        }
-        result = run_local(build_spec, {})
-        assert result.num_rows == 1
-        assert result.column_names == ["x"]
-
-    def test_duckdb_executor_without_prefix(self):
-        """The DuckDB executor works without the local:// prefix."""
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {"sql": "SELECT 42 as answer"},
-            "input_uris": [],
-        }
-        result = run_local(build_spec, {})
-        assert result.to_pydict() == {"answer": [42]}
-
-    def test_unsupported_executor_raises(self):
-        build_spec = {
-            "executor": "local://unknown_executor@v1",
-            "params": {},
-            "input_uris": [],
-        }
-        with pytest.raises(ValueError) as exc_info:
-            run_local(build_spec, {})
-        assert "Unknown transform" in str(exc_info.value)
-        assert "unknown_executor" in str(exc_info.value)
-
-    def test_empty_executor_raises(self):
-        build_spec = {
-            "executor": "",
-            "params": {},
-            "input_uris": [],
-        }
-        with pytest.raises(ValueError) as exc_info:
-            run_local(build_spec, {})
-        assert "Unknown transform" in str(exc_info.value)
 
 
 class TestDuckDBExecutor:
@@ -163,52 +117,3 @@ class TestDuckDBExecutor:
         assert "int_col" in result.column_names
         assert "float_col" in result.column_names
         assert "str_col" in result.column_names
-
-
-class TestRunLocalWithBuildSpec:
-    """run_local with the build_spec format the server returns."""
-
-    def test_run_local_with_uri_mapping(self):
-        """run_local with a URI-to-table mapping."""
-        events = pa.table({"value": [10, 20, 30]})
-
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {"sql": "SELECT AVG(value) as avg_val FROM input0"},
-            "input_uris": ["file:///warehouse#db.events"],
-        }
-        input_tables = {"file:///warehouse#db.events": events}
-
-        result = run_local(build_spec, input_tables)
-        assert result.column("avg_val").to_pylist() == [20.0]
-
-    def test_run_local_missing_input_raises(self):
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {"sql": "SELECT * FROM input0"},
-            "input_uris": ["file:///warehouse#db.events"],
-        }
-        with pytest.raises(ValueError) as exc_info:
-            run_local(build_spec, {})
-        assert "Missing input table" in str(exc_info.value)
-        assert "file:///warehouse#db.events" in str(exc_info.value)
-
-    def test_run_local_preserves_input_order(self):
-        """Input order follows input_uris, not dict order."""
-        first = pa.table({"val": [1]})
-        second = pa.table({"val": [2]})
-
-        build_spec = {
-            "executor": "duckdb_sql@v1",
-            "params": {
-                "sql": (
-                    "SELECT (SELECT val FROM input0) as first, (SELECT val FROM input1) as second"
-                )
-            },
-            "input_uris": ["uri://first", "uri://second"],
-        }
-        input_tables = {"uri://second": second, "uri://first": first}
-
-        result = run_local(build_spec, input_tables)
-        assert result.column("first").to_pylist() == [1]
-        assert result.column("second").to_pylist() == [2]

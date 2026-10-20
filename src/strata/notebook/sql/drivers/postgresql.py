@@ -8,7 +8,6 @@ mode sets ``default_transaction_read_only = on`` so the engine rejects writes.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from collections.abc import Callable
 from typing import Any
@@ -22,6 +21,7 @@ from strata.notebook.sql.adapter import (
     SchemaFingerprint,
     TableSchema,
     hash_connection_identity,
+    resolve_env_var,
 )
 from strata.notebook.sql.registry import register_adapter
 
@@ -64,23 +64,6 @@ WHERE a.attrelid = to_regclass($1)
   AND NOT a.attisdropped
 ORDER BY a.attnum
 """
-
-
-def _resolve_var(value: str) -> str:
-    """Resolve a single ``${VAR}`` indirection to its env-var value.
-
-    Literal strings pass through: the writer scrubs literals on save, so one can
-    only come from unsaved in-memory state.
-    """
-    if value.startswith("${") and value.endswith("}"):
-        var = value[2:-1]
-        env_val = os.environ.get(var)
-        if env_val is None:
-            raise RuntimeError(
-                f"Connection auth references ${{{var}}} but the environment variable is not set"
-            )
-        return env_val
-    return value
 
 
 class PostgresAdapter:
@@ -140,7 +123,7 @@ class PostgresAdapter:
         auth_user = auth.get("user")
         if auth_user:
             try:
-                identity["user"] = _resolve_var(auth_user)
+                identity["user"] = resolve_env_var(auth_user)
             except RuntimeError:
                 # Env var unset: the raw value keeps the identity stable.
                 identity["user"] = auth_user
@@ -218,9 +201,9 @@ class PostgresAdapter:
         auth_user = auth_raw.get("user")
         auth_password = auth_raw.get("password")
         if auth_user:
-            auth_user = _resolve_var(auth_user)
+            auth_user = resolve_env_var(auth_user)
         if auth_password:
-            auth_password = _resolve_var(auth_password)
+            auth_password = resolve_env_var(auth_password)
 
         uri = getattr(spec, "uri", None)
         if uri:

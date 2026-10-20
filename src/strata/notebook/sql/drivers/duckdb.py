@@ -32,6 +32,7 @@ from strata.notebook.sql.adapter import (
     hash_connection_identity,
 )
 from strata.notebook.sql.registry import register_adapter
+from strata.transforms.duckdb_sql import lock_down
 
 _CAPABILITIES = AdapterCapabilities(
     # DuckDB's per-table ``estimated_size`` doesn't change reliably for small
@@ -417,8 +418,7 @@ def _confine(conn: Any, locations: list[str]) -> None:
     files = [location for location in locations if not location.endswith("/")]
     conn.execute(f"SET allowed_directories = [{', '.join(map(_literal, directories))}]")
     conn.execute(f"SET allowed_paths = [{', '.join(map(_literal, files))}]")
-    conn.execute("SET enable_external_access = false")
-    conn.execute("SET lock_configuration = true")
+    lock_down(conn)
 
 
 def _mount_scheme(uri: str) -> str:
