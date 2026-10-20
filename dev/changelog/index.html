@@ -3811,6 +3811,27 @@ exhaustive commit history.</p>
   cached row group deleted the entry, so running out of file handles, or a
   read racing a write of the same row group, threw away a good entry. Only an
   entry that fails to parse is removed now; a failed read is a miss. (#1261)</li>
+<li><strong>A Run given to a large read sticks.</strong> A cell beside an unreachable or
+  empty <code>@table</code>, a mount whose credential could not be resolved, or a mount
+  whose listing failed asked again after every Run, since those inputs are
+  keyed afresh each time; the yes now counts them by name. (#1262)</li>
+<li><strong>A large-read yes is kept for the machine and the settings it was given
+  under.</strong> Pointing a worker somewhere else, or changing a read threshold or a
+  rate, now asks again. (#1262)</li>
+<li><strong>Running a cell's tests asks before a large read</strong>, as running the cell
+  does, and what the tests read is counted in the reads index. (#1262)</li>
+<li><strong>A ready cell whose stored result was collected is asked about</strong> before a
+  run reads its inputs again. (#1262)</li>
+<li><strong>Weighing remote mounts no longer blocks the server</strong> while it lists an
+  object store before a run. (#1262)</li>
+<li><strong>A cell's read-size badge follows an edit</strong> to its <code>@mount</code>, <code>@table</code>,
+  <code>@fetch</code> or <code>@worker</code> lines instead of showing the old inputs until the next
+  run. (#1262)</li>
+<li><strong>A <code>@fetch</code> from a pre-signed URL is weighed.</strong> Such a URL refuses the
+  <code>HEAD</code> used to ask its size; the notebook now asks for its first byte
+  instead, so the fetch counts toward a large-read question. (#1262)</li>
+<li><strong>Read sizes are shown in decimal units</strong>, as the read thresholds and per-GB
+  rates are, so a 1 GB threshold and a 1.0 GB read agree. (#1262)</li>
 </ul>
 <h2 id="0110-2026-10-19">0.11.0 - 2026-10-19<a class="headerlink" href="#0110-2026-10-19" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
