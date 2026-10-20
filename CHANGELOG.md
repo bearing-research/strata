@@ -283,6 +283,10 @@ exhaustive commit history.
 
 ### Fixed
 
+- **An exported link with an unsafe target loses all of it.** A `javascript:`,
+  `vbscript:` or `data:` link whose target held a space kept what followed the
+  space, which a renderer that allows spaces read as the link. The whole target
+  now becomes `#`. (#1251)
 - **A tenant's scans are cached as its own.** In multi-tenant mode, a
   `scan@v1` through `/v1/materialize`, a `/v1/cache/warm` request and a
   transform build reading a table planned without the tenant, so their row

@@ -364,7 +364,9 @@ def _neutralize_link_targets(text: str) -> str:
         if _is_unsafe_link(text[start:end]):
             out.append(text[pos:start])
             out.append("#")
-            pos = end
+            # Up to the link's own ``)``, or a renderer that allows spaces in a
+            # destination reads what followed the first one as the target.
+            pos = _link_close(text, start, fallback=end)
     out.append(text[pos:])
     text = "".join(out)
 
@@ -403,6 +405,27 @@ def _link_destination_end(text: str, start: int) -> int:
             depth -= 1
         i += 1
     return min(i, len(text))
+
+
+def _link_close(text: str, start: int, *, fallback: int) -> int:
+    """The index of the ``)`` that closes a link starting at ``start``, else ``fallback``."""
+    depth = 0
+    i = start
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if text.startswith("\n\n", i):
+            break
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth == 0:
+                return i
+            depth -= 1
+        i += 1
+    return fallback
 
 
 def _is_unsafe_link(destination: str) -> bool:
