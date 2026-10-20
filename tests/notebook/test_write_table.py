@@ -337,6 +337,75 @@ class TestARevert:
         assert reverted.cache_hit
         assert _rows(warehouse) == [(1, 10), (2, 20)]
 
+    @staticmethod
+    async def _run_all_reverted(tmp_path: Path, mode: str) -> tuple[Path, NotebookSession]:
+        from strata.notebook.ws import (
+            _ensure_execution_state,
+            _handle_notebook_run_all,
+            _notebook_connections,
+            forget_notebook_execution_state,
+        )
+
+        class _Socket:
+            async def send_text(self, text: str) -> None:
+                return None
+
+        warehouse, uri = _warehouse(tmp_path)
+        first = _source(uri, '{"id": [1], "v": [10]}', mode)
+        session = _session(tmp_path, first, reader="n = rows.num_rows")
+        session.environment_sync_state = "ready"
+        assert (await _run(session, first)).success
+        assert (await _run(session, _source(uri, '{"id": [2], "v": [20]}', mode))).success
+        cell = session.notebook_state.get_cell("w")
+        cell.source = first
+        session.re_analyze_cell("w")
+
+        socket = _Socket()
+        _notebook_connections[session.id] = [socket]
+        try:
+            state = _ensure_execution_state(session.id)
+            await _handle_notebook_run_all(socket, session, state, session.id, {})
+            assert state.execution_task is not None
+            await state.execution_task
+        finally:
+            _notebook_connections.pop(session.id, None)
+            forget_notebook_execution_state(session.id)
+        assert [c.status for c in session.notebook_state.cells] == [CellStatus.READY] * 2
+        return warehouse, session
+
+    async def test_run_all_keeps_an_append_revert_a_cache_hit(self, tmp_path):
+        warehouse, session = await self._run_all_reverted(tmp_path, "append")
+
+        assert _rows(warehouse) == [(1, 10), (2, 20)]
+        assert session.notebook_state.get_cell("w").cache_hit
+
+    async def test_run_all_writes_an_overwrite_revert_again(self, tmp_path):
+        warehouse, session = await self._run_all_reverted(tmp_path, "overwrite")
+
+        assert not session.notebook_state.get_cell("w").cache_hit
+        assert _rows(warehouse) == [(1, 10)]
+
+    async def test_a_loop_append_revert_is_a_cache_hit(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+
+        def loop(v: int) -> str:
+            return TestALoopCell._loop(
+                uri,
+                "import pyarrow as pa\n"
+                f"rows = pa.table({{'id': [rows['id'][0].as_py() + 1], 'v': [{v}]}})\n",
+            )
+
+        session = _notebook(tmp_path, [("s", TestALoopCell.SEED), ("l", loop(1))])
+        assert (await _run(session, TestALoopCell.SEED, "s")).success
+        assert (await _run(session, loop(1), "l")).success
+        assert (await _run(session, loop(2), "l")).success
+
+        reverted = await _run(session, loop(1), "l")
+
+        assert reverted.success, reverted.error
+        assert sorted(_rows(warehouse)) == [(2, 1), (2, 2)]
+        assert reverted.cache_hit
+
 
 @windows
 class TestAPerVariantCell:

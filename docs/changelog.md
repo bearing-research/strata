@@ -99,6 +99,17 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   instead, so the fetch counts toward a large-read question. (#1262)
 - **Read sizes are shown in decimal units**, as the read thresholds and per-GB
   rates are, so a 1 GB threshold and a 1.0 GB read agree. (#1262)
+- **Run All and loop cells honour a revert as a single run does.** Going back
+  to source a cell ran before reused that run's outputs under a single run, but
+  Run All and a loop cell ran the cell again, so a `# @write_table ... append`
+  cell appended its rows a second time. They now reuse the earlier outputs too,
+  and an overwrite or merge cell still runs again. (#1264)
+- **A worker that does not answer no longer slows every cell bound to it.**
+  Weighing a remote cell's mounts asks the worker how much it already holds; a
+  worker that accepted the connection and never replied made each check wait
+  20 seconds, cache hits included. The question now gives up after 2 seconds,
+  and a worker that failed to answer is not asked again for a minute; its share
+  shows as unknown. (#1264)
 
 ## 0.11.0 - 2026-10-19
 

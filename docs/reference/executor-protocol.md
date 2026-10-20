@@ -498,7 +498,7 @@ Before a cell with a read-only `# @mount` runs on a worker, the notebook lists t
 {"cached_bytes": [1048576]}
 ```
 
-`null` is a share the worker cannot tell: a credential it does not have, a `file://` mount, or a read-write one. The notebook waits at most 5 seconds and treats any failure as unknown. A pool's `/health` advertises no features, so a cell bound to a pool is not asked: the machine that will run it is not known until dispatch.
+`null` is a share the worker cannot tell: a credential it does not have, a `file://` mount, or a read-write one. The notebook waits at most 2 seconds for the worker's `/health` and 5 seconds for this answer, and treats any failure as unknown; after a failure it does not ask that worker again for a minute. A pool's `/health` advertises no features, so a cell bound to a pool is not asked: the machine that will run it is not known until dispatch.
 
 ## `POST /execute` (worker-pool alias)
 

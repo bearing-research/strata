@@ -765,6 +765,10 @@ _FEATURES_TTL_SECONDS = 60.0
 # ``nvidia-smi`` with its own 10 s timeout, so a shorter probe refuses a fresh machine.
 _PROBE_TIMEOUT_SECONDS = 20.0
 _advertised_features: dict[str, tuple[float, dict[str, Any]]] = {}
+# The cached-share probe runs on every provenance, cache hits included, and its answer only
+# bounds a badge: a worker that cannot answer quickly is left alone for the features TTL.
+_CACHE_PROBE_TIMEOUT_SECONDS = 2.0
+_cache_probe_failures: dict[str, float] = {}
 
 
 async def worker_advertises(worker: WorkerSpec, feature: str) -> bool | None:
@@ -811,12 +815,24 @@ async def worker_cached_bytes(
 
     *mounts* are ``{"spec", "entries"}``. ``None`` when it cannot answer: it does not
     advertise ``mount_cache_probe`` (a pool's dispatcher does not, since the machine is
-    picked later), or the request fails.
+    picked later), the request fails, or it failed within the TTL.
     """
-    if not await worker_advertises(worker, "mount_cache_probe"):
-        return None
     health_url = _health_url_for_worker(worker)
     if health_url is None:
+        return None
+    failed_at = _cache_probe_failures.get(health_url)
+    if failed_at is not None and time.monotonic() - failed_at < _FEATURES_TTL_SECONDS:
+        return None
+    try:
+        advertised = await asyncio.wait_for(
+            worker_advertises(worker, "mount_cache_probe"), _CACHE_PROBE_TIMEOUT_SECONDS
+        )
+    except TimeoutError:
+        advertised = None
+    if advertised is None:
+        _cache_probe_failures[health_url] = time.monotonic()
+        return None
+    if not advertised:
         return None
     url = health_url.removesuffix("/health") + "/v1/mount-cache/cached"
     headers = {"Authorization": f"Bearer {token}"} if token else None
@@ -825,6 +841,7 @@ async def worker_cached_bytes(
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(url, json={"mounts": mounts}, headers=headers)
     except httpx.HTTPError:
+        _cache_probe_failures[health_url] = time.monotonic()
         return None
     if response.status_code != 200:
         return None

@@ -155,6 +155,7 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     from strata.notebook import workers as _workers_cache
 
     _workers_cache._advertised_features.clear()
+    _workers_cache._cache_probe_failures.clear()
 
     # The notebooks here carry a stub uv.lock (``_fake_uv_sync``) that no worker
     # could install, so remote cells run in the worker's own environment unless
