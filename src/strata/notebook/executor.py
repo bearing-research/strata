@@ -3017,6 +3017,7 @@ class CellExecutor:
         for mount in mount_specs:
             if mount.credential:
                 credentials.ensure_allowed(mount.credential)
+            credentials.ensure_options_allowed(parse_mount_uri(mount.uri)[0], mount.options)
         ensure_writable(credentials, mount_specs)
 
         executor_url = str(worker_spec.config.url or "").strip()

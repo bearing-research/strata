@@ -24,12 +24,17 @@ mount, a ``write=true`` SQL connection, a ``@write_table`` catalog. Once it is s
 to ``{}``, an unlisted name is read-only and a remote read-write mount must name one. It
 limits what Strata writes, not what a cell can do with a credential's values should they
 reach it (see the docs).
+
+In service mode, and always on a remote worker, a mount's own ``options`` may set only
+:data:`NOTEBOOK_MOUNT_OPTIONS`: the registry is the operator's, and a notebook naming a
+token file or an endpoint would turn the server's credentials against it.
 """
 
 from __future__ import annotations
 
 import fnmatch
 import os
+import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -41,14 +46,79 @@ class CredentialError(ValueError):
     """A credential name, or a reference inside one, cannot be resolved."""
 
 
-def resolve_reference(value: str, env: Mapping[str, str]) -> str:
+CREDENTIAL_FILE_LIMIT = 64 * 1024
+"""The most a credential file may hold."""
+
+# What a service-mode notebook's mount options may set, per scheme. None names a secret,
+# a file the server reads or where requests go; those come only from the registry.
+NOTEBOOK_MOUNT_OPTIONS: dict[str, frozenset[str]] = {
+    "s3": frozenset(
+        {"anon", "requester_pays", "version_aware", "cache_regions", "default_block_size"}
+        | {"default_cache_type", "default_fill_cache", "use_listings_cache"}
+    ),
+    "gs": frozenset(
+        {"requester_pays", "version_aware", "consistency", "cache_timeout", "block_size"}
+        | {"use_listings_cache"}
+    ),
+    "az": frozenset(
+        {"anon", "version_aware", "blocksize", "default_cache_type", "default_fill_cache"}
+        | {"use_listings_cache"}
+    ),
+}
+
+
+def is_reference(value: str) -> bool:
+    """Whether *value* is a ``${VAR}`` or ``${file:/path}`` reference, not a literal."""
+    return value.startswith("${") and value.endswith("}")
+
+
+def file_in_roots(path: Path, roots: Sequence[Path]) -> Path:
+    """*path* with every symlink resolved, when that lies inside one of *roots*.
+
+    Raises:
+        CredentialError: it does not, naming the path and the setting.
+    """
+    real = Path(os.path.realpath(path))
+    if any(real.is_relative_to(os.path.realpath(root)) for root in roots):
+        return real
+    raise CredentialError(
+        f"{path} is not inside notebook_credential_file_roots "
+        f"(STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS){'' if roots else ', which is empty'}"
+    )
+
+
+def read_credential_file(path: Path, *, nofollow: bool = False) -> str:
+    """The text of a credential file: a regular file, at most :data:`CREDENTIAL_FILE_LIMIT`.
+
+    Checked on the open descriptor, so a FIFO or a device cannot hang or flood the read.
+    *nofollow* refuses a symlink, for a path already resolved and checked.
+
+    Raises:
+        OSError: it cannot be opened.
+        CredentialError: it is not a regular file, or is too large.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    if nofollow:
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise CredentialError(f"{path} is not a regular file")
+        data = handle.read(CREDENTIAL_FILE_LIMIT + 1)
+    if len(data) > CREDENTIAL_FILE_LIMIT:
+        raise CredentialError(f"{path} is larger than {CREDENTIAL_FILE_LIMIT} bytes")
+    return data.decode()
+
+
+def resolve_reference(value: str, env: Mapping[str, str], file_roots: Sequence[Path] = ()) -> str:
     """``${VAR}`` to its value from *env*, then the process environment.
 
     ``${file:/path}`` is the file's contents, read at each use, without trailing line
-    breaks, so a host rotates a secret by rewriting the file. Anything else is a
-    literal and passes through: the registry is operator config, not a committed file.
+    breaks, so a host rotates a secret by rewriting the file. With *file_roots*, the
+    path must resolve inside one, checked at each read. Anything else is a literal and
+    passes through: the registry is operator config, not a committed file.
     """
-    if not (value.startswith("${") and value.endswith("}")):
+    if not is_reference(value):
         return value
     name = value[2:-1]
     if name.startswith("file:"):
@@ -56,11 +126,16 @@ def resolve_reference(value: str, env: Mapping[str, str]) -> str:
         if not path.is_absolute():
             raise CredentialError(f"references ${{{name}}}, which is not an absolute path")
         try:
-            return path.read_text().rstrip("\r\n")
+            if file_roots:
+                # Read the checked path itself, so a link swapped in after the check fails.
+                path = file_in_roots(path, file_roots)
+            return read_credential_file(path, nofollow=bool(file_roots)).rstrip("\r\n")
         except OSError as exc:
             raise CredentialError(
                 f"references ${{{name}}}, which cannot be read ({exc.strerror})"
             ) from None
+        except CredentialError as exc:
+            raise CredentialError(f"references ${{{name}}}: {exc}") from None
     if name in env:
         return env[name]
     resolved = os.environ.get(name)
@@ -82,8 +157,13 @@ class CredentialResolver:
         notebook: Path | None = None,
         writers: Mapping[str, Sequence[str]] | None = None,
         principal: str | None = None,
+        restrict_options: bool = False,
+        file_roots: Sequence[Path] = (),
     ):
         self._registry = dict(registry or {})
+        self._file_roots = list(file_roots)
+        # A notebook's mount options are then held to NOTEBOOK_MOUNT_OPTIONS.
+        self._restrict_options = restrict_options
         # None is unset (every name writes); ``{}`` is set with nothing writable.
         self._writers = (
             None
@@ -124,6 +204,8 @@ class CredentialResolver:
             notebook=notebook,
             writers=getattr(config, "notebook_credential_writers", None),
             principal=principal,
+            restrict_options=getattr(config, "deployment_mode", "personal") == "service",
+            file_roots=getattr(config, "notebook_credential_file_roots", None) or (),
         )
 
     def ensure_allowed(self, name: str) -> None:
@@ -188,6 +270,27 @@ class CredentialResolver:
                 f"credential {name!r} is not writable by {who} (STRATA_NOTEBOOK_CREDENTIAL_WRITERS)"
             )
 
+    def ensure_options_allowed(self, scheme: str, options: Mapping[str, Any]) -> None:
+        """Refuse a mount option a notebook may not set here.
+
+        Also the check before a remote worker, so a refused option never leaves the server.
+
+        Raises:
+            CredentialError: naming the option.
+        """
+        if not self._restrict_options:
+            return
+        allowed = NOTEBOOK_MOUNT_OPTIONS.get(scheme, frozenset())
+        for key, value in options.items():
+            # gcsfs spells anonymous access as a token.
+            if key in allowed or (scheme == "gs" and key == "token" and value == "anon"):
+                continue
+            raise CredentialError(
+                f"mount option {key!r} cannot be set by a notebook on this server: "
+                "credentials, key files and endpoints come only from its named credentials "
+                f"(a {scheme} mount may set {', '.join(sorted(allowed)) or 'no options'})"
+            )
+
     def resolve(self, name: str) -> dict[str, str]:
         """The fields behind *name*, with every reference resolved.
 
@@ -201,7 +304,10 @@ class CredentialResolver:
                 f"credential {name!r} is not defined on this server (STRATA_NOTEBOOK_CREDENTIALS)"
             )
         try:
-            return {key: resolve_reference(str(value), self._env) for key, value in fields.items()}
+            return {
+                key: resolve_reference(str(value), self._env, self._file_roots)
+                for key, value in fields.items()
+            }
         except CredentialError as exc:
             raise CredentialError(f"credential {name!r} {exc}") from None
 
@@ -210,9 +316,10 @@ class CredentialResolver:
     ) -> dict[str, Any]:
         """fsspec options for a mount: scheme default, then its credential, then its options.
 
-        The mount's own ``options`` win, so a notebook can set a non-secret like
-        ``endpoint_url`` on top of a credential.
+        The mount's own ``options`` win, so a notebook can set ``endpoint_url`` on top of a
+        credential, where :meth:`ensure_options_allowed` lets it.
         """
+        self.ensure_options_allowed(scheme, options)
         merged: dict[str, Any] = {}
         default = self._scheme_defaults.get(scheme)
         if default:

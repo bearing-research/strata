@@ -439,6 +439,10 @@ class StrataConfig(BaseSettings):
     # principal matches). Once set, even to ``{}``, an unlisted name is read-only and a remote
     # read-write mount must name one. Unset, every name writes.
     notebook_credential_writers: Annotated[dict[str, list[str]] | None, NoDecode] = None
+    # Directories a ``${file:...}`` credential reference may read from, symlinks resolved.
+    # Empty: the admin route refuses every ``${file:}`` and startup references are not
+    # limited. Set: every ``${file:}`` reference, from either, must resolve inside one.
+    notebook_credential_file_roots: Annotated[list[Path], NoDecode] = Field(default_factory=list)
     # Whether a cell's ``# @write_table ... append|merge`` may change a table Strata did not
     # create (another writer's). Off: only tables Strata wrote first. An overwrite of such a
     # table is refused either way.
@@ -686,6 +690,34 @@ class StrataConfig(BaseSettings):
         if v is None or v == "":
             return None
         return cls.parse_credential_maps(v, info)
+
+    @field_validator("notebook_credential_file_roots", mode="before")
+    @classmethod
+    def parse_credential_file_roots(cls, v: Any) -> list[Any]:
+        """Accept a list, a JSON array, or comma-separated directories."""
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            import json
+
+            stripped = v.strip()
+            v = (
+                json.loads(stripped)
+                if stripped.startswith("[")
+                else [part.strip() for part in stripped.split(",") if part.strip()]
+            )
+        if not isinstance(v, list):
+            raise ValueError("notebook_credential_file_roots must be a list")
+        return v
+
+    @field_validator("notebook_credential_file_roots")
+    @classmethod
+    def credential_file_roots_are_absolute(cls, v: list[Path]) -> list[Path]:
+        """A relative root would match against the server's working directory."""
+        for root in v:
+            if not root.is_absolute():
+                raise ValueError(f"notebook_credential_file_roots: {root} is not an absolute path")
+        return v
 
     @field_validator("notebook_credential_paths")
     @classmethod

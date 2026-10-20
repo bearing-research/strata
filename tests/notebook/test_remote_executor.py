@@ -162,6 +162,40 @@ def test_remote_executor_rejects_file_mounts(notebook_executor_server):
     assert "does not support file:// mount" in response.json()["detail"]
 
 
+def test_remote_executor_rejects_a_mount_option_naming_an_endpoint(notebook_executor_server):
+    """The worker's own credentials would be sent there, whatever server dispatched."""
+    metadata = {
+        "protocol_version": NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
+        "source": "x = 1",
+        "timeout_seconds": 10.0,
+        "inputs": {},
+        "mounts": [
+            {
+                "name": "raw",
+                "uri": "s3://lab/raw",
+                "mode": "ro",
+                "options": {"endpoint_url": "https://author.example"},
+            }
+        ],
+        "env": {},
+    }
+
+    response = httpx.post(
+        notebook_executor_server["notebook_execute_url"],
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps(metadata).encode("utf-8"),
+                "application/json",
+            ),
+        },
+        timeout=10.0,
+    )
+
+    assert response.status_code == 400
+    assert "mount 'raw': mount option 'endpoint_url' cannot be set" in response.json()["detail"]
+
+
 def test_remote_executor_executes_signed_manifest_build(
     notebook_executor_server,
     notebook_build_server,

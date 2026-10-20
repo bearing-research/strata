@@ -73,6 +73,51 @@ class TestResolution:
         with pytest.raises(CredentialError, match=rf"'lab'.*file:{path}.*{said}"):
             resolver.resolve("lab")
 
+    def test_with_file_roots_a_reference_reads_only_inside_them(self, tmp_path):
+        """Set, the roots bind startup references too, at each resolve."""
+        root = tmp_path / "creds"
+        root.mkdir()
+        (root / "token").write_text("inside")
+        (tmp_path / "token").write_text("outside")
+        resolver = CredentialResolver(
+            {
+                "in": {"t": f"${{file:{root / 'token'}}}"},
+                "out": {"t": f"${{file:{tmp_path}/token}}"},
+            },
+            file_roots=[root],
+        )
+
+        assert resolver.resolve("in") == {"t": "inside"}
+        with pytest.raises(
+            CredentialError, match=r"'out'.*not inside notebook_credential_file_roots"
+        ):
+            resolver.resolve("out")
+
+    def test_config_reads_the_file_roots_and_wants_them_absolute(self, monkeypatch):
+        from pydantic import ValidationError
+
+        from strata.config import StrataConfig
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS", "/run/a, /run/b")
+        assert StrataConfig().notebook_credential_file_roots == [Path("/run/a"), Path("/run/b")]
+        monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS", '["/run/a"]')
+        assert StrataConfig().notebook_credential_file_roots == [Path("/run/a")]
+
+        monkeypatch.setenv("STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS", "run/a")
+        with pytest.raises(ValidationError, match="not an absolute path"):
+            StrataConfig()
+
+    def test_a_file_reference_to_a_fifo_is_refused_not_read(self, tmp_path):
+        """A read of a FIFO no one writes to would never return."""
+        import os
+
+        fifo = tmp_path / "fifo"
+        os.mkfifo(fifo)
+        resolver = CredentialResolver({"lab": {"token": f"${{file:{fifo}}}"}})
+
+        with pytest.raises(CredentialError, match=r"'lab'.*is not a regular file"):
+            resolver.resolve("lab")
+
     def test_mount_options_layer_default_then_credential_then_the_mounts_own(self):
         resolver = CredentialResolver(
             {"org": {"endpoint_url": "https://org", "key": "o"}, "lab": {"key": "l"}},

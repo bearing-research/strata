@@ -95,10 +95,20 @@ Each mount becomes a `pathlib.Path` variable in the cell namespace. Cells access
 | `uri` | string (required) | `file:///path`, `s3://bucket/prefix`, `gs://bucket/prefix`, `az://container/prefix`. |
 | `mode` | `"ro"` \| `"rw"` | Default `"ro"`. |
 | `pin` | string \| absent | Pinned version/etag - disables auto-fingerprinting. |
-| `options` | table | Backend storage options passed through to fsspec. Common keys: `anon`, `endpoint_url`, `profile`. |
+| `options` | table | Backend storage options passed through to fsspec. Common keys: `anon`, `endpoint_url`, `profile`. On a service-mode server and on a remote worker only a few keys are allowed ([below](#mount-options-on-a-shared-server)). |
 | `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become fsspec storage options, so no secret lives in this file. `options` still win on a shared key. |
 
 Cell-level mounts (under `[[cells.mounts]]`) supplement notebook-level ones.
+
+### Mount options on a shared server
+
+On a server in service mode, a mount's `options` may set only these keys, whether or not the mount names a credential:
+
+- **`s3`**: `anon`, `requester_pays`, `version_aware`, `cache_regions`, `default_block_size`, `default_cache_type`, `default_fill_cache`, `use_listings_cache`.
+- **`gs`**: `requester_pays`, `version_aware`, `consistency`, `cache_timeout`, `block_size`, `use_listings_cache`, and `token = "anon"` for anonymous reads.
+- **`az`**: `anon`, `version_aware`, `blocksize`, `default_cache_type`, `default_fill_cache`, `use_listings_cache`.
+
+Anything else, such as a key, secret, token or token file (`token`, `federated_token_file`), a profile, a tenant or client id, an account name, or where requests go (`endpoint_url`, `client_kwargs`), comes only from the server's [named credentials](#named-credentials) and scheme defaults. A notebook that sets one fails its cell with `mount option 'endpoint_url' cannot be set by a notebook on this server`, before anything is read. Otherwise a notebook could send the server's credentials to a host of its choosing, or have the server read a file and hand it to a token service the author picked. A mount bound for a remote worker is checked before it is sent. A remote worker also holds a mount's options to the same list, whatever mode the server that dispatched it runs in, since its credentials are its operator's: there, put an endpoint or a profile in the worker's own `STRATA_NOTEBOOK_CREDENTIALS`. A personal server's local mounts take any option.
 
 ## Named credentials
 
@@ -127,11 +137,12 @@ STRATA_NOTEBOOK_CREDENTIALS='{
 
 - A mount's fields become fsspec storage options; a connection's become driver `auth`.
 - `${VAR}` resolves against the notebook's environment first, which is where a configured [secret manager](#secret_manager-external-secret-manager-wiring) puts what it fetches, and then the server's.
-- `${file:/path}` is the file's contents, read each time the name resolves, without trailing line breaks. The path must be absolute. A host that writes secrets as files rotates one by rewriting its file, with no restart and no call.
+- `${file:/path}` is the file's contents, read each time the name resolves, without trailing line breaks. The path must be absolute and name a regular file of at most 64 KiB, as must a keyless `token` or `federated_token_file` (below). When `STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS` is set, the path must also resolve inside one of its directories, checked at each read. A host that writes secrets as files rotates one by rewriting its file, with no restart and no call.
 - The **name** is part of a cell's provenance, because a different credential can see different data. The **values** never are, so rotating a secret invalidates nothing.
 - A name the server does not define, or a reference that is not set, fails the cell with a message naming the credential.
 - `STRATA_NOTEBOOK_MOUNT_CREDENTIALS='{"s3": "org-bucket"}'` applies a credential to every mount of a scheme that names none, so the organization's primary store works without editing notebooks.
 - A remote worker resolves names against its own `STRATA_NOTEBOOK_CREDENTIALS`; only the name travels in the dispatch.
+- On a service-mode server, and on any remote worker, a mount's own `options` cannot override a credential's fields or name another secret, file or endpoint: see [Mount options on a shared server](#mount-options-on-a-shared-server).
 - `STRATA_NOTEBOOK_CREDENTIAL_PATHS='{"lab-a": ["/srv/projects/lab-a"]}'` keeps a name to the notebooks under those directories, for a server that hosts several projects. Anywhere else, the cell fails with `credential 'lab-a' is not available to this notebook`, naming the credential and none of its fields. Mounts, connections and catalogs are all checked, and so is a mount sent to a remote worker, before it is sent. A listed name is not usable outside a notebook at all, for example by a scan through a catalog that names it. Names not listed stay open to every notebook.
 - `STRATA_NOTEBOOK_CREDENTIAL_WRITERS='{"lab-bucket": ["user_*", "agent:agt_1/*"]}'` says who may write through a name, as glob patterns over the principal who started the run (`["*"]` is anyone). It gates three writes: an `rw` mount, a `# @sql connection=... write=true` cell whose connection names the credential, and a [`# @write_table`](../notebook/annotations.md#write_table) into a catalog whose `strata_credential` names it. Once it is set, even to `{}`, a name not listed is read-only. A write through a name the run may not write with fails before the run with `credential 'lab-bucket' is read-only on this server` or `... is not writable by '<principal>'`, and nothing is staged or written. An `rw` mount from a cell or from `notebook.toml` is checked, and so is one sent to a remote worker, before it is sent. A mount names a credential when its scheme has a default (`STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) as well as when it names its own, and both are checked, since the write uses both. An `rw` mount on `s3`, `gs` or `az` that names no credential, and whose scheme has no default, fails with `a read-write s3 mount must name the source it writes to with credential=<name>`, since it would write as the server's own identity. A `file://` mount is outside the setting. A run with no principal (personal mode) matches only `*`. Unset, every name writes. Reads and provenance are unchanged.
 
@@ -180,20 +191,40 @@ curl -X PUT "$STRATA/v1/admin/notebook-credentials" -H 'Content-Type: applicatio
   "notebook_credentials": {"lab-bucket": {"key": "${file:/run/creds/lab-bucket/key}",
                                           "secret": "${file:/run/creds/lab-bucket/secret}"}},
   "notebook_mount_credentials": {"s3": "lab-bucket"},
+  "notebook_credential_paths": {},
+  "notebook_credential_writers": null,
   "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}}
 }'
 ```
 
-- A setting left out of the body is replaced by its default, as if unset.
+- A value is a literal or a `${file:...}` reference under one of the server's
+  `STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS` (here `/run/creds`). The path counts
+  as inside when it resolves there with every symlink followed; one outside, or
+  any `${file:...}` while the setting is empty (the default), is refused with
+  `422` naming the path and the setting. The check runs again at each read, so
+  a file swapped for a link out of the root afterwards is not read. A file
+  rewritten in place is used at the next run with no second call.
+- A `${VAR}` reference is always refused with `400` naming the field: the
+  server's environment holds its own secrets, such as the proxy token. Variable
+  references keep working in the server's startup `STRATA_NOTEBOOK_CREDENTIALS`.
+- `notebook_credential_paths` and `notebook_credential_writers` are required in
+  every body, so leaving one out cannot lift a restriction unnoticed: such a
+  body is refused with `422` naming the field, and changes nothing. Paths `{}`
+  restricts no name; writers `null` is unset (every name writes), and `{}`
+  makes every name read-only.
+- Any other setting left out of the body is replaced by its default, as if unset.
 - The next run uses the new settings, in a session opened before the call too. A
   running cell keeps what it resolved. A removed name fails its next use naming
   it, as an unknown name does.
 - A changed catalog is rebuilt from its new properties at its next use.
 - It is validated as the settings are at startup, and a refused body (`400`)
   changes nothing.
-- `GET` returns the five settings. A credential's literal values, and a
-  catalog's `uri` and secret-looking keys, read `<redacted>`; a `${...}`
-  reference is shown, since it only says where a value lives.
+- `GET` returns the five settings. A credential's literal values read
+  `<redacted>`; a `${...}` reference is shown, since it only says where a value
+  lives. A catalog shows only the keys known to hold no secret (`type`,
+  `warehouse`, `strata_credential`, `s3.region`, `client.region`,
+  `glue.region`, `glue.id`, `adls.account-name`, `gcs.project-id`); every other
+  value, `uri` included, reads `<redacted>`.
 - It changes this process only. A restart goes back to the environment, and
   each replica of a service takes its own call. A remote worker resolves names
   from its own environment and is unaffected.

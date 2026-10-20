@@ -26,7 +26,12 @@ from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel
 
-from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
+from strata.notebook.credentials import (
+    CredentialError,
+    CredentialResolver,
+    credential_identity,
+    read_credential_file,
+)
 from strata.notebook.harness_user import UnsafeRunFile, open_tree_file
 from strata.notebook.models import MountMode, MountSpec
 from strata.notebook.mount_cache import MountCache, object_key
@@ -683,15 +688,23 @@ def _keyless(protocol: str, storage_options: dict[str, Any]) -> dict[str, Any]:
         if not tenant_id or not client_id:
             raise ValueError("an az mount's federated_token_file needs tenant_id and client_id")
         # WorkloadIdentityCredential's exchange, minus its ten minutes of caching the file.
-        credential = ClientAssertionCredential(tenant_id, client_id, token_file.read_text)
+        credential = ClientAssertionCredential(
+            tenant_id, client_id, lambda: read_credential_file(token_file)
+        )
         return {**options, "credential": credential}
     return storage_options
 
 
 def _external_account(token: str) -> dict[str, Any] | None:
-    """The workload-identity configuration in the file *token* names, if it is one."""
+    """The workload-identity configuration in the file *token* names, if it is one.
+
+    Raises:
+        CredentialError: *token* names a file that is not regular, or is too large.
+    """
     try:
-        info = json.loads(Path(token).read_text())
+        info = json.loads(read_credential_file(Path(token)))
+    except CredentialError:
+        raise
     except (OSError, ValueError):
         # A raw token, which gcsfs takes as it is.
         return None
