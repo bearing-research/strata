@@ -3914,6 +3914,10 @@ exhaustive commit history.</p>
   reach, so a build could read or write files there and return a result its
   inputs do not determine. It now runs the built-in transform's engine, which
   shuts all three off; its memory limit is unchanged. (#1268)</li>
+<li><strong>Cancelling a Run All stops its cells.</strong> Cancelling a Run All or Rerun All
+  whose cells ran together in one process (by a stop, or by closing the
+  notebook's last tab) left that process running the rest of the user's code;
+  it is now terminated, as a single cell's is. (#1269)</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
