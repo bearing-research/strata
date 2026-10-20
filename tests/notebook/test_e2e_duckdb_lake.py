@@ -45,7 +45,7 @@ if not _docker_daemon_reachable():
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402
 from testcontainers.core.container import DockerContainer  # noqa: E402
-from testcontainers.core.waiting_utils import wait_for_logs  # noqa: E402
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy  # noqa: E402
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -74,11 +74,8 @@ def rest_catalog(tmp_path):
     container.with_volume_mapping(str(warehouse), str(warehouse), "rw")
     container.with_env("CATALOG_WAREHOUSE", warehouse.as_uri())
     container.with_bind_ports(8181, port)
-    start_container_or_skip(
-        container,
-        label="iceberg-rest-fixture",
-        ready=lambda c: wait_for_logs(c, "Started", timeout=120),
-    )
+    container.waiting_for(LogMessageWaitStrategy("Started").with_startup_timeout(120))
+    start_container_or_skip(container, label="iceberg-rest-fixture")
     try:
         properties = {"type": "rest", "uri": f"http://127.0.0.1:{port}"}
         catalog = load_catalog("lake", **properties)
@@ -270,9 +267,8 @@ def gcs_mount():
     container = DockerContainer("fsouza/fake-gcs-server:1.52.2")
     container.with_command("-scheme http -port 4443 -public-host localhost:4443")
     container.with_exposed_ports(4443)
-    start_container_or_skip(
-        container, label="fake-gcs-server", ready=lambda c: wait_for_logs(c, "server started at")
-    )
+    container.waiting_for(LogMessageWaitStrategy("server started at"))
+    start_container_or_skip(container, label="fake-gcs-server")
     try:
         endpoint = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(4443)}"
         httpx.post(f"{endpoint}/storage/v1/b", params={"project": "p"}, json={"name": "raw"})

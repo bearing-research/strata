@@ -41,7 +41,7 @@ if not _docker_daemon_reachable():
 
 from testcontainers.community.minio import MinioContainer  # noqa: E402
 from testcontainers.core.container import DockerContainer  # noqa: E402
-from testcontainers.core.waiting_utils import wait_for_logs  # noqa: E402
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy  # noqa: E402
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -110,11 +110,8 @@ def rest_catalog(tmp_path):
         (warehouse / directory).mkdir()
         (warehouse / directory).chmod(0o777)
     container.with_bind_ports(8181, port)
-    start_container_or_skip(
-        container,
-        label="iceberg-rest-fixture",
-        ready=lambda c: wait_for_logs(c, "Started", timeout=120),
-    )
+    container.waiting_for(LogMessageWaitStrategy("Started").with_startup_timeout(120))
+    start_container_or_skip(container, label="iceberg-rest-fixture")
     try:
         properties = {"type": "rest", "uri": f"http://127.0.0.1:{port}"}
         yield RestCatalog(load_catalog("rest", **properties), properties, container, warehouse)
@@ -202,9 +199,8 @@ def fake_gcs():
     # process reaches the container on.
     container.with_command(f"-scheme http -port 4443 -external-url http://127.0.0.1:{port}")
     container.with_bind_ports(4443, port)
-    start_container_or_skip(
-        container, label="fake-gcs-server", ready=lambda c: wait_for_logs(c, "server started at")
-    )
+    container.waiting_for(LogMessageWaitStrategy("server started at"))
+    start_container_or_skip(container, label="fake-gcs-server")
     try:
         endpoint = f"http://127.0.0.1:{port}"
         urllib.request.urlopen(
