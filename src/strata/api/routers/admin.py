@@ -8,14 +8,20 @@ a personal server's caller already runs cells as its owner. Credential routes ne
 
 from __future__ import annotations
 
-import re
 import time
+from pathlib import Path
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from strata.api.dependencies import require_scope
+from strata.notebook.credentials import (
+    CATALOG_CREDENTIAL_KEY,
+    CredentialError,
+    file_in_roots,
+    is_reference,
+)
 from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
 from strata.notebook.workers import (
     ManagedWorkerRecord,
@@ -254,22 +260,25 @@ class AdminNotebookCredentialsRequest(BaseModel):
 
     notebook_credentials: dict[str, dict[str, str]] = Field(default_factory=dict)
     notebook_mount_credentials: dict[str, str] = Field(default_factory=dict)
-    notebook_credential_paths: dict[str, list[str]] = Field(default_factory=dict)
-    # None, not {}: once set, a name not listed is read-only.
-    notebook_credential_writers: dict[str, list[str]] | None = None
+    # Required, so a body that leaves out a restriction cannot lift it unnoticed. ``{}``
+    # restricts nothing; writers ``null`` is unset (every name writes), ``{}`` all read-only.
+    notebook_credential_paths: dict[str, list[str]]
+    notebook_credential_writers: dict[str, list[str]] | None
     catalogs: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 _REDACTED = "<redacted>"
-# A catalog's own keys that may carry a secret; a credential's every literal may.
-_SECRET_CATALOG_KEY = re.compile(r"uri|key|secret|token|password|credential", re.IGNORECASE)
+# A catalog's keys known not to hold a secret; any other value is redacted, a credential's
+# every literal too.
+_PLAIN_CATALOG_KEYS = frozenset(
+    {"type", "warehouse", CATALOG_CREDENTIAL_KEY, "s3.region", "client.region"}
+    | {"glue.region", "glue.id", "adls.account-name", "gcs.project-id"}
+)
 
 
-def _shown(value: str, *, secret: bool) -> str:
-    """A reference names where a value lives, so it is shown; a literal secret is not."""
-    if value.startswith("${") and value.endswith("}"):
-        return value
-    return _REDACTED if secret else value
+def _shown(value: str) -> str:
+    """A reference names where a value lives, so it is shown; a literal is not."""
+    return value if is_reference(value) else _REDACTED
 
 
 def _serialize_notebook_credentials() -> dict[str, object]:
@@ -278,15 +287,16 @@ def _serialize_notebook_credentials() -> dict[str, object]:
     config = get_state().config
     return {
         "notebook_credentials": {
-            name: {key: _shown(value, secret=True) for key, value in fields.items()}
+            name: {key: _shown(value) for key, value in fields.items()}
             for name, fields in config.notebook_credentials.items()
         },
         "notebook_mount_credentials": config.notebook_mount_credentials,
         "notebook_credential_paths": config.notebook_credential_paths,
         "notebook_credential_writers": config.notebook_credential_writers,
+        # Strata resolves no reference in a catalog, so every value there is a literal.
         "catalogs": {
             name: {
-                key: _shown(value, secret=bool(_SECRET_CATALOG_KEY.search(key)))
+                key: value if key in _PLAIN_CATALOG_KEYS else _REDACTED
                 for key, value in properties.items()
             }
             for name, properties in config.catalogs.items()
@@ -318,6 +328,30 @@ async def replace_admin_notebook_credentials(request: AdminNotebookCredentialsRe
 
     state = get_state()
     update = request.model_dump()
+    # A reference has the server read its own environment or files into a value this
+    # caller chose how to use: only files under the operator's roots, never the env.
+    for name, fields in update["notebook_credentials"].items():
+        for key, value in fields.items():
+            if not is_reference(value):
+                continue
+            field = f"notebook_credentials[{name!r}][{key!r}]"
+            reference = value[2:-1]
+            if not reference.startswith("file:"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{field} is a ${{VAR}} reference; this route takes literal values "
+                        "or ${file:...} under notebook_credential_file_roots, and variable "
+                        "references belong in the server's startup configuration"
+                    ),
+                )
+            path = Path(reference.removeprefix("file:"))
+            try:
+                if not path.is_absolute():
+                    raise CredentialError(f"{path} is not an absolute path")
+                file_in_roots(path, state.config.notebook_credential_file_roots)
+            except CredentialError as exc:
+                raise HTTPException(status_code=422, detail=f"{field}: {exc}") from None
     try:
         StrataConfig.credential_paths_are_absolute(update["notebook_credential_paths"])
         check_catalogs(

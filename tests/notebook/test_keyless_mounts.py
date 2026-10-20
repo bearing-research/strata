@@ -208,3 +208,49 @@ def test_an_az_federated_token_file_without_its_app_is_refused(tmp_path):
             "abfs",
             {"account_name": "lab", "federated_token_file": str(tmp_path / "token")},
         )
+
+
+@pytest.fixture
+def fifo(tmp_path) -> Path:
+    """A FIFO no one writes to: an unguarded read of it never returns."""
+    import os
+
+    path = tmp_path / "fifo"
+    os.mkfifo(path)
+    return path
+
+
+def test_a_gs_token_naming_a_fifo_is_refused_not_read(fifo):
+    from strata.notebook.credentials import CredentialError
+
+    with pytest.raises(CredentialError, match="is not a regular file"):
+        _mount_filesystem("gcs", {"token": str(fifo), "endpoint_url": "http://127.0.0.1:9"})
+
+
+def test_a_gs_token_file_past_the_size_cap_is_refused(tmp_path):
+    from strata.notebook.credentials import CREDENTIAL_FILE_LIMIT, CredentialError
+
+    big = tmp_path / "token.json"
+    big.write_text(json.dumps({"type": "external_account", "pad": "x" * CREDENTIAL_FILE_LIMIT}))
+
+    with pytest.raises(CredentialError, match="is larger than"):
+        _mount_filesystem("gcs", {"token": str(big), "endpoint_url": "http://127.0.0.1:9"})
+
+
+def test_an_az_federated_token_file_that_is_a_fifo_is_refused_not_read(fifo):
+    from fsspec.asyn import sync
+
+    from strata.notebook.credentials import CredentialError
+
+    fs = _mount_filesystem(
+        "abfs",
+        {
+            "account_name": "lab",
+            "tenant_id": "amber-tenant",
+            "client_id": "source-app",
+            "federated_token_file": str(fifo),
+        },
+    )
+
+    with pytest.raises(CredentialError, match="is not a regular file"):
+        sync(fs.loop, _azure_token, fs)

@@ -24,6 +24,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   after the upgrade every named artifact over a table reports stale once, and
   materializing a transform or scan over a table builds a new artifact rather
   than reusing the old one. (#1260)
+- **`PUT /v1/admin/notebook-credentials` requires `notebook_credential_paths`
+  and `notebook_credential_writers` in every body.** Leaving one out used to
+  reset it, which lifted a restriction without anyone saying so; it is now
+  refused with `422` naming the field. Send `{}` for no path restrictions and
+  `null` for writers unset. (#1265)
 
 ### Fixed
 
@@ -110,6 +115,48 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   20 seconds, cache hits included. The question now gives up after 2 seconds,
   and a worker that failed to answer is not asked again for a minute; its share
   shows as unknown. (#1264)
+- **A credential file must be a regular file of at most 64 KiB.** A
+  `${file:...}` reference, a keyless `gs` `token` file or an `az`
+  `federated_token_file` that named a FIFO or a device could hang or flood the
+  read; it now fails naming the file. (#1265)
+
+### Security
+
+- **A service-mode notebook's mount options can no longer name credentials, key
+  files or endpoints.** On a server in service mode a mount's `options` may set
+  only a short list of non-secret keys per scheme (`anon`, `requester_pays`,
+  `version_aware`, block and cache settings, and `token = "anon"` on `gs`),
+  whether or not the mount names a credential. `endpoint_url`, `client_kwargs`,
+  `key`, `secret`, `token`, `profile`, `federated_token_file`, `tenant_id`,
+  `client_id`, `account_name` and every other key fail the cell naming the key,
+  and a mount bound for a remote worker is checked before it is sent. Before,
+  a notebook could send a named credential to a host of its choosing, or have
+  the server read any file it could and post it to a token service the author
+  picked. These settings now come only from the server's named credentials and
+  scheme defaults. Personal mode is unchanged. (#1265)
+- **A remote worker holds a mount's options to the same list, whatever server
+  dispatched it.** A worker's credentials are its operator's, and a personal
+  server's notebook could otherwise point them at its own host. A dispatch
+  whose mount sets another option is refused with `400` naming the key; put an
+  endpoint or a profile in the worker's own `STRATA_NOTEBOOK_CREDENTIALS`.
+  (#1265)
+- **`GET /v1/admin/notebook-credentials` shows a catalog's value only for keys
+  known to hold no secret.** It redacted by a name pattern, which missed keys
+  such as `adls.connection-string` and `header.*`. Now `type`, `warehouse`,
+  `strata_credential`, the region keys, `glue.id`, `adls.account-name` and
+  `gcs.project-id` are shown and every other value reads `<redacted>`. (#1265)
+- **`PUT /v1/admin/notebook-credentials` reads files only under
+  `STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS`.** A caller holding only the route's
+  scope could have the server read any environment variable or file it can
+  into a credential. A `${VAR}` reference through the route is now refused
+  with `400` naming the field. A `${file:...}` reference must resolve, with
+  symlinks followed, inside one of the directories in the new
+  `STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS`, or it is refused with `422` naming
+  the path and the setting; the setting is empty by default, which refuses
+  every one. Once roots are set, every `${file:...}` reference, startup ones
+  included, is checked again at each read, so a file swapped for a link out of
+  a root is not read, and a file rewritten in place is still used at the next
+  run with no call. (#1265)
 
 ## 0.11.0 - 2026-10-19
 

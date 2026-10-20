@@ -616,11 +616,14 @@ def _worker_credentials() -> CredentialResolver:
     """Named credentials from the worker's environment.
 
     Read from ``STRATA_NOTEBOOK_CREDENTIALS`` and ``STRATA_NOTEBOOK_MOUNT_CREDENTIALS``
-    directly: a worker is not a Strata server and has no server config.
+    directly: a worker is not a Strata server and has no server config. A mount's own
+    options are always held to the service-mode allowlist: these credentials are the
+    worker's operator's, whatever mode the dispatching server runs in.
     """
     return CredentialResolver(
         json.loads(worker_secret("STRATA_NOTEBOOK_CREDENTIALS") or "{}"),
         scheme_defaults=json.loads(worker_secret("STRATA_NOTEBOOK_MOUNT_CREDENTIALS") or "{}"),
+        restrict_options=True,
     )
 
 
@@ -804,6 +807,7 @@ def create_notebook_executor_app(
             raise HTTPException(status_code=400, detail="mounts must be a list")
 
         mount_specs = [MountSpec(**mount) for mount in raw_mounts]
+        credentials = _worker_credentials()
         for mount in mount_specs:
             scheme, _path = parse_mount_uri(mount.uri)
             if scheme == "file":
@@ -811,6 +815,12 @@ def create_notebook_executor_app(
                     status_code=400,
                     detail=(f"Remote execution does not support file:// mount '{mount.name}'"),
                 )
+            try:
+                credentials.ensure_options_allowed(scheme, mount.options)
+            except CredentialError as exc:
+                raise HTTPException(
+                    status_code=400, detail=f"mount '{mount.name}': {exc}"
+                ) from None
 
         # Before any download, so a refused request costs nothing; held until the harness exits.
         gpu = _admit()
