@@ -7171,6 +7171,7 @@ class CellExecutor:
         completed = False
         end_reason = "subprocess_died"
         failed_cell_id: str | None = None
+        proc: asyncio.subprocess.Process | None = None
 
         with ExitStack() as token_scope:
             try:
@@ -7316,6 +7317,16 @@ class CellExecutor:
 
                 await proc.wait()
                 await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            except asyncio.CancelledError:
+                # As _run_harness: a cancelled run (a closed socket) must not leave the
+                # harness running the user's code, unreaped.
+                if proc is not None:
+                    logger.info(
+                        "Batch execution cancelled; terminating harness subprocess tree pid=%s",
+                        proc.pid,
+                    )
+                    await asyncio.shield(terminate_subprocess_tree(proc))
+                raise
             finally:
                 for fd in (frame_w, resp_r, frame_r, resp_w):
                     if fd >= 0:

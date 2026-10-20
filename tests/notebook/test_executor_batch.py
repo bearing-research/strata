@@ -5,6 +5,7 @@ They spawn the real harness subprocess against a real notebook venv.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -364,6 +365,47 @@ async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
     )
     # c3 was never reached: the harness was killed before it started.
     assert statuses.get("c3", "not_run") == "not_run"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_batch_kills_and_reaps_its_harness(tmp_path: Path, monkeypatch):
+    """Cancelling a run-all (its socket closed) ends the harness, not just the wait on it."""
+    from strata.notebook.process_tree import terminate_subprocess_tree
+
+    session = _make_session_with_cells(
+        tmp_path, [("c1", "x = 1\n"), ("c_hang", "import time\ntime.sleep(60)\n")]
+    )
+    specs = _populate_consumed_vars(
+        [_cell_spec("c1", "x = 1\n"), _cell_spec("c_hang", "import time\ntime.sleep(60)\n")],
+        session,
+    )
+    spawned: list[asyncio.subprocess.Process] = []
+    spawn = asyncio.create_subprocess_exec
+
+    async def _recording_spawn(*args, **kwargs):
+        spawned.append(await spawn(*args, **kwargs))
+        return spawned[-1]
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _recording_spawn)
+    c1_done = asyncio.Event()
+
+    async def _on_cell_event(result) -> None:
+        if result.cell_id == "c1":
+            c1_done.set()
+
+    batch = asyncio.create_task(
+        CellExecutor(session).execute_batch(specs, on_cell_event=_on_cell_event)
+    )
+    try:
+        await c1_done.wait()
+        batch.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await batch
+        (harness,) = spawned
+        assert harness.returncode is not None
+    finally:
+        for proc in spawned:
+            await terminate_subprocess_tree(proc)
 
 
 @pytest.mark.asyncio
