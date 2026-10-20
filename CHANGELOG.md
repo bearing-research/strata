@@ -57,6 +57,10 @@ exhaustive commit history.
 - **A cell's table read counts a column whose name holds a dot.** The bytes a
   scan read from storage, in `.strata/reads/index.json`, left out a top-level
   column such as `a.b`, taking it for field `b` of a struct `a`. (#TBD)
+- **A row-group cache entry that fails to read is kept.** Any error reading a
+  cached row group deleted the entry, so running out of file handles, or a
+  read racing a write of the same row group, threw away a good entry. Only an
+  entry that fails to parse is removed now; a failed read is a miss. (#TBD)
 
 ## 0.11.0 - 2026-10-19
 
