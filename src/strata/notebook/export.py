@@ -373,11 +373,12 @@ def _neutralize_link_targets(text: str) -> str:
     def _ref(m: re.Match[str]) -> str:
         return m.group(1) + ("#" if _is_unsafe_link(m.group(2)) else m.group(2))
 
+    # Any ``]:``, not only at a line start: a definition inside a blockquote or list
+    # item, or with a label that spans lines, still defines a document-wide target.
     return re.sub(
-        r"^( {0,3}\[[^\]\n]+\]:[ \t]*(?:\r?\n[ \t]*)?)(<[^>\n]*>|\S+)",
+        r"(\]:[ \t]*(?:\r?\n(?:[ \t]*>)*[ \t]*)?)(<[^>\n]*>|\S+)",
         _ref,
         text,
-        flags=re.MULTILINE,
     )
 
 
