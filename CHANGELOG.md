@@ -160,7 +160,7 @@ exhaustive commit history.
   drain that landed while a worker was still being spawned killed only the
   lifeline wrapper, leaving the R process under it running until it exited on
   its own. The pool now finishes the spawn and stops the whole process group.
-  (#TBD)
+  (#1266)
 
 ## 0.11.0 - 2026-10-19
 
