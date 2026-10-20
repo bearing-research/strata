@@ -586,6 +586,59 @@ def _one_active_publication(conn: StoreConnection, dialect: SqlDialect) -> None:
     conn.execute(_ACTIVE_PUBLICATION_INDEX_SQL)
 
 
+# The only transform the embedded runner can build: it runs what ``get_transform`` knows,
+# which strips a ``local://`` scheme, and scan@v1 never builds.
+_EMBEDDED_EXECUTORS = frozenset({"duckdb_sql@v1", "local://duckdb_sql@v1"})
+
+
+def _fail_misbound_builds(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Fail every embedded SQL build over 11 or more inputs, and every build that read one.
+
+    The embedded runner bound inputs in name order, ``input10`` before ``input2``, so
+    those bytes answer another query under a correct hash, as does anything built over
+    them. Failed, a lookup misses and the next materialize rebuilds. A version's row does
+    not say which runner built it (imports carry no build row), so the same spec built by
+    an HTTP executor fails too and rebuilds once.
+    """
+    del dialect
+    rows = conn.execute(
+        "SELECT id, version, transform_spec FROM artifact_versions "
+        "WHERE state IN ('ready', 'superseded') AND transform_spec LIKE ?",
+        ("%duckdb_sql@v1%",),
+    ).fetchall()
+    pending = []
+    for row in rows:
+        spec = parse_transform_spec(row["transform_spec"])
+        if spec is not None and spec.executor in _EMBEDDED_EXECUTORS and len(spec.inputs) >= 11:
+            pending.append(f"{row['id']}@v={row['version']}")
+    failed: set[str] = set()
+    while pending:
+        ref = pending.pop()
+        if ref in failed:
+            continue
+        failed.add(ref)
+        artifact_id, version = ref.rsplit("@v=", 1)
+        conn.execute(
+            "UPDATE artifact_versions SET state = 'failed' WHERE id = ? AND version = ?",
+            (artifact_id, int(version)),
+        )
+        # An artifact or name input records the version it read as ``id@v=N``.
+        readers = conn.execute(
+            "SELECT id, version, input_versions FROM artifact_versions "
+            "WHERE state IN ('ready', 'superseded') AND input_versions LIKE ?",
+            (f"%{ref}%",),
+        ).fetchall()
+        for row in readers:
+            if ref in json.loads(row["input_versions"]).values():
+                pending.append(f"{row['id']}@v={row['version']}")
+    if failed:
+        logger.warning(
+            "Failed %d artifact versions built from inputs bound out of order; "
+            "materializing them again rebuilds them",
+            len(failed),
+        )
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
@@ -597,6 +650,7 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(8, "artifact_publications.token hashed", _hash_publication_tokens),
     _Migration(9, "notebook_workers", _add_notebook_workers),
     _Migration(10, "artifact_publications: one active per version", _one_active_publication),
+    _Migration(11, "fail embedded builds that bound inputs out of order", _fail_misbound_builds),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)

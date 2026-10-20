@@ -14,12 +14,31 @@ exhaustive commit history.
   as its cool-down until its next job, so a host can hold each tenant's
   machines for as long as that tenant's next job is worth waiting for. (#1257)
 
+### Changed
+
+- **Upgrading from 0.10 or earlier: artifacts over a table rebuild once.**
+  Since 0.11 a table input's recorded version carries its reading fingerprint
+  (format version and name mapping) as well as its snapshot and schema, so
+  after the upgrade every named artifact over a table reports stale once, and
+  materializing a transform or scan over a table builds a new artifact rather
+  than reusing the old one. (#1260)
+
 ### Fixed
 
 - **An exported link loses an unsafe target wherever it is defined.** A
   `javascript:`, `vbscript:` or non-image `data:` reference definition inside
   a blockquote or list item, or under a label split across lines, kept its
   target in a Markdown export; it now becomes `#` like the others. (#1259)
+- **A transform over 11 or more inputs reads each input under its own name.**
+  The built-in runner (`duckdb_sql@v1`, always on in personal mode) bound
+  inputs in name order, so `input10` and `input11` came before `input2` and
+  every name from `input2` on queried another input's table. The wrong result
+  was stored as that computation and served again. When the server first opens
+  its store after upgrading, such artifacts, and those built from them, are
+  marked failed; they no longer read and the next materialize builds them
+  again. A `duckdb_sql@v1` build over 11 or more inputs by an HTTP executor is
+  rebuilt too, since an artifact's record does not say which runner built it.
+  `parse_arrow_inputs` orders inputs by index the same way. (#1260)
 - **The shortcuts list names the editor's real undo and redo keys.** It said
   Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
   Mac both use Cmd. (#1256)

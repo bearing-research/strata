@@ -216,6 +216,48 @@ class TestConstantsAndMigrationsAgree:
         assert _columns(migrated.db_path) == _columns(fresh.db_path)
 
 
+def _ready(store, artifact_id, executor, inputs, input_versions=None) -> None:
+    from strata.artifact.provenance import TransformSpec
+
+    spec = TransformSpec(executor=executor, params={"sql": "SELECT 1"}, inputs=inputs)
+    version = store.create_artifact(
+        artifact_id, f"hash-{artifact_id}", transform_spec=spec, input_versions=input_versions
+    )
+    store.finalize_artifact(artifact_id, version, "{}", 1, 1)
+
+
+class TestTheMisboundBuildMigration:
+    def test_fails_embedded_builds_over_eleven_inputs_and_what_read_them(self, tmp_path):
+        """Their bytes bound input10 before input2; anything built over them inherits that."""
+        store = ArtifactStore(tmp_path / "s")
+        twelve = [f"strata://artifact/in{i}@v=1" for i in range(12)]
+        _ready(store, "wide", "local://duckdb_sql@v1", twelve)
+        _ready(store, "wide_bare", "duckdb_sql@v1", twelve[:11])
+        _ready(
+            store,
+            "reader",
+            "local://duckdb_sql@v1",
+            ["strata://name/wide"],
+            {"strata://name/wide": "wide@v=1"},
+        )
+        _ready(store, "narrow", "local://duckdb_sql@v1", twelve[:10])
+        _ready(store, "remote", "pandas_script@v1", twelve)
+        conn = sqlite3.connect(store.db_path)
+        conn.execute("DELETE FROM schema_version WHERE version >= 11")
+        conn.commit()
+        conn.close()
+
+        reopened = ArtifactStore(tmp_path / "s")
+
+        states = {a: reopened.get_artifact(a, 1).state for a in ("wide", "wide_bare", "reader")}
+        assert states == {"wide": "failed", "wide_bare": "failed", "reader": "failed"}
+        assert reopened.find_by_provenance("hash-wide") is None
+        assert reopened.find_by_provenance("hash-reader") is None
+        assert reopened.find_by_provenance("hash-narrow") is not None
+        assert reopened.find_by_provenance("hash-remote") is not None
+        assert _version(reopened.db_path) == _LATEST_SCHEMA_VERSION
+
+
 @pytest.mark.parametrize("dialect_name", ["sqlite"])
 def test_column_exists_reports_truthfully(tmp_path, dialect_name):
     """The primitive every migration is built from."""

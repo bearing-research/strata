@@ -830,8 +830,10 @@ class BuildRunner:
 
         from strata.transforms.base import _run_transform
 
+        # Transforms bind inputs by position, so keep the caller's index order
+        # (a name sort puts input10 before input2).
         inputs = []
-        for name, path in sorted(input_files, key=lambda x: x[0]):
+        for _name, path in input_files:
             with ipc.open_stream(str(path)) as reader:
                 inputs.append(reader.read_all())
 

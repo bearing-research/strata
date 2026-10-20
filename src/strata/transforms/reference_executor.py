@@ -294,13 +294,14 @@ def get_app():
 def parse_arrow_inputs(
     file_parts: dict[str, bytes],
 ) -> list[ExecutorInput]:
-    """Collect non-empty ``input*`` parts as ExecutorInputs, sorted by name."""
+    """Collect non-empty ``inputN`` parts as ExecutorInputs, in index order."""
     inputs = []
     for name, data in file_parts.items():
-        if name.startswith("input") and data:
+        if name.startswith("input") and name[5:].isdigit() and data:
             inputs.append(ExecutorInput(name=name, data=data))
 
-    return sorted(inputs, key=lambda x: x.name)
+    # Numeric, not by name: a name sort puts input10 before input2.
+    return sorted(inputs, key=lambda x: int(x.name[5:]))
 
 
 def serialize_arrow_output(table) -> bytes:
