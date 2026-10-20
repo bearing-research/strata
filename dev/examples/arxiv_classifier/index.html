@@ -2166,11 +2166,13 @@ DataFusion worker, close to the data, avoids round-tripping the full
 dataset. Cell 5 runs on the GPU worker; training a logistic regression on
 the embeddings takes under a second on a CPU, so it stays local.</p>
 <h2 id="running-it-locally">Running it locally<a class="headerlink" href="#running-it-locally" title="Permanent link">&para;</a></h2>
-<p><code>notebook.toml</code> points <code>df-cluster</code> and <code>gpu-fly</code> at hosted workers. To use
-two local HTTP executors instead, change the <code>url</code> under each
-<code>[workers.config]</code>: <code>df-cluster</code> to <code>http://127.0.0.1:9000/v1/execute</code> and
-<code>gpu-fly</code> to <code>http://127.0.0.1:9001/v1/execute</code>, the ports
-<code>run_local_workers.sh</code> binds.</p>
+<p><code>notebook.toml</code> points <code>df-cluster</code> and <code>gpu-fly</code> at two local HTTP
+executors, <code>http://127.0.0.1:9000/v1/execute</code> and
+<code>http://127.0.0.1:9001/v1/execute</code>, the ports <code>run_local_workers.sh</code> binds.
+To run them on hosted machines instead, deploy <code>df-cluster/</code> to Fly and
+<code>modal_gpu_worker.py</code> to Modal (<code>MODAL_DEPLOY.md</code>), then change the <code>url</code>
+under each <code>[workers.config]</code> to the deployed one. <code>df-cluster</code> sends the
+token in <code>STRATA_DF_CLUSTER_TOKEN</code> when that is set.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Terminal 1: start the two local worker processes</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>./examples/arxiv_classifier/run_local_workers.sh
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
