@@ -1829,6 +1829,37 @@ class TestSchemaMigrations:
         finally:
             dialect.close()
 
+    def test_an_existing_database_fails_misbound_builds(self, postgres_dsn, tmp_path, store):
+        """Embedded SQL over 11+ inputs bound input10 before input2, as did what read it."""
+        twelve = [f"strata://artifact/in{i}@v=1" for i in range(12)]
+        builds = {
+            "wide": ("local://duckdb_sql@v1", twelve, None),
+            "reader": ("duckdb_sql@v1", ["strata://name/wide"], {"strata://name/wide": "wide@v=1"}),
+            "narrow": ("local://duckdb_sql@v1", twelve[:10], None),
+        }
+        for artifact_id, (executor, inputs, input_versions) in builds.items():
+            spec = TransformSpec(executor=executor, params={"sql": "SELECT 1"}, inputs=inputs)
+            version = store.create_artifact(
+                artifact_id, f"prov-{artifact_id}", spec, input_versions=input_versions
+            )
+            store.finalize_artifact(artifact_id, version, schema_json="", row_count=1, byte_size=1)
+        conn = store._get_connection()
+        try:
+            conn.execute("DELETE FROM schema_version WHERE version >= 11")
+            conn.commit()
+        finally:
+            conn.close()
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+
+            assert reopened.find_by_provenance("prov-wide") is None
+            assert reopened.find_by_provenance("prov-reader") is None
+            assert reopened.find_by_provenance("prov-narrow") is not None
+        finally:
+            dialect.close()
+
     def test_column_exists_reports_truthfully(self, store):
         conn = store._get_connection()
         try:

@@ -328,6 +328,31 @@ class TestChainedArtifacts:
         finally:
             client.close()
 
+    def test_a_build_over_twelve_inputs_binds_each_by_its_index(self, e2e_server):
+        """A name sort binds input10 and input11 before input2 and shifts the rest."""
+        client = ArtifactClient(e2e_server["base_url"])
+
+        try:
+            uris = [
+                client.create_artifact(
+                    inputs=[f"table://source{i}"], result_table=pa.table({"which": [i]})
+                )
+                for i in range(12)
+            ]
+            uri = client.create_artifact(
+                inputs=uris,
+                result_table=pa.table({"unused": [0]}),
+                params={
+                    "sql": "SELECT (SELECT which FROM input2) AS in2, "
+                    "(SELECT which FROM input10) AS in10, (SELECT which FROM input11) AS in11"
+                },
+                name="twelve_inputs",
+            )
+
+            assert client.fetch_artifact(uri).to_pylist() == [{"in2": 2, "in10": 10, "in11": 11}]
+        finally:
+            client.close()
+
 
 class TestLineageTraversal:
     def test_lineage_with_multiple_inputs(self, e2e_server):

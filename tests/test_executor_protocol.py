@@ -285,6 +285,16 @@ class TestUtilityFunctions:
         assert inputs[0].name == "input0"
         assert inputs[1].name == "input1"
 
+    def test_parse_arrow_inputs_orders_by_index_past_ten(self):
+        """A name sort would put input10 and input11 before input2."""
+        from strata.transforms.reference_executor import parse_arrow_inputs
+
+        file_parts = {f"input{i}": table_to_ipc_bytes(pa.table({"i": [i]})) for i in range(12)}
+
+        inputs = parse_arrow_inputs(file_parts)
+
+        assert [inp.name for inp in inputs] == [f"input{i}" for i in range(12)]
+
     def test_serialize_arrow_output(self):
         from strata.transforms.reference_executor import serialize_arrow_output
 
