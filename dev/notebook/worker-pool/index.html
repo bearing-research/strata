@@ -2346,7 +2346,8 @@ terminal job, including failures and cancels, with a monotonic duration. A job
 cancelled before it reached a machine ran for no time and has none. What is billable,
 and at what price, is decided above it.</p>
 <p><strong>It does not keep machines warm on purpose.</strong> <code>start_scaler()</code> stops
-machines idle past their type's <code>cool_down_seconds</code>, and nothing else in the
+machines idle past their type's <code>cool_down_seconds</code>, or the <code>hold_seconds</code> of
+the last job they ran, and nothing else in the
 pool ever ends a machine that finished its work: a deployment that forgets
 that call bills for every machine it ever started. A machine whose stop fails
 keeps its row, still counted against the fleet cap, and the next pass tries
@@ -2479,12 +2480,16 @@ deployment cannot forget the call that stops it paying for idle machines.</p>
 </tbody>
 </table>
 <p>Both job submit routes take their options as query parameters: <code>machine_type</code>
-(required), <code>priority</code> (default 0, higher runs first; a 64-bit integer), <code>session_id</code> and
-<code>timeout_seconds</code> (both optional). <code>timeout_seconds</code> can shorten the machine type's
-<code>job_timeout_seconds</code> but not extend it. <code>POST /v1/jobs/sync</code> also takes
-<code>wait_seconds</code> (default 300), which bounds the wait and not the job, and is cut to
-the type's <code>boot_timeout_seconds</code> plus <code>job_timeout_seconds</code>. Both times must be
-positive and finite; anything else is a 422 and no job is queued.</p>
+(required), <code>priority</code> (default 0, higher runs first; a 64-bit integer), <code>session_id</code>,
+<code>timeout_seconds</code> and <code>hold_seconds</code> (all optional). <code>timeout_seconds</code> can shorten the
+machine type's <code>job_timeout_seconds</code> but not extend it. <code>hold_seconds</code> is how long the
+machine that runs the job stays warm once idle, in place of the type's
+<code>cool_down_seconds</code>, until its next job names another hold or none; a host that sees a
+tenant's gaps between jobs can hold that tenant's machines longer or shorter than the
+type's. <code>POST /v1/jobs/sync</code> also takes <code>wait_seconds</code> (default 300), which bounds the
+wait and not the job, and is cut to the type's <code>boot_timeout_seconds</code> plus
+<code>job_timeout_seconds</code>. These times must be finite, and all but <code>hold_seconds</code> (which may
+be 0) positive; anything else is a 422 and no job is queued.</p>
 <p>A hint starts one machine of the type for the caller's tenant unless one is
 already warm or starting, so its boot overlaps the user's typing instead of
 their first run. Send one when a user opens a notebook that names the type, or
