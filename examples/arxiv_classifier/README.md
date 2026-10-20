@@ -36,11 +36,13 @@ the embeddings takes under a second on a CPU, so it stays local.
 
 ## Running it locally
 
-`notebook.toml` points `df-cluster` and `gpu-fly` at hosted workers. To use
-two local HTTP executors instead, change the `url` under each
-`[workers.config]`: `df-cluster` to `http://127.0.0.1:9000/v1/execute` and
-`gpu-fly` to `http://127.0.0.1:9001/v1/execute`, the ports
-`run_local_workers.sh` binds.
+`notebook.toml` points `df-cluster` and `gpu-fly` at two local HTTP
+executors, `http://127.0.0.1:9000/v1/execute` and
+`http://127.0.0.1:9001/v1/execute`, the ports `run_local_workers.sh` binds.
+To run them on hosted machines instead, deploy `df-cluster/` to Fly and
+`modal_gpu_worker.py` to Modal (`MODAL_DEPLOY.md`), then change the `url`
+under each `[workers.config]` to the deployed one. `df-cluster` sends the
+token in `STRATA_DF_CLUSTER_TOKEN` when that is set.
 
 ```bash
 # Terminal 1: start the two local worker processes

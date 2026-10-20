@@ -1,14 +1,18 @@
 <script setup lang="ts">
+import { historyShortcuts } from '../composables/editorKeymaps'
+
 defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ close: [] }>()
+
+const history = historyShortcuts(/Mac|iPhone|iPad/.test(navigator.platform))
 
 const shortcuts = [
   { keys: 'Shift + Enter', description: 'Run cell' },
   { keys: 'Mod + Shift + Enter', description: 'Rerun cell (bypass cache)' },
   { keys: '?', description: 'Show keyboard shortcuts' },
   { keys: 'Esc', description: 'Close modal' },
-  { keys: 'Ctrl + Z', description: 'Undo (in editor)' },
-  { keys: 'Ctrl + Shift + Z', description: 'Redo (in editor)' },
+  { keys: history.undo, description: 'Undo (in editor)' },
+  { keys: history.redo, description: 'Redo (in editor)' },
 ]
 </script>
 

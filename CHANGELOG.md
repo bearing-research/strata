@@ -7,6 +7,12 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Fixed
+
+- **The shortcuts list names the editor's real undo and redo keys.** It said
+  Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
+  Mac both use Cmd. (#1255)
+
 ## 0.11.0 - 2026-10-19
 
 ### Added

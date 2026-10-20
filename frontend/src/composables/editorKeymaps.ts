@@ -36,3 +36,11 @@ export function editorKeymaps(handlers: RunHandlers): Extension[] {
     keymap.of([...defaultKeymap, ...historyKeymap]),
   ]
 }
+
+/**
+ * Undo and redo as the shortcuts modal names them. CodeMirror's history keymap
+ * binds redo to Mod+Shift+Z on a Mac and Mod+Y elsewhere.
+ */
+export function historyShortcuts(mac: boolean): { undo: string; redo: string } {
+  return { undo: 'Mod + Z', redo: mac ? 'Mod + Shift + Z' : 'Mod + Y' }
+}
