@@ -56,6 +56,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   could drop the new rows and an unfiltered one could fail reading a page.
   They are now matched on the file size the Iceberg manifest records too.
   (#TBD)
+- **A cell's table read counts a column whose name holds a dot.** The bytes a
+  scan read from storage, in `.strata/reads/index.json`, left out a top-level
+  column such as `a.b`, taking it for field `b` of a struct `a`. (#TBD)
 
 ## 0.11.0 - 2026-10-19
 

@@ -27,13 +27,20 @@ pc = cast(Any, _pc)
 _MAX_FILE_CACHE_SIZE = 128
 
 
+def _prefixes(path: str) -> set[str]:
+    """Every dotted prefix of a chunk's path: the names pyarrow reads it for."""
+    parts = path.split(".")
+    return {".".join(parts[:n]) for n in range(1, len(parts) + 1)}
+
+
 def _chunk_bytes(row_group: pq.RowGroupMetaData, columns: list[str] | None) -> int:
     """The compressed size of the row group's column chunks a read of *columns* fetches."""
     wanted = None if columns is None else set(columns)
+    # Not the first segment alone: a top-level name may hold a dot itself.
     return sum(
         chunk.total_compressed_size
         for chunk in (row_group.column(i) for i in range(row_group.num_columns))
-        if wanted is None or chunk.path_in_schema.split(".")[0] in wanted
+        if wanted is None or not wanted.isdisjoint(_prefixes(chunk.path_in_schema))
     )
 
 

@@ -328,6 +328,32 @@ def test_a_fetch_counts_the_column_chunks_it_read_from_storage(tmp_path, granula
     assert hit.storage_bytes == 0
 
 
+def test_a_fetch_counts_a_column_whose_name_holds_a_dot(tmp_path):
+    """``a.b`` is a top-level name here, not field ``b`` of a struct ``a``."""
+    parquet_path = tmp_path / "data.parquet"
+    pq.write_table(pa.table({"a.b": [1, 2], "c": [3, 4]}), parquet_path)
+    row_group = pq.ParquetFile(parquet_path).metadata.row_group(0)
+    fetcher = CachedFetcher(StrataConfig(cache_dir=tmp_path / "cache"))
+    task = Task(
+        file_path=str(parquet_path),
+        row_group_id=0,
+        cache_key=CacheKey(
+            tenant_id="_default",
+            table_identity=TableIdentity.from_table_id("test_db.events"),
+            file_size=1024,
+            file_path=str(parquet_path),
+            row_group_id=0,
+            projection_fingerprint=CacheKey.compute_projection_fingerprint(["a.b"]),
+        ),
+        num_rows=2,
+        columns=["a.b"],
+    )
+
+    fetcher.fetch(task)
+
+    assert task.storage_bytes == row_group.column(0).total_compressed_size > 0
+
+
 @pytest.mark.parametrize("granularity", list(CacheGranularity))
 def test_an_empty_projection_keeps_the_row_count_on_a_miss_and_a_hit(tmp_path, granularity):
     """``columns=[]`` asks for every row and no column (a row count), cached or not."""
