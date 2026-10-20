@@ -96,7 +96,9 @@ For each cell, the exporter emits in order:
     - **PNG images** inline as `data:` URLs, loaded lazily from the
       artifact store when needed.
     - **JSON / dict / list** as fenced JSON.
-    - **Markdown** rendered as content.
+    - **Markdown** (including an [`# @output_dir`](annotations.md#output_dir)
+      folder's summary) rendered as content in markdown exports and as
+      preformatted text in HTML.
     - **Pickled** values become a placeholder with the type hint
       from the serializer (e.g. *Pickled output (`<MyThing object>`) not rendered in export*).
     - **An output that could not be stored** (a serialization error)
@@ -149,7 +151,8 @@ export for limited gain). The cell banner notes `max_iter` and
 ### Markdown cells, content verbatim
 
 Markdown cells render as content, not as fenced source. In HTML
-exports they currently render as preformatted text (no
+exports they, and markdown display outputs such as an `# @output_dir`
+folder summary, currently render as preformatted text (no
 markdown-to-HTML pass); for prose-heavy notebooks use the markdown
 format.
 

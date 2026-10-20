@@ -27,9 +27,8 @@ This page deploys Strata on [Fly.io](https://fly.io) as a single-tenant, persona
 - [Fly CLI](https://fly.io/docs/flyctl/install/) installed (`brew install flyctl` on macOS).
 - `fly auth login` completed (opens a browser; one-time).
 - A Fly.io account with a payment method on file. The template runs
-  one `shared-cpu-4x` VM with 2 GB of memory. It suspends idle machines
-  but keeps one running, so it does not scale to zero unless you change
-  `min_machines_running`. See
+  one `shared-cpu-4x` VM with 2 GB of memory and keeps it running, so it
+  does not scale to zero unless you set `min_machines_running = 0`. See
   [Fly pricing](https://fly.io/docs/about/pricing/) for what that costs.
 
 ## Deploy
@@ -81,10 +80,10 @@ the most common cause is a cold-start delay on the first request.
 
 The template configures:
 
-- **VM size**: `shared-cpu-4x` with 2 GB RAM
-- **Auto-scaling**: machines suspend when idle, auto-start on requests
-- **Persistent storage**: 5 GB volume at `/home/strata/.strata` with auto-extend
-- **Health check**: HTTP on `/health` every 15 s
+- **VM size:** `shared-cpu-4x` with 2 GB RAM
+- **Auto-start:** the machine starts on requests; with `min_machines_running = 1` it never suspends, so set `min_machines_running = 0` to suspend it when idle
+- **Persistent storage:** 5 GB volume at `/home/strata/.strata` with auto-extend
+- **Health check:** HTTP on `/health` every 15 s
 
 ## Key environment variables
 

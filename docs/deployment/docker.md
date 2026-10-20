@@ -83,8 +83,7 @@ docker compose up -d --build
 **Permissions.** The container runs as a non-root `strata` user (UID
 1000 in the Docker image). If your host user has a different UID,
 files the container writes will be owned by UID 1000 from the host's
-perspective. On Linux, `chown -R 1000:1000 ./notebooks` once, or run
-the container with `user: "${UID}:${GID}"` in compose to align IDs.
+perspective. On Linux, `chown -R 1000:1000 ./notebooks` once.
 On macOS Docker Desktop this is handled transparently by the file-
 sharing layer; no action needed.
 
@@ -144,6 +143,12 @@ docker run --rm -p 127.0.0.1:8765:8765 \
 ```
 
 To extend it, start your own Dockerfile `FROM` it.
+
+The image runs as the non-root `strata` user, so a service-mode server in it
+refuses [`STRATA_NOTEBOOK_HARNESS_USER`](service-mode.md#who-a-cell-is-strata_notebook_harness_user):
+switching users needs root. To run cells as a harness user here, run the
+container as root (`--user root`, or `user: root` in Compose) and under an init
+(`docker run --init`, or `init: true`).
 
 ## Building the image manually
 

@@ -21,7 +21,7 @@ what the graph looks like for a realistic ML pipeline: load → explore
 | `load_data` | Loads the iris dataset into a DataFrame. |
 | `explore_stats` | Per-feature summary stats. |
 | `scatter_plot` | Pair-plot of the four features, colored by class. |
-| `train_test` | 80/20 train/test split. |
+| `train_test` | 70/30 train/test split. |
 | `train_model` | Fits a `RandomForestClassifier` (100 trees). |
 | `evaluate` | Accuracy + per-class precision/recall. |
 | `confusion` | Confusion-matrix heatmap. |

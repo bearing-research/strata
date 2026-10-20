@@ -50,9 +50,10 @@ class MessageType(StrEnum):
     CELL_STATUS = "cell_status"
     CELL_OUTPUT = "cell_output"
     # Incremental output while a cell runs (today only prompt-cell LLM streaming).
-    # Payload: ``{cell_id, attempt, kind, text}``; ``kind`` is ``"delta"`` (append) or
-    # ``"retry"`` (validation failed: clear the buffer). Ephemeral: never persisted or
-    # replayed; the final CELL_OUTPUT is canonical.
+    # Payload: ``{cell_id, attempt, kind, text}``; ``kind`` is ``"delta"`` (append),
+    # ``"retry"`` (validation failed: clear the buffer) or ``"notice"`` (a provider note
+    # kept out of the content). Ephemeral: never persisted or replayed; the final
+    # CELL_OUTPUT is canonical.
     CELL_OUTPUT_DELTA = "cell_output_delta"
     CELL_CONSOLE = "cell_console"
     CELL_ERROR = "cell_error"

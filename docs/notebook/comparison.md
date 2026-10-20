@@ -72,22 +72,22 @@ cell 3 from rebasing on top of changes to cell 7.
 
 ## Where other notebooks are stronger
 
-- **Interactive UI widgets.** Marimo's `mo.ui.*` widgets are composed in
+- **Interactive UI widgets:** Marimo's `mo.ui.*` widgets are composed in
   Python and can be built up programmatically. Strata's `widget` cells are
   declarative rather than composable: slider, number, dropdown, text and
   checkbox, declared in the cell and consumed by downstream cells as inputs.
   With Live on, moving a control re-runs what depends on it.
-- **Ecosystem maturity.** Jupyter's ecosystem of extensions, kernels (R,
+- **Ecosystem maturity:** Jupyter's ecosystem of extensions, kernels (R,
   Julia, Scala, Bash, etc.), and integrations is unmatched. Strata runs
   Python, R, SQL, prompt, markdown and widget cells in one DAG, which covers
   a narrower range than Jupyter's kernels.
-- **Reactive evaluation at the keystroke level.** Pluto and Marimo
+- **Reactive evaluation at the keystroke level:** Pluto and Marimo
   immediately re-run dependent cells on edit. Strata is reactive about
   *staleness* (the DAG updates, downstream cells flip to stale on every
   source change) and execution is explicit, you press Run. The exception is
   a widget cell with Live on, where moving a control re-runs its dependents
   immediately.
-- **Hosted offerings.** Google Colab, Deepnote, Hex, and Databricks
+- **Hosted offerings:** Google Colab, Deepnote, Hex, and Databricks
   Notebooks all bundle a hosted runtime; Strata is self-hosted (see
   the section below on where these fit).
 
@@ -121,17 +121,17 @@ moat is compute provisioning, not notebook-engine innovation.
 
 Strata is the right fit when your notebook is:
 
-- **Expensive to recompute**: model training, embeddings, large scans,
+- **Expensive to recompute:** model training, embeddings, large scans,
   long LLM chains. The automatic cache pays for itself the first time you
   reload.
-- **Heterogeneous in compute**: some cells want a GPU, some want a
+- **Heterogeneous in compute:** some cells want a GPU, some want a
   warehouse, some are pure CPU. The `# @worker` annotation routes each
   cell to where it should run.
-- **Iterative and branching**: variant cells let you keep three model
+- **Iterative and branching:** variant cells let you keep three model
   candidates in one notebook without forking.
-- **Version-controlled with others**: plain text, no JSON-in-git pain,
+- **Version-controlled with others:** plain text, no JSON-in-git pain,
   no execution-count churn on every re-run.
-- **AI-heavy**: prompt cells make LLM responses cacheable like any
+- **AI-heavy:** prompt cells make LLM responses cacheable like any
   other artifact, with schema-constrained output and retry-on-validation.
 
 For light interactive exploration where the work is a few seconds per

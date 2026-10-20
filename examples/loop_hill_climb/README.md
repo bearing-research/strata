@@ -1,6 +1,6 @@
 # Loop Hill Climb: demo for the `@loop` cell primitive
 
-Three-cell notebook that exercises every moving part of Strata's loop
+Four-code-cell notebook (plus a markdown cell) that exercises every moving part of Strata's loop
 cell feature: the `@loop` / `@loop_until` annotations, per-iteration
 artifacts, the progress badge, the iteration picker, and the
 `@loop start_from` fork. The cell body is greedy hill climbing on
@@ -42,8 +42,8 @@ converge to different basins.
 uv run strata-notebook
 ```
 
-Open the notebook from the Strata home page, then run the three cells
-in order. While `evolve` is running you should see:
+Open the notebook from the Strata home page, then run the four code
+cells in order. While `evolve` is running you should see:
 
 - A `iter k/40` progress badge next to the cell title, with a spinner
   while it is still running.
@@ -69,7 +69,8 @@ demo below.
 import random
 
 next_iter = state["iter"] + 1
-rng = random.Random((next_iter, round(state["x"], 6), round(state["y"], 6), "alt"))
+# Numbers only: hash() of a str changes from one process to the next.
+rng = random.Random(hash((next_iter, round(state["x"], 6), round(state["y"], 6), 2)))
 
 # Larger exploration step so the fork is meaningfully different.
 step = state["step"] * 3.0

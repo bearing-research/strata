@@ -25,7 +25,7 @@ Withdraw it with: strata artifact unpublish ocxQj-toxGttZYyRl-Zf9...
 ```
 
 The link starts with the server's `STRATA_PUBLIC_BASE_URL` and
-`STRATA_PUBLIC_BASE_PATH` when they are set, or with `--to-url` when publishing
+`STRATA_PUBLIC_BASE_PATH` when they are set, or with `--to URL` when publishing
 to another store.
 
 Every cell output is already an artifact, and a plot is no exception: it is

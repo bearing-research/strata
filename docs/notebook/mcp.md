@@ -111,7 +111,7 @@ details stay in the server log.
 | `set_variant(session_id, group, active?, mode?)` | Pick which variant of a group runs, or set the group to `switch` / `sweep`. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
-| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. With `confirm_reads`, a run over the server's read threshold returns `error_code: large_read` and the estimate instead; `approve_reads` runs it. |
+| `run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. With `confirm_reads`, a run over the server's read threshold returns `status: error`, `error_code: large_read` and the estimate in `reads` instead; `approve_reads` runs it. |
 | `cancel_cell(session_id, cell_id)` | Cancel the cell's run, whoever started it, as the browser's stop button does: the run stops and the cell is left idle. A `run_cell` waiting on it returns `status: error` with `error_code: cancelled`. Returns `{cell_id, cancelled, status}`; `cancelled` is `false` when the cell was not running. |
 | `set_widget_value(session_id, cell_id, values)` | Set a widget cell's controls and re-run it at the new values, the same thing moving the slider does. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
@@ -124,12 +124,12 @@ details stay in the server log.
 | `remove_dependency(session_id, package)` | `uv remove` a dependency. |
 | `note(session_id, message)` | Post a line into the terminal viewer's Agent tab for the human watching. |
 | `list_workers(session_id)` | The notebook's registered workers and which is the default. |
-| `add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)` | Register a remote executor worker so cells can run on it. |
+| `add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)` | Register a remote executor worker so cells can run on it. Refused where the server manages worker definitions (service mode, or `STRATA_NOTEBOOK_WORKERS_EDITABLE=false`), as are `remove_worker` and `connect_ssh_worker`. |
 | `set_default_worker(session_id, name?)` | Set the notebook's default worker (`name` omitted/`local` clears it). |
 | `remove_worker(session_id, name)` | Remove a notebook-scoped worker. |
 | `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to)). |
 | `disconnect_ssh_worker(session_id, name, stop_remote?)` | Close an SSH worker's tunnel and unregister it. |
-| `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a `# @per_variant` cell, name it `variable@variant=<name>` (for example `score@variant=triple`); the error on a bare name lists the stored ones. |
+| `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a `# @per_variant` cell, name it `variable@variant=<name>` (for example `score@variant=triple`); the error on a bare name lists the stored ones. `variable` may be `__mount__<name>`, what a run wrote through its `rw` mount `<name>`. |
 | `promote(session_id, cell_id, variable, name, alias?, tags?)` | Copy the output **and everything behind it** into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back `pending`. Needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`. |
 | `publish_preflight(session_id, cell_id, variable)` | What publishing would expose - the whole chain, step by step. Read this to the user before `publish`. |
 | `publish(session_id, cell_id, variable, title?)` | Mint a URL that needs no credentials. Copies the chain into the store the link resolves from first. |
@@ -170,10 +170,20 @@ already exist.
 
 On a server that [asks before a large read](lake-aware-cells.md#asking-before-a-large-read),
 pass `confirm_reads=true` so a run that would move more than the threshold
-returns `error_code: large_read` with each cell's inputs, `bytes_to_move` and
-`cost` rather than starting. Ask the user, then call again with
-`approve_reads=true`. Without either, the run goes ahead and the reads index
-records that it was not asked.
+returns, rather than starting:
+
+```json
+{"cell_id": "...", "status": "error", "error_code": "large_read",
+ "error": "<the server's message>",
+ "reads": [{"cell_id": "...", "machine": "...", "inputs": [...],
+            "bytes_to_move": 0, "cost": 0.0}]}
+```
+
+`reads` has one entry per cell of the run (its stale upstreams included) that
+reads past the threshold with no approval kept. Ask the user, then call again
+with `approve_reads=true`; the yes is remembered for that cell, machine and
+inputs, so the same run does not ask again. Without either, the run goes ahead
+and the reads index records that it was not asked.
 
 `set_variant` drives [variant groups](annotations.md#variant-cells):
 `set_variant(session_id, "policy", active="service")` picks one variant,

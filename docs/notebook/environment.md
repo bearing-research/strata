@@ -95,7 +95,7 @@ When you install or remove a package:
 
 1. `uv sync` runs to update `uv.lock`
 2. The lockfile hash changes
-3. All cells become **stale** (their provenance no longer matches)
+3. Cells go out of date (**idle**), since their provenance no longer matches, and the cells below them read **stale**
 4. Re-running any cell recomputes with the new environment
 
 !!! info "Switching back"

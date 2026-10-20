@@ -193,8 +193,8 @@ virginica                6.59              2.97               5.55              
 ```
 
 Strata reads this cell's AST, sees it references `df` and `feature_names`
-from the loader, and wires an edge. The DAG view in the sidebar
-shows the dependency.
+from the loader, and wires an edge. The DAG view in the bottom
+drawer shows the dependency.
 
 ### Plot
 
@@ -294,8 +294,7 @@ inputs, model config)`. Running again with the same upstream
 Needs `ANTHROPIC_API_KEY` (or another provider's key) configured in
 the Runtime panel. See [Provider configuration](../notebook/cells.md#provider-configuration)
 for provider setup and [Prompt cells](../notebook/cells.md#prompt-cells)
-for the full annotation surface (`@output_schema`, `@validate_retries`,
-multi-turn conversations).
+for the full annotation surface (`@output_schema`, `@validate_retries`).
 
 ## 7. Other display types
 

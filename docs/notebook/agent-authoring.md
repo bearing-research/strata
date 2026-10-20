@@ -48,7 +48,7 @@ is the file-format contract underneath both.
 
 ```
 my_analysis/
-├── .gitignore             # written by `strata new`: keeps .strata/, .venv/ and work/ out of git
+├── .gitignore             # written by `strata new`: keeps runtime state (.strata/, .venv/, work/, ...) out of git
 ├── notebook.toml          # committed config: cells, env, workers, mounts
 ├── pyproject.toml         # uv-managed dependencies
 ├── uv.lock                # written by uv; do not hand-edit
@@ -253,8 +253,11 @@ what that run stored, so pass `--force` once before comparing.
 - **Don't reuse cell IDs** or change `notebook_id` after artifacts exist.
 - **Don't encode per-cell config in `notebook.toml`** when an annotation
   exists - annotations are the single per-cell configuration surface.
-- **Don't write outputs into the notebook directory** from cell code
-  unless you mean to commit them; artifacts already persist results.
+- **Mind where cell code writes files.** Cells run in the gitignored
+  `work/` directory, so a relative path lands there. Files to keep as a
+  result go in a [`# @output_dir`](annotations.md#output_dir) folder. Don't
+  write into `../` (the notebook directory) unless you mean to commit the
+  file.
 
 ## Worked example
 

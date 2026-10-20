@@ -530,10 +530,9 @@ class NotebookToml(BaseModel):
     r: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "R environment metadata under ``[r]``. Mirrors the Python "
-            "side's ``[environment]`` block (lockfile hash, last sync "
-            "timestamp, R version). Populated by ``_renv_sync`` after "
-            "a successful ``renv::restore()``."
+            "A legacy ``[r]`` block, written back as it was read. The R "
+            "runtime (lockfile hash, last sync, R version) lives in "
+            "``.strata/runtime.json`` as ``RRuntime``."
         ),
     )
     # Round-tripped in TOML but unused at runtime
@@ -987,10 +986,9 @@ class NotebookState(BaseModel):
     r: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "R environment metadata under ``[r]``: lockfile hash, last "
-            "renv-sync timestamp, R version. Populated by ``_renv_sync`` "
-            "after a successful ``renv::restore()``. Mirrors the Python "
-            "side's ``[environment]`` block."
+            "A legacy ``[r]`` block, written back as it was read. The R "
+            "runtime (lockfile hash, last sync, R version) lives in "
+            "``.strata/runtime.json`` as ``RRuntime``."
         ),
     )
     cells: list[CellState] = Field(default_factory=list, description="Cells with source")

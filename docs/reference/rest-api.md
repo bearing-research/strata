@@ -68,6 +68,7 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | Pinning and unpinning a version (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) | `artifacts:pin` |
 | `GET /v1/admin/tenants`, `GET /v1/admin/tenants/{tenant_id}` | `admin:tenants` |
 | `/v1/admin/notebook-workers*` (the server-managed worker registry) | `admin:notebook-workers` |
+| `GET` / `PUT /v1/admin/notebook-credentials` (the named credentials and catalogs cells use) | `admin:notebook-credentials` |
 | `POST /v1/registry/pending/approve` and `.../reject` | `admin:registry` |
 | Quiesce and release (`POST /v1/notebooks/{id}/quiesce` / `release`, `POST /v1/projects/{path}/quiesce` / `release`) | `admin:notebooks` |
 | `POST /v1/artifacts/gc`, and another tenant's `GET /v1/artifacts/usage` / `stats` | `admin:*` |
@@ -733,6 +734,9 @@ POST /v1/notebooks/{session_id}/environment/environment.yaml/preview
 GET /v1/notebooks/{session_id}/workers
 ```
 
+Each remote worker carries its `/health` result, reused for 5 seconds.
+`?refresh=true` probes every worker again instead of reusing it.
+
 ### Update Notebook Worker
 
 ```
@@ -1201,6 +1205,8 @@ by that team store, after this server's own gate.
 | `DELETE` | `/v1/names/{name}/aliases/{alias}` | personal | Delete an alias; a protected alias answers `202` and queues |
 | `GET` | `/v1/registry/artifacts` | read | Ready artifacts carrying one tag (`tag_key`, optional `tag_value`) |
 | `GET` | `/v1/registry/pending` | read | Protected-alias changes awaiting approval |
+| `POST` | `/v1/registry/pending/approve` | `admin:registry` | Apply the pending change to `{"name", "alias"}`, with the approver as the audit actor. Service mode also needs `STRATA_SERVICE_WRITES_ENABLED`, but not `artifacts:write`. The requester approving their own change is a `403` unless they hold `admin:*`; no such change is a `404` |
+| `POST` | `/v1/registry/pending/reject` | `admin:registry` | Discard the pending change to `{"name", "alias"}`, audited, under the same gates as approve; no such change is a `404` |
 | `GET` | `/v1/cache/stats` | `admin:cache` | Disk cache statistics, with counts per table across tenants |
 | `GET` | `/v1/cache/evictions` | open | Eviction rate and pressure level; `include_events=true` adds recent events |
 | `POST` | `/v1/cache/warm` | table ACL | Warm the cache for some tables and wait until every row group is fetched |
@@ -1216,5 +1222,5 @@ by that team store, after this server's own gate.
 | `GET` | `/v1/debug/rate-limits` | `admin:*` | Rate limiter allowed and rejected counts |
 | `GET` | `/v1/debug/cache/inspect` | `admin:cache` | Disk cache entries: key hash, file path, size and stored metadata |
 
-The `admin:*` and `admin:cache` gates apply under principal auth; without it
+The `admin:*`, `admin:cache` and `admin:registry` gates apply under principal auth; without it
 those routes are open.

@@ -62,7 +62,7 @@ INFO:     Uvicorn running on http://127.0.0.1:9000
 curl http://localhost:9000/health
 ```
 
-Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, `launch_id` is set only on a worker Strata [launched over SSH](#run-cells-on-a-machine-you-can-ssh-to), and `hardware` lists what the machine reports):
+Expected response (`locked_environments` is `false` if `uv` is not on the worker's `PATH`, `languages` adds `"r"` when `Rscript` is installed, `locked_r_environments` is `true` when that R can load `renv`, `launch_id` is set only on a worker Strata [launched over SSH](#run-cells-on-a-machine-you-can-ssh-to), and `hardware` lists what the machine reports). `output_dirs` says the worker returns a cell's `# @output_dir` folders and `folder_inputs` that it takes another cell's folder as an input; `mount_cache_probe` says it answers `POST /v1/mount-cache/cached` (behind the same bearer token as `/v1/execute`) with how much of each read-only mount its cache already holds, so the server can tell what a run would download:
 
 ```json
 {
@@ -75,6 +75,8 @@ Expected response (`locked_environments` is `false` if `uv` is not on the worker
       "output_format": "notebook-output-bundle@v1",
       "pull_model": true,
       "cancel": true,
+      "output_dirs": true,
+      "folder_inputs": true,
       "locked_environments": true,
       "locked_r_environments": false,
       "mount_cache_probe": true,
@@ -119,7 +121,7 @@ import platform
 hostname = platform.node()
 ```
 
-When the cell runs, the UI shows a pulsing **"dispatching → local-dev"** badge during execution. The `hostname` artifact is what the worker process saw. On one machine that is the same name your laptop reports, so it confirms the round trip rather than the location; point the worker at another host and the name changes.
+When the cell runs, the UI shows a pulsing **"dispatching → local-dev"** badge during execution. The cell's `hostname` value, shown in its output, is what the worker process saw. On one machine that is the same name your laptop reports, so it confirms the round trip rather than the location; point the worker at another host and the name changes.
 
 ### Sharing one machine: concurrency and GPUs
 
@@ -498,7 +500,7 @@ strata worker default ./my-notebook fly-cpu   # omit the name, or pass local, to
 strata worker rm ./my-notebook fly-cpu
 ```
 
-`add` replaces a worker of the same name; `--transport` defaults to `direct` and must be `direct` or `signed` (`manifest` and `build` are aliases of `signed`; the MCP tool and the REST workers route refuse anything else too), and `--default` also makes it the notebook default. `rm` refuses the built-in `local` worker and clears the default if it named the removed one. Each prints the resulting worker list, as JSON by default (`--format human` for a table). In service mode the server owns worker definitions, so these commands are refused. For a box you reach over SSH, use [`add-ssh` / `rm-ssh`](#run-cells-on-a-machine-you-can-ssh-to) instead.
+`add` replaces a worker of the same name; `--transport` defaults to `direct` and must be `direct` or `signed` (`manifest` and `build` are aliases of `signed`; the MCP tool and the REST workers route refuse anything else too), and `--default` also makes it the notebook default. `rm` refuses the built-in `local` worker and clears the default if it named the removed one. Each prints the resulting worker list, as JSON by default (`--format human` for a table). These commands only edit the file, so no server refuses them. A service-mode server, or one with `STRATA_NOTEBOOK_WORKERS_EDITABLE=false`, runs remote cells only on its registry's workers and lists the notebook's own entries as not allowed; its MCP and REST worker routes refuse to add or remove one (see [Server-managed workers](#server-managed-workers)). For a box you reach over SSH, use [`add-ssh` / `rm-ssh`](#run-cells-on-a-machine-you-can-ssh-to) instead.
 
 ### Signed workers and private hosts
 
@@ -667,7 +669,7 @@ The worker annotation is the **only** change needed; the cell code itself is ide
 
 A [loop cell](cells.md#loop-cells) is the exception: it runs only on the notebook's own server, so a `# @loop` cell sent to a remote worker (by its `# @worker` or the notebook's default) fails before it starts. Give it `# @worker local`, or run the part that needs the worker in an ordinary cell.
 
-A worker cell runs in a `work/` directory made for the run and removed with it, so a file it writes by a relative path does not come back. To keep files from a worker run, write them to an [`# @output_dir`](annotations.md#output_dir) folder, which the worker returns with the result.
+A worker cell runs in a `work/` directory made for the run and removed with it, so a file it writes by a relative path does not come back. To keep files from a worker run, write them to an [`# @output_dir`](annotations.md#output_dir) folder, which the worker returns with the result. A worker whose `/health` does not advertise `output_dirs` (or `folder_inputs`, for a cell that reads another cell's folder), or that cannot be asked, is refused before the cell runs.
 
 ### Precedence
 

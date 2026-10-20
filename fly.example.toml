@@ -41,8 +41,8 @@ primary_region = "<region>"
 [http_service]
   internal_port = 8765
   force_https = true
-  # ``suspend`` with ``min_machines_running = 1`` is intentional: one machine
-  # stays attached to the volume for fast wakes but suspends when idle.
+  # With ``count = 1`` and ``min_machines_running = 1`` the machine never
+  # suspends. Set ``min_machines_running = 0`` to suspend it when idle.
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 1

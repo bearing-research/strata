@@ -93,13 +93,13 @@ whether an un-primed session uses the notebook at all. See
 **Compute and data**
 
 - **distributed:** `# @worker gpu-fly` dispatches a cell to a remote box; bring your own compute
-- **worker pool** (separate package, `pip install strata-pool`)**:** machines (Fly, Docker or RunPod) start on demand, are held for a tenant, hand out GPUs per cell, and stop when the work does
+- **worker pool:** a separate package (`pip install strata-pool`): machines (Fly, Docker or RunPod) start on demand, are held for a tenant, hand out GPUs per cell, and stop when the work does
 - **the same environment, elsewhere:** a remote cell runs in the notebook's own locked environment rather than whatever the worker image holds
 - **the machine starts before the run:** focusing a cell bound to a pooled worker, or starting Run All, asks the pool to bring up a machine while you are still reading the code
 - **remote cells over SSH:** hand an agent an SSH target and it provisions a worker there, tunnels to it, and routes heavy cells over, cached like everything else
 - **workers behind NAT:** `strata-worker --connect` dials out to a relay, so a machine with no open port serves cells
 - **lake-aware SQL:** read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records
-- **Iceberg as other engines write it:** scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly, from SQL, REST, Glue, GCS and Azure catalogs
+- **Iceberg as other engines write it:** scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly, from SQL, REST and Glue catalogs, with warehouses on S3, GCS or Azure
 - **every input recorded:** `# @fetch` makes bytes from a URL an input, `# @dataset` makes a registry name one, both content-addressed
 - **folders as outputs:** `# @output_dir ckpt` gives a cell a folder whose files are stored as an output, kept even when the run fails, and handed to the next cell as a `Path`
 - **write back to the lake:** `# @write_table readings lake:lab.readings append` writes a variable into an Iceberg table when the run succeeds, and each snapshot names the result that made it
@@ -116,7 +116,7 @@ whether an un-primed session uses the notebook at all. See
 - **a figure gets a URL:** publish an artifact and anyone with the link sees the plot, the code, and the environment of every step behind it, with no account and no install
 - **a notebook travels:** export the whole state as one bundle and import it back, artifacts included
 - **share a session:** presence, cell focus and soft locks, with every cell recording who wrote it
-- **safe to share** (in service mode)**:** cells run as their own OS user once you name one, notebook scopes are enforced on every notebook route under principal auth, and an MCP tool call runs as its caller
+- **safe to share in service mode:** cells run as their own OS user once you name one, notebook scopes are enforced on every notebook route under principal auth, and an MCP tool call runs as its caller
 - **host it for many people:** in service mode every notebook route, the WebSocket and MCP stay within the caller's tenant, the server runs under a path behind your proxy, and the editor can be framed inside your own product
 - **a store that stays bounded:** results nobody has used for a while are collected least recently used first, never anything named, pinned, published or still needed
 
@@ -153,7 +153,7 @@ strata-notebook
 ```
 
 For the full inventory of installed commands (`strata-notebook`, `strata`,
-`strata-worker`, `python -m strata`), see the
+`strata-notebook-tui`, `strata-worker`, `python -m strata`), see the
 [Commands reference](https://bearing-research.github.io/strata/latest/getting-started/installation/#commands-reference).
 
 Source builds (`git clone + uv sync`) are documented in
@@ -182,9 +182,10 @@ on Windows via WSL2 or natively.
 
 ## The Cache Advantage
 
-Every notebook platform re-executes from scratch when you change one cell.
-Strata doesn't. The artifact store deduplicates by provenance hash. If
-the code and inputs haven't changed, the result is served instantly.
+Most notebooks either re-run everything or cache only what you opt in to.
+Strata caches every cell by default. The artifact store deduplicates by
+provenance hash. If the code and inputs haven't changed, the result is served
+instantly.
 
 ```
 First run:     load data (10s) → clean (3s) → train (20s) → evaluate (1s)  = 34s
@@ -291,12 +292,12 @@ new or changed files. The copy runs in Strata's own environment, so install the 
 Materialization, the artifact store, the DAG, caching and headless run are
 settled and covered by tests. Three surfaces are not:
 
-- **Prompt-cell API.** Streaming, conversation memory and structured-output
-  validation will change.
-- **SQL cloud drivers.** DuckDB, SQLite and PostgreSQL run in CI. BigQuery and
+- **Prompt-cell API:** Streaming and structured-output validation will
+  change.
+- **SQL cloud drivers:** DuckDB, SQLite and PostgreSQL run in CI. BigQuery and
   Snowflake ship without integration coverage. MotherDuck and MySQL are not
   implemented.
-- **On-disk formats.** `notebook.toml`, `.strata/runtime.json` and the artifact
+- **On-disk formats:** `notebook.toml`, `.strata/runtime.json` and the artifact
   cache layout may change between minor versions. Depend on the Python API,
   not the file shapes.
 

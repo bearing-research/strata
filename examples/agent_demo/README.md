@@ -25,9 +25,11 @@ it gets written.
 
 ## Running
 
+From the repository root (the notebook's own venv does not include Strata;
+`strata run` builds it from `pyproject.toml` before the first cell):
+
 ```bash
-uv sync                       # build the notebook's venv from pyproject.toml
-uv run strata run . --force   # run every cell
+uv run strata run examples/agent_demo --force   # run every cell
 ```
 
 ## Reproducing the demo

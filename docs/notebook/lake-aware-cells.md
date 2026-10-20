@@ -3,8 +3,9 @@
 A **lake-aware cell** is a notebook cell that takes an Iceberg table as a
 versioned input via the [`@table`](annotations.md#table) annotation. The
 table's current snapshot id is folded into the cell's provenance, so **new
-data landing in the lake makes the cell stale and the normal cascade re-runs
-it** - no manual data-version bookkeeping, no re-pointing paths.
+data landing in the lake puts the cell out of date, its downstream cells go
+stale, and the normal cascade re-runs them** - no manual data-version
+bookkeeping, no re-pointing paths.
 
 This page is the end-to-end walkthrough: build a tiny warehouse, scan it from
 a cell, retrain when new data arrives, and pin a snapshot for reproducibility.
@@ -152,14 +153,16 @@ print("snapshot S2:", table.current_snapshot().snapshot_id)
 uv run python append_month2.py
 ```
 
-Back in the notebook, the `@table` cell is now **stale** - its snapshot id
-moved from S1 to S2, so its provenance changed. The badge does not update live:
-the notebook looks up the current snapshot only when it recomputes staleness,
-which happens when you reopen the notebook, edit a cell, or run one. Refreshing
-the browser tab alone keeps the old badge. A plain **Run** (no force)
-recomputes the scan against S2 and **cascades** the rebuild to every
-downstream cell. Nothing changed in your code; the data moved, and Strata
-treated that exactly like a code change.
+Back in the notebook, the `@table` cell is now **out of date (idle)** - its
+snapshot id moved from S1 to S2, so its provenance changed and no stored result
+matches it. The cells downstream of it that ran before read **stale**. The
+badges do not update live: the notebook looks up the current snapshot only when
+it recomputes staleness, which happens when you reopen the notebook, edit a
+cell, or run one. Refreshing the browser tab alone keeps the old badge. A plain
+**Run** (no force) of the scan cell recomputes it against S2; running a
+downstream cell instead **cascades** the scan first, then runs that cell.
+Nothing changed in your code; the data moved, and Strata treated that exactly
+like a code change.
 
 Run again without appending and the cell is a **cache hit** - same snapshot,
 same provenance, instant.
@@ -174,7 +177,7 @@ add `snapshot=<id>`:
 ```
 
 A pinned cell reads that snapshot regardless of new data and **never goes
-stale** on appends - the lake-side analog of a mount `pin`. Drop the
+out of date** on appends - the lake-side analog of a mount `pin`. Drop the
 `snapshot=` to return to tracking the current snapshot.
 
 ## How it works
@@ -183,7 +186,8 @@ The snapshot id is part of the cell's **provenance hash**, alongside the
 source hash, environment hash, and input hashes:
 
 ```
-provenance = hash(input_hashes + mount_fingerprints + table_fingerprints,
+provenance = hash(input_hashes + mount_fingerprints + table_fingerprints
+                  + fetch_fingerprints + dataset_fingerprints,
                   source_hash, env_hash)
 ```
 
@@ -191,7 +195,7 @@ A table fingerprint is `"<name>:table:<uri>:<snapshot_id>"`. Because the
 snapshot id is immutable and content-addressed, a cached result for a given
 provenance is valid forever - and a moved snapshot is a different provenance,
 hence a different (missing) cache entry, hence a recompute. This is the same
-provenance machinery that makes ordinary cells stale when their source or
+provenance machinery that puts ordinary cells out of date when their source or
 inputs change; `@table` adds the lake snapshot to the mix.
 
 ## Which cells read a table
@@ -298,9 +302,9 @@ result turns out to be cached may still ask; asking is the safe direction.
   commits no new snapshot. The cell stays a cache hit, and a scan that passes
   `orders_snapshot` keeps reading that snapshot's schema. The new schema shows
   up once new data lands in a new snapshot.
-- **Unreachable catalog → conservatively stale.** If the catalog can't be
-  reached when provenance is computed (which also happens on notebook open),
-  the cell is treated as stale rather than crashing; if it's still unreachable
+- **Unreachable catalog → conservatively out of date.** If the catalog can't
+  be reached when provenance is computed (which also happens on notebook open),
+  the cell is treated as out of date rather than crashing; if it's still unreachable
   at execution time, the run fails with a clear error.
 - **The embedded scan runs in-process.** `scan@v1` is handled by the server
   itself in both modes: it is resolved before any executor dispatch, so

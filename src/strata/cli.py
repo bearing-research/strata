@@ -384,8 +384,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Who to credit on the page. A local run has no authenticated "
-            "identity, so without this the page says the author was not "
-            "recorded rather than showing a blank."
+            "identity, so without this the page names no author."
         ),
     )
     publish_parser.add_argument(
