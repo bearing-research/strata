@@ -3889,6 +3889,26 @@ exhaustive commit history.</p>
   <code>${file:...}</code> reference, a keyless <code>gs</code> <code>token</code> file or an <code>az</code>
   <code>federated_token_file</code> that named a FIFO or a device could hang or flood the
   read; it now fails naming the file. (#1265)</li>
+<li><strong>A slow or broken strata-pool <code>tenant_env</code> no longer stalls the pool.</strong> It
+  had no time limit and a sync one ran on the event loop, so a hung secrets
+  lookup held up that tenant's submit and every scaler pass, for every tenant.
+  It now runs in a thread and has <code>tenant_env_timeout_seconds</code> (default 30) to
+  answer. (#1267)</li>
+<li><strong>A strata-pool <code>tenant_env</code> answer that is not string names and values
+  starts no machine.</strong> It reached the provider as given. The start now fails,
+  logged as a <code>tenant_env</code> failure that never quotes the answer rather than as
+  a backend failure, and the job stays queued. (#1267)</li>
+<li><strong>A RunPod or Fly machine type's <code>provider_options</code> <code>env</code> no longer drops
+  the pool's.</strong> It replaced the machine's whole environment, so the machine
+  booted without the type's <code>env</code> and the tenant's <code>tenant_env</code>. It now merges
+  beneath them, and where both name a variable the type's and the tenant's
+  win. On Fly it also no longer wrote the worker token into the shared machine
+  type. (#1267)</li>
+<li><strong>A cell on a remote worker cannot read the variables a credential names.</strong>
+  The worker kept <code>STRATA_NOTEBOOK_CREDENTIALS</code> from its cells but not the
+  variables its <code>${VAR}</code> values name, which hold the keys themselves. It now
+  takes those out of its environment too, and still resolves its mounts
+  against them. (#1267)</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>

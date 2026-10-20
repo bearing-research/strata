@@ -2295,11 +2295,20 @@ the outside.</p>
 <code>Pool(tenant_env=...)</code> takes a callable, sync or async,
 <code>(tenant_id, machine_type) -&gt; dict[str, str]</code>, asked each time a machine
 starts for a tenant. Its variables go over the type's <code>env</code>, and the worker
-token wins over both. The answer is used for that boot only: it is never
-stored, logged or put on a span. A callable that raises fails the start as a
-backend failure does, and the job stays queued. A worker reads
+token wins over both. It runs in a thread, so a sync one may wait on a secrets
+store, and has <code>Pool(tenant_env_timeout_seconds=...)</code> (default 30) to answer;
+a sync one that runs past that keeps its thread until it returns. One that
+raises, runs out of time, or answers anything but string names and values
+fails the start, which is logged as a <code>tenant_env</code> failure without the
+answer, and the job stays queued. A worker reads
 <code>STRATA_NOTEBOOK_CREDENTIALS</code> and <code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code> there
-and keeps them from its cells, so a tenant's mounts work on its machines.</p>
+and keeps them, and the variables they name, from its cells, so a tenant's
+mounts work on its machines.</p>
+<p>The pool uses the answer for that boot only and never stores, logs or traces
+it. The provider does keep it: it is the machine's environment, which RunPod
+or Fly holds for the machine's life and shows to anyone with access to the
+account. A provider's refusal to start a machine is logged in the provider's
+own words, which the pool cannot vouch for.</p>
 <p>Still missing: any restriction on the container's own network access.</p>
 <h2 id="several-processes-over-one-store">Several processes over one store<a class="headerlink" href="#several-processes-over-one-store" title="Permanent link">&para;</a></h2>
 <p><code>PoolStore</code> is a SQLite file, and one pool process on it is the simple
@@ -2570,7 +2579,9 @@ its own jobs: another tenant's job id answers 404, not 403, so the id does not
 confirm the job exists. <strong>The caller is trusted for tenant
 identity</strong>: it authenticates as itself and asserts whose work this is. The
 pool does not authenticate end users and must never be reachable from
-anywhere but the proxy.</p>
+anywhere but the proxy. Anyone holding the API token can name any tenant, and
+so run code on a machine that boots with that tenant's <code>tenant_env</code>: the token
+is as sensitive as every tenant's secrets together.</p>
 <h2 id="the-runpod-backend">The RunPod backend<a class="headerlink" href="#the-runpod-backend" title="Permanent link">&para;</a></h2>
 <p>Rents real hardware. <code>MachineType.gpu_type</code> is the provider's own string
 (<code>"NVIDIA H100 80GB PCIe"</code>), deliberately not a normalised label, because one
@@ -2613,7 +2624,8 @@ twice, with nothing left running. The <code>gpu</code> block has not been run li
 <p>RunPod has moved its API surface before. Every field lives in <code>_create_body</code>
 and is asserted by a test, so a wrong one is a one-line fix; <code>provider_options</code>
 overrides anything in the body, so a deployment can correct a field without
-waiting for a release; and <code>base_url</code> can be repointed. To re-verify, or to
+waiting for a release (its <code>env</code> merges beneath the type's <code>env</code>, the
+tenant's and the worker token instead); and <code>base_url</code> can be repointed. To re-verify, or to
 close the GPU gap with <code>STRATA_POOL_RUNPOD_GPU</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">RUNPOD_API_KEY</span><span class="o">=</span>...
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_POOL_RUNPOD_LIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>packages/strata-pool/tests/test_runpod_live.py<span class="w"> </span>-v<span class="w"> </span>-s
@@ -2657,7 +2669,8 @@ force (a second destroy is a no-op). <code>health</code> needs Fly to report the
 private address can be reused.</p>
 <p><strong>Not yet verified against a live account.</strong> The request shapes follow the
 Machines API documentation; every field lives in <code>_create_body</code> and is asserted
-by a test, <code>provider_options</code> overrides anything in the machine <code>config</code>, and
+by a test, <code>provider_options</code> overrides anything in the machine <code>config</code> (its
+<code>env</code> merges beneath the type's <code>env</code>, the tenant's and the worker token), and
 <code>base_url</code> can be repointed. To verify:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">FLY_API_TOKEN</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_APP</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_REGION</span><span class="o">=</span>sjc
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nv">STRATA_POOL_FLY_LIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>packages/strata-pool/tests/test_fly_live.py<span class="w"> </span>-v<span class="w"> </span>-s
