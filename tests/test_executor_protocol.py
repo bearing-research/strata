@@ -319,6 +319,14 @@ class TestUtilityFunctions:
 
         assert [inp.name for inp in inputs] == [f"input{i}" for i in range(12)]
 
+    def test_parse_arrow_inputs_ignores_non_decimal_suffix(self):
+        """``"²".isdigit()`` holds but ``int("²")`` raises; such a part is just unknown."""
+        from strata.transforms.reference_executor import parse_arrow_inputs
+
+        file_parts = {"input²": b"x", "input0": table_to_ipc_bytes(pa.table({"a": [1]}))}
+
+        assert [inp.name for inp in parse_arrow_inputs(file_parts)] == ["input0"]
+
     def test_serialize_arrow_output(self):
         from strata.transforms.reference_executor import serialize_arrow_output
 
@@ -557,6 +565,36 @@ class TestExecutorHTTPIntegration:
         revenues = output_table.column("revenue").to_pylist()
         assert abs(revenues[0] - 59.97) < 0.01  # Gadget
         assert abs(revenues[1] - 29.97) < 0.01  # Widget
+
+    def test_execute_reads_every_input_part(self, executor_server):
+        """A build with twelve inputs: parts past input4 (input10, input11) reach the SQL."""
+        base_url = executor_server["base_url"]
+
+        parts = {f"input{i}": table_to_ipc_bytes(pa.table({"i": [i]})) for i in range(12)}
+        metadata = json.dumps(
+            {
+                "protocol_version": "v1",
+                "build_id": "test-build-012",
+                "provenance_hash": "test-hash-12",
+                "transform": {
+                    "ref": "duckdb_sql@v1",
+                    "params": {
+                        "sql": "SELECT i FROM input2 UNION ALL SELECT i FROM input10 "
+                        "UNION ALL SELECT i FROM input11 ORDER BY i"
+                    },
+                },
+                "inputs": [{"name": name, "size_bytes": len(data)} for name, data in parts.items()],
+            }
+        )
+
+        files = {"metadata": ("metadata.json", metadata, "application/json")}
+        for name, data in parts.items():
+            files[name] = (f"{name}.arrow", data, "application/vnd.apache.arrow.stream")
+
+        resp = httpx.post(f"{base_url}/v1/execute", files=files)
+        assert resp.status_code == 200, resp.text
+
+        assert ipc_bytes_to_table(resp.content).column("i").to_pylist() == [2, 10, 11]
 
     def test_execute_logs_in_header(self, executor_server):
         """Executor logs come back in a header."""

@@ -158,6 +158,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   arrived, so the browser never showed a cell running or offered its stop
   button. Each now shows running from the moment it starts, and a cell left
   unfinished by a stop goes back to idle. (#1271)
+- **The reference executor reads every input part.** `create_executor_app`
+  read only `input0` to `input4`, so a build over six or more inputs lost the
+  rest and its SQL could not query them. It now reads each `inputN` part, in
+  index order. (#1272)
 
 ### Security
 

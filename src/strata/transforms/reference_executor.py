@@ -198,7 +198,7 @@ def create_executor_app(executor: BaseExecutor | None = None):
 
     @app.post("/v1/execute")
     async def execute(http_request: FastAPIRequest):
-        """Execute a transform from a multipart ``metadata`` part and ``input0``..``input4``.
+        """Execute a transform from a multipart ``metadata`` part and ``inputN`` parts.
 
         Returns an Arrow IPC stream, or a 400 JSON error (``ExecutorResponse`` shape).
         """
@@ -235,13 +235,13 @@ def create_executor_app(executor: BaseExecutor | None = None):
                 detail=f"Unsupported transform: {transform_ref}. Supported: {supported_refs}",
             )
 
-        inputs: list[ExecutorInput] = []
-        for name in ["input0", "input1", "input2", "input3", "input4"]:
-            upload = form.get(name)
-            if isinstance(upload, UploadFile):
-                data = await upload.read()
-                if data:
-                    inputs.append(ExecutorInput(name=name, data=data))
+        inputs = parse_arrow_inputs(
+            {
+                name: await part.read()
+                for name, part in form.items()
+                if isinstance(part, UploadFile) and name.startswith("input")
+            }
+        )
 
         result = executor.execute(transform_ref, params, inputs)
 
@@ -296,7 +296,8 @@ def parse_arrow_inputs(
     """Collect non-empty ``inputN`` parts as ExecutorInputs, in index order."""
     inputs = []
     for name, data in file_parts.items():
-        if name.startswith("input") and name[5:].isdigit() and data:
+        # isdecimal, not isdigit: int() rejects digits like "²", which isdigit accepts.
+        if name.startswith("input") and name[5:].isdecimal() and data:
             inputs.append(ExecutorInput(name=name, data=data))
 
     # Numeric, not by name: a name sort puts input10 before input2.
