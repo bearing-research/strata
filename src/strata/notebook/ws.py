@@ -116,6 +116,9 @@ class NotebookExecutionState:
     sequence: int = 0
     running_cell: str | None = None
     requested_cell: str | None = None
+    # Every cell a Run All was asked for: a batch cannot say which of them is running, so
+    # a stop on any of them stops the run.
+    run_all_cells: frozenset[str] = frozenset()
     cascade_plan: CascadePlan | None = None
     # A read_confirm_prompt waiting for its answer. Not cleared with the execution: a
     # run that ends meanwhile does not answer it.
@@ -1730,7 +1733,9 @@ async def cancel_cell_run(session: NotebookSession, cell_id: str, notebook_id: s
         requested_cell = execution_state.requested_cell
         task = execution_state.active_task()
 
-        should_cancel = task is not None and cell_id in {running_cell, requested_cell}
+        should_cancel = task is not None and (
+            cell_id in {running_cell, requested_cell} or cell_id in execution_state.run_all_cells
+        )
         if should_cancel and task is not None:
             task.cancel()
 
@@ -2559,6 +2564,7 @@ async def _execute_run_all(
     # producer would materialise it, then the producer's row would run again.
     with executor.one_run():
         try:
+            execution_state.run_all_cells = frozenset(c.id for c in runnable)
             for kind, cells_in_run in partition:
                 if had_failure and not continue_on_error:
                     break
@@ -2629,6 +2635,7 @@ async def _execute_run_all(
                         failed.add(cell.id)
         finally:
             execution_state.running_cell = None
+            execution_state.run_all_cells = frozenset()
 
 
 async def _run_partition_batch(

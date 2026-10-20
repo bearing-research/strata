@@ -146,6 +146,11 @@ exhaustive commit history.
   whose cells ran together in one process (by a stop, or by closing the
   notebook's last tab) left that process running the rest of the user's code;
   it is now terminated, as a single cell's is. (#1269)
+- **Stopping a cell of a Run All stops the run.** During a batched Run All or
+  Rerun All, a stop on the cell then executing did nothing: the run counted as
+  that cell's only while it was the first cell asked for or the last one to
+  finish. A stop on any cell the run was asked to execute now cancels it,
+  whether it comes over the WebSocket, REST, the CLI or MCP. (#1270)
 
 ### Security
 
