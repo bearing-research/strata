@@ -134,3 +134,59 @@ async def test_draining_while_a_worker_boots_stops_that_worker(notebook_dir, tmp
             os.kill(pid, 9)
         except ProcessLookupError:
             pass
+
+
+@pytest.mark.asyncio
+async def test_draining_before_the_spawn_returns_stops_the_wrapped_worker(
+    notebook_dir, tmp_path, monkeypatch
+):
+    """drain() can cancel a spawn still inside create_subprocess_exec, as on a starved
+    runner; asyncio then kills only the lifeline wrapper, and the worker under it must go too."""
+    pid_file = tmp_path / "worker.pid"
+    script = (
+        "import os, pathlib, time\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()))\n"
+        "time.sleep(600)\n"
+    )
+    create_subprocess_exec = asyncio.create_subprocess_exec
+    spawn_may_return = asyncio.Event()
+
+    async def slow_create_subprocess_exec(*args, **kwargs):
+        process = await create_subprocess_exec(*args, **kwargs)
+        try:
+            await spawn_may_return.wait()
+        except asyncio.CancelledError:
+            # What asyncio does when cancelled while connecting the pipes.
+            process.kill()
+            raise
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", slow_create_subprocess_exec)
+    pool = WarmProcessPool(notebook_dir, pool_size=1, worker_command=[sys.executable, "-c", script])
+    spawn = asyncio.create_task(pool._spawn_warm_process())
+    pool.track_background_task(spawn)
+    for _ in range(600):
+        if pid_file.exists() and pid_file.read_text():
+            break
+        await asyncio.sleep(0.05)
+    pid = int(pid_file.read_text())
+
+    try:
+        drain = asyncio.create_task(pool.drain())
+        while not spawn.cancelling():
+            await asyncio.sleep(0)
+        spawn_may_return.set()
+        await drain
+        for _ in range(600):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail(f"the wrapped worker {pid} outlived drain()")
+    finally:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass

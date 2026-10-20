@@ -158,6 +158,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   a root is not read, and a file rewritten in place is still used at the next
   run with no call. (#1265)
 
+- **Restarting the R warm pool no longer orphans a booting R worker.** A pool
+  drain that landed while a worker was still being spawned killed only the
+  lifeline wrapper, leaving the R process under it running until it exited on
+  its own. The pool now finishes the spawn and stops the whole process group.
+  (#TBD)
+
 ## 0.11.0 - 2026-10-19
 
 ### Added
