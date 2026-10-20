@@ -9,6 +9,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
+### Added
+
+- **A strata-pool job names how long its machine stays warm.** `submit` and
+  `POST /v1/jobs` take `hold_seconds`; the machine that runs the job keeps it
+  as its cool-down until its next job, so a host can hold each tenant's
+  machines for as long as that tenant's next job is worth waiting for. (#1257)
+
 ### Fixed
 
 - **The shortcuts list names the editor's real undo and redo keys.** It said

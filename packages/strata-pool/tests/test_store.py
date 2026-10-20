@@ -44,7 +44,7 @@ def store(tmp_path):
 
 class TestWorkers:
     def test_round_trip(self, store):
-        worker = _worker(store, endpoint="http://a.test", session_id="s1")
+        worker = _worker(store, endpoint="http://a.test", session_id="s1", hold_seconds=30.0)
         loaded = store.get_worker(worker.id)
         assert loaded == worker
 
@@ -86,7 +86,7 @@ class TestWorkers:
 
 class TestJobs:
     def test_round_trip(self, store):
-        job = _job(store, priority=3, session_id="s1", timeout_seconds=12.0)
+        job = _job(store, priority=3, session_id="s1", timeout_seconds=12.0, hold_seconds=30.0)
         assert store.get_job(job.id) == job
 
     def test_queue_is_priority_then_fifo(self, store):

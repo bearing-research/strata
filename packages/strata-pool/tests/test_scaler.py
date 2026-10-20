@@ -104,6 +104,43 @@ async def test_cool_down_is_per_machine_type(make_pool):
     assert survivors == {"cpu"}, "the expensive one goes first, because it was told to"
 
 
+async def test_a_job_names_its_machines_hold_in_place_of_the_types_cool_down(make_pool):
+    """A host holds one tenant's machines shorter than the type's cool-down, another's not."""
+    clock = Clock()
+    backend = FakeBackend()
+    pool = make_pool(backend=backend, machine_types=[_spec(cool_down_seconds=300.0)], wall=clock)
+
+    held = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"w", hold_seconds=30)
+    plain = await pool.submit(tenant_id="globex", machine_type="cpu", payload=b"w")
+    await pool.wait(held.id)
+    await pool.wait(plain.id)
+
+    clock.advance(31)
+    assert await pool.reap_idle_workers() == 1
+    assert [w.tenant_id for w in pool.store.list_workers()] == ["globex"]
+
+    clock.advance(270)
+    assert await pool.reap_idle_workers() == 1
+    assert pool.store.list_workers() == []
+
+
+async def test_the_next_job_replaces_a_machines_hold(make_pool):
+    """A hold lasts until the machine's next job, which may name none."""
+    clock = Clock()
+    pool = make_pool(machine_types=[_spec(cool_down_seconds=300.0)], wall=clock)
+
+    first = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"w", hold_seconds=30)
+    await pool.wait(first.id)
+    second = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"w")
+    ran = await pool.wait(second.id)
+    assert ran.worker_id == pool.store.get_job(first.id).worker_id
+
+    clock.advance(31)
+    assert await pool.reap_idle_workers() == 0
+    clock.advance(270)
+    assert await pool.reap_idle_workers() == 1
+
+
 async def test_a_machine_that_never_ran_anything_still_ages_out(make_pool):
     """With no last_active_at, a machine ages from when it booted."""
     clock = Clock()

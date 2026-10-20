@@ -27,6 +27,7 @@ _CATALOGUE = TypeAdapter(list[MachineType], config=ConfigDict(extra="forbid", al
 # Stored in a SQLite INTEGER column.
 Priority = Annotated[int, Query(ge=-(2**63), le=2**63 - 1)]
 PositiveSeconds = Annotated[float, Query(gt=0, allow_inf_nan=False)]
+HoldSeconds = Annotated[float, Query(ge=0, allow_inf_nan=False)]
 
 
 def _job_json(job: Job) -> dict:
@@ -155,6 +156,7 @@ def create_app(
         priority: Priority = 0,
         session_id: str | None = None,
         timeout_seconds: PositiveSeconds | None = None,
+        hold_seconds: HoldSeconds | None = None,
     ) -> JSONResponse:
         """Queue a job. The request body is the payload, verbatim."""
         job = await _submit(
@@ -166,6 +168,7 @@ def create_app(
             session_id=session_id,
             timeout_seconds=timeout_seconds,
             trace_context=_trace_context(request),
+            hold_seconds=hold_seconds,
         )
         return JSONResponse(_job_json(job), status_code=202)
 
@@ -177,6 +180,7 @@ def create_app(
         priority: Priority = 0,
         session_id: str | None = None,
         timeout_seconds: PositiveSeconds | None = None,
+        hold_seconds: HoldSeconds | None = None,
         wait_seconds: PositiveSeconds = 300.0,
     ) -> Response:
         """Queue a job and block until it finishes.
@@ -193,6 +197,7 @@ def create_app(
             session_id=session_id,
             timeout_seconds=timeout_seconds,
             trace_context=_trace_context(request),
+            hold_seconds=hold_seconds,
         )
         spec = pool.machine_types.get(machine_type)
         if spec is not None:
