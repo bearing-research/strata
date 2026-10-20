@@ -391,6 +391,12 @@ def test_markdown_export_emits_only_an_inline_image_with_quoted_attributes() -> 
         ("[x](vbscript:msgbox(1))", "[x](#)"),
         ("[x](data:text/html,<script>alert(1)</script>)", "[x](#)"),
         ("[r]: javascript:alert(1)\n\n[go][r]", "[r]: #\n\n[go][r]"),
+        # A definition inside a container, or with a label over two lines, is still
+        # a document-wide target.
+        ("[go][r]\n\n> [r]: javascript:alert(1)\n", "[go][r]\n\n> [r]: #\n"),
+        ("[go][r]\n\n- [r]: javascript:alert(1)\n", "[go][r]\n\n- [r]: #\n"),
+        ("> [go][r]\n>\n> [r]:\n> javascript:alert(1)\n", "> [go][r]\n>\n> [r]:\n> #\n"),
+        ("[go][a b]\n\n[a\nb]: javascript:alert(1)\n", "[go][a b]\n\n[a\nb]: #\n"),
     ],
 )
 def test_sanitizer_neutralizes_bypass_payloads(payload: str, expected: str | None) -> None:

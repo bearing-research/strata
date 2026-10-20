@@ -18,6 +18,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **An exported link loses an unsafe target wherever it is defined.** A
+  `javascript:`, `vbscript:` or non-image `data:` reference definition inside
+  a blockquote or list item, or under a label split across lines, kept its
+  target in a Markdown export; it now becomes `#` like the others. (#1259)
 - **The shortcuts list names the editor's real undo and redo keys.** It said
   Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
   Mac both use Cmd. (#1256)
