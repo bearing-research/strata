@@ -144,6 +144,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   reach, so a build could read or write files there and return a result its
   inputs do not determine. It now runs the built-in transform's engine, which
   shuts all three off; its memory limit is unchanged. (#1268)
+- **Cancelling a Run All stops its cells.** Cancelling a Run All or Rerun All
+  whose cells ran together in one process (by a stop, or by closing the
+  notebook's last tab) left that process running the rest of the user's code;
+  it is now terminated, as a single cell's is. (#1269)
 
 ### Security
 
