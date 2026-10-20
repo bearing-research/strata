@@ -8,16 +8,17 @@ const mount: InputWeight = {
   kind: 'mount',
   name: 'data',
   uri: 's3://bucket/data',
-  bytes: 3 * 1024 ** 3,
-  cached_bytes: 1024 ** 3,
+  bytes: 3 * 1000 ** 3,
+  cached_bytes: 1000 ** 3,
 }
 
-test('formatBytes picks the largest unit under 1024', () => {
-  assert.deepEqual([0, 1023, 1536, 5 * 1024 ** 2, 2.5 * 1024 ** 3].map(formatBytes), [
+test('formatBytes uses decimal units, as the read thresholds do', () => {
+  assert.deepEqual([0, 999, 1500, 5 * 1000 ** 2, 10 ** 9, 2.5 * 1000 ** 3].map(formatBytes), [
     '0 B',
-    '1023 B',
+    '999 B',
     '1.5 KB',
     '5.0 MB',
+    '1.0 GB',
     '2.5 GB',
   ])
 })
@@ -27,7 +28,7 @@ test('while it runs, the badge counts what is not already on the machine', () =>
     kind: 'table',
     name: 'events',
     uri: 'lake#db.events',
-    bytes: 1024 ** 2,
+    bytes: 1000 ** 2,
   }
 
   assert.deepEqual(
@@ -49,7 +50,7 @@ test('while it runs, the badge counts what is not already on the machine', () =>
 
 test('at rest, or with nothing to move, the badge says what the inputs weigh', () => {
   const warm = { ...mount, cached_bytes: mount.bytes }
-  const table: InputWeight = { kind: 'table', name: 'events', uri: 'lake#db.events', bytes: 1024 }
+  const table: InputWeight = { kind: 'table', name: 'events', uri: 'lake#db.events', bytes: 1000 }
 
   assert.equal(
     inputWeightBadge({ status: 'ready', machine: 'local', inputs: [mount] })?.label,

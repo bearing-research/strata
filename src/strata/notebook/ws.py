@@ -957,8 +957,8 @@ async def reads_to_confirm(
     """The cells about to run that read past a threshold with no yes kept for them.
 
     Empty with no threshold set. A ready cell is left out unless *force*, since its run
-    is a cache hit. A cell that cannot be weighed runs unasked, and its reads index
-    entry says so.
+    is a cache hit, but not once its stored result was collected. A cell that cannot be
+    weighed runs unasked, and its reads index entry says so.
     """
     executor = CellExecutor(session)
     config = executor._lake_config()
@@ -967,7 +967,13 @@ async def reads_to_confirm(
     asking: list[ReadEstimate] = []
     for cell_id in dict.fromkeys(cell_ids):
         cell = session.notebook_state.get_cell(cell_id)
-        if cell is None or (not force and cell.status == CellStatus.READY):
+        if cell is None:
+            continue
+        if (
+            not force
+            and cell.status == CellStatus.READY
+            and not await anyio.to_thread.run_sync(session.stored_result_gone, cell)
+        ):
             continue
         try:
             read = await executor.estimate_reads(cell_id, cell.source)
@@ -1628,6 +1634,19 @@ async def _handle_cell_run_tests(
         await _send_busy_refusal(websocket, seq, busy_cell, cell_id)
         return
 
+    # Tests read the cell's inputs whether or not it is ready, after its stale upstreams.
+    if await _ask_before_reading(
+        websocket,
+        session,
+        execution_state,
+        notebook_id,
+        run_cells(session, cell_id, "normal"),
+        lambda: _handle_cell_run_tests(websocket, session, payload, execution_state, notebook_id),
+        force=True,
+    ):
+        await _release_execution_request(execution_state, cell_id)
+        return
+
     try:
         write_cell_tests(session.path, cell_id, test_source)
         cell.test_source = test_source
@@ -1729,6 +1748,27 @@ async def cancel_cell_run(session: NotebookSession, cell_id: str, notebook_id: s
     return False
 
 
+def _weighed_inputs(source: str) -> tuple[Any, ...]:
+    """The annotations a cell's input weights come from."""
+    annotations = parse_annotations(source)
+    return annotations.worker, annotations.mounts, annotations.tables, annotations.fetches
+
+
+async def _reweigh_inputs(session: NotebookSession, cell_id: str) -> None:
+    """Weigh a cell's inputs again after an edit changed them, so its badge is not stale."""
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        return
+    executor = CellExecutor(session)
+    try:
+        read = await executor.estimate_reads(cell_id, cell.source)
+    except Exception:
+        logger.warning("Could not weigh the inputs of cell %s", cell_id, exc_info=True)
+        return
+    if session.record_cell_inputs(cell_id, read.machine, read.inputs):
+        await executor._broadcast_cell_inputs(cell_id, read.machine, read.inputs)
+
+
 async def _handle_cell_source_update(
     websocket: WebSocket,
     session: NotebookSession,
@@ -1819,7 +1859,9 @@ async def _handle_cell_source_update(
 
         # Must happen before re-analysis
         cell_in_session = session.notebook_state.get_cell(cell_id)
+        reads_changed = False
         if cell_in_session:
+            reads_changed = _weighed_inputs(cell_in_session.source) != _weighed_inputs(source)
             cell_in_session.source = source
             # Else broadcasts name the previous author until the next reload.
             cell_in_session.updated_by = author
@@ -1885,6 +1927,8 @@ async def _handle_cell_source_update(
         await _broadcast_message(notebook_id, own, sender=websocket, to_others=others)
 
         await _broadcast_staleness_updates(session, notebook_id, staleness_map)
+        if reads_changed:
+            await _reweigh_inputs(session, cell_id)
 
     except Exception as e:
         await websocket.send_text(

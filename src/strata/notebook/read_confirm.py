@@ -17,6 +17,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from strata.notebook.models import InputWeight
+from strata.notebook.tables import without_table_nonce
 
 ReadConfirmation = Literal["under_threshold", "approved", "not_asked"]
 
@@ -56,11 +57,36 @@ def asks(config: Any) -> bool:
 
 
 def input_fingerprint(
-    mount_fingerprints: list[str], table_fingerprints: list[str], fetch_urls: list[str]
+    mount_approvals: list[str],
+    table_fingerprints: list[str],
+    fetch_urls: list[str],
+    *,
+    runtime_identity: str | None,
+    config: Any,
 ) -> str:
-    """What a yes is kept for. A fetch counts by its URL: its size is known only once read."""
-    parts = [sorted(mount_fingerprints), sorted(table_fingerprints), sorted(fetch_urls)]
-    return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
+    """What a yes is kept for. A fetch counts by its URL: its size is known only once read.
+
+    *mount_approvals* come from ``weigh_mount_sync``, free of per-call nonces as the
+    tables are made here. The machine's runtime identity and the settings that decide
+    whether to ask are in it too, so a re-pointed worker or a new threshold asks again.
+    """
+    settings = {
+        name: getattr(config, name, None)
+        for name in (
+            "notebook_confirm_read_bytes",
+            "notebook_confirm_read_cost",
+            "notebook_credential_read_cost",
+            "notebook_mount_credentials",
+        )
+    }
+    parts = [
+        sorted(mount_approvals),
+        sorted(without_table_nonce(fingerprint) for fingerprint in table_fingerprints),
+        sorted(fetch_urls),
+        runtime_identity,
+        settings,
+    ]
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def estimate(

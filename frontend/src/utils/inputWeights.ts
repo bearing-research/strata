@@ -1,11 +1,12 @@
 import type { InputWeight } from '../types/ws-payloads.generated'
 
+// Decimal, as STRATA_NOTEBOOK_CONFIRM_READ_BYTES and the per-GB rates are.
 export function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let value = bytes
   let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000
     unit += 1
   }
   return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${units[unit]}`

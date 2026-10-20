@@ -792,6 +792,7 @@ class CellExecutor:
 
         source = cell.source
         await self._materialize_upstreams(cell_id)
+        self.forget_moved(cell_id)
 
         # The same fetch, mount, dataset, table and env inputs a run of the cell gets.
         annotations = parse_annotations(source)
@@ -813,7 +814,7 @@ class CellExecutor:
                 for name, path in prov.fetched.items()
             ),
         ]
-        resolved_mounts = await self._prepare_mounts(mount_specs)
+        resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
 
         # Tests run the cell's source, so they are refused or dropped to the harness user
@@ -935,6 +936,12 @@ class CellExecutor:
         persist_cell_test_result(self.session.path, cell_id, result.model_dump())
         cell.test_result = result
         cell.test_source = test_source
+        if refused is None:
+            # The tests read the cell's inputs onto this machine, as a run of it does.
+            from strata.notebook import reads_index
+
+            live = [c.id for c in self.session.notebook_state.cells]
+            reads_index.record(self.session.path, cell_id, prov.reads(*self._moved(cell_id)), live)
         return result
 
     async def execute_batch(
@@ -1232,10 +1239,17 @@ class CellExecutor:
         weights: list[InputWeight] = []
         machine_cache = self._mount_cache_for(effective_worker)
         listings: dict[str, dict[str, dict[str, Any]]] = {}
+        mount_approvals: list[str] = []
         if mount_fingerprints is None or has_rw_mount is None:
             mount_fingerprints, has_rw_mount = await self._fingerprint_mounts(
-                mount_specs, weights=weights, cache=machine_cache, listings=listings
+                mount_specs,
+                weights=weights,
+                cache=machine_cache,
+                listings=listings,
+                approvals=mount_approvals,
             )
+        else:
+            mount_approvals = list(mount_fingerprints)
         if machine_cache is None and listings:
             weights = await self._ask_worker_cache(effective_worker, mount_specs, weights, listings)
 
@@ -1296,7 +1310,11 @@ class CellExecutor:
             effective_worker,
             weights,
             input_fingerprint(
-                mount_fingerprints, table_fingerprints, [f.url for f in annotations.fetches]
+                mount_approvals,
+                table_fingerprints,
+                [f.url for f in annotations.fetches],
+                runtime_identity=runtime_identity,
+                config=self._lake_config(),
             ),
         )
         provenance_hash = compute_provenance_hash(
@@ -4073,18 +4091,25 @@ class CellExecutor:
         weights: list[InputWeight] | None = None,
         cache: MountCache | None = None,
         listings: dict[str, dict[str, dict[str, Any]]] | None = None,
+        approvals: list[str] | None = None,
     ) -> tuple[list[str], bool]:
         """Compute mount fingerprints without preparing local materializations.
 
         *weights*, when given, gets each remote read-only mount's weight from the same
         listing, its cached share counted in *cache* (``None``: unknown). *listings* gets
         the listing of each mount whose share is unknown, for the machine to be asked.
+        *approvals* gets what a yes to reading each mount is kept for.
         """
         self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
         has_rw_mount = False
         for mount in sorted(mount_specs, key=lambda item: item.name):
-            fingerprint, weight = weigh_mount_sync(self._mount_resolver, mount, cache)
+            # Listing an object store blocks: keep it off the event loop.
+            fingerprint, weight, approval = await asyncio.to_thread(
+                weigh_mount_sync, self._mount_resolver, mount, cache
+            )
+            if approvals is not None and approval is not None:
+                approvals.append(approval)
             if listings is not None and weight is not None and weight.listing is not None:
                 listings[mount.name] = weight.listing
             if weights is not None and weight is not None:
@@ -4350,8 +4375,9 @@ class CellExecutor:
         weights: list[InputWeight] = []
         cache = self._mount_cache_for(machine)
         listings: dict[str, dict[str, dict[str, Any]]] = {}
-        mount_fingerprints, _ = await self._fingerprint_mounts(
-            mount_specs, weights=weights, cache=cache, listings=listings
+        mount_approvals: list[str] = []
+        await self._fingerprint_mounts(
+            mount_specs, weights=weights, cache=cache, listings=listings, approvals=mount_approvals
         )
         if cache is None and listings:
             weights = await self._ask_worker_cache(machine, mount_specs, weights, listings)
@@ -4371,10 +4397,15 @@ class CellExecutor:
                         kind="fetch", name=spec.name, uri=spec.url, bytes=size, cached_bytes=cached
                     )
                 )
+        config = self._lake_config()
         fingerprint = input_fingerprint(
-            mount_fingerprints, table_fingerprints, [f.url for f in annotations.fetches]
+            mount_approvals,
+            table_fingerprints,
+            [f.url for f in annotations.fetches],
+            runtime_identity=worker_runtime_identity(self.session.notebook_state, machine),
+            config=config,
         )
-        return estimate(cell_id, machine, weights, fingerprint, self._lake_config())
+        return estimate(cell_id, machine, weights, fingerprint, config)
 
     def _read_confirmation(
         self, cell_id: str, machine: str, weights: list[InputWeight], fingerprint: str

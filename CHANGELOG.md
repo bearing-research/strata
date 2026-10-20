@@ -61,6 +61,27 @@ exhaustive commit history.
   cached row group deleted the entry, so running out of file handles, or a
   read racing a write of the same row group, threw away a good entry. Only an
   entry that fails to parse is removed now; a failed read is a miss. (#1261)
+- **A Run given to a large read sticks.** A cell beside an unreachable or
+  empty `@table`, a mount whose credential could not be resolved, or a mount
+  whose listing failed asked again after every Run, since those inputs are
+  keyed afresh each time; the yes now counts them by name. (#1262)
+- **A large-read yes is kept for the machine and the settings it was given
+  under.** Pointing a worker somewhere else, or changing a read threshold or a
+  rate, now asks again. (#1262)
+- **Running a cell's tests asks before a large read**, as running the cell
+  does, and what the tests read is counted in the reads index. (#1262)
+- **A ready cell whose stored result was collected is asked about** before a
+  run reads its inputs again. (#1262)
+- **Weighing remote mounts no longer blocks the server** while it lists an
+  object store before a run. (#1262)
+- **A cell's read-size badge follows an edit** to its `@mount`, `@table`,
+  `@fetch` or `@worker` lines instead of showing the old inputs until the next
+  run. (#1262)
+- **A `@fetch` from a pre-signed URL is weighed.** Such a URL refuses the
+  `HEAD` used to ask its size; the notebook now asks for its first byte
+  instead, so the fetch counts toward a large-read question. (#1262)
+- **Read sizes are shown in decimal units**, as the read thresholds and per-GB
+  rates are, so a 1 GB threshold and a 1.0 GB read agree. (#1262)
 
 ## 0.11.0 - 2026-10-19
 

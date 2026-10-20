@@ -1980,6 +1980,26 @@ class NotebookSession:
 
         return cached_outputs
 
+    def stored_result_gone(self, cell: CellState) -> bool:
+        """Whether a ready cell's stored variables are no longer in the store (collected).
+
+        Its next run then reads its inputs again. Told only for a cell whose variables are
+        stored under its generic hash; a leaf, or a cell keyed under its own scheme, is
+        taken as present.
+        """
+        from strata.notebook.languages import get_language_executor
+
+        if cell.last_provenance_hash is None or self.dag is None:
+            return False
+        if not self.dag.consumed_variables.get(cell.id):
+            return False
+        if (
+            get_language_executor(cell.language).has_alternate_cache_scheme
+            or parse_annotations(cell.source).per_variant
+        ):
+            return False
+        return self._resolve_cached_outputs(cell.id, cell.last_provenance_hash) is None
+
     def wired_variables(self, cell_id: str, upstream_id: str) -> set[str]:
         """The variables ``cell_id`` reads from ``upstream_id``, as the DAG wired them."""
         return self.dag.wired_variables(cell_id, upstream_id) if self.dag is not None else set()

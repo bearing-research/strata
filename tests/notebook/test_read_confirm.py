@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+from pathlib import Path
 
 import pytest
 
@@ -18,8 +20,10 @@ from strata.notebook.ws import (
     _handle_read_confirm,
     _notebook_connections,
     forget_notebook_execution_state,
+    reads_to_confirm,
 )
 from tests.notebook.test_fetch import _cache, _Origin
+from tests.notebook.test_mounts import TestSharedMountCache, _FakeRemoteFS, _install_fake_fsspec
 from tests.notebook.test_table_index import _session, _warehouse
 
 windows = pytest.mark.skipif(sys.platform == "win32", reason="pyiceberg's local paths fail")
@@ -111,6 +115,22 @@ class TestAFetchIsAskedNotRead:
 
         assert cache.probe(spec) == (len(origin.body),) * 2
         assert origin.methods == ["GET"]
+
+    def test_a_url_that_refuses_a_head_is_asked_for_its_first_byte(self, tmp_path, origin):
+        """A pre-signed GET URL answers 403 to a HEAD."""
+        origin.refuse_head = True
+        cache = _cache(tmp_path)
+        spec = FetchSpec(name="zones", url=origin.url())
+        body = len(origin.body)
+
+        first = cache.probe(spec)
+        cache.resolve(spec, max_age=0)
+        again = cache.probe(spec)
+
+        assert (first, again) == ((body, 0), (body, body))
+        assert origin.methods == ["HEAD", "GET", "GET", "HEAD", "GET"]
+        ranged = [headers.get("Range") for _, headers in origin.requests]
+        assert ranged == ["bytes=0-0", None, "bytes=0-0"]
 
     def test_an_unreachable_url_is_not_guessed(self, tmp_path):
         spec = FetchSpec(name="zones", url="http://127.0.0.1:9/zones.csv")
@@ -334,3 +354,208 @@ async def test_run_all_asks_once_for_the_cells_over_the_threshold(tmp_path, thre
     assert [cell["cell_id"] for cell in prompt["cells"]] == ["c2"]
     assert "ready" not in nothing_ran
     assert [c.status.value for c in session.notebook_state.cells] == ["ready", "ready"]
+
+
+class _BrokenBucketFS(_FakeRemoteFS):
+    """Lists ``bucket/data``; listing ``broken/...`` fails."""
+
+    def find(self, uri: str, **kwargs):
+        if self._strip(uri).startswith("broken"):
+            raise OSError("listing refused")
+        return super().find(uri, **kwargs)
+
+
+@pytest.fixture
+def big_mount(tmp_path, monkeypatch) -> StrataConfig:
+    """A remote mount moving 250 bytes, over a 10-byte threshold."""
+    files = TestSharedMountCache._files("bucket/data", {"a": b"aa" * 50, "b": b"bbb" * 50})
+    _install_fake_fsspec(monkeypatch, _BrokenBucketFS(files))
+    config = StrataConfig(
+        cache_dir=tmp_path / "cache",
+        notebook_mount_cache_dir=tmp_path / "mounts",
+        notebook_confirm_read_bytes=10,
+    )
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+    return config
+
+
+async def _asked(session) -> list[str]:
+    return [read.cell_id for read in await reads_to_confirm(session, ["c1"])]
+
+
+async def _approve(session) -> None:
+    for read in await reads_to_confirm(session, ["c1"]):
+        session.approve_reads(read.cell_id, read.machine, read.fingerprint)
+
+
+def _empty_table(tmp_path) -> str:
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import LongType, NestedField
+
+    warehouse = tmp_path / "empty"
+    warehouse.mkdir()
+    catalog = SqlCatalog(
+        "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
+    )
+    catalog.create_namespace("db")
+    catalog.create_table("db.empty", Schema(NestedField(1, "id", LongType())))
+    return f"file://{warehouse}#db.empty"
+
+
+@windows
+@pytest.mark.parametrize(
+    "beside",
+    [
+        "# @table t file://{tmp}/nowhere#db.t",
+        "# @table t {empty}",
+        "# @mount other s3://bucket/data ro credential=missing",
+        "# @mount gone s3://broken/x ro",
+    ],
+    ids=["unreachable table", "empty table", "unknown credential", "failed listing"],
+)
+async def test_a_yes_sticks_beside_an_input_keyed_per_call(tmp_path, big_mount, beside):
+    """Such an input's provenance is a fresh nonce each time; the yes must not be."""
+    empty = _empty_table(tmp_path) if "{empty}" in beside else ""
+    line = beside.format(tmp=tmp_path, empty=empty)
+    session = _session(tmp_path, {"c1": f"# @mount data s3://bucket/data ro\n{line}\nx = 1\n"})
+
+    before = await _asked(session)
+    await _approve(session)
+
+    assert before == ["c1"]
+    assert await _asked(session) == []
+
+
+@windows
+async def test_a_new_threshold_or_rate_asks_again(tmp_path, big_mount):
+    session = _session(tmp_path, {"c1": "# @mount data s3://bucket/data ro\nx = 1\n"})
+    await _approve(session)
+    kept = await _asked(session)
+
+    big_mount.notebook_confirm_read_bytes = 5
+    lower = await _asked(session)
+    await _approve(session)
+    big_mount.notebook_credential_read_cost = {"lab": 1.0}
+
+    assert (kept, lower, await _asked(session)) == ([], ["c1"], ["c1"])
+
+
+@windows
+async def test_a_re_pointed_worker_asks_again(tmp_path, big_mount):
+    from strata.notebook.models import WorkerBackendType, WorkerSpec
+
+    _, uri = _warehouse(tmp_path)
+    big_mount.notebook_confirm_read_bytes = 0
+    session = _session(tmp_path, {"c1": f"# @worker gpu\n# @table events {uri}\nx = 1\n"})
+
+    def point_at(url: str) -> None:
+        session.notebook_state.workers = [
+            WorkerSpec(name="gpu", backend=WorkerBackendType.EXECUTOR, config={"url": url})
+        ]
+
+    point_at("http://127.0.0.1:9/a")
+    await _approve(session)
+    kept = await _asked(session)
+    point_at("http://127.0.0.1:9/b")
+
+    assert (kept, await _asked(session)) == ([], ["c1"])
+
+
+@windows
+async def test_a_mount_is_listed_off_the_event_loop(tmp_path, big_mount, monkeypatch):
+    listed_on: list[int] = []
+    find = _BrokenBucketFS.find
+
+    def recording_find(self, uri: str, **kwargs):
+        listed_on.append(threading.get_ident())
+        return find(self, uri, **kwargs)
+
+    monkeypatch.setattr(_BrokenBucketFS, "find", recording_find)
+    session = _session(tmp_path, {"c1": "# @mount data s3://bucket/data ro\nx = 1\n"})
+
+    await _asked(session)
+
+    assert listed_on
+    assert threading.get_ident() not in listed_on
+
+
+@windows
+async def test_an_edit_to_what_a_cell_reads_weighs_it_again(tmp_path, big_mount):
+    from strata.notebook.ws import _handle_cell_source_update
+
+    session = _session(tmp_path, {"c1": "x = 1\n"})
+    socket = _Socket()
+    _notebook_connections[session.id] = [socket]
+    try:
+        state = _ensure_execution_state(session.id)
+        for source in (
+            "# @mount data s3://bucket/data ro\nx = 1\n",
+            "# @mount data s3://bucket/data ro\nx = 2\n",
+            "x = 2\n",
+        ):
+            payload = {"cell_id": "c1", "source": source}
+            await _handle_cell_source_update(socket, session, payload, state, session.id)
+    finally:
+        _notebook_connections.pop(session.id, None)
+        forget_notebook_execution_state(session.id)
+
+    # The second edit leaves the inputs as they were: nothing to send.
+    weighed, cleared = socket.frames("cell_inputs")
+    assert [(w["name"], w["bytes"]) for w in weighed["inputs"]] == [("data", 250)]
+    assert cleared["inputs"] == []
+    assert session.notebook_state.get_cell("c1").inputs == []
+
+
+@windows
+async def test_a_ready_cell_whose_result_was_collected_is_asked_about(tmp_path, threshold):
+    """Its run is no longer a cache hit: it reads its inputs again."""
+    _, uri = _warehouse(tmp_path)
+    session = _session(
+        tmp_path, {"c1": f"# @table events {uri}\nx = events_snapshot\n", "c2": "y = x\n"}
+    )
+    cell = session.notebook_state.get_cell("c1")
+    result = await CellExecutor(session).execute_cell("c1", cell.source)
+    assert result.success, result.error
+    cell.status = CellStatus.READY
+    stored = await _asked(session)
+
+    store = session.get_artifact_manager().artifact_store
+    for uri in cell.artifact_uris.values():
+        artifact_id, _, version = uri.removeprefix("strata://artifact/").partition("@v=")
+        store.delete_artifact(artifact_id, int(version))
+
+    assert (stored, await _asked(session)) == ([], ["c1"])
+
+
+@windows
+async def test_a_cells_tests_ask_before_reading_and_count_what_they_read(tmp_path, big_mount):
+    from strata.notebook.ws import _handle_cell_run_tests
+
+    session = _session(
+        tmp_path, {"c1": "# @mount data s3://bucket/data ro\ndef add(a, b):\n    return a + b\n"}
+    )
+    session.venv_python = Path(sys.executable)
+    socket = _Socket()
+    _notebook_connections[session.id] = [socket]
+    payload = {
+        "cell_id": "c1",
+        "test_source": "def test_add(cell):\n    assert cell.add(1, 2) == 3\n",
+    }
+    try:
+        state = _ensure_execution_state(session.id)
+        await _handle_cell_run_tests(socket, session, payload, state, session.id)
+        (prompt,) = socket.frames("read_confirm_prompt")
+        held_back = socket.frames("cell_test_results")
+        await _handle_read_confirm(
+            socket, session, {"prompt_id": prompt["prompt_id"]}, state, session.id
+        )
+    finally:
+        _notebook_connections.pop(session.id, None)
+        forget_notebook_execution_state(session.id)
+
+    assert [cell["cell_id"] for cell in prompt["cells"]] == ["c1"]
+    assert held_back == []
+    assert socket.frames("cell_test_results")[-1]["passed"] == 1
+    (read,) = reads_index.load(session.path)["c1"]["inputs"]
+    assert (read["name"], read["bytes_moved"]) == ("data", 250)
