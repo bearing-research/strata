@@ -1940,6 +1940,70 @@ async def test_cell_cancel_interrupts_running_execution(notebook_session, monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("msg_type", ["notebook_run_all", "notebook_rerun_all"])
+async def test_cancelling_a_queued_cell_of_a_batch_stops_the_run(
+    temp_notebook, monkeypatch, msg_type
+):
+    """A batch reports only finished cells, so the stop must not depend on which one ran last.
+
+    The batch is faked: a real harness outlives a cancelled batch until #1269 lands.
+    """
+    from strata.notebook.executor import BatchCellResult, BatchExecutionResult, CellExecutor
+    from strata.notebook.models import CellStatus
+    from strata.notebook.ws import (
+        _handle_cell_cancel,
+        _handle_notebook_rerun_all,
+        _handle_notebook_run_all,
+    )
+
+    notebook_dir, _ = temp_notebook
+    write_cell(notebook_dir, "middle", "import time\ntime.sleep(60)\ny = x + 1")
+    session = open_session(notebook_dir)
+    sleeping = asyncio.Event()
+    cancelled = asyncio.Event()
+    emitted: list[str] = []
+
+    async def fake_execute_batch(self, cell_specs, *, on_cell_event=None, **kwargs):
+        del self, kwargs
+        assert on_cell_event is not None
+        for spec in cell_specs:
+            if spec["cell_id"] == "middle":
+                sleeping.set()
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+            await on_cell_event(BatchCellResult(cell_id=spec["cell_id"], status="ok"))
+            emitted.append(spec["cell_id"])
+        return BatchExecutionResult(cell_results=[], completed=True)
+
+    monkeypatch.setattr(CellExecutor, "execute_batch", fake_execute_batch)
+
+    handler = (
+        _handle_notebook_run_all if msg_type == "notebook_run_all" else _handle_notebook_rerun_all
+    )
+    fake, execution_state = _make_fake_ws(session)
+    await handler(cast(WebSocket, fake), session, execution_state, session.id, {})
+    run = execution_state.execution_task
+    assert run is not None
+    try:
+        await _wait_until(sleeping.is_set)
+        assert emitted == ["root"]
+
+        await _handle_cell_cancel(session, {"cell_id": "middle"}, session.id)
+
+        assert cancelled.is_set()
+        assert run.done()
+        assert emitted == ["root"]
+        assert session.notebook_state.get_cell("middle").status != CellStatus.READY
+        assert session.notebook_state.get_cell("leaf").status != CellStatus.READY
+    finally:
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_stale_cell_cancel_does_not_clobber_ready_state(notebook_session):
     """A late cancel does not rewrite a completed cell back to idle."""
     from strata.notebook.ws import _handle_cell_cancel
