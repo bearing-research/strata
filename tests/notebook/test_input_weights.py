@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -298,6 +300,70 @@ async def test_a_batched_run_counts_what_its_mounts_downloaded(tmp_path, remote,
 
     assert [c.status.value for c in session.notebook_state.cells] == ["ready", "ready"]
     assert [i["bytes_moved"] for i in reads_index.load(nb)["c1"]["inputs"]] == [5]
+
+
+@pytest.fixture
+def silent_worker():
+    """A worker that accepts connections and never answers; yields its URL and connections."""
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(16)
+    server.settimeout(0.2)
+    accepted: list[socket.socket] = []
+    stop = threading.Event()
+
+    def _accept() -> None:
+        while not stop.is_set():
+            try:
+                accepted.append(server.accept()[0])
+            except OSError:
+                continue
+
+    thread = threading.Thread(target=_accept, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.getsockname()[1]}/v1/notebook-execute", accepted
+    stop.set()
+    thread.join()
+    for conn in accepted:
+        conn.close()
+    server.close()
+
+
+async def test_a_hung_worker_is_asked_once_and_its_share_stays_unknown(
+    tmp_path, remote, monkeypatch, silent_worker
+):
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.models import WorkerBackendType, WorkerSpec
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    url, accepted = silent_worker
+    config = StrataConfig(cache_dir=tmp_path / "cache", notebook_mount_cache_dir=tmp_path / "mc")
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: config)
+    source = "# @worker remote\n# @mount data s3://bucket/data ro\nx = 1"
+    nb = create_notebook(tmp_path / "nb", "Hung worker")
+    add_cell_to_notebook(nb, "c1", None)
+    write_cell(nb, "c1", source)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.workers = [
+        WorkerSpec(
+            name="remote", backend=WorkerBackendType.EXECUTOR, runtime_id="r", config={"url": url}
+        )
+    ]
+    executor = CellExecutor(session)
+
+    shares = []
+    for _ in range(2):
+        prov = await executor._compute_cell_provenance("c1", source)
+        shares += [w.cached_bytes for w in prov.input_weights]
+    estimate = await executor.estimate_reads("c1", source)
+    shares += [w.cached_bytes for w in estimate.inputs]
+
+    assert shares == [None, None, None]
+    # The first probe gave up; the rest did not wait on the worker again.
+    assert len(accepted) == 1
 
 
 async def test_a_worker_answers_by_its_own_object_keys(tmp_path, monkeypatch):
