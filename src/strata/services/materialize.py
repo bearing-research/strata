@@ -179,7 +179,8 @@ class MaterializeService:
         hasher.update(f"schema:{schema_id}".encode())
         hasher.update(f"reading:{reading}".encode())
         hasher.update(b"executor:scan@v1")
-        if columns:
+        # An empty list projects no column (a row count), not all of them.
+        if columns is not None:
             hasher.update(f"columns:{columns}".encode())
         else:
             hasher.update(b"columns:*")

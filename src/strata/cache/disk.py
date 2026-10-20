@@ -559,6 +559,9 @@ class CachedFetcher:
             return batch
         if batch.schema.names == columns:
             return batch
+        if not columns:
+            # ``from_arrays`` of nothing has no rows; a row count needs the batch's.
+            return batch.select([])
         # Index by NAME: ``get_field_index`` returns -1 for an unknown name, and
         # ``batch.column(-1)`` is the last column, so an unknown column would silently hold another
         # column's values.

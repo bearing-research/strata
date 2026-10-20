@@ -276,7 +276,7 @@ def _assert_projection_exists(
 
 def _project_schema(schema, columns: list[str] | None):
     """Return ``schema`` narrowed to ``columns``, in the requested order."""
-    if not columns or schema is None:
+    if columns is None or schema is None:
         return schema
     if list(schema.names) == columns:
         return schema
@@ -296,7 +296,7 @@ def _estimate_row_group_bytes(
     which can under-state Arrow's in-memory size for dictionary-encoded columns.
     """
     total = getattr(rg_meta, "total_byte_size", 0)
-    if not columns:
+    if columns is None:
         return total
 
     projected = 0

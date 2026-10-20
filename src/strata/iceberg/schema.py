@@ -331,6 +331,9 @@ def read_as_snapshot(
 ) -> pa.Table:
     """Return *table*, read from the file, as the snapshot's *names* (all when None)."""
     wanted = [c for c in columns if names is None or c.name in names]
+    if not wanted:
+        # A table built from no arrays has no rows; an empty projection keeps the count.
+        return table.select([])
     if names is not None:
         order = {name: i for i, name in enumerate(names)}
         wanted.sort(key=lambda c: order[c.name])

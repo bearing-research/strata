@@ -326,3 +326,36 @@ def test_a_fetch_counts_the_column_chunks_it_read_from_storage(tmp_path, granula
     assert miss.storage_bytes == sum(chunks[name] for name in read) > 0
     assert hit.cached is True
     assert hit.storage_bytes == 0
+
+
+@pytest.mark.parametrize("granularity", list(CacheGranularity))
+def test_an_empty_projection_keeps_the_row_count_on_a_miss_and_a_hit(tmp_path, granularity):
+    """``columns=[]`` asks for every row and no column (a row count), cached or not."""
+    parquet_path = tmp_path / "data.parquet"
+    pq.write_table(pa.table({"id": [1, 2, 3], "name": ["a", "b", "c"]}), parquet_path)
+    fetcher = CachedFetcher(
+        StrataConfig(cache_dir=tmp_path / "cache", cache_granularity=granularity)
+    )
+
+    def task() -> Task:
+        return Task(
+            file_path=str(parquet_path),
+            row_group_id=0,
+            cache_key=CacheKey(
+                tenant_id="_default",
+                table_identity=TableIdentity.from_table_id("test_db.events"),
+                file_size=1024,
+                file_path=str(parquet_path),
+                row_group_id=0,
+                projection_fingerprint=CacheKey.compute_projection_fingerprint([]),
+            ),
+            num_rows=3,
+            columns=[],
+        )
+
+    miss, hit, streamed = task(), task(), task()
+    batches = [fetcher.fetch(miss), fetcher.fetch(hit)]
+    batches.append(ipc.open_stream(fetcher.fetch_as_stream_bytes(streamed)).read_next_batch())
+
+    assert hit.cached and streamed.cached
+    assert [(b.num_rows, b.num_columns) for b in batches] == [(3, 0)] * 3

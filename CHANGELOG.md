@@ -42,6 +42,12 @@ exhaustive commit history.
 - **The shortcuts list names the editor's real undo and redo keys.** It said
   Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
   Mac both use Cmd. (#1256)
+- **A scan with `columns: []` is a row count, not a full scan.** An
+  empty projection, the row-count idiom of pyarrow's `to_table(columns=[])`,
+  shared its artifact with the full scan of the same snapshot, so whichever
+  ran first answered both: a full scan could come back with no columns, or a
+  row count with every column. It now has its own artifact and returns every
+  row with no columns, cached or not. (#TBD)
 
 ## 0.11.0 - 2026-10-19
 

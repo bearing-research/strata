@@ -98,6 +98,15 @@ def test_a_renamed_column_reads_under_its_new_name(lake):
     assert _rows(_scan(config, uri, columns=["id", "y"])[0]) == expected
 
 
+def test_an_empty_projection_of_an_evolved_file_keeps_its_row_count(lake):
+    """``columns=[]`` is a row count, also when the file is read as a newer schema."""
+    catalog, uri, config = lake
+    _evolve(catalog, lambda u: u.rename_column("x", "y"))
+
+    table, _ = _scan(config, uri, columns=[])
+    assert (table.num_rows, table.column_names) == (2, [])
+
+
 def test_a_new_column_taking_a_renamed_ones_name_is_not_its_data(lake):
     catalog, uri, config = lake
     _evolve(catalog, lambda u: u.rename_column("x", "y"))

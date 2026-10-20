@@ -316,6 +316,12 @@ class TestComputeIdentityProvenance:
         projected = service.compute_identity_provenance("cat.ns.t", 42, ["x"], [], 0, "r")
         assert star != projected
 
+    def test_empty_projection_differs_from_all_columns(self, service):
+        # ``[]`` reads no column (a row count); sharing the full scan's hash poisoned it.
+        star = service.compute_identity_provenance("cat.ns.t", 42, None, [], 0, "r")
+        empty = service.compute_identity_provenance("cat.ns.t", 42, [], [], 0, "r")
+        assert star != empty
+
 
 class TestRebuildArtifactId:
     def test_fresh_miss_uses_new_id(self, service):

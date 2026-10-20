@@ -911,3 +911,28 @@ def test_a_scan_keeps_each_requests_column_order(server_with_personal_mode):
             assert client.fetch(artifact.uri).column_names == columns
     finally:
         client.close()
+
+
+@pytest.mark.parametrize("mode", ["stream", "artifact"])
+def test_an_empty_projection_counts_rows_and_is_not_a_full_scan(server_with_personal_mode, mode):
+    """``columns: []`` is pyarrow's row-count idiom: every row, no column, its own artifact."""
+    from strata_client.client import StrataClient
+    from strata_client.integration.arrow import StrataDataset
+
+    base_url = server_with_personal_mode["base_url"]
+    uri = server_with_personal_mode["warehouse"]["table_uri"]
+    client = StrataClient(base_url=base_url)
+    try:
+        shapes = []
+        for params in ({"columns": []}, {}, {"columns": []}):
+            artifact = client.materialize(
+                inputs=[uri], transform={"executor": "scan@v1", "params": params}, mode=mode
+            )
+            table = client.fetch(artifact.uri)
+            shapes.append((table.num_rows, len(table.column_names)))
+        assert shapes == [(100, 0), (100, 4), (100, 0)]
+    finally:
+        client.close()
+
+    with StrataDataset(uri, base_url=base_url) as dataset:
+        assert dataset.scanner(columns=[]).to_table().num_rows == 100
