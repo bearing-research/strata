@@ -264,6 +264,30 @@ class TestReferenceExecutor:
         assert result.error_code is not None
         assert result.logs is not None
 
+    def test_duckdb_executor_reads_only_its_inputs_under_its_memory_limit(self, tmp_path):
+        """It runs duckdb_sql@v1's engine: no host files, and its own memory limit."""
+        from strata.transforms.reference_executor import DuckDBExecutor
+
+        secret = tmp_path / "secret.txt"
+        secret.write_text("executor secret")
+        executor = DuckDBExecutor(max_memory_mb=512)
+
+        result = executor.execute(
+            transform_ref="duckdb_sql@v1",
+            params={"sql": f"SELECT content FROM read_text('{secret}')"},
+            inputs=[],
+        )
+        assert result.success is False
+        assert result.error_code == "PermissionException"
+
+        result = executor.execute(
+            transform_ref="duckdb_sql@v1",
+            params={"sql": "SELECT current_setting('memory_limit') AS m"},
+            inputs=[],
+        )
+        assert result.output_bytes is not None
+        assert ipc_bytes_to_table(result.output_bytes).to_pylist() == [{"m": "488.2 MiB"}]
+
 
 class TestUtilityFunctions:
     def test_parse_arrow_inputs(self):

@@ -137,6 +137,11 @@ exhaustive commit history.
   variables its `${VAR}` values name, which hold the keys themselves. It now
   takes those out of its environment too, and still resolves its mounts
   against them. (#1267)
+- **The reference executor reads only a build's inputs.** Its `duckdb_sql@v1`
+  ran the SQL with the executor host's files, network and extensions in
+  reach, so a build could read or write files there and return a result its
+  inputs do not determine. It now runs the built-in transform's engine, which
+  shuts all three off; its memory limit is unchanged.
 
 ### Security
 
