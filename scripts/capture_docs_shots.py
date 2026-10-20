@@ -484,6 +484,83 @@ def build_warehouse(root: Path) -> str:
     return f"{warehouse.as_uri()}#taxi.trips"
 
 
+# The lake notebook shows what a run reads and writes: the weight badge and the
+# read dialog need a table big enough to cross the threshold below, and the
+# folder listing needs files of real size.
+LAKE_CELLS = [
+    """\
+# @name rides
+# @table rides lake:taxi.rides
+scan = strata.materialize(
+    inputs=[rides],
+    transform={"executor": "scan@v1", "params": {"snapshot_id": rides_snapshot}},
+)
+df = scan.to_pandas()
+print(f"{len(df):,} rides at snapshot {rides_snapshot}")
+""",
+    """\
+# @name train
+# @output_dir ckpt
+import json
+import numpy as np
+
+fare_per_km = float((df["fare"] / df["distance"]).mean())
+(ckpt / "metrics.json").write_text(json.dumps({"fare_per_km": round(fare_per_km, 3)}))
+rng = np.random.default_rng(0)
+for epoch in range(3):
+    np.save(ckpt / f"epoch{epoch}.npy", rng.standard_normal((256, 1024), dtype=np.float32))
+""",
+]
+
+# Ask before a run that moves more than this: the rides table is about twice it.
+CONFIRM_READ_BYTES = 16 * 1024 * 1024
+CONFIRM_READ_MESSAGE = "Large reads are faster on the lab's workers next to the bucket."
+
+
+def build_lake(root: Path) -> dict[str, dict[str, str]]:
+    """A ``lake`` catalog holding one table of about 34 MB, as ``STRATA_CATALOGS``.
+
+    Random values, so Parquet cannot compress the table under the threshold.
+    """
+    import numpy as np
+    import pyarrow as pa
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    warehouse = root / "lake-warehouse"
+    warehouse.mkdir(parents=True, exist_ok=True)
+    properties = {
+        "type": "sql",
+        "uri": f"sqlite:///{(warehouse / 'catalog.db').as_posix()}",
+        "warehouse": warehouse.as_uri(),
+    }
+    catalog = SqlCatalog("lake", **{k: v for k, v in properties.items() if k != "type"})
+    catalog.create_namespace("taxi")
+    rng = np.random.default_rng(0)
+    rows = 1_500_000
+    data = pa.table(
+        {
+            "ride_id": pa.array(np.arange(rows, dtype=np.int64)),
+            "fare": pa.array(rng.uniform(5, 80, rows)),
+            "distance": pa.array(rng.uniform(0.5, 30, rows)),
+        }
+    )
+    catalog.create_table("taxi.rides", data.schema).append(data)
+    return {"lake": properties}
+
+
+def start_worker(port: int, log_dir: Path) -> subprocess.Popen:
+    """A real ``strata-worker``, so the Workers panel reports a health check it ran."""
+    log = (log_dir / "worker.log").open("wb")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "strata.notebook.remote_executor", "--port", str(port)],
+        cwd=REPO_ROOT,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+    )
+    _wait_for_port(proc, port, log_dir / "worker.log", "strata-worker")
+    return proc
+
+
 def _scaffold(root: Path, name: str, deps: tuple[str, ...], cells: list[str]) -> Path:
     nb = root / name
     if nb.exists():
@@ -514,9 +591,8 @@ def test_setosa_has_the_shortest_petals(cell):
 def _cell_id(notebook: Path, snippet: str) -> str:
     """Resolve a cell id by a distinctive fragment of its source.
 
-    Ids are backend-generated, the quickstart cells carry no name annotations
-    (adding them would show in the screenshot), and matching by position would
-    silently pick the wrong cell if the quickstart gained a step.
+    Ids are backend-generated, and matching by position would silently pick
+    the wrong cell if the quickstart gained a step.
     """
     out = subprocess.run(
         [sys.executable, "-m", "strata.cli", "cell", "list", str(notebook), "--format", "json"],
@@ -571,12 +647,12 @@ def publish_figure(notebook: Path, storage_dir: Path) -> str:
     return str(json.loads(out.stdout)["token"])
 
 
-def build_fixtures(root: Path) -> tuple[Path, Path]:
-    """Scaffold the two fixture notebooks the web shots photograph.
+def build_fixtures(root: Path, worker_url: str) -> tuple[Path, Path, Path]:
+    """Scaffold the three fixture notebooks the web shots photograph.
 
-    The quickstart notebook is run here. The registry notebook is not: it
-    publishes through the ambient ``strata`` client, so the browser script runs
-    it against the live server.
+    The quickstart notebook is run here. The registry and lake notebooks are
+    not: their cells use the ambient ``strata`` client, so the browser script
+    runs them against the live server.
     """
     iris = _scaffold(
         root, "iris", ("pandas", "scikit-learn", "matplotlib"), extract_quickstart_cells()
@@ -594,12 +670,34 @@ def build_fixtures(root: Path) -> tuple[Path, Path]:
     table_uri = build_warehouse(root)
     cells = [REGISTRY_CELLS[0].replace("TABLE_URI", repr(table_uri)), *REGISTRY_CELLS[1:]]
     registry = _scaffold(root, "registry", ("scikit-learn",), cells)
-    return iris, registry
+
+    lake = _scaffold(root, "lake", ("pandas", "numpy"), LAKE_CELLS)
+    _strata("worker", "add", str(lake), "local-dev", "--url", worker_url)
+    return iris, registry, lake
 
 
-def serve(storage_dir: Path, port: int) -> subprocess.Popen:
+def _wait_for_port(proc: subprocess.Popen, port: int, log: Path, what: str) -> None:
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise SystemExit(f"{what} exited before it came up:\n{log.read_text(errors='replace')}")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return
+        except OSError:
+            time.sleep(0.25)
+    proc.terminate()
+    raise SystemExit(
+        f"{what} did not listen on {port} within 60s:\n{log.read_text(errors='replace')}"
+    )
+
+
+def serve(
+    storage_dir: Path, port: int, extra_env: dict[str, str] | None = None
+) -> subprocess.Popen:
     env = {
         **os.environ,
+        **(extra_env or {}),
         "STRATA_NOTEBOOK_STORAGE_DIR": str(storage_dir),
         "STRATA_DEPLOYMENT_MODE": "personal",
         "STRATA_PORT": str(port),
@@ -618,29 +716,27 @@ def serve(storage_dir: Path, port: int) -> subprocess.Popen:
         stdout=handle,
         stderr=subprocess.STDOUT,
     )
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            raise SystemExit(
-                f"strata server exited before it came up:\n{log.read_text(errors='replace')}"
-            )
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                return proc
-        except OSError:
-            time.sleep(0.25)
-    proc.terminate()
-    raise SystemExit(
-        f"strata server did not listen on {port} within 60s:\n{log.read_text(errors='replace')}"
-    )
+    _wait_for_port(proc, port, log, "strata server")
+    return proc
 
 
 def capture_web(work_dir: Path) -> None:
     check_bundle_is_current()
-    iris, registry = build_fixtures(work_dir)
+    worker_port = _free_port()
+    iris, registry, lake = build_fixtures(work_dir, f"http://127.0.0.1:{worker_port}/v1/execute")
     token = publish_figure(iris, work_dir)
+    catalogs = build_lake(work_dir)
+    worker = start_worker(worker_port, work_dir)
     port = _free_port()
-    proc = serve(work_dir, port)
+    proc = serve(
+        work_dir,
+        port,
+        {
+            "STRATA_CATALOGS": json.dumps(catalogs),
+            "STRATA_NOTEBOOK_CONFIRM_READ_BYTES": str(CONFIRM_READ_BYTES),
+            "STRATA_NOTEBOOK_CONFIRM_READ_MESSAGE": CONFIRM_READ_MESSAGE,
+        },
+    )
     try:
         subprocess.run(
             [
@@ -652,6 +748,8 @@ def capture_web(work_dir: Path) -> None:
                 str(iris),
                 "--registry-path",
                 str(registry),
+                "--lake-path",
+                str(lake),
                 "--publication-token",
                 token,
                 "--out",
@@ -661,13 +759,14 @@ def capture_web(work_dir: Path) -> None:
             check=True,
         )
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            # Never let cleanup mask the capture error or leave the port held.
-            proc.kill()
-            proc.wait(timeout=10)
+        for child in (proc, worker):
+            child.terminate()
+            try:
+                child.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                # Never let cleanup mask the capture error or leave the port held.
+                child.kill()
+                child.wait(timeout=10)
 
 
 # --------------------------------------------------------------------------

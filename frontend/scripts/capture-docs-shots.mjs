@@ -45,8 +45,8 @@ async function openNotebook(baseUrl, path) {
 }
 
 /** Load a notebook page with the theme pinned, settled enough to photograph. */
-async function loadNotebook(browser, baseUrl, sessionId, theme) {
-  const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: SCALE })
+async function loadNotebook(browser, baseUrl, sessionId, theme, viewport = VIEWPORT) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: SCALE })
   await context.addInitScript((value) => {
     try {
       localStorage.setItem('strata.theme', value)
@@ -117,13 +117,15 @@ async function main() {
   const outDir = argFor('--out', '../docs/assets')
   const irisPath = argFor('--iris-path')
   const registryPath = argFor('--registry-path')
+  const lakePath = argFor('--lake-path')
   const publicationToken = argFor('--publication-token')
-  if (!irisPath || !registryPath) {
-    throw new Error('--iris-path and --registry-path are required')
+  if (!irisPath || !registryPath || !lakePath) {
+    throw new Error('--iris-path, --registry-path and --lake-path are required')
   }
 
   const iris = await openNotebook(baseUrl, irisPath)
   const registry = await openNotebook(baseUrl, registryPath)
+  const lake = await openNotebook(baseUrl, lakePath)
 
   // Run the iris cells twice in this session: once with the target's cache
   // bypassed, then normally. Cache savings are priced against the last uncached
@@ -159,10 +161,32 @@ async function main() {
 
   const browser = await chromium.launch()
   try {
+    // 6: the question before a large read. Taken before the lake notebook runs
+    // at all: a ready cell is a cache hit and is never asked about, and REST
+    // runs without `confirm_reads` go ahead, so the browser's Run is what asks.
     for (const theme of THEMES) {
-      // 1: the quickstart notebook, settled.
+      const { context, page } = await loadNotebook(browser, baseUrl, lake.sessionId, theme)
+      const rides = page.locator('.cell').filter({ hasText: '@table rides' })
+      await rides.locator('button[title="Run (Shift+Enter)"]').click()
+      await page.locator('.read-overlay').waitFor({ timeout: TIMEOUT_MS })
+      await page.waitForTimeout(400)
+      await shoot(page, 'read-confirm', outDir, theme)
+      await page.locator('.read-cancel').click()
+      await context.close()
+    }
+
+    for (const cell of lake.cells) {
+      await api('POST', `${baseUrl}/v1/notebooks/${lake.sessionId}/cells/${cell.id}/execute`, {})
+    }
+
+    for (const theme of THEMES) {
+      // 1: the quickstart notebook, settled. Taller than the rest so the
+      // second cell shows beside the first: one cell is not a pipeline.
       {
-        const { context, page } = await loadNotebook(browser, baseUrl, iris.sessionId, theme)
+        const { context, page } = await loadNotebook(browser, baseUrl, iris.sessionId, theme, {
+          width: VIEWPORT.width,
+          height: 1180,
+        })
         await shoot(page, 'notebook-anatomy', outDir, theme)
         await context.close()
       }
@@ -242,6 +266,35 @@ async function main() {
         await page.waitForTimeout(600)
         await shoot(page, 'registry-lineage', outDir, theme, '.lineage-modal')
 
+        await context.close()
+      }
+
+      // 8 + 9 + 10: what the lake notebook's run read and wrote, and the
+      // worker catalog it can send cells to.
+      {
+        const { context, page } = await loadNotebook(browser, baseUrl, lake.sessionId, theme)
+        const rides = page.locator('.cell').filter({ has: page.locator('.inputs-badge') })
+        await shoot(page, 'input-weight', outDir, theme, rides)
+
+        // The folder listing is the train cell's display, ahead of its console.
+        const train = page.locator('.cell').filter({ hasText: '@output_dir ckpt' })
+        await train.locator('table').first().waitFor({ timeout: TIMEOUT_MS })
+        await shoot(page, 'output-dir', outDir, theme, train)
+
+        // The panel is taller than the sidebar shows beside an open drawer, and
+        // an element shot of an overflowing panel spills into the drawer.
+        await page.setViewportSize({ width: VIEWPORT.width, height: 2000 })
+        await page.locator('.dag-drawer').getByText('collapse').click()
+        await page.locator('.workers-toggle').click()
+        // Wait for the health check the panel ran against the real worker, not
+        // just the panel: before it lands the worker reads "unknown".
+        await page
+          .locator('.workers-panel')
+          .getByText('healthy', { exact: true })
+          .first()
+          .waitFor({ timeout: TIMEOUT_MS })
+        await page.waitForTimeout(400)
+        await shoot(page, 'workers-panel', outDir, theme, '.workers-panel')
         await context.close()
       }
 

@@ -33,7 +33,7 @@ a wall of JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/notebook-anatomy-dark.png">
-  <img alt="The Strata notebook UI: a Python cell with its source and an interactive table of results, sidebar panels for mounts, workers and environment, and a bottom drawer showing the cell DAG and per-cell timings." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/notebook-anatomy-light.png">
+  <img alt="The Strata notebook UI: two named Python cells, load and summarize, each with its source and an interactive table of results, sidebar panels for mounts, workers and environment, and a bottom drawer showing the DAG of load, summarize and plot with per-cell timings." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/notebook-anatomy-light.png">
 </picture>
 
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
@@ -48,12 +48,13 @@ Install it as a one-command [Claude Code plugin](https://github.com/bearing-rese
 /plugin install strata-scratchpad@strata
 ```
 
-![The terminal viewer over five moments: an empty notebook, a cell arriving,
-that cell finishing in 1.0s with its output, a second cell arriving that reads
-the first one's variable, and both cells green.](https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/tui-agent-live.gif)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/web-agent-live-dark.gif">
+  <img alt="A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds." src="https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/web-agent-live-light.gif">
+</picture>
 
-*A coding agent drives the notebook in one terminal; `strata-notebook-tui`
-mirrors it live in another. Captured from a real run, not a mock-up.*
+*A coding agent drives the notebook through the `strata` CLI; the browser on
+the same session updates as it goes. Captured from a real run, not a mock-up.*
 
 Whether an agent reaches for it instead of a scratch script is measured rather
 than assumed. `evals/agent_notebook/` drives the real on-ramp and grades the

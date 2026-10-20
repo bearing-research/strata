@@ -2,12 +2,14 @@
 
 **Strata is a notebook your coding agent can drive, and everything it computes stays.**
 
-![The Strata notebook UI: a Python cell with its source and an interactive table
-of results, the sidebar panels for mounts, workers and environment, and a bottom
-drawer showing the cell DAG and per-cell timings.](assets/notebook-anatomy-light.png#only-light)
-![The Strata notebook UI: a Python cell with its source and an interactive table
-of results, the sidebar panels for mounts, workers and environment, and a bottom
-drawer showing the cell DAG and per-cell timings.](assets/notebook-anatomy-dark.png#only-dark)
+![The Strata notebook UI: two named Python cells, load and summarize, each with
+its source and an interactive table of results, the sidebar panels for mounts,
+workers and environment, and a bottom drawer showing the DAG of load, summarize
+and plot with per-cell timings.](assets/notebook-anatomy-light.png#only-light)
+![The Strata notebook UI: two named Python cells, load and summarize, each with
+its source and an interactive table of results, the sidebar panels for mounts,
+workers and environment, and a bottom drawer showing the DAG of load, summarize
+and plot with per-cell timings.](assets/notebook-anatomy-dark.png#only-dark)
 
 Coding agents explore by writing throwaway scripts that nobody sees and
 nothing remembers. Point one at Strata and the work lands in a notebook
@@ -112,13 +114,12 @@ same cell run.
 | **Terminal (TUI)** | Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only. | [Quickstart - Terminal](notebook/tui.md) |
 | **Coding agent** | Handing the notebook to Claude Code and watching it build, through MCP tools. The notebook is what you wanted. | [Quickstart - Coding agent](notebook/agent.md) |
 
-![The terminal viewer over five moments: an empty notebook, a cell arriving,
-that cell finishing in 1.0s with its output, a second cell arriving that reads
-the first one's variable, and both cells green.](assets/tui-agent-live.gif)
+![A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds.](assets/web-agent-live-light.gif#only-light)
+![A terminal running strata CLI commands beside a browser on the same notebook, over seven moments: the empty notebook, a load cell arriving, the cell running, finishing after about two seconds, a summarize cell arriving that reads its variable, both cells green, and the load cell run again and served from the cache in milliseconds.](assets/web-agent-live-dark.gif#only-dark)
 
 Two of those front doors at once: a coding agent adds and runs cells through
-the CLI while `strata-notebook-tui` mirrors it live in another terminal.
-Captured from a real run rather than assembled from canned frames.
+the `strata` CLI while the web UI on the same session updates live. Captured
+from a real run rather than assembled from canned frames.
 
 There is also a use that is not a front door at all: an agent working on
 something else entirely, using a notebook as a **cached scratchpad** for

@@ -4,8 +4,8 @@ Images the docs site and the top-level `README.md` embed.
 
 Everything here except `agent-demo.gif` is **generated**, not hand-made -
 including `tui-cache-payoff.gif`, which is assembled from canned TUI frames
-rather than recorded, and `tui-agent-live.gif`, which is not canned at all
-(see [Live captures](#live-captures)). A screenshot of last release's layout still looks
+rather than recorded, and `tui-agent-live.gif` and `web-agent-live-*.gif`,
+which are not canned at all (see [Live captures](#live-captures)). A screenshot of last release's layout still looks
 authoritative, so the way these stay honest is that regenerating all of them is
 one command rather than an afternoon of cropping:
 
@@ -28,10 +28,15 @@ result alongside that change.
 | `registry-tab-{light,dark}.png` | Web UI | Registry dashboard, step 5 |
 | `registry-lineage-{light,dark}.png` | Web UI | Registry dashboard, step 7 |
 | `publication-page-{light,dark}.png` | Published page | Publishing an artifact |
+| `input-weight-{light,dark}.png` | Web UI | Annotations, `@mount` (what a cell reads) |
+| `output-dir-{light,dark}.png` | Web UI | Annotations, `@output_dir` |
+| `read-confirm-{light,dark}.png` | Web UI | Lake-aware cells, asking before a large read |
+| `workers-panel-{light,dark}.png` | Web UI | Remote workers, registering workers |
+| `web-agent-live-{light,dark}.gif` | Web UI + CLI | Docs home, `README.md` |
 | `tui-layout.svg` | TUI | Terminal viewer |
 | `tui-agent-running.svg` | TUI | Driving a notebook with a coding agent |
 | `tui-cache-payoff.gif` | TUI | Terminal viewer, watching a re-run |
-| `tui-agent-live.gif` | TUI | Docs home, `README.md`, Terminal viewer (watching a coding agent) |
+| `tui-agent-live.gif` | TUI | Terminal viewer (watching a coding agent) |
 | `agent-demo.gif` | Screen recording | Not yet recorded - see below |
 
 ## Conventions
@@ -70,15 +75,19 @@ mistimed GIF.
 
 ### Live captures
 
-`tui-agent-live.gif` is the exception to everything above: it is not fed canned
-frames. It runs a real server, scaffolds a real notebook, drives it with the
-real `strata` CLI over `--server`/`--session` (the same path a coding agent
-takes), and screenshots a real TUI attached over a real WebSocket.
+`tui-agent-live.gif` and `web-agent-live-{light,dark}.gif` are the exception to
+everything above: they are not fed canned frames. Each runs a real server,
+scaffolds a real notebook, drives it with the real `strata` CLI over
+`--server`/`--session` (the same path a coding agent takes), and screenshots a
+real viewer attached over a real WebSocket: the TUI for one, a browser per
+theme for the other, framed beside the terminal the commands ran in.
 
 ```bash
 uv run python scripts/capture_agent_drive.py
 cd frontend && node scripts/rasterize-svg.mjs --in /tmp/strata-agent-drive/frames
 uv run python scripts/assemble_gif.py --in /tmp/strata-agent-drive/frames --name tui-agent-live
+
+uv run python scripts/capture_web_agent_drive.py   # both web GIFs, one command
 ```
 
 The cost is a slower, more fragile capture; the reason to pay it is that the
@@ -105,5 +114,5 @@ recording.
   (two side-by-side panes, `strata agent`, two prompts, ~15-25s, < 5 MB).
 - **Where it goes:** save the exported GIF here as `docs/assets/agent-demo.gif`.
 - **Wire it in:** there is no reserved slot for it any more. The README's
-  "Point an agent at it" section now shows `tui-agent-live.gif`, so decide where
-  the recording goes when it exists.
+  "Point an agent at it" section now shows `web-agent-live-*.gif`, so decide
+  where the recording goes when it exists.
