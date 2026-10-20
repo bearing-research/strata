@@ -36,7 +36,7 @@ Add extras in brackets, for example
 | `tui` | The terminal viewer: `strata watch`, `strata-notebook-tui`, and `strata agent` unless you pass `--no-tui`. |
 | `sql` | SQL cells. Add a driver extra for each database you connect to: `sql-duckdb`, `sql-sqlite`, `sql-postgres`, `sql-snowflake`, `sql-bigquery`. |
 | `postgres` | A Postgres metadata database for the artifact store (`STRATA_ARTIFACT_METADATA_DSN`), for several nodes sharing one store. |
-| `azure` | The Azure Blob Storage artifact backend, and reading Azure lake tables (`adlfs`). |
+| `azure` | The Azure Blob Storage artifact backend, notebook `az://` mounts, and reading Azure lake tables (`adlfs`). |
 | `s3` | Notebook `s3://` mounts (`s3fs`), and presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) from an S3 role (instance profile, ECS task role, web identity) rather than an access key pair. |
 | `gcs` | Notebook `gs://` mounts (`gcsfs`), and presigned build-manifest URLs (`STRATA_ARTIFACT_PRESIGNED_URLS`) for the GCS artifact backend. |
 | `otel` | OpenTelemetry tracing. |
@@ -83,7 +83,10 @@ npm run build
 cd ..
 ```
 
-The server auto-detects `frontend/dist/` and serves it.
+The server serves `src/strata/_frontend/` if it exists, else
+`frontend/dist/`. `_frontend/` is the bundle a release copies in, so after a
+fresh build either copy `frontend/dist/` into `src/strata/_frontend/` or
+remove `src/strata/_frontend/`.
 
 ### 3. Start the server
 

@@ -6,8 +6,9 @@ through a network. It's the right mode when:
 - Multiple users are sharing one Strata instance with their own
   identities (not just "everyone is logged in as me").
 - The server is reachable beyond a loopback interface.
-- Multi-tenancy matters, separate caches, separate QoS, separate
-  metrics per tenant.
+- Multi-tenancy matters: each tenant gets its own cache keying and its
+  own QoS limiter pool, and `GET /v1/admin/tenants` reports usage per
+  tenant.
 - You want the platform to mediate writes - either routing them
   through server-side transforms, or letting authenticated clients
   publish directly to a shared store with `service_writes_enabled`
@@ -81,8 +82,9 @@ proxy that:
 
    `$authenticated_*` stand for whatever your auth layer provides (for
    example `auth_request_set` from an `auth_request` subrequest). If you
-   renamed a header with `STRATA_PRINCIPAL_HEADER`, `STRATA_TENANT_HEADER`
-   or `STRATA_SCOPES_HEADER`, set the renamed one. Check it from outside
+   renamed a header with `STRATA_PRINCIPAL_HEADER`, `STRATA_TENANT_HEADER`,
+   `STRATA_SCOPES_HEADER` or `STRATA_PROXY_TOKEN_HEADER`, set the renamed
+   one. Check it from outside
    the proxy: a request carrying `X-Strata-Scopes: admin:*` for an
    ordinary user must still get 403 from `GET /v1/logs`. The demo
    stack's `.docker/service-mode/nginx.conf` sets all four.
@@ -143,8 +145,9 @@ The configuration is in `.docker/service-mode/`:
 
 - `pyproject.toml`, Strata's service-mode config (mounted into the
   container as `/home/strata/pyproject.toml`). Includes the proxy
-  token, multi-tenancy on, tenant header name, and a sample
-  worker-catalog entry pointing at the executor sidecar.
+  token, multi-tenancy on, tenant header name, and two worker-catalog
+  entries pointing at the executor sidecar: `gpu-http` (direct transport)
+  and `gpu-http-signed` (signed-URL transport).
 - `nginx.conf`, the two `server {}` blocks that inject the demo
   identities.
 
@@ -275,9 +278,10 @@ Compared to personal mode:
   started it, in the tenant it started it in, and admin endpoints such as `POST /v1/cache/clear` need
   their [scope](#scope-gated-endpoints).
 - **Per-tenant resources** when multi-tenancy is on. Each tenant
-  gets its own QoS limiter pool, its own metric labels, and its own
-  cache keying, bulk queries from tenant A can't starve tenant B's
-  dashboards.
+  gets its own QoS limiter pool and its own cache keying, so bulk
+  queries from tenant A can't starve tenant B's dashboards. Per-tenant
+  usage comes from `GET /v1/admin/tenants`, not Prometheus labels (see
+  [Multi-tenancy](#multi-tenancy)).
 
 ## Running more than one replica
 
@@ -330,7 +334,8 @@ header are rejected. Under `api_key` auth the tenant is the key's own
 and an `X-Tenant-ID` the caller sends is ignored, so a key cannot pick
 another tenant's limiters or log attribution; under `trusted_proxy` it
 is the header the proxy sets. The tenant ID is validated as 1–64
-alphanumeric / `_` / `-` characters and hashed into:
+alphanumeric / `_` / `-` characters, starting with a letter or digit, and
+hashed into:
 
 - **Cache keys**: tenant A and tenant B can scan the same Iceberg
   table and never see each other's row-group cache entries.
@@ -768,7 +773,10 @@ host: it runs the harness in place.
 Switching users needs the privilege to do it, so **the server runs as root**
 and drops to the harness user for every process that runs cell code: the cold
 and R harnesses, the batch harness behind Run All, the warm pool workers, the
-inspect REPL, cell tests and the R package restore. It is POSIX only. What the harness user needs:
+inspect REPL, cell tests and the R package restore. It is POSIX only. The
+published Docker image runs as the non-root `strata` user, which refuses the
+setting: run that container as root (`--user root`, or `user: root` in Compose)
+and under an init (below). What the harness user needs:
 
 | Path | Access |
 | --- | --- |
@@ -802,8 +810,10 @@ before each hand-over Strata kills (`SIGKILL`) every process of the harness user
 that no run holds. A run holds what descends from the server (or from a process
 that started the server, such as a supervisor running other workers of it), and
 what is still in the session of a running cell. So `cmd &` from a cell's shell
-lives until its cell ends, while a process that left with `setsid` is stopped at
-the next hand-over, even while its cell runs. Two things follow:
+is held while the process that ran its cell lives (a cold or warm harness runs
+one cell, the batch harness behind Run All several), and once that process
+exits it is stopped at the next hand-over. A process that left with `setsid` is
+stopped at the next hand-over, even while its cell runs. Two things follow:
 
 - **The harness user is this server's alone.** Any other process of that user,
   another server's cells or a login, is stopped too.
@@ -819,8 +829,9 @@ A cell's ambient `strata` client reaches this server with a token the server
 hands each run on the harness's stdin (see
 [the ambient client](../notebook/cells.md#the-ambient-strata-client)), which
 stands in for the proxy token (or, under `api_key`, the key) on the client's
-routes only and stops working when
-the run ends. Every cell runs as the one harness user, so keep the host's
+routes, plus promoting into its own session, and stops working when the run
+ends. A request with it acts as whoever started the run, without their
+`admin:` scopes. Every cell runs as the one harness user, so keep the host's
 `kernel.yama.ptrace_scope` at 1 or higher: at 0, a cell can read the memory of
 another running cell, its token included.
 

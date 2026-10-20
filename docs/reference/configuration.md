@@ -13,8 +13,8 @@ strings, numbers, booleans, and TOML arrays all work as expected.
 Some settings are environment-only and have no `[tool.strata]` equivalent,
 because they are read directly by the process that uses them rather than being
 fields of `StrataConfig`: everything in the **Worker** section (the
-`strata-worker` process), the TUI variables, logging, tracing and metrics, and
-the fast-IO tuning. Those rows say so.
+`strata-worker` process), the TUI variables, and logging, tracing and metrics.
+Those rows say so.
 
 ```toml
 # pyproject.toml
@@ -275,7 +275,7 @@ with either.
 | `STRATA_ARTIFACT_AZURE_CONTAINER` | `None`      | Azure container                  |
 | `STRATA_ARTIFACT_AZURE_PREFIX`    | `artifacts` | Azure prefix                     |
 | `STRATA_ARTIFACT_METADATA_DSN`    | `None`      | `postgresql://` URL for the artifact store's metadata. Unset keeps SQLite under `STRATA_ARTIFACT_DIR` |
-| `STRATA_STORE_TOKEN`              | `None`      | Bearer token `strata artifact publish --to <url>` presents to the remote store. Read from the environment so it stays out of shell history; `--header` covers anything else a proxy wants |
+| `STRATA_STORE_TOKEN`              | `None`      | Bearer token `strata artifact publish --to <url>` and `strata artifact promote --to <url>` present to the remote store. Read from the environment so it stays out of shell history; `--header` covers anything else a proxy wants |
 | `STRATA_NODE_ADVERTISED_URL`      | `None`      | URL that reaches this node. Set only in multi-node deployments; enables stream redirects instead of 404s |
 
 ### Sharing one artifact store across nodes
@@ -645,7 +645,8 @@ carries upload and finalize capabilities; under any other auth mode it returns
 ## TUI
 
 Defaults for the `strata-notebook-tui` client; each is also a command-line
-flag, and the flag wins. Environment only.
+flag, and the flag wins. Environment only. `STRATA_TUI_SERVER` is also the
+`--server` default for `strata watch` and `strata agent`.
 
 | Variable                       | Default                 | Description                                                       |
 | ------------------------------ | ----------------------- | ----------------------------------------------------------------- |

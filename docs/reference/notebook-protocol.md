@@ -132,7 +132,7 @@ further calls are required before showing a useful UI. The shape is
 | `session_id` | The route parameter for every subsequent call. |
 | `path` | Absolute notebook directory path. |
 | `dag` | `edges`, `topological_order`, `roots`, `leaves` and `variable_producer` (which cell defines each variable); `error` instead when the DAG cannot be built. |
-| Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`. |
+| Runtime config | `deployment_mode`, `default_parent_path`, `available_python_versions`, `default_python_version`, `python_selection_fixed`, `registry_enabled`, `team_store_configured`, `workers_panel`. |
 | `id`, `name`, `worker`, `timeout`, `env`, `created_at`, `updated_at` | `notebook.toml`, plus fetched secrets in `env`; secret values are masked (see [Update Notebook Default Env](rest-api.md#update-notebook-default-env)) |
 | `env_sources`, `env_fetch_error`, `env_fetched_at` | Secret-manager fetch status |
 | `workers`, `mounts`, `connections`, `malformed_connections`, `catalogs`, `r`, `secret_manager_config`, `variant_groups`, `variant_active_selections`, `variant_modes` | `notebook.toml` |
@@ -359,8 +359,8 @@ edits exactly as before. `0` turns the lock off.
 
 ## Where to go next
 
-- [REST API Reference](rest-api.md) - every endpoint with request /
-  response shapes.
+- [REST API Reference](rest-api.md) - the notebook routes and core client
+  routes with request / response shapes.
 - [WebSocket Protocol](websocket.md) - every C→S and S→C frame with
   payload shapes.
 - [notebook.toml Schema](notebook-toml.md) - what the on-disk config

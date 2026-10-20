@@ -112,6 +112,8 @@ url = "https://my-datafusion-worker.fly.dev/v1/execute"
 transport = "direct"
 ```
 
+A server may hide the Workers panel (`STRATA_NOTEBOOK_WORKERS_PANEL=hidden`) or run remote cells only on its own registry's workers, ignoring a notebook's `[[workers]]` (`STRATA_NOTEBOOK_WORKERS_EDITABLE=false`); see [Server-managed workers](workers.md#server-managed-workers).
+
 During execution, the UI shows a pulsing "dispatching → df-cluster" badge on the cell. After completion, the worker name appears in the cell's metadata.
 
 Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion cluster on Fly, a beefy EC2 instance, or a local process on a different port. The built-in `remote_executor.py` provides a reference implementation:
@@ -228,7 +230,7 @@ what produced them. On a remote worker the worker reports them. Each run adds a
 version, since an `rw` cell never serves a cached result. Deleted files are not
 recorded, and are not deleted from a remote mount either.
 
-Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).
+Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. On a server that sets `STRATA_NOTEBOOK_CREDENTIAL_WRITERS`, an `rw` mount of `s3://`, `gs://` or `az://` must write through a credential its run's principal is listed for (its `credential=`, or the server's default for that scheme), or the cell fails before it runs; a credential that `STRATA_NOTEBOOK_CREDENTIAL_PATHS` restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---
 

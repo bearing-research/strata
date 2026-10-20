@@ -11,7 +11,7 @@ notebook server ──HTTP──► relay ◄══WebSocket══ strata-worker
 
 ## What goes over the socket, and what does not
 
-Only requests **to** the worker go through the relay: the dispatch (`/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/execute`), the cancel (`/v1/executions/{build_id}/cancel`) and `GET /health`.
+Only requests **to** the worker go through the relay: the dispatch (`/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/execute`), the cancel (`/v1/executions/{build_id}/cancel`), `GET /health`, the mount cache probe (`POST /v1/mount-cache/cached`) and the pre-warm hint (`POST /v1/hints`, which a plain `strata-worker` answers with `404`).
 
 Requests the worker **makes** go out directly, as from any worker: a signed worker downloads inputs, uploads its bundle, finalizes and posts console chunks to the `log_url` over ordinary outbound HTTPS. A `direct` worker makes none; its console arrives in the bundle when the cell ends. So a `signed` worker needs outbound reach to the server's signed URLs (or the object store, with presigned URLs), and a `direct` worker needs nothing but the relay.
 
@@ -30,7 +30,7 @@ The relay refuses a worker by answering the handshake with an HTTP status instea
 
 ## Mapping URLs
 
-The relay chooses the URL it presents the worker at, typically with a per-worker prefix such as `https://relay.example.com/w/<worker-id>`. It strips that prefix before forwarding, so the worker sees the paths of the executor protocol. The server is registered with the relay URL, for example `config.url = "https://relay.example.com/w/abc/v1/execute"`, and derives `/health`, `/v1/execute-manifest` and the cancel URL from it keeping the prefix, so all of them reach the relay under the same prefix.
+The relay chooses the URL it presents the worker at, typically with a per-worker prefix such as `https://relay.example.com/w/<worker-id>`. It strips that prefix before forwarding, so the worker sees the paths of the executor protocol. The server is registered with the relay URL, for example `config.url = "https://relay.example.com/w/abc/v1/execute"`, and derives `/health`, `/v1/execute-manifest`, the cancel URL, `/v1/mount-cache/cached` and `/v1/hints` from it keeping the prefix, so all of them reach the relay under the same prefix.
 
 ## Frames
 

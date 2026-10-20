@@ -351,7 +351,7 @@ This means you can edit an early cell and run a downstream cell, and Strata will
 
 ## Run All
 
-Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, `@loop`, `@fetch` or `@dataset`, a sweep variant or a consumer of one, and every non-Python cell runs on its own.
+Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, `@loop`, `@fetch`, `@dataset` or `@output_dir`, a sweep variant or a consumer of one, and every non-Python cell runs on its own.
 
 When a cell fails, Run All carries on, but not through the failure: every cell that reads from a failed cell, directly or further down, is skipped and marked stale with the reason that an upstream failed. Cells the failure does not reach run as normal. Rerun All does the same while bypassing the cache.
 

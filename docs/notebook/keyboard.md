@@ -71,7 +71,7 @@ yet. Use the buttons:
 
 This list is intentionally explicit so you know what's wired up
 versus what's still UI-only. Missing bindings are usually a one-line
-addition to the keymap in `frontend/src/composables/useCodemirror.ts` (or the
+addition to the keymap in `frontend/src/composables/editorKeymaps.ts` (or the
 global handler in `frontend/src/views/NotebookPage.vue`), plus a row in
 `frontend/src/components/KeyboardShortcutsModal.vue`. Open an issue if a
 specific shortcut is high-friction for you.

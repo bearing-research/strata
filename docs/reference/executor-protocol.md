@@ -540,6 +540,9 @@ dirs/<name>/<path>      - each file of each # @output_dir folder (output_dirs wo
   "traceback": null,
   "build_env": "cpython-3.13-linux-x86_64",
   "mount_bytes": {"raw": 1048576},
+  "mount_writes": [
+    {"mount": "out", "uri": "s3://bucket/out", "files": [{"path": "a/b.parquet", "size": 4096, "sha256": "..."}]}
+  ],
   "hardware": {"cpus": 32, "memory_mb": 257000, "accelerators": ["..."], "cuda": "12.2"}
 }
 ```
@@ -552,6 +555,8 @@ emitted, in order, in the same shape (a display that failed to serialize has
 be a list, possibly empty.
 
 `mount_bytes`, on a successful run, is what each read-only mount downloaded into the worker's cache for this run, `{"<mount name>": <bytes>}`, and `0` for a mount it already held. The notebook records it in its reads index as the bytes that mount moved. A worker that leaves it out has its mounts recorded as unknown.
+
+`mount_writes`, on a successful run, is what the cell wrote through each read-write mount, after the worker synced it back: one `{"mount", "uri", "files"}` entry per mount it created or changed a file in, where each of `files` is `{"path", "size", "sha256"}` with `path` relative to the mount and `/`-separated. Deleted files are not listed. The notebook keeps only the entries whose `mount` and `uri` match one of the cell's own read-write mounts, drops any it cannot parse, and stores each as the cell's `__mount__<name>` record. A worker that leaves it out records no writes.
 
 `hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
 

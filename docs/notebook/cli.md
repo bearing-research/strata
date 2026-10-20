@@ -119,6 +119,10 @@ the expected artifacts.
 - **No WebSocket broadcasts.** Progress is written to stdout only.
 - **No interactive prompts.** A cascade that would pop a confirmation in the
   UI just runs, the CLI treats every cell as "confirmed."
+- **No large-read question.** With a
+  [read threshold](lake-aware-cells.md#asking-before-a-large-read) set, the CLI
+  never asks: `strata run` and `strata cell run` (`--server` included) go
+  ahead, and `.strata/reads/index.json` records the read as `not_asked`.
 
 ## Environment & Secrets
 

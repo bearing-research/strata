@@ -14,7 +14,7 @@
 # loop cell's ``# @loop start_from=<cell>@iter=<k>`` to fork a
 # different search strategy from a promising mid-iter state.
 #
-# `random` and `himmelblau` come from the seed cell via the DAG, so
+# `random` and `himmelblau` come from the helpers cell via the DAG, so
 # there is no need to re-import or redefine them here.
 next_iter = state["iter"] + 1
 # Deterministic per-iteration RNG so the whole notebook is reproducible.

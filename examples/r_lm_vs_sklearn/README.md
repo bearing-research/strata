@@ -36,9 +36,10 @@ viz, with the artifact store gluing everything together.
 
 ## What you need
 
-- **R + the `arrow` and `jsonlite` R packages** for the cross-
-  language handoff. On macOS: `brew install r` then `Rscript -e
-  'install.packages(c("arrow", "jsonlite"))'`. On Ubuntu: see
+- **R** on `PATH` (`Rscript`). The notebook's `arrow` and `jsonlite`
+  come from `renv.lock`: opening the notebook restores them into a
+  project-scoped library automatically; no system installs beyond R
+  itself. On macOS: `brew install r`. On Ubuntu: see
   [CRAN](https://cran.r-project.org/). The strata-notebook server
   surfaces a clean skip / error if R is missing, no crash.
 - **Python deps** declared in this notebook's `pyproject.toml`
@@ -88,10 +89,12 @@ solution; the `lm_p_value` column is R-only.
 1. **Edit the model.** Drop `bedrooms` from the R formula
    (`lm(price ~ sqft + age + location)`) and watch the comparison
    reshape, `compare` shows the row dropping out.
-2. **Misalign the baseline level.** Comment out the
-   `location_levels.sort(...)` line in `fit-sklearn`. The sklearn
-   coefficients will swap signs vs R's, a real risk in any
-   "translate this R analysis to Python" workflow.
+2. **Misalign the baseline level.** In `fit-sklearn`, replace the
+   `sorted(...)` in `location_levels = sorted(...)` with an unsorted
+   list, `list(housing_train["location"].unique())`. When the first
+   level seen is not the alphabetical first, the baseline no longer
+   matches R's and the sklearn coefficients will swap signs vs R's, a
+   real risk in any "translate this R analysis to Python" workflow.
 3. **Add interaction terms.** R: `price ~ sqft * location`. sklearn:
    you'll have to add the interaction columns by hand. The contrast
    gets sharper.

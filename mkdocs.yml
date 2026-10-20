@@ -115,6 +115,10 @@ exclude_docs: |
   internal/
   assets/README.md
 
+# Rendered from examples/ by the hook above and linked from notebook/examples.md.
+not_in_nav: |
+  /examples/*.md
+
 # Versioned docs via `mike`, which maintains ``versions.json`` on ``gh-pages``
 # for Material's version picker. Aliases:
 #   * ``latest``: the most recent release; the default landing page.

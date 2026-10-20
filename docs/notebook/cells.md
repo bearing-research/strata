@@ -391,7 +391,7 @@ When `@output_schema` is set, Strata runs a **validate-and-retry loop** after ev
 3. On failure → append the bad response as an `assistant` turn, feed the validator's path-addressed errors back as a `user` turn, and retry.
 4. On retry exhaustion → surface a cell error with the last validator messages.
 
-The default is 3 total attempts (1 initial + 2 retries). Override with `# @validate_retries N`. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (`validation_retries`), and the UI shows "validated after N retries" when non-zero.
+The default is 3 total attempts (1 initial + 2 retries). Override with `# @validate_retries N`. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (`validation_retries`), and when non-zero the cell's console line ends with `| Validation retries: N`.
 
 Retries are mostly invisible on OpenAI-strict (OpenAI, Gemini) and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the `json_object` fallback path (Mistral, Ollama, vLLM) where the provider only guarantees _syntactic_ JSON.
 
@@ -1063,6 +1063,7 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | `# @mount data file:///x`  | Binds `data` inside the R cell to the mount's local path (a character string - R has no `pathlib.Path`).  |
 | `# @timeout 60`            | Per-cell execution timeout in seconds.                                  |
 | `# @fetch data <url>`      | Downloads a URL as a recorded input; `data` is the file's path as a string. |
+| `# @output_dir ckpt`       | Gives the cell an empty output folder; `ckpt` is its path as a string. An R cell cannot read another cell's folder yet. |
 | `# @nocache`               | Always re-execute.                                                      |
 | `# @worker gpu-box`        | Runs the cell on an executor worker with R (see below).                 |
 

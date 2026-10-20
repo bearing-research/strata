@@ -27,6 +27,18 @@ Set these in the **Runtime panel**:
 
 Alpaca free tier gives 200 req/min, 7+ years history, 15-min REST delay. Plenty for daily rebalancing.
 
+### Secret manager
+
+`notebook.toml` also wires a secret manager, so these keys can come from Infisical instead of being typed in:
+
+```toml
+[secret_manager]
+provider = "infisical"
+project_id = "7301e122-565d-491d-9082-056504381782"
+```
+
+That `project_id` is the example author's project; replace it with your own Infisical project's id. Strata logs in with credentials from the environment of the shell that starts the server, never from the notebook: export `INFISICAL_CLIENT_ID` and `INFISICAL_CLIENT_SECRET` (a Machine Identity with read access to the project, recommended) or `INFISICAL_TOKEN` (a service token), plus `INFISICAL_HOST` for a self-hosted Infisical. See [Secrets](https://bearing-research.github.io/strata/latest/notebook/secrets/) for the full setup. Without those credentials the Runtime panel shows a fetch error; keys typed into the panel still work, or remove the `[secret_manager]` block to stop the fetch.
+
 ## Paper vs live
 
 **The notebook ships in `paper` mode.** Every code path is identical between paper and live; only the Alpaca endpoint URL differs. To flip to live you must:

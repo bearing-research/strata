@@ -86,12 +86,14 @@ badge.](../assets/cell-tests-dark.png#only-dark)
 The flask toggle doubles as a status badge, so a cell's test health is visible
 without opening the panel:
 
-| Badge        | Meaning                                                      |
-| ------------ | ------------------------------------------------------------ |
-| `✓ 4/4`      | all tests passed                                             |
-| red          | one or more **failed**                                       |
-| amber        | **errored** - the cell source or test setup blew up          |
-| `· stale`    | the cell, its tests or its inputs changed since the last run |
+| Badge                | Meaning                                                      |
+| -------------------- | ------------------------------------------------------------ |
+| green `4/4`          | all tests passed (passed / total)                            |
+| red `3/4`            | one or more **failed**                                       |
+| amber `3/4`          | **errored** - the cell source or test setup blew up          |
+| grey `3/4 · stale`   | the cell, its tests or its inputs changed since the last run |
+| `…`                  | the tests are running                                        |
+| amber `!`            | pytest is not installed in the notebook's environment        |
 
 Stale is computed from a fingerprint of `(cell source, test source, inputs)`,
 where the inputs are everything a run of the cell reads: upstream versions,

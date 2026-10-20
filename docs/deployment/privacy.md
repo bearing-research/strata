@@ -1,11 +1,10 @@
 # Privacy & Sharing Model
 
-A personal server has one user, so notebook access there is
-**URL-based**, similar to Google Docs: notebook IDs are unguessable,
-and anyone who can reach the server and has the ID can open and
-execute the notebook. Service mode gates the routes by scope and
-tenant. This page lays out the model honestly so you can pick the
-deployment shape that matches your trust boundary.
+A personal server has one user, so it checks no identity: anyone who
+can reach it can list, open and execute every notebook under the
+storage root. Service mode gates the routes by scope and tenant. This
+page lays out the model honestly so you can pick the deployment shape
+that matches your trust boundary.
 
 ## What's shared, what isn't
 
@@ -47,13 +46,11 @@ each other there.
 
 ### Notebook access
 
-Notebook IDs are full UUIDs (8-char prefix for display, full UUID
-for the actual ID). They're not in any global enumeration.
-
 On a personal server there is no identity to check against: `discover`
-lists every notebook under the storage root, and anyone who can reach
-the port can open anything. That is the single-user shape, and it is why
-personal mode binds to loopback by default. Use
+lists every notebook under the storage root, `open` takes a notebook's
+path, and anyone who can reach the port can open anything. That is the
+single-user shape, and it is why personal mode binds to loopback by
+default. Use
 [publishing](../notebook/publishing.md) to hand someone a result, or
 service mode for a genuinely shared deployment.
 
@@ -77,7 +74,8 @@ run service mode (next section).
 ### Multi-tenant or hard-isolation requirements
 
 `STRATA_DEPLOYMENT_MODE=service` + multi-tenancy. Each tenant gets
-its own QoS pools, cache namespacing, and metric labels. Notebook routes
+its own QoS pools and cache namespacing; per-tenant usage comes from
+`GET /v1/admin/tenants`. Notebook routes
 are scope gated (`notebook:read`, `notebook:write`, `notebook:execute`),
 so what a principal can reach depends on the scopes the proxy asserts
 for it.
