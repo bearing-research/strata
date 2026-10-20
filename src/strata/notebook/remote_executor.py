@@ -549,13 +549,34 @@ def capture_worker_secrets() -> None:
     before it is unset. Called by the app factory, so a host that mounts the app
     itself (Modal, a custom ASGI server) is covered too; a second call is a no-op.
     """
-    for name in _WORKER_SECRETS:
+    # With the variables the credentials' ``${VAR}`` values name: those hold the keys.
+    for name in (*_WORKER_SECRETS, *_credential_references()):
         value = os.environ.get(name)
         if value is None:
             continue
         _CAPTURED_SECRETS[name] = value
         _scrub_environ_value(name)
         os.environ.pop(name)
+
+
+def _credential_references() -> list[str]:
+    """The variables ``STRATA_NOTEBOOK_CREDENTIALS``' ``${VAR}`` values name."""
+    try:
+        registry = json.loads(worker_secret("STRATA_NOTEBOOK_CREDENTIALS") or "{}")
+    except ValueError:
+        # Resolving any name raises on it later; there is nothing to capture.
+        return []
+    if not isinstance(registry, dict):
+        return []
+    names = []
+    for fields in registry.values():
+        if not isinstance(fields, dict):
+            continue
+        for value in map(str, fields.values()):
+            name = value[2:-1]
+            if value.startswith("${") and value.endswith("}") and not name.startswith("file:"):
+                names.append(name)
+    return names
 
 
 def parent_still_holds_secret(name: str, proc: Path = Path("/proc")) -> bool:
@@ -624,6 +645,8 @@ def _worker_credentials() -> CredentialResolver:
         json.loads(worker_secret("STRATA_NOTEBOOK_CREDENTIALS") or "{}"),
         scheme_defaults=json.loads(worker_secret("STRATA_NOTEBOOK_MOUNT_CREDENTIALS") or "{}"),
         restrict_options=True,
+        # The ``${VAR}`` values were captured out of the environment with the rest.
+        env=_CAPTURED_SECRETS,
     )
 
 

@@ -656,7 +656,7 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 
 `token_env` is preferred over `token` because the literal-token form gets committed to your notebook repo. Use `token = "..."` only for one-off local experiments.
 
-A worker with `STRATA_WORKER_TOKEN` set rejects unauthenticated requests with `401 Unauthorized`. `/health` stays open so platform health probes work without the secret. The worker app takes the token out of its process environment when it is created and holds it in memory, zeroing the value in the environment block the process started with, so a cell it runs cannot read it from `os.environ` or from `/proc/<ppid>/environ`. The same goes for the credential variables (`STRATA_NOTEBOOK_CREDENTIALS`, `STRATA_NOTEBOOK_MOUNT_CREDENTIALS`). This holds for `strata-worker` and for an app built directly with `create_notebook_executor_app()`, as in the Modal example above.
+A worker with `STRATA_WORKER_TOKEN` set rejects unauthenticated requests with `401 Unauthorized`. `/health` stays open so platform health probes work without the secret. The worker app takes the token out of its process environment when it is created and holds it in memory, zeroing the value in the environment block the process started with, so a cell it runs cannot read it from `os.environ` or from `/proc/<ppid>/environ`. The same goes for the credential variables (`STRATA_NOTEBOOK_CREDENTIALS`, `STRATA_NOTEBOOK_MOUNT_CREDENTIALS`) and for every variable a credential's `${VAR}` values name, which the worker still resolves its mounts against. This holds for `strata-worker` and for an app built directly with `create_notebook_executor_app()`, as in the Modal example above.
 
 ## Using workers in cells
 
