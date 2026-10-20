@@ -6,6 +6,7 @@ and collecting/asserting on WebSocket message sequences.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 from collections import deque
@@ -263,6 +264,13 @@ def ws_connect(client: TestClient, session_id: str):
     """Context manager: connect a WebSocket and yield a WebSocketTestHelper."""
     with client.websocket_connect(f"/v1/notebooks/ws/{session_id}") as ws:
         yield WebSocketTestHelper(ws)
+        # TestClient cancels the app and closes its loop right after the disconnect, cutting
+        # short the teardown of a run still going: its harness is left unreaped. Let it finish.
+        state = _notebook_execution_state.get(session_id)
+        task = state.execution_task if state is not None else None
+        ws.close(1000)
+        if task is not None:
+            ws.portal.call(asyncio.wait, {task})
 
 
 def execute_cell_and_wait(
