@@ -455,6 +455,10 @@ service, and the isolation model.
 
 Workers live in `notebook.toml` under `[[workers]]`. You can add them through the **Workers panel** sidebar (which writes the same TOML) or edit the file directly:
 
+
+![The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes.](../assets/workers-panel-light.png#only-light)
+![The Workers panel open in the sidebar: cards counting two visible workers, both healthy; the worker policy for personal mode; the notebook's default worker; the catalog entry for local-dev with its URL and transport; and each visible worker with its recent health probes.](../assets/workers-panel-dark.png#only-dark)
+
 | Field | Description |
 | --- | --- |
 | `name` | Used in `@worker <name>` annotations and the dropdown UI |

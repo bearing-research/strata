@@ -8,46 +8,15 @@ import {
 } from '@codemirror/view'
 import { history } from '@codemirror/commands'
 import { python } from '@codemirror/lang-python'
-import { oneDark } from '@codemirror/theme-one-dark'
-import {
-  syntaxHighlighting,
-  defaultHighlightStyle,
-  bracketMatching,
-  StreamLanguage,
-} from '@codemirror/language'
+import { bracketMatching, StreamLanguage } from '@codemirror/language'
 // No first-party ``@codemirror/lang-r`` exists; wrap the legacy CM5 mode in
 // ``StreamLanguage.define()``.
 import { r as rLegacyMode } from '@codemirror/legacy-modes/mode/r'
 import { closeBrackets } from '@codemirror/autocomplete'
 import type { CellLanguage } from '../types/notebook'
 import { editorKeymaps } from './editorKeymaps'
+import { editorTheme } from './editorThemes'
 import { useTheme } from './useTheme'
-
-// Dark: oneDark plus a gutter tweak for the Mocha base. Light: a minimal
-// hand-rolled Catppuccin Latte theme, to avoid another dependency. Both share
-// `defaultHighlightStyle` for syntax colors.
-
-const darkTheme = [
-  oneDark,
-  EditorView.theme({
-    '.cm-gutters': { backgroundColor: '#1e1e2e', border: 'none' },
-  }),
-]
-
-const lightTheme = EditorView.theme(
-  {
-    '&': { color: '#4c4f69', backgroundColor: '#ffffff' },
-    '.cm-content': { caretColor: '#1e66f5' },
-    '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#1e66f5' },
-    '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, ::selection': {
-      backgroundColor: '#bcc0cc',
-    },
-    '.cm-gutters': { backgroundColor: '#e6e9ef', color: '#6c6f85', border: 'none' },
-    '.cm-activeLineGutter': { backgroundColor: '#dce0e8' },
-    '.cm-activeLine': { backgroundColor: '#e6e9ef' },
-  },
-  { dark: false },
-)
 
 export function useCodemirror(
   container: Ref<HTMLElement | null>,
@@ -69,10 +38,6 @@ export function useCodemirror(
   // the cell renders as plain text.
   const langCompartment = new Compartment()
   const { resolved } = useTheme()
-
-  function themeFor(mode: 'light' | 'dark') {
-    return mode === 'light' ? lightTheme : darkTheme
-  }
 
   onMounted(() => {
     if (!container.value) return
@@ -103,9 +68,8 @@ export function useCodemirror(
         history(),
         bracketMatching(),
         closeBrackets(),
-        syntaxHighlighting(defaultHighlightStyle),
         langCompartment.of(langExt),
-        themeCompartment.of(themeFor(resolved.value)),
+        themeCompartment.of(editorTheme(resolved.value)),
         ...editorKeymaps(opts),
         updateListener,
         EditorView.theme({
@@ -140,7 +104,7 @@ export function useCodemirror(
   watch(resolved, (mode) => {
     const v = view.value
     if (!v) return
-    v.dispatch({ effects: themeCompartment.reconfigure(themeFor(mode)) })
+    v.dispatch({ effects: themeCompartment.reconfigure(editorTheme(mode)) })
   })
 
   onBeforeUnmount(() => {

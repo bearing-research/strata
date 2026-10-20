@@ -218,6 +218,9 @@ pinned mount's, is not guessed. After a successful run, `.strata/reads/index.jso
 what each input moved and on which machine; see
 [What a run moved](lake-aware-cells.md#what-a-run-moved).
 
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](../assets/input-weight-light.png#only-light)
+![A cell that scans the table lake:taxi.rides, with a badge in its header reading "reads up to 26.3 MB" beside its worker and cache badges.](../assets/input-weight-dark.png#only-dark)
+
 Strata copies a remote mount in its own process, not the notebook's venv, so
 its filesystem library goes where Strata is installed: the `s3` extra for
 `s3://` (`s3fs`), `gcs` for `gs://` (`gcsfs`) and `azure` for `az://`
@@ -515,6 +518,9 @@ copy, so writing to it changes nothing upstream.
 table of paths and sizes (the first 20 files, then a count of the rest), ahead
 of the cell's own output. It is a markdown display like any other, so a cache
 hit, a reopened notebook and an export show it too.
+
+![A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: "ckpt: 4 files, 3.0 MiB" and a table of each file with its size.](../assets/output-dir-light.png#only-light)
+![A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: "ckpt: 4 files, 3.0 MiB" and a table of each file with its size.](../assets/output-dir-dark.png#only-dark)
 
 **A failed run keeps what it wrote.** Its files are stored and its manifest is
 kept as a failed version: never a cache hit and never an input, but lineage

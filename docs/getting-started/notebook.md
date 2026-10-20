@@ -11,12 +11,14 @@ browser. The same notebook can also be driven by a
 [coding agent](../notebook/agent.md) or watched live from a
 [terminal](../notebook/tui.md).
 
-![The Strata notebook UI: a Python cell with its source and an interactive table
-of results, the sidebar panels for mounts, workers and environment, and a bottom
-drawer showing the cell DAG and per-cell timings.](../assets/notebook-anatomy-light.png#only-light)
-![The Strata notebook UI: a Python cell with its source and an interactive table
-of results, the sidebar panels for mounts, workers and environment, and a bottom
-drawer showing the cell DAG and per-cell timings.](../assets/notebook-anatomy-dark.png#only-dark)
+![The Strata notebook UI: two named Python cells, load and summarize, each with
+its source and an interactive table of results, the sidebar panels for mounts,
+workers and environment, and a bottom drawer showing the DAG of load, summarize
+and plot with per-cell timings.](../assets/notebook-anatomy-light.png#only-light)
+![The Strata notebook UI: two named Python cells, load and summarize, each with
+its source and an interactive table of results, the sidebar panels for mounts,
+workers and environment, and a bottom drawer showing the DAG of load, summarize
+and plot with per-cell timings.](../assets/notebook-anatomy-dark.png#only-dark)
 
 The pipeline below is the one in that screenshot.
 
@@ -153,6 +155,7 @@ working. Wait for the banner to clear before running the first cell.
 ### Load the data
 
 ```python
+# @name load
 import time
 import pandas as pd
 from sklearn.datasets import load_iris
@@ -174,12 +177,17 @@ df.head()
 4                5.0               3.6                1.4               0.2       0  setosa
 ```
 
+The `# @name load` line labels the cell in the DAG view and its header; without
+it, a cell is labelled by the variables it defines. See
+[`@name`](../notebook/annotations.md#name).
+
 Press ++shift+enter++. The first run pauses ~2 seconds (the simulated
 fetch) and the DataFrame preview renders below the cell.
 
 ### Summarize by species
 
 ```python
+# @name summarize
 stats = df.groupby("species", observed=True)[feature_names].mean().round(2)
 stats
 ```
@@ -199,6 +207,7 @@ drawer shows the dependency.
 ### Plot
 
 ```python
+# @name plot
 import matplotlib.pyplot as plt
 
 fig, ax = plt.subplots(figsize=(6, 4))

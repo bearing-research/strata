@@ -278,6 +278,9 @@ cells, their inputs, sizes and cost, and the host's
 the whole run, Run All included. A ready cell is left out, since its run is a
 cache hit.
 
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](../assets/read-confirm-light.png#only-light)
+![The notebook dimmed behind a dialog titled "Read this much before running?": the rides cell moves 26.3 MB onto local, from table rides (lake:taxi.rides), up to 26.3 MB, followed by the host's message and Cancel and Run buttons.](../assets/read-confirm-dark.png#only-dark)
+
 A Run is kept per cell, machine and inputs (the mount listings, table snapshots
 and fetch URLs), so a rerun on the same machine does not ask again, while new
 data, or another machine, does. A run that cannot ask goes ahead and its reads

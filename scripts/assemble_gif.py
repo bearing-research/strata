@@ -22,6 +22,9 @@ HOLDS = {
     "tui-cache-payoff": [1800, 1400, 2000, 1600, 2800],
     # The empty "before" is brief; each new cell is held long enough to read.
     "tui-agent-live": [1400, 2200, 2200, 2200, 3000],
+    # Empty, cell added, running, finished, second cell, both done, cache hit.
+    "web-agent-live-light": [1400, 2000, 1600, 2200, 2000, 2400, 3200],
+    "web-agent-live-dark": [1400, 2000, 1600, 2200, 2000, 2400, 3200],
 }
 
 # GIF alpha is one bit, so the SVG's antialiased rounded corners would fringe;

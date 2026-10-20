@@ -283,6 +283,10 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Keywords are readable in the dark editor.** The light theme's syntax
+  colors stayed active in dark mode and outranked the dark theme's, so
+  `import`, `from`, `as` and `True` were dark purple on a dark background.
+  Each theme now brings its own. (#1253)
 - **An exported link with an unsafe target loses all of it.** A `javascript:`,
   `vbscript:` or `data:` link whose target held a space kept what followed the
   space, which a renderer that allows spaces read as the link. The whole target
