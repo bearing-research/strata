@@ -57,10 +57,15 @@ logger = logging.getLogger(__name__)
 _HEALTH_POLL_SECONDS = 0.5
 _LEASE_SECONDS = 30.0
 _CANCEL_TIMEOUT_SECONDS = 5.0
+_TENANT_ENV_TIMEOUT_SECONDS = 30.0
 # The build id lands in the machine's URL path, so it must not be able to leave it.
 _BUILD_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 __all__ = ["Pool", "WORKER_TOKEN_ENV"]
+
+
+class _TenantEnvError(Exception):
+    """``tenant_env`` gave nothing a machine can boot with."""
 
 
 class Pool:
@@ -82,6 +87,7 @@ class Pool:
         lease_seconds: float = _LEASE_SECONDS,
         tenant_env: Callable[[str, str], Mapping[str, str] | Awaitable[Mapping[str, str]]]
         | None = None,
+        tenant_env_timeout_seconds: float = _TENANT_ENV_TIMEOUT_SECONDS,
     ):
         """Create a pool over a store and a backend.
 
@@ -98,8 +104,10 @@ class Pool:
             lease_seconds: Lease length without renewal; renewed at a third of this.
             tenant_env: ``(tenant_id, machine_type) -> env``, sync or async: variables a
                 machine started for that tenant boots with, over the type's ``env``. Used
-                for that boot only, never stored or logged. Raising fails the start as a
-                backend failure does.
+                for that boot only, never stored or logged. Called in a thread, so a sync
+                one may block. Raising, answering anything but a mapping of strings, or
+                outlasting ``tenant_env_timeout_seconds`` fails the start as a backend
+                failure does.
         """
         if store.shared and instance_id is None:
             raise ValueError("a pool over a shared store needs its own instance_id")
@@ -124,6 +132,7 @@ class Pool:
         self.instance_id = instance_id or f"{socket.gethostname()}:{os.getpid()}:{new_id('p')}"
         self.lease_seconds = lease_seconds
         self._tenant_env = tenant_env
+        self.tenant_env_timeout_seconds = tenant_env_timeout_seconds
         self._tasks: set[asyncio.Task] = set()
         # worker id -> consecutive failed probes. In memory: recover() re-checks everything
         # on restart, and a persisted count would let one stale bad reading survive it.
@@ -471,12 +480,23 @@ class Pool:
         assert worker.auth_token is not None
         try:
             async with self._holding(worker_id=worker.id):
-                tenant_env: Mapping[str, str] = {}
-                if self._tenant_env is not None:
-                    answer = self._tenant_env(worker.tenant_id, spec.name)
-                    tenant_env = await answer if inspect.isawaitable(answer) else answer
+                tenant_env = await self._resolve_tenant_env(worker.tenant_id, spec.name)
                 env = {**spec.env, **tenant_env, WORKER_TOKEN_ENV: worker.auth_token}
                 provisioned = await self.backend.start(spec, env)
+        except _TenantEnvError as exc:
+            logger.error(
+                "tenant_env gave no usable environment; the machine was not started",
+                exc_info=exc.__cause__,
+                extra={
+                    "machine_type": spec.name,
+                    "worker_id": worker.id,
+                    "tenant_id": worker.tenant_id,
+                    "reason": str(exc),
+                },
+            )
+            self.store.delete_worker(worker.id)
+            self._boot_span(worker, waiting, error="tenant_env gave no usable environment")
+            return
         except Exception:
             logger.exception(
                 "backend failed to start a worker",
@@ -511,6 +531,32 @@ class Pool:
             await self.backend.stop(provisioned.backend_id)
             return
         self._spawn(self._await_boot(worker, spec, provisioned.endpoint, waiting))
+
+    async def _resolve_tenant_env(self, tenant_id: str, machine_type: str) -> dict[str, str]:
+        """The tenant's boot variables, checked. Raises _TenantEnvError, never quoting a value."""
+        if self._tenant_env is None:
+            return {}
+        try:
+            async with asyncio.timeout(self.tenant_env_timeout_seconds):
+                # A thread, so a sync callable fetching secrets cannot stall the loop; an
+                # async one only builds its coroutine there and runs here.
+                answer = await asyncio.to_thread(self._tenant_env, tenant_id, machine_type)
+                if inspect.isawaitable(answer):
+                    answer = await answer
+        except TimeoutError as exc:
+            raise _TenantEnvError(
+                f"no answer within {self.tenant_env_timeout_seconds} seconds"
+            ) from exc
+        except Exception as exc:
+            raise _TenantEnvError(f"raised {type(exc).__name__}") from exc
+        if not isinstance(answer, Mapping):
+            raise _TenantEnvError(f"answered a {type(answer).__name__}, not a mapping")
+        for name, value in answer.items():
+            if not isinstance(name, str) or not isinstance(value, str):
+                raise _TenantEnvError(
+                    f"{name!r} maps to a {type(value).__name__}; names and values must be strings"
+                )
+        return dict(answer)
 
     async def _await_boot(
         self, worker: Worker, spec: MachineType, endpoint: str, waiting: Job | None

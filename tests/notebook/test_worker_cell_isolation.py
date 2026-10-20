@@ -80,6 +80,25 @@ async def test_a_cell_cannot_read_the_workers_token_or_credentials(tmp_path, wor
 
 
 @pytest.mark.asyncio
+async def test_a_cell_cannot_read_the_variables_a_credential_names(tmp_path, monkeypatch):
+    """A credential's ``${VAR}`` values are where its keys live; the worker still resolves them."""
+    from strata.notebook.remote_executor import _worker_credentials
+
+    monkeypatch.setenv("STRATA_WORKER_TOKEN", "worker-bearer-token")
+    monkeypatch.setenv(
+        "STRATA_NOTEBOOK_CREDENTIALS", '{"lab": {"key": "${LAB_KEY}", "region": "us-east-1"}}'
+    )
+    monkeypatch.setenv("LAB_KEY", "lab-key-value")
+    monkeypatch.delenv("STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST", raising=False)
+
+    seen = json.loads(_stdout(await _run_cell(), tmp_path))
+
+    assert "LAB_KEY" not in seen
+    assert "lab-key-value" not in json.dumps(seen)
+    assert _worker_credentials().resolve("lab") == {"key": "lab-key-value", "region": "us-east-1"}
+
+
+@pytest.mark.asyncio
 async def test_an_allowlist_narrows_the_rest_of_the_workers_environment(
     tmp_path, monkeypatch, worker_secrets
 ):

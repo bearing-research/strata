@@ -395,17 +395,21 @@ class TestCredentialCannotBeDropped:
         assert spec.provider_options == {"env": {"HF_TOKEN": "hf_abc"}, "gpu": {"count": 2}}
         assert fake.body()["env"]["STRATA_WORKER_TOKEN"] == "secret-a"
 
-    async def test_an_override_can_still_correct_other_env_values(self):
-        """`provider_options` overrides everything except the credential, even caller-set values."""
+    async def test_an_env_override_merges_under_the_pools_env(self):
+        """The type's and tenant's variables reach the pod, and win where both name one."""
         fake = FakeRunPod()
         await _backend(fake).start(
-            _spec(provider_options={"env": {"HF_HOME": "/corrected"}}),
-            {"STRATA_WORKER_TOKEN": "ours", "HF_HOME": "/wrong"},
+            _spec(provider_options={"env": {"HF_HOME": "/workspace/hf", "REGION": "type"}}),
+            {"STRATA_WORKER_TOKEN": "ours", "STRATA_NOTEBOOK_CREDENTIALS": "acme", "REGION": "eu"},
         )
 
         env = fake.body()["env"]
-        assert env["HF_HOME"] == "/corrected"
-        assert env["STRATA_WORKER_TOKEN"] == "ours"
+        assert {key: env[key] for key in env if key != "STRATA_WORKER_HEARTBEAT_SECONDS"} == {
+            "HF_HOME": "/workspace/hf",
+            "STRATA_NOTEBOOK_CREDENTIALS": "acme",
+            "REGION": "eu",
+            "STRATA_WORKER_TOKEN": "ours",
+        }
 
     @pytest.mark.parametrize("shape", ["A=1", [{"key": "A", "value": "1"}]])
     async def test_an_env_shape_with_nowhere_to_put_a_credential_is_refused(self, shape):

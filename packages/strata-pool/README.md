@@ -66,11 +66,21 @@ Since a machine serves one tenant, it can boot with that tenant's own secrets.
 `Pool(tenant_env=...)` takes a callable, sync or async,
 `(tenant_id, machine_type) -> dict[str, str]`, asked each time a machine
 starts for a tenant. Its variables go over the type's `env`, and the worker
-token wins over both. The answer is used for that boot only: it is never
-stored, logged or put on a span. A callable that raises fails the start as a
-backend failure does, and the job stays queued. A worker reads
+token wins over both. It runs in a thread, so a sync one may wait on a secrets
+store, and has `Pool(tenant_env_timeout_seconds=...)` (default 30) to answer;
+a sync one that runs past that keeps its thread until it returns. One that
+raises, runs out of time, or answers anything but string names and values
+fails the start, which is logged as a `tenant_env` failure without the
+answer, and the job stays queued. A worker reads
 `STRATA_NOTEBOOK_CREDENTIALS` and `STRATA_NOTEBOOK_MOUNT_CREDENTIALS` there
-and keeps them from its cells, so a tenant's mounts work on its machines.
+and keeps them, and the variables they name, from its cells, so a tenant's
+mounts work on its machines.
+
+The pool uses the answer for that boot only and never stores, logs or traces
+it. The provider does keep it: it is the machine's environment, which RunPod
+or Fly holds for the machine's life and shows to anyone with access to the
+account. A provider's refusal to start a machine is logged in the provider's
+own words, which the pool cannot vouch for.
 
 Still missing: any restriction on the container's own network access.
 
@@ -303,7 +313,9 @@ its own jobs: another tenant's job id answers 404, not 403, so the id does not
 confirm the job exists. **The caller is trusted for tenant
 identity**: it authenticates as itself and asserts whose work this is. The
 pool does not authenticate end users and must never be reachable from
-anywhere but the proxy.
+anywhere but the proxy. Anyone holding the API token can name any tenant, and
+so run code on a machine that boots with that tenant's `tenant_env`: the token
+is as sensitive as every tenant's secrets together.
 
 ## The RunPod backend
 
@@ -356,7 +368,8 @@ twice, with nothing left running. The `gpu` block has not been run live; set
 RunPod has moved its API surface before. Every field lives in `_create_body`
 and is asserted by a test, so a wrong one is a one-line fix; `provider_options`
 overrides anything in the body, so a deployment can correct a field without
-waiting for a release; and `base_url` can be repointed. To re-verify, or to
+waiting for a release (its `env` merges beneath the type's `env`, the
+tenant's and the worker token instead); and `base_url` can be repointed. To re-verify, or to
 close the GPU gap with `STRATA_POOL_RUNPOD_GPU`:
 
 ```bash
@@ -411,7 +424,8 @@ private address can be reused.
 
 **Not yet verified against a live account.** The request shapes follow the
 Machines API documentation; every field lives in `_create_body` and is asserted
-by a test, `provider_options` overrides anything in the machine `config`, and
+by a test, `provider_options` overrides anything in the machine `config` (its
+`env` merges beneath the type's `env`, the tenant's and the worker token), and
 `base_url` can be repointed. To verify:
 
 ```bash
