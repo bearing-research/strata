@@ -3847,6 +3847,17 @@ exhaustive commit history.</p>
   instead, so the fetch counts toward a large-read question. (#1262)</li>
 <li><strong>Read sizes are shown in decimal units</strong>, as the read thresholds and per-GB
   rates are, so a 1 GB threshold and a 1.0 GB read agree. (#1262)</li>
+<li><strong>Run All and loop cells honour a revert as a single run does.</strong> Going back
+  to source a cell ran before reused that run's outputs under a single run, but
+  Run All and a loop cell ran the cell again, so a <code># @write_table ... append</code>
+  cell appended its rows a second time. They now reuse the earlier outputs too,
+  and an overwrite or merge cell still runs again. (#1264)</li>
+<li><strong>A worker that does not answer no longer slows every cell bound to it.</strong>
+  Weighing a remote cell's mounts asks the worker how much it already holds; a
+  worker that accepted the connection and never replied made each check wait
+  20 seconds, cache hits included. The question now gives up after 2 seconds,
+  and a worker that failed to answer is not asked again for a minute; its share
+  shows as unknown. (#1264)</li>
 </ul>
 <h2 id="0110-2026-10-19">0.11.0 - 2026-10-19<a class="headerlink" href="#0110-2026-10-19" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
