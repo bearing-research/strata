@@ -2307,7 +2307,7 @@ the <a href="../cli/">Notebook CLI</a> for the full command surface. The rest of
 is the file-format contract underneath both.</p>
 <h2 id="on-disk-layout">On-disk layout<a class="headerlink" href="#on-disk-layout" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>my_analysis/
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── .gitignore             # written by `strata new`: keeps .strata/, .venv/ and work/ out of git
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── .gitignore             # written by `strata new`: keeps runtime state (.strata/, .venv/, work/, ...) out of git
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── notebook.toml          # committed config: cells, env, workers, mounts
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├── pyproject.toml         # uv-managed dependencies
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>├── uv.lock                # written by uv; do not hand-edit
@@ -2501,8 +2501,11 @@ what that run stored, so pass <code>--force</code> once before comparing.</p>
 <li><strong>Don't reuse cell IDs</strong> or change <code>notebook_id</code> after artifacts exist.</li>
 <li><strong>Don't encode per-cell config in <code>notebook.toml</code></strong> when an annotation
   exists - annotations are the single per-cell configuration surface.</li>
-<li><strong>Don't write outputs into the notebook directory</strong> from cell code
-  unless you mean to commit them; artifacts already persist results.</li>
+<li><strong>Mind where cell code writes files.</strong> Cells run in the gitignored
+  <code>work/</code> directory, so a relative path lands there. Files to keep as a
+  result go in a <a href="../annotations/#output_dir"><code># @output_dir</code></a> folder. Don't
+  write into <code>../</code> (the notebook directory) unless you mean to commit the
+  file.</li>
 </ul>
 <h2 id="worked-example">Worked example<a class="headerlink" href="#worked-example" title="Permanent link">&para;</a></h2>
 <p>Its <code>notebook.toml</code> and cells are pinned by Strata's test suite

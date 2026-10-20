@@ -2381,7 +2381,7 @@ and <code>cloudpickle</code> (which every Python cell needs) stay unless the fil
 <ol>
 <li><code>uv sync</code> runs to update <code>uv.lock</code></li>
 <li>The lockfile hash changes</li>
-<li>All cells become <strong>stale</strong> (their provenance no longer matches)</li>
+<li>Cells go out of date (<strong>idle</strong>), since their provenance no longer matches, and the cells below them read <strong>stale</strong></li>
 <li>Re-running any cell recomputes with the new environment</li>
 </ol>
 <div class="admonition info">

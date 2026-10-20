@@ -4260,6 +4260,10 @@
 <td><code>admin:notebook-workers</code></td>
 </tr>
 <tr>
+<td><code>GET</code> / <code>PUT /v1/admin/notebook-credentials</code> (the named credentials and catalogs cells use)</td>
+<td><code>admin:notebook-credentials</code></td>
+</tr>
+<tr>
 <td><code>POST /v1/registry/pending/approve</code> and <code>.../reject</code></td>
 <td><code>admin:registry</code></td>
 </tr>
@@ -4778,6 +4782,8 @@ not in the server's <code>available_python_versions</code> is a <code>400</code>
 <h3 id="list-workers">List Workers<a class="headerlink" href="#list-workers" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-61-1" name="__codelineno-61-1" href="#__codelineno-61-1"></a>GET /v1/notebooks/{session_id}/workers
 </code></pre></div>
+<p>Each remote worker carries its <code>/health</code> result, reused for 5 seconds.
+<code>?refresh=true</code> probes every worker again instead of reusing it.</p>
 <h3 id="update-notebook-worker">Update Notebook Worker<a class="headerlink" href="#update-notebook-worker" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-62-1" name="__codelineno-62-1" href="#__codelineno-62-1"></a>PUT /v1/notebooks/{session_id}/worker
 </code></pre></div>
@@ -5294,6 +5300,18 @@ by that team store, after this server's own gate.</p>
 <td>Protected-alias changes awaiting approval</td>
 </tr>
 <tr>
+<td><code>POST</code></td>
+<td><code>/v1/registry/pending/approve</code></td>
+<td><code>admin:registry</code></td>
+<td>Apply the pending change to <code>{"name", "alias"}</code>, with the approver as the audit actor. Service mode also needs <code>STRATA_SERVICE_WRITES_ENABLED</code>, but not <code>artifacts:write</code>. The requester approving their own change is a <code>403</code> unless they hold <code>admin:*</code>; no such change is a <code>404</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/v1/registry/pending/reject</code></td>
+<td><code>admin:registry</code></td>
+<td>Discard the pending change to <code>{"name", "alias"}</code>, audited, under the same gates as approve; no such change is a <code>404</code></td>
+</tr>
+<tr>
 <td><code>GET</code></td>
 <td><code>/v1/cache/stats</code></td>
 <td><code>admin:cache</code></td>
@@ -5379,7 +5397,7 @@ by that team store, after this server's own gate.</p>
 </tr>
 </tbody>
 </table>
-<p>The <code>admin:*</code> and <code>admin:cache</code> gates apply under principal auth; without it
+<p>The <code>admin:*</code>, <code>admin:cache</code> and <code>admin:registry</code> gates apply under principal auth; without it
 those routes are open.</p>
 
 

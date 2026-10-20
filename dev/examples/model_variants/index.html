@@ -2094,9 +2094,12 @@ tab to switch.</p>
   and <code>confusion</code> go stale; re-run them to see the random-forest
   numbers. Click <code>logreg</code> again, both downstream cells become cache
   hits.</li>
-<li>Add a fourth variant: create <code>cells/train_svc.py</code> with
-  <code># @variant classifier svc</code> and <code>model = SVC(...)</code>. The tab appears
-  immediately after the file is saved and the source is parsed.</li>
+<li>Add a fourth variant: click the <code>+</code> on the tab strip, which clones
+  the active variant, then change its annotation to
+  <code># @variant classifier svc</code> and its body to <code>model = SVC(...)</code>. A
+  file dropped into <code>cells/</code> on its own is ignored: only cells listed
+  in <code>notebook.toml</code> load, so a hand-made <code>cells/train_svc.py</code> also
+  needs a <code>[[cells]]</code> entry there.</li>
 <li>Edit a variant cell to define an extra variable (say,
   <code>feature_importance = ...</code>). The header pill flags
   <code>variant_contract_mismatch</code>: siblings disagree on what they

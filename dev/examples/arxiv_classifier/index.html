@@ -1949,10 +1949,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#day-1-vs-real-workload" class="md-nav__link">
+  <a href="#what-it-needs" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Day 1 vs. real workload
+        What it needs
       
     </span>
   </a>
@@ -2083,16 +2083,16 @@
 Notebook at once:</p>
 <ul>
 <li><strong>Distributed workers.</strong> Nine cells, three different workers: <code>local</code>,
-  <code>df-cluster</code> (CPU-heavy DataFusion), <code>gpu-fly</code> (GPU for embeddings and
-  training). Each cell declares its target worker with a single annotation;
+  <code>df-cluster</code> (CPU-heavy DataFusion), <code>gpu-fly</code> (GPU for embeddings).
+  Each cell declares its target worker with a single annotation;
   no deployment code.</li>
 <li><strong>Content-addressed caching.</strong> Re-run the notebook after an edit; every
   unchanged cell hits cache instantly regardless of which worker it runs on.</li>
 <li><strong>Prompt cells.</strong> Two cells use the LLM assistant with <code>{{ variable }}</code>
   injection to narrate the data at key points.</li>
 <li><strong>DAG invalidation.</strong> Change the model in the training cell, and every
-  upstream cell (load, aggregate, embed) still hits cache, only training
-  and evaluation re-execute.</li>
+  upstream cell (load, aggregate, embed) still hits cache, only training,
+  evaluation and the plot re-execute.</li>
 </ul>
 <h2 id="the-workflow">The workflow<a class="headerlink" href="#the-workflow" title="Permanent link">&para;</a></h2>
 <table>
@@ -2144,7 +2144,7 @@ Notebook at once:</p>
 <tr>
 <td>7</td>
 <td><code>train</code></td>
-<td>gpu-fly</td>
+<td>local</td>
 <td>Train a classifier on the embeddings</td>
 </tr>
 <tr>
@@ -2161,11 +2161,16 @@ Notebook at once:</p>
 </tr>
 </tbody>
 </table>
-<p>Cells 1, 3, 6, 8, 9 run on the user's machine. Cells 2 and 4 run on the
+<p>Cells 1, 3, 6, 7, 8, 9 run on the user's machine. Cells 2 and 4 run on the
 DataFusion worker, close to the data, avoids round-tripping the full
-dataset. Cells 5 and 7 run on the GPU worker.</p>
+dataset. Cell 5 runs on the GPU worker; training a logistic regression on
+the embeddings takes under a second on a CPU, so it stays local.</p>
 <h2 id="running-it-locally">Running it locally<a class="headerlink" href="#running-it-locally" title="Permanent link">&para;</a></h2>
-<p>Two local HTTP executors stand in for the cloud workers during development.</p>
+<p><code>notebook.toml</code> points <code>df-cluster</code> and <code>gpu-fly</code> at hosted workers. To use
+two local HTTP executors instead, change the <code>url</code> under each
+<code>[workers.config]</code>: <code>df-cluster</code> to <code>http://127.0.0.1:9000/v1/execute</code> and
+<code>gpu-fly</code> to <code>http://127.0.0.1:9001/v1/execute</code>, the ports
+<code>run_local_workers.sh</code> binds.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Terminal 1: start the two local worker processes</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>./examples/arxiv_classifier/run_local_workers.sh
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
@@ -2179,19 +2184,19 @@ dataset. Cells 5 and 7 run on the GPU worker.</p>
 <p>Once the notebook is open, run all cells. You should see:</p>
 <ul>
 <li>The <code>worker: df-cluster</code> badge next to cells 2 and 4</li>
-<li>The <code>worker: gpu-fly</code> badge next to cells 5 and 7</li>
+<li>The <code>worker: gpu-fly</code> badge next to cell 5</li>
 <li>A live <code>dispatching → df-cluster</code> or <code>dispatching → gpu-fly</code> badge
   (pulsing yellow) while each remote cell is executing</li>
 <li>Green <code>✓</code> status on every cell after the first run</li>
 <li>Green <code>✓ cached</code> on every cell on the second run</li>
 </ul>
-<h2 id="day-1-vs-real-workload">Day 1 vs. real workload<a class="headerlink" href="#day-1-vs-real-workload" title="Permanent link">&para;</a></h2>
-<p>As of Day 1 (April 2026), the cells run placeholder workloads, tiny
-DataFrames, fake embeddings, a trivial classifier, so we can validate the
-distributed plumbing without downloading a 500 MB dataset or setting up
-GPU deps. The workload is swapped in over the following days as the cloud
-workers come online. The worker annotations and cell structure stay the
-same.</p>
+<h2 id="what-it-needs">What it needs<a class="headerlink" href="#what-it-needs" title="Permanent link">&para;</a></h2>
+<p>The cells run the real workload: <code>load</code> downloads about 20K arXiv abstracts
+from Hugging Face, and <code>embed</code> encodes them with the <code>all-MiniLM-L6-v2</code>
+sentence-transformer, so the worker running <code>embed</code> needs
+<code>sentence-transformers</code> (and with it <code>torch</code>). The two prompt cells, <code>themes</code>
+and <code>clusters</code>, need an LLM provider key such as <code>ANTHROPIC_API_KEY</code> or
+<code>OPENAI_API_KEY</code>, set in the Runtime panel.</p>
 <h2 id="load-arxiv-papers">Load arXiv Papers<a class="headerlink" href="#load-arxiv-papers" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python  ·  <strong>worker</strong> local</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name Load arXiv Papers</span>

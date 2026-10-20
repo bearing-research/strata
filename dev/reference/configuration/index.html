@@ -2643,8 +2643,8 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <p>Some settings are environment-only and have no <code>[tool.strata]</code> equivalent,
 because they are read directly by the process that uses them rather than being
 fields of <code>StrataConfig</code>: everything in the <strong>Worker</strong> section (the
-<code>strata-worker</code> process), the TUI variables, logging, tracing and metrics, and
-the fast-IO tuning. Those rows say so.</p>
+<code>strata-worker</code> process), the TUI variables, and logging, tracing and metrics.
+Those rows say so.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># pyproject.toml</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">[tool.strata]</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0.0.0.0"</span>
@@ -3280,7 +3280,7 @@ with either.</p>
 <tr>
 <td><code>STRATA_STORE_TOKEN</code></td>
 <td><code>None</code></td>
-<td>Bearer token <code>strata artifact publish --to &lt;url&gt;</code> presents to the remote store. Read from the environment so it stays out of shell history; <code>--header</code> covers anything else a proxy wants</td>
+<td>Bearer token <code>strata artifact publish --to &lt;url&gt;</code> and <code>strata artifact promote --to &lt;url&gt;</code> present to the remote store. Read from the environment so it stays out of shell history; <code>--header</code> covers anything else a proxy wants</td>
 </tr>
 <tr>
 <td><code>STRATA_NODE_ADVERTISED_URL</code></td>
@@ -3905,7 +3905,8 @@ carries upload and finalize capabilities; under any other auth mode it returns
 </table>
 <h2 id="tui">TUI<a class="headerlink" href="#tui" title="Permanent link">&para;</a></h2>
 <p>Defaults for the <code>strata-notebook-tui</code> client; each is also a command-line
-flag, and the flag wins. Environment only.</p>
+flag, and the flag wins. Environment only. <code>STRATA_TUI_SERVER</code> is also the
+<code>--server</code> default for <code>strata watch</code> and <code>strata agent</code>.</p>
 <table>
 <thead>
 <tr>

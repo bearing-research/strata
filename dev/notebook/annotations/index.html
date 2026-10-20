@@ -3084,6 +3084,7 @@ UI for renaming a cell ID; a friendly ID is set by editing
 <a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://my-datafusion-worker.fly.dev/v1/execute"</span>
 <a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"direct"</span>
 </code></pre></div>
+<p>A server may hide the Workers panel (<code>STRATA_NOTEBOOK_WORKERS_PANEL=hidden</code>) or run remote cells only on its own registry's workers, ignoring a notebook's <code>[[workers]]</code> (<code>STRATA_NOTEBOOK_WORKERS_EDITABLE=false</code>); see <a href="../workers/#server-managed-workers">Server-managed workers</a>.</p>
 <p>During execution, the UI shows a pulsing "dispatching → df-cluster" badge on the cell. After completion, the worker name appears in the cell's metadata.</p>
 <p>Workers can be anything that speaks HTTP: a GPU box on RunPod, a DataFusion cluster on Fly, a beefy EC2 instance, or a local process on a different port. The built-in <code>remote_executor.py</code> provides a reference implementation:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata-worker<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">9000</span>
@@ -3172,7 +3173,7 @@ the files it created or changed (path, size and sha256) are stored as the cell's
 what produced them. On a remote worker the worker reports them. Each run adds a
 version, since an <code>rw</code> cell never serves a cached result. Deleted files are not
 recorded, and are not deleted from a remote mount either.</p>
-<p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw] [credential=&lt;name&gt;]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. <code>credential=</code> names a <a href="../../reference/notebook-toml/#named-credentials">server-defined credential</a> instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).</p>
+<p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw] [credential=&lt;name&gt;]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. <code>credential=</code> names a <a href="../../reference/notebook-toml/#named-credentials">server-defined credential</a> instead of putting a secret in the cell. On a server that sets <code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code>, an <code>rw</code> mount of <code>s3://</code>, <code>gs://</code> or <code>az://</code> must write through a credential its run's principal is listed for (its <code>credential=</code>, or the server's default for that scheme), or the cell fails before it runs; a credential that <code>STRATA_NOTEBOOK_CREDENTIAL_PATHS</code> restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).</p>
 <hr />
 <h2 id="fetch">@fetch<a class="headerlink" href="#fetch" title="Permanent link">&para;</a></h2>
 <p>Declare a URL the cell reads. The bytes are downloaded into the notebook's

@@ -3841,7 +3841,7 @@ this is blocking you.</p>
 <li>On failure → append the bad response as an <code>assistant</code> turn, feed the validator's path-addressed errors back as a <code>user</code> turn, and retry.</li>
 <li>On retry exhaustion → surface a cell error with the last validator messages.</li>
 </ol>
-<p>The default is 3 total attempts (1 initial + 2 retries). Override with <code># @validate_retries N</code>. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (<code>validation_retries</code>), and the UI shows "validated after N retries" when non-zero.</p>
+<p>The default is 3 total attempts (1 initial + 2 retries). Override with <code># @validate_retries N</code>. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (<code>validation_retries</code>), and when non-zero the cell's console line ends with <code>| Validation retries: N</code>.</p>
 <p>Retries are mostly invisible on OpenAI-strict (OpenAI, Gemini) and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the <code>json_object</code> fallback path (Mistral, Ollama, vLLM) where the provider only guarantees <em>syntactic</em> JSON.</p>
 <h3 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h3>
 <p>A prompt cell's provenance hash mixes together:</p>
@@ -4532,6 +4532,10 @@ and machines without <code>Rscript</code> never start one.</p>
 <tr>
 <td><code># @fetch data &lt;url&gt;</code></td>
 <td>Downloads a URL as a recorded input; <code>data</code> is the file's path as a string.</td>
+</tr>
+<tr>
+<td><code># @output_dir ckpt</code></td>
+<td>Gives the cell an empty output folder; <code>ckpt</code> is its path as a string. An R cell cannot read another cell's folder yet.</td>
 </tr>
 <tr>
 <td><code># @nocache</code></td>

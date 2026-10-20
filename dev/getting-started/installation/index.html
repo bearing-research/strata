@@ -2341,7 +2341,7 @@ is not supported; see the uv requirement above.</p>
 </tr>
 <tr>
 <td><code>azure</code></td>
-<td>The Azure Blob Storage artifact backend, and reading Azure lake tables (<code>adlfs</code>).</td>
+<td>The Azure Blob Storage artifact backend, notebook <code>az://</code> mounts, and reading Azure lake tables (<code>adlfs</code>).</td>
 </tr>
 <tr>
 <td><code>s3</code></td>
@@ -2385,7 +2385,10 @@ see <a href="../../deployment/docker/#prebuilt-image">Docker → Prebuilt image<
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>npm<span class="w"> </span>run<span class="w"> </span>build
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nb">cd</span><span class="w"> </span>..
 </code></pre></div>
-<p>The server auto-detects <code>frontend/dist/</code> and serves it.</p>
+<p>The server serves <code>src/strata/_frontend/</code> if it exists, else
+<code>frontend/dist/</code>. <code>_frontend/</code> is the bundle a release copies in, so after a
+fresh build either copy <code>frontend/dist/</code> into <code>src/strata/_frontend/</code> or
+remove <code>src/strata/_frontend/</code>.</p>
 <h3 id="3-start-the-server">3. Start the server<a class="headerlink" href="#3-start-the-server" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>

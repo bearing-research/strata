@@ -2247,12 +2247,11 @@
 
 
 <h1 id="privacy-sharing-model">Privacy &amp; Sharing Model<a class="headerlink" href="#privacy-sharing-model" title="Permanent link">&para;</a></h1>
-<p>A personal server has one user, so notebook access there is
-<strong>URL-based</strong>, similar to Google Docs: notebook IDs are unguessable,
-and anyone who can reach the server and has the ID can open and
-execute the notebook. Service mode gates the routes by scope and
-tenant. This page lays out the model honestly so you can pick the
-deployment shape that matches your trust boundary.</p>
+<p>A personal server has one user, so it checks no identity: anyone who
+can reach it can list, open and execute every notebook under the
+storage root. Service mode gates the routes by scope and tenant. This
+page lays out the model honestly so you can pick the deployment shape
+that matches your trust boundary.</p>
 <h2 id="whats-shared-what-isnt">What's shared, what isn't<a class="headerlink" href="#whats-shared-what-isnt" title="Permanent link">&para;</a></h2>
 <h3 id="iceberg-scan-cache-shared-by-design">Iceberg scan cache, shared by design<a class="headerlink" href="#iceberg-scan-cache-shared-by-design" title="Permanent link">&para;</a></h3>
 <p>The original Strata value prop: identical scans hit the same cache.
@@ -2283,12 +2282,11 @@ is opt-in: the <a href="../service-mode/#the-team-cache-sharing-results-nobody-n
 store by provenance, so identical cells in different notebooks hit
 each other there.</p>
 <h3 id="notebook-access">Notebook access<a class="headerlink" href="#notebook-access" title="Permanent link">&para;</a></h3>
-<p>Notebook IDs are full UUIDs (8-char prefix for display, full UUID
-for the actual ID). They're not in any global enumeration.</p>
 <p>On a personal server there is no identity to check against: <code>discover</code>
-lists every notebook under the storage root, and anyone who can reach
-the port can open anything. That is the single-user shape, and it is why
-personal mode binds to loopback by default. Use
+lists every notebook under the storage root, <code>open</code> takes a notebook's
+path, and anyone who can reach the port can open anything. That is the
+single-user shape, and it is why personal mode binds to loopback by
+default. Use
 <a href="../../notebook/publishing/">publishing</a> to hand someone a result, or
 service mode for a genuinely shared deployment.</p>
 <h2 id="trust-boundaries-pick-a-shape">Trust boundaries, pick a shape<a class="headerlink" href="#trust-boundaries-pick-a-shape" title="Permanent link">&para;</a></h2>
@@ -2305,7 +2303,8 @@ than by sending a notebook link. For one server the whole team uses,
 run service mode (next section).</p>
 <h3 id="multi-tenant-or-hard-isolation-requirements">Multi-tenant or hard-isolation requirements<a class="headerlink" href="#multi-tenant-or-hard-isolation-requirements" title="Permanent link">&para;</a></h3>
 <p><code>STRATA_DEPLOYMENT_MODE=service</code> + multi-tenancy. Each tenant gets
-its own QoS pools, cache namespacing, and metric labels. Notebook routes
+its own QoS pools and cache namespacing; per-tenant usage comes from
+<code>GET /v1/admin/tenants</code>. Notebook routes
 are scope gated (<code>notebook:read</code>, <code>notebook:write</code>, <code>notebook:execute</code>),
 so what a principal can reach depends on the scopes the proxy asserts
 for it.</p>

@@ -2035,9 +2035,10 @@
 
 
 <h1 id="widget-playground-interactive-controls-driving-the-dag">Widget Playground: interactive controls driving the DAG<a class="headerlink" href="#widget-playground-interactive-controls-driving-the-dag" title="Permanent link">&para;</a></h1>
-<p>A two-cell notebook: a <strong>widget cell</strong> (a control panel) feeding a Python cell
-that renders a DataFrame. Drag a control and the downstream cell goes stale;
-run it and the grid updates.</p>
+<p>A three-cell notebook: a <strong>widget cell</strong> (a control panel) feeding two Python
+cells, one that renders a DataFrame and one that draws a chart. The widget
+cell is <code># @live</code>, so dragging a control re-runs both downstream cells and
+the grid and the chart update.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
 <li>A <strong>widget cell</strong> with three controls:</li>
@@ -2047,6 +2048,9 @@ run it and the grid updates.</p>
 <li>A downstream Python cell that reads <code>alpha</code>, <code>n</code>, <code>curve</code> and builds a
   DataFrame, which renders in the <strong>interactive data viewer</strong>. So the two
   features compose: a widget drives the grid.</li>
+<li>A second downstream cell that plots the same curve with matplotlib.</li>
+<li><strong>Live mode</strong>: <code># @live</code> on the widget cell makes a control change re-run
+  the cheap downstream cells instead of only marking them stale.</li>
 <li><strong>Content-addressed values</strong>: drag <code>alpha</code> to a new value and back, the
   second time is a cache hit, no recompute.</li>
 </ul>
@@ -2061,11 +2065,15 @@ run it and the grid updates.</p>
 <tbody>
 <tr>
 <td><code>controls</code></td>
-<td>A <code>widget</code> cell declaring the slider / number / dropdown.</td>
+<td>A <code># @live</code> <code>widget</code> cell declaring the slider / number / dropdown.</td>
 </tr>
 <tr>
 <td><code>preview</code></td>
 <td>Reads the control values, builds a DataFrame, displays it.</td>
+</tr>
+<tr>
+<td><code>plot</code></td>
+<td>Reads the same values and plots <code>y</code> against <code>x</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -2076,20 +2084,22 @@ run it and the grid updates.</p>
 <p>Open <code>examples/widget_playground</code> from the Strata home page.</p>
 <h2 id="try-this">Try this<a class="headerlink" href="#try-this" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Run the <code>preview</code> cell, it materializes the widget defaults and shows a
-   20-row table in the data viewer.</li>
-<li>Drag the <code>alpha</code> slider. <code>preview</code> turns yellow (stale).</li>
-<li>Run <code>preview</code>: the <code>y</code> column reflects the new <code>alpha</code>.</li>
-<li>Switch <code>curve</code> to <code>square</code> and re-run, the shape changes.</li>
-<li>Drag <code>alpha</code> back to its previous value and run, a cache hit.</li>
+<li>Run <code>preview</code> and <code>plot</code>. They read the widget defaults: a 20-row table
+   in the data viewer and a straight line.</li>
+<li>Drag the <code>alpha</code> slider. Both cells re-run on their own, and the <code>y</code>
+   column and the chart reflect the new <code>alpha</code>.</li>
+<li>Switch <code>curve</code> to <code>square</code>, the shape changes.</li>
+<li>Drag <code>alpha</code> back to its previous value, a cache hit.</li>
+<li>Turn <strong>⚡ Live</strong> off (or change the annotation to <code># @live off</code>) and drag
+   again: now the two cells only turn yellow (stale) until you run them.</li>
 </ol>
 <p>Widget cells render in the web UI. Edit the control declaration with the
 <strong>✎ Edit controls</strong> toggle on the cell.</p>
 <h2 id="open-as-an-app">Open as an app<a class="headerlink" href="#open-as-an-app" title="Permanent link">&para;</a></h2>
 <p>Click <strong>App</strong> in the notebook header to open this notebook as a read-only
-interactive app, just the controls + the table, no editor. Turn on the
-widget cell's <strong>⚡ Live</strong> toggle first, and dragging <code>alpha</code> in the app updates
-the table live.</p>
+interactive app, just the controls, the table and the chart, no editor. With
+the widget cell's <strong>⚡ Live</strong> on, as it ships, dragging <code>alpha</code> in the app
+updates them live.</p>
 <h2 id="controls">Controls<a class="headerlink" href="#controls" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> widget</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a># @live

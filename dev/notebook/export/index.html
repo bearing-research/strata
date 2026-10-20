@@ -2455,7 +2455,9 @@ alongside Markdown and HTML.</p>
 <li><strong>PNG images</strong> inline as <code>data:</code> URLs, loaded lazily from the
   artifact store when needed.</li>
 <li><strong>JSON / dict / list</strong> as fenced JSON.</li>
-<li><strong>Markdown</strong> rendered as content.</li>
+<li><strong>Markdown</strong> (including an <a href="../annotations/#output_dir"><code># @output_dir</code></a>
+  folder's summary) rendered as content in markdown exports and as
+  preformatted text in HTML.</li>
 <li><strong>Pickled</strong> values become a placeholder with the type hint
   from the serializer (e.g. <em>Pickled output (<code>&lt;MyThing object&gt;</code>) not rendered in export</em>).</li>
 <li><strong>An output that could not be stored</strong> (a serialization error)
@@ -2501,7 +2503,8 @@ export for limited gain). The cell banner notes <code>max_iter</code> and
 <code>carry</code> so the reader knows it's a loop.</p>
 <h3 id="markdown-cells-content-verbatim">Markdown cells, content verbatim<a class="headerlink" href="#markdown-cells-content-verbatim" title="Permanent link">&para;</a></h3>
 <p>Markdown cells render as content, not as fenced source. In HTML
-exports they currently render as preformatted text (no
+exports they, and markdown display outputs such as an <code># @output_dir</code>
+folder summary, currently render as preformatted text (no
 markdown-to-HTML pass); for prose-heavy notebooks use the markdown
 format.</p>
 <h2 id="output-formats">Output formats<a class="headerlink" href="#output-formats" title="Permanent link">&para;</a></h2>

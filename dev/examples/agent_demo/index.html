@@ -2029,8 +2029,9 @@ it gets written.</p>
 </tbody>
 </table>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>sync<span class="w">                       </span><span class="c1"># build the notebook's venv from pyproject.toml</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>.<span class="w"> </span>--force<span class="w">   </span><span class="c1"># run every cell</span>
+<p>From the repository root (the notebook's own venv does not include Strata;
+<code>strata run</code> builds it from <code>pyproject.toml</code> before the first cell):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>examples/agent_demo<span class="w"> </span>--force<span class="w">   </span><span class="c1"># run every cell</span>
 </code></pre></div>
 <h2 id="reproducing-the-demo">Reproducing the demo<a class="headerlink" href="#reproducing-the-demo" title="Permanent link">&para;</a></h2>
 <p>To watch a coding agent build this notebook from scratch, see <code>RECORDING.md</code> in

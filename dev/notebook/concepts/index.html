@@ -2733,7 +2733,7 @@ per artifact.</p>
 </ol>
 <p>This means you can edit an early cell and run a downstream cell, and Strata will re-execute the pipeline up to it. Within one run each cell executes at most once, even when two branches of the DAG both need it.</p>
 <h2 id="run-all">Run All<a class="headerlink" href="#run-all" title="Permanent link">&para;</a></h2>
-<p>Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, <code>@loop</code>, <code>@fetch</code> or <code>@dataset</code>, a sweep variant or a consumer of one, and every non-Python cell runs on its own.</p>
+<p>Run All runs every cell in notebook order. Consecutive plain Python cells that run locally share one harness process (a batch); a cell with a worker, a timeout, a read-write mount, <code>@loop</code>, <code>@fetch</code>, <code>@dataset</code> or <code>@output_dir</code>, a sweep variant or a consumer of one, and every non-Python cell runs on its own.</p>
 <p>When a cell fails, Run All carries on, but not through the failure: every cell that reads from a failed cell, directly or further down, is skipped and marked stale with the reason that an upstream failed. Cells the failure does not reach run as normal. Rerun All does the same while bypassing the cache.</p>
 <h2 id="staleness">Staleness<a class="headerlink" href="#staleness" title="Permanent link">&para;</a></h2>
 <p>A cell is out of date when no stored result matches its current provenance. This happens when:</p>

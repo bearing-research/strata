@@ -2530,8 +2530,8 @@ fetch) and the DataFrame preview renders below the cell.</p>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>virginica                6.59              2.97               5.55              2.03
 </code></pre></div>
 <p>Strata reads this cell's AST, sees it references <code>df</code> and <code>feature_names</code>
-from the loader, and wires an edge. The DAG view in the sidebar
-shows the dependency.</p>
+from the loader, and wires an edge. The DAG view in the bottom
+drawer shows the dependency.</p>
 <h3 id="plot">Plot<a class="headerlink" href="#plot" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
@@ -2612,8 +2612,7 @@ inputs, model config)</code>. Running again with the same upstream
 <p>Needs <code>ANTHROPIC_API_KEY</code> (or another provider's key) configured in
 the Runtime panel. See <a href="../../notebook/cells/#provider-configuration">Provider configuration</a>
 for provider setup and <a href="../../notebook/cells/#prompt-cells">Prompt cells</a>
-for the full annotation surface (<code>@output_schema</code>, <code>@validate_retries</code>,
-multi-turn conversations).</p>
+for the full annotation surface (<code>@output_schema</code>, <code>@validate_retries</code>).</p>
 <h2 id="7-other-display-types">7. Other display types<a class="headerlink" href="#7-other-display-types" title="Permanent link">&para;</a></h2>
 <p>The cells above used trailing expressions for the DataFrame and
 the matplotlib <code>Figure</code>. Other shapes you can put at the end of a

@@ -2271,8 +2271,7 @@ container.</p>
 <p><strong>Permissions.</strong> The container runs as a non-root <code>strata</code> user (UID
 1000 in the Docker image). If your host user has a different UID,
 files the container writes will be owned by UID 1000 from the host's
-perspective. On Linux, <code>chown -R 1000:1000 ./notebooks</code> once, or run
-the container with <code>user: "${UID}:${GID}"</code> in compose to align IDs.
+perspective. On Linux, <code>chown -R 1000:1000 ./notebooks</code> once.
 On macOS Docker Desktop this is handled transparently by the file-
 sharing layer; no action needed.</p>
 <p><strong>Why <code>/tmp/strata-notebooks</code> inside the container?</strong> That's the path
@@ -2316,6 +2315,11 @@ emulation, or builds its own as below.</p>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>ghcr.io/bearing-research/strata:&lt;version&gt;
 </code></pre></div>
 <p>To extend it, start your own Dockerfile <code>FROM</code> it.</p>
+<p>The image runs as the non-root <code>strata</code> user, so a service-mode server in it
+refuses <a href="../service-mode/#who-a-cell-is-strata_notebook_harness_user"><code>STRATA_NOTEBOOK_HARNESS_USER</code></a>:
+switching users needs root. To run cells as a harness user here, run the
+container as root (<code>--user root</code>, or <code>user: root</code> in Compose) and under an init
+(<code>docker run --init</code>, or <code>init: true</code>).</p>
 <h2 id="building-the-image-manually">Building the image manually<a class="headerlink" href="#building-the-image-manually" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>strata<span class="w"> </span>.
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>-p<span class="w"> </span><span class="m">127</span>.0.0.1:8765:8765<span class="w"> </span><span class="se">\</span>

@@ -2181,9 +2181,8 @@ comparison.</p>
 <li><a href="https://fly.io/docs/flyctl/install/">Fly CLI</a> installed (<code>brew install flyctl</code> on macOS).</li>
 <li><code>fly auth login</code> completed (opens a browser; one-time).</li>
 <li>A Fly.io account with a payment method on file. The template runs
-  one <code>shared-cpu-4x</code> VM with 2 GB of memory. It suspends idle machines
-  but keeps one running, so it does not scale to zero unless you change
-  <code>min_machines_running</code>. See
+  one <code>shared-cpu-4x</code> VM with 2 GB of memory and keeps it running, so it
+  does not scale to zero unless you set <code>min_machines_running = 0</code>. See
   <a href="https://fly.io/docs/about/pricing/">Fly pricing</a> for what that costs.</li>
 </ul>
 <h2 id="deploy">Deploy<a class="headerlink" href="#deploy" title="Permanent link">&para;</a></h2>
@@ -2221,10 +2220,10 @@ the most common cause is a cold-start delay on the first request.</p>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
 <p>The template configures:</p>
 <ul>
-<li><strong>VM size</strong>: <code>shared-cpu-4x</code> with 2 GB RAM</li>
-<li><strong>Auto-scaling</strong>: machines suspend when idle, auto-start on requests</li>
-<li><strong>Persistent storage</strong>: 5 GB volume at <code>/home/strata/.strata</code> with auto-extend</li>
-<li><strong>Health check</strong>: HTTP on <code>/health</code> every 15 s</li>
+<li><strong>VM size:</strong> <code>shared-cpu-4x</code> with 2 GB RAM</li>
+<li><strong>Auto-start:</strong> the machine starts on requests; with <code>min_machines_running = 1</code> it never suspends, so set <code>min_machines_running = 0</code> to suspend it when idle</li>
+<li><strong>Persistent storage:</strong> 5 GB volume at <code>/home/strata/.strata</code> with auto-extend</li>
+<li><strong>Health check:</strong> HTTP on <code>/health</code> every 15 s</li>
 </ul>
 <h2 id="key-environment-variables">Key environment variables<a class="headerlink" href="#key-environment-variables" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[env]</span>

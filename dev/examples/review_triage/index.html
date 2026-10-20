@@ -2006,8 +2006,9 @@
 <p>The <code>triage</code> cell sends a list of customer reviews to an LLM and gets
 back a <strong>schema-validated JSON array</strong>: not free-form text that a
 downstream cell has to regex. The schema is passed through as native
-structured-output (OpenAI's <code>response_format: {type: "json_schema"}</code>,
-or <code>json_object</code> fallback for providers that don't support schemas).</p>
+structured-output (Anthropic's native tool use, OpenAI's
+<code>response_format: {type: "json_schema"}</code>, or <code>json_object</code> fallback for
+providers that don't support schemas).</p>
 <p>Because the schema is part of the cell's provenance hash, editing the
 schema invalidates the cached response, exactly what you want when
 you're iterating on the shape of the output.</p>

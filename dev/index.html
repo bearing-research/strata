@@ -2144,35 +2144,70 @@ so a commit is a readable diff rather than a wall of JSON.</p>
 <p>The interactive notebook surface: Python, R, SQL, prompt, widget and loop cells, each
 producing artifacts that flow through an auto-built DAG.</p>
 <p><strong>Highlights:</strong></p>
+<p><strong>For an agent</strong></p>
 <ul>
-<li><strong>content-addressed:</strong> every cell output is keyed by source + inputs + environment - identical work hits the cache, and no result ever needs invalidating</li>
-<li><strong>reactive:</strong> edit a cell, the cascade re-runs only the downstream cells that depend on it</li>
-<li><strong>dag-from-ast:</strong> Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges</li>
-<li><strong>dag-view:</strong> the dependency graph renders alongside the cells - double-click any node to jump to its source</li>
-<li><strong>git-friendly:</strong> notebooks are plain <code>.py</code> files plus a TOML manifest - readable diffs, no JSON blobs</li>
-<li><strong>prompt cells:</strong> LLM calls are first-class DAG nodes, <code>{{ variable }}</code> interpolation from upstream cells, cached by template + inputs + model config</li>
-<li><strong>SQL cells:</strong> named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery</li>
-<li><strong>loop cells:</strong> <code># @loop max_iter=N carry=state</code> iterates a cell with explicit carry between steps - each iteration is its own artifact</li>
-<li><strong>interactive widgets + app view:</strong> a <code>widget</code> cell is a control panel (slider / dropdown / …) whose values downstream cells consume; with <strong>⚡ Live</strong> on, dragging a control recomputes the dependents. Open a notebook as a read-only <strong>app</strong>, <strong>embed</strong> it as an <code>&lt;iframe&gt;</code>, or export a frozen <strong>snapshot</strong></li>
-<li><strong>distributed:</strong> <code># @worker gpu-fly</code> dispatches a single cell to a remote box - bring your own compute</li>
-<li><strong>mounts:</strong> <code># @mount data s3://bucket/prefix ro</code> makes any S3 / GCS / Azure prefix a local <code>pathlib.Path</code></li>
-<li><strong>isolated envs:</strong> every notebook gets its own uv-managed <code>.venv/</code>, locked and reproducible</li>
-<li><strong>auto-install:</strong> missing import in a cell? one click adds the package via uv; run the cell again to use it</li>
-<li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution - same DAG, same cache</li>
-<li><strong>stop a run from anywhere:</strong> cancel a running cell from the browser, <code>strata cell cancel</code>, REST or MCP, and on Linux and macOS a cell stops when the server that started it does</li>
-<li><strong>every input recorded:</strong> <code># @fetch</code> makes bytes from a URL an input and <code># @dataset</code> makes a registry name one, both content-addressed like everything else</li>
-<li><strong>lake-aware SQL:</strong> read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records</li>
-<li><strong>the same environment, elsewhere:</strong> a remote cell runs in the notebook's own locked environment rather than whatever the worker image happens to hold</li>
+<li><strong>a scratchpad that lasts:</strong> a Claude Code plugin points an agent at a cached notebook cell instead of a <code>/tmp</code> script, so the snippet it ran ten turns ago is still there</li>
+<li><strong>any MCP client:</strong> a warm notebook session is exposed at <code>/mcp</code>, and you can watch the agent work in the browser or the terminal while it does</li>
+<li><strong>built to be scripted:</strong> <code>strata</code> inspects, runs and authors a notebook with JSON output and stable exit codes, offline or against a live session</li>
+<li><strong>one command to start:</strong> <code>strata agent ./nb</code> stands up the server, the session, the config and the viewer together</li>
+<li><strong>you can tell who did what:</strong> every cell records whether a person or an agent wrote it</li>
+</ul>
+<p><strong>Why nothing runs twice</strong></p>
+<ul>
+<li><strong>results are keyed by what made them:</strong> a cell's source, its inputs and its environment decide its identity, so identical work is a cache hit and no result ever needs invalidating</li>
+<li><strong>only what changed re-runs:</strong> edit one cell and Strata re-runs the cells below it and nothing else</li>
+<li><strong>no wiring:</strong> Strata reads each cell to find what it uses and what it defines, so there are no decorators and no edges to maintain by hand</li>
+<li><strong>readable in git:</strong> a notebook is plain <code>.py</code> files plus a TOML manifest, so a diff shows the code that changed</li>
+<li><strong>the graph is visible:</strong> the dependency graph renders beside the cells, and double-clicking a node jumps to its source</li>
+</ul>
+<p><strong>Cell types</strong></p>
+<ul>
+<li><strong>prompt cells:</strong> LLM calls as DAG nodes, <code>{{ variable }}</code> interpolation from upstream, cached by template + inputs + model config</li>
+<li><strong>SQL cells:</strong> named connections and bind-parameter templating, with drivers for DuckDB, SQLite, Postgres, Snowflake and BigQuery</li>
+<li><strong>R cells:</strong> Python and R share one DAG, exchanging Arrow, so a <code>pandas.DataFrame</code> is a <code>data.frame</code> for the next cell</li>
+<li><strong>loop cells:</strong> <code># @loop max_iter=N carry=state</code> iterates with an explicit carry, each step its own artifact</li>
+<li><strong>variant sweeps:</strong> run every variant of a group and hand the downstream cell a <code>{name: value}</code> dict, or fan out with <code># @per_variant</code> so adding a variant only runs the new one</li>
+<li><strong>widget cells:</strong> declarative controls that downstream cells consume as inputs; with Live on, dragging one recomputes what depends on it</li>
+<li><strong>cell unit tests:</strong> a Tests panel runs real pytest against a cell's defs and upstream inputs, doubling as a health badge</li>
+</ul>
+<p><strong>Compute and data</strong></p>
+<ul>
+<li><strong>distributed:</strong> <code># @worker gpu-fly</code> dispatches a cell to a remote box; bring your own compute</li>
+<li><strong>worker pool:</strong> a separate package (<code>pip install strata-pool</code>): machines (Fly, Docker or RunPod) start on demand, are held for a tenant, hand out GPUs per cell, and stop when the work does</li>
+<li><strong>the same environment, elsewhere:</strong> a remote cell runs in the notebook's own locked environment rather than whatever the worker image holds</li>
 <li><strong>the machine starts before the run:</strong> focusing a cell bound to a pooled worker, or starting Run All, asks the pool to bring up a machine while you are still reading the code</li>
+<li><strong>remote cells over SSH:</strong> hand an agent an SSH target and it provisions a worker there, tunnels to it, and routes heavy cells over, cached like everything else</li>
 <li><strong>workers behind NAT:</strong> <code>strata-worker --connect</code> dials out to a relay, so a machine with no open port serves cells</li>
-<li><strong>Iceberg as other engines write it:</strong> scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly</li>
-<li><strong>a figure gets a URL:</strong> publish an artifact and anyone with the link sees the plot, the code behind it, and the environment of every step - no account, no install</li>
-<li><strong>promote to the team:</strong> copy a result and its whole chain into a shared store, from the notebook, the CLI or inside a cell - and a teammate's earlier run can serve your cell</li>
-<li><strong>a notebook travels:</strong> export the whole state as one bundle, artifacts included, and import it back elsewhere</li>
+<li><strong>lake-aware SQL:</strong> read a named catalog and the notebook's mounts in one query, pinned to the snapshot the cell's provenance records</li>
+<li><strong>Iceberg as other engines write it:</strong> scans apply merge-on-read deletes and follow schema changes by field id, so tables Spark, Flink and DuckDB write read correctly, from SQL, REST and Glue catalogs, with warehouses on S3, GCS or Azure</li>
+<li><strong>every input recorded:</strong> <code># @fetch</code> makes bytes from a URL an input, <code># @dataset</code> makes a registry name one, both content-addressed</li>
+<li><strong>folders as outputs:</strong> <code># @output_dir ckpt</code> gives a cell a folder whose files are stored as an output, kept even when the run fails, and handed to the next cell as a <code>Path</code></li>
+<li><strong>write back to the lake:</strong> <code># @write_table readings lake:lab.readings append</code> writes a variable into an Iceberg table when the run succeeds, and each snapshot names the result that made it</li>
+<li><strong>an append keeps the cache:</strong> cached row groups are keyed by data file, not snapshot, so after an append a scan reads only the new files</li>
+<li><strong>mounts:</strong> <code># @mount data s3://bucket/prefix ro</code> makes any S3, GCS or Azure prefix a local <code>pathlib.Path</code></li>
+<li><strong>one mount cache per machine:</strong> every notebook shares one bounded copy of each remote file, so a prefix with one new file downloads only that file</li>
+<li><strong>isolated envs:</strong> every notebook gets its own uv-managed <code>.venv/</code>, locked and reproducible</li>
+<li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution, same DAG and same cache</li>
+</ul>
+<p><strong>Teams</strong></p>
+<ul>
+<li><strong>promote to the team:</strong> <code>strata artifact promote</code> copies a result and the chain behind it into the team's store, from the notebook, the CLI or inside a cell</li>
+<li><strong>a colleague's run counts:</strong> a cell can be served from a teammate's earlier result: the expensive middle of a pipeline, not only what someone chose to name</li>
+<li><strong>a figure gets a URL:</strong> publish an artifact and anyone with the link sees the plot, the code, and the environment of every step behind it, with no account and no install</li>
+<li><strong>a notebook travels:</strong> export the whole state as one bundle and import it back, artifacts included</li>
 <li><strong>share a session:</strong> presence, cell focus and soft locks, with every cell recording who wrote it</li>
-<li><strong>host it for many people:</strong> in service mode every notebook route stays within the caller's tenant, the server runs under a path behind your proxy, and the editor can be framed inside your own product</li>
+<li><strong>safe to share in service mode:</strong> cells run as their own OS user once you name one, notebook scopes are enforced on every notebook route under principal auth, and an MCP tool call runs as its caller</li>
+<li><strong>host it for many people:</strong> in service mode every notebook route, the WebSocket and MCP stay within the caller's tenant, the server runs under a path behind your proxy, and the editor can be framed inside your own product</li>
 <li><strong>a store that stays bounded:</strong> results nobody has used for a while are collected least recently used first, never anything named, pinned, published or still needed</li>
-<li><strong>worker pool</strong> (a separate package, <code>pip install strata-pool</code>)<strong>:</strong> machines start on demand - Fly, Docker or RunPod - are held for a tenant, hand out GPUs per cell, and stop when the work does</li>
+</ul>
+<p><strong>Surfaces</strong></p>
+<ul>
+<li><strong>terminal viewer:</strong> <code>strata watch</code> renders a running notebook live in the terminal, read-only, over SSH or beside your editor</li>
+<li><strong>stop a run from anywhere:</strong> cancel a running cell from the browser, <code>strata cell cancel</code>, REST or MCP, and on Linux and macOS a cell stops when the server that started it does</li>
+<li><strong>app view:</strong> open a notebook as a read-only app, embed it as an <code>&lt;iframe&gt;</code>, or export a self-contained snapshot</li>
+<li><strong>data viewer:</strong> DataFrame outputs render in a grid you can page, sort, filter and search, backed by the full artifact rather than a preview</li>
+<li><strong>also a library:</strong> <code>pip install strata-client</code> talks to the store from any pipeline or service, with no server install</li>
+<li><strong>production:</strong> Iceberg-aware scans, trusted-proxy auth, multi-tenancy, and S3, GCS, Azure or local blob backends</li>
 </ul>
 <h3 id="three-ways-to-drive-it">Three ways to drive it<a class="headerlink" href="#three-ways-to-drive-it" title="Permanent link">&para;</a></h3>
 <p>The same notebook - the same cells, the same cache, the same artifacts - has

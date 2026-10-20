@@ -2258,22 +2258,22 @@ share the same file. Strata's per-cell layout keeps a diff that touches
 cell 3 from rebasing on top of changes to cell 7.</p>
 <h2 id="where-other-notebooks-are-stronger">Where other notebooks are stronger<a class="headerlink" href="#where-other-notebooks-are-stronger" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Interactive UI widgets.</strong> Marimo's <code>mo.ui.*</code> widgets are composed in
+<li><strong>Interactive UI widgets:</strong> Marimo's <code>mo.ui.*</code> widgets are composed in
   Python and can be built up programmatically. Strata's <code>widget</code> cells are
   declarative rather than composable: slider, number, dropdown, text and
   checkbox, declared in the cell and consumed by downstream cells as inputs.
   With Live on, moving a control re-runs what depends on it.</li>
-<li><strong>Ecosystem maturity.</strong> Jupyter's ecosystem of extensions, kernels (R,
+<li><strong>Ecosystem maturity:</strong> Jupyter's ecosystem of extensions, kernels (R,
   Julia, Scala, Bash, etc.), and integrations is unmatched. Strata runs
   Python, R, SQL, prompt, markdown and widget cells in one DAG, which covers
   a narrower range than Jupyter's kernels.</li>
-<li><strong>Reactive evaluation at the keystroke level.</strong> Pluto and Marimo
+<li><strong>Reactive evaluation at the keystroke level:</strong> Pluto and Marimo
   immediately re-run dependent cells on edit. Strata is reactive about
   <em>staleness</em> (the DAG updates, downstream cells flip to stale on every
   source change) and execution is explicit, you press Run. The exception is
   a widget cell with Live on, where moving a control re-runs its dependents
   immediately.</li>
-<li><strong>Hosted offerings.</strong> Google Colab, Deepnote, Hex, and Databricks
+<li><strong>Hosted offerings:</strong> Google Colab, Deepnote, Hex, and Databricks
   Notebooks all bundle a hosted runtime; Strata is self-hosted (see
   the section below on where these fit).</li>
 </ul>
@@ -2330,17 +2330,17 @@ moat is compute provisioning, not notebook-engine innovation.</p>
 <h2 id="when-to-pick-strata">When to pick Strata<a class="headerlink" href="#when-to-pick-strata" title="Permanent link">&para;</a></h2>
 <p>Strata is the right fit when your notebook is:</p>
 <ul>
-<li><strong>Expensive to recompute</strong>: model training, embeddings, large scans,
+<li><strong>Expensive to recompute:</strong> model training, embeddings, large scans,
   long LLM chains. The automatic cache pays for itself the first time you
   reload.</li>
-<li><strong>Heterogeneous in compute</strong>: some cells want a GPU, some want a
+<li><strong>Heterogeneous in compute:</strong> some cells want a GPU, some want a
   warehouse, some are pure CPU. The <code># @worker</code> annotation routes each
   cell to where it should run.</li>
-<li><strong>Iterative and branching</strong>: variant cells let you keep three model
+<li><strong>Iterative and branching:</strong> variant cells let you keep three model
   candidates in one notebook without forking.</li>
-<li><strong>Version-controlled with others</strong>: plain text, no JSON-in-git pain,
+<li><strong>Version-controlled with others:</strong> plain text, no JSON-in-git pain,
   no execution-count churn on every re-run.</li>
-<li><strong>AI-heavy</strong>: prompt cells make LLM responses cacheable like any
+<li><strong>AI-heavy:</strong> prompt cells make LLM responses cacheable like any
   other artifact, with schema-constrained output and retry-on-validation.</li>
 </ul>
 <p>For light interactive exploration where the work is a few seconds per

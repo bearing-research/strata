@@ -2278,20 +2278,28 @@ without opening the panel:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>✓ 4/4</code></td>
-<td>all tests passed</td>
+<td>green <code>4/4</code></td>
+<td>all tests passed (passed / total)</td>
 </tr>
 <tr>
-<td>red</td>
+<td>red <code>3/4</code></td>
 <td>one or more <strong>failed</strong></td>
 </tr>
 <tr>
-<td>amber</td>
+<td>amber <code>3/4</code></td>
 <td><strong>errored</strong> - the cell source or test setup blew up</td>
 </tr>
 <tr>
-<td><code>· stale</code></td>
+<td>grey <code>3/4 · stale</code></td>
 <td>the cell, its tests or its inputs changed since the last run</td>
+</tr>
+<tr>
+<td><code>…</code></td>
+<td>the tests are running</td>
+</tr>
+<tr>
+<td>amber <code>!</code></td>
+<td>pytest is not installed in the notebook's environment</td>
 </tr>
 </tbody>
 </table>

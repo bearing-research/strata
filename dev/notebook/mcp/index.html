@@ -2267,7 +2267,7 @@ details stay in the server log.</p>
 </tr>
 <tr>
 <td><code>run_cell(session_id, cell_id, mode, confirm_reads, approve_reads)</code></td>
-<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live. With <code>confirm_reads</code>, a run over the server's read threshold returns <code>error_code: large_read</code> and the estimate instead; <code>approve_reads</code> runs it.</td>
+<td>Execute a cell (<code>normal</code> / <code>rerun</code> / <code>force</code>), broadcast live. With <code>confirm_reads</code>, a run over the server's read threshold returns <code>status: error</code>, <code>error_code: large_read</code> and the estimate in <code>reads</code> instead; <code>approve_reads</code> runs it.</td>
 </tr>
 <tr>
 <td><code>cancel_cell(session_id, cell_id)</code></td>
@@ -2319,7 +2319,7 @@ details stay in the server log.</p>
 </tr>
 <tr>
 <td><code>add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)</code></td>
-<td>Register a remote executor worker so cells can run on it.</td>
+<td>Register a remote executor worker so cells can run on it. Refused where the server manages worker definitions (service mode, or <code>STRATA_NOTEBOOK_WORKERS_EDITABLE=false</code>), as are <code>remove_worker</code> and <code>connect_ssh_worker</code>.</td>
 </tr>
 <tr>
 <td><code>set_default_worker(session_id, name?)</code></td>
@@ -2339,7 +2339,7 @@ details stay in the server log.</p>
 </tr>
 <tr>
 <td><code>lineage(session_id, cell_id, variable, max_depth?)</code></td>
-<td>The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a <code># @per_variant</code> cell, name it <code>variable@variant=&lt;name&gt;</code> (for example <code>score@variant=triple</code>); the error on a bare name lists the stored ones.</td>
+<td>The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. For one instance of a <code># @per_variant</code> cell, name it <code>variable@variant=&lt;name&gt;</code> (for example <code>score@variant=triple</code>); the error on a bare name lists the stored ones. <code>variable</code> may be <code>__mount__&lt;name&gt;</code>, what a run wrote through its <code>rw</code> mount <code>&lt;name&gt;</code>.</td>
 </tr>
 <tr>
 <td><code>promote(session_id, cell_id, variable, name, alias?, tags?)</code></td>
@@ -2387,10 +2387,17 @@ upstreams; <code>force</code> ("run this only") runs against whatever upstream a
 already exist.</p>
 <p>On a server that <a href="../lake-aware-cells/#asking-before-a-large-read">asks before a large read</a>,
 pass <code>confirm_reads=true</code> so a run that would move more than the threshold
-returns <code>error_code: large_read</code> with each cell's inputs, <code>bytes_to_move</code> and
-<code>cost</code> rather than starting. Ask the user, then call again with
-<code>approve_reads=true</code>. Without either, the run goes ahead and the reads index
-records that it was not asked.</p>
+returns, rather than starting:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"error"</span><span class="p">,</span><span class="w"> </span><span class="nt">"error_code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"large_read"</span><span class="p">,</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;the server's message&gt;"</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w"> </span><span class="nt">"reads"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"cell_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"machine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">            </span><span class="nt">"bytes_to_move"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"cost"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">}]}</span>
+</code></pre></div>
+<p><code>reads</code> has one entry per cell of the run (its stale upstreams included) that
+reads past the threshold with no approval kept. Ask the user, then call again
+with <code>approve_reads=true</code>; the yes is remembered for that cell, machine and
+inputs, so the same run does not ask again. Without either, the run goes ahead
+and the reads index records that it was not asked.</p>
 <p><code>set_variant</code> drives <a href="../annotations/#variant-cells">variant groups</a>:
 <code>set_variant(session_id, "policy", active="service")</code> picks one variant,
 <code>set_variant(session_id, "policy", mode="sweep")</code> runs them all, and either

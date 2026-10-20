@@ -2534,6 +2534,10 @@ the expected artifacts.</p>
 <li><strong>No WebSocket broadcasts.</strong> Progress is written to stdout only.</li>
 <li><strong>No interactive prompts.</strong> A cascade that would pop a confirmation in the
   UI just runs, the CLI treats every cell as "confirmed."</li>
+<li><strong>No large-read question.</strong> With a
+  <a href="../lake-aware-cells/#asking-before-a-large-read">read threshold</a> set, the CLI
+  never asks: <code>strata run</code> and <code>strata cell run</code> (<code>--server</code> included) go
+  ahead, and <code>.strata/reads/index.json</code> records the read as <code>not_asked</code>.</li>
 </ul>
 <h2 id="environment-secrets">Environment &amp; Secrets<a class="headerlink" href="#environment-secrets" title="Permanent link">&para;</a></h2>
 <p><code>strata run</code> reads the notebook's <code>[env]</code> and <code>[secret_manager]</code> blocks the

@@ -2115,9 +2115,10 @@ viz, with the artifact store gluing everything together.</p>
 </table>
 <h2 id="what-you-need">What you need<a class="headerlink" href="#what-you-need" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>R + the <code>arrow</code> and <code>jsonlite</code> R packages</strong> for the cross-
-  language handoff. On macOS: <code>brew install r</code> then <code>Rscript -e
-  'install.packages(c("arrow", "jsonlite"))'</code>. On Ubuntu: see
+<li><strong>R</strong> on <code>PATH</code> (<code>Rscript</code>). The notebook's <code>arrow</code> and <code>jsonlite</code>
+  come from <code>renv.lock</code>: opening the notebook restores them into a
+  project-scoped library automatically; no system installs beyond R
+  itself. On macOS: <code>brew install r</code>. On Ubuntu: see
   <a href="https://cran.r-project.org/">CRAN</a>. The strata-notebook server
   surfaces a clean skip / error if R is missing, no crash.</li>
 <li><strong>Python deps</strong> declared in this notebook's <code>pyproject.toml</code>
@@ -2157,10 +2158,12 @@ solution; the <code>lm_p_value</code> column is R-only.</p>
 <li><strong>Edit the model.</strong> Drop <code>bedrooms</code> from the R formula
    (<code>lm(price ~ sqft + age + location)</code>) and watch the comparison
    reshape, <code>compare</code> shows the row dropping out.</li>
-<li><strong>Misalign the baseline level.</strong> Comment out the
-   <code>location_levels.sort(...)</code> line in <code>fit-sklearn</code>. The sklearn
-   coefficients will swap signs vs R's, a real risk in any
-   "translate this R analysis to Python" workflow.</li>
+<li><strong>Misalign the baseline level.</strong> In <code>fit-sklearn</code>, replace the
+   <code>sorted(...)</code> in <code>location_levels = sorted(...)</code> with an unsorted
+   list, <code>list(housing_train["location"].unique())</code>. When the first
+   level seen is not the alphabetical first, the baseline no longer
+   matches R's and the sklearn coefficients will swap signs vs R's, a
+   real risk in any "translate this R analysis to Python" workflow.</li>
 <li><strong>Add interaction terms.</strong> R: <code>price ~ sqft * location</code>. sklearn:
    you'll have to add the interaction columns by hand. The contrast
    gets sharper.</li>

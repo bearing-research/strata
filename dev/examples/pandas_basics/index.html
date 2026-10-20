@@ -2080,15 +2080,17 @@
 
 <h1 id="pandas-basics-the-core-dataframe-operations">Pandas Basics: the core DataFrame operations<a class="headerlink" href="#pandas-basics-the-core-dataframe-operations" title="Permanent link">&para;</a></h1>
 <p>A guided tour of the pandas operations you reach for every day, split
-into one cell per concept. Running cell N re-uses the artifact from
-cell N-1, so edits stay fast and the DAG stays honest.</p>
+into one cell per concept. Each cell re-uses its upstream cell's
+artifact, so edits stay fast and the DAG stays honest.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
-<li>A linear chain where each cell reads the previous cell's output.</li>
+<li>A fan-out: <code>create_data</code> feeds <code>select_filter</code> and <code>add_columns</code>, and
+  <code>add_columns</code> feeds <code>groupby</code>, <code>pivot</code>, <code>merge</code> and <code>summary</code>.</li>
 <li>Cache-hit behavior: re-running a cell after its upstream hasn't
   changed finishes in a few milliseconds.</li>
-<li>How Strata's <strong>staleness propagation</strong> works, edit cell 2 and cells
-  3-7 turn yellow automatically.</li>
+<li>How Strata's <strong>staleness propagation</strong> works, edit <code>add_columns</code> and
+  the four cells it feeds turn yellow automatically, while
+  <code>select_filter</code> stays ready.</li>
 </ul>
 <h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
 <table>
@@ -2109,7 +2111,7 @@ cell N-1, so edits stay fast and the DAG stays honest.</p>
 </tr>
 <tr>
 <td><code>add_columns</code></td>
-<td>Derived columns (e.g. <code>total = price * quantity</code>).</td>
+<td>Derived columns (<code>revenue = units * price</code>, <code>month</code>).</td>
 </tr>
 <tr>
 <td><code>groupby</code></td>
@@ -2178,10 +2180,10 @@ WS request. A cell with no tests simply carries no <code>.test.py</code> file.</
 <ol>
 <li>Run all cells top-to-bottom.</li>
 <li>Edit <code>create_data</code> (for example, change a price).</li>
-<li>Watch cells 2-7 turn stale automatically.</li>
-<li>Run cell 7. Strata re-executes only the cells that need it, you
-   should see cache hits reported for any intermediate cell whose
-   inputs didn't actually change.</li>
+<li>Watch every other cell turn stale automatically.</li>
+<li>Run <code>summary</code>. Strata re-executes only the cells on its path,
+   <code>create_data</code> and <code>add_columns</code>, and leaves <code>select_filter</code>,
+   <code>groupby</code>, <code>pivot</code> and <code>merge</code> stale until you run them.</li>
 </ol>
 <h2 id="create-sample-sales-dataset">Create sample sales dataset<a class="headerlink" href="#create-sample-sales-dataset" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>
