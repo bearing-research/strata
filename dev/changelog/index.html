@@ -3792,6 +3792,25 @@ exhaustive commit history.</p>
 <li><strong>The shortcuts list names the editor's real undo and redo keys.</strong> It said
   Ctrl+Z and Ctrl+Shift+Z everywhere, but redo is Mod+Y off a Mac, and on a
   Mac both use Cmd. (#1256)</li>
+<li><strong>A scan with <code>columns: []</code> is a row count, not a full scan.</strong> An
+  empty projection, the row-count idiom of pyarrow's <code>to_table(columns=[])</code>,
+  shared its artifact with the full scan of the same snapshot, so whichever
+  ran first answered both: a full scan could come back with no columns, or a
+  row count with every column. It now has its own artifact and returns every
+  row with no columns, cached or not. (#1261)</li>
+<li><strong>A table recreated at the same file paths is no longer read with the old
+  files' Parquet footers.</strong> Footers were cached by path alone, in memory and
+  on disk (where a remote file's was never checked again), so a filtered scan
+  could drop the new rows and an unfiltered one could fail reading a page.
+  They are now matched on the file size the Iceberg manifest records too.
+  (#1261)</li>
+<li><strong>A cell's table read counts a column whose name holds a dot.</strong> The bytes a
+  scan read from storage, in <code>.strata/reads/index.json</code>, left out a top-level
+  column such as <code>a.b</code>, taking it for field <code>b</code> of a struct <code>a</code>. (#1261)</li>
+<li><strong>A row-group cache entry that fails to read is kept.</strong> Any error reading a
+  cached row group deleted the entry, so running out of file handles, or a
+  read racing a write of the same row group, threw away a good entry. Only an
+  entry that fails to parse is removed now; a failed read is a miss. (#1261)</li>
 </ul>
 <h2 id="0110-2026-10-19">0.11.0 - 2026-10-19<a class="headerlink" href="#0110-2026-10-19" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
