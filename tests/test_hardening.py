@@ -870,7 +870,10 @@ class TestStreamAbortMetrics:
 
         serve(config)
 
+        # Three row groups, as in test_timeout_aborts_stream_with_error: with two, a finished
+        # prefetch lets the scan beat its 1ms timeout.
         append_rows(temp_warehouse["table"], 1000, 25)
+        append_rows(temp_warehouse["table"], 1025, 25)
         table_uri = temp_warehouse["table_uri"]
         initial_timeouts = state.metrics.stream_aborts_timeout
 
@@ -890,16 +893,10 @@ class TestStreamAbortMetrics:
             assert response.status_code == 200
             stream_url = response.json()["stream_url"]
 
-            try:
-                http_client.get(
-                    f"http://127.0.0.1:{port}{stream_url}",
-                    timeout=10,
-                )
-            except Exception:
-                pass
-
-        # Give the server time to record metrics.
-        time.sleep(0.5)
+            # The handler awaits the build, which records the abort before this 500 is sent.
+            response = http_client.get(f"http://127.0.0.1:{port}{stream_url}")
+            assert response.status_code == 500
+            assert response.json()["error"] == "scan_build_failed"
 
         final_timeouts = state.metrics.stream_aborts_timeout
         assert final_timeouts > initial_timeouts
