@@ -2671,17 +2671,18 @@ egress rate, reaches a running server without closing its sessions:</p>
 <li>A <code>${VAR}</code> reference is always refused with <code>400</code> naming the field: the
   server's environment holds its own secrets, such as the proxy token. Variable
   references keep working in the server's startup <code>STRATA_NOTEBOOK_CREDENTIALS</code>.</li>
-<li><code>notebook_credential_paths</code> and <code>notebook_credential_writers</code> are required in
-  every body, so leaving one out cannot lift a restriction unnoticed: such a
-  body is refused with <code>422</code> naming the field, and changes nothing. Paths <code>{}</code>
+<li><code>notebook_credential_paths</code>, <code>notebook_credential_writers</code> and
+  <code>notebook_credential_read_cost</code> are required in every body, so leaving one
+  out cannot lift a restriction or clear the rates unnoticed: such a body is
+  refused with <code>422</code> naming the field, and changes nothing. Paths <code>{}</code>
   restricts no name; writers <code>null</code> is unset (every name writes), and <code>{}</code>
-  makes every name read-only.</li>
-<li>Any other setting left out of the body is replaced by its default, as if unset.
-  Left out, <code>notebook_credential_read_cost</code> is <code>{}</code>, so no name has a rate and
-  only the size threshold can ask.</li>
+  makes every name read-only; read cost <code>{}</code> gives no name a rate, so only the
+  size threshold can ask.</li>
+<li>Any other setting left out of the body is replaced by its default, as if unset.</li>
 <li><code>notebook_credential_read_cost</code> is dollars per GB for each name, the rate
   <a href="../../notebook/lake-aware-cells/#asking-before-a-large-read">asking before a large read</a>
-  uses. A rate that is not a number is refused with <code>422</code> naming the field.</li>
+  uses. A rate that is not a number, or is negative, NaN or infinite, is
+  refused with <code>422</code> naming the field, as it is at startup.</li>
 <li>The next run uses the new settings, in a session opened before the call too. A
   running cell keeps what it resolved. A removed name fails its next use naming
   it, as an unknown name does.</li>
