@@ -96,6 +96,17 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   entries, and its last good run, are now recorded only after its `rw` mounts
   are synced back, so a failed sync-back or a failed variant leaves them as
   they were. (#1283)
+- **An output folder is read more safely from another store.** A store's
+  garbage collection no longer fails for good when it holds a folder manifest
+  it cannot read (an import can store any bytes under that type); that
+  manifest keeps no files, and a notebook's prune keeps every folder file while
+  one is there. Reading a promoted folder as `@dataset` streams each file to
+  disk instead of holding it in memory, and refuses a file whose bytes are not
+  the ones the manifest names. A folder whose file has a row but lost its bytes
+  is refused before any of its files is copied. A folder naming a file another
+  tenant holds reads that file as missing, in a rebuild, a copy and a
+  publication's archive. `strata artifact pull <id>@v=<n> --to <dir>` rebuilds
+  a folder's files instead of writing its manifest. (#1284)
 - **Promoting or publishing an output folder copies its files.** Promote,
   `strata artifact publish` (`--to` too) and the MCP tools copied a
   `# @output_dir` folder's manifest without the files it names, leaving it

@@ -5549,7 +5549,8 @@ class CellExecutor:
         if content_type == output_dirs.CONTENT_TYPE:
             folder = path.with_name(path.name.removesuffix(output_dirs.EXTENSION) + ".dir")
             store = self.session.get_artifact_manager().artifact_store
-            output_dirs.materialize(store, artifact_id, blob, folder)
+            # The notebook's store is untenanted.
+            output_dirs.materialize(store, artifact_id, blob, folder, tenant=None)
 
     def _collect_output_dir(self, cell_id: str, name: str, output_dir: Path | None) -> bytes:
         """Store a ``# @output_dir`` folder's files and return its manifest.
@@ -7051,6 +7052,7 @@ class CellExecutor:
                 kept.id,
                 manifest,
                 folders / output_dirs.OUTPUT_DIRS / name,
+                tenant=kept.tenant,
             )
 
     def _resolve_loop_seed(

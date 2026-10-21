@@ -533,12 +533,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     pull_parser = artifact_sub.add_parser(
         "pull",
-        help="Write an artifact's blob to a local Arrow IPC file",
+        help="Write an artifact's blob to a local Arrow IPC file, or a folder's files",
         description="Pull an artifact's data. <ref> as in `show`.",
     )
     pull_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
     _add_artifact_dir_arg(pull_parser)
-    pull_parser.add_argument("--to", default=None, help="Output path (default <ref>.arrow)")
+    pull_parser.add_argument(
+        "--to", default=None, help="Output path (default <ref>.arrow, or <ref>/ for a folder)"
+    )
     _add_tenant_arg(pull_parser)
     pull_parser.set_defaults(func=_dispatch_artifact("cmd_pull"))
 

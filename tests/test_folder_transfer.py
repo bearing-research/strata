@@ -50,12 +50,32 @@ def _folder(root, files, *, provenance="c3" * 32, notebook_id="nb"):
 def _rebuilt(store: ArtifactStore, artifact_id: str, version: int, dest) -> dict[str, bytes]:
     """The folder a store's manifest version describes, rebuilt from that store alone."""
     manifest = store.read_blob(artifact_id, version)
-    output_dirs.materialize(store, artifact_id, manifest, dest)
+    tenant = store.get_artifact(artifact_id, version).tenant
+    output_dirs.materialize(store, artifact_id, manifest, dest, tenant=tenant)
     return {
         path.relative_to(dest).as_posix(): path.read_bytes()
         for path in dest.rglob("*")
         if path.is_file()
     }
+
+
+def _stored(store: ArtifactStore, artifact_id: str, blob: bytes, *, content_type, tenant=None):
+    """A version holding *blob* under *artifact_id*, as an import could leave one."""
+    from strata.artifact.provenance import TransformSpec
+
+    version = store.create_artifact(
+        artifact_id=artifact_id,
+        provenance_hash=hashlib.sha256(artifact_id.encode() + blob).hexdigest(),
+        transform_spec=TransformSpec(
+            executor="notebook/cell@v1", params={"content_type": content_type}, inputs=[]
+        ),
+        tenant=tenant,
+    )
+    store.write_blob(artifact_id, version, blob)
+    store.finalize_artifact(
+        artifact_id, version, "", None, len(blob), hashlib.sha256(blob).hexdigest()
+    )
+    return store.get_artifact(artifact_id, version)
 
 
 def _promote(root, url, ref, *, name="team/ckpt", header=None) -> int:
@@ -196,6 +216,50 @@ class TestPromote:
 
         assert ArtifactStore(team_dir).get_artifact(folder.id, folder.version) is None
 
+    def test_a_folder_whose_file_lost_its_bytes_is_refused_before_any_file_is_sent(self, tmp_path):
+        """The file's row is there and its bytes are not: no file and no manifest is copied."""
+        from strata.artifact.transfer import copy_chain
+
+        manager, folder = _folder(tmp_path / "alice", FILES)
+        final = output_dirs.file_artifact_id(
+            manager, "w", hashlib.sha256(FILES["final.txt"]).hexdigest()
+        )
+        assert manager.artifact_store.blob_store.delete_blob(final, 1)
+        central = ArtifactStore(tmp_path / "central")
+
+        with pytest.raises(ValueError, match="whose bytes are gone"):
+            copy_chain(manager.artifact_store, central, folder, 10)
+
+        assert central.list_versions_by_id_prefix("nb_") == []
+
+    def test_a_promoted_folder_pulls_by_id_from_the_stores_server(self, team, tmp_path):
+        from strata.artifact.cli import cmd_pull
+
+        base, team_dir = team
+        _, folder = _folder(tmp_path / "alice", FILES)
+        assert _promote(tmp_path / "alice", base, folder.id) == 0
+        out = tmp_path / "pulled"
+
+        def pull() -> int:
+            return cmd_pull(
+                argparse.Namespace(
+                    ref=f"{folder.id}@v={folder.version}",
+                    artifact_dir=str(team_dir),
+                    to=str(out),
+                    tenant=None,
+                )
+            )
+
+        assert pull() == 0
+
+        assert {
+            path.relative_to(out).as_posix(): path.read_bytes()
+            for path in out.rglob("*")
+            if path.is_file()
+        } == FILES
+        # Never into a directory holding other files: they would read as the folder's.
+        assert pull() == 1
+
 
 @pytest.fixture
 def central(tmp_path):
@@ -292,7 +356,9 @@ class TestReading:
         ).encode()
 
         with pytest.raises(ValueError, match="leaves"):
-            output_dirs.materialize(store, "nb_x_cell_w_var_ckpt", manifest, tmp_path / "out")
+            output_dirs.materialize(
+                store, "nb_x_cell_w_var_ckpt", manifest, tmp_path / "out", tenant=None
+            )
 
         assert not (tmp_path / "escape").exists()
 
@@ -334,4 +400,136 @@ class TestRetention:
 
         store.garbage_collect(keep_superseded=0)
 
+        assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES
+
+
+class TestAnotherTenantsFile:
+    """A manifest's bytes are its importer's: naming another tenant's file reads as missing it."""
+
+    @staticmethod
+    def _crafted(tmp_path):
+        store = ArtifactStore(tmp_path / "central")
+        secret = b"team-b's weights"
+        sha256 = hashlib.sha256(secret).hexdigest()
+        theirs = _stored(
+            store,
+            f"nb_b_cell_w_var___file__{sha256}",
+            secret,
+            content_type="application/octet-stream",
+            tenant="team-b",
+        )
+        entry = {"id": theirs.id, "sha256": sha256, "size": len(secret), "version": 1}
+        manifest = json.dumps({"cell_id": "w", "files": {"w.bin": entry}}).encode()
+        mine = _stored(
+            store,
+            "nb_a_cell_w_var_ckpt",
+            manifest,
+            content_type=output_dirs.CONTENT_TYPE,
+            tenant="team-a",
+        )
+        return store, mine, manifest
+
+    def test_a_rebuild_refuses_it(self, tmp_path):
+        store, mine, manifest = self._crafted(tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="missing"):
+            output_dirs.materialize(store, mine.id, manifest, tmp_path / "out", tenant="team-a")
+
+        assert not (tmp_path / "out" / "w.bin").exists()
+        # The file is there: a folder of its own tenant reads it.
+        output_dirs.materialize(store, mine.id, manifest, tmp_path / "theirs", tenant="team-b")
+        assert (tmp_path / "theirs" / "w.bin").read_bytes() == b"team-b's weights"
+
+    def test_an_archive_refuses_it(self, tmp_path, capsys):
+        from strata.artifact.cli import cmd_archive
+
+        _, mine, _ = self._crafted(tmp_path)
+
+        code = cmd_archive(
+            argparse.Namespace(
+                ref=f"{mine.id}@v={mine.version}",
+                token=None,
+                artifact_dir=str(tmp_path / "central"),
+                title=None,
+                author=None,
+                max_depth=None,
+                to=str(tmp_path / "bundle"),
+                force=False,
+                tenant="team-a",
+            )
+        )
+
+        assert code == 1
+        assert "missing from the store" in capsys.readouterr().out
+        assert not (tmp_path / "bundle" / "folder" / "w.bin").exists()
+
+    def test_a_copy_refuses_it(self, tmp_path):
+        from strata.artifact.transfer import copy_chain
+
+        store, mine, _ = self._crafted(tmp_path)
+        other = ArtifactStore(tmp_path / "other")
+
+        with pytest.raises(ValueError, match="which is gone"):
+            copy_chain(store, other, mine, 10)
+
+        assert other.list_versions_by_id_prefix("nb_") == []
+
+
+class TestAnUnreadableManifest:
+    """An import can hold any bytes under the folder type and any id: one names no file."""
+
+    @pytest.mark.parametrize(
+        ("artifact_id", "blob"),
+        [
+            ("nb_x_cell_w_var_ckpt", b"\xff not json"),
+            ("nb_x_cell_w_var_ckpt", b"[1]"),
+            ("nb_x_cell_w_var_ckpt", b'{"cell_id": "w", "files": {"a": {"sha256": "0"}}}'),
+            (
+                "an-id-of-no-cell",
+                json.dumps(
+                    {"cell_id": "w", "files": {"a": {"sha256": "0" * 64, "size": 1, "version": 1}}}
+                ).encode(),
+            ),
+        ],
+    )
+    def test_garbage_collection_completes_past_a_held_one(
+        self, tmp_path, artifact_id, blob, caplog
+    ):
+        from strata.artifact.transfer import copy_chain
+
+        manager, folder = _folder(tmp_path / "alice", FILES)
+        central = ArtifactStore(tmp_path / "central")
+        copy_chain(manager.artifact_store, central, folder, 10)
+        central.set_name("team/ckpt", folder.id, folder.version)
+        junk = _stored(central, artifact_id, blob, content_type=output_dirs.CONTENT_TYPE)
+        central.set_name("team/junk", junk.id, junk.version)
+
+        central.garbage_collect(max_idle_days=0, collect_latest=True)
+
+        assert central.get_artifact(junk.id, junk.version) is not None
+        assert _rebuilt(central, folder.id, folder.version, tmp_path / "out") == FILES
+        assert f"{artifact_id}@v=1 is not a readable folder manifest" in caplog.text
+
+    def test_a_notebook_prune_keeps_every_folder_file(self, tmp_path):
+        """What the unreadable one names is unknown, so no folder file is taken."""
+        manager, folder = _folder(tmp_path / "alice", FILES)
+        stray = tmp_path / "stray.bin"
+        stray.write_bytes(b"named by no manifest")
+        sha256 = hashlib.sha256(stray.read_bytes()).hexdigest()
+        unnamed = output_dirs.store_received(manager, "w", stray, sha256, 20)
+        manager.store_cell_output(
+            cell_id="j",
+            variable_name="junk",
+            blob_data=b"not json",
+            content_type=output_dirs.CONTENT_TYPE,
+            provenance_hash="a1" * 32,
+            input_versions={},
+            source="# @output_dir junk",
+        )
+
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+
+        store = manager.artifact_store
+        stray_id = output_dirs.file_artifact_id(manager, "w", sha256)
+        assert store.get_artifact(stray_id, unnamed["version"]) is not None
         assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES

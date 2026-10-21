@@ -118,12 +118,31 @@ def file_ref(manifest_id: str, cell_id: str, entry: dict[str, Any]) -> tuple[str
 
 
 def file_refs(manifest_id: str, manifest: bytes) -> list[tuple[str, int, str]]:
-    """``(id, version, sha256)`` of each file a manifest names."""
-    described = json.loads(manifest)
-    return [
-        (*file_ref(manifest_id, described["cell_id"], entry), entry["sha256"])
-        for entry in described["files"].values()
-    ]
+    """``(id, version, sha256)`` of each file a manifest names.
+
+    Raises:
+        ValueError: *manifest* is not a folder manifest, or *manifest_id* not a folder's
+            id. An import can store any bytes under any id with this content type.
+    """
+    try:
+        described = json.loads(manifest)
+        return [
+            (*file_ref(manifest_id, described["cell_id"], entry), entry["sha256"])
+            for entry in described["files"].values()
+        ]
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{manifest_id} is not a readable folder manifest") from exc
+
+
+def held_file(store: Any, tenant: str | None, file_id: str, version: int) -> Any:
+    """The row of a file a folder of *tenant* names, or ``None`` if absent or another tenant's.
+
+    A manifest's bytes are its importer's to choose: an id it names grants nothing.
+    """
+    record = store.get_artifact(file_id, version)
+    if record is None or (record.tenant or "") != (tenant or ""):
+        return None
+    return record
 
 
 def relocate(
@@ -222,7 +241,15 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
             continue  # left by a crash, never to be read: it keeps no file
         if blob is None:
             return None  # being written, or lost: what it names is unknown
-        named.update((fid, fv) for fid, fv, _ in file_refs(version.id, blob))
+        try:
+            named.update((fid, fv) for fid, fv, _ in file_refs(version.id, blob))
+        except ValueError:
+            logger.warning(
+                "Not sweeping folder files: %s@v=%d is not a readable folder manifest",
+                version.id,
+                version.version,
+            )
+            return None
     return [
         (version.id, version.version)
         for version in versions
@@ -433,10 +460,13 @@ def _size(n: int) -> str:
     return f"{scaled:.1f} GiB"
 
 
-def materialize(store: Any, manifest_id: str, manifest: bytes, dest: Path) -> None:
+def materialize(
+    store: Any, manifest_id: str, manifest: bytes, dest: Path, *, tenant: str | None
+) -> None:
     """Rebuild the folder manifest *manifest_id* describes at *dest*, from the *store* holding it.
 
-    Any store: a notebook's own, or one a folder was promoted or copied to.
+    Any store: a notebook's own, or one a folder was promoted or copied to. *tenant* is the
+    manifest's; a file another tenant holds reads as missing.
     """
     described = json.loads(manifest)
     cell_id = described["cell_id"]
@@ -446,7 +476,8 @@ def materialize(store: Any, manifest_id: str, manifest: bytes, dest: Path) -> No
         target.parent.mkdir(parents=True, exist_ok=True)
         artifact_id, version = file_ref(manifest_id, cell_id, entry)
         # Through the store, not its blob store: an imported file's bytes are under its row's key.
-        reader = store.open_blob_reader(artifact_id, version)
+        held = held_file(store, tenant, artifact_id, version)
+        reader = None if held is None else store.open_blob_reader(artifact_id, version)
         if reader is None:
             raise FileNotFoundError(f"output folder file {rel} is missing from the store")
         with reader as src, open(target, "wb") as out:

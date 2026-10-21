@@ -595,7 +595,8 @@ folder's version names before its manifest; a file the other store already
 holds is not sent again. When a file lands under another version or id there
 (another tenant held its id), the copied manifest names where it landed. Read
 from that store as [`@dataset`](#dataset), the folder arrives as a `Path` with
-its files. A [snapshot](export.md#snapshots) carries the file versions each
+its files; `strata artifact pull <id>@v=<n> --to <dir>` on that store's server
+rebuilds them in a new directory. A [snapshot](export.md#snapshots) carries the file versions each
 manifest names, and a [publication's archive](publishing.md#archiving-the-copy-that-needs-no-server)
 holds the files under `folder/`.
 

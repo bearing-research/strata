@@ -794,7 +794,11 @@ class TestAFolder:
         store = manager.artifact_store
         current = store.get_latest_version(manager.cell_artifact_id("w", "ckpt"))
         output_dirs.materialize(
-            store, current.id, store.read_blob(current.id, current.version), tmp_path / "out"
+            store,
+            current.id,
+            store.read_blob(current.id, current.version),
+            tmp_path / "out",
+            tenant=current.tenant,
         )
         assert (tmp_path / "out" / "epochs" / "e0.bin").read_bytes() == b"0" * 10
         assert (tmp_path / "out" / "final.txt").read_text() == "done"

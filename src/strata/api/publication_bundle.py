@@ -341,7 +341,8 @@ def _write_folder_files(
     for rel in sorted(files):
         name = f"folder/{output_dirs.checked_path(rel)}"
         file_id, version = output_dirs.file_ref(artifact.id, cell_id, files[rel])
-        reader_cm = store.open_blob_reader(file_id, version)
+        held = output_dirs.held_file(store, artifact.tenant, file_id, version)
+        reader_cm = None if held is None else store.open_blob_reader(file_id, version)
         if reader_cm is None:
             raise ValueError(f"the folder's file {rel} is missing from the store")
         (dest / name).parent.mkdir(parents=True, exist_ok=True)
