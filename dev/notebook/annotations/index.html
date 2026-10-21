@@ -3487,7 +3487,9 @@ holds is not sent again. When a file lands under another version or id there
 (another tenant held its id), the copied manifest names where it landed. Read
 from that store as <a href="#dataset"><code>@dataset</code></a>, the folder arrives as a <code>Path</code> with
 its files; <code>strata artifact pull &lt;id&gt;@v=&lt;n&gt; --to &lt;dir&gt;</code> on that store's server
-rebuilds them in a new directory. A <a href="../export/#snapshots">snapshot</a> carries the file versions each
+rebuilds them in a new directory, and from anywhere else strata-client's
+<code>client.download_folder(&lt;id&gt;, &lt;n&gt;, &lt;dir&gt;)</code> does, over HTTP, checking each
+file's size and sha256. A <a href="../export/#snapshots">snapshot</a> carries the file versions each
 manifest names, and a <a href="../publishing/#archiving-the-copy-that-needs-no-server">publication's archive</a>
 holds the files under <code>folder/</code>.</p>
 <p>The <a href="../../deployment/service-mode/#the-team-cache-sharing-results-nobody-named">team cache</a>

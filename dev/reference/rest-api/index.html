@@ -5172,7 +5172,7 @@ timed per route; failed object-store calls are counted by operation (see
 The gate column uses these terms:</p>
 <ul>
 <li><strong>read</strong>: open in both modes. Under principal auth, a route that takes an
-  artifact id (<code>/v1/artifacts/{id}/v/{n}</code> and its <code>lineage</code> and <code>dependents</code>)
+  artifact id (<code>/v1/artifacts/{id}/v/{n}</code> and its <code>lineage</code>, <code>dependents</code> and <code>files</code>)
   answers for the caller's tenant's versions and tenantless ones, refuses a
   caller with no tenant (<code>400</code>), and lets <code>admin:*</code> reach every tenant. Name,
   alias, tag, pending, tag-search and provenance lookups resolve in the
@@ -5220,6 +5220,12 @@ by that team store, after this server's own gate.</p>
 <td><code>/v1/artifacts/{id}/v/{n}/dependents</code></td>
 <td>read</td>
 <td>Ready artifacts that take this one as a direct input</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/v1/artifacts/{id}/v/{n}/files</code></td>
+<td>read</td>
+<td>An <code># @output_dir</code> folder's files, by path: each one's <code>size</code>, <code>sha256</code>, and the <code>artifact_id</code> and <code>version</code> whose <code>/data</code> serves its bytes. Not a folder is a <code>400</code>; a manifest that cannot be read, a path that leaves the folder, or a file the folder's tenant does not hold is a <code>404</code></td>
 </tr>
 <tr>
 <td><code>GET</code></td>

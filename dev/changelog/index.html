@@ -3848,6 +3848,14 @@ exhaustive commit history.</p>
   <code>put</code>, <code>get</code>, <code>head</code>, <code>list</code> or <code>delete</code>, including the ones a caller
   reports as absent or unknown; an object that is not there is not an
   error. (#1289)</li>
+<li><strong>strata-client reads an output folder from a server.</strong>
+  <code>client.download_folder(artifact_id, version, dest)</code> rebuilds a promoted
+  <code># @output_dir</code> folder's files in a new or empty directory over HTTP,
+  checking each file's size and sha256, and leaves nothing there when one
+  fails. <code>GET /v1/artifacts/{id}/v/{n}/files</code> lists a folder's files with the
+  artifact holding each, gated as <code>/data</code> is; a file the folder's tenant does
+  not hold is a <code>404</code>. <code>fetch</code> of a folder says to call <code>download_folder</code>
+  instead of failing to read Arrow. (#1291)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
