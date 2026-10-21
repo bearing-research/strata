@@ -258,27 +258,39 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
 
 
 def failed_since_ready(artifact_mgr: Any) -> list[tuple[str, int]]:
-    """Each failed manifest version newer than its folder's newest good one.
+    """Each failed manifest version a prune should keep.
 
-    Kept through a prune until a later run succeeds, so a crash's files can still be
-    downloaded when the run is recovered. A crash's row with no manifest is kept too; it
-    holds no bytes.
+    One is kept while no later good version of its folder is stored, or while the good
+    one it follows (the newest good version below it) is. So a crash's files can still be
+    downloaded when the run is recovered, and go no sooner than what came before them. A
+    crash's row with no manifest is kept too; it holds no bytes.
     """
     store = artifact_mgr.artifact_store
-    versions = [
-        version
-        for version in store.list_versions_by_id_prefix(f"nb_{artifact_mgr.notebook_id}_cell_")
-        if version.params.get("content_type") == CONTENT_TYPE
-    ]
-    newest_good: dict[str, int] = {}
-    for version in versions:
-        if version.state in ("ready", "superseded"):
-            newest_good[version.id] = max(newest_good.get(version.id, 0), version.version)
-    return [
-        (version.id, version.version)
-        for version in versions
-        if version.state == "failed" and version.version > newest_good.get(version.id, 0)
-    ]
+    states: dict[str, dict[int, str]] = {}
+    for version in store.list_versions_by_id_prefix(f"nb_{artifact_mgr.notebook_id}_cell_"):
+        if version.params.get("content_type") == CONTENT_TYPE:
+            states.setdefault(version.id, {})[version.version] = version.state
+
+    def follows_a_kept_good_one(by_version: dict[int, str], number: int) -> bool:
+        number -= 1
+        while by_version.get(number) == "failed":
+            number -= 1
+        # A gap is a version already pruned: an older kept one is not what this followed.
+        return by_version.get(number) in ("ready", "superseded")
+
+    spared = []
+    for artifact_id, by_version in states.items():
+        newest_good = max(
+            (n for n, state in by_version.items() if state in ("ready", "superseded")),
+            default=0,
+        )
+        spared += [
+            (artifact_id, number)
+            for number, state in by_version.items()
+            if state == "failed"
+            and (number > newest_good or follows_a_kept_good_one(by_version, number))
+        ]
+    return spared
 
 
 def _reused(store: Any, artifact_id: str) -> int | None:

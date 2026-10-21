@@ -154,6 +154,28 @@ class TestTheListing:
         assert zombie != building
         assert [v["version"] for v in response.json()["versions"]] == [1]
 
+    async def test_a_run_still_writing_is_not_listed_though_its_manifest_is_stored(
+        self, client, opened
+    ):
+        session = opened(SUCCESS)
+        assert await _run(session, SUCCESS)
+        manager = session.get_artifact_manager()
+        # Staged as a run does: the manifest's bytes are written while the row is building.
+        staged = manager.stage_cell_output(
+            cell_id="w",
+            variable_name="ckpt",
+            blob_data=json.dumps({"cell_id": "w", "files": {}}).encode(),
+            content_type=output_dirs.CONTENT_TYPE,
+            provenance_hash="run",
+        )
+        store = manager.artifact_store
+        assert store.get_artifact(staged.artifact_id, staged.version).state == "building"
+        assert store.read_blob(staged.artifact_id, staged.version) is not None
+
+        response = await client.get(f"/v1/notebooks/{session.id}/cells/w/folders/ckpt")
+
+        assert [v["version"] for v in response.json()["versions"]] == [1]
+
     async def test_a_name_the_cell_does_not_declare_is_404(self, client, opened):
         session = opened(SUCCESS)
         assert await _run(session, SUCCESS)
@@ -281,3 +303,60 @@ class TestAFile:
         )
 
         assert response.status_code == 404
+
+
+class TestAPerVariantCell:
+    """Each instance's folder is its own, listed under its variant, a failed one's too."""
+
+    WRITER = (
+        "# @per_variant\n# @output_dir ckpt\n"
+        "(ckpt / 'k.txt').write_text(str(k))\n"
+        "if k == 2:\n    raise RuntimeError('lost')\n"
+    )
+
+    @pytest.fixture
+    async def fanned_out(self, tmp_path):
+        from strata.notebook.writer import set_variant_mode
+
+        nb = create_notebook(tmp_path, "Folders")
+        after = None
+        for cell_id, source in (
+            ("a", "# @variant model a\nk = 1\n"),
+            ("b", "# @variant model b\nk = 2\n"),
+            ("w", self.WRITER),
+        ):
+            add_cell_to_notebook(nb, cell_id, after)
+            write_cell(nb, cell_id, source)
+            after = cell_id
+        set_variant_mode(nb, "model", "sweep")
+        session = get_session_manager().open_notebook(nb)
+        executor = CellExecutor(session)
+        for cell_id in ("a", "b"):
+            cell = session.notebook_state.get_cell(cell_id)
+            assert (await executor.execute_cell(cell_id, cell.source)).success
+        result = await executor.execute_cell("w", self.WRITER)
+        assert not result.success
+        assert "variant 'b' failed" in result.error
+        yield session
+        await asyncio.gather(*get_session_manager().close_session(session.id))
+
+    async def test_each_variant_is_listed_and_the_failed_one_is_marked(self, client, fanned_out):
+        response = await client.get(f"/v1/notebooks/{fanned_out.id}/cells/w/folders/ckpt")
+
+        assert response.status_code == 200, response.text
+        listed = {
+            (v["variant"], v["version"], v["failed"]): [f["path"] for f in v["files"]]
+            for v in response.json()["versions"]
+        }
+        assert listed == {("a", 1, False): ["k.txt"], ("b", 1, True): ["k.txt"]}
+
+    async def test_a_variants_file_downloads_by_its_variant(self, client, fanned_out):
+        base = f"/v1/notebooks/{fanned_out.id}/cells/w/folders/ckpt/v/1/files/k.txt"
+
+        for variant, data in (("a", b"1"), ("b", b"2")):
+            response = await client.get(base, params={"variant": variant})
+            assert response.status_code == 200, response.text
+            assert response.content == data
+        for params in ({}, {"variant": "c"}, {"variant": "a@iter=1"}):
+            response = await client.get(base, params=params)
+            assert response.status_code == 404, params

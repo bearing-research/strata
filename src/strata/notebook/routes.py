@@ -3326,8 +3326,13 @@ async def get_cell_output_blob(
     )
 
 
-def _folder_artifact_id(session: NotebookSession, cell_id: str, name: str) -> str:
-    """The manifest id of one of the cell's ``# @output_dir`` folders; 404 for any other name."""
+def _folder_artifact_id(
+    session: NotebookSession, cell_id: str, name: str, variant: str | None = None
+) -> str:
+    """The manifest id of one of the cell's ``# @output_dir`` folders; 404 for any other name.
+
+    *variant* names a ``# @per_variant`` instance's folder.
+    """
     from strata.notebook.annotations import parse_annotations
 
     cell = session.notebook_state.get_cell(cell_id)
@@ -3337,17 +3342,26 @@ def _folder_artifact_id(session: NotebookSession, cell_id: str, name: str) -> st
         raise HTTPException(
             status_code=404, detail=f"{name!r} is not an output_dir annotation of this cell"
         )
-    return session.get_artifact_manager().cell_artifact_id(cell_id, name)
+    return session.get_artifact_manager().cell_artifact_id(cell_id, name, variant=variant)
 
 
 def _folder_versions(store, artifact_id: str) -> list[dict]:
-    """Each version of a folder with a manifest, newest first, with its files and totals."""
+    """Each version of a folder with a manifest, newest first, with its files and totals.
+
+    A ``# @per_variant`` cell's instances are listed too, each under its ``variant``.
+    """
     listed: list[dict] = []
-    for version in reversed(store.list_versions_by_id_prefix(artifact_id)):
-        if version.id != artifact_id or version.state not in ("ready", "superseded", "failed"):
+    for version in store.list_versions_by_id_prefix(artifact_id):
+        if version.id == artifact_id:
+            variant = None
+        else:
+            variant = version.id.removeprefix(f"{artifact_id}@variant=")
+            if variant == version.id or "@" in variant:
+                continue  # another variable's id, or a loop iteration's
+        if version.state not in ("ready", "superseded", "failed"):
             continue
         # Not a use: a page polling the listing would otherwise keep every version.
-        blob = store.read_blob(artifact_id, version.version, note_use=False)
+        blob = store.read_blob(version.id, version.version, note_use=False)
         if blob is None:
             continue  # a crash's row swept to failed before its manifest was written
         files = [
@@ -3356,6 +3370,7 @@ def _folder_versions(store, artifact_id: str) -> list[dict]:
         ]
         listed.append(
             {
+                "variant": variant,
                 "version": version.version,
                 "created_at": version.created_at,
                 "principal": version.principal,
@@ -3365,6 +3380,7 @@ def _folder_versions(store, artifact_id: str) -> list[dict]:
                 "total_bytes": sum(item["size"] for item in files),
             }
         )
+    listed.sort(key=lambda item: (item["created_at"], item["version"]), reverse=True)
     return listed
 
 
@@ -3385,14 +3401,18 @@ async def get_cell_folder_file(
     name: str,
     version: int,
     path: str,
+    variant: str | None = None,
 ):
-    """One file of a folder version, streamed, with its sha256 as ``Content-Digest``."""
+    """One file of a folder version, streamed, with its sha256 as ``Content-Digest``.
+
+    *variant* names a ``# @per_variant`` instance's folder, as the listing does.
+    """
     from base64 import b64encode
 
     from strata.api.served_bytes import data_headers
     from strata.notebook import output_dirs
 
-    artifact_id = _folder_artifact_id(session, cell_id, name)
+    artifact_id = _folder_artifact_id(session, cell_id, name, variant)
     manager = session.get_artifact_manager()
     store = manager.artifact_store
 

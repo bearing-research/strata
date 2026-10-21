@@ -558,8 +558,11 @@ left out with a warning.
 **Files go with the last version that names them.** Folder versions are pruned
 like any cell output's earlier values
 ([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](../reference/configuration.md#notebook)),
-except that a failed run's version newer than the folder's last good one stays
-until a later run succeeds, so a crash's checkpoints can still be downloaded.
+except that a failed run's version stays until a later run of the cell stores
+a new successful version, and at least as long as the successful version it
+follows, so a crash's checkpoints can still be downloaded. A cache hit (the
+source put back to an earlier good version) stores nothing new, so the failed
+version stays.
 A file no kept version names is removed in the same pass, so old checkpoints
 do not pile up. Pin a folder version to keep its files: a store's garbage
 collection keeps every file version a published, named or pinned folder names.
@@ -587,6 +590,11 @@ worker too old to take one is refused before the cell runs.
 
 **In a `# @loop` cell the folder lasts the whole loop**, and each iteration's
 contents are stored as its `@iter=k` version ([loop cells](cells.md#output-folders)).
+
+**A [`# @per_variant`](#fan-out-run-a-downstream-cell-once-per-variant) cell
+keeps a folder per variant**, a failed variant's too, and a plain downstream
+cell reads them as a `{variant: Path}` dict. Each variant's folder is listed and
+downloaded over REST under its name.
 
 **A folder leaves the notebook with its files.** Promoting or publishing it, or
 a result made from it (the notebook's promote route, `strata artifact promote`,

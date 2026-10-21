@@ -229,9 +229,11 @@ marked failed then. Set `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`
 to keep more, or to `0` to keep every value. Deleting the notebook deletes its
 store.
 
-A failed run's `# @output_dir` folder version newer than the folder's last
-good one is not pruned until a later run of the cell succeeds. A folder's files
-are stored one per digest and outlive the
+A failed run's `# @output_dir` folder version is not pruned until a later run
+of the cell stores a new successful version, and it goes no sooner than the
+successful version it follows: once that one is pruned, the failed one goes in
+the next pass. A run that is a cache hit stores no new version, so it does not
+release a failed one. A folder's files are stored one per digest and outlive the
 values that named them, so the same pass then removes each file no kept folder
 version (current, earlier, failed or pinned) still names, once it has gone
 unused for `STRATA_ARTIFACT_GC_MIN_IDLE_SECONDS`. A file a run is still
