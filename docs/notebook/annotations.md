@@ -366,7 +366,9 @@ The server resolves the name in its own registry, or in the team store when
 notebook's own store, keeping its id and version, and `<name>` is bound to its value like an upstream variable: a
 table as a DataFrame, a JSON value or a pickled object as itself. Artifacts
 written outside a notebook (a core transform, `strata.put`) are Arrow tables.
-Anything else, such as an image, arrives as a `pathlib.Path` to its bytes.
+A promoted [`# @output_dir`](#output_dir) folder arrives as the folder's `Path`,
+its files copied with it. Anything else, such as an image, arrives as a
+`pathlib.Path` to its bytes.
 
 Each artifact the cell stores records the name and the version it resolved to
 as an input, so lineage, in the dashboard and in `strata artifact lineage`,
@@ -556,7 +558,8 @@ like any cell output's earlier values
 except that a failed run's version newer than the folder's last good one stays
 until a later run succeeds, so a crash's checkpoints can still be downloaded.
 A file no kept version names is removed in the same pass, so old checkpoints
-do not pile up. Pin a folder version to keep its files.
+do not pile up. Pin a folder version to keep its files: a store's garbage
+collection keeps every file version a published, named or pinned folder names.
 
 **On a remote worker** the folder comes back with the run's result, each file
 streamed, so a checkpoint is not held in memory and is not limited by
@@ -582,9 +585,21 @@ worker too old to take one is refused before the cell runs.
 **In a `# @loop` cell the folder lasts the whole loop**, and each iteration's
 contents are stored as its `@iter=k` version ([loop cells](cells.md#output-folders)).
 
+**A folder leaves the notebook with its files.** Promoting or publishing it, or
+a result made from it (the notebook's promote route, `strata artifact promote`,
+`strata artifact publish` with or without `--to`, and the MCP tools), copies each file the
+folder's version names before its manifest; a file the other store already
+holds is not sent again. When a file lands under another version or id there
+(another tenant held its id), the copied manifest names where it landed. Read
+from that store as [`@dataset`](#dataset), the folder arrives as a `Path` with
+its files. A [snapshot](export.md#snapshots) carries the file versions each
+manifest names, and a [publication's archive](publishing.md#archiving-the-copy-that-needs-no-server)
+holds the files under `folder/`.
+
 For now run-all runs a cell with a folder on its own rather than in a batch,
 and the [team cache](../deployment/service-mode.md#the-team-cache-sharing-results-nobody-named)
-neither offers nor serves a cell with a folder: it runs locally.
+neither offers nor serves a cell with a folder: it runs locally. Promote the
+folder to share it.
 An R cell gets the folder as a path string and its folder is kept, but cannot
 read another cell's folder yet.
 

@@ -229,6 +229,49 @@ class TestAFile:
             )
             assert response.status_code == 404, name
 
+    async def test_a_file_the_manifest_names_by_id_is_served_from_there(self, client, opened):
+        from strata.artifact.provenance import TransformSpec
+
+        session = opened(SUCCESS)
+        assert await _run(session, SUCCESS)
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        # A copy that landed a file under another id names it; its bytes live only there.
+        data = b"landed elsewhere"
+        sha = hashlib.sha256(data).hexdigest()
+        file_id = f"{manager.cell_artifact_id('w', f'__file__{sha}')}@import=0badf00d"
+        spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
+        file_version = store.create_artifact(file_id, provenance_hash="landed", transform_spec=spec)
+        store.write_blob(file_id, file_version, data)
+        store.finalize_artifact(file_id, file_version, "{}", None, len(data))
+        manager.store_cell_output(
+            cell_id="w",
+            variable_name="ckpt",
+            blob_data=json.dumps(
+                {
+                    "cell_id": "w",
+                    "files": {
+                        "final.pt": {
+                            "sha256": sha,
+                            "size": len(data),
+                            "version": file_version,
+                            "id": file_id,
+                        }
+                    },
+                }
+            ).encode(),
+            content_type=output_dirs.CONTENT_TYPE,
+            provenance_hash="moved",
+        )
+
+        response = await client.get(
+            f"/v1/notebooks/{session.id}/cells/w/folders/ckpt/v/2/files/final.pt"
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.content == data
+        assert response.headers["content-digest"] == _digest(data)
+
     async def test_a_version_that_is_not_there_is_404(self, client, opened):
         session = opened(SUCCESS)
         assert await _run(session, SUCCESS)

@@ -102,6 +102,66 @@ def file_artifact_id(artifact_mgr: Any, cell_id: str, sha256: str) -> str:
     return artifact_mgr.cell_artifact_id(cell_id, f"__file__{sha256}")
 
 
+def file_ref(manifest_id: str, cell_id: str, entry: dict[str, Any]) -> tuple[str, int]:
+    """Where a manifest entry's file is stored, in the store holding the manifest.
+
+    Beside the manifest's own id unless the entry names one: a copy into another store
+    writes ``id`` when a file landed elsewhere (another tenant held its id).
+    """
+    if entry.get("id"):
+        return str(entry["id"]), int(entry["version"])
+    # Read off the manifest's id, not the reader's notebook: a folder copied in from
+    # another notebook keeps its files under that notebook's ids.
+    marker = f"_cell_{cell_id}_var_"
+    base = manifest_id[: manifest_id.index(marker) + len(marker)]
+    return f"{base}__file__{entry['sha256']}", int(entry["version"])
+
+
+def file_refs(manifest_id: str, manifest: bytes) -> list[tuple[str, int, str]]:
+    """``(id, version, sha256)`` of each file a manifest names."""
+    described = json.loads(manifest)
+    return [
+        (*file_ref(manifest_id, described["cell_id"], entry), entry["sha256"])
+        for entry in described["files"].values()
+    ]
+
+
+def relocate(
+    manifest: bytes, manifest_id: str, landed: dict[tuple[str, int], tuple[str, int]]
+) -> bytes:
+    """The manifest naming where each file *landed* in another store.
+
+    *landed* maps where a file was, read off *manifest_id*, to where it landed. An entry
+    names an ``id`` only when that differs from the one read off *manifest_id*; the bytes
+    are unchanged when no entry changes.
+    """
+    described = json.loads(manifest)
+    cell_id = described["cell_id"]
+    changed = False
+    for entry in described["files"].values():
+        source = file_ref(manifest_id, cell_id, entry)
+        target_id, target_version = landed.get(source, source)
+        moved = {key: value for key, value in entry.items() if key != "id"}
+        moved["version"] = target_version
+        if file_ref(manifest_id, cell_id, moved)[0] != target_id:
+            moved["id"] = target_id
+        if moved != entry:
+            entry.clear()
+            entry.update(moved)
+            changed = True
+    if not changed:
+        return manifest
+    return json.dumps(described, sort_keys=True).encode("utf-8")
+
+
+def checked_path(rel: str) -> str:
+    """*rel* if it stays inside its folder; a manifest read from another store is not ours."""
+    parts = rel.split("/")
+    if rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in parts):
+        raise ValueError(f"output folder path {rel!r} leaves its folder")
+    return rel
+
+
 def _file_provenance(artifact_id: str, sha256: str) -> str:
     """Unique to the file's id: the store dedups equal provenance across ids, which would
     leave one cell's file reading another cell's bytes and swept with them."""
@@ -157,12 +217,7 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
             continue  # left by a crash, never to be read: it keeps no file
         if blob is None:
             return None  # being written, or lost: what it names is unknown
-        manifest = json.loads(blob)
-        for entry in manifest["files"].values():
-            sha256 = entry["sha256"]
-            named.add(
-                (file_artifact_id(artifact_mgr, manifest["cell_id"], sha256), entry["version"])
-            )
+        named.update((fid, fv) for fid, fv, _ in file_refs(version.id, blob))
     return [
         (version.id, version.version)
         for version in versions
@@ -373,17 +428,20 @@ def _size(n: int) -> str:
     return f"{scaled:.1f} GiB"
 
 
-def materialize(artifact_mgr: Any, manifest: bytes, dest: Path) -> None:
-    """Rebuild the folder a manifest describes at *dest*, for a downstream cell to read."""
-    store = artifact_mgr.artifact_store
+def materialize(store: Any, manifest_id: str, manifest: bytes, dest: Path) -> None:
+    """Rebuild the folder manifest *manifest_id* describes at *dest*, from the *store* holding it.
+
+    Any store: a notebook's own, or one a folder was promoted or copied to.
+    """
     described = json.loads(manifest)
     cell_id = described["cell_id"]
     dest.mkdir(parents=True, exist_ok=True)
     for rel, entry in described["files"].items():
-        target = dest / rel
+        target = dest / checked_path(rel)
         target.parent.mkdir(parents=True, exist_ok=True)
-        artifact_id = file_artifact_id(artifact_mgr, cell_id, entry["sha256"])
-        reader = store.blob_store.open_blob_reader(artifact_id, int(entry["version"]))
+        artifact_id, version = file_ref(manifest_id, cell_id, entry)
+        # Through the store, not its blob store: an imported file's bytes are under its row's key.
+        reader = store.open_blob_reader(artifact_id, version)
         if reader is None:
             raise FileNotFoundError(f"output folder file {rel} is missing from the store")
         with reader as src, open(target, "wb") as out:

@@ -735,6 +735,94 @@ class TestLoopIterations:
         assert self._iterations(imported.notebook_dir) == expected
 
 
+FOLDER_WRITER = (
+    "# @output_dir ckpt\n"
+    "(ckpt / 'epochs').mkdir()\n"
+    "(ckpt / 'epochs' / 'e0.bin').write_bytes(b'0' * 10)\n"
+    "(ckpt / 'final.txt').write_text('done')\n"
+)
+FOLDER_READER = (
+    "seen = sorted(p.relative_to(ckpt).as_posix() for p in ckpt.rglob('*') if p.is_file())\n"
+)
+
+
+class TestAFolder:
+    """A bundle carries the file versions a folder's manifest names, not each file's latest."""
+
+    @pytest.fixture
+    async def superseded(self, tmp_path, monkeypatch):
+        """A folder whose files were stored again after its run: none is at the version named."""
+        from strata.notebook import output_dirs
+        from strata.notebook.executor import CellExecutor
+
+        nb = create_notebook(tmp_path / "src", "Folders", initialize_environment=False)
+        prepared_venv(nb)
+        add_cell_to_notebook(nb, "w", None)
+        write_cell(nb, "w", FOLDER_WRITER)
+        add_cell_to_notebook(nb, "r", "w")
+        write_cell(nb, "r", FOLDER_READER)
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        assert (await CellExecutor(session).execute_cell("w", FOLDER_WRITER)).success
+        manager = session.get_artifact_manager()
+        run = tmp_path / "run"
+        (run / output_dirs.OUTPUT_DIRS / "ckpt" / "epochs").mkdir(parents=True)
+        (run / output_dirs.OUTPUT_DIRS / "ckpt" / "epochs" / "e0.bin").write_bytes(b"0" * 10)
+        (run / output_dirs.OUTPUT_DIRS / "ckpt" / "final.txt").write_text("done")
+        with monkeypatch.context() as patched:
+            # Each file stored again under its id, as two runs storing it at once make.
+            patched.setattr(output_dirs, "_reused", lambda store, artifact_id: None)
+            output_dirs.collect(manager, "w", run, "ckpt")
+        store = manager.artifact_store
+        current = store.get_latest_version(manager.cell_artifact_id("w", "ckpt"))
+        refs = output_dirs.file_refs(current.id, store.read_blob(current.id, current.version))
+        # Non-vacuity: the manifest names a version of each file that is no longer its latest.
+        assert [(fv, store.get_latest_version(fid).version) for fid, fv, _ in refs] == [(1, 2)] * 2
+        return nb
+
+    async def test_the_imported_folder_is_intact(self, superseded, tmp_path):
+        from strata.notebook import output_dirs
+        from strata.notebook.executor import CellExecutor
+
+        imported = import_snapshot(_export(superseded, tmp_path / "snap.zip"), tmp_path / "dst")
+
+        dst = imported.notebook_dir
+        prepared_venv(dst)
+        session = NotebookSession(parse_notebook(dst), dst)
+        session.refresh_environment_runtime()
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        current = store.get_latest_version(manager.cell_artifact_id("w", "ckpt"))
+        output_dirs.materialize(
+            store, current.id, store.read_blob(current.id, current.version), tmp_path / "out"
+        )
+        assert (tmp_path / "out" / "epochs" / "e0.bin").read_bytes() == b"0" * 10
+        assert (tmp_path / "out" / "final.txt").read_text() == "done"
+        read = await CellExecutor(session).execute_cell("r", FOLDER_READER)
+        assert read.success, read.error
+        assert read.outputs["seen"]["preview"] == ["epochs/e0.bin", "final.txt"]
+
+    async def test_the_index_lists_the_named_versions(self, superseded):
+        from strata.notebook.snapshot import build_artifact_index
+
+        session = NotebookSession(parse_notebook(superseded), superseded)
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        current = store.get_latest_version(manager.cell_artifact_id("w", "ckpt"))
+        from strata.notebook import output_dirs
+
+        named = {
+            (fid, fv)
+            for fid, fv, _ in output_dirs.file_refs(
+                current.id, store.read_blob(current.id, current.version)
+            )
+        }
+
+        listed = {(e["artifact_id"], e["version"]) for e in build_artifact_index(session)["w"]}
+
+        assert named <= listed
+
+
 class TestWidgetSelections:
     """Widget values travel with the snapshot.
 

@@ -174,7 +174,8 @@ def build_crate(
                 "name": f"{root_id} ({companion['file']})",
                 "encodingFormat": companion["content_type"],
                 "sha256": companion["sha256"],
-                "description": f"The same rows as {payload_id}, in another format.",
+                "description": companion.get("description")
+                or f"The same rows as {payload_id}, in another format.",
             }
         )
 

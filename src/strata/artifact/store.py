@@ -4236,10 +4236,13 @@ class ArtifactStore:
 
         Roots: names and aliases; pending alias changes; publications (revoked ones
         too) and pins; running builds; and with ``current_values`` the current value
-        of every caller-named id, except those in ``not_current``. Deliberately not
+        of every caller-named id, except those in ``not_current``. A held
+        ``# @output_dir`` manifest holds each file version it names. Deliberately not
         tenant-scoped: over-protecting is free, and proving chains never cross tenants
         is not.
         """
+        from strata.notebook import output_dirs
+
         roots_sql = (
             "SELECT artifact_id, version FROM artifact_publications "
             "UNION SELECT artifact_id, version FROM artifact_pins "
@@ -4279,6 +4282,16 @@ class ArtifactStore:
                 "WHERE superseded_by IS NOT NULL"
             ).fetchall()
         }
+        # A folder's files are not edges. Only the manifests the walk reaches are read.
+        manifests: set[tuple[str, int]] = {
+            (row["id"], row["version"])
+            for row in conn.execute(
+                "SELECT id, version, transform_spec FROM artifact_versions "
+                "WHERE transform_spec LIKE ?",
+                (f"%{output_dirs.CONTENT_TYPE}%",),
+            ).fetchall()
+            if _declared_content_type(row["transform_spec"]) == output_dirs.CONTENT_TYPE
+        }
 
         reachable: set[tuple[str, int]] = set()
         pending = list(roots)
@@ -4289,6 +4302,12 @@ class ArtifactStore:
             reachable.add(node)
             if node in canonical:
                 pending.append(canonical[node])
+            if node in manifests:
+                manifest = self.read_blob(*node, note_use=False)
+                if manifest is not None:
+                    pending += [
+                        (fid, fv) for fid, fv, _ in output_dirs.file_refs(node[0], manifest)
+                    ]
             recorded_inputs = inputs.get(node)
             if not recorded_inputs:
                 continue

@@ -589,7 +589,13 @@ def cmd_publish(args: argparse.Namespace) -> int:
     copied = 0
     published_id, published_version = artifact.id, artifact.version
     if target.db_path != store.db_path:
-        written, landed_ref = copy_chain(store, target, artifact, getattr(args, "max_depth", 10))
+        try:
+            written, landed_ref = copy_chain(
+                store, target, artifact, getattr(args, "max_depth", 10)
+            )
+        except ValueError as exc:
+            print(f"Cannot publish: {exc}")
+            return 1
         copied = len(written)
         # The copy deduplicates against the target, so the grant has to be
         # minted on the row that is actually there. Minting on the source's id

@@ -945,6 +945,8 @@ outputs/<cell id>/0.png          each display output as a file
 outputs/<cell id>/console.json   stdout / stderr
 artifacts.json                   per-cell provenance, timings, and every ready
                                  cell's artifacts with their content digests
+                                 (an output folder's entries include each file
+                                 version its manifest names)
 artifacts/<id>@v=<n>             the bytes, for whichever were included
 fetch/<sha256>/<file>            with include=all, the bytes each @fetch last read
 fetch/index.json                 with include=all, which URL served which bytes

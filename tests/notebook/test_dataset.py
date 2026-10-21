@@ -655,6 +655,63 @@ class TestARemoteRegistry:
             "raw@v=1",
         ]
 
+    @pytest.mark.parametrize("remote", [True, False])
+    async def test_a_promoted_folder_is_read_as_a_folder(
+        self, notebook, notebook_personal_server, monkeypatch, tmp_path, remote
+    ):
+        """Another notebook's ``# @output_dir`` folder, promoted, arrives with its files."""
+        import argparse
+
+        from strata.artifact.cli import cmd_promote
+        from strata.notebook import output_dirs
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.notebook.executor import CellExecutor
+
+        files = {"epochs/e0.bin": b"\x00" * 10, "final.txt": b"done"}
+        writer = NotebookArtifactManager("trainer", artifact_dir=tmp_path / "trainer")
+        for rel, data in files.items():
+            path = tmp_path / "run" / output_dirs.OUTPUT_DIRS / "ckpt" / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        folder = writer.store_cell_output(
+            cell_id="w",
+            variable_name="ckpt",
+            blob_data=output_dirs.collect(writer, "w", tmp_path / "run", "ckpt"),
+            content_type=output_dirs.CONTENT_TYPE,
+            provenance_hash="c3" * 32,
+            input_versions={},
+            source="# @output_dir ckpt",
+        )
+        base = notebook_personal_server["base_url"]
+        promoted = argparse.Namespace(
+            ref=folder.id,
+            artifact_dir=str(tmp_path / "trainer"),
+            to_url=base,
+            name="team/ckpt",
+            alias=None,
+            tag=None,
+            header=None,
+            format="human",
+            tenant=None,
+            max_depth=10,
+        )
+        assert cmd_promote(promoted) == 0
+        if remote:
+            self._point_at(monkeypatch, base)
+        source = (
+            f"# @dataset ckpt team/ckpt@v={folder.version}\n"
+            "score = {p.relative_to(ckpt).as_posix(): p.read_bytes().decode('latin-1')"
+            " for p in ckpt.rglob('*') if p.is_file()}"
+        )
+        session = notebook(source)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+        assert result.outputs["score"]["preview"] == {
+            rel: data.decode("latin-1") for rel, data in files.items()
+        }
+
     async def test_an_unreachable_registry_fails_the_cell_rather_than_reading_locally(
         self, notebook, notebook_personal_server, monkeypatch
     ):

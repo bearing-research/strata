@@ -128,6 +128,8 @@ def write_bundle(
         if parquet_name is not None
         else []
     )
+    folder_files = _write_folder_files(store, artifact, content_type, dest)
+    companions += folder_files
     _name_bundle_files(dest, filename, companions)
     # RO-Crate turns the chain into data a repository such as Zenodo can index.
     (dest / "ro-crate-metadata.json").write_text(
@@ -147,13 +149,14 @@ def write_bundle(
     )
 
     (dest / "README.md").write_text(
-        _bundle_readme(publication, artifact, filename, digest, parquet_name),
+        _bundle_readme(publication, artifact, filename, digest, parquet_name, bool(folder_files)),
         encoding="utf-8",
     )
 
     written = ["index.html", filename]
     if parquet_name is not None:
         written.append(parquet_name)
+    written += [entry["file"] for entry in folder_files]
     written += ["manifest.json", "ro-crate-metadata.json", "README.md"]
     return written
 
@@ -315,6 +318,51 @@ def _write_parquet_companion(
     return "artifact.parquet"
 
 
+def _write_folder_files(
+    store: ArtifactStore, artifact: ArtifactVersion, content_type: str, dest: Path
+) -> list[dict[str, str]]:
+    """Write a ``# @output_dir`` folder's files under ``folder/``; return them as companions.
+
+    The published bytes are only the folder's manifest; these are what it describes.
+
+    Raises:
+        ValueError: If a file the manifest names is missing or not the bytes it names.
+    """
+    from strata.notebook import output_dirs
+
+    if content_type != output_dirs.CONTENT_TYPE:
+        return []
+    manifest = store.read_blob(artifact.id, artifact.version)
+    if manifest is None:
+        raise ValueError(f"{artifact.id}@v={artifact.version} has no stored bytes to archive")
+    described = json.loads(manifest)
+    cell_id, files = described["cell_id"], described["files"]
+    written = []
+    for rel in sorted(files):
+        name = f"folder/{output_dirs.checked_path(rel)}"
+        file_id, version = output_dirs.file_ref(artifact.id, cell_id, files[rel])
+        reader_cm = store.open_blob_reader(file_id, version)
+        if reader_cm is None:
+            raise ValueError(f"the folder's file {rel} is missing from the store")
+        (dest / name).parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        with reader_cm as reader, open(dest / name, "wb") as out:
+            while chunk := reader.read(1024 * 1024):
+                digest.update(chunk)
+                out.write(chunk)
+        if digest.hexdigest() != files[rel]["sha256"]:
+            raise ValueError(f"the folder's file {rel} is not the bytes its manifest names")
+        written.append(
+            {
+                "file": name,
+                "content_type": "application/octet-stream",
+                "sha256": files[rel]["sha256"],
+                "description": f"A file of the folder {artifact.id}@v={artifact.version}.",
+            }
+        )
+    return written
+
+
 def _name_bundle_files(dest: Path, filename: str, companions: list[dict[str, str]]) -> None:
     """Name the payload file in ``manifest.json`` and give any companion its own digest.
 
@@ -341,6 +389,7 @@ def _bundle_readme(
     filename: str,
     digest: str,
     parquet_name: str | None = None,
+    folder: bool = False,
 ) -> str:
     title = publication.title or f"{artifact.id}@v={artifact.version}"
     parquet_line = (
@@ -354,6 +403,12 @@ def _bundle_readme(
         if parquet_name
         else ""
     )
+    folder_line = (
+        "\n- `folder/`: the files of the folder those bytes list, each with its own"
+        " digest in `manifest.json`."
+        if folder
+        else ""
+    )
     return f"""# {title}
 
 A Strata artifact and the record of what produced it.
@@ -361,7 +416,7 @@ A Strata artifact and the record of what produced it.
 - `index.html`: the result, the code that produced it, and the code and
   environment of every step behind it. Open it in a browser; it needs no
   server and makes no external requests.
-- `{filename}`: the bytes themselves.{parquet_line}
+- `{filename}`: the bytes themselves.{parquet_line}{folder_line}
 - `manifest.json`: the same record, machine-readable.
 - `ro-crate-metadata.json`: the same chain as [RO-Crate](https://w3id.org/ro/crate/)
   JSON-LD, which repositories and provenance tooling read directly.

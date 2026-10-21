@@ -183,7 +183,9 @@ What travels is `--include`:
 | `none`     | No artifact bytes: the notebook and its provenance, nothing to replay from. |
 
 A carried loop cell brings every stored iteration (`@iter=k`) with it, so a
-cell that forks from one with `start_from` still runs after an import.
+cell that forks from one with `start_from` still runs after an import. A carried
+[`# @output_dir`](annotations.md#output_dir) folder brings the version of each
+file its manifest names, which need not be the file's latest.
 
 ```bash
 # The whole thing, to carry to another machine

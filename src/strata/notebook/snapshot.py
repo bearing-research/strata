@@ -69,26 +69,42 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
 def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
     """What every ready cell produced, named so another store can find it.
 
-    Digests let two snapshots be compared output by output without reading blobs.
+    Digests let two snapshots be compared output by output without reading blobs. A
+    ``# @output_dir`` folder brings the file versions its manifest names, which need
+    not be each file's latest.
     """
+    from strata.notebook import output_dirs
+
     manager = session.get_artifact_manager()
     store = manager.artifact_store
     cells: dict[str, Any] = {}
 
     for cell in session.notebook_state.cells:
-        entries = []
-        for variable, artifact in sorted(manager.list_cell_artifacts(cell.id)):
-            entries.append(
-                {
-                    "variable": variable,
-                    "artifact_id": artifact.id,
-                    "version": artifact.version,
-                    "provenance_hash": artifact.provenance_hash,
-                    "content_type": artifact.params.get("content_type") or "",
-                    "content_sha256": store.content_digest(artifact.id, artifact.version),
-                    "byte_size": artifact.byte_size,
-                }
-            )
+        artifacts = sorted(manager.list_cell_artifacts(cell.id))
+        listed = {(artifact.id, artifact.version) for _, artifact in artifacts}
+        for _, artifact in list(artifacts):
+            if artifact.params.get("content_type") != output_dirs.CONTENT_TYPE:
+                continue
+            manifest = store.read_blob(artifact.id, artifact.version)
+            if manifest is None:
+                continue
+            for file_id, version, _ in output_dirs.file_refs(artifact.id, manifest):
+                named = store.get_artifact(file_id, version)
+                if named is not None and (file_id, version) not in listed:
+                    listed.add((file_id, version))
+                    artifacts.append((file_id.rpartition("_var_")[2], named))
+        entries = [
+            {
+                "variable": variable,
+                "artifact_id": artifact.id,
+                "version": artifact.version,
+                "provenance_hash": artifact.provenance_hash,
+                "content_type": artifact.params.get("content_type") or "",
+                "content_sha256": store.content_digest(artifact.id, artifact.version),
+                "byte_size": artifact.byte_size,
+            }
+            for variable, artifact in artifacts
+        ]
         if entries:
             cells[cell.id] = entries
     return cells

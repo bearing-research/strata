@@ -279,10 +279,16 @@ the whole table in memory; neither the manifest nor the crate then lists one.
 The limit is fixed, so it never makes one publication's archive differ between
 builds.
 
+A [`# @output_dir`](annotations.md#output_dir) folder's published bytes are its
+manifest, the list of its files (`artifact.bin`, JSON), which `/p/<token>/data`
+serves. The bundle holds the files themselves under `folder/`, at their paths in
+the folder, each with its own digest in the manifest's `additional_files` and
+as a `File` in the RO-Crate.
+
 Whichever file a reader kept, the server can say whether it is this
 publication's. `GET /p/<token>/verify?sha256=<digest of the file>` answers with
-`file` naming it (`artifact.arrow` or `artifact.parquet`, or `null` for a file
-from elsewhere) and `matches` true only when it names one and the stored bytes
+`file` naming it (`artifact.arrow`, `artifact.parquet` or a folder's
+`folder/<path>`, or `null` for a file from elsewhere) and `matches` true only when it names one and the stored bytes
 are unchanged. The Parquet digest is the one in the archive the server serves.
 
 Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
@@ -432,6 +438,11 @@ version id a different computation took there) lands as a copy under a fresh
 id, `<id>@import=<8 hex>`, in the caller's tenant. Each copy keeps its
 provenance hash, and the CLI points every descendant's lineage edges at the
 ids its ancestors landed on, so the published page resolves every step.
+A [`# @output_dir`](annotations.md#output_dir) folder in the chain goes with
+every file its version names, each before the manifest. A file the target
+already holds (`GET /v1/artifacts/by-provenance/{hash}` finds it with the same
+digest) is not uploaded again, and when a file lands under another version or a
+fresh id, the copied manifest's entry names that version and `id`.
 Publishing the same chain again writes nothing. The target refuses a blob
 larger than its `STRATA_MAX_UPLOAD_BYTES` with `413`; raise it there to publish
 larger artifacts.

@@ -3408,8 +3408,8 @@ async def get_cell_folder_file(
         entry = manifest["files"].get(path)
         if entry is None:
             raise HTTPException(status_code=404, detail="No such file in this folder version")
-        file_id = output_dirs.file_artifact_id(manager, manifest["cell_id"], entry["sha256"])
-        reader = store.open_blob_reader(file_id, int(entry["version"]))
+        file_id, file_version = output_dirs.file_ref(artifact_id, manifest["cell_id"], entry)
+        reader = store.open_blob_reader(file_id, file_version)
         if reader is None:
             raise HTTPException(status_code=404, detail="The file's bytes are gone")
         return entry, reader
