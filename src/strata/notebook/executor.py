@@ -104,6 +104,7 @@ from strata.notebook.provenance import (
     derive_subkey,
     safe_filename_stem,
 )
+from strata.notebook.quiesce import NotebookQuiesced
 from strata.notebook.read_confirm import (
     ReadConfirmation,
     ReadEstimate,
@@ -634,6 +635,31 @@ def _worker_mount_writes(result: Any, mount_specs: list[MountSpec]) -> list[Moun
     return writes
 
 
+def _merge_variant_writes(writes: list[MountWrite]) -> list[MountWrite]:
+    """A fan-out's writes, one per mount; a path two variants wrote keeps the later's record."""
+    merged: dict[str, MountWrite] = {}
+    for write in writes:
+        seen = merged.setdefault(
+            write.mount, MountWrite(mount=write.mount, uri=write.uri, files=[])
+        )
+        files = {f.path: f for f in [*seen.files, *write.files]}
+        seen.files = sorted(files.values(), key=lambda f: f.path)
+    return list(merged.values())
+
+
+def _writes_entry(writes: list[MountWrite]) -> dict[str, Any] | None:
+    """The writes index entry for a good run that wrote *writes*; None when it wrote nothing."""
+    from strata.notebook.artifact_integration import caller_principal_id
+
+    if not writes:
+        return None
+    return {
+        "ran_at": int(time.time() * 1000),
+        "principal": caller_principal_id(),
+        "mounts": [write.model_dump() for write in writes],
+    }
+
+
 def _worker_mount_bytes(result: Any, mount_specs: list[MountSpec]) -> dict[str, int | None]:
     """What a remote worker reports its read-only remote mounts downloaded.
 
@@ -703,6 +729,9 @@ class CellExecutor:
         # Each ``# @output_dir`` folder's listing from a cell's run, by cell then folder,
         # shown ahead of the run's displays when it succeeds.
         self._folder_listings: dict[str, dict[str, str]] = {}
+        # What each variant of a running ``# @per_variant`` cell wrote through its mounts,
+        # recorded together once every variant has succeeded.
+        self._variant_writes: dict[str, list[MountWrite]] = {}
         # Also store the variables of a cell nothing downstream reads. Off by default: only
         # consumed variables are kept, and a leaf's result can be large.
         self.store_leaf_outputs = False
@@ -1695,14 +1724,16 @@ class CellExecutor:
                     team_cache_promotion=team_pull.promotion if team_pull else None,
                     from_team_cache=team_pull is not None,
                 ).apply_remote_metadata(**remote_metadata)
-                self.session.record_successful_execution_provenance(
-                    cell_id,
-                    provenance_hash,
-                    source_hash,
-                    env_hash,
-                    table_reads=prov.table_reads,
-                    reads=prov.reads(*self._moved(cell_id)),
-                )
+                # A variant's hit is recorded by its fan-out, once every variant succeeded.
+                if fanout_variant is None:
+                    self.session.record_successful_execution_provenance(
+                        cell_id,
+                        provenance_hash,
+                        source_hash,
+                        env_hash,
+                        table_reads=prov.table_reads,
+                        reads=prov.reads(*self._moved(cell_id)),
+                    )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
 
@@ -1854,15 +1885,6 @@ class CellExecutor:
                         # Only once artifacts are on disk: the publish reads them back, so a pull
                         # reproduces exactly what a local run stored.
                         await self._push_to_team_store(cell_id=cell_id, variant=fanout_variant)
-                        # Not before: a failed store or table write is not the cell's last good run.
-                        self.session.record_successful_execution_provenance(
-                            cell_id,
-                            provenance_hash,
-                            source_hash,
-                            env_hash,
-                            table_reads=prov.table_reads,
-                            reads=prov.reads(*self._moved(cell_id)),
-                        )
 
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
@@ -1926,6 +1948,13 @@ class CellExecutor:
                             source=source,
                             env_hash=env_hash,
                         )
+                        if fanout_variant is not None:
+                            # Recorded by the fan-out, once every variant has succeeded.
+                            self._variant_writes.setdefault(cell_id, []).extend(mount_writes)
+                        else:
+                            self._record_good_run(
+                                cell_id, provenance_hash, source_hash, env_hash, prov, mount_writes
+                            )
 
                 self.session.persist_display_outputs(
                     cell_id,
@@ -2193,6 +2222,7 @@ class CellExecutor:
             await self._materialize_upstreams(cell_id)
 
         results: list[tuple[str, CellExecutionResult]] = []
+        self._variant_writes[cell_id] = []
         total = len(variant_names)
         for index, name in enumerate(variant_names):
             variant_start = time.time()
@@ -2227,6 +2257,7 @@ class CellExecutor:
                         name,
                     )
 
+        writes = _merge_variant_writes(self._variant_writes.pop(cell_id, []))
         duration_ms = (time.time() - start_time) * 1000
         failures = [(name, r) for name, r in results if not r.success]
         stdout = "\n".join(f"[variant={name}]\n{r.stdout}" for name, r in results if r.stdout)
@@ -2264,6 +2295,7 @@ class CellExecutor:
                     prov.env_hash,
                     table_reads=prov.table_reads,
                     reads=prov.reads(*self._moved(cell_id)),
+                    writes=_writes_entry(writes),
                 )
             except Exception:
                 logger.exception("Failed to record fan-out base provenance for cell %s", cell_id)
@@ -2624,15 +2656,6 @@ class CellExecutor:
 
                     if stored_ok:
                         await self._push_to_team_store(cell_id=cell_id)
-                        # Not before: a failed store or table write is not the cell's last good run.
-                        self.session.record_successful_execution_provenance(
-                            cell_id,
-                            provenance_hash,
-                            source_hash,
-                            env_hash,
-                            table_reads=prov.table_reads,
-                            reads=prov.reads(*self._moved(cell_id)),
-                        )
 
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
@@ -2681,6 +2704,9 @@ class CellExecutor:
                             source_hash=source_hash,
                             source=source,
                             env_hash=env_hash,
+                        )
+                        self._record_good_run(
+                            cell_id, provenance_hash, source_hash, env_hash, prov, mount_writes
                         )
 
                 self.session.persist_display_outputs(
@@ -5733,13 +5759,7 @@ class CellExecutor:
         A read-write cell never cache-hits, so this is the run's record of its side effect:
         the files it created or changed, with sizes and sha256 digests, linked to the inputs
         it read. Each run adds a version, so earlier runs' records stay readable.
-
-        The writes index gets the same, or loses the cell's entry when the run wrote nothing.
-        Called once the sync-back succeeded, so a failed one leaves the entry as it was.
         """
-        from strata.notebook import writes_index
-        from strata.notebook.artifact_integration import caller_principal_id
-
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id)
         for write in writes:
@@ -5765,13 +5785,35 @@ class CellExecutor:
                 # The files are already written and synced; losing the record is not a
                 # reason to fail the run.
                 logger.exception("Failed to record writes through mount %s", write.mount)
-        entry = {
-            "ran_at": int(time.time() * 1000),
-            "principal": caller_principal_id(),
-            "mounts": [write.model_dump() for write in writes],
-        }
-        live = [c.id for c in self.session.notebook_state.cells]
-        writes_index.record(self.session.path, cell_id, entry if writes else None, live)
+
+    def _record_good_run(
+        self,
+        cell_id: str,
+        provenance_hash: str,
+        source_hash: str,
+        env_hash: str,
+        prov: _CellProvenance,
+        writes: list[MountWrite],
+    ) -> None:
+        """Record a run that stored its outputs and synced its mounts as the cell's last good one.
+
+        Not before the sync-back: a run that fails there is not the last good run, and leaves
+        the reads, tables and writes indexes as they were.
+        """
+        try:
+            self.session.record_successful_execution_provenance(
+                cell_id,
+                provenance_hash,
+                source_hash,
+                env_hash,
+                table_reads=prov.table_reads,
+                reads=prov.reads(*self._moved(cell_id)),
+                writes=_writes_entry(writes),
+            )
+        except (OSError, NotebookQuiesced):
+            # The outputs are stored and the files synced; losing the record is not a
+            # reason to fail the run.
+            logger.exception("Failed to record the run of cell %s", cell_id)
 
     def _store_inline_display_outputs(
         self,

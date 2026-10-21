@@ -85,6 +85,17 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `s3://lake/wh2`). Each table is loaded once per run, and a table pinned by
   `# @cache snapshot` is located only when the query runs, so its cache hit
   needs no catalog again. (#1282)
+- **`.strata/writes/index.json` follows the cell's last good run.** A
+  `# @per_variant` cell's entry kept only its last variant's files, and a
+  variant that failed or wrote nothing replaced or dropped it before the
+  fan-out had succeeded. It now lists every variant's files, merged per mount
+  (a path two variants wrote keeps the later one's), once every variant has
+  succeeded. A cache hit or a run-all batch drops a stale entry, as any good
+  run that writes nothing does, and failing to write the index no longer
+  fails a run whose files were already synced. A cell's reads and tables
+  entries, and its last good run, are now recorded only after its `rw` mounts
+  are synced back, so a failed sync-back or a failed variant leaves them as
+  they were. (#1283)
 - **Promoting or publishing an output folder copies its files.** Promote,
   `strata artifact publish` (`--to` too) and the MCP tools copied a
   `# @output_dir` folder's manifest without the files it names, leaving it

@@ -222,8 +222,9 @@ reads this file rather than parsing cell sources:
 `<catalog>:<namespace>.<table>`. `catalog` is the configured catalog the URI
 names, or `null` for a warehouse path or the server's default catalog
 (`STRATA_CATALOG_NAME`). `snapshot_id` is `null` for a table with no snapshots
-yet. A failed run leaves the cell's entry as it was, and a
-cell that stops reading tables, or is deleted, drops out.
+yet. A failed run leaves the cell's entry as it was, a run whose `rw` mounts
+fail to sync back included, and a cell that stops reading tables, or is
+deleted, drops out.
 
 ## What a run moved
 

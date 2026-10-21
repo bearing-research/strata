@@ -8,8 +8,9 @@ Beside the reads index, for a host to list the files cells wrote to a source::
 ``mounts`` has one entry per read-write mount the run wrote through, as its
 ``__mount__<name>`` record does, and ``principal`` is the member the run was for (null
 in personal mode). A cell's entry is replaced once its writes are synced back, and
-dropped when a successful run writes nothing; a failed run, a failed sync-back included,
-leaves it as it was.
+dropped when a successful run writes nothing (a cache hit or a batched run too); a
+failed run, a failed sync-back included, leaves it as it was. A ``# @per_variant`` cell's
+entry merges its variants' writes per mount, recorded once every variant has succeeded.
 """
 
 from __future__ import annotations
