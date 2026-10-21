@@ -3814,6 +3814,11 @@ exhaustive commit history.</p>
   <code>s3.*</code> keys (<code>s3.endpoint</code>, <code>s3.region</code> and <code>s3.path-style-access</code> too)
   whatever form the warehouse takes. Without an <code>s3://</code> warehouse those keys
   reach only the locations of the tables the query reads. (#1278)</li>
+<li><strong>A promoted output folder reads back as a folder.</strong> <code># @dataset</code> naming a
+  <code># @output_dir</code> folder in the registry binds the folder's <code>Path</code>, its files
+  copied into the notebook's store, rather than a path to its manifest; and a
+  published folder's <code>/p/{token}/archive.zip</code> holds its files under <code>folder/</code>,
+  each with its own digest that <code>/p/{token}/verify</code> recognises. (#1279)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3831,6 +3836,17 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Promoting or publishing an output folder copies its files.</strong> Promote,
+  <code>strata artifact publish</code> (<code>--to</code> too) and the MCP tools copied a
+  <code># @output_dir</code> folder's manifest without the files it names, leaving it
+  unreadable in the other store. Each file now goes first, a file the store
+  already holds is not uploaded again, and a file that lands under another
+  version or id is named there. A snapshot carries the file versions a folder
+  names rather than only each file's latest, and a folder imported from a
+  snapshot is rebuilt again (it read imported bytes from the wrong key). A
+  store's garbage collection now keeps every file version a published, named
+  or pinned folder names, and <code>strata artifact publish</code> refuses a folder
+  missing a file with a message instead of a traceback. (#1279)</li>
 <li><strong>An exported link loses an unsafe target wherever it is defined.</strong> A
   <code>javascript:</code>, <code>vbscript:</code> or non-image <code>data:</code> reference definition inside
   a blockquote or list item, or under a label split across lines, kept its

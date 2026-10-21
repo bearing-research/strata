@@ -2562,7 +2562,9 @@ import &lt;file&gt;.zip</code> unpacks one back into a notebook directory (see
 </tbody>
 </table>
 <p>A carried loop cell brings every stored iteration (<code>@iter=k</code>) with it, so a
-cell that forks from one with <code>start_from</code> still runs after an import.</p>
+cell that forks from one with <code>start_from</code> still runs after an import. A carried
+<a href="../annotations/#output_dir"><code># @output_dir</code></a> folder brings the version of each
+file its manifest names, which need not be the file's latest.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># The whole thing, to carry to another machine</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>strata<span class="w"> </span><span class="nb">export</span><span class="w"> </span>./my_analysis<span class="w"> </span>--to<span class="w"> </span>snapshot<span class="w"> </span>--include<span class="w"> </span>all<span class="w"> </span>--out<span class="w"> </span>my_analysis.zip
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>

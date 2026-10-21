@@ -3287,7 +3287,9 @@ in the source hash and the version is in nothing.</p>
 notebook's own store, keeping its id and version, and <code>&lt;name&gt;</code> is bound to its value like an upstream variable: a
 table as a DataFrame, a JSON value or a pickled object as itself. Artifacts
 written outside a notebook (a core transform, <code>strata.put</code>) are Arrow tables.
-Anything else, such as an image, arrives as a <code>pathlib.Path</code> to its bytes.</p>
+A promoted <a href="#output_dir"><code># @output_dir</code></a> folder arrives as the folder's <code>Path</code>,
+its files copied with it. Anything else, such as an image, arrives as a
+<code>pathlib.Path</code> to its bytes.</p>
 <p>Each artifact the cell stores records the name and the version it resolved to
 as an input, so lineage, in the dashboard and in <code>strata artifact lineage</code>,
 walks from a downstream result through the cell to the named version. The copy
@@ -3445,7 +3447,8 @@ like any cell output's earlier values
 except that a failed run's version newer than the folder's last good one stays
 until a later run succeeds, so a crash's checkpoints can still be downloaded.
 A file no kept version names is removed in the same pass, so old checkpoints
-do not pile up. Pin a folder version to keep its files.</p>
+do not pile up. Pin a folder version to keep its files: a store's garbage
+collection keeps every file version a published, named or pinned folder names.</p>
 <p><strong>On a remote worker</strong> the folder comes back with the run's result, each file
 streamed, so a checkpoint is not held in memory and is not limited by
 <code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code>. A failed run on a worker keeps its
@@ -3466,9 +3469,20 @@ local <code>Path</code> with the same name it has on the server before the cell 
 worker too old to take one is refused before the cell runs.</p>
 <p><strong>In a <code># @loop</code> cell the folder lasts the whole loop</strong>, and each iteration's
 contents are stored as its <code>@iter=k</code> version (<a href="../cells/#output-folders">loop cells</a>).</p>
+<p><strong>A folder leaves the notebook with its files.</strong> Promoting or publishing it, or
+a result made from it (the notebook's promote route, <code>strata artifact promote</code>,
+<code>strata artifact publish</code> with or without <code>--to</code>, and the MCP tools), copies each file the
+folder's version names before its manifest; a file the other store already
+holds is not sent again. When a file lands under another version or id there
+(another tenant held its id), the copied manifest names where it landed. Read
+from that store as <a href="#dataset"><code>@dataset</code></a>, the folder arrives as a <code>Path</code> with
+its files. A <a href="../export/#snapshots">snapshot</a> carries the file versions each
+manifest names, and a <a href="../publishing/#archiving-the-copy-that-needs-no-server">publication's archive</a>
+holds the files under <code>folder/</code>.</p>
 <p>For now run-all runs a cell with a folder on its own rather than in a batch,
 and the <a href="../../deployment/service-mode/#the-team-cache-sharing-results-nobody-named">team cache</a>
-neither offers nor serves a cell with a folder: it runs locally.
+neither offers nor serves a cell with a folder: it runs locally. Promote the
+folder to share it.
 An R cell gets the folder as a path string and its folder is kept, but cannot
 read another cell's folder yet.</p>
 <h2 id="nocache">@nocache<a class="headerlink" href="#nocache" title="Permanent link">&para;</a></h2>

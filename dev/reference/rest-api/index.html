@@ -4970,9 +4970,11 @@ hold, <code>502</code> when the team store refuses or cannot be reached.</p>
 <a id="__codelineno-79-2" name="__codelineno-79-2" href="#__codelineno-79-2"></a>outputs/&lt;cell id&gt;/console.json   stdout / stderr
 <a id="__codelineno-79-3" name="__codelineno-79-3" href="#__codelineno-79-3"></a>artifacts.json                   per-cell provenance, timings, and every ready
 <a id="__codelineno-79-4" name="__codelineno-79-4" href="#__codelineno-79-4"></a>                                 cell's artifacts with their content digests
-<a id="__codelineno-79-5" name="__codelineno-79-5" href="#__codelineno-79-5"></a>artifacts/&lt;id&gt;@v=&lt;n&gt;             the bytes, for whichever were included
-<a id="__codelineno-79-6" name="__codelineno-79-6" href="#__codelineno-79-6"></a>fetch/&lt;sha256&gt;/&lt;file&gt;            with include=all, the bytes each @fetch last read
-<a id="__codelineno-79-7" name="__codelineno-79-7" href="#__codelineno-79-7"></a>fetch/index.json                 with include=all, which URL served which bytes
+<a id="__codelineno-79-5" name="__codelineno-79-5" href="#__codelineno-79-5"></a>                                 (an output folder's entries include each file
+<a id="__codelineno-79-6" name="__codelineno-79-6" href="#__codelineno-79-6"></a>                                 version its manifest names)
+<a id="__codelineno-79-7" name="__codelineno-79-7" href="#__codelineno-79-7"></a>artifacts/&lt;id&gt;@v=&lt;n&gt;             the bytes, for whichever were included
+<a id="__codelineno-79-8" name="__codelineno-79-8" href="#__codelineno-79-8"></a>fetch/&lt;sha256&gt;/&lt;file&gt;            with include=all, the bytes each @fetch last read
+<a id="__codelineno-79-9" name="__codelineno-79-9" href="#__codelineno-79-9"></a>fetch/index.json                 with include=all, which URL served which bytes
 </code></pre></div>
 <p><code>include</code> chooses how much travels:</p>
 <table>

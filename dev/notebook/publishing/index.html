@@ -2508,10 +2508,15 @@ is over 128 MiB is archived without the Parquet copy, since converting it holds
 the whole table in memory; neither the manifest nor the crate then lists one.
 The limit is fixed, so it never makes one publication's archive differ between
 builds.</p>
+<p>A <a href="../annotations/#output_dir"><code># @output_dir</code></a> folder's published bytes are its
+manifest, the list of its files (<code>artifact.bin</code>, JSON), which <code>/p/&lt;token&gt;/data</code>
+serves. The bundle holds the files themselves under <code>folder/</code>, at their paths in
+the folder, each with its own digest in the manifest's <code>additional_files</code> and
+as a <code>File</code> in the RO-Crate.</p>
 <p>Whichever file a reader kept, the server can say whether it is this
 publication's. <code>GET /p/&lt;token&gt;/verify?sha256=&lt;digest of the file&gt;</code> answers with
-<code>file</code> naming it (<code>artifact.arrow</code> or <code>artifact.parquet</code>, or <code>null</code> for a file
-from elsewhere) and <code>matches</code> true only when it names one and the stored bytes
+<code>file</code> naming it (<code>artifact.arrow</code>, <code>artifact.parquet</code> or a folder's
+<code>folder/&lt;path&gt;</code>, or <code>null</code> for a file from elsewhere) and <code>matches</code> true only when it names one and the stored bytes
 are unchanged. The Parquet digest is the one in the archive the server serves.</p>
 <p>Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.</p>
@@ -2625,6 +2630,11 @@ version id a different computation took there) lands as a copy under a fresh
 id, <code>&lt;id&gt;@import=&lt;8 hex&gt;</code>, in the caller's tenant. Each copy keeps its
 provenance hash, and the CLI points every descendant's lineage edges at the
 ids its ancestors landed on, so the published page resolves every step.
+A <a href="../annotations/#output_dir"><code># @output_dir</code></a> folder in the chain goes with
+every file its version names, each before the manifest. A file the target
+already holds (<code>GET /v1/artifacts/by-provenance/{hash}</code> finds it with the same
+digest) is not uploaded again, and when a file lands under another version or a
+fresh id, the copied manifest's entry names that version and <code>id</code>.
 Publishing the same chain again writes nothing. The target refuses a blob
 larger than its <code>STRATA_MAX_UPLOAD_BYTES</code> with <code>413</code>; raise it there to publish
 larger artifacts.</p>
