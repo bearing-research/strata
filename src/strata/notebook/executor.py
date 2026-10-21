@@ -1915,7 +1915,7 @@ class CellExecutor:
                                 execution_method=exec_result.execution_method,
                                 mutation_warnings=exec_result.mutation_warnings,
                             ).apply_remote_metadata(**remote_metadata)
-                    if exec_result.success and mount_writes:
+                    if exec_result.success:
                         self._store_mount_writes(
                             cell_id,
                             provenance_hash,
@@ -2671,7 +2671,7 @@ class CellExecutor:
                                 execution_method=exec_result.execution_method,
                                 mutation_warnings=exec_result.mutation_warnings,
                             )
-                    if exec_result.success and mount_writes:
+                    if exec_result.success:
                         self._store_mount_writes(
                             cell_id,
                             provenance_hash,
@@ -5727,7 +5727,13 @@ class CellExecutor:
         A read-write cell never cache-hits, so this is the run's record of its side effect:
         the files it created or changed, with sizes and sha256 digests, linked to the inputs
         it read. Each run adds a version, so earlier runs' records stay readable.
+
+        The writes index gets the same, or loses the cell's entry when the run wrote nothing.
+        Called once the sync-back succeeded, so a failed one leaves the entry as it was.
         """
+        from strata.notebook import writes_index
+        from strata.notebook.artifact_integration import caller_principal_id
+
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id)
         for write in writes:
@@ -5753,6 +5759,13 @@ class CellExecutor:
                 # The files are already written and synced; losing the record is not a
                 # reason to fail the run.
                 logger.exception("Failed to record writes through mount %s", write.mount)
+        entry = {
+            "ran_at": int(time.time() * 1000),
+            "principal": caller_principal_id(),
+            "mounts": [write.model_dump() for write in writes],
+        }
+        live = [c.id for c in self.session.notebook_state.cells]
+        writes_index.record(self.session.path, cell_id, entry if writes else None, live)
 
     def _store_inline_display_outputs(
         self,
