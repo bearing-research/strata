@@ -138,8 +138,6 @@ exhaustive commit history.
   the ones the manifest names. A folder whose file has a row but lost its bytes
   is refused before any of its files is copied. A folder naming a file another
   tenant holds reads that file as missing, in a rebuild, a copy and a
-  publication's archive. `strata artifact pull <id>@v=<n> --to <dir>` rebuilds
-  a folder's files instead of writing its manifest. (#1284)
   publication's archive. A publication's archive of a folder manifest that
   cannot be read is a `404`, as for a missing file, not a `500`.
   `strata artifact pull <id>@v=<n> --to <dir>` rebuilds a folder's files
@@ -160,7 +158,7 @@ exhaustive commit history.
   once its most recently used member is among the least recently used. A
   dry run reports the same. A stored folder whose files are already gone is a
   miss for `GET /v1/artifacts/by-provenance/{hash}`, and the next publish of it
-  replaces it rather than getting it back as the first writer's. (#TBD)
+  replaces it rather than getting it back as the first writer's. (#1290)
 - **Promoting or publishing an output folder copies its files.** Promote,
   `strata artifact publish` (`--to` too) and the MCP tools copied a
   `# @output_dir` folder's manifest without the files it names, leaving it
