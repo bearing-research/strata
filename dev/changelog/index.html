@@ -3928,6 +3928,15 @@ exhaustive commit history.</p>
   arrived, so the browser never showed a cell running or offered its stop
   button. Each now shows running from the moment it starts, and a cell left
   unfinished by a stop goes back to idle. (#1271)</li>
+<li><strong>The reference executor reads every input part.</strong> <code>create_executor_app</code>
+  read only <code>input0</code> to <code>input4</code>, so a build over six or more inputs lost the
+  rest and its SQL could not query them. It now reads each <code>inputN</code> part, in
+  index order. (#1272)</li>
+<li><strong>Restarting the R warm pool no longer orphans a booting R worker.</strong> A pool
+  drain that landed while a worker was still being spawned killed only the
+  lifeline wrapper, leaving the R process under it running until it exited on
+  its own. The pool now finishes the spawn and stops the whole process group.
+  (#1266)</li>
 </ul>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3954,8 +3963,7 @@ exhaustive commit history.</p>
   such as <code>adls.connection-string</code> and <code>header.*</code>. Now <code>type</code>, <code>warehouse</code>,
   <code>strata_credential</code>, the region keys, <code>glue.id</code>, <code>adls.account-name</code> and
   <code>gcs.project-id</code> are shown and every other value reads <code>&lt;redacted&gt;</code>. (#1265)</li>
-<li>
-<p><strong><code>PUT /v1/admin/notebook-credentials</code> reads files only under
+<li><strong><code>PUT /v1/admin/notebook-credentials</code> reads files only under
   <code>STRATA_NOTEBOOK_CREDENTIAL_FILE_ROOTS</code>.</strong> A caller holding only the route's
   scope could have the server read any environment variable or file it can
   into a credential. A <code>${VAR}</code> reference through the route is now refused
@@ -3966,15 +3974,7 @@ exhaustive commit history.</p>
   every one. Once roots are set, every <code>${file:...}</code> reference, startup ones
   included, is checked again at each read, so a file swapped for a link out of
   a root is not read, and a file rewritten in place is still used at the next
-  run with no call. (#1265)</p>
-</li>
-<li>
-<p><strong>Restarting the R warm pool no longer orphans a booting R worker.</strong> A pool
-  drain that landed while a worker was still being spawned killed only the
-  lifeline wrapper, leaving the R process under it running until it exited on
-  its own. The pool now finishes the spawn and stops the whole process group.
-  (#1266)</p>
-</li>
+  run with no call. (#1265)</li>
 </ul>
 <h2 id="0110-2026-10-19">0.11.0 - 2026-10-19<a class="headerlink" href="#0110-2026-10-19" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
