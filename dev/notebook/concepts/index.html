@@ -2486,9 +2486,10 @@ explicit <code>map_location</code> - see the device/placement guidance in
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    ├── fetch/                 # The bytes each @fetch last read
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    ├── tables/index.json      # The tables each cell's last good run read
 <a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    ├── reads/index.json       # The bytes each cell's last good run moved, per input
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    └── artifacts/
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>        ├── artifacts.sqlite   # Artifact metadata
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        └── blobs/             # Serialized cell outputs
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>    ├── writes/index.json      # The files each cell's last good run wrote through rw mounts
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    └── artifacts/
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        ├── artifacts.sqlite   # Artifact metadata
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        └── blobs/             # Serialized cell outputs
 </code></pre></div>
 <p><code>notebook.toml</code> holds stable config you'd commit to git; <code>.strata/</code> holds runtime state that changes on every execution (display outputs, console snapshots, the last <code>uv sync</code> timestamp, per-cell provenance hashes). <code>notebook.toml</code>'s <code>updated_at</code> tracks only structural edits (adding/removing cells, changing workers or mounts), so example notebooks don't churn under version control.</p>
 <p><code>notebook.toml</code> defines the notebook identity and cell ordering:</p>

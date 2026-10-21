@@ -3791,6 +3791,13 @@ exhaustive commit history.</p>
   source a host connects mid-session brings its egress rate and a costly first
   read through it asks without a restart. A rate that is not a number is
   refused with <code>422</code>. Left out of a body, the rates are cleared. (#1275)</li>
+<li><strong><code>.strata/writes/index.json</code>: the files each cell wrote through its <code>rw</code>
+  mounts.</strong> For each cell, its last successful run's writes, one entry per
+  mount with each file's path, size and sha256, plus when it ran and the
+  principal it ran for, so a host lists what a source was written by without
+  reading each cell's <code>__mount__&lt;name&gt;</code> record. A failed run or sync-back
+  leaves the entry; a run that writes nothing, or deleting the cell, drops it.
+  (#1276)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
