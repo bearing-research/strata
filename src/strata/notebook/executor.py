@@ -3477,6 +3477,7 @@ class CellExecutor:
                     blob_store=(
                         artifact_store.blob_store if state.config.artifact_presigned_urls else None
                     ),
+                    version_record=artifact_store.get_artifact,
                     # The worker uploads and finalizes after provisioning plus the whole
                     # cell run (and 5 minutes for the upload), so the setting is a floor.
                     url_expiry_seconds=max(

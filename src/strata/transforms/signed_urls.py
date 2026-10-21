@@ -14,11 +14,11 @@ import hmac
 import json
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 from urllib.parse import urlencode
 
-from strata.artifact.store import attempt_blob_id
+from strata.artifact.store import ArtifactVersion, attempt_blob_id
 
 
 def lease_token(lease_owner: str | None, lease_expires_at: float | None) -> str:
@@ -47,12 +47,16 @@ def lease_attempt(lease: str) -> str | None:
 
 @dataclass(frozen=True)
 class SignedDownloadURL:
-    """Signed URL for downloading an input artifact; ``expires_at`` is epoch seconds."""
+    """Signed URL for downloading an input artifact; ``expires_at`` is epoch seconds.
+
+    ``size_bytes`` is the version's stored size, ``None`` when the store has none recorded.
+    """
 
     url: str
     artifact_id: str
     version: int
     expires_at: float
+    size_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -108,10 +112,14 @@ class BuildManifest:
         for optional in ("fields", "headers"):
             if output[optional] is None:
                 del output[optional]
+        inputs = [asdict(url) for url in self.input_urls]
+        for entry in inputs:
+            if entry["size_bytes"] is None:
+                del entry["size_bytes"]
         return {
             "build_id": self.build_id,
             "metadata": self.metadata,
-            "inputs": [asdict(url) for url in self.input_urls],
+            "inputs": inputs,
             "output": output,
             "finalize_url": self.finalize_url,
             "log_url": self.log_url,
@@ -376,6 +384,7 @@ class URLSigner:
         lease_expires_at: float | None = None,
         blob_store: Any = None,
         blob_key: Callable[[str, int], tuple[str, int]] | None = None,
+        version_record: Callable[[str, int], ArtifactVersion | None] | None = None,
     ) -> BuildManifest:
         """Assemble the signed-URL manifest for a build: inputs, output, finalize and log.
 
@@ -383,7 +392,9 @@ class URLSigner:
         presign, inputs and output go straight to the object store and only finalize and log stay
         Strata routes; the output key is ``metadata["artifact_id"]`` / ``["version"]``.
         ``blob_key`` maps an input to the key its bytes are presigned under, which may be an
-        attempt's or another version's.
+        attempt's or another version's. ``version_record`` (the store's ``get_artifact``) gives
+        each input its recorded ``byte_size`` as ``size_bytes``, so a dispatcher can weigh the
+        inputs before placing the build.
         """
         expires_at = time.time() + url_expiry_seconds
         # The executor writes under this claim's own attempt, so an earlier
@@ -399,7 +410,7 @@ class URLSigner:
                 if blob_store is not None
                 else None
             )
-            input_urls.append(
+            signed = (
                 SignedDownloadURL(
                     url=presigned,
                     artifact_id=artifact_id,
@@ -414,6 +425,10 @@ class URLSigner:
                     build_id=build_id,
                     expiry_seconds=url_expiry_seconds,
                 )
+            )
+            record = version_record(artifact_id, version) if version_record is not None else None
+            input_urls.append(
+                replace(signed, size_bytes=record.byte_size) if record is not None else signed
             )
         output_artifact = metadata.get("artifact_id"), metadata.get("version")
         presigned_upload = presigned_put = None

@@ -1492,6 +1492,55 @@ class Person:
         assert metadata["cell_provenance_hash"] != artifact.provenance_hash
 
     @pytest.mark.asyncio
+    async def test_each_manifest_input_carries_the_size_the_store_holds(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """A dispatcher weighs a cell's inputs from the manifest before it places the cell."""
+        import strata.server as server_module
+
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell1.source = 'small = "x" * 10\nlarge = "y" * 50000'
+        sample_notebook.re_analyze_cell("cell1")
+        cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
+        cell2.worker = "gpu-http-signed"
+        cell2.source = "total = len(small) + len(large)"
+        sample_notebook.re_analyze_cell("cell2")
+        signer = server_module._state.url_signer
+        real = signer.generate_build_manifest
+        manifests: list[dict] = []
+
+        def _capturing(*args, **kwargs):
+            manifest = real(*args, **kwargs)
+            manifests.append(manifest.to_dict())
+            return manifest
+
+        monkeypatch.setattr(signer, "generate_build_manifest", _capturing)
+
+        executor = CellExecutor(sample_notebook)
+        first = await executor.execute_cell("cell1", cell1.source)
+        second = await executor.execute_cell("cell2", cell2.source)
+
+        assert first.success, first.error
+        assert second.success, second.error
+        assert second.outputs["total"]["preview"] == 50010
+        store = notebook_build_server["artifact_store"]
+        inputs = manifests[-1]["inputs"]
+        assert len(inputs) == 2
+        sizes = []
+        for entry in inputs:
+            record = store.get_artifact(entry["artifact_id"], entry["version"])
+            stored = len(store.read_blob(entry["artifact_id"], entry["version"]))
+            assert entry["size_bytes"] == record.byte_size == stored
+            sizes.append(stored)
+        assert len(set(sizes)) == 2
+        assert max(sizes) > 50000 > min(sizes)
+
+    @pytest.mark.asyncio
     async def test_the_env_reaches_the_worker_but_no_stored_row(
         self,
         sample_notebook,

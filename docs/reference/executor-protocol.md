@@ -309,7 +309,8 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
       "artifact_id": "abc123",
       "version": 4,
       "url": "https://strata.example.com/v1/artifacts/download?...&signature=...",
-      "expires_at": 1789455608.2
+      "expires_at": 1789455608.2,
+      "size_bytes": 52428800
     }
   ],
   "output": {
@@ -325,7 +326,10 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
 ```
 
 Each URL is a signed capability that expires at `expires_at`; `output.max_bytes`
-caps the upload. Fetching a build's manifest again (`GET
+caps the upload. An input's `size_bytes` is the stored size of that artifact
+version, so a dispatcher can weigh a job's inputs before it places the job; it
+is absent when the store records no size, as for a version still being
+written. A worker can ignore it. Fetching a build's manifest again (`GET
 /v1/builds/{build_id}/manifest`) renews its lease and retires the upload and
 finalize URLs of every earlier manifest, so an executor still holding an old
 one can no longer publish. If the lease lapsed and the build runner took the
