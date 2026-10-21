@@ -952,13 +952,15 @@ class CellExecutor:
         batch_timeout_seconds: float = 600.0,
         cell_timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
+        on_cell_start: Callable[[str], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Execute a sequence of cells in one harness subprocess.
 
         ``cell_specs`` are in notebook order, each with ``cell_id``, ``source``,
         ``env`` and a resolved ``mount_manifest``; the caller partitions the
         notebook. ``use_cache=False`` is rerun-all. ``on_cell_event`` is awaited
-        as each ``BatchCellResult`` is recorded, so frames stream in real time.
+        as each ``BatchCellResult`` is recorded, so frames stream in real time;
+        ``on_cell_start`` is awaited with a cell's id as the harness starts it.
         """
         return await self._run_batch(
             cell_specs,
@@ -966,6 +968,7 @@ class CellExecutor:
             batch_timeout_seconds=batch_timeout_seconds,
             cell_timeout_seconds=cell_timeout_seconds,
             on_cell_event=on_cell_event,
+            on_cell_start=on_cell_start,
         )
 
     @contextmanager
@@ -7132,6 +7135,7 @@ class CellExecutor:
         batch_timeout_seconds: float,
         cell_timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
+        on_cell_start: Callable[[str], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Run a sequence of cells in one harness subprocess (see ``execute_batch``).
 
@@ -7282,6 +7286,7 @@ class CellExecutor:
                             },
                             use_cache=use_cache,
                             on_cell_event=on_cell_event,
+                            on_cell_start=on_cell_start,
                             watchdog_state=watchdog_state,
                         ),
                         timeout=batch_timeout_seconds,
@@ -7353,12 +7358,14 @@ class CellExecutor:
         executed_sources: dict[str, str],
         use_cache: bool,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
+        on_cell_start: Callable[[str], Awaitable[None]] | None = None,
         watchdog_state: dict[str, Any] | None = None,
     ) -> tuple[str, str | None]:
         """Read frames and service requests until ``batch_end``.
 
         Returns ``(end_reason, failed_cell_id)``. ``on_cell_event`` is awaited
-        after each ``BatchCellResult`` is recorded.
+        after each ``BatchCellResult`` is recorded, ``on_cell_start`` on each
+        ``cell_start``.
         """
         active_cell_id: str | None = None
         end_reason = "subprocess_died"
@@ -7445,6 +7452,9 @@ class CellExecutor:
 
             if ftype == "cell_start":
                 active_cell_id = payload.get("cell_id")
+                # Before the watchdog window opens: the announcement is the parent's time.
+                if on_cell_start is not None and active_cell_id:
+                    await on_cell_start(active_cell_id)
                 # Watchdog window: from cell_start until a completion frame (cache_hit output,
                 # cell_error, or persist).
                 if watchdog_state is not None and active_cell_id:
