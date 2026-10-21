@@ -65,6 +65,10 @@ class PublicationTarget(Protocol):
         self, record: ArtifactVersion, blob: bytes | Path | None
     ) -> ImportedArtifact: ...
 
+    def find_by_provenance(
+        self, provenance_hash: str, tenant: str | None = None
+    ) -> ArtifactVersion | None: ...
+
     def publish_artifact(
         self,
         artifact_id: str,
@@ -152,6 +156,32 @@ class RemoteStore:
             id=str(body["id"]),
             version=int(body["version"]),
             written=bool(body.get("written")),
+        )
+
+    def find_by_provenance(
+        self, provenance_hash: str, tenant: str | None = None
+    ) -> ArtifactVersion | None:
+        """The ready version the far side holds for *provenance_hash*, or ``None``.
+
+        ``tenant`` is not sent: the far side scopes the lookup to the authenticated caller.
+        Any refusal reads as a miss, and the caller sends the bytes.
+        """
+        import httpx
+
+        response = httpx.get(
+            f"{self.base_url}/v1/artifacts/by-provenance/{provenance_hash}",
+            headers=self._headers,
+            timeout=REMOTE_TIMEOUT_SECONDS,
+        )
+        if response.status_code != 200:
+            return None
+        body = response.json()
+        return ArtifactVersion(
+            id=str(body["artifact_id"]),
+            version=int(body["version"]),
+            state=str(body.get("state") or "ready"),
+            provenance_hash=str(body["provenance_hash"]),
+            content_sha256=body.get("content_sha256"),
         )
 
     def set_name(self, name: str, artifact_id: str, version: int) -> None:
@@ -323,11 +353,16 @@ def copy_chain(
     does not serve, and the published page needs every upstream step. Ancestors go
     first, so a descendant is never readable with dangling edges and can be
     rewritten to where each ancestor landed (possibly an existing row with the same
-    computation under another id).
+    computation under another id). A ``# @output_dir`` folder in the chain goes with
+    every file it names, before its manifest.
 
     Returns the refs newly written on the target, in landing order, and the ref the
     artifact itself landed on, which differs from the caller's when it deduplicated.
+
+    Raises:
+        ValueError: A folder in the chain names a file the source does not hold.
     """
+    from strata.notebook import output_dirs
     from strata.services.artifact import ArtifactService
 
     lineage = ArtifactService().build_lineage(
@@ -352,19 +387,10 @@ def copy_chain(
         if record is None:
             continue
         record = remap_input_versions(record, remap)
-        with tempfile.TemporaryDirectory(prefix="strata_copy_") as workdir:
-            # Spooled to disk, so an artifact never sits whole in memory.
-            reader_cm = source.open_blob_reader(node.artifact_id, node.version)
-            blob = None
-            if reader_cm is not None:
-                blob = Path(workdir) / "blob"
-                hasher = hashlib.sha256()
-                with reader_cm as reader, open(blob, "wb") as out:
-                    for chunk in _chunks(reader):
-                        hasher.update(chunk)
-                        out.write(chunk)
-                record = replace(record, content_sha256=hasher.hexdigest())
-            imported = target.import_artifact(record, blob)
+        manifest = None
+        if record.params.get("content_type") == output_dirs.CONTENT_TYPE:
+            manifest = _copy_folder_files(source, target, record, written)
+        imported = _copy_record(source, target, record, manifest)
         if imported.written:
             written.append(imported.ref)
 
@@ -374,6 +400,67 @@ def copy_chain(
             if source_ref == published_ref:
                 landed_ref = imported.ref
     return written, landed_ref
+
+
+def _copy_record(
+    source: ArtifactStore,
+    target: PublicationTarget,
+    record: ArtifactVersion,
+    blob: bytes | None = None,
+) -> ImportedArtifact:
+    """Import one version into *target* with *blob*, or else its bytes in *source*."""
+    if blob is not None:
+        digest = hashlib.sha256(blob).hexdigest()
+        return target.import_artifact(replace(record, content_sha256=digest), blob)
+    with tempfile.TemporaryDirectory(prefix="strata_copy_") as workdir:
+        # Spooled to disk, so an artifact never sits whole in memory.
+        reader_cm = source.open_blob_reader(record.id, record.version)
+        path = None
+        if reader_cm is not None:
+            path = Path(workdir) / "blob"
+            hasher = hashlib.sha256()
+            with reader_cm as reader, open(path, "wb") as out:
+                for chunk in _chunks(reader):
+                    hasher.update(chunk)
+                    out.write(chunk)
+            record = replace(record, content_sha256=hasher.hexdigest())
+        return target.import_artifact(record, path)
+
+
+def _copy_folder_files(
+    source: ArtifactStore,
+    target: PublicationTarget,
+    manifest_record: ArtifactVersion,
+    written: list[str],
+) -> bytes:
+    """Copy each file a folder manifest names; return the manifest naming where each landed.
+
+    A file is not a lineage edge of its manifest, so the walk never reaches it. One the
+    target already holds (same id and digest, so the same bytes) is not sent again, and
+    the manifest names the version the target has.
+    """
+    from strata.notebook import output_dirs
+
+    ref = f"{manifest_record.id}@v={manifest_record.version}"
+    manifest = source.read_blob(manifest_record.id, manifest_record.version)
+    if manifest is None:
+        raise ValueError(f"{ref} is a folder whose manifest has no stored bytes")
+    landed: dict[tuple[str, int], tuple[str, int]] = {}
+    for file_id, version, sha256 in output_dirs.file_refs(manifest_record.id, manifest):
+        record = source.get_artifact(file_id, version)
+        if record is None or record.state not in ("ready", "superseded"):
+            raise ValueError(f"{ref} is a folder naming {file_id}@v={version}, which is gone")
+        held = target.find_by_provenance(record.provenance_hash, tenant=record.tenant)
+        if held is not None and held.content_sha256 == sha256:
+            landed[(file_id, version)] = (held.id, held.version)
+            continue
+        imported = _copy_record(source, target, record)
+        if imported.written:
+            written.append(imported.ref)
+        landed[(file_id, version)] = (imported.id, imported.version)
+    # Under the id it is sent with: a remap only suffixes that, which keeps the base its
+    # files' ids are read from.
+    return output_dirs.relocate(manifest, manifest_record.id, landed)
 
 
 def _ancestors_first(lineage: ArtifactLineageResponse) -> list[LineageNode]:

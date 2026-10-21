@@ -44,6 +44,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `s3.*` keys (`s3.endpoint`, `s3.region` and `s3.path-style-access` too)
   whatever form the warehouse takes. Without an `s3://` warehouse those keys
   reach only the locations of the tables the query reads. (#1278)
+- **A promoted output folder reads back as a folder.** `# @dataset` naming a
+  `# @output_dir` folder in the registry binds the folder's `Path`, its files
+  copied into the notebook's store, rather than a path to its manifest; and a
+  published folder's `/p/{token}/archive.zip` holds its files under `folder/`,
+  each with its own digest that `/p/{token}/verify` recognises. (#1279)
 
 ### Changed
 
@@ -61,6 +66,17 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **Promoting or publishing an output folder copies its files.** Promote,
+  `strata artifact publish` (`--to` too) and the MCP tools copied a
+  `# @output_dir` folder's manifest without the files it names, leaving it
+  unreadable in the other store. Each file now goes first, a file the store
+  already holds is not uploaded again, and a file that lands under another
+  version or id is named there. A snapshot carries the file versions a folder
+  names rather than only each file's latest, and a folder imported from a
+  snapshot is rebuilt again (it read imported bytes from the wrong key). A
+  store's garbage collection now keeps every file version a published, named
+  or pinned folder names, and `strata artifact publish` refuses a folder
+  missing a file with a message instead of a traceback. (#1279)
 - **An exported link loses an unsafe target wherever it is defined.** A
   `javascript:`, `vbscript:` or non-image `data:` reference definition inside
   a blockquote or list item, or under a label split across lines, kept its

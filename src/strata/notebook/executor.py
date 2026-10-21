@@ -1740,7 +1740,9 @@ class CellExecutor:
                 )
                 if fetches_as_inputs:
                     _add_fetch_inputs(input_specs, prov.fetched, output_dir)
-                self._add_dataset_inputs(input_specs, prov.datasets, output_dir)
+                await anyio.to_thread.run_sync(
+                    self._add_dataset_inputs, input_specs, prov.datasets, output_dir
+                )
 
                 venv_path = self.session.venv_python
 
@@ -4314,7 +4316,7 @@ class CellExecutor:
                 continue
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(dataset.content_type, "")
             file_name = f"__dataset_{name}{ext}"
-            (output_dir / file_name).write_bytes(blob)
+            self._write_input_file(output_dir / file_name, blob, dataset.content_type, artifact_id)
             input_specs[name] = {
                 "content_type": dataset.content_type,
                 "file": file_name,
@@ -5122,7 +5124,7 @@ class CellExecutor:
             content_type = artifact.params.get("content_type") or "pickle/object"
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
-            self._write_input_file(input_file, blob_data, content_type)
+            self._write_input_file(input_file, blob_data, content_type, artifact_id)
             return {
                 "content_type": content_type,
                 "file": f"{safe_filename_stem(file_stem)}{ext}",
@@ -5146,7 +5148,7 @@ class CellExecutor:
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
             self._write_input_file(
-                input_file, artifact_mgr.load_artifact_data(art_id, version), content_type
+                input_file, artifact_mgr.load_artifact_data(art_id, version), content_type, art_id
             )
             return {"content_type": content_type, "file": f"{safe_filename_stem(file_stem)}{ext}"}
 
@@ -5513,12 +5515,15 @@ class CellExecutor:
 
         return True
 
-    def _write_input_file(self, path: Path, blob: bytes, content_type: str) -> None:
+    def _write_input_file(
+        self, path: Path, blob: bytes, content_type: str, artifact_id: str
+    ) -> None:
         """Write an input's bytes for the harness; an output folder is rebuilt beside them."""
         path.write_bytes(blob)
         if content_type == output_dirs.CONTENT_TYPE:
             folder = path.with_name(path.name.removesuffix(output_dirs.EXTENSION) + ".dir")
-            output_dirs.materialize(self.session.get_artifact_manager(), blob, folder)
+            store = self.session.get_artifact_manager().artifact_store
+            output_dirs.materialize(store, artifact_id, blob, folder)
 
     def _collect_output_dir(self, cell_id: str, name: str, output_dir: Path | None) -> bytes:
         """Store a ``# @output_dir`` folder's files and return its manifest.
@@ -7000,7 +7005,10 @@ class CellExecutor:
             if manifest is None:
                 raise ValueError(f"Loop seed folder missing for {kept.id}@v={kept.version}.")
             output_dirs.materialize(
-                artifact_mgr, manifest, folders / output_dirs.OUTPUT_DIRS / name
+                artifact_mgr.artifact_store,
+                kept.id,
+                manifest,
+                folders / output_dirs.OUTPUT_DIRS / name,
             )
 
     def _resolve_loop_seed(
@@ -7636,7 +7644,7 @@ class CellExecutor:
         content_type = _artifact_content_type(art)
         ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
         file_name = f"{safe_filename_stem(var_name)}{ext}"
-        self._write_input_file(target_dir / file_name, blob, content_type)
+        self._write_input_file(target_dir / file_name, blob, content_type, artifact_id)
         return {"content_type": content_type, "file": file_name}
 
     def _upstream_artifact_uris(self, cell_id: str) -> dict[str, dict[str, str]]:

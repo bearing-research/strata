@@ -300,7 +300,8 @@ async def pull_cell_outputs(
         if artifact is not None
     ]
     if any(artifact.content_type == output_dirs.CONTENT_TYPE for _, artifact in pulled):
-        # Its files are artifacts of their own, which the team store does not hold.
+        # A pull fetches the manifest alone and lands it under this notebook's ids, where the
+        # files it names are not. Promoting a folder copies its files; a pull does not.
         logger.debug("Cell %s keeps an output folder; running it locally", cell_id)
         return None
 
@@ -404,7 +405,7 @@ async def publish_cell_outputs(
             continue
         content_type = _spec_param(stored, "content_type")
         if content_type == output_dirs.CONTENT_TYPE:
-            continue  # a manifest without its files, which a pull refuses
+            continue  # the cache route takes one blob, the manifest without its files
         blob = artifact_mgr.artifact_store.read_blob(artifact_id, stored.version)
         if blob is None:
             continue

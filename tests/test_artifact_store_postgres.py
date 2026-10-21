@@ -465,6 +465,18 @@ class TestFindReadyAndSetName:
 
 
 class TestGarbageCollection:
+    def test_a_published_folder_keeps_its_files(self, store, tmp_path):
+        # The walk finds manifests with a LIKE over transform_spec; run it on Postgres.
+        from strata.artifact.transfer import copy_chain
+        from tests.test_folder_transfer import FILES, _folder, _rebuilt
+
+        manager, folder = _folder(tmp_path / "alice", FILES)
+        copy_chain(manager.artifact_store, store, folder, 10)
+        store.publish_artifact(folder.id, folder.version)
+
+        assert store.garbage_collect(max_idle_days=0, collect_latest=True)["deleted_count"] == 0
+        assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES
+
     def test_the_current_value_survives_a_rebuild_in_flight(self, store):
         # The spare-the-current-value clause is a correlated NOT EXISTS; run
         # it on the dialect that has never seen it in a unit test.

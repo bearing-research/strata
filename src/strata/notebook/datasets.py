@@ -5,7 +5,8 @@ the ambient client uses, to one ``id@v=N``; copies that version into the
 notebook's store; binds it to ``model`` like an upstream variable; and folds
 ``"<var>:dataset:<reference>:<id>@v=<n>"`` into provenance. ``name@alias`` and a
 bare name go stale when their pointer moves; ``name@v=N`` never does. A value the
-harness can read is bound as that value; anything else arrives as a ``Path``.
+harness can read is bound as that value; a ``# @output_dir`` folder arrives as
+the folder's ``Path``, its files copied with it; anything else arrives as a ``Path``.
 The copy keeps its ``input_versions``, and the chain behind it is copied too, so
 lineage in the notebook walks past the dataset to the steps that made it.
 """
@@ -22,6 +23,7 @@ import httpx
 
 from strata.artifact.store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
 from strata.artifact.transfer import remap_input_versions
+from strata.notebook import output_dirs
 from strata.notebook.models import DatasetSpec
 
 STALE_CHECK_SECONDS = 60.0
@@ -81,10 +83,13 @@ def unresolved_fingerprint(spec: DatasetSpec) -> str:
 def content_type_of(record: ArtifactVersion) -> str:
     """Return *record*'s content type if the harness can read it, else ``file/path``.
 
-    A record with no content type (written outside a notebook) is Arrow IPC.
+    A record with no content type (written outside a notebook) is Arrow IPC. A folder
+    keeps its own, so the executor rebuilds it beside its manifest.
     """
     content_type = record.params.get("content_type") or "arrow/ipc"
-    return content_type if content_type in VALUE_CONTENT_TYPES else "file/path"
+    if content_type in VALUE_CONTENT_TYPES or content_type == output_dirs.CONTENT_TYPE:
+        return content_type
+    return "file/path"
 
 
 class Registry(Protocol):
@@ -320,9 +325,40 @@ def _land(
         landed[ref] = _land(registry, store, *fetched, depth=depth + 1, landed=landed)
     # The notebook's store is untenanted.
     record = remap_input_versions(replace(record, tenant=None), landed)
+    if record.params.get("content_type") == output_dirs.CONTENT_TYPE:
+        blob = _land_folder_files(registry, store, record, blob, landed)
     try:
         return store.import_artifact(record, blob).ref
     except ArtifactImportConflict:
         # A clone of this notebook made the same id for other bytes.
         fresh = replace(record, id=f"{record.id}@import={uuid.uuid4().hex[:8]}")
         return store.import_artifact(fresh, blob).ref
+
+
+def _land_folder_files(
+    registry: Registry,
+    store: ArtifactStore,
+    record: ArtifactVersion,
+    manifest: bytes,
+    landed: dict[str, str],
+) -> bytes:
+    """Copy each file a folder's manifest names; return the manifest naming where they landed.
+
+    The files are not lineage edges, so the walk above never reaches them.
+    """
+    moved: dict[tuple[str, int], tuple[str, int]] = {}
+    for file_id, version, _ in output_dirs.file_refs(record.id, manifest):
+        ref = f"{file_id}@v={version}"
+        if ref not in landed:
+            local = _already_here(registry, store, file_id, version)
+            if local is not None:
+                landed[ref] = f"{local.id}@v={local.version}"
+            else:
+                fetched = registry.download(file_id, version)
+                if fetched is None:
+                    raise DatasetError(f"{record.id}@v={record.version} names {ref}, which is gone")
+                # A file has no inputs to walk.
+                landed[ref] = _land(registry, store, *fetched, depth=ANCESTRY_DEPTH, landed=landed)
+        landed_id, _, landed_version = landed[ref].rpartition("@v=")
+        moved[(file_id, version)] = (landed_id, int(landed_version))
+    return output_dirs.relocate(manifest, record.id, moved)
