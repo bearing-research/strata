@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from strata.notebook.executor import CellExecutor
 from tests.notebook.e2e_fixtures import (
     NotebookBuilder,
     create_test_app,
@@ -118,31 +119,43 @@ class TestAnnotationOverrides:
                 assert cell["env"] == {"APP_MODE": "notebook"}
                 assert cell["annotations"]["env"] == {"APP_MODE": "annotated"}
 
-    def test_timeout_annotation_beats_notebook_timeout(self, setup):
+    def test_timeout_annotation_beats_notebook_timeout(self, setup, monkeypatch):
         client, tmp = setup
         nb = NotebookBuilder(tmp).add_cell(
             "c1",
             "import time\ntime.sleep(0.05)\nvalue = 'done'",
         )
+        resolved: list[float] = []
+        real_resolve = CellExecutor._resolve_effective_timeout
+
+        def _spy_resolve(self, cell_id, timeout_seconds, annotation_timeout):
+            effective = real_resolve(self, cell_id, timeout_seconds, annotation_timeout)
+            resolved.append(effective)
+            return effective
+
+        monkeypatch.setattr(CellExecutor, "_resolve_effective_timeout", _spy_resolve)
 
         with open_notebook_session(client, nb.path) as (sid, session):
+            # The cell sleeps 0.05 s, so the 0.01 s notebook timeout fails it on any machine.
             notebook_timeout = _put_notebook_timeout(client, sid, 0.01)
             assert notebook_timeout["timeout"] == 0.01
 
             with ws_connect(client, sid) as ws:
+                # Under the 180 s pytest timeout, far above a cold harness start on a loaded runner.
                 _update_source_and_wait(
                     ws,
                     "c1",
-                    "# @timeout 5\nimport time\ntime.sleep(0.05)\nvalue = 'done'",
+                    "# @timeout 120\nimport time\ntime.sleep(0.05)\nvalue = 'done'",
                 )
 
                 result = execute_cell_and_wait(ws, "c1")
                 assert result["type"] == "cell_output"
                 assert result["payload"]["outputs"]["value"]["preview"] == "done"
+                assert resolved == [120.0]
 
                 cell = _sync_cell(ws, "c1")
                 assert cell["timeout"] == 0.01
-                assert cell["annotations"]["timeout"] == 5.0
+                assert cell["annotations"]["timeout"] == 120.0
 
     def test_mount_annotation_beats_notebook_mount(self, setup):
         client, tmp = setup
