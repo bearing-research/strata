@@ -68,6 +68,14 @@ exhaustive commit history.
   `include_tenantless=true`, which anyone else is refused (`403`). A version
   another tenant's name, pin, publication or build reaches is kept as before,
   and the scheduled sweep still covers the whole store. (#1288)
+- **Request status, latency and storage errors in `/metrics/prometheus`.**
+  `strata_http_request_duration_seconds{route}` is a histogram of each
+  request's duration by route template, up to the response's last byte, so
+  a stream is timed to its end. `strata_object_store_errors_total{operation}`
+  counts the artifact store's S3, GCS and Azure calls that failed, by
+  `put`, `get`, `head`, `list` or `delete`, including the ones a caller
+  reports as absent or unknown; an object that is not there is not an
+  error. (#1289)
 
 ### Changed
 
@@ -90,6 +98,15 @@ exhaustive commit history.
   reset it, which lifted a restriction without anyone saying so; it is now
   refused with `422` naming the field. Send `{}` for no path restrictions and
   `null` for writers unset. (#1265)
+- **`strata_http_requests_total` is labelled by `method`, `route` and
+  `status`.** It was one number. `route` is the matched route's template
+  (`/v1/artifacts/{artifact_id}/v/{version}`), or `unmatched` for a request
+  answered before routing (a refused Host, auth, the rate limiter) or
+  matching no route; `status` is the class (`2xx`, `4xx`, `5xx`), and a
+  request that raised before answering counts as `5xx`. There is no tenant
+  label.
+  A query for the total sums the series: `sum(strata_http_requests_total)`.
+  (#1289)
 
 ### Fixed
 

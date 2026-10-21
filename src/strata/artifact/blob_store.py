@@ -12,6 +12,7 @@ import io
 import logging
 import os
 import tempfile
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Buffer, Callable, Generator, Iterator
@@ -36,6 +37,46 @@ Matches httpx's multipart ``FileField.CHUNK_SIZE`` and FastAPI's
 ``FileResponse`` default, so the HTTP-boundary streams line up with
 the blob-store streams without extra copying.
 """
+
+
+OBJECT_STORE_OPERATIONS = ("put", "get", "head", "list", "delete")
+
+
+class ObjectStoreErrors:
+    """Failed object-store calls by operation, for ``strata_object_store_errors_total``."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counts = dict.fromkeys(OBJECT_STORE_OPERATIONS, 0)
+
+    @contextmanager
+    def counting(
+        self, operation: str, absent: tuple[type[BaseException], ...] = (FileNotFoundError,)
+    ) -> Generator[None]:
+        """Count an exception raised in the block, then re-raise it unchanged.
+
+        ``absent`` is how the backend says the object is not there, an answer and not a fault.
+        """
+        try:
+            yield
+        except absent:
+            raise
+        except Exception:
+            with self._lock:
+                self._counts[operation] += 1
+            raise
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._counts)
+
+
+_object_store_errors = ObjectStoreErrors()
+
+
+def get_object_store_errors() -> ObjectStoreErrors:
+    """The process-wide object-store error counts."""
+    return _object_store_errors
 
 
 def _sigv4_context(secret_key: str, region: str) -> tuple[str, str, bytes]:
@@ -501,13 +542,15 @@ class S3BlobStore(BlobStore):
 
         key = self._s3_key(artifact_id, version)
         try:
-            return self._fs.open_input_stream(key)
+            with _object_store_errors.counting("get"):
+                return self._fs.open_input_stream(key)
         except (FileNotFoundError, pa.ArrowIOError):
             return None
 
     def _upload_from_path(self, key: str, source_path: Path) -> None:
         """Stream a local file to ``key`` via the PyArrow S3 filesystem."""
-        _upload_to_arrow_fs(self._fs, key, source_path)
+        with _object_store_errors.counting("put"):
+            _upload_to_arrow_fs(self._fs, key, source_path)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
         """Open a streaming writer for an S3 blob, staged locally so failed writes never upload."""
@@ -528,7 +571,8 @@ class S3BlobStore(BlobStore):
 
         key = self._s3_key(artifact_id, version)
         try:
-            info = self._fs.get_file_info(key)
+            with _object_store_errors.counting("head"):
+                info = self._fs.get_file_info(key)
             return info.type == pafs.FileType.File
         except Exception:
             # A backend error is not "absent"; log it rather than report a
@@ -544,7 +588,8 @@ class S3BlobStore(BlobStore):
 
         key = self._s3_key(artifact_id, version)
         try:
-            info = self._fs.get_file_info(key)
+            with _object_store_errors.counting("head"):
+                info = self._fs.get_file_info(key)
         except Exception:
             logger.exception(
                 "blob_size failed for %s@v=%d; reporting unknown", artifact_id, version
@@ -560,7 +605,8 @@ class S3BlobStore(BlobStore):
         try:
             if not self.blob_exists(artifact_id, version):
                 return False
-            self._fs.delete_file(key)
+            with _object_store_errors.counting("delete"):
+                self._fs.delete_file(key)
             return True
         except Exception:
             # The caller removes the metadata row regardless, so a silent False
@@ -772,13 +818,15 @@ class GCSBlobStore(BlobStore):
 
         key = self._gcs_key(artifact_id, version)
         try:
-            return self._fs.open_input_stream(key)
+            with _object_store_errors.counting("get"):
+                return self._fs.open_input_stream(key)
         except (FileNotFoundError, pa.ArrowIOError):
             return None
 
     def _upload_from_path(self, key: str, source_path: Path) -> None:
         """Stream a local file to ``key`` via the PyArrow GCS filesystem."""
-        _upload_to_arrow_fs(self._fs, key, source_path)
+        with _object_store_errors.counting("put"):
+            _upload_to_arrow_fs(self._fs, key, source_path)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
         """Open a streaming writer for a GCS blob, staged locally so failed writes never upload."""
@@ -799,7 +847,8 @@ class GCSBlobStore(BlobStore):
 
         key = self._gcs_key(artifact_id, version)
         try:
-            info = self._fs.get_file_info(key)
+            with _object_store_errors.counting("head"):
+                info = self._fs.get_file_info(key)
             return info.type == pafs.FileType.File
         except Exception:
             return False
@@ -810,7 +859,8 @@ class GCSBlobStore(BlobStore):
 
         key = self._gcs_key(artifact_id, version)
         try:
-            info = self._fs.get_file_info(key)
+            with _object_store_errors.counting("head"):
+                info = self._fs.get_file_info(key)
         except Exception:
             return None
         if info.type != pafs.FileType.File:
@@ -823,7 +873,8 @@ class GCSBlobStore(BlobStore):
         try:
             if not self.blob_exists(artifact_id, version):
                 return False
-            self._fs.delete_file(key)
+            with _object_store_errors.counting("delete"):
+                self._fs.delete_file(key)
             return True
         except Exception:
             # The caller removes the metadata row regardless, so a silent False
@@ -1034,7 +1085,8 @@ class AzureBlobStore(BlobStore):
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
         try:
-            downloader = blob_client.download_blob()
+            with _object_store_errors.counting("get", absent=(ResourceNotFoundError,)):
+                downloader = blob_client.download_blob()
         except ResourceNotFoundError:
             return None
 
@@ -1051,7 +1103,7 @@ class AzureBlobStore(BlobStore):
     def _upload_from_path(self, key: str, source_path: Path) -> None:
         """Stream a local file to ``key`` via the Azure SDK."""
         blob_client = self._client.get_blob_client(key)
-        with open(source_path, "rb") as src:
+        with open(source_path, "rb") as src, _object_store_errors.counting("put"):
             blob_client.upload_blob(src, overwrite=True)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
@@ -1075,7 +1127,8 @@ class AzureBlobStore(BlobStore):
         """Check if blob exists in Azure Blob Storage."""
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
-        return blob_client.exists()
+        with _object_store_errors.counting("head"):
+            return blob_client.exists()
 
     def blob_size(self, artifact_id: str, version: int) -> int | None:
         """Return blob size from Azure Blob Storage metadata."""
@@ -1084,7 +1137,8 @@ class AzureBlobStore(BlobStore):
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
         try:
-            props = blob_client.get_blob_properties()
+            with _object_store_errors.counting("head", absent=(ResourceNotFoundError,)):
+                props = blob_client.get_blob_properties()
         except ResourceNotFoundError:
             return None
         size = getattr(props, "size", None)
@@ -1097,7 +1151,8 @@ class AzureBlobStore(BlobStore):
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
         try:
-            blob_client.delete_blob()
+            with _object_store_errors.counting("delete", absent=(ResourceNotFoundError,)):
+                blob_client.delete_blob()
             return True
         except ResourceNotFoundError:
             return False

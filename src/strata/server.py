@@ -58,6 +58,7 @@ from strata.config import StrataConfig, describe_config_error
 from strata.json_types import JsonValue
 from strata.observability.gc_tracker import install_gc_tracker
 from strata.observability.health import _package_version
+from strata.observability.http_metrics import RequestMetricsMiddleware
 from strata.observability.logging import (
     configure_logging,
     get_logger,
@@ -1471,6 +1472,9 @@ class HostAllowlistMiddleware:
 
 # Added after every other middleware so it runs first: the origin guard trusts Host.
 app.add_middleware(HostAllowlistMiddleware)
+# Outside the Host check so a refused Host is counted too; inside BasePathMiddleware, whose
+# scope copy would hide the route the router picks.
+app.add_middleware(RequestMetricsMiddleware)
 
 
 class BasePathMiddleware:

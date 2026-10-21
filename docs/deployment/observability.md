@@ -51,8 +51,30 @@ families include:
   bytes/second
 - **QoS**: interactive vs bulk slot usage, queue wait and rejections
 - **Rate limiter**: request acceptance / rejection counts
-- **Server**: draining flag, HTTP connections and requests, thread
-  pools, Arrow memory, GC pauses
+- **Server**: draining flag, HTTP connections, thread pools, Arrow
+  memory, GC pauses
+- **HTTP requests**: `strata_http_requests_total{method, route, status}`
+  and the histogram `strata_http_request_duration_seconds{route}`
+  (`_bucket`, `_sum`, `_count`; buckets from 5 ms to 300 s). `route` is the
+  matched route's template (`/v1/artifacts/{artifact_id}/v/{version}`),
+  never the raw path; a mount is its prefix (`/assets/{path}`,
+  `/mcp/{path}`), and a request answered before routing (a refused Host,
+  auth, the rate limiter) or matching no route is `unmatched`. `status` is
+  the class: `2xx`, `3xx`, `4xx` or `5xx`. A request that raised before its
+  response started counts as `5xx`, the 500 the server answers; one that
+  raised mid-stream keeps the status it sent. A method outside the standard
+  set is `other`. The duration runs to the response's last byte, so a
+  stream (`/v1/streams/{stream_id}`) is timed to its end. There is no tenant
+  label. The error rate is
+  `sum(rate(strata_http_requests_total{status="5xx"}[5m])) / sum(rate(strata_http_requests_total[5m]))`.
+- **Object storage**: `strata_object_store_errors_total{operation}`, the
+  artifact store's S3, GCS and Azure calls that raised, by `put`, `get`,
+  `head`, `list` or `delete`, every operation present from the first
+  scrape. A call counts even when its caller carries on (an existence check
+  reports a refused `head` as absent); an object that is not there is an
+  answer, not an error. A `get` counts when opening the object fails, not a
+  read that fails partway. No artifact path lists the store today, so
+  `list` stays 0, and the local-disk backend is not counted.
 - **Per tenant**: `strata_tenant_scans_total`,
   `strata_tenant_cache_hit_rate` and `strata_tenant_bytes_total`, labelled
   by `tenant`, once a tenant has made a request, and the build series
