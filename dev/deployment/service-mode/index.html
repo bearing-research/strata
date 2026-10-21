@@ -3133,11 +3133,13 @@ exactly the case the shared store exists to create.</p>
   it does not look like the cache is simply empty.</li>
 <li><strong>It never fails a cell.</strong> A store that is unreachable, refusing, or missing
   one of a cell's outputs ends in "run it locally".</li>
-<li><strong>A cell with a <a href="../../notebook/annotations/#output_dir"><code># @output_dir</code></a>
-  folder is not shared.</strong> The folder's files are kept as artifacts of their own,
-  and the cache moves one blob per output, the manifest without them, so the
-  cell is neither offered nor served from it: it runs locally. Promoting a
-  folder copies its files, and <code>@dataset</code> reads it back whole.</li>
+<li><strong>A <a href="../../notebook/annotations/#output_dir"><code># @output_dir</code></a> folder travels
+  with its files.</strong> A publish offers each file the folder names, one blob each
+  under its own provenance key (a file the store already holds is not sent
+  again), then the manifest naming where each landed. A pull fetches every file
+  and checks its sha256 and size against the manifest before anything lands;
+  the files land under the pulling notebook's own ids, then the manifest. A
+  missing or altered file lands nothing and the cell runs locally.</li>
 <li><strong>A notebook whose environment does not match its lockfile will not publish.</strong>
   A failed <code>uv sync</code> keeps the previous venv and stays usable on purpose, so a
   transient network failure does not lock you out of your own notebook - but
