@@ -1940,7 +1940,7 @@ class TestTenantlessArtifactsAreVisibleToScopedQueries:
         store.write_blob("legacy", 2, _ipc_bytes(1))
         store.finalize_artifact("legacy", 2, "{}", 1, 10)
 
-        store.garbage_collect(max_idle_days=0, tenant="team-a")
+        store.garbage_collect(max_idle_days=0, tenant="team-a", include_tenantless=True)
 
         assert store.get_artifact("legacy", 1) is None, (
             "tenant-scoped GC still cannot reach a tenantless artifact"

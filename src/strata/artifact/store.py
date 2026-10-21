@@ -4507,6 +4507,7 @@ class ArtifactStore:
         keep_superseded: int | None = None,
         min_idle_seconds: float = 0.0,
         tenant: str | None = None,
+        include_tenantless: bool = False,
         collect_latest: bool = False,
         collectable: Collection[tuple[str, int]] = (),
         exempt: Callable[[str], bool] | None = None,
@@ -4530,10 +4531,11 @@ class ArtifactStore:
         id never loses its highest version while keeping a lower one, so a version
         number is never reused.
 
-        ``tenant`` limits the sweep, and the ``max_bytes`` measure, to that tenant
-        and legacy tenantless rows. Returns ``deleted_count``, ``deleted_bytes``,
-        ``store_bytes`` before the pass and, with ``dry_run``, the chosen versions
-        under ``collected``.
+        ``tenant`` limits the sweep, and the ``max_bytes`` measure, to that tenant;
+        ``include_tenantless`` adds the legacy tenantless rows every tenant shares.
+        Holds are walked over the whole store either way. Returns ``deleted_count``,
+        ``deleted_bytes``, ``store_bytes`` before the pass and, with ``dry_run``, the
+        chosen versions under ``collected``.
         """
         now = time.time()
         conn = self._get_connection()
@@ -4585,8 +4587,9 @@ class ArtifactStore:
             floor = min_idle_seconds + _USE_RESOLUTION_SECONDS if min_idle_seconds else 0.0
             params: list[float | str] = [now - floor]
             filters = ""
+            tenantless = " OR av.tenant = '' OR av.tenant IS NULL" if include_tenantless else ""
             if tenant is not None:
-                filters += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
+                filters += f" AND (av.tenant = ?{tenantless})"
                 params.append(tenant)
             # Least recently used first; the version breaks ties, so a sweep
             # facing an id whose versions share a timestamp takes the oldest.
@@ -4622,7 +4625,9 @@ class ArtifactStore:
             )
             size_params: list[str] = []
             if tenant is not None:
-                size_sql += " AND (tenant = ? OR tenant = '' OR tenant IS NULL)"
+                size_sql += " AND (tenant = ?" + (
+                    " OR tenant = '' OR tenant IS NULL)" if include_tenantless else ")"
+                )
                 size_params.append(tenant)
             store_bytes = int(conn.execute(size_sql, size_params).fetchone()[0])
 

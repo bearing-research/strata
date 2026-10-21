@@ -1212,33 +1212,45 @@ def export_artifact_to_table(
 
 @router.post("/v1/artifacts/gc")
 def garbage_collect_artifacts(
-    tenant_filter: CurrentTenant,
     max_idle_days: float | None = None,
     max_bytes: int | None = None,
     min_idle_seconds: float | None = None,
     collect_latest: bool = False,
     dry_run: bool = False,
-    store: ArtifactStore = store_for_scope("admin:*"),
+    tenant: str | None = Query(
+        default=None,
+        description="Tenant to sweep. Service mode, admin:* only; others sweep their own.",
+    ),
+    include_tenantless: bool = False,
+    store: ArtifactStore = store_for_scope("artifacts:gc"),
 ):
     """Collect unneeded artifact versions, least recently used first.
 
-    Personal mode, or service mode with ``admin:*``. Neither has a tenant filter
-    (``admin:*`` is unscoped), so the sweep covers the whole store, every tenant.
+    Personal mode sweeps the whole store. Service mode needs ``artifacts:gc``: the
+    caller sweeps its own tenant (the tenant header is required), leaving the
+    tenantless rows every tenant shares. ``admin:*`` sweeps the whole store, every
+    tenant, or with ``tenant`` only that one (the tenant header does not narrow it).
     A version is kept if it has a name, alias, pin or publication, if something
-    pinned, published or building depends on it, or if it is the latest value of a
-    caller-named id (see ``ArtifactStore.garbage_collect``). Omitted parameters take
-    the configured ``STRATA_ARTIFACT_GC_*`` retention.
+    pinned, published or building depends on it, whatever tenant holds it, or if it
+    is the latest value of a caller-named id (see ``ArtifactStore.garbage_collect``).
+    Omitted parameters take the configured ``STRATA_ARTIFACT_GC_*`` retention.
 
     Args:
         max_idle_days: Collect what has not been used for this long.
-        max_bytes: Collect until the store is at 80% of this.
+        max_bytes: Collect until the swept rows are at 80% of this.
         min_idle_seconds: Never collect anything used more recently.
         collect_latest: Also collect the latest value of caller-named ids (deletes live state).
         dry_run: Report what would go; delete nothing.
+        tenant: The tenant to sweep (``admin:*`` only).
+        include_tenantless: A tenant's sweep also takes tenantless rows (``admin:*`` only).
 
     Returns:
-        ``deleted_count``, ``deleted_bytes``, ``store_bytes`` and, with ``dry_run``, ``collected``.
+        ``deleted_count``, ``deleted_bytes``, ``store_bytes`` (over the swept rows) and,
+        with ``dry_run``, ``collected``.
     """
+    from strata.auth.principal import get_principal
+    from strata.server import get_state
+
     for name, value in (
         ("max_idle_days", max_idle_days),
         ("max_bytes", max_bytes),
@@ -1246,9 +1258,24 @@ def garbage_collect_artifacts(
     ):
         if value is not None and value < 0:
             raise HTTPException(status_code=400, detail=f"{name} must be non-negative")
-    from strata.server import get_state
+    config = get_state().config
+    sweep_tenant: str | None = None
+    if config.deployment_mode != "personal":
+        principal = get_principal()
+        if principal is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if principal.has_scope("admin:*"):
+            sweep_tenant = tenant
+        elif include_tenantless:
+            raise HTTPException(status_code=403, detail="include_tenantless requires admin:*")
+        elif principal.tenant is None:
+            raise HTTPException(status_code=400, detail="Tenant header required for a sweep")
+        elif tenant is not None and tenant != principal.tenant:
+            raise HTTPException(status_code=403, detail="Sweeping another tenant requires admin:*")
+        else:
+            sweep_tenant = principal.tenant
 
-    policy = get_state().config.artifact_gc_policy()
+    policy = config.artifact_gc_policy()
     if max_idle_days is not None:
         policy["max_idle_days"] = max_idle_days
     if max_bytes is not None:
@@ -1256,7 +1283,11 @@ def garbage_collect_artifacts(
     if min_idle_seconds is not None:
         policy["min_idle_seconds"] = min_idle_seconds
     return store.garbage_collect(
-        **policy, tenant=tenant_filter, collect_latest=collect_latest, dry_run=dry_run
+        **policy,
+        tenant=sweep_tenant,
+        include_tenantless=include_tenantless,
+        collect_latest=collect_latest,
+        dry_run=dry_run,
     )
 
 

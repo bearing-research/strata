@@ -1110,6 +1110,25 @@ class TestWhatAKeptResultNeeds:
         assert result["deleted_count"] == 0
         assert all(_exists(store, key) for key in mine)
 
+    def test_a_tenants_cap_leaves_out_the_tenantless_rows(self, store):
+        """A tenant's sweep does not take tenantless rows, so their bytes are not its share."""
+        mine = str(uuid.uuid4())
+        store.create_artifact(mine, f"p-{mine}", tenant="a", minted=True)
+        store.write_blob(mine, 1, b"x" * 10)
+        store.finalize_artifact(mine, 1, "{}", 1, 10)
+        shared = str(uuid.uuid4())
+        store.create_artifact(shared, "p-shared", minted=True)
+        store.write_blob(shared, 1, b"x" * 1000)
+        store.finalize_artifact(shared, 1, "{}", 1, 1000)
+        for key in [(mine, 1), (shared, 1)]:
+            _last_used(store, key, 40 * DAY)
+
+        result = store.garbage_collect(max_bytes=100, tenant="a")
+
+        assert result["store_bytes"] == 10
+        assert result["deleted_count"] == 0
+        assert _exists(store, (mine, 1)) and _exists(store, (shared, 1))
+
     def test_an_imported_copy_starts_its_idle_clock_at_the_import(self, tmp_path):
         """A promoted chain keeps its source's created_at, so without this a fresh copy reads as
         days idle.

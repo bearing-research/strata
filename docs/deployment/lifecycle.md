@@ -196,9 +196,23 @@ settings, where `0` turns the limit off. `min_idle_seconds`
 recently than it is collected. `collect_latest=true`
 (`--collect-latest`) also collects the current value of caller-chosen ids,
 which deletes live notebook state; use it only on a store you are deliberately
-reclaiming. In service mode the route needs a principal holding `admin:*`, and,
-as on every artifact route, `admin:*` is unscoped: the sweep covers every
-tenant's results.
+reclaiming.
+
+In service mode the route needs the `artifacts:gc` scope, and a caller holding
+it sweeps only its own tenant, named by the tenant header, which the route then
+requires. That sweep leaves the tenantless rows every tenant shares alone, and
+`max_bytes` and `store_bytes` measure the tenant's own versions, so a platform
+can call it once per tenant with that tenant's `max_idle_days`.
+
+`admin:*` is unscoped, as on every artifact route: its sweep covers every
+tenant's results and the tenantless ones, whatever tenant header it carries.
+It alone may name a tenant with `tenant=` (then only that tenant is swept) and
+add the tenantless rows to that sweep with `include_tenantless=true`. Another
+caller naming a tenant not its own, or sending `include_tenantless=true`, is
+refused with `403`. Whatever a sweep covers, a version
+another tenant's name, pin, publication or build still reaches is kept. The
+scheduled sweep (`STRATA_ARTIFACT_GC_INTERVAL_SECONDS`) always covers the whole
+store.
 
 A publication (withdrawn ones included) or a pin protects its whole lineage, not
 only the version. A page or a snapshot needs every step behind the result.

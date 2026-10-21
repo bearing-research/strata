@@ -214,6 +214,101 @@ class TestTheRoutesInServiceMode:
         assert store.list_pins("figure", figure) == []
 
 
+class TestATenantsSweep:
+    """``artifacts:gc`` lets a platform collect one tenant's results on that tenant's period."""
+
+    @staticmethod
+    def _idle_old_versions(store):
+        """An idle, unnamed, overtaken version for tenants a and b and for no tenant."""
+        old = {}
+        for owner in ("a", "b", None):
+            artifact_id = f"rows-{owner}"
+            old[owner] = _version(store, artifact_id, b"[1]", tenant=owner)
+            _version(store, artifact_id, b"[1, 2]", tenant=owner)
+        return old
+
+    def _sweep(self, client, headers, **params):
+        return client.post(
+            "/v1/artifacts/gc",
+            params={"max_idle_days": 0, "min_idle_seconds": 0, **params},
+            headers=headers,
+        )
+
+    def test_the_scope_collects_its_tenants_version_and_leaves_the_rest(self, service):
+        client, store = service
+        old = self._idle_old_versions(store)
+
+        response = self._sweep(client, _as("amber", "a", "artifacts:gc"))
+
+        assert response.status_code == 200, response.text
+        assert store.get_artifact("rows-a", old["a"]) is None
+        assert store.get_artifact("rows-b", old["b"]) is not None
+        assert store.get_artifact("rows-None", old[None]) is not None
+        # Measured over tenant a: its two versions of 3 and 6 bytes.
+        assert response.json()["deleted_count"] == 1
+        assert response.json()["store_bytes"] == 9
+
+    def test_without_the_scope_the_route_refuses(self, service):
+        client, store = service
+        old = self._idle_old_versions(store)
+
+        response = self._sweep(client, _as("amber", "a", "artifacts:read"))
+
+        assert response.status_code == 403
+        assert store.get_artifact("rows-a", old["a"]) is not None
+
+    def test_include_tenantless_needs_admin(self, service):
+        client, store = service
+        old = self._idle_old_versions(store)
+
+        refused = self._sweep(client, _as("amber", "a", "artifacts:gc"), include_tenantless="true")
+        swept = self._sweep(
+            client, _as("ops", "a", "admin:*"), tenant="a", include_tenantless="true"
+        )
+
+        assert refused.status_code == 403
+        assert swept.status_code == 200, swept.text
+        assert store.get_artifact("rows-a", old["a"]) is None
+        assert store.get_artifact("rows-None", old[None]) is None
+        assert store.get_artifact("rows-b", old["b"]) is not None
+
+    def test_another_tenant_cannot_be_named_without_admin(self, service):
+        client, store = service
+        old = self._idle_old_versions(store)
+
+        response = self._sweep(client, _as("amber", "a", "artifacts:gc"), tenant="b")
+
+        assert response.status_code == 403
+        assert store.get_artifact("rows-b", old["b"]) is not None
+
+    def test_a_sweep_without_a_tenant_header_is_refused(self, service):
+        client, store = service
+        old = self._idle_old_versions(store)
+        headers = _as("amber", "a", "artifacts:gc")
+        del headers["X-Strata-Tenant"], headers["X-Tenant-ID"]
+
+        response = self._sweep(client, headers)
+
+        assert response.status_code == 400
+        assert "Tenant header" in response.json()["detail"]
+        assert store.get_artifact("rows-a", old["a"]) is not None
+
+    def test_another_tenants_hold_keeps_what_its_chain_reaches(self, service):
+        client, store = service
+        rows = _version(store, "rows", b"[1]", tenant="a")
+        _version(store, "rows", b"[1, 2]", tenant="a")
+        ref = f"rows@v={rows}"
+        figure = _version(
+            store, "figure", b"PNG", inputs={f"strata://artifact/{ref}": ref}, tenant="b"
+        )
+        store.pin_artifact("figure", figure, "snapshot:s1")
+
+        response = self._sweep(client, _as("amber", "a", "artifacts:gc"))
+
+        assert response.status_code == 200, response.text
+        assert store.get_artifact("rows", rows) is not None
+
+
 def test_without_principal_auth_service_mode_refuses_gc(monkeypatch, tmp_path):
     import strata.server as server_module
     from strata.config import StrataConfig

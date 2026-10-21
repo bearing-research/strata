@@ -60,6 +60,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   of that artifact version, so a dispatcher can weigh a cell's inputs before
   it places the cell. An input whose size the store does not know, a version
   still being written, leaves the field out. (#1287)
+- **One tenant's artifacts can be collected on that tenant's period.** A new
+  `artifacts:gc` scope opens `POST /v1/artifacts/gc` to a caller that is not
+  `admin:*`, and its sweep covers only its own tenant (the tenant header is
+  required): `max_bytes`, `deleted_count`, `deleted_bytes` and `store_bytes`
+  are measured over that tenant, and the tenantless rows every tenant shares
+  are left alone. `admin:*` still sweeps the whole store, and may name one
+  tenant with `tenant=` and add the tenantless rows with
+  `include_tenantless=true`, which anyone else is refused (`403`). A version
+  another tenant's name, pin, publication or build reaches is kept as before,
+  and the scheduled sweep still covers the whole store. (#1288)
 
 ### Changed
 
