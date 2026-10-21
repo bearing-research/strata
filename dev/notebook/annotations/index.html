@@ -3435,13 +3435,17 @@ hit, a reopened notebook and an export show it too.</p>
 <img alt="A cell with # @output_dir ckpt that saves three checkpoint files and a metrics file. Below its source: &quot;ckpt: 4 files, 3.0 MiB&quot; and a table of each file with its size." src="../../assets/output-dir-dark.png#only-dark" /></p>
 <p><strong>A failed run keeps what it wrote.</strong> Its files are stored and its manifest is
 kept as a failed version: never a cache hit and never an input, but lineage
-shows it and <code>&lt;id&gt;@v=&lt;n&gt;</code> reads it. A link in the folder, or a file with more
-than one hard link, is left out with a warning.</p>
+shows it, and its files are listed and downloaded over
+<a href="../../reference/rest-api/#read-a-cells-output-folder">REST</a> like any
+version's. A link in the folder, or a file with more than one hard link, is
+left out with a warning.</p>
 <p><strong>Files go with the last version that names them.</strong> Folder versions are pruned
 like any cell output's earlier values
-(<a href="../../reference/configuration/#notebook"><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></a>);
-a file no kept version names is removed in the same pass, so old checkpoints do
-not pile up. Pin a folder version to keep its files.</p>
+(<a href="../../reference/configuration/#notebook"><code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code></a>),
+except that a failed run's version newer than the folder's last good one stays
+until a later run succeeds, so a crash's checkpoints can still be downloaded.
+A file no kept version names is removed in the same pass, so old checkpoints
+do not pile up. Pin a folder version to keep its files.</p>
 <p><strong>On a remote worker</strong> the folder comes back with the run's result, each file
 streamed, so a checkpoint is not held in memory and is not limited by
 <code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code>. A failed run on a worker keeps its

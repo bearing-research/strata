@@ -3798,6 +3798,15 @@ exhaustive commit history.</p>
   reading each cell's <code>__mount__&lt;name&gt;</code> record. A failed run or sync-back
   leaves the entry; a run that writes nothing, or deleting the cell, drops it.
   (#1276)</li>
+<li><strong>A cell's output folder over HTTP.</strong>
+  <code>GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}</code> lists every
+  version of a <code># @output_dir</code> folder, newest first, a failed run's marked
+  <code>failed</code>, each with its files' paths, sizes and sha256 digests;
+  <code>.../folders/{name}/v/{version}/files/{path}</code> streams one file with a
+  <code>Content-Digest</code>. A crash's checkpoints can be downloaded, and with
+  <code>STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS</code> set, a failed folder version
+  newer than the last good one is no longer pruned until a later run
+  succeeds. (#1277)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
