@@ -251,8 +251,11 @@ a host can list the files cells wrote to a source without reading each record:
 
 `principal` is the member the run was for (`null` in personal mode). A cell's entry
 is replaced once its writes are synced back; a failed run, a failed sync-back
-included, leaves it as it was, and a successful run that writes nothing, or the
-cell's deletion, drops it. Loop, SQL and prompt cells do not record writes.
+included, leaves it as it was, and a successful run that writes nothing (a cache
+hit or a run-all batch too), or the cell's deletion, drops it. A `# @per_variant`
+cell's entry lists every variant's files, merged per mount, once every variant has
+succeeded; a path two variants wrote keeps the later one's. Loop, SQL and prompt
+cells do not record writes, so a successful run of one drops the entry too.
 
 Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. On a server that sets `STRATA_NOTEBOOK_CREDENTIAL_WRITERS`, an `rw` mount of `s3://`, `gs://` or `az://` must write through a credential its run's principal is listed for (its `credential=`, or the server's default for that scheme), or the cell fails before it runs; a credential that `STRATA_NOTEBOOK_CREDENTIAL_PATHS` restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).
 

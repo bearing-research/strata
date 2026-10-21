@@ -1297,14 +1297,17 @@ class NotebookSession:
         *,
         table_reads: list[dict[str, Any]],
         reads: dict[str, Any] | None,
+        writes: dict[str, Any] | None = None,
     ) -> None:
         """Persist the last successful execution provenance for uncached cells.
 
         Also writes ``.strata/runtime.json`` so ``compute_staleness`` classifies the
-        cell correctly after a reopen, records *table_reads* in the table index, and
-        *reads*, what the run moved, in the reads index.
+        cell correctly after a reopen, records *table_reads* in the table index,
+        *reads*, what the run moved, in the reads index, and *writes*, what it wrote
+        through its read-write mounts, in the writes index. A run that wrote nothing
+        (a cache hit, a batched cell) passes no *writes* and drops the cell's entry.
         """
-        from strata.notebook import reads_index, table_index
+        from strata.notebook import reads_index, table_index, writes_index
         from strata.notebook.runtime_state import persist_cell_provenance
 
         cell = self.notebook_state.get_cell(cell_id)
@@ -1327,6 +1330,7 @@ class NotebookSession:
         live = [c.id for c in self.notebook_state.cells]
         table_index.record(self.path, cell_id, table_reads, live)
         reads_index.record(self.path, cell_id, reads, live)
+        writes_index.record(self.path, cell_id, writes, live)
 
     def record_cell_inputs(self, cell_id: str, machine: str, weights: list[InputWeight]) -> bool:
         """Keep what *cell_id*'s inputs weigh, for its badge after a reopen; True if changed."""

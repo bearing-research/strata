@@ -16,8 +16,14 @@ from strata.notebook.executor import CellExecutor
 from strata.notebook.mounts import MountResolver
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
-from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from strata.notebook.writer import (
+    add_cell_to_notebook,
+    create_notebook,
+    set_variant_mode,
+    write_cell,
+)
 from strata.types import Principal
+from tests.notebook.test_table_index import _warehouse, windows
 
 
 def _sha(data: bytes) -> str:
@@ -131,6 +137,166 @@ class TestALocalRun:
         session.remove_cell("c1")
 
         assert writes_index.load(session.path) == {}
+
+    async def test_losing_the_record_does_not_fail_the_run(self, tmp_path, monkeypatch):
+        out = tmp_path / "out"
+        session = _session(tmp_path, _two_files(out))
+
+        def fails(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(writes_index, "record", fails)
+        result = await _run(CellExecutor(session), session)
+
+        assert result.success, result.error
+        assert (out / "deep" / "b.txt").read_text() == "b"
+
+
+class TestOtherGoodRuns:
+    """A good run that wrote through no read-write mount drops the entry, however it ran."""
+
+    async def test_a_cache_hit_drops_the_entry(self, tmp_path):
+        leaf = 'print("hi")\n'
+        session = _session(tmp_path, leaf)
+        executor = CellExecutor(session)
+        assert (await _run(executor, session)).success
+        assert (await _run(executor, session, _two_files(tmp_path / "out"))).success
+        assert "c1" in writes_index.load(session.path)
+
+        hit = await _run(executor, session, leaf)
+
+        assert hit.success, hit.error
+        assert hit.cache_hit is True
+        assert "c1" not in writes_index.load(session.path)
+
+    async def test_a_batched_run_drops_the_entry(self, tmp_path):
+        from tests.notebook.test_executor_batch import _cell_spec, _populate_consumed_vars
+
+        session = _session(tmp_path, _two_files(tmp_path / "out"))
+        executor = CellExecutor(session)
+        assert (await _run(executor, session)).success
+        cell = session.notebook_state.get_cell("c1")
+        cell.source = "x = 2\n"
+        session.re_analyze_cell("c1")
+
+        batch = await executor.execute_batch(
+            _populate_consumed_vars([_cell_spec("c1", cell.source)], session)
+        )
+
+        assert [r.status for r in batch.cell_results] == ["ok"]
+        assert "c1" not in writes_index.load(session.path)
+
+
+def _fanout_session(tmp_path: Path, body: str) -> NotebookSession:
+    """A sweep over ``double`` and ``triple``, and ``ev`` run once per variant on ``preds``."""
+    nb = create_notebook(tmp_path, "Fanout")
+    cells = [
+        ("load", "X = [1.0, 2.0, 3.0]\n"),
+        ("vdouble", "# @variant model double\npreds = [v * 2 for v in X]\n"),
+        ("vtriple", "# @variant model triple\npreds = [v * 3 for v in X]\n"),
+        ("ev", body),
+    ]
+    after = None
+    for cell_id, source in cells:
+        add_cell_to_notebook(nb, cell_id, after)
+        write_cell(nb, cell_id, source)
+        after = cell_id
+    set_variant_mode(nb, "model", "sweep")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.refresh_environment_runtime()
+    return session
+
+
+async def _run_ev(executor: CellExecutor, session: NotebookSession, body: str):
+    cell = session.notebook_state.get_cell("ev")
+    if cell.source != body:
+        cell.source = body
+        session.re_analyze_cell("ev")
+    return await executor.execute_cell("ev", body)
+
+
+class TestAFanOut:
+    """A per_variant cell's entry is what all its variants wrote, once every one succeeded."""
+
+    def _body(self, out: Path, script: str) -> str:
+        return f"# @mount out {out.as_uri()} rw\n# @per_variant\nscore = sum(preds)\n{script}"
+
+    async def test_every_variants_files_are_in_the_entry(self, tmp_path):
+        out = tmp_path / "out"
+        body = self._body(
+            out,
+            '(out / f"p{score}.txt").write_text("p")\n'
+            '(out / "shared.txt").write_text(str(score))\n',
+        )
+        session = _fanout_session(tmp_path, body)
+
+        result = await _run_ev(CellExecutor(session), session, body)
+
+        assert result.success, result.error
+        # Both variants wrote shared.txt: the later one's write is what is on disk.
+        assert (out / "shared.txt").read_text() == "18.0"
+        assert writes_index.load(session.path)["ev"]["mounts"] == [
+            {
+                "mount": "out",
+                "uri": out.as_uri(),
+                "files": [
+                    {"path": "p12.0.txt", "size": 1, "sha256": _sha(b"p")},
+                    {"path": "p18.0.txt", "size": 1, "sha256": _sha(b"p")},
+                    {"path": "shared.txt", "size": 4, "sha256": _sha(b"18.0")},
+                ],
+            }
+        ]
+
+    async def test_a_variant_that_writes_nothing_keeps_the_others_files(self, tmp_path):
+        out = tmp_path / "out"
+        body = self._body(out, 'if score < 15:\n    (out / f"p{score}.txt").write_text("p")\n')
+        session = _fanout_session(tmp_path, body)
+
+        result = await _run_ev(CellExecutor(session), session, body)
+
+        assert result.success, result.error
+        (mount,) = writes_index.load(session.path)["ev"]["mounts"]
+        assert [f["path"] for f in mount["files"]] == ["p12.0.txt"]
+
+    async def test_a_failed_variant_leaves_the_entry_as_it_was(self, tmp_path):
+        out = tmp_path / "out"
+        good = self._body(out, '(out / f"p{score}.txt").write_text("p")\n')
+        session = _fanout_session(tmp_path, good)
+        executor = CellExecutor(session)
+        assert (await _run_ev(executor, session, good)).success
+        before = writes_index.load(session.path)
+
+        failing = self._body(
+            out,
+            '(out / f"q{score}.txt").write_text("q")\nif score > 15:\n    raise ValueError("no")\n',
+        )
+        result = await _run_ev(executor, session, failing)
+
+        assert not result.success
+        assert (out / "q12.0.txt").exists()
+        assert writes_index.load(session.path) == before
+
+    @windows
+    async def test_a_failed_fan_out_leaves_the_reads_entry_its_variants_ran_or_hit(self, tmp_path):
+        from strata.notebook import reads_index
+
+        _, uri = _warehouse(tmp_path)
+        good = f"# @table events {uri}\n# @per_variant\nscore = sum(preds)\nprint(score)\n"
+        session = _fanout_session(tmp_path, good)
+        executor = CellExecutor(session)
+        first = await _run_ev(executor, session, good)
+        assert first.success, first.error
+        before = reads_index.load(session.path)
+        assert before["ev"]["inputs"]
+
+        # The double variant runs, then is a cache hit; the triple one fails both times.
+        failing = good + "if score > 15:\n    raise ValueError('no')\n"
+        ran = await _run_ev(executor, session, failing)
+        assert not ran.success
+        assert reads_index.load(session.path) == before
+        hit = await _run_ev(executor, session, failing)
+        assert not hit.success
+        assert reads_index.load(session.path) == before
 
 
 class TestAWorkerRun:

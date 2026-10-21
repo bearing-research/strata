@@ -146,6 +146,30 @@ class TestATableCell:
         assert _index(session) == before
 
     @pytest.mark.asyncio
+    async def test_a_failed_sync_back_leaves_the_last_good_runs_reads(self, tmp_path, monkeypatch):
+        from strata.notebook import reads_index
+        from strata.notebook.mounts import MountResolver
+
+        table, uri = _warehouse(tmp_path)
+        head = f"# @table events {uri}\n# @mount out {(tmp_path / 'out').as_uri()} rw\n"
+        session = _session(tmp_path, {"c1": head + "snap = events_snapshot\n"})
+        await _run(session, "c1")
+        tables, reads = _index(session), reads_index.load(session.path)
+        assert reads["c1"]["inputs"]
+
+        async def fails(self, resolved):
+            raise RuntimeError("bucket unreachable")
+
+        monkeypatch.setattr(MountResolver, "sync_back", fails)
+        table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+        failed = await CellExecutor(session).execute_cell("c1", head + "snap = 2\n")
+
+        assert not failed.success
+        assert "bucket unreachable" in (failed.error or "")
+        assert _index(session) == tables
+        assert reads_index.load(session.path) == reads
+
+    @pytest.mark.asyncio
     async def test_a_run_all_cache_hit_records_its_reads(self, tmp_path):
         from tests.notebook.test_executor_batch import _cell_spec
 
