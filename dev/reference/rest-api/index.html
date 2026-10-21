@@ -4274,6 +4274,10 @@
 <td><code>artifacts:pin</code></td>
 </tr>
 <tr>
+<td>Collecting the caller's own tenant's unneeded versions (<code>POST /v1/artifacts/gc</code>)</td>
+<td><code>artifacts:gc</code></td>
+</tr>
+<tr>
 <td><code>GET /v1/admin/tenants</code>, <code>GET /v1/admin/tenants/{tenant_id}</code></td>
 <td><code>admin:tenants</code></td>
 </tr>
@@ -4294,7 +4298,7 @@
 <td><code>admin:notebooks</code></td>
 </tr>
 <tr>
-<td><code>POST /v1/artifacts/gc</code>, and another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code></td>
+<td>A <code>POST /v1/artifacts/gc</code> sweep of the whole store, another tenant, or the tenantless rows (<code>include_tenantless=true</code>), and another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code></td>
 <td><code>admin:*</code></td>
 </tr>
 <tr>

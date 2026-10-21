@@ -2960,11 +2960,15 @@ auth (<code>admin:*</code> satisfies any of them):</p>
 </tr>
 <tr>
 <td><code>admin:*</code></td>
-<td>Garbage collection (<code>POST /v1/artifacts/gc</code>, which sweeps the whole store), reading another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code>, the server-wide log buffer (<code>GET /v1/logs</code>, <code>GET /v1/logs/stream</code>), per-table metrics (<code>GET /metrics/tables*</code>), and the process diagnostics under <code>/v1/debug/*</code> (latency, GC pauses, pools, connections, memory, rate limits)</td>
+<td>Garbage collection over the whole store, another tenant or the tenantless rows (<code>POST /v1/artifacts/gc</code>), reading another tenant's <code>GET /v1/artifacts/usage</code> / <code>stats</code>, the server-wide log buffer (<code>GET /v1/logs</code>, <code>GET /v1/logs/stream</code>), per-table metrics (<code>GET /metrics/tables*</code>), and the process diagnostics under <code>/v1/debug/*</code> (latency, GC pauses, pools, connections, memory, rate limits)</td>
 </tr>
 <tr>
 <td><code>admin:registry</code></td>
 <td><code>POST /v1/registry/pending/approve</code> and <code>.../reject</code> - deciding protected-alias changes</td>
+</tr>
+<tr>
+<td><code>artifacts:gc</code></td>
+<td>Garbage collection of the caller's own tenant (<code>POST /v1/artifacts/gc</code>); the tenant header is required, and tenantless rows are left alone</td>
 </tr>
 <tr>
 <td><code>artifacts:pin</code></td>

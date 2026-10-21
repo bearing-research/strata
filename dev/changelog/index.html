@@ -3830,6 +3830,16 @@ exhaustive commit history.</p>
   of that artifact version, so a dispatcher can weigh a cell's inputs before
   it places the cell. An input whose size the store does not know, a version
   still being written, leaves the field out. (#1287)</li>
+<li><strong>One tenant's artifacts can be collected on that tenant's period.</strong> A new
+  <code>artifacts:gc</code> scope opens <code>POST /v1/artifacts/gc</code> to a caller that is not
+  <code>admin:*</code>, and its sweep covers only its own tenant (the tenant header is
+  required): <code>max_bytes</code>, <code>deleted_count</code>, <code>deleted_bytes</code> and <code>store_bytes</code>
+  are measured over that tenant, and the tenantless rows every tenant shares
+  are left alone. <code>admin:*</code> still sweeps the whole store, and may name one
+  tenant with <code>tenant=</code> and add the tenantless rows with
+  <code>include_tenantless=true</code>, which anyone else is refused (<code>403</code>). A version
+  another tenant's name, pin, publication or build reaches is kept as before,
+  and the scheduled sweep still covers the whole store. (#1288)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
