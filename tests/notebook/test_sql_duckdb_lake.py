@@ -724,18 +724,23 @@ class TestARestCatalogThatVendsNothing:
         assert answering("s3://other/x.parquet") is None
         assert answering("s3://raw/events/part-0.parquet") == "strata_mount_raw"
 
-    def _session(self, tmp_path, monkeypatch, cells=None):
+    def _session(self, tmp_path, monkeypatch, cells=None, mode="personal"):
         nb_dir = _notebook(
             tmp_path, cells or {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'
         )
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
-        config = StrataConfig(catalogs={"lake": self._LAKE})
+        config = StrataConfig(
+            catalogs={"lake": self._LAKE}, deployment_mode=mode, **service_auth(mode)
+        )
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
         return session
 
     @staticmethod
-    def _catalog(monkeypatch):
-        """Each table the catalog loads, and a list that takes the catalog down when not empty."""
+    def _catalog(monkeypatch, root="s3://lake"):
+        """Each table the catalog loads, and a list that takes the catalog down when not empty.
+
+        A table lives at ``<root>/<namespace>.<table>``.
+        """
         from types import SimpleNamespace
 
         from strata.iceberg.catalog import PyIcebergCatalog
@@ -749,7 +754,7 @@ class TestARestCatalogThatVendsNothing:
                 raise ConnectionError("the catalog is unreachable")
             snapshot = SimpleNamespace(snapshot_id=7, summary={})
             return SimpleNamespace(
-                location=lambda: f"s3://lake/{uri.partition(':')[2]}",
+                location=lambda: f"{root}/{uri.partition(':')[2]}",
                 current_snapshot=lambda: snapshot,
             )
 
@@ -788,19 +793,47 @@ class TestARestCatalogThatVendsNothing:
 
         assert getattr(self._resolve(session).spec, "catalog_locations", None) is None
 
-    def test_a_pinned_table_is_located_only_when_the_query_runs(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("mode", ["personal", "service"])
+    def test_a_pinned_table_is_located_only_when_the_query_runs(self, tmp_path, monkeypatch, mode):
         from strata.notebook.sql.lake import locate_tables
 
-        session = self._session(tmp_path, monkeypatch)
+        session = self._session(tmp_path, monkeypatch, mode=mode)
         loads, _ = self._catalog(monkeypatch)
+        confined = mode == "service"
 
         lake = self._resolve(session, pinned={("taxi", "trips"): 3})
         assert loads == ["lake:taxi.zones"]
         assert lake.spec.catalog_locations == ["s3://lake/taxi.zones/"]
+        assert lake.locations == (["s3://lake/taxi.zones/"] if confined else [])
 
         spec = locate_tables(session, lake, lake.spec)
         assert loads == ["lake:taxi.zones", "lake:taxi.trips"]
         assert spec.catalog_locations == ["s3://lake/taxi.zones/", "s3://lake/taxi.trips/"]
+        assert lake.locations == (
+            ["s3://lake/taxi.zones/", "s3://lake/taxi.trips/"] if confined else []
+        )
+
+    def test_a_vending_catalogs_pinned_table_is_located_in_service_mode_for_confinement_only(
+        self, tmp_path, monkeypatch
+    ):
+        from strata.notebook.sql.lake import locate_tables
+
+        session = self._session(tmp_path, monkeypatch, mode="service")
+        vending = {k: v for k, v in self._LAKE.items() if not k.startswith("header.")}
+        config = StrataConfig(
+            catalogs={"lake": vending}, deployment_mode="service", **service_auth()
+        )
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        loads, _ = self._catalog(monkeypatch)
+
+        lake = self._resolve(session, pinned={("taxi", "trips"): 3})
+        assert loads == ["lake:taxi.zones"]
+
+        spec = locate_tables(session, lake, lake.spec)
+        assert loads == ["lake:taxi.zones", "lake:taxi.trips"]
+        assert lake.locations == ["s3://lake/taxi.zones/", "s3://lake/taxi.trips/"]
+        # The catalog vends its own keys, so its secret stays unscoped.
+        assert getattr(spec, "catalog_locations", None) is None
 
     @pytest.mark.asyncio
     async def test_a_pinned_cache_hit_needs_no_catalog(self, tmp_path, monkeypatch):
@@ -834,6 +867,81 @@ class TestARestCatalogThatVendsNothing:
         assert replay["success"] is False
         assert "the catalog is unreachable" in replay["error"]
         assert len(located) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_pinned_cache_hit_in_service_mode_needs_no_catalog(self, tmp_path, monkeypatch):
+        from strata.notebook.sql import cell_executor
+
+        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        session = self._session(tmp_path, monkeypatch, {"c1": source}, mode="service")
+        loads, down = self._catalog(monkeypatch)
+        confined: list[list[str]] = []
+
+        def execute(adapter, spec, analysis, params, *, at=None, lake=None):
+            confined.append(spec.confine_to)
+            return pa.table({"id": [1, 2]})
+
+        monkeypatch.setattr(cell_executor, "_execute_query", execute)
+
+        first = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert first["success"], first["error"]
+        assert confined == [["s3://lake/taxi.trips/"]]
+        assert loads == ["lake:taxi.trips"]
+
+        down.append(True)
+        hit = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert hit["success"], hit["error"]
+        assert hit["cache_hit"] is True
+        assert loads == ["lake:taxi.trips"]
+
+        # Past the cache, the pinned table is located before the query, through the catalog.
+        monkeypatch.setattr(session.get_artifact_manager(), "find_cached", lambda provenance: None)
+        replay = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert replay["success"] is False
+        assert "the catalog is unreachable" in replay["error"]
+        assert len(confined) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_service_mode_miss_confines_the_query_to_the_pinned_tables_location(
+        self, tmp_path, monkeypatch
+    ):
+        import duckdb
+
+        from strata.notebook.sql import cell_executor
+        from strata.notebook.sql.drivers.duckdb import _confine
+
+        warehouse = tmp_path / "wh"
+        _write_parquet(warehouse / "taxi.trips" / "data" / "0.parquet", [1, 2])
+        outside = tmp_path / "server-only.parquet"
+        _write_parquet(outside, [9])
+        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        session = self._session(tmp_path, monkeypatch, {"c1": source}, mode="service")
+        loads, _ = self._catalog(monkeypatch, root=str(warehouse))
+        confined: list[list[str]] = []
+
+        def execute(adapter, spec, analysis, params, *, at=None, lake=None):
+            # The driver confines its handle so; read inside and outside the table.
+            confined.append(spec.confine_to)
+            conn = duckdb.connect(":memory:")
+            _confine(conn, spec.confine_to)
+            inside = f"{warehouse}/taxi.trips/data/0.parquet"
+            table = conn.execute(f"SELECT k AS id FROM read_parquet('{inside}')").to_arrow_table()
+            with pytest.raises(duckdb.PermissionException):
+                conn.execute(f"SELECT * FROM read_parquet('{outside}')").fetchall()
+            return table
+
+        monkeypatch.setattr(cell_executor, "_execute_query", execute)
+
+        first = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert first["success"], first["error"]
+
+        # The second run is pinned; a miss locates the table only now, and confines to it.
+        monkeypatch.setattr(session.get_artifact_manager(), "find_cached", lambda provenance: None)
+        miss = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert miss["success"], miss["error"]
+        assert miss["cache_hit"] is False
+        assert loads == ["lake:taxi.trips", "lake:taxi.trips"]
+        assert confined == [[f"{warehouse}/taxi.trips/"]] * 2
 
 
 class TestAGcsOrAzureMount:

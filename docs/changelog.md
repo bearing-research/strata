@@ -120,6 +120,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A pinned DuckDB SQL cell hits its cache without the catalog in service
+  mode too.** There a `# @cache snapshot` cell over a catalog still loaded
+  each pinned table before the cache check, since the cell's confinement
+  needed its location, so its cache hit failed with the catalog unreachable.
+  The table is now located only when the query runs, and the query is
+  confined to its location then, as strictly as before. (#1292)
 - **A DuckDB SQL cell over a catalog that vends nothing reads as the catalog
   is configured.** `s3.path-style-access` takes the booleans pyiceberg reads
   (`0`, `no`, `off` turn it off; `1`, `yes` turn it on without an endpoint),
