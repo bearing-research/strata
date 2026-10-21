@@ -208,17 +208,18 @@ curl -X PUT "$STRATA/v1/admin/notebook-credentials" -H 'Content-Type: applicatio
 - A `${VAR}` reference is always refused with `400` naming the field: the
   server's environment holds its own secrets, such as the proxy token. Variable
   references keep working in the server's startup `STRATA_NOTEBOOK_CREDENTIALS`.
-- `notebook_credential_paths` and `notebook_credential_writers` are required in
-  every body, so leaving one out cannot lift a restriction unnoticed: such a
-  body is refused with `422` naming the field, and changes nothing. Paths `{}`
+- `notebook_credential_paths`, `notebook_credential_writers` and
+  `notebook_credential_read_cost` are required in every body, so leaving one
+  out cannot lift a restriction or clear the rates unnoticed: such a body is
+  refused with `422` naming the field, and changes nothing. Paths `{}`
   restricts no name; writers `null` is unset (every name writes), and `{}`
-  makes every name read-only.
+  makes every name read-only; read cost `{}` gives no name a rate, so only the
+  size threshold can ask.
 - Any other setting left out of the body is replaced by its default, as if unset.
-  Left out, `notebook_credential_read_cost` is `{}`, so no name has a rate and
-  only the size threshold can ask.
 - `notebook_credential_read_cost` is dollars per GB for each name, the rate
   [asking before a large read](../notebook/lake-aware-cells.md#asking-before-a-large-read)
-  uses. A rate that is not a number is refused with `422` naming the field.
+  uses. A rate that is not a number, or is negative, NaN or infinite, is
+  refused with `422` naming the field, as it is at startup.
 - The next run uses the new settings, in a session opened before the call too. A
   running cell keeps what it resolved. A removed name fails its next use naming
   it, as an unknown name does.

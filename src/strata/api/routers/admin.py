@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from strata.api.dependencies import require_scope
+from strata.config import ReadCostRate
 from strata.notebook.credentials import (
     CATALOG_CREDENTIAL_KEY,
     CredentialError,
@@ -264,8 +265,9 @@ class AdminNotebookCredentialsRequest(BaseModel):
     # restricts nothing; writers ``null`` is unset (every name writes), ``{}`` all read-only.
     notebook_credential_paths: dict[str, list[str]]
     notebook_credential_writers: dict[str, list[str]] | None
+    # Required too: the rates guard a costly read the way the restrictions guard a path.
     # Dollars per GB, typed as StrataConfig types it, so a value startup refuses is refused.
-    notebook_credential_read_cost: dict[str, float] = Field(default_factory=dict)
+    notebook_credential_read_cost: dict[str, ReadCostRate]
     catalogs: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 

@@ -29,6 +29,10 @@ from strata.notebook.python_versions import (
 )
 from strata.types import CacheGranularity
 
+# Dollars per GB. Not negative, NaN or infinite: any of those can make a cost
+# estimate that never asks.
+ReadCostRate = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
 # --- ACL configuration types ---
 
 
@@ -468,7 +472,7 @@ class StrataConfig(BaseSettings):
     # API) goes ahead and records so in the reads index.
     notebook_confirm_read_bytes: Annotated[int | None, Field(ge=0)] = None
     notebook_confirm_read_cost: Annotated[float | None, Field(ge=0)] = None
-    notebook_credential_read_cost: Annotated[dict[str, float], NoDecode] = Field(
+    notebook_credential_read_cost: Annotated[dict[str, ReadCostRate], NoDecode] = Field(
         default_factory=dict
     )
     notebook_confirm_read_message: str | None = None
