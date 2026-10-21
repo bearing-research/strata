@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
+from strata.api.routers.admin import AdminNotebookCredentialsRequest
 from strata.config import StrataConfig
 from strata.iceberg.catalog import PyIcebergCatalog
 from tests.notebook import test_mounts
@@ -15,8 +16,12 @@ from tests.notebook.test_read_confirm import _asked, windows
 
 ROUTE = "/v1/admin/notebook-credentials"
 MOUNT_CELL = "# @mount raw s3://lab/raw ro credential=lab\nx = 1"
-# The two restrictions a body must state, here as unrestricted.
-OPEN = {"notebook_credential_paths": {}, "notebook_credential_writers": None}
+# The settings a body must state, here as unrestricted and with no rates.
+OPEN = {
+    "notebook_credential_paths": {},
+    "notebook_credential_writers": None,
+    "notebook_credential_read_cost": {},
+}
 
 
 def _body(**settings) -> dict:
@@ -145,7 +150,6 @@ def test_the_six_settings_are_replaced_together(tmp_path, server):
     assert server.config.notebook_credentials == {}
     assert server.config.notebook_mount_credentials == {}
     assert server.config.notebook_credential_writers is None
-    assert server.config.notebook_credential_read_cost == {}
 
 
 def test_read_costs_read_back_as_set(server):
@@ -176,6 +180,36 @@ def test_a_rate_that_is_not_a_number_is_refused_and_changes_nothing(server, rate
         StrataConfig(notebook_credential_read_cost={"lab": rate})
     assert server.config.notebook_credential_read_cost == {"old": 0.02}
     assert server.config.notebook_credentials == {"old": {"key": "old-key"}}
+
+
+def test_a_negative_rate_is_refused_and_changes_nothing(server):
+    """A negative rate lowers a cost estimate until it never asks."""
+    server.config.notebook_credential_read_cost = {"old": 0.02}
+
+    reply = server.client.put(
+        ROUTE,
+        json=_body(
+            notebook_credentials={"lab": {"key": "k"}},
+            notebook_credential_read_cost={"lab": -0.01},
+        ),
+    )
+
+    assert reply.status_code == 422
+    assert "notebook_credential_read_cost" in reply.text
+    assert server.config.notebook_credential_read_cost == {"old": 0.02}
+
+
+@pytest.mark.parametrize("rate", [-0.01, float("nan"), float("inf")])
+def test_a_negative_or_unbounded_rate_is_refused_by_the_body_and_at_startup(rate):
+    """An input rated NaN, or infinite and fully cached (0 * inf), makes a cell's cost NaN,
+    which is never over the threshold. Checked on the model: a JSON reply cannot echo NaN.
+    """
+    with pytest.raises(ValueError, match="notebook_credential_read_cost"):
+        AdminNotebookCredentialsRequest.model_validate(
+            _body(notebook_credential_read_cost={"lab": rate})
+        )
+    with pytest.raises(ValueError, match="notebook_credential_read_cost"):
+        StrataConfig(notebook_credential_read_cost={"lab": rate})
 
 
 @windows
@@ -283,13 +317,17 @@ async def test_a_file_swapped_for_a_link_out_of_the_root_is_not_read(tmp_path, s
     assert server.fetched == []
 
 
-@pytest.mark.parametrize("left_out", ["notebook_credential_paths", "notebook_credential_writers"])
+@pytest.mark.parametrize(
+    "left_out",
+    ["notebook_credential_paths", "notebook_credential_writers", "notebook_credential_read_cost"],
+)
 def test_a_body_that_leaves_out_a_restriction_is_refused_and_keeps_it(tmp_path, server, left_out):
     """Left out would have reset it, lifting the restriction without anyone saying so."""
     restricted = {
         "notebook_credentials": {"lab": {"key": "k"}},
         "notebook_credential_paths": {"lab": [str(tmp_path / "lab")]},
         "notebook_credential_writers": {"lab": ["user_*"]},
+        "notebook_credential_read_cost": {"lab": 0.09},
     }
     assert server.client.put(ROUTE, json=restricted).status_code == 200
     body = {key: value for key, value in restricted.items() if key != left_out}
@@ -300,6 +338,7 @@ def test_a_body_that_leaves_out_a_restriction_is_refused_and_keeps_it(tmp_path, 
     assert left_out in reply.text
     assert server.config.notebook_credential_paths == {"lab": [str(tmp_path / "lab")]}
     assert server.config.notebook_credential_writers == {"lab": ["user_*"]}
+    assert server.config.notebook_credential_read_cost == {"lab": 0.09}
 
 
 def test_reading_them_back_shows_references_and_hides_literal_secrets(server):

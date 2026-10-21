@@ -19,8 +19,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `PUT /v1/admin/notebook-credentials` takes `notebook_credential_read_cost`
   as a sixth setting, replaced with the others, and `GET` returns it, so a
   source a host connects mid-session brings its egress rate and a costly first
-  read through it asks without a restart. A rate that is not a number is
-  refused with `422`. Left out of a body, the rates are cleared. (#1275)
+  read through it asks without a restart. The setting is required in every
+  body, as paths and writers are, so a body that leaves it out is refused with
+  `422` rather than clearing the rates. A rate that is not a number, or is
+  negative, NaN or infinite, is refused with `422`, and at startup.
+  (#1275, #1280)
 - **`.strata/writes/index.json`: the files each cell wrote through its `rw`
   mounts.** For each cell, its last successful run's writes, one entry per
   mount with each file's path, size and sha256, plus when it ran and the
