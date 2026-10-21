@@ -151,7 +151,9 @@ class DatasetSpec(BaseModel):
 
 
 # Set by the SQL executor on a connection's runtime copy, never read from input.
-_INTERNAL_CONNECTION_KEYS = frozenset({"catalog_properties", "confine_to", "mount_sources"})
+_INTERNAL_CONNECTION_KEYS = frozenset(
+    {"catalog_locations", "catalog_properties", "confine_to", "mount_sources"}
+)
 
 
 class ConnectionSpec(BaseModel):

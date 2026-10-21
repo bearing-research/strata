@@ -185,6 +185,7 @@ def resolve_lake(
             )
         except CredentialError as exc:
             raise LakeError(f"catalog {catalog!r}: {exc}") from exc
+        from strata.notebook.sql.drivers.duckdb import secret_scoped_to_tables
         from strata.notebook.table_index import table_read
         from strata.notebook.tables import (
             fingerprint_tables,
@@ -192,6 +193,10 @@ def resolve_lake(
             resolve_table_snapshot,
         )
 
+        # The catalog's S3 secret answers only for these (duckdb._attach_catalog).
+        catalog_locations: list[str] | None = (
+            [] if secret_scoped_to_tables(update["catalog_properties"]) else None
+        )
         pinned = pinned or {}
         specs = {_table_key(spec): spec for spec in _catalog_tables(catalog, tables)}
         _, snapshots = fingerprint_tables(
@@ -224,10 +229,14 @@ def resolve_lake(
                 # still gives a reproducible hash (fingerprint_tables invents a random one
                 # otherwise).
                 lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
-            if confined:
-                lake.locations.append(
-                    _table_location(table_spec, config, env, notebook=session.path)
-                )
+            if confined or catalog_locations is not None:
+                location = _table_location(table_spec, config, env, notebook=session.path)
+                if confined:
+                    lake.locations.append(location)
+                if catalog_locations is not None:
+                    catalog_locations.append(location)
+        if catalog_locations is not None:
+            update["catalog_locations"] = catalog_locations
     if mount_names:
         update["mount_sources"] = _mount_sources(
             session, cell_id, source, mount_names, lake, config if confined else None

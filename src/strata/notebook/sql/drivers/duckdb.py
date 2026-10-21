@@ -112,7 +112,12 @@ class DuckDBAdapter:
             if not read_only:
                 raise RuntimeError("a connection's catalog and mounts are read-only")
             return self._open_lake(
-                path, getattr(spec, "catalog", None), catalog, mounts or [], confine
+                path,
+                getattr(spec, "catalog", None),
+                catalog,
+                mounts or [],
+                confine,
+                getattr(spec, "catalog_locations", None),
             )
         is_memory = path == ":memory:"
         # ``read_only=True`` needs an existing file and fails for memory connections;
@@ -136,13 +141,15 @@ class DuckDBAdapter:
         catalog: dict[str, str] | None,
         mounts: list[dict[str, Any]],
         confine: list[str] | None = None,
+        catalog_locations: list[str] | None = None,
     ) -> Any:
         """A read-only handle with the catalog attached and each mount a view.
 
         Views must exist before the read-only transaction starts and a read-only file
         cannot hold them, so the handle is an in-memory database with the file attached
         as default; views live in ``memory`` and resolve after the file's own tables.
-        The executor resolves ``catalog_properties`` and ``mount_sources``.
+        The executor resolves ``catalog_properties``, ``catalog_locations`` and
+        ``mount_sources``.
         """
         conn = self._invoke_connect(":memory:", read_only=False)
         setup: list[str] = []
@@ -160,7 +167,7 @@ class DuckDBAdapter:
         if catalog:
             assert catalog_name is not None
             conn.execute("INSTALL iceberg; LOAD iceberg")
-            _attach_catalog(conn, catalog_name, catalog)
+            _attach_catalog(conn, catalog_name, catalog, catalog_locations)
         filesystems: dict[str, tuple[str, dict[str, Any]]] = {}
         for mount in mounts:
             _create_mount_view(conn, mount, filesystems)
@@ -427,11 +434,12 @@ def _mount_scheme(uri: str) -> str:
     return parse_mount_uri(uri)[0]
 
 
-def _s3_secret(name: str, fields: dict[str, Any], scope: str | None = None) -> str | None:
+def _s3_secret(name: str, fields: dict[str, Any], scope: list[str] | None = None) -> str | None:
     """``CREATE SECRET`` for S3 from fsspec or pyiceberg names, or None without any.
 
     Mount storage options use s3fs names (``key``, ``endpoint_url``); catalog
     properties use pyiceberg names (``s3.access-key-id``, ``s3.endpoint``).
+    With *scope*, the secret answers only for paths under one of its prefixes.
     """
     client_kwargs = fields.get("client_kwargs") or {}
     values = {
@@ -451,15 +459,50 @@ def _s3_secret(name: str, fields: dict[str, Any], scope: str | None = None) -> s
         options += [
             f"ENDPOINT {_literal(parsed.netloc or parsed.path)}",
             f"USE_SSL {'false' if parsed.scheme == 'http' else 'true'}",
-            "URL_STYLE 'path'",
         ]
+    # Path style by default with an endpoint, as MinIO and most S3-compatible stores need.
+    path_style = str(fields.get("s3.path-style-access", "")).lower()
+    if path_style == "true" or (endpoint and path_style != "false"):
+        options.append("URL_STYLE 'path'")
     if scope:
-        options.append(f"SCOPE {_literal(scope)}")
+        prefixes = ", ".join(map(_literal, scope))
+        options.append(f"SCOPE [{prefixes}]" if len(scope) > 1 else f"SCOPE {prefixes}")
     return f"CREATE OR REPLACE SECRET {_ident(name)} (TYPE s3, {', '.join(options)})"
 
 
-def _attach_catalog(conn: Any, name: str, properties: dict[str, str]) -> None:
-    """Attach an Iceberg REST or AWS Glue catalog, from its pyiceberg properties, as *name*."""
+def _vends_credentials(properties: dict[str, str]) -> bool:
+    """Whether a REST catalog is asked to vend storage credentials.
+
+    pyiceberg asks unless ``header.X-Iceberg-Access-Delegation`` names something
+    else. A catalog whose store has no STS refuses, so its properties carry the
+    store's ``s3.*`` keys and an empty header instead.
+    """
+    for key, value in properties.items():
+        if key.lower() == "header.x-iceberg-access-delegation":
+            return "vended-credentials" in [mode.strip() for mode in str(value).split(",")]
+    return True
+
+
+def secret_scoped_to_tables(properties: dict[str, str]) -> bool:
+    """Whether a catalog's S3 secret is scoped to the tables a query reads.
+
+    So for a REST catalog that vends nothing and has no ``s3://`` warehouse to
+    scope to. The executor locates those tables (``catalog_locations``).
+    """
+    return (
+        properties.get("type", "rest") == "rest"
+        and not _vends_credentials(properties)
+        and not properties.get("warehouse", "").startswith("s3://")
+    )
+
+
+def _attach_catalog(
+    conn: Any, name: str, properties: dict[str, str], locations: list[str] | None = None
+) -> None:
+    """Attach an Iceberg REST or AWS Glue catalog, from its pyiceberg properties, as *name*.
+
+    *locations* are where the tables the query reads live, for ``secret_scoped_to_tables``.
+    """
     kind = properties.get("type", "rest")
     if kind == "glue":
         _attach_glue(conn, name, properties)
@@ -488,20 +531,22 @@ def _attach_catalog(conn: Any, name: str, properties: dict[str, str]) -> None:
         auth = f"SECRET {_ident(secret)}"
     else:
         auth = "AUTHORIZATION_TYPE 'none'"
-    # Scoped to the warehouse, so it neither reaches other buckets nor answers
-    # for a mount's; without an s3 warehouse to scope to, the catalog's vended
-    # credentials are all the tables get.
+    # Scoped to the warehouse, or to the tables read, so it neither reaches other
+    # buckets nor answers for a mount's (or sends a keyless one to its endpoint).
+    # A catalog that vends, with no s3 warehouse, gives the tables their credentials.
     warehouse = properties.get("warehouse", "")
-    s3 = (
-        _s3_secret(f"strata_catalog_{name}_s3", properties, warehouse)
-        if warehouse.startswith("s3://")
-        else None
-    )
+    if warehouse.startswith("s3://"):
+        scope = [warehouse]
+    else:
+        scope = sorted(set(locations or [])) if secret_scoped_to_tables(properties) else []
+    s3 = _s3_secret(f"strata_catalog_{name}_s3", properties, scope) if scope else None
     if s3:
         conn.execute(s3)
+    # DuckDB asks for vended credentials by default, which such a catalog refuses.
+    delegation = "" if _vends_credentials(properties) else ", ACCESS_DELEGATION_MODE 'none'"
     conn.execute(
-        f"ATTACH {_literal(properties.get('warehouse', ''))} AS {_ident(name)} "
-        f"(TYPE iceberg, ENDPOINT {_literal(uri)}, {auth}, READ_ONLY)"
+        f"ATTACH {_literal(warehouse)} AS {_ident(name)} "
+        f"(TYPE iceberg, ENDPOINT {_literal(uri)}, {auth}{delegation}, READ_ONLY)"
     )
 
 
@@ -584,7 +629,7 @@ def _create_mount_view(
     root = mount_root(uri)
     storage_options = mount.get("storage_options") or {}
     if scheme == "s3":
-        secret = _s3_secret(f"strata_mount_{name}", storage_options, root)
+        secret = _s3_secret(f"strata_mount_{name}", storage_options, [root])
         if secret:
             conn.execute(secret)
     elif scheme in _FSSPEC_PREFIXES:
