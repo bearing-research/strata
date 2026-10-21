@@ -2297,8 +2297,30 @@ families include:</p>
   bytes/second</li>
 <li><strong>QoS</strong>: interactive vs bulk slot usage, queue wait and rejections</li>
 <li><strong>Rate limiter</strong>: request acceptance / rejection counts</li>
-<li><strong>Server</strong>: draining flag, HTTP connections and requests, thread
-  pools, Arrow memory, GC pauses</li>
+<li><strong>Server</strong>: draining flag, HTTP connections, thread pools, Arrow
+  memory, GC pauses</li>
+<li><strong>HTTP requests</strong>: <code>strata_http_requests_total{method, route, status}</code>
+  and the histogram <code>strata_http_request_duration_seconds{route}</code>
+  (<code>_bucket</code>, <code>_sum</code>, <code>_count</code>; buckets from 5 ms to 300 s). <code>route</code> is the
+  matched route's template (<code>/v1/artifacts/{artifact_id}/v/{version}</code>),
+  never the raw path; a mount is its prefix (<code>/assets/{path}</code>,
+  <code>/mcp/{path}</code>), and a request answered before routing (a refused Host,
+  auth, the rate limiter) or matching no route is <code>unmatched</code>. <code>status</code> is
+  the class: <code>2xx</code>, <code>3xx</code>, <code>4xx</code> or <code>5xx</code>. A request that raised before its
+  response started counts as <code>5xx</code>, the 500 the server answers; one that
+  raised mid-stream keeps the status it sent. A method outside the standard
+  set is <code>other</code>. The duration runs to the response's last byte, so a
+  stream (<code>/v1/streams/{stream_id}</code>) is timed to its end. There is no tenant
+  label. The error rate is
+  <code>sum(rate(strata_http_requests_total{status="5xx"}[5m])) / sum(rate(strata_http_requests_total[5m]))</code>.</li>
+<li><strong>Object storage</strong>: <code>strata_object_store_errors_total{operation}</code>, the
+  artifact store's S3, GCS and Azure calls that raised, by <code>put</code>, <code>get</code>,
+  <code>head</code>, <code>list</code> or <code>delete</code>, every operation present from the first
+  scrape. A call counts even when its caller carries on (an existence check
+  reports a refused <code>head</code> as absent); an object that is not there is an
+  answer, not an error. A <code>get</code> counts when opening the object fails, not a
+  read that fails partway. No artifact path lists the store today, so
+  <code>list</code> stays 0, and the local-disk backend is not counted.</li>
 <li><strong>Per tenant</strong>: <code>strata_tenant_scans_total</code>,
   <code>strata_tenant_cache_hit_rate</code> and <code>strata_tenant_bytes_total</code>, labelled
   by <code>tenant</code>, once a tenant has made a request, and the build series

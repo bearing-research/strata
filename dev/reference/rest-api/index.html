@@ -5164,7 +5164,9 @@ are covered in <a href="../../deployment/observability/#health-endpoints">Observ
 <code>admin:*</code> data (<code>GET /metrics/tables</code>), and the per-tenant series, since
 tenant ids are <code>admin:tenants</code> data (<code>GET /v1/admin/tenants</code>). The AI usage
 series carry no <code>tenant</code> or <code>principal</code> label there: they are per-model
-totals.</p>
+totals. Requests are counted by method, route template and status class, and
+timed per route; failed object-store calls are counted by operation (see
+<a href="../../deployment/observability/#metrics-metricsprometheus">Observability</a>).</p>
 <h3 id="artifacts-names-cache-and-diagnostics">Artifacts, names, cache and diagnostics<a class="headerlink" href="#artifacts-names-cache-and-diagnostics" title="Permanent link">&para;</a></h3>
 <p>The routes the client SDK and the web UI call that no feature page covers.
 The gate column uses these terms:</p>

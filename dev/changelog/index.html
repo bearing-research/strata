@@ -3840,6 +3840,14 @@ exhaustive commit history.</p>
   <code>include_tenantless=true</code>, which anyone else is refused (<code>403</code>). A version
   another tenant's name, pin, publication or build reaches is kept as before,
   and the scheduled sweep still covers the whole store. (#1288)</li>
+<li><strong>Request status, latency and storage errors in <code>/metrics/prometheus</code>.</strong>
+  <code>strata_http_request_duration_seconds{route}</code> is a histogram of each
+  request's duration by route template, up to the response's last byte, so
+  a stream is timed to its end. <code>strata_object_store_errors_total{operation}</code>
+  counts the artifact store's S3, GCS and Azure calls that failed, by
+  <code>put</code>, <code>get</code>, <code>head</code>, <code>list</code> or <code>delete</code>, including the ones a caller
+  reports as absent or unknown; an object that is not there is not an
+  error. (#1289)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3862,6 +3870,15 @@ exhaustive commit history.</p>
   reset it, which lifted a restriction without anyone saying so; it is now
   refused with <code>422</code> naming the field. Send <code>{}</code> for no path restrictions and
   <code>null</code> for writers unset. (#1265)</li>
+<li><strong><code>strata_http_requests_total</code> is labelled by <code>method</code>, <code>route</code> and
+  <code>status</code>.</strong> It was one number. <code>route</code> is the matched route's template
+  (<code>/v1/artifacts/{artifact_id}/v/{version}</code>), or <code>unmatched</code> for a request
+  answered before routing (a refused Host, auth, the rate limiter) or
+  matching no route; <code>status</code> is the class (<code>2xx</code>, <code>4xx</code>, <code>5xx</code>), and a
+  request that raised before answering counts as <code>5xx</code>. There is no tenant
+  label.
+  A query for the total sums the series: <code>sum(strata_http_requests_total)</code>.
+  (#1289)</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
