@@ -326,7 +326,8 @@ def _write_folder_files(
     The published bytes are only the folder's manifest; these are what it describes.
 
     Raises:
-        ValueError: If a file the manifest names is missing or not the bytes it names.
+        ValueError: If the manifest cannot be read, or a file it names is missing or not
+            the bytes it names.
     """
     from strata.notebook import output_dirs
 
@@ -335,13 +336,16 @@ def _write_folder_files(
     manifest = store.read_blob(artifact.id, artifact.version)
     if manifest is None:
         raise ValueError(f"{artifact.id}@v={artifact.version} has no stored bytes to archive")
+    # An import can store any bytes as a manifest: refused like a missing file, not a 500.
+    output_dirs.file_refs(artifact.id, manifest)
     described = json.loads(manifest)
     cell_id, files = described["cell_id"], described["files"]
     written = []
     for rel in sorted(files):
         name = f"folder/{output_dirs.checked_path(rel)}"
         file_id, version = output_dirs.file_ref(artifact.id, cell_id, files[rel])
-        reader_cm = store.open_blob_reader(file_id, version)
+        held = output_dirs.held_file(store, artifact.tenant, file_id, version)
+        reader_cm = None if held is None else store.open_blob_reader(file_id, version)
         if reader_cm is None:
             raise ValueError(f"the folder's file {rel} is missing from the store")
         (dest / name).parent.mkdir(parents=True, exist_ok=True)

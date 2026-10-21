@@ -437,7 +437,8 @@ def _copy_folder_files(
 
     A file is not a lineage edge of its manifest, so the walk never reaches it. One the
     target already holds (same id and digest, so the same bytes) is not sent again, and
-    the manifest names the version the target has.
+    the manifest names the version the target has. Every file is checked before any is
+    sent, so a refused folder leaves none of its files behind.
     """
     from strata.notebook import output_dirs
 
@@ -446,18 +447,25 @@ def _copy_folder_files(
     if manifest is None:
         raise ValueError(f"{ref} is a folder whose manifest has no stored bytes")
     landed: dict[tuple[str, int], tuple[str, int]] = {}
+    to_send: list[ArtifactVersion] = []
     for file_id, version, sha256 in output_dirs.file_refs(manifest_record.id, manifest):
-        record = source.get_artifact(file_id, version)
+        record = output_dirs.held_file(source, manifest_record.tenant, file_id, version)
         if record is None or record.state not in ("ready", "superseded"):
             raise ValueError(f"{ref} is a folder naming {file_id}@v={version}, which is gone")
         held = target.find_by_provenance(record.provenance_hash, tenant=record.tenant)
         if held is not None and held.content_sha256 == sha256:
             landed[(file_id, version)] = (held.id, held.version)
             continue
+        if not source.blob_exists(file_id, version):
+            raise ValueError(
+                f"{ref} is a folder naming {file_id}@v={version}, whose bytes are gone"
+            )
+        to_send.append(record)
+    for record in to_send:
         imported = _copy_record(source, target, record)
         if imported.written:
             written.append(imported.ref)
-        landed[(file_id, version)] = (imported.id, imported.version)
+        landed[(record.id, record.version)] = (imported.id, imported.version)
     # Under the id it is sent with: a remap only suffixes that, which keeps the base its
     # files' ids are read from.
     return output_dirs.relocate(manifest, manifest_record.id, landed)

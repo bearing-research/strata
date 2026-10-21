@@ -4305,9 +4305,17 @@ class ArtifactStore:
             if node in manifests:
                 manifest = self.read_blob(*node, note_use=False)
                 if manifest is not None:
-                    pending += [
-                        (fid, fv) for fid, fv, _ in output_dirs.file_refs(node[0], manifest)
-                    ]
+                    try:
+                        pending += [
+                            (fid, fv) for fid, fv, _ in output_dirs.file_refs(node[0], manifest)
+                        ]
+                    except ValueError:
+                        # An import can hold any bytes under this type; one bad row must not
+                        # stop every sweep of the store. It names nothing, so holds nothing.
+                        logger.warning(
+                            "%s@v=%d is not a readable folder manifest; it holds no files",
+                            *node,
+                        )
             recorded_inputs = inputs.get(node)
             if not recorded_inputs:
                 continue

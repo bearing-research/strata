@@ -13,9 +13,13 @@ lineage in the notebook walks past the dataset to the steps that made it.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import tempfile
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote
 
@@ -29,6 +33,7 @@ from strata.notebook.models import DatasetSpec
 STALE_CHECK_SECONDS = 60.0
 LOOKUP_TIMEOUT_SECONDS = 10.0
 DOWNLOAD_TIMEOUT_SECONDS = 300.0
+_CHUNK = 1 << 20
 # How many steps behind a dataset are copied with it, as the lineage walk reads.
 ANCESTRY_DEPTH = 10
 
@@ -103,6 +108,23 @@ class Registry(Protocol):
         """A readable version and its bytes, or ``None`` when the registry has none."""
         ...
 
+    def download_to(self, artifact_id: str, version: int, dest: Path) -> ArtifactVersion | None:
+        """A readable version, its bytes streamed to *dest*, or ``None`` when the registry has none.
+
+        The record's ``content_sha256`` is the digest of what was written.
+        """
+        ...
+
+
+def _spool(chunks: Iterable[bytes], dest: Path) -> str:
+    """Write *chunks* to *dest*; return their sha256."""
+    digest = hashlib.sha256()
+    with open(dest, "wb") as out:
+        for chunk in chunks:
+            digest.update(chunk)
+            out.write(chunk)
+    return digest.hexdigest()
+
 
 class LocalRegistry:
     """The registry of a store on this machine, as *tenant* sees it."""
@@ -142,6 +164,15 @@ class LocalRegistry:
             return None
         blob = self._store.read_blob(artifact_id, version)
         return None if blob is None else (record, blob)
+
+    def download_to(self, artifact_id: str, version: int, dest: Path) -> ArtifactVersion | None:
+        record = self.record(artifact_id, version)
+        reader = None if record is None else self._store.open_blob_reader(artifact_id, version)
+        if record is None or reader is None:
+            return None
+        with reader as src:
+            digest = _spool(iter(lambda: src.read(_CHUNK), b""), dest)
+        return replace(record, content_sha256=digest)
 
 
 class RemoteRegistry:
@@ -230,6 +261,27 @@ class RemoteRegistry:
                 f"(HTTP {response.status_code})"
             )
         return record, response.content
+
+    def download_to(self, artifact_id: str, version: int, dest: Path) -> ArtifactVersion | None:
+        record = self.record(artifact_id, version)
+        if record is None:
+            return None
+        url = f"{self._base_url}/v1/artifacts/{quote(artifact_id, safe='')}/v/{version}/data"
+        try:
+            with httpx.stream(
+                "GET", url, headers=self._headers, timeout=DOWNLOAD_TIMEOUT_SECONDS
+            ) as response:
+                if response.status_code == 404:
+                    return None
+                if response.status_code >= 400:
+                    raise DatasetError(
+                        f"the bytes of {artifact_id}@v={version} could not be read "
+                        f"(HTTP {response.status_code})"
+                    )
+                digest = _spool(response.iter_bytes(_CHUNK), dest)
+        except httpx.HTTPError as exc:
+            raise DatasetError(f"the registry at {self._base_url} is unreachable: {exc}") from exc
+        return replace(record, content_sha256=digest)
 
 
 def registry_for(config: Any, tenant: str | None = None) -> Registry:
@@ -327,6 +379,11 @@ def _land(
     record = remap_input_versions(replace(record, tenant=None), landed)
     if record.params.get("content_type") == output_dirs.CONTENT_TYPE:
         blob = _land_folder_files(registry, store, record, blob, landed)
+    return _import(store, record, blob)
+
+
+def _import(store: ArtifactStore, record: ArtifactVersion, blob: bytes | Path) -> str:
+    """Import *record* with *blob*; return the ref it landed on."""
     try:
         return store.import_artifact(record, blob).ref
     except ArtifactImportConflict:
@@ -344,21 +401,30 @@ def _land_folder_files(
 ) -> bytes:
     """Copy each file a folder's manifest names; return the manifest naming where they landed.
 
-    The files are not lineage edges, so the walk above never reaches them.
+    The files are not lineage edges, so the walk above never reaches them. Each is
+    streamed through a file on disk: a folder's files can be checkpoints of many GB.
     """
     moved: dict[tuple[str, int], tuple[str, int]] = {}
-    for file_id, version, _ in output_dirs.file_refs(record.id, manifest):
-        ref = f"{file_id}@v={version}"
-        if ref not in landed:
-            local = _already_here(registry, store, file_id, version)
-            if local is not None:
-                landed[ref] = f"{local.id}@v={local.version}"
-            else:
-                fetched = registry.download(file_id, version)
-                if fetched is None:
-                    raise DatasetError(f"{record.id}@v={record.version} names {ref}, which is gone")
-                # A file has no inputs to walk.
-                landed[ref] = _land(registry, store, *fetched, depth=ANCESTRY_DEPTH, landed=landed)
-        landed_id, _, landed_version = landed[ref].rpartition("@v=")
-        moved[(file_id, version)] = (landed_id, int(landed_version))
+    with tempfile.TemporaryDirectory(prefix="strata_dataset_") as workdir:
+        spooled = Path(workdir) / "file"
+        for file_id, version, sha256 in output_dirs.file_refs(record.id, manifest):
+            ref = f"{file_id}@v={version}"
+            if ref not in landed:
+                local = _already_here(registry, store, file_id, version)
+                if local is not None:
+                    landed[ref] = f"{local.id}@v={local.version}"
+                else:
+                    fetched = registry.download_to(file_id, version, spooled)
+                    if fetched is None:
+                        raise DatasetError(
+                            f"{record.id}@v={record.version} names {ref}, which is gone"
+                        )
+                    if fetched.content_sha256 != sha256:
+                        raise DatasetError(
+                            f"{ref} is not the bytes {record.id}@v={record.version} names"
+                        )
+                    # The notebook's store is untenanted; a file has no inputs to walk.
+                    landed[ref] = _import(store, replace(fetched, tenant=None), spooled)
+            landed_id, _, landed_version = landed[ref].rpartition("@v=")
+            moved[(file_id, version)] = (landed_id, int(landed_version))
     return output_dirs.relocate(manifest, record.id, moved)

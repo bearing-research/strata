@@ -841,6 +841,8 @@ def cmd_archive(args: argparse.Namespace) -> int:
 
 
 def cmd_pull(args: argparse.Namespace) -> int:
+    from strata.notebook import output_dirs
+
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
@@ -855,15 +857,33 @@ def cmd_pull(args: argparse.Namespace) -> int:
     if blob is None:
         print(f"blob missing for {artifact.id}@v={artifact.version}", file=sys.stderr)
         return 1
+    safe_ref = args.ref.replace("/", "_").replace("@", "_")
+    if artifact.params.get("content_type") == output_dirs.CONTENT_TYPE:
+        return _pull_folder(store, artifact, blob, Path(args.to or safe_ref))
 
-    if args.to:
-        out_path = Path(args.to)
-    else:
-        safe_ref = args.ref.replace("/", "_").replace("@", "_")
-        out_path = Path(f"{safe_ref}.arrow")
+    out_path = Path(args.to) if args.to else Path(f"{safe_ref}.arrow")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(blob)
     print(f"wrote {len(blob):,} bytes to {out_path}  ({artifact.id}@v={artifact.version})")
+    return 0
+
+
+def _pull_folder(
+    store: ArtifactStore, artifact: ArtifactVersion, manifest: bytes, dest: Path
+) -> int:
+    """Rebuild an ``output_dir`` folder at *dest* from the files its manifest names."""
+    from strata.notebook import output_dirs
+
+    if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
+        print(f"{dest} exists; a folder is pulled into a new or empty directory", file=sys.stderr)
+        return 1
+    try:
+        count = len(output_dirs.file_refs(artifact.id, manifest))
+        output_dirs.materialize(store, artifact.id, manifest, dest, tenant=artifact.tenant)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"cannot rebuild {artifact.id}@v={artifact.version}: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {count} files to {dest}/  ({artifact.id}@v={artifact.version})")
     return 0
 
 

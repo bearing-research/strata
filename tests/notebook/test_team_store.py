@@ -1357,7 +1357,7 @@ def _folder_bytes(manager: NotebookArtifactManager, cell_id: str, dest) -> dict[
     stored = manager.artifact_store.get_latest_version(manifest_id)
     assert stored is not None
     blob = manager.artifact_store.read_blob(manifest_id, stored.version)
-    output_dirs.materialize(manager.artifact_store, manifest_id, blob, dest)
+    output_dirs.materialize(manager.artifact_store, manifest_id, blob, dest, tenant=None)
     return {p.relative_to(dest).as_posix(): p.read_bytes() for p in dest.rglob("*") if p.is_file()}
 
 

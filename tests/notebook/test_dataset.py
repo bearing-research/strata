@@ -655,19 +655,15 @@ class TestARemoteRegistry:
             "raw@v=1",
         ]
 
-    @pytest.mark.parametrize("remote", [True, False])
-    async def test_a_promoted_folder_is_read_as_a_folder(
-        self, notebook, notebook_personal_server, monkeypatch, tmp_path, remote
-    ):
-        """Another notebook's ``# @output_dir`` folder, promoted, arrives with its files."""
+    @staticmethod
+    def _promoted_folder(base: str, tmp_path, files: dict[str, bytes]):
+        """Another notebook's ``# @output_dir`` folder, promoted to the store at *base*."""
         import argparse
 
         from strata.artifact.cli import cmd_promote
         from strata.notebook import output_dirs
         from strata.notebook.artifact_integration import NotebookArtifactManager
-        from strata.notebook.executor import CellExecutor
 
-        files = {"epochs/e0.bin": b"\x00" * 10, "final.txt": b"done"}
         writer = NotebookArtifactManager("trainer", artifact_dir=tmp_path / "trainer")
         for rel, data in files.items():
             path = tmp_path / "run" / output_dirs.OUTPUT_DIRS / "ckpt" / rel
@@ -682,7 +678,6 @@ class TestARemoteRegistry:
             input_versions={},
             source="# @output_dir ckpt",
         )
-        base = notebook_personal_server["base_url"]
         promoted = argparse.Namespace(
             ref=folder.id,
             artifact_dir=str(tmp_path / "trainer"),
@@ -696,13 +691,36 @@ class TestARemoteRegistry:
             max_depth=10,
         )
         assert cmd_promote(promoted) == 0
+        return folder
+
+    _FOLDER_READER = (
+        "score = {p.relative_to(ckpt).as_posix(): p.read_bytes().decode('latin-1')"
+        " for p in ckpt.rglob('*') if p.is_file()}"
+    )
+
+    @pytest.mark.parametrize("remote", [True, False])
+    async def test_a_promoted_folder_is_read_as_a_folder(
+        self, notebook, notebook_personal_server, monkeypatch, tmp_path, remote
+    ):
+        """Another notebook's ``# @output_dir`` folder, promoted, arrives with its files."""
+        from strata.notebook import output_dirs
+        from strata.notebook.executor import CellExecutor
+
+        files = {"epochs/e0.bin": b"\x00" * 10, "final.txt": b"done"}
+        base = notebook_personal_server["base_url"]
+        folder = self._promoted_folder(base, tmp_path, files)
         if remote:
             self._point_at(monkeypatch, base)
-        source = (
-            f"# @dataset ckpt team/ckpt@v={folder.version}\n"
-            "score = {p.relative_to(ckpt).as_posix(): p.read_bytes().decode('latin-1')"
-            " for p in ckpt.rglob('*') if p.is_file()}"
-        )
+        # Each file streams to disk; only the manifest is read whole.
+        whole: list[str] = []
+        for registry in (datasets_module.RemoteRegistry, datasets_module.LocalRegistry):
+
+            def spy(self, artifact_id, version, real=registry.download):
+                whole.append(artifact_id)
+                return real(self, artifact_id, version)
+
+            monkeypatch.setattr(registry, "download", spy)
+        source = f"# @dataset ckpt team/ckpt@v={folder.version}\n{self._FOLDER_READER}"
         session = notebook(source)
 
         result = await CellExecutor(session).execute_cell("c1", source)
@@ -711,6 +729,35 @@ class TestARemoteRegistry:
         assert result.outputs["score"]["preview"] == {
             rel: data.decode("latin-1") for rel, data in files.items()
         }
+        assert whole == [folder.id]
+        assert not any(output_dirs.is_file_id(artifact_id) for artifact_id in whole)
+
+    @pytest.mark.parametrize("remote", [True, False])
+    async def test_a_folder_file_not_the_bytes_its_manifest_names_fails_the_cell(
+        self, notebook, notebook_personal_server, monkeypatch, tmp_path, remote
+    ):
+        from strata.notebook import output_dirs
+        from strata.notebook.executor import CellExecutor
+
+        files = {"final.txt": b"done"}
+        base = notebook_personal_server["base_url"]
+        folder = self._promoted_folder(base, tmp_path, files)
+        registry = notebook_personal_server["artifact_store"]
+        ((file_id, version, _),) = output_dirs.file_refs(
+            folder.id, registry.read_blob(folder.id, folder.version)
+        )
+        registry.blob_store.write_blob(*registry._blob_key(file_id, version), b"swapped")
+        if remote:
+            self._point_at(monkeypatch, base)
+        source = f"# @dataset ckpt team/ckpt@v={folder.version}\n{self._FOLDER_READER}"
+        session = notebook(source)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success is False
+        assert "is not the bytes" in result.error
+        local = session.get_artifact_manager().artifact_store
+        assert local.get_artifact(file_id, version) is None
 
     async def test_an_unreachable_registry_fails_the_cell_rather_than_reading_locally(
         self, notebook, notebook_personal_server, monkeypatch
