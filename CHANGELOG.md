@@ -35,6 +35,13 @@ exhaustive commit history.
   `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` set, a failed folder version
   newer than the last good one is no longer pruned until a later run
   succeeds. (#1277)
+- **A DuckDB SQL cell reads a REST catalog that vends no credentials.** When a
+  catalog's properties set `header.X-Iceberg-Access-Delegation` to something
+  other than `vended-credentials` (empty, for a store without STS), DuckDB no
+  longer asks the catalog to vend, and reads the tables with the catalog's
+  `s3.*` keys (`s3.endpoint`, `s3.region` and `s3.path-style-access` too)
+  whatever form the warehouse takes. Without an `s3://` warehouse those keys
+  reach only the locations of the tables the query reads. (#1278)
 
 ### Changed
 

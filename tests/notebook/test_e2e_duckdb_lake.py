@@ -427,3 +427,150 @@ async def test_a_confined_cell_reads_its_catalog_and_nothing_outside_it(
     result = await CellExecutor(session).execute_cell("c1", source)
     assert result.success is False
     assert "Permission" in (result.error or "")
+
+
+class _NoVendingCatalog:
+    """A proxy to a REST catalog that refuses to vend credentials, as Polaris does
+    when its store has no STS. ``refused`` holds the path of each request that asked."""
+
+    def __init__(self, upstream: str) -> None:
+        import http.client
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from urllib.parse import urlparse
+
+        target = urlparse(upstream)
+        refused: list[str] = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def _forward(self) -> None:
+                if "vended-credentials" in self.headers.get("X-Iceberg-Access-Delegation", ""):
+                    refused.append(self.path)
+                    error = {
+                        "message": "Credential vending was requested, "
+                        "but no credentials are available",
+                        "type": "ForbiddenException",
+                        "code": 403,
+                    }
+                    self._reply(403, json.dumps({"error": error}).encode(), "application/json")
+                    return
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                connection = http.client.HTTPConnection(target.hostname, target.port)
+                # Uncompressed, so the body passes through as it is.
+                headers = {
+                    k: v
+                    for k, v in self.headers.items()
+                    if k.lower() not in ("host", "accept-encoding")
+                }
+                connection.request(self.command, self.path, body or None, headers)
+                response = connection.getresponse()
+                self._reply(
+                    response.status, response.read(), response.getheader("Content-Type", "")
+                )
+                connection.close()
+
+            def _reply(self, status: int, body: bytes, content_type: str) -> None:
+                self.send_response(status)
+                if content_type:
+                    self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            do_GET = do_POST = do_HEAD = do_DELETE = _forward
+
+            def log_message(self, format: str, *args: Any) -> None:
+                del format, args
+
+        self.refused = refused
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.uri = f"http://127.0.0.1:{self._server.server_address[1]}"
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+@pytest.fixture
+def no_vending_catalog():
+    """A REST catalog over MinIO that vends nothing, its warehouse a name, as Amber's lake
+    is: its properties, carrying the store's keys, and the proxy that refuses vending.
+    It holds ``taxi.trips`` (ids 1 and 2)."""
+    from pyiceberg.catalog import load_catalog
+    from testcontainers.core.network import Network
+
+    with Network() as network:
+        minio = MinioContainer(MINIO_IMAGE).with_network(network).with_network_aliases("minio")
+        start_container_or_skip(minio, label="MinIO")
+        try:
+            minio.get_client().make_bucket("lake")
+            minio_config = minio.get_config()
+            rest = DockerContainer("apache/iceberg-rest-fixture:1.9.2").with_network(network)
+            for key, value in {
+                "CATALOG_WAREHOUSE": "s3://lake/",
+                "CATALOG_IO__IMPL": "org.apache.iceberg.aws.s3.S3FileIO",
+                "CATALOG_S3_ENDPOINT": "http://minio:9000",
+                "CATALOG_S3_PATH__STYLE__ACCESS": "true",
+                "AWS_ACCESS_KEY_ID": minio_config["access_key"],
+                "AWS_SECRET_ACCESS_KEY": minio_config["secret_key"],
+                "AWS_REGION": "us-east-1",
+            }.items():
+                rest.with_env(key, value)
+            rest.with_exposed_ports(8181)
+            rest.waiting_for(LogMessageWaitStrategy("Started").with_startup_timeout(120))
+            start_container_or_skip(rest, label="iceberg-rest-fixture")
+            proxy = _NoVendingCatalog(
+                f"http://{rest.get_container_host_ip()}:{rest.get_exposed_port(8181)}"
+            )
+            try:
+                properties = {
+                    "type": "rest",
+                    "uri": proxy.uri,
+                    "warehouse": "lake",
+                    "header.X-Iceberg-Access-Delegation": "",
+                    "s3.endpoint": f"http://{minio_config['endpoint']}",
+                    "s3.access-key-id": minio_config["access_key"],
+                    "s3.secret-access-key": minio_config["secret_key"],
+                    "s3.region": "us-east-1",
+                    "s3.path-style-access": "true",
+                }
+                catalog = load_catalog("lake", **properties)
+                catalog.create_namespace("taxi")
+                table = catalog.create_table("taxi.trips", schema=pa.schema([("id", pa.int64())]))
+                table.append(pa.table({"id": [1, 2]}))
+                yield properties, proxy
+            finally:
+                proxy.close()
+                rest.stop()
+        finally:
+            minio.stop()
+
+
+@pytest.mark.asyncio
+# Service mode also confines the cell to the table's location in the store.
+@pytest.mark.parametrize("mode", ["personal", "service"])
+async def test_a_duckdb_cell_reads_a_catalog_that_vends_nothing_with_its_keys(
+    tmp_path, monkeypatch, no_vending_catalog, mode
+):
+    properties, proxy = no_vending_catalog
+    _configure(
+        monkeypatch,
+        StrataConfig(
+            cache_dir=tmp_path / "cache",
+            catalogs={"lake": properties},
+            deployment_mode=mode,
+            **service_auth(mode),
+        ),
+    )
+    nb_dir = _notebook(
+        tmp_path,
+        "# @sql connection=lake\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
+        'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+    _, rows = await _run(nb_dir, session)
+
+    assert rows == [{"id": 1}, {"id": 2}]
+    assert proxy.refused == []

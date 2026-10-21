@@ -560,6 +560,136 @@ class TestAGlueCatalog:
         assert "/eu-west-1/glue/aws4_request" in seen[0]
 
 
+class TestARestCatalogThatVendsNothing:
+    """An empty access-delegation header: DuckDB asks the catalog for no credentials and
+    reads the tables with the catalog's own keys, where those tables live (a real catalog
+    that refuses to vend: test_e2e_duckdb_lake.py)."""
+
+    _LAKE = {
+        "type": "rest",
+        "uri": "http://catalog",
+        "warehouse": "lake",
+        "header.X-Iceberg-Access-Delegation": "",
+        "s3.access-key-id": "k",
+        "s3.secret-access-key": "s",
+        "s3.endpoint": "https://store.example:9000",
+        "s3.region": "eu-west-1",
+        "s3.path-style-access": "true",
+    }
+
+    @staticmethod
+    def _attach(properties, locations=None):
+        from strata.notebook.sql.drivers.duckdb import _attach_catalog
+
+        recorder = _Recorder()
+        _attach_catalog(recorder, "lake", properties, locations)
+        return recorder.statements
+
+    def test_its_keys_reach_only_the_tables_the_query_reads(self):
+        statements = self._attach(self._LAKE, ["s3://lake/l1/b/", "s3://lake/l1/a/"])
+
+        assert statements == [
+            'CREATE OR REPLACE SECRET "strata_catalog_lake_s3" (TYPE s3, '
+            "KEY_ID 'k', SECRET 's', REGION 'eu-west-1', ENDPOINT 'store.example:9000', "
+            "USE_SSL true, URL_STYLE 'path', SCOPE ['s3://lake/l1/a/', 's3://lake/l1/b/'])",
+            "ATTACH 'lake' AS \"lake\" (TYPE iceberg, ENDPOINT 'http://catalog', "
+            "AUTHORIZATION_TYPE 'none', ACCESS_DELEGATION_MODE 'none', READ_ONLY)",
+        ]
+
+    def test_with_an_s3_warehouse_they_reach_the_warehouse(self):
+        secret, attach = self._attach(
+            {**self._LAKE, "warehouse": "s3://lake/wh"}, ["s3://lake/wh/t/"]
+        )
+
+        assert secret.endswith("SCOPE 's3://lake/wh')")
+        assert "ACCESS_DELEGATION_MODE 'none'" in attach
+
+    @pytest.mark.parametrize(
+        "delegation", [None, "vended-credentials", "remote-signing, vended-credentials"]
+    )
+    def test_a_catalog_asked_to_vend_gets_no_keys_for_a_named_warehouse(self, delegation):
+        from strata.notebook.sql.drivers.duckdb import secret_scoped_to_tables
+
+        properties = {k: v for k, v in self._LAKE.items() if not k.startswith("header.")}
+        if delegation is not None:
+            properties["header.x-iceberg-access-delegation"] = delegation
+
+        assert self._attach(properties, ["s3://lake/l1/a/"]) == [
+            "ATTACH 'lake' AS \"lake\" (TYPE iceberg, ENDPOINT 'http://catalog', "
+            "AUTHORIZATION_TYPE 'none', READ_ONLY)"
+        ]
+        assert not secret_scoped_to_tables(properties)
+
+    def test_path_style_can_be_turned_off(self):
+        secret, _ = self._attach(
+            {**self._LAKE, "s3.path-style-access": "false"}, ["s3://lake/l1/a/"]
+        )
+
+        assert "URL_STYLE" not in secret
+
+    def test_duckdb_answers_with_them_only_under_those_tables(self):
+        import duckdb
+
+        from strata.notebook.sql.drivers.duckdb import _s3_secret
+
+        conn = duckdb.connect()
+        try:
+            conn.execute("INSTALL httpfs; LOAD httpfs")
+        except duckdb.Error as exc:
+            pytest.skip(f"DuckDB extensions unavailable: {exc}")
+        secret, _ = self._attach(self._LAKE, ["s3://lake/l1/a/", "s3://lake/l1/b/"])
+        conn.execute(secret)
+        conn.execute(_s3_secret("strata_mount_raw", {"key": "m"}, ["s3://raw/events"]))
+
+        def answering(path):
+            row = conn.execute("SELECT name FROM which_secret(?, 's3')", [path]).fetchone()
+            return row[0] if row else None
+
+        assert answering("s3://lake/l1/a/data/0.parquet") == "strata_catalog_lake_s3"
+        assert answering("s3://lake/l1/b/metadata/snap.avro") == "strata_catalog_lake_s3"
+        assert answering("s3://lake/l1/ab/data/0.parquet") is None
+        assert answering("s3://other/x.parquet") is None
+        assert answering("s3://raw/events/part-0.parquet") == "strata_mount_raw"
+
+    def test_the_executor_locates_the_tables_the_query_reads(self, tmp_path, monkeypatch):
+        from strata.notebook import tables
+        from strata.notebook.sql import lake as lake_module
+        from strata.notebook.sql.adapter import QualifiedTable
+        from strata.notebook.sql.lake import resolve_lake
+
+        nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+
+        def resolve(properties):
+            config = StrataConfig(catalogs={"lake": properties})
+            monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+            monkeypatch.setattr(
+                tables,
+                "fingerprint_tables",
+                lambda specs, cfg, env=None, notebook=None: (
+                    [],
+                    {spec.name: 7 for spec in specs},
+                ),
+            )
+            monkeypatch.setattr(
+                lake_module,
+                "_table_location",
+                lambda spec, cfg, env, notebook: f"s3://lake/{spec.uri.split(':')[1]}/",
+            )
+            return resolve_lake(
+                session,
+                "c1",
+                "",
+                session.notebook_state.connections[0],
+                [QualifiedTable("lake", "taxi", "trips"), QualifiedTable("lake", "taxi", "zones")],
+            ).spec
+
+        spec = resolve(self._LAKE)
+        assert spec.catalog_locations == ["s3://lake/taxi.trips/", "s3://lake/taxi.zones/"]
+        vending = {k: v for k, v in self._LAKE.items() if not k.startswith("header.")}
+        assert getattr(resolve(vending), "catalog_locations", None) is None
+
+
 class TestAGcsOrAzureMount:
     """Read through the mount's own fsspec filesystem (real stores: test_e2e_duckdb_lake.py)."""
 

@@ -675,12 +675,14 @@ async def test_a_service_mode_bigquery_connection_without_a_key_file_is_refused(
 
 
 def test_adapter_internal_keys_are_not_read_from_a_connection_block(tmp_path):
-    """``confine_to``, ``mount_sources`` and ``catalog_properties`` are set by the
-    executor; from notebook.toml or a request they would steer what the server opens."""
+    """``confine_to``, ``mount_sources``, ``catalog_properties`` and ``catalog_locations``
+    are set by the executor; from notebook.toml or a request they would steer what the
+    server opens, or where the catalog's keys reach."""
     internal = {
         "confine_to": [],
         "mount_sources": [{"name": "m", "uri": "file:///", "storage_options": {}}],
         "catalog_properties": {"uri": "http://attacker.example"},
+        "catalog_locations": ["s3://"],
     }
 
     spec = ConnectionSpec(name="db", driver="duckdb", path=":memory:", **internal)
