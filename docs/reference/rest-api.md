@@ -1183,7 +1183,9 @@ Both are unauthenticated, for scrapers. Under principal auth
 `admin:*` data (`GET /metrics/tables`), and the per-tenant series, since
 tenant ids are `admin:tenants` data (`GET /v1/admin/tenants`). The AI usage
 series carry no `tenant` or `principal` label there: they are per-model
-totals.
+totals. Requests are counted by method, route template and status class, and
+timed per route; failed object-store calls are counted by operation (see
+[Observability](../deployment/observability.md#metrics-metricsprometheus)).
 
 ### Artifacts, names, cache and diagnostics
 

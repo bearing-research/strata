@@ -14,9 +14,11 @@ import pyarrow as pa
 from fastapi import APIRouter, HTTPException, Response
 
 from strata.api.dependencies import require_scope
+from strata.artifact.blob_store import get_object_store_errors
 from strata.cache.metrics import get_eviction_tracker
 from strata.observability.gc_tracker import get_gc_stats
 from strata.observability.health import HealthStatus, run_health_checks
+from strata.observability.http_metrics import DURATION_BUCKETS, get_request_metrics
 from strata.observability.logging import get_logger
 from strata.observability.pool_metrics import get_connection_metrics, get_pool_tracker
 from strata.rate_limiter import get_rate_limiter
@@ -679,12 +681,58 @@ async def metrics_prometheus():
 
     conn_metrics = get_connection_metrics()
     conn_stats = conn_metrics.get_stats()
+    request_counts, durations = get_request_metrics().snapshot()
     lines.extend(
         [
             "",
-            "# HELP strata_http_requests_total Total HTTP requests",
+            "# HELP strata_http_requests_total HTTP requests by method, route template and "
+            "status class",
             "# TYPE strata_http_requests_total counter",
-            f"strata_http_requests_total {conn_stats.get('total_requests', 0)}",
+        ]
+    )
+    for (method, route, status), count in sorted(request_counts.items()):
+        lines.append(
+            f'strata_http_requests_total{{method="{method}",route="{_prom_label(route)}",'
+            f'status="{status}"}} {count}'
+        )
+    lines.extend(
+        [
+            "",
+            "# HELP strata_http_request_duration_seconds HTTP request duration by route template",
+            "# TYPE strata_http_request_duration_seconds histogram",
+        ]
+    )
+    for route, histogram in sorted(durations.items()):
+        label = _prom_label(route)
+        cumulative = 0
+        for bound, bucket_count in zip(
+            (*DURATION_BUCKETS, "+Inf"), histogram.bucket_counts, strict=True
+        ):
+            cumulative += bucket_count
+            lines.append(
+                f'strata_http_request_duration_seconds_bucket{{route="{label}",le="{bound}"}} '
+                f"{cumulative}"
+            )
+        lines.append(
+            f'strata_http_request_duration_seconds_sum{{route="{label}"}} {histogram.total_seconds}'
+        )
+        lines.append(
+            f'strata_http_request_duration_seconds_count{{route="{label}"}} {histogram.count}'
+        )
+
+    lines.extend(
+        [
+            "",
+            "# HELP strata_object_store_errors_total Artifact object-store calls that failed, "
+            "by operation",
+            "# TYPE strata_object_store_errors_total counter",
+        ]
+    )
+    for operation, count in get_object_store_errors().snapshot().items():
+        lines.append(f'strata_object_store_errors_total{{operation="{operation}"}} {count}')
+
+    lines.extend(
+        [
             "",
             "# HELP strata_http_connections_active Current active HTTP connections",
             "# TYPE strata_http_connections_active gauge",
