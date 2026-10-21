@@ -164,7 +164,11 @@ A version is collected only when nothing holds it:
   latest version back, so that version stays. An id the store made up for one
   `materialize` has no such value;
 - it has not been used in the last hour: finishing its build, a cache hit, a
-  read of its data, or a request that names it as an input all count.
+  read of its data, or a request that names it as an input all count;
+- it is not a file an `# @output_dir` folder manifest of its tenant names, unless
+  that manifest goes in the same sweep. Under the byte cap a folder goes whole,
+  its manifest with the files no other folder names, once its most recently
+  used member is among the least recently used.
 
 So **an unnamed result is a cache entry**. Its URI keeps working while it is
 used, and once it is collected the same request computes it again. To keep a

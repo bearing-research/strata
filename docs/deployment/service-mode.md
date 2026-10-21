@@ -619,7 +619,8 @@ What to know before switching it on:
   again), then the manifest naming where each landed. A pull fetches every file
   and checks its sha256 and size against the manifest before anything lands;
   the files land under the pulling notebook's own ids, then the manifest. A
-  missing or altered file lands nothing and the cell runs locally.
+  missing or altered file lands nothing and the cell runs locally. A stored
+  folder whose files are gone is a miss, and the next publish of it replaces it.
 - **A notebook whose environment does not match its lockfile will not publish.**
   A failed `uv sync` keeps the previous venv and stays usable on purpose, so a
   transient network failure does not lock you out of your own notebook - but

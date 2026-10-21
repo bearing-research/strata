@@ -477,6 +477,26 @@ class TestGarbageCollection:
         assert store.garbage_collect(max_idle_days=0, collect_latest=True)["deleted_count"] == 0
         assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES
 
+    def test_a_folder_goes_whole_or_stays_whole(self, store):
+        # Manifests by a LIKE, their files' tenants by a batched IN; run both on Postgres.
+        from tests.test_artifact_retention import _team_folder
+
+        idle, idle_files = _team_folder(store, tenant="a")
+        used, used_files = _team_folder(store, tenant="a")
+        for artifact_id, _ in (idle, *idle_files, *used_files):
+            self._last_used(store, artifact_id, 40 * 86400)
+        self._last_used(store, used[0], 86400)
+
+        dry = store.garbage_collect(max_idle_days=30, dry_run=True)
+        store.garbage_collect(max_idle_days=30)
+
+        reported = {(entry["artifact_id"], entry["version"]) for entry in dry["collected"]}
+        assert reported == {idle, *idle_files}
+        assert all(store.get_artifact(*key) is None for key in reported)
+        assert store.folder_is_whole(store.get_artifact(*used))
+        store.delete_artifact(*used_files[0])
+        assert not store.folder_is_whole(store.get_artifact(*used))
+
     def test_the_current_value_survives_a_rebuild_in_flight(self, store):
         # The spare-the-current-value clause is a correlated NOT EXISTS; run
         # it on the dialect that has never seen it in a unit test.

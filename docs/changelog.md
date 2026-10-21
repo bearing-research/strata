@@ -140,8 +140,6 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   the ones the manifest names. A folder whose file has a row but lost its bytes
   is refused before any of its files is copied. A folder naming a file another
   tenant holds reads that file as missing, in a rebuild, a copy and a
-  publication's archive. `strata artifact pull <id>@v=<n> --to <dir>` rebuilds
-  a folder's files instead of writing its manifest. (#1284)
   publication's archive. A publication's archive of a folder manifest that
   cannot be read is a `404`, as for a missing file, not a `500`.
   `strata artifact pull <id>@v=<n> --to <dir>` rebuilds a folder's files
@@ -152,6 +150,17 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   prune never released them. It is now kept under its variant, the listing
   carries each version's `variant`, and the file route takes `?variant=`.
   (#1285)
+- **A store's garbage collection no longer splits an output folder.** A shared
+  store keeps a folder's files and its manifest as separate unnamed results, and
+  idle-days and the byte cap took them independently, so a manifest could
+  outlive a file it names and stay the team cache's answer for a folder no one
+  could pull. A file now goes only with every manifest of its tenant naming it,
+  a file is kept if a manifest naming it is used during the sweep, and the cap
+  evicts a folder whole (its manifest with the files no other folder names)
+  once its most recently used member is among the least recently used. A
+  dry run reports the same. A stored folder whose files are already gone is a
+  miss for `GET /v1/artifacts/by-provenance/{hash}`, and the next publish of it
+  replaces it rather than getting it back as the first writer's. (#1290)
 - **Promoting or publishing an output folder copies its files.** Promote,
   `strata artifact publish` (`--to` too) and the MCP tools copied a
   `# @output_dir` folder's manifest without the files it names, leaving it

@@ -808,11 +808,14 @@ def _store_put_by_provenance(
     # write to the tenant.
     existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
     if existing is not None and existing.state == "ready":
-        return PutArtifactResponse(
-            artifact_uri=f"strata://artifact/{existing.id}@v={existing.version}",
-            hit=True,
-            byte_size=existing.byte_size or 0,
-        )
+        if store.folder_is_whole(existing):
+            return PutArtifactResponse(
+                artifact_uri=f"strata://artifact/{existing.id}@v={existing.version}",
+                hit=True,
+                byte_size=existing.byte_size or 0,
+            )
+        # A folder whose files are gone answers nobody; this upload takes the key over.
+        store.retire_ready(existing.id, existing.version)
 
     params: dict[str, str] = {"content_type": str(content_type)}
     variable_name = metadata.get("variable_name")
@@ -902,7 +905,9 @@ def find_artifact_by_provenance(
     # artifact by id is where admin widens.
     lookup_tenant = principal.tenant if principal else None
     artifact = store.find_by_provenance(provenance_hash, tenant=lookup_tenant)
-    if artifact is None:
+    # A folder whose files are gone cannot be pulled; the puller recomputes and its
+    # publish takes the key over.
+    if artifact is None or not store.folder_is_whole(artifact):
         raise HTTPException(
             status_code=404,
             detail="No artifact has been computed for that provenance hash",
