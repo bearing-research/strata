@@ -73,9 +73,10 @@ class NotebookArtifactManager:
         """Drop each cell output's values older than its newest *keep_superseded*.
 
         Keeps every output's current value, anything named, pinned or published, and
-        anything used in the last *min_idle_seconds*. Then drops each ``# @output_dir``
-        file no manifest version still names. Values a crash left half-written
-        are failed first, so they no longer hold their inputs.
+        anything used in the last *min_idle_seconds*, and each ``# @output_dir`` version
+        a failed run left after the folder's last good one. Then drops each
+        ``# @output_dir`` file no manifest version still names. Values a crash left
+        half-written are failed first, so they no longer hold their inputs.
 
         Raises:
             NotebookQuiesced: the notebook is held still for a copy, which
@@ -84,12 +85,19 @@ class NotebookArtifactManager:
         from strata.notebook.quiesce import assert_writable
 
         assert_writable(self.artifact_dir)
-        from strata.notebook.output_dirs import is_file_id, unreferenced_files
+        from strata.notebook.output_dirs import (
+            failed_since_ready,
+            is_file_id,
+            unreferenced_files,
+        )
 
         self.artifact_store.sweep_zombie_builds(_ABANDONED_BUILD_SECONDS)
         # A folder file is not a value with versions: a manifest may name any of them.
         result = self.artifact_store.garbage_collect(
-            keep_superseded=keep_superseded, min_idle_seconds=min_idle_seconds, exempt=is_file_id
+            keep_superseded=keep_superseded,
+            min_idle_seconds=min_idle_seconds,
+            exempt=is_file_id,
+            spare=failed_since_ready(self),
         )
         # After the values: a folder file goes once no manifest version left names it.
         files = unreferenced_files(self)

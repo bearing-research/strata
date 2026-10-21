@@ -3326,6 +3326,114 @@ async def get_cell_output_blob(
     )
 
 
+def _folder_artifact_id(session: NotebookSession, cell_id: str, name: str) -> str:
+    """The manifest id of one of the cell's ``# @output_dir`` folders; 404 for any other name."""
+    from strata.notebook.annotations import parse_annotations
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    if name not in parse_annotations(cell.source).output_dirs:
+        raise HTTPException(
+            status_code=404, detail=f"{name!r} is not an output_dir annotation of this cell"
+        )
+    return session.get_artifact_manager().cell_artifact_id(cell_id, name)
+
+
+def _folder_versions(store, artifact_id: str) -> list[dict]:
+    """Each version of a folder with a manifest, newest first, with its files and totals."""
+    listed: list[dict] = []
+    for version in reversed(store.list_versions_by_id_prefix(artifact_id)):
+        if version.id != artifact_id or version.state not in ("ready", "superseded", "failed"):
+            continue
+        # Not a use: a page polling the listing would otherwise keep every version.
+        blob = store.read_blob(artifact_id, version.version, note_use=False)
+        if blob is None:
+            continue  # a crash's row swept to failed before its manifest was written
+        files = [
+            {"path": path, "size": int(entry["size"]), "sha256": entry["sha256"]}
+            for path, entry in sorted(json.loads(blob)["files"].items())
+        ]
+        listed.append(
+            {
+                "version": version.version,
+                "created_at": version.created_at,
+                "principal": version.principal,
+                "failed": version.state == "failed",
+                "files": files,
+                "file_count": len(files),
+                "total_bytes": sum(item["size"] for item in files),
+            }
+        )
+    return listed
+
+
+@router.get("/{notebook_id}/cells/{cell_id}/folders/{name}")
+async def get_cell_folder(notebook_id: str, session: SessionDep, cell_id: str, name: str) -> dict:
+    """Every version of a cell's ``# @output_dir`` folder, a failed run's included."""
+    artifact_id = _folder_artifact_id(session, cell_id, name)
+    store = session.get_artifact_manager().artifact_store
+    versions = await anyio.to_thread.run_sync(_folder_versions, store, artifact_id)
+    return {"cell_id": cell_id, "name": name, "versions": versions}
+
+
+@router.get("/{notebook_id}/cells/{cell_id}/folders/{name}/v/{version}/files/{path:path}")
+async def get_cell_folder_file(
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    name: str,
+    version: int,
+    path: str,
+):
+    """One file of a folder version, streamed, with its sha256 as ``Content-Digest``."""
+    from base64 import b64encode
+
+    from strata.api.served_bytes import data_headers
+    from strata.notebook import output_dirs
+
+    artifact_id = _folder_artifact_id(session, cell_id, name)
+    manager = session.get_artifact_manager()
+    store = manager.artifact_store
+
+    def _open_file():
+        artifact = store.get_artifact(artifact_id, version)
+        if artifact is None or artifact.state not in ("ready", "superseded", "failed"):
+            raise HTTPException(status_code=404, detail="No such version of this folder")
+        blob = store.read_blob(artifact_id, version)
+        if blob is None:
+            raise HTTPException(status_code=404, detail="No such version of this folder")
+        manifest = json.loads(blob)
+        # A key of the manifest, never joined to a filesystem path.
+        entry = manifest["files"].get(path)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="No such file in this folder version")
+        file_id = output_dirs.file_artifact_id(manager, manifest["cell_id"], entry["sha256"])
+        reader = store.open_blob_reader(file_id, int(entry["version"]))
+        if reader is None:
+            raise HTTPException(status_code=404, detail="The file's bytes are gone")
+        return entry, reader
+
+    entry, reader = await anyio.to_thread.run_sync(_open_file)
+
+    def _chunks():
+        with reader as f:
+            while chunk := f.read(1024 * 1024):
+                yield chunk
+
+    digest = b64encode(bytes.fromhex(entry["sha256"])).decode()
+    return StreamingResponse(
+        _chunks(),
+        media_type="application/octet-stream",
+        headers={
+            **data_headers(),
+            "Content-Length": str(int(entry["size"])),
+            "Content-Digest": f"sha-256=:{digest}:",
+            "Content-Disposition": _attachment(path.rsplit("/", 1)[-1], ""),
+        },
+    )
+
+
 @router.get("/{notebook_id}/dependencies")
 async def get_dependencies(notebook_id: str, session: SessionDep) -> dict:
     """List current dependencies from the notebook's pyproject.toml."""

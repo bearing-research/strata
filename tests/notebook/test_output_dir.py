@@ -433,6 +433,45 @@ class TestTheFileSweep:
         assert read.success, read.error
         assert read.outputs["seen"]["preview"] == "same"
 
+    async def test_a_crashs_folder_stays_until_a_later_run_succeeds(self, tmp_path):
+        """Pruned with superseded values kept, a failed version newer than the last good one
+        stays, files and all, so a crash's checkpoints can still be downloaded."""
+        crash = (
+            "# @output_dir ckpt\n"
+            "import os\n"
+            "(ckpt / 'e.pt').write_bytes(os.urandom(16))\n"
+            "raise RuntimeError('lost')\n"
+        )
+        session = _session(tmp_path, writer=OLD, reader=None)
+        executor = CellExecutor(session)
+        manager = session.get_artifact_manager()
+        store = manager.artifact_store
+        artifact_id = manager.cell_artifact_id("w", "ckpt")
+        assert (await executor.execute_cell("w", OLD)).success
+        cell = session.notebook_state.get_cell("w")
+        cell.source = crash
+        session.re_analyze_cell("w")
+        # Two crashes: the newer is the id's top version, which is spared anyway.
+        for _ in range(2):
+            assert not (await executor.execute_cell("w", crash)).success
+        first_crash, _ = _manifest(session, version=2)
+
+        manager.prune(keep_superseded=1, min_idle_seconds=0)
+
+        assert store.get_artifact(artifact_id, 2).state == "failed"
+        [entry] = first_crash["files"].values()
+        file_id = output_dirs.file_artifact_id(manager, "w", entry["sha256"])
+        assert store.read_blob(file_id, entry["version"]) is not None
+
+        cell.source = NEW
+        session.re_analyze_cell("w")
+        assert (await executor.execute_cell("w", NEW)).success
+        manager.prune(keep_superseded=1, min_idle_seconds=0)
+
+        assert store.get_artifact(artifact_id, 2) is None
+        assert store.get_artifact(artifact_id, 3) is None
+        assert store.get_latest_version(file_id) is None
+
     async def test_a_file_a_kept_manifest_names_stays_though_stored_again(
         self, tmp_path, monkeypatch
     ):
