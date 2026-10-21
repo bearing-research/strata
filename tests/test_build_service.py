@@ -1,7 +1,8 @@
 """Unit tests for ``BuildService.assemble_manifest``: no server.
 
-Signing is stubbed; these cover resolving input URIs to ``(artifact_id, version)`` (a name at the
-version admission recorded), raising on an unresolvable input, and the executor metadata.
+Signing is stubbed but for the wire-shape test; these cover resolving input URIs to
+``(artifact_id, version)`` (a name at the version admission recorded), raising on an
+unresolvable input, the executor metadata, and each input's stored size.
 """
 
 from types import SimpleNamespace
@@ -111,6 +112,34 @@ def test_assemble_manifest_reads_a_name_at_the_version_admission_recorded(
     )
 
     assert captured_manifest.calls["input_artifacts"] == [("A", 1)]
+
+
+def test_a_manifest_input_carries_its_stored_size_and_an_unknown_one_none(tmp_path):
+    """A core build's inputs carry the store's recorded sizes, the shape the notebook sends;
+    a version still being written has none, so the field is left out."""
+    from strata.artifact.store import ArtifactStore
+    from strata.transforms.signed_urls import URLSigner
+
+    store = ArtifactStore(tmp_path / "artifacts")
+    store.create_artifact("A", "prov-a")
+    store.finalize_artifact("A", 1, "{}", 1, 4321)
+    store.create_artifact("B", "prov-b")  # still building: no size recorded
+    store.create_artifact("OUT", "prov-earlier")
+    store.create_artifact("OUT", "prov-out")
+
+    manifest = build_service.assemble_manifest(
+        store,
+        signer=URLSigner(b"test-secret-key-12345678901234"),
+        build=_build(input_uris=["strata://artifact/A@v=1", "strata://artifact/B@v=1"]),
+        base_url="http://host",
+        max_output_bytes=1,
+        url_expiry_seconds=60.0,
+    )
+
+    first, second = manifest["inputs"]
+    assert (first["artifact_id"], first["size_bytes"]) == ("A", 4321)
+    assert second["artifact_id"] == "B"
+    assert "size_bytes" not in second
 
 
 def test_assemble_manifest_raises_valueerror_on_unresolvable_input(captured_manifest):

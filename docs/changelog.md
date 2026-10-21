@@ -54,6 +54,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   copied into the notebook's store, rather than a path to its manifest; and a
   published folder's `/p/{token}/archive.zip` holds its files under `folder/`,
   each with its own digest that `/p/{token}/verify` recognises. (#1279)
+- **Each manifest input carries its size.** Every entry of a worker
+  manifest's `inputs`, on the notebook's signed transport and from
+  `GET /v1/builds/{build_id}/manifest`, carries `size_bytes`, the stored size
+  of that artifact version, so a dispatcher can weigh a cell's inputs before
+  it places the cell. An input whose size the store does not know, a version
+  still being written, leaves the field out. (#1287)
 
 ### Changed
 
