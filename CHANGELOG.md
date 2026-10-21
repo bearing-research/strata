@@ -156,6 +156,15 @@ exhaustive commit history.
   arrived, so the browser never showed a cell running or offered its stop
   button. Each now shows running from the moment it starts, and a cell left
   unfinished by a stop goes back to idle. (#1271)
+- **The reference executor reads every input part.** `create_executor_app`
+  read only `input0` to `input4`, so a build over six or more inputs lost the
+  rest and its SQL could not query them. It now reads each `inputN` part, in
+  index order. (#1272)
+- **Restarting the R warm pool no longer orphans a booting R worker.** A pool
+  drain that landed while a worker was still being spawned killed only the
+  lifeline wrapper, leaving the R process under it running until it exited on
+  its own. The pool now finishes the spawn and stops the whole process group.
+  (#1266)
 
 ### Security
 
@@ -194,12 +203,6 @@ exhaustive commit history.
   included, is checked again at each read, so a file swapped for a link out of
   a root is not read, and a file rewritten in place is still used at the next
   run with no call. (#1265)
-
-- **Restarting the R warm pool no longer orphans a booting R worker.** A pool
-  drain that landed while a worker was still being spawned killed only the
-  lifeline wrapper, leaving the R process under it running until it exited on
-  its own. The pool now finishes the spawn and stops the whole process group.
-  (#1266)
 
 ## 0.11.0 - 2026-10-19
 
