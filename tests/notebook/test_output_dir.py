@@ -1247,20 +1247,52 @@ class TestStreamingFromAWorker:
     async def test_a_lost_worker_leaves_what_it_uploaded(
         self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
     ):
-        """The run times out on the worker: no result comes back, the uploads stay.
+        """The run dies on the worker: no result comes back, the uploads stay.
 
         Only the uploads: a folder of the same name where the server runs is not the run's.
         """
+        import asyncio
+
+        from strata.notebook import output_file_relay
+
         stray = tmp_path / "cwd" / "output_dirs" / "ckpt"
         stray.mkdir(parents=True)
         (stray / "stray.bin").write_bytes(b"not the run's")
         monkeypatch.chdir(tmp_path / "cwd")
         monkeypatch.setenv("STRATA_WORKER_OUTPUT_DIR_POLL_SECONDS", "0.1")
+        # The cell is killed (no result file) only once the server holds e0, so the
+        # loss cannot beat the upload; the timeout is a backstop for a broken upload.
+        lose = tmp_path / "lose"
         writer = (
-            "# @worker remote\n# @timeout 4\n# @output_dir ckpt\nimport time\n"
+            "# @worker remote\n# @timeout 60\n# @output_dir ckpt\n"
+            "import os, pathlib, signal, time\n"
             "(ckpt / 'e0.bin').write_bytes(b'0' * 9)\n"
-            "time.sleep(60)\n"
+            f"while not pathlib.Path({str(lose)!r}).exists():\n"
+            "    time.sleep(0.05)\n"
+            "os.kill(os.getpid(), signal.SIGKILL)\n"
         )
+        session = self._session_on_worker(
+            tmp_path, writer, notebook_executor_server, notebook_personal_server
+        )
+        run = asyncio.create_task(CellExecutor(session).execute_cell("w", writer))
+        while not any(r.received() for r in output_file_relay._receivers.values()):
+            assert not run.done(), (await run).error
+            await asyncio.sleep(0.05)
+        lose.touch()
+
+        result = await run
+
+        assert not result.success
+        assert result.remote_error_code == "EXECUTOR_HTTP_ERROR", result.error
+        manifest, state = _manifest(session, version=1)
+        assert state == "failed"
+        assert list(manifest["files"]) == ["e0.bin"]
+
+    async def test_a_run_past_its_timeout_on_the_worker_fails_as_a_timeout(
+        self, tmp_path, notebook_executor_server, notebook_personal_server
+    ):
+        """The worker answers 408 and the server records the run as timed out."""
+        writer = "# @worker remote\n# @timeout 2\nimport time\ntime.sleep(60)\n"
         session = self._session_on_worker(
             tmp_path, writer, notebook_executor_server, notebook_personal_server
         )
@@ -1268,9 +1300,7 @@ class TestStreamingFromAWorker:
         result = await CellExecutor(session).execute_cell("w", writer)
 
         assert not result.success
-        manifest, state = _manifest(session, version=1)
-        assert state == "failed"
-        assert list(manifest["files"]) == ["e0.bin"]
+        assert result.remote_error_code == "TIMEOUT", result.error
 
     async def test_a_folder_emptied_before_the_end_is_empty(
         self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
