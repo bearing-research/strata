@@ -460,9 +460,12 @@ def _s3_secret(name: str, fields: dict[str, Any], scope: list[str] | None = None
             f"ENDPOINT {_literal(parsed.netloc or parsed.path)}",
             f"USE_SSL {'false' if parsed.scheme == 'http' else 'true'}",
         ]
-    # Path style by default with an endpoint, as MinIO and most S3-compatible stores need.
-    path_style = str(fields.get("s3.path-style-access", "")).lower()
-    if path_style == "true" or (endpoint and path_style != "false"):
+    from pyiceberg.utils.properties import property_as_bool
+
+    # Path style by default with an endpoint, as MinIO and most S3-compatible stores need,
+    # unless virtual-host addressing is forced, as pyiceberg then reads.
+    path_style = property_as_bool(fields, "s3.path-style-access", bool(endpoint))
+    if path_style and not property_as_bool(fields, "s3.force-virtual-addressing", False):
         options.append("URL_STYLE 'path'")
     if scope:
         prefixes = ", ".join(map(_literal, scope))
@@ -536,7 +539,8 @@ def _attach_catalog(
     # A catalog that vends, with no s3 warehouse, gives the tables their credentials.
     warehouse = properties.get("warehouse", "")
     if warehouse.startswith("s3://"):
-        scope = [warehouse]
+        # A scope is a plain prefix: without the slash ``s3://lake/wh`` covers ``s3://lake/wh2``.
+        scope = [warehouse.rstrip("/") + "/"]
     else:
         scope = sorted(set(locations or [])) if secret_scoped_to_tables(properties) else []
     s3 = _s3_secret(f"strata_catalog_{name}_s3", properties, scope) if scope else None
@@ -629,7 +633,10 @@ def _create_mount_view(
     root = mount_root(uri)
     storage_options = mount.get("storage_options") or {}
     if scheme == "s3":
-        secret = _s3_secret(f"strata_mount_{name}", storage_options, [root])
+        from strata.notebook.sql.lake import _mount_location
+
+        # Its directory with the slash, so a sibling prefix is not covered; or its one file.
+        secret = _s3_secret(f"strata_mount_{name}", storage_options, [_mount_location(uri)])
         if secret:
             conn.execute(secret)
     elif scheme in _FSSPEC_PREFIXES:

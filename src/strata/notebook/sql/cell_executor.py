@@ -41,6 +41,7 @@ from strata.notebook.sql.lake import (
     LakeError,
     lake_options,
     local_database_problem,
+    locate_tables,
     pin_snapshots,
     resolve_lake,
     snapshot_problem,
@@ -288,6 +289,11 @@ async def execute_sql_cell(
                 return _with_reads(_report_snapshots(_report_pin(hit, pin), pinned_lake), lake)
 
     # ---- execute query ---------------------------------------------
+    if lake is not None:
+        try:
+            runtime_spec = locate_tables(session, lake, runtime_spec)
+        except LakeError as exc:
+            return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     try:
         table = await asyncio.to_thread(
             _execute_query,

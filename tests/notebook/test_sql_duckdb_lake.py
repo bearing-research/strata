@@ -270,7 +270,7 @@ def test_a_table_the_first_resolution_missed_reads_what_the_retry_found(tmp_path
     monkeypatch.setattr(
         tables,
         "fingerprint_tables",
-        lambda specs, cfg, env=None, notebook=None: (["x:unresolved"], {}),
+        lambda specs, cfg, env=None, notebook=None, locations=None: (["x:unresolved"], {}),
     )
     monkeypatch.setattr(
         tables, "resolve_table_snapshot", lambda spec, cfg, env=None, notebook=None: 7
@@ -301,7 +301,9 @@ def test_a_table_never_written_is_read_unpinned_and_never_cached(tmp_path, monke
     monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
     name = _lake_name("lake:taxi.trips")
     monkeypatch.setattr(
-        tables, "fingerprint_tables", lambda specs, cfg, env=None, notebook=None: ([], {name: None})
+        tables,
+        "fingerprint_tables",
+        lambda specs, cfg, env=None, notebook=None, locations=None: ([], {name: None}),
     )
 
     def resolve():
@@ -340,7 +342,9 @@ class TestACatalogCredential:
         )
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
         monkeypatch.setattr(
-            tables, "fingerprint_tables", lambda specs, cfg, env=None, notebook=None: ([], {})
+            tables,
+            "fingerprint_tables",
+            lambda specs, cfg, env=None, notebook=None, locations=None: ([], {}),
         )
         monkeypatch.setattr(
             tables, "resolve_table_snapshot", lambda spec, cfg, env=None, notebook=None: 7
@@ -442,7 +446,7 @@ def test_the_catalogs_s3_secret_reaches_only_its_warehouse():
     _attach_catalog(unscoped, "lake", {**keys, "warehouse": "prod"})
 
     (secret,) = [s for s in scoped.statements if "TYPE s3" in s]
-    assert "SCOPE 's3://lake/wh'" in secret
+    assert "SCOPE 's3://lake/wh/'" in secret
     assert not [s for s in unscoped.statements if "TYPE s3" in s]
     assert all(s.endswith("READ_ONLY)") for s in scoped.statements if s.startswith("ATTACH"))
 
@@ -453,6 +457,34 @@ class _Recorder:
 
     def execute(self, statement):
         self.statements.append(statement)
+
+
+class _Globbing(_Recorder):
+    """A connection on which every glob finds a file."""
+
+    def execute(self, statement):
+        super().execute(statement)
+        return self
+
+    def fetchone(self):
+        return (1,)
+
+
+def _which_secret():
+    """A DuckDB connection with httpfs, and what answers which secret it reads a path with."""
+    import duckdb
+
+    conn = duckdb.connect()
+    try:
+        conn.execute("INSTALL httpfs; LOAD httpfs")
+    except duckdb.Error as exc:
+        pytest.skip(f"DuckDB extensions unavailable: {exc}")
+
+    def answering(path):
+        row = conn.execute("SELECT name FROM which_secret(?, 's3')", [path]).fetchone()
+        return row[0] if row else None
+
+    return conn, answering
 
 
 class TestAGlueCatalog:
@@ -560,6 +592,9 @@ class TestAGlueCatalog:
         assert "/eu-west-1/glue/aws4_request" in seen[0]
 
 
+_STORE = {"s3.endpoint": "https://store.example"}
+
+
 class TestARestCatalogThatVendsNothing:
     """An empty access-delegation header: DuckDB asks the catalog for no credentials and
     reads the tables with the catalog's own keys, where those tables live (a real catalog
@@ -596,13 +631,32 @@ class TestARestCatalogThatVendsNothing:
             "AUTHORIZATION_TYPE 'none', ACCESS_DELEGATION_MODE 'none', READ_ONLY)",
         ]
 
-    def test_with_an_s3_warehouse_they_reach_the_warehouse(self):
-        secret, attach = self._attach(
-            {**self._LAKE, "warehouse": "s3://lake/wh"}, ["s3://lake/wh/t/"]
-        )
+    @pytest.mark.parametrize("warehouse", ["s3://lake/wh", "s3://lake/wh/"])
+    def test_with_an_s3_warehouse_they_reach_the_warehouse(self, warehouse):
+        secret, attach = self._attach({**self._LAKE, "warehouse": warehouse}, ["s3://lake/wh/t/"])
 
-        assert secret.endswith("SCOPE 's3://lake/wh')")
+        assert secret.endswith("SCOPE 's3://lake/wh/')")
         assert "ACCESS_DELEGATION_MODE 'none'" in attach
+
+    def test_neither_a_warehouse_nor_a_mount_scope_reaches_a_sibling_prefix(self):
+        from strata.notebook.sql.drivers.duckdb import _create_mount_view
+
+        conn, answering = _which_secret()
+        secret, _ = self._attach({**self._LAKE, "warehouse": "s3://lake/wh"})
+        conn.execute(secret)
+        for name, uri in [("events", "s3://raw/events"), ("one", "s3://raw/one.parquet")]:
+            mount = _Globbing()
+            _create_mount_view(
+                mount, {"name": name, "uri": uri, "storage_options": {"key": "m"}}, {}
+            )
+            conn.execute(mount.statements[0])
+
+        assert answering("s3://lake/wh/ns/t/data/0.parquet") == "strata_catalog_lake_s3"
+        assert answering("s3://lake/wh2/ns/t/data/0.parquet") is None
+        assert answering("s3://raw/events/part-0.parquet") == "strata_mount_events"
+        assert answering("s3://raw/events2/part-0.parquet") is None
+        # A mount of one file is read at its root exactly.
+        assert answering("s3://raw/one.parquet") == "strata_mount_one"
 
     @pytest.mark.parametrize(
         "delegation", [None, "vended-credentials", "remote-signing, vended-credentials"]
@@ -620,12 +674,31 @@ class TestARestCatalogThatVendsNothing:
         ]
         assert not secret_scoped_to_tables(properties)
 
-    def test_path_style_can_be_turned_off(self):
-        secret, _ = self._attach(
-            {**self._LAKE, "s3.path-style-access": "false"}, ["s3://lake/l1/a/"]
-        )
+    @pytest.mark.parametrize(
+        ("fields", "path_style"),
+        [
+            (_STORE, True),
+            ({}, False),
+            *[({**_STORE, "s3.path-style-access": v}, False) for v in ("false", "0", "no", "OFF")],
+            *[({"s3.path-style-access": v}, True) for v in ("true", "1", "yes", "On")],
+            ({**_STORE, "s3.force-virtual-addressing": "true"}, False),
+            ({"s3.path-style-access": "true", "s3.force-virtual-addressing": "1"}, False),
+            ({**_STORE, "s3.force-virtual-addressing": "false"}, True),
+        ],
+    )
+    def test_path_style_reads_its_booleans_as_pyiceberg_does(self, fields, path_style):
+        from strata.notebook.sql.drivers.duckdb import _s3_secret
 
-        assert "URL_STYLE" not in secret
+        secret = _s3_secret("lake", {"s3.access-key-id": "k", **fields})
+
+        assert secret is not None
+        assert ("URL_STYLE 'path'" in secret) is path_style
+
+    def test_a_path_style_that_is_not_a_boolean_fails_naming_it(self):
+        from strata.notebook.sql.drivers.duckdb import _s3_secret
+
+        with pytest.raises(ValueError, match="s3.path-style-access"):
+            _s3_secret("lake", {**_STORE, "s3.path-style-access": "sometimes"})
 
     def test_duckdb_answers_with_them_only_under_those_tables(self):
         import duckdb
@@ -651,43 +724,116 @@ class TestARestCatalogThatVendsNothing:
         assert answering("s3://other/x.parquet") is None
         assert answering("s3://raw/events/part-0.parquet") == "strata_mount_raw"
 
-    def test_the_executor_locates_the_tables_the_query_reads(self, tmp_path, monkeypatch):
-        from strata.notebook import tables
-        from strata.notebook.sql import lake as lake_module
+    def _session(self, tmp_path, monkeypatch, cells=None):
+        nb_dir = _notebook(
+            tmp_path, cells or {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"'
+        )
+        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+        config = StrataConfig(catalogs={"lake": self._LAKE})
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        return session
+
+    @staticmethod
+    def _catalog(monkeypatch):
+        """Each table the catalog loads, and a list that takes the catalog down when not empty."""
+        from types import SimpleNamespace
+
+        from strata.iceberg.catalog import PyIcebergCatalog
+
+        loads: list[str] = []
+        down: list[bool] = []
+
+        def load_table(self, uri):
+            loads.append(uri)
+            if down:
+                raise ConnectionError("the catalog is unreachable")
+            snapshot = SimpleNamespace(snapshot_id=7, summary={})
+            return SimpleNamespace(
+                location=lambda: f"s3://lake/{uri.partition(':')[2]}",
+                current_snapshot=lambda: snapshot,
+            )
+
+        monkeypatch.setattr(PyIcebergCatalog, "load_table", load_table)
+        return loads, down
+
+    @staticmethod
+    def _resolve(session, pinned=None):
         from strata.notebook.sql.adapter import QualifiedTable
         from strata.notebook.sql.lake import resolve_lake
 
-        nb_dir = _notebook(tmp_path, {}, 'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"')
-        session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+        return resolve_lake(
+            session,
+            "c1",
+            "",
+            session.notebook_state.connections[0],
+            [QualifiedTable("lake", "taxi", "trips"), QualifiedTable("lake", "taxi", "zones")],
+            pinned=pinned,
+        )
 
-        def resolve(properties):
-            config = StrataConfig(catalogs={"lake": properties})
-            monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
-            monkeypatch.setattr(
-                tables,
-                "fingerprint_tables",
-                lambda specs, cfg, env=None, notebook=None: (
-                    [],
-                    {spec.name: 7 for spec in specs},
-                ),
-            )
-            monkeypatch.setattr(
-                lake_module,
-                "_table_location",
-                lambda spec, cfg, env, notebook: f"s3://lake/{spec.uri.split(':')[1]}/",
-            )
-            return resolve_lake(
-                session,
-                "c1",
-                "",
-                session.notebook_state.connections[0],
-                [QualifiedTable("lake", "taxi", "trips"), QualifiedTable("lake", "taxi", "zones")],
-            ).spec
+    def test_each_table_read_is_loaded_once_and_located_by_that_load(self, tmp_path, monkeypatch):
+        session = self._session(tmp_path, monkeypatch)
+        loads, _ = self._catalog(monkeypatch)
 
-        spec = resolve(self._LAKE)
+        spec = self._resolve(session).spec
+
         assert spec.catalog_locations == ["s3://lake/taxi.trips/", "s3://lake/taxi.zones/"]
+        assert sorted(loads) == ["lake:taxi.trips", "lake:taxi.zones"]
+
+    def test_a_catalog_that_vends_is_not_located(self, tmp_path, monkeypatch):
+        session = self._session(tmp_path, monkeypatch)
         vending = {k: v for k, v in self._LAKE.items() if not k.startswith("header.")}
-        assert getattr(resolve(vending), "catalog_locations", None) is None
+        config = StrataConfig(catalogs={"lake": vending})
+        monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
+        self._catalog(monkeypatch)
+
+        assert getattr(self._resolve(session).spec, "catalog_locations", None) is None
+
+    def test_a_pinned_table_is_located_only_when_the_query_runs(self, tmp_path, monkeypatch):
+        from strata.notebook.sql.lake import locate_tables
+
+        session = self._session(tmp_path, monkeypatch)
+        loads, _ = self._catalog(monkeypatch)
+
+        lake = self._resolve(session, pinned={("taxi", "trips"): 3})
+        assert loads == ["lake:taxi.zones"]
+        assert lake.spec.catalog_locations == ["s3://lake/taxi.zones/"]
+
+        spec = locate_tables(session, lake, lake.spec)
+        assert loads == ["lake:taxi.zones", "lake:taxi.trips"]
+        assert spec.catalog_locations == ["s3://lake/taxi.zones/", "s3://lake/taxi.trips/"]
+
+    @pytest.mark.asyncio
+    async def test_a_pinned_cache_hit_needs_no_catalog(self, tmp_path, monkeypatch):
+        from strata.notebook.sql import cell_executor
+
+        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        session = self._session(tmp_path, monkeypatch, {"c1": source})
+        loads, down = self._catalog(monkeypatch)
+        located: list[list[str]] = []
+
+        def execute(adapter, spec, analysis, params, *, at=None, lake=None):
+            located.append(spec.catalog_locations)
+            return pa.table({"id": [1, 2]})
+
+        monkeypatch.setattr(cell_executor, "_execute_query", execute)
+
+        first = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert first["success"], first["error"]
+        assert located == [["s3://lake/taxi.trips/"]]
+        assert loads == ["lake:taxi.trips"]
+
+        down.append(True)
+        hit = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert hit["success"], hit["error"]
+        assert hit["cache_hit"] is True
+        assert loads == ["lake:taxi.trips"]
+
+        # Past the cache, the pinned table is located before the query, through the catalog.
+        monkeypatch.setattr(session.get_artifact_manager(), "find_cached", lambda provenance: None)
+        replay = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert replay["success"] is False
+        assert "the catalog is unreachable" in replay["error"]
+        assert len(located) == 1
 
 
 class TestAGcsOrAzureMount:
@@ -771,7 +917,7 @@ class TestNotebookCatalogs:
         monkeypatch.setattr(NotebookSession, "_lake_config", lambda self: config)
         seen: list[dict] = []
 
-        def fingerprint(specs, cfg, env=None, notebook=None):
+        def fingerprint(specs, cfg, env=None, notebook=None, locations=None):
             seen.append(dict(cfg.catalogs))
             return [], {}
 
