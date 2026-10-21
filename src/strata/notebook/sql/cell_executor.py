@@ -221,6 +221,8 @@ async def execute_sql_cell(
             return _error_result(f"connection {spec.name!r}: {exc}", start_time)
         runtime_spec = lake.spec
     try:
+        # Lacks only pinned tables' locations, and a pinned cell opens no connection
+        # until the query, which is confined again once they are located.
         runtime_spec = _confined(session, runtime_spec, lake)
     except LakeError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
@@ -289,11 +291,12 @@ async def execute_sql_cell(
                 return _with_reads(_report_snapshots(_report_pin(hit, pin), pinned_lake), lake)
 
     # ---- execute query ---------------------------------------------
-    if lake is not None:
-        try:
+    try:
+        if lake is not None:
             runtime_spec = locate_tables(session, lake, runtime_spec)
-        except LakeError as exc:
-            return _error_result(f"connection {spec.name!r}: {exc}", start_time)
+        runtime_spec = _confined(session, runtime_spec, lake)
+    except LakeError as exc:
+        return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     try:
         table = await asyncio.to_thread(
             _execute_query,

@@ -58,8 +58,9 @@ class Lake:
     # Service mode only (see duckdb._confine): each mount's root and each catalog
     # table's location, readable once confined.
     locations: list[str] = field(default_factory=list)
-    # Tables the scoped catalog secret needs that no load located (pinned ones): found by
-    # locate_tables only once the cache misses, so a cache hit needs no catalog.
+    # Tables the scoped catalog secret or confinement needs that no load located (pinned
+    # ones): found by locate_tables only once the cache misses, so a cache hit needs no
+    # catalog.
     unlocated: list[TableSpec] = field(default_factory=list)
 
 
@@ -237,16 +238,17 @@ def resolve_lake(
                 lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
             found = loaded.get(table_spec.name)
             location = _directory(found) if found is not None else None
+            if location is None and confined and (namespace, name) not in pinned:
+                # An unpinned cell may probe its confined connection before the cache check.
+                location = _table_location(table_spec, config, env, notebook=session.path)
+            if location is None:
+                if confined or catalog_locations is not None:
+                    lake.unlocated.append(table_spec)
+                continue
             if confined:
-                # Confinement is set before the cache check, so this one cannot wait.
-                if location is None:
-                    location = _table_location(table_spec, config, env, notebook=session.path)
                 lake.locations.append(location)
             if catalog_locations is not None:
-                if location is None:
-                    lake.unlocated.append(table_spec)
-                else:
-                    catalog_locations.append(location)
+                catalog_locations.append(location)
         if catalog_locations is not None:
             update["catalog_locations"] = catalog_locations
     if mount_names:
@@ -263,7 +265,8 @@ def resolve_lake(
 def locate_tables(session: Any, lake: Lake, spec: ConnectionSpec) -> ConnectionSpec:
     """*spec* with the locations of the tables ``resolve_lake`` left unlocated.
 
-    For just before the query runs, once the cache has missed.
+    For just before the query runs, once the cache has missed. In service mode they
+    join ``lake.locations`` too, so confine the connection after this.
 
     Raises:
         LakeError: the catalog could not load one.
@@ -273,8 +276,14 @@ def locate_tables(session: Any, lake: Lake, spec: ConnectionSpec) -> ConnectionS
     config = with_notebook_catalogs(session._lake_config(), session.notebook_state)
     env = dict(session.notebook_state.env)
     found = [_table_location(t, config, env, notebook=session.path) for t in lake.unlocated]
-    located = [*(getattr(spec, "catalog_locations", None) or []), *found]
-    return spec.model_copy(update={"catalog_locations": located})
+    lake.unlocated = []
+    if getattr(config, "deployment_mode", "personal") == "service":
+        lake.locations.extend(found)
+    scoped = getattr(spec, "catalog_locations", None)
+    if scoped is None:
+        # A catalog that vends its own keys: its secret is not scoped.
+        return spec
+    return spec.model_copy(update={"catalog_locations": [*scoped, *found]})
 
 
 def _table_key(table_spec: TableSpec) -> tuple[str, str]:

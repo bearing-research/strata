@@ -891,8 +891,9 @@ also on the [publication page](publishing.md) of a result built from the cell.
 On a DuckDB connection over a [catalog](cells.md#duckdb-over-the-lake), the
 state is the Iceberg snapshot of each catalog table the query reads. The first
 run records those snapshot ids on its artifact and reads each table `AT
-(VERSION => id)`; later runs read the same snapshots and hit the cache, and a
-new snapshot of a table does not make the cell out of date. Only a rerun (`↻`)
+(VERSION => id)`; later runs read the same snapshots and hit the cache without
+asking the catalog, so a hit works with the catalog unreachable, and a new
+snapshot of a table does not make the cell out of date. Only a rerun (`↻`)
 or a change to the cell moves it to the current snapshots. The run says which
 snapshots it shows:
 

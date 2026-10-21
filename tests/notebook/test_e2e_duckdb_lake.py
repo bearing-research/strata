@@ -577,12 +577,20 @@ async def test_a_duckdb_cell_reads_a_catalog_that_vends_nothing_with_its_keys(
 
 
 @pytest.mark.asyncio
+# Service mode confines the query to the pinned table, located only once the cache misses.
+@pytest.mark.parametrize("mode", ["personal", "service"])
 async def test_a_pinned_cell_over_a_catalog_that_vends_nothing_hits_its_cache_with_it_down(
-    tmp_path, monkeypatch, no_vending_catalog
+    tmp_path, monkeypatch, no_vending_catalog, mode
 ):
     properties, proxy = no_vending_catalog
     _configure(
-        monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
+        monkeypatch,
+        StrataConfig(
+            cache_dir=tmp_path / "cache",
+            catalogs={"lake": properties},
+            deployment_mode=mode,
+            **service_auth(mode),
+        ),
     )
     nb_dir = _notebook(
         tmp_path,
@@ -591,6 +599,13 @@ async def test_a_pinned_cell_over_a_catalog_that_vends_nothing_hits_its_cache_wi
     )
     session = NotebookSession(parse_notebook(nb_dir), nb_dir)
     _, rows = await _run(nb_dir, session)
+    assert rows == [{"id": 1}, {"id": 2}]
+
+    # A miss on the pinned run still reads the table.
+    with monkeypatch.context() as patch:
+        patch.setattr(session.get_artifact_manager(), "find_cached", lambda provenance: None)
+        result, rows = await _run(nb_dir, session)
+    assert result.cache_hit is False
     assert rows == [{"id": 1}, {"id": 2}]
 
     proxy.close()
