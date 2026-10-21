@@ -596,10 +596,11 @@ its files. A [snapshot](export.md#snapshots) carries the file versions each
 manifest names, and a [publication's archive](publishing.md#archiving-the-copy-that-needs-no-server)
 holds the files under `folder/`.
 
-For now run-all runs a cell with a folder on its own rather than in a batch,
-and the [team cache](../deployment/service-mode.md#the-team-cache-sharing-results-nobody-named)
-neither offers nor serves a cell with a folder: it runs locally. Promote the
-folder to share it.
+The [team cache](../deployment/service-mode.md#the-team-cache-sharing-results-nobody-named)
+offers and serves a folder with its files: a teammate's pull lands every file
+under their notebook's own ids before the manifest, or nothing.
+
+For now run-all runs a cell with a folder on its own rather than in a batch.
 An R cell gets the folder as a path string and its folder is kept, but cannot
 read another cell's folder yet.
 

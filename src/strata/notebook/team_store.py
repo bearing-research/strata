@@ -15,9 +15,14 @@ only in log level.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
+from typing import BinaryIO
 
+import anyio
 import httpx
 
 from strata.notebook import output_dirs
@@ -141,18 +146,19 @@ class TeamStore:
     async def publish(
         self,
         provenance_hash: str,
-        blob: bytes,
+        blob: bytes | BinaryIO,
         *,
         content_type: str,
         variable_name: str | None = None,
         build_env: str = "",
         build_duration_ms: int = 0,
         env_hash: str = "",
-    ) -> bool:
+    ) -> tuple[str, int] | None:
         """Offer a result to the team, keyed by provenance. Never raises.
 
-        Returns whether it landed (for logging only): a failed push costs the next
-        person a recompute and must not fail a cell that ran fine.
+        *blob* is bytes or an open file, sent as it is read. Returns the ``(id, version)``
+        it landed on, or ``None``: a failed push costs the next person a recompute and must
+        not fail a cell that ran fine.
         """
         metadata: dict[str, str] = {"content_type": content_type}
         if variable_name:
@@ -176,13 +182,13 @@ class TeamStore:
                 headers=self._headers,
                 timeout=PUBLISH_TIMEOUT_SECONDS,
             )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, OSError) as exc:
             logger.warning(
                 "Team store unreachable publishing %s (%s); the result stays local",
                 provenance_hash[:12],
                 exc,
             )
-            return False
+            return None
 
         if response.status_code >= 400:
             # 403 is usually a read-only member: legitimate, but visible, or a team wonders why
@@ -192,8 +198,53 @@ class TeamStore:
                 provenance_hash[:12],
                 response.status_code,
             )
-            return False
-        return True
+            return None
+        try:
+            uri = str(response.json()["artifact_uri"])
+            landed_id, _, landed_version = uri.removeprefix("strata://artifact/").rpartition("@v=")
+            return landed_id, int(landed_version)
+        except (ValueError, KeyError, TypeError):
+            logger.warning("Team store took %s but did not say where", provenance_hash[:12])
+            return None
+
+    async def holds(self, provenance_hash: str, sha256: str) -> tuple[str, int] | None:
+        """Where the store keeps these exact bytes under *provenance_hash*, if it does."""
+        match = await self._lookup(provenance_hash)
+        if match is None or match.get("content_sha256") != sha256:
+            return None
+        try:
+            return str(match["artifact_id"]), int(match["version"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    async def download_to(
+        self, artifact_id: str, version: int, dest: Path
+    ) -> tuple[str, int] | None:
+        """Write a version's bytes to *dest* as they arrive; their sha256 and size, or ``None``."""
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            async with self._client.stream(
+                "GET",
+                f"{self._base_url}/v1/artifacts/{artifact_id}/v/{version}/data",
+                headers=self._headers,
+                timeout=DOWNLOAD_TIMEOUT_SECONDS,
+            ) as response:
+                response.raise_for_status()
+                with open(dest, "wb") as out:
+                    async for chunk in response.aiter_bytes():
+                        digest.update(chunk)
+                        size += len(chunk)
+                        out.write(chunk)
+        except (httpx.HTTPError, OSError) as exc:
+            logger.warning(
+                "Team store named %s@v=%d but it could not be fetched: %s",
+                artifact_id,
+                version,
+                exc,
+            )
+            return None
+        return digest.hexdigest(), size
 
     async def _lookup(self, provenance_hash: str) -> dict | None:
         try:
@@ -274,6 +325,9 @@ async def pull_cell_outputs(
     fetched before any is written, and the pull stops at the first absent one. A
     download failing after a write leaves correctly keyed rows behind; the hit
     check keeps rejecting the incomplete set. Returns ``None`` on any miss or failure.
+
+    An output folder comes with every file its manifest names, each checked against
+    its entry, and lands under this notebook's own ids before its manifest does.
     """
     if not consumed_vars:
         # Nothing downstream means no artifact; console and display outputs live in runtime
@@ -299,11 +353,6 @@ async def pull_cell_outputs(
         for var, artifact in zip(ordered, fetched, strict=True)
         if artifact is not None
     ]
-    if any(artifact.content_type == output_dirs.CONTENT_TYPE for _, artifact in pulled):
-        # A pull fetches the manifest alone and lands it under this notebook's ids, where the
-        # files it names are not. Promoting a folder copies its files; a pull does not.
-        logger.debug("Cell %s keeps an output folder; running it locally", cell_id)
-        return None
 
     # The publisher's env_hash, kept rather than restamped. Provenance folds in env_hash,
     # so an honest pull cannot disagree. If it does, importing it would make
@@ -329,32 +378,48 @@ async def pull_cell_outputs(
         )
         published_env_hash = ""
 
-    total_bytes = 0
-    for var, artifact in pulled:
-        artifact_mgr.store_cell_output(
-            cell_id=cell_id,
-            variable_name=var,
-            blob_data=artifact.blob,
-            content_type=artifact.content_type,
-            provenance_hash=artifact.provenance_hash,
-            # Same upstream refs a local run records, so lineage doesn't depend on which cells
-            # happened to hit the shared cache.
-            input_versions=input_versions or {},
-            source_hash=source_hash,
-            # The local source, not the publisher's: a provenance match only proves AST identity,
-            # and annotations (``# @worker``, ``# @env``) are comments that can differ. Record
-            # what this machine would have run.
-            source=source,
-            env_hash=published_env_hash or env_hash,
-            variant=variant,
-            # Preserved, not restamped: the bytes came from the publisher's machine.
-            build_env=artifact.build_env,
-            build_duration_ms=artifact.build_duration_ms,
-            # Persisted, not just logged: lineage reads the local store, so otherwise the author
-            # column is blank on exactly the steps someone else produced.
-            principal=artifact.principal,
+    with (
+        tempfile.TemporaryDirectory(prefix="strata_team_pull_") as workdir,
+        output_dirs.assembling(),
+    ):
+        # Every file of every folder is fetched and checked before anything lands, so no
+        # manifest lands naming a file that is not here.
+        fetched_files: dict[str, dict[str, tuple[Path, str, int]]] = {}
+        for var, artifact in pulled:
+            if artifact.content_type == output_dirs.CONTENT_TYPE:
+                files = await _fetch_folder_files(store, artifact, Path(workdir) / var)
+                if files is None:
+                    return None
+                fetched_files[var] = files
+        manifests = await anyio.to_thread.run_sync(
+            _land_folder_files, artifact_mgr, cell_id, fetched_files
         )
-        total_bytes += len(artifact.blob)
+        total_bytes = sum(size for files in fetched_files.values() for _, _, size in files.values())
+        for var, artifact in pulled:
+            artifact_mgr.store_cell_output(
+                cell_id=cell_id,
+                variable_name=var,
+                blob_data=manifests.get(var, artifact.blob),
+                content_type=artifact.content_type,
+                provenance_hash=artifact.provenance_hash,
+                # Same upstream refs a local run records, so lineage doesn't depend on which cells
+                # happened to hit the shared cache.
+                input_versions=input_versions or {},
+                source_hash=source_hash,
+                # The local source, not the publisher's: a provenance match only proves AST
+                # identity, and annotations (``# @worker``, ``# @env``) are comments that can
+                # differ. Record what this machine would have run.
+                source=source,
+                env_hash=published_env_hash or env_hash,
+                variant=variant,
+                # Preserved, not restamped: the bytes came from the publisher's machine.
+                build_env=artifact.build_env,
+                build_duration_ms=artifact.build_duration_ms,
+                # Persisted, not just logged: lineage reads the local store, so otherwise the author
+                # column is blank on exactly the steps someone else produced.
+                principal=artifact.principal,
+            )
+            total_bytes += len(artifact.blob)
 
     # One cell run computed every variable, so they share an author.
     principal = pulled[0][1].principal
@@ -404,11 +469,13 @@ async def publish_cell_outputs(
         if stored is None or stored.state not in ("ready", "superseded"):
             continue
         content_type = _spec_param(stored, "content_type")
-        if content_type == output_dirs.CONTENT_TYPE:
-            continue  # the cache route takes one blob, the manifest without its files
         blob = artifact_mgr.artifact_store.read_blob(artifact_id, stored.version)
         if blob is None:
             continue
+        if content_type == output_dirs.CONTENT_TYPE:
+            blob = await _offer_folder_files(store, artifact_mgr, stored.id, blob)
+            if blob is None:
+                continue
         if await store.publish(
             stored.provenance_hash,
             blob,
@@ -427,6 +494,123 @@ async def publish_cell_outputs(
             cell_id,
         )
     return published
+
+
+async def _fetch_folder_files(
+    store: TeamStore, artifact: TeamArtifact, workdir: Path
+) -> dict[str, tuple[Path, str, int]] | None:
+    """Download each file a pulled folder names into *workdir*: ``{path: (file, sha256, size)}``.
+
+    ``None`` when the manifest cannot be read, or any file is missing or differs from its
+    entry: the manifest came from another store, so nothing in it is taken on trust.
+    """
+    try:
+        described = json.loads(artifact.blob)
+        named = [
+            (
+                output_dirs.checked_path(rel),
+                *output_dirs.file_ref(artifact.artifact_id, described["cell_id"], entry),
+                str(entry["sha256"]),
+                int(entry["size"]),
+            )
+            for rel, entry in described["files"].items()
+        ]
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        logger.warning(
+            "Team store's folder %s@v=%d cannot be read (%s); running it locally",
+            artifact.artifact_id,
+            artifact.version,
+            exc,
+        )
+        return None
+    workdir.mkdir()
+    files: dict[str, tuple[Path, str, int]] = {}
+    for index, (rel, file_id, version, sha256, size) in enumerate(named):
+        dest = workdir / str(index)
+        got = await store.download_to(file_id, version, dest)
+        if got is None:
+            return None
+        if got != (sha256, size):
+            logger.warning(
+                "Team store's %s@v=%d is not the file %s its folder names; running it locally",
+                file_id,
+                version,
+                rel,
+            )
+            return None
+        files[rel] = (dest, sha256, size)
+    return files
+
+
+def _land_folder_files(
+    artifact_mgr: NotebookArtifactManager,
+    cell_id: str,
+    fetched: dict[str, dict[str, tuple[Path, str, int]]],
+) -> dict[str, bytes]:
+    """Store each fetched file under this notebook's id; return each folder's manifest.
+
+    The manifest is the one a run here would have collected, so the folder rebuilds
+    from this store alone.
+    """
+    return {
+        var: output_dirs.collect(
+            artifact_mgr,
+            cell_id,
+            None,
+            var,
+            {
+                rel: output_dirs.store_received(artifact_mgr, cell_id, path, sha256, size)
+                for rel, (path, sha256, size) in files.items()
+            },
+        )
+        for var, files in fetched.items()
+    }
+
+
+async def _offer_folder_files(
+    store: TeamStore,
+    artifact_mgr: NotebookArtifactManager,
+    manifest_id: str,
+    manifest: bytes,
+) -> bytes | None:
+    """Offer each file a folder names; return the manifest naming where each landed.
+
+    ``None``, and nothing offered, when a file is not here to send; ``None`` too when one
+    does not land, so the manifest is never published without its files.
+    """
+    local = artifact_mgr.artifact_store
+    records = []
+    for file_id, version, sha256 in output_dirs.file_refs(manifest_id, manifest):
+        record = local.get_artifact(file_id, version)
+        if record is None or record.state not in ("ready", "superseded"):
+            logger.warning(
+                "Not offering folder %s to the team store: it names %s@v=%d, which is gone",
+                manifest_id,
+                file_id,
+                version,
+            )
+            return None
+        records.append((record, sha256))
+
+    landed: dict[tuple[str, int], tuple[str, int]] = {}
+    for record, sha256 in records:
+        # A file unchanged since an earlier run is there already; it is not sent again.
+        held = await store.holds(record.provenance_hash, sha256)
+        if held is None:
+            reader = local.open_blob_reader(record.id, record.version)
+            if reader is None:
+                return None
+            with reader as handle:
+                held = await store.publish(
+                    record.provenance_hash,
+                    handle,
+                    content_type=_spec_param(record, "content_type"),
+                )
+            if held is None:
+                return None
+        landed[(record.id, record.version)] = held
+    # The store mints the manifest's id, so no file id can be read off it.
+    return output_dirs.relocate(manifest, manifest_id, landed, every_id=True)
 
 
 def _spec_param(artifact, key: str) -> str:

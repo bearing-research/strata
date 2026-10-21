@@ -127,12 +127,17 @@ def file_refs(manifest_id: str, manifest: bytes) -> list[tuple[str, int, str]]:
 
 
 def relocate(
-    manifest: bytes, manifest_id: str, landed: dict[tuple[str, int], tuple[str, int]]
+    manifest: bytes,
+    manifest_id: str,
+    landed: dict[tuple[str, int], tuple[str, int]],
+    *,
+    every_id: bool = False,
 ) -> bytes:
     """The manifest naming where each file *landed* in another store.
 
     *landed* maps where a file was, read off *manifest_id*, to where it landed. An entry
-    names an ``id`` only when that differs from the one read off *manifest_id*; the bytes
+    names an ``id`` only when that differs from the one read off *manifest_id*, or always
+    with *every_id*, for a manifest landing under an id the other store mints; the bytes
     are unchanged when no entry changes.
     """
     described = json.loads(manifest)
@@ -143,7 +148,7 @@ def relocate(
         target_id, target_version = landed.get(source, source)
         moved = {key: value for key, value in entry.items() if key != "id"}
         moved["version"] = target_version
-        if file_ref(manifest_id, cell_id, moved)[0] != target_id:
+        if every_id or file_ref(manifest_id, cell_id, moved)[0] != target_id:
             moved["id"] = target_id
         if moved != entry:
             entry.clear()

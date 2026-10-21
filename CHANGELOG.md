@@ -53,6 +53,14 @@ exhaustive commit history.
 
 ### Changed
 
+- **The team cache shares an output folder.** A cell's `# @output_dir` folder
+  was neither offered to nor served from the team cache, so a teammate always
+  ran it. A publish now offers each file the folder names, then its manifest
+  naming where each landed; a file the store already holds is not sent again.
+  A pull fetches every file, checks its sha256 and size against the manifest,
+  and lands the files under the notebook's own ids before the manifest, so the
+  folder rebuilds and downstream cells read it; a missing or altered file lands
+  nothing and the cell runs locally. (#1281)
 - **Upgrading from 0.10 or earlier: artifacts over a table rebuild once.**
   Since 0.11 a table input's recorded version carries its reading fingerprint
   (format version and name mapping) as well as its snapshot and schema, so

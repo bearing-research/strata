@@ -612,11 +612,13 @@ What to know before switching it on:
   it does not look like the cache is simply empty.
 - **It never fails a cell.** A store that is unreachable, refusing, or missing
   one of a cell's outputs ends in "run it locally".
-- **A cell with a [`# @output_dir`](../notebook/annotations.md#output_dir)
-  folder is not shared.** The folder's files are kept as artifacts of their own,
-  and the cache moves one blob per output, the manifest without them, so the
-  cell is neither offered nor served from it: it runs locally. Promoting a
-  folder copies its files, and `@dataset` reads it back whole.
+- **A [`# @output_dir`](../notebook/annotations.md#output_dir) folder travels
+  with its files.** A publish offers each file the folder names, one blob each
+  under its own provenance key (a file the store already holds is not sent
+  again), then the manifest naming where each landed. A pull fetches every file
+  and checks its sha256 and size against the manifest before anything lands;
+  the files land under the pulling notebook's own ids, then the manifest. A
+  missing or altered file lands nothing and the cell runs locally.
 - **A notebook whose environment does not match its lockfile will not publish.**
   A failed `uv sync` keeps the previous venv and stays usable on purpose, so a
   transient network failure does not lock you out of your own notebook - but
