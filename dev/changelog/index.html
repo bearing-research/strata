@@ -3890,6 +3890,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A pinned DuckDB SQL cell hits its cache without the catalog in service
+  mode too.</strong> There a <code># @cache snapshot</code> cell over a catalog still loaded
+  each pinned table before the cache check, since the cell's confinement
+  needed its location, so its cache hit failed with the catalog unreachable.
+  The table is now located only when the query runs, and the query is
+  confined to its location then, as strictly as before. (#1292)</li>
 <li><strong>A DuckDB SQL cell over a catalog that vends nothing reads as the catalog
   is configured.</strong> <code>s3.path-style-access</code> takes the booleans pyiceberg reads
   (<code>0</code>, <code>no</code>, <code>off</code> turn it off; <code>1</code>, <code>yes</code> turn it on without an endpoint),

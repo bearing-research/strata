@@ -3719,8 +3719,9 @@ also on the <a href="../publishing/">publication page</a> of a result built from
 <p>On a DuckDB connection over a <a href="../cells/#duckdb-over-the-lake">catalog</a>, the
 state is the Iceberg snapshot of each catalog table the query reads. The first
 run records those snapshot ids on its artifact and reads each table <code>AT
-(VERSION =&gt; id)</code>; later runs read the same snapshots and hit the cache, and a
-new snapshot of a table does not make the cell out of date. Only a rerun (<code>↻</code>)
+(VERSION =&gt; id)</code>; later runs read the same snapshots and hit the cache without
+asking the catalog, so a hit works with the catalog unreachable, and a new
+snapshot of a table does not make the cell out of date. Only a rerun (<code>↻</code>)
 or a change to the cell moves it to the current snapshots. The run says which
 snapshots it shows:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>State of lake.taxi.trips at snapshot 5739646342007261951.
