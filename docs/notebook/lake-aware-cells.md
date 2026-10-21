@@ -275,7 +275,9 @@ refuses one, a GET of its first byte). Sizes are decimal: a GB is 10^9 bytes,
 in the thresholds, the rates and the dialog alike. What would move is what the machine does not hold yet, of the
 sizes that are known; a table counts its snapshot's files, an upper bound. When
 that passes `STRATA_NOTEBOOK_CONFIRM_READ_BYTES`, or its cost at
-`STRATA_NOTEBOOK_CREDENTIAL_READ_COST`'s rate per GB passes
+`STRATA_NOTEBOOK_CREDENTIAL_READ_COST`'s rate per GB (which a host can
+[replace while the server runs](../reference/notebook-toml.md#changing-them-while-the-server-runs))
+passes
 `STRATA_NOTEBOOK_CONFIRM_READ_COST`, nothing starts: the notebook lists those
 cells, their inputs, sizes and cost, and the host's
 `STRATA_NOTEBOOK_CONFIRM_READ_MESSAGE`, with Run and Cancel. One question covers

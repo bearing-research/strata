@@ -182,9 +182,9 @@ refresh without a restart. This holds on a server and on a worker alike.
 
 `PUT /v1/admin/notebook-credentials` replaces `notebook_credentials`,
 `notebook_mount_credentials`, `notebook_credential_paths`,
-`notebook_credential_writers` and `catalogs` together, so a source a host
-connects, rotates, restricts or removes reaches a running server without
-closing its sessions:
+`notebook_credential_writers`, `notebook_credential_read_cost` and `catalogs`
+together, so a source a host connects, rotates, restricts or removes, with its
+egress rate, reaches a running server without closing its sessions:
 
 ```bash
 curl -X PUT "$STRATA/v1/admin/notebook-credentials" -H 'Content-Type: application/json' -d '{
@@ -193,6 +193,7 @@ curl -X PUT "$STRATA/v1/admin/notebook-credentials" -H 'Content-Type: applicatio
   "notebook_mount_credentials": {"s3": "lab-bucket"},
   "notebook_credential_paths": {},
   "notebook_credential_writers": null,
+  "notebook_credential_read_cost": {"lab-bucket": 0.09},
   "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}}
 }'
 ```
@@ -213,13 +214,18 @@ curl -X PUT "$STRATA/v1/admin/notebook-credentials" -H 'Content-Type: applicatio
   restricts no name; writers `null` is unset (every name writes), and `{}`
   makes every name read-only.
 - Any other setting left out of the body is replaced by its default, as if unset.
+  Left out, `notebook_credential_read_cost` is `{}`, so no name has a rate and
+  only the size threshold can ask.
+- `notebook_credential_read_cost` is dollars per GB for each name, the rate
+  [asking before a large read](../notebook/lake-aware-cells.md#asking-before-a-large-read)
+  uses. A rate that is not a number is refused with `422` naming the field.
 - The next run uses the new settings, in a session opened before the call too. A
   running cell keeps what it resolved. A removed name fails its next use naming
   it, as an unknown name does.
 - A changed catalog is rebuilt from its new properties at its next use.
 - It is validated as the settings are at startup, and a refused body (`400`)
   changes nothing.
-- `GET` returns the five settings. A credential's literal values read
+- `GET` returns the six settings, rates as set. A credential's literal values read
   `<redacted>`; a `${...}` reference is shown, since it only says where a value
   lives. A catalog shows only the keys known to hold no secret (`type`,
   `warehouse`, `strata_credential`, `s3.region`, `client.region`,
