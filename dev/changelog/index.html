@@ -3847,6 +3847,14 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A DuckDB SQL cell over a catalog that vends nothing reads as the catalog
+  is configured.</strong> <code>s3.path-style-access</code> takes the booleans pyiceberg reads
+  (<code>0</code>, <code>no</code>, <code>off</code> turn it off; <code>1</code>, <code>yes</code> turn it on without an endpoint),
+  and <code>s3.force-virtual-addressing</code> turns it off. The catalog's and an S3
+  mount's keys no longer reach a sibling prefix (<code>s3://lake/wh</code> covered
+  <code>s3://lake/wh2</code>). Each table is loaded once per run, and a table pinned by
+  <code># @cache snapshot</code> is located only when the query runs, so its cache hit
+  needs no catalog again. (#1282)</li>
 <li><strong>Promoting or publishing an output folder copies its files.</strong> Promote,
   <code>strata artifact publish</code> (<code>--to</code> too) and the MCP tools copied a
   <code># @output_dir</code> folder's manifest without the files it names, leaving it
