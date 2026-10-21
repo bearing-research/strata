@@ -328,6 +328,29 @@ class TestPublish:
         assert capsys.readouterr().out.startswith(f"Cannot publish: {folder.id}@v=1 is a folder")
         assert ArtifactStore(team_dir).get_artifact(folder.id, folder.version) is None
 
+    def test_an_unreadable_published_manifest_is_answered_as_a_missing_file(self, team, tmp_path):
+        """An import can publish any bytes as a folder; its archive is a 404, as for a lost file."""
+        base, team_dir = team
+        store = ArtifactStore(team_dir)
+        lost_file = _stored(
+            store,
+            "nb_x_cell_w_var_lost",
+            json.dumps(
+                {"cell_id": "w", "files": {"a": {"sha256": "0" * 64, "size": 1, "version": 1}}}
+            ).encode(),
+            content_type=output_dirs.CONTENT_TYPE,
+        )
+        unreadable = _stored(
+            store, "nb_x_cell_w_var_junk", b"[1]", content_type=output_dirs.CONTENT_TYPE
+        )
+
+        def archive_status(record) -> int:
+            token = store.publish_artifact(record.id, record.version).token
+            return httpx.get(f"{base}/p/{token}/archive.zip", timeout=30).status_code
+
+        assert archive_status(lost_file) == 404
+        assert archive_status(unreadable) == 404
+
     def test_a_folder_another_tenant_holds_lands_as_this_tenants_copy(self, central, tmp_path):
         """Remapped, each file lands under a fresh id, and the manifest names it there."""
         base, central_dir = central

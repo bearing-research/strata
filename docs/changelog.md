@@ -107,6 +107,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   tenant holds reads that file as missing, in a rebuild, a copy and a
   publication's archive. `strata artifact pull <id>@v=<n> --to <dir>` rebuilds
   a folder's files instead of writing its manifest. (#1284)
+  publication's archive. A publication's archive of a folder manifest that
+  cannot be read is a `404`, as for a missing file, not a `500`.
+  `strata artifact pull <id>@v=<n> --to <dir>` rebuilds a folder's files
+  instead of writing its manifest. (#1284)
 - **Promoting or publishing an output folder copies its files.** Promote,
   `strata artifact publish` (`--to` too) and the MCP tools copied a
   `# @output_dir` folder's manifest without the files it names, leaving it
