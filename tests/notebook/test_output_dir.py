@@ -1288,6 +1288,20 @@ class TestStreamingFromAWorker:
         assert state == "failed"
         assert list(manifest["files"]) == ["e0.bin"]
 
+    async def test_a_run_past_its_timeout_on_the_worker_fails_as_a_timeout(
+        self, tmp_path, notebook_executor_server, notebook_personal_server
+    ):
+        """The worker answers 408 and the server records the run as timed out."""
+        writer = "# @worker remote\n# @timeout 2\nimport time\ntime.sleep(60)\n"
+        session = self._session_on_worker(
+            tmp_path, writer, notebook_executor_server, notebook_personal_server
+        )
+
+        result = await CellExecutor(session).execute_cell("w", writer)
+
+        assert not result.success
+        assert result.remote_error_code == "TIMEOUT", result.error
+
     async def test_a_folder_emptied_before_the_end_is_empty(
         self, tmp_path, monkeypatch, notebook_executor_server, notebook_personal_server
     ):
