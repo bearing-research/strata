@@ -574,3 +574,27 @@ async def test_a_duckdb_cell_reads_a_catalog_that_vends_nothing_with_its_keys(
 
     assert rows == [{"id": 1}, {"id": 2}]
     assert proxy.refused == []
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_cell_over_a_catalog_that_vends_nothing_hits_its_cache_with_it_down(
+    tmp_path, monkeypatch, no_vending_catalog
+):
+    properties, proxy = no_vending_catalog
+    _configure(
+        monkeypatch, StrataConfig(cache_dir=tmp_path / "cache", catalogs={"lake": properties})
+    )
+    nb_dir = _notebook(
+        tmp_path,
+        "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips ORDER BY id\n",
+        'driver = "duckdb"\npath = ":memory:"\ncatalog = "lake"',
+    )
+    session = NotebookSession(parse_notebook(nb_dir), nb_dir)
+    _, rows = await _run(nb_dir, session)
+    assert rows == [{"id": 1}, {"id": 2}]
+
+    proxy.close()
+    result, rows = await _run(nb_dir, session)
+
+    assert result.cache_hit is True
+    assert rows == [{"id": 1}, {"id": 2}]

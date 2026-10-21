@@ -209,7 +209,7 @@ class TestASqlCellsCatalogTables:
         monkeypatch.setattr(
             tables,
             "fingerprint_tables",
-            lambda specs, cfg, env=None, notebook=None: (
+            lambda specs, cfg, env=None, notebook=None, locations=None: (
                 [],
                 {spec.name: 7 if spec.uri.endswith("trips") else None for spec in specs},
             ),

@@ -75,6 +75,14 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A DuckDB SQL cell over a catalog that vends nothing reads as the catalog
+  is configured.** `s3.path-style-access` takes the booleans pyiceberg reads
+  (`0`, `no`, `off` turn it off; `1`, `yes` turn it on without an endpoint),
+  and `s3.force-virtual-addressing` turns it off. The catalog's and an S3
+  mount's keys no longer reach a sibling prefix (`s3://lake/wh` covered
+  `s3://lake/wh2`). Each table is loaded once per run, and a table pinned by
+  `# @cache snapshot` is located only when the query runs, so its cache hit
+  needs no catalog again. (#1282)
 - **Promoting or publishing an output folder copies its files.** Promote,
   `strata artifact publish` (`--to` too) and the MCP tools copied a
   `# @output_dir` folder's manifest without the files it names, leaving it

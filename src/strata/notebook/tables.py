@@ -58,10 +58,13 @@ def resolve_table_read(
     env: Mapping[str, str] | None,
     *,
     notebook: Path | None,
-) -> tuple[int | None, int | None]:
-    """The snapshot to read and its data files' bytes; a pin's size is not looked up."""
+) -> tuple[int | None, int | None, str | None]:
+    """The snapshot to read, its data files' bytes and the table's location.
+
+    A pin's size and location are not looked up.
+    """
     if spec.snapshot_pin is not None:
-        return spec.snapshot_pin, None
+        return spec.snapshot_pin, None, None
 
     from strata.iceberg.catalog import PyIcebergCatalog
 
@@ -72,11 +75,12 @@ def resolve_table_read(
     except Exception as e:
         raise ValueError(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
 
+    location = table.location()
     snapshot = table.current_snapshot()
     if snapshot is None:
-        return None, 0
+        return None, 0, location
     size = snapshot.summary.get("total-files-size") if snapshot.summary else None
-    return snapshot.snapshot_id, int(size) if size is not None else None
+    return snapshot.snapshot_id, int(size) if size is not None else None, location
 
 
 def fingerprint_tables(
@@ -86,11 +90,13 @@ def fingerprint_tables(
     *,
     notebook: Path | None = None,
     sizes: dict[str, int | None] | None = None,
+    locations: dict[str, str] | None = None,
 ) -> tuple[list[str], dict[str, int | None]]:
     """Resolve every table's snapshot for provenance hashing.
 
     *sizes*, when given, is filled with each resolved table's data-file bytes (from its
     snapshot summary, ``None`` if unknown), an upper bound on what a scan reads.
+    *locations*, when given, is filled with each loaded table's location.
 
     Returns ``(fingerprints, snapshots)``: fingerprints are
     ``"<name>:table:<uri>:<snapshot_id>"``; ``snapshots`` maps table name to
@@ -104,7 +110,7 @@ def fingerprint_tables(
     snapshots: dict[str, int | None] = {}
     for spec in sorted(specs, key=lambda t: t.name):
         try:
-            snapshot_id, size = resolve_table_read(spec, config, env, notebook=notebook)
+            snapshot_id, size, location = resolve_table_read(spec, config, env, notebook=notebook)
         except ValueError as e:
             logger.warning(
                 "table fingerprint unresolved for %s (%s): %s",
@@ -117,6 +123,8 @@ def fingerprint_tables(
         snapshots[spec.name] = snapshot_id
         if sizes is not None:
             sizes[spec.name] = size
+        if locations is not None and location is not None:
+            locations[spec.name] = location
         if snapshot_id is None:
             fingerprints.append(f"{spec.name}:table:empty:{random_fingerprint()}")
             continue
