@@ -66,12 +66,13 @@ Under `trusted_proxy`, **every** `/v1/*` endpoint requires `X-Strata-Principal` 
 | `GET /v1/cache/entries`, `GET /v1/cache/histogram`, `GET /v1/cache/stats`, `GET /v1/debug/cache/inspect`, `POST /v1/metadata/cleanup` | `admin:cache` |
 | Minting, editing and withdrawing a publication (`POST /v1/artifacts/{id}/v/{n}/publish`, `PATCH` / `DELETE /v1/publications/{token}`) | `artifacts:publish` |
 | Pinning and unpinning a version (`POST` / `DELETE /v1/artifacts/{id}/v/{n}/pin`) | `artifacts:pin` |
+| Collecting the caller's own tenant's unneeded versions (`POST /v1/artifacts/gc`) | `artifacts:gc` |
 | `GET /v1/admin/tenants`, `GET /v1/admin/tenants/{tenant_id}` | `admin:tenants` |
 | `/v1/admin/notebook-workers*` (the server-managed worker registry) | `admin:notebook-workers` |
 | `GET` / `PUT /v1/admin/notebook-credentials` (the named credentials and catalogs cells use) | `admin:notebook-credentials` |
 | `POST /v1/registry/pending/approve` and `.../reject` | `admin:registry` |
 | Quiesce and release (`POST /v1/notebooks/{id}/quiesce` / `release`, `POST /v1/projects/{path}/quiesce` / `release`) | `admin:notebooks` |
-| `POST /v1/artifacts/gc`, and another tenant's `GET /v1/artifacts/usage` / `stats` | `admin:*` |
+| A `POST /v1/artifacts/gc` sweep of the whole store, another tenant, or the tenantless rows (`include_tenantless=true`), and another tenant's `GET /v1/artifacts/usage` / `stats` | `admin:*` |
 | `GET /metrics/tables`, `GET /metrics/tables/{table_id}` (every tenant's table names), and `/v1/debug/*` other than cache inspection | `admin:*` |
 
 `notebook:execute` is the default on purpose: an operation nobody classified is treated as the most dangerous kind. The per-route table is `src/strata/notebook/scopes.py`, and the same table checks WebSocket frames - a principal that cannot run a cell over the socket cannot run it over REST either.

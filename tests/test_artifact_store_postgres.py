@@ -540,6 +540,28 @@ class TestGarbageCollection:
             conn.close()
         assert row["last_used_at"] == pytest.approx(time.time(), abs=60)
 
+    def test_a_tenants_sweep_leaves_other_tenants_and_tenantless_rows(self, store):
+        ids = {owner: f"0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e1{n}" for n, owner in enumerate("ab_")}
+        for owner, artifact_id in ids.items():
+            tenant = None if owner == "_" else owner
+            version = store.create_artifact(
+                artifact_id, f"p-{owner}", _spec(), tenant=tenant, minted=True
+            )
+            store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=100)
+            self._last_used(store, artifact_id, 7200)
+
+        result = store.garbage_collect(max_idle_days=0, tenant="a")
+
+        assert (result["deleted_count"], result["store_bytes"]) == (1, 100)
+        assert store.get_artifact(ids["b"], 1) is not None
+        assert store.get_artifact(ids["_"], 1) is not None
+
+        result = store.garbage_collect(max_idle_days=0, tenant="a", include_tenantless=True)
+
+        assert (result["deleted_count"], result["store_bytes"]) == (1, 100)
+        assert store.get_artifact(ids["_"], 1) is None
+        assert store.get_artifact(ids["b"], 1) is not None
+
     def test_a_hit_during_the_sweep_keeps_the_version(self, store, monkeypatch):
         """Another node's cache hit commits while this sweep is between choosing and deleting."""
         artifact = "0b6f2a4e-6d1a-4c0e-9b1e-2f8d6a3c1e03"
