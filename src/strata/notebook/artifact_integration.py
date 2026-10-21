@@ -74,7 +74,8 @@ class NotebookArtifactManager:
 
         Keeps every output's current value, anything named, pinned or published, and
         anything used in the last *min_idle_seconds*, and each ``# @output_dir`` version
-        a failed run left after the folder's last good one. Then drops each
+        a failed run left, until a later run stores a good one and the good one it
+        follows is pruned (it goes in the sweep after that one's). Then drops each
         ``# @output_dir`` file no manifest version still names. Values a crash left
         half-written are failed first, so they no longer hold their inputs.
 

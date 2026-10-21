@@ -433,9 +433,9 @@ class TestTheFileSweep:
         assert read.success, read.error
         assert read.outputs["seen"]["preview"] == "same"
 
-    async def test_a_crashs_folder_stays_until_a_later_run_succeeds(self, tmp_path):
-        """Pruned with superseded values kept, a failed version newer than the last good one
-        stays, files and all, so a crash's checkpoints can still be downloaded."""
+    async def test_a_crashs_folder_stays_as_long_as_the_good_one_it_follows(self, tmp_path):
+        """Pruned with superseded values kept, a failed version stays, files and all, until a
+        later run stores a good one and the good one it follows is pruned too."""
         crash = (
             "# @output_dir ckpt\n"
             "import os\n"
@@ -468,9 +468,57 @@ class TestTheFileSweep:
         assert (await executor.execute_cell("w", NEW)).success
         manager.prune(keep_superseded=1, min_idle_seconds=0)
 
+        # v1 is the one earlier value kept, and the crashes follow it.
+        assert store.get_artifact(artifact_id, 1) is not None
+        assert store.get_artifact(artifact_id, 2).state == "failed"
+        assert store.read_blob(file_id, entry["version"]) is not None
+
+        newer = NEW + "(ckpt / 'more.txt').write_text('m')\n"
+        cell.source = newer
+        session.re_analyze_cell("w")
+        assert (await executor.execute_cell("w", newer)).success
+        manager.prune(keep_superseded=1, min_idle_seconds=0)
+        assert store.get_artifact(artifact_id, 1) is None
+        # Spared as v1 was when the sweep began; the next sweep takes them.
+        manager.prune(keep_superseded=1, min_idle_seconds=0)
+
         assert store.get_artifact(artifact_id, 2) is None
         assert store.get_artifact(artifact_id, 3) is None
         assert store.get_latest_version(file_id) is None
+
+    def test_a_failed_version_follows_the_good_one_just_before_it(self, tmp_path):
+        """Spared while the good version just below it is stored, not while an older one is."""
+        from strata.artifact.provenance import TransformSpec
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+
+        manager = NotebookArtifactManager("nb", tmp_path)
+        store = manager.artifact_store
+        artifact_id = manager.cell_artifact_id("w", "ckpt")
+        spec = TransformSpec(
+            executor="notebook/cell@v1",
+            params={"content_type": output_dirs.CONTENT_TYPE},
+            inputs=[],
+        )
+        # A folder whose first runs crashed has no good version yet: those stay.
+        crashed = manager.cell_artifact_id("c", "ckpt")
+        runs = {artifact_id: [True, True, False, False, True], crashed: [False, False]}
+        for folder, outcomes in runs.items():
+            for good in outcomes:
+                version = store.create_artifact(
+                    folder, provenance_hash=f"{folder}{good}", transform_spec=spec
+                )
+                if good:
+                    store.finalize_artifact(folder, version, "{}", row_count=0, byte_size=0)
+                else:
+                    store.fail_artifact(folder, version)
+
+        assert sorted(output_dirs.failed_since_ready(manager)) == sorted(
+            [(artifact_id, 3), (artifact_id, 4), (crashed, 1), (crashed, 2)]
+        )
+
+        store.delete_artifact(artifact_id, 2)  # pruned; v1 (say, pinned) is not what they follow
+
+        assert sorted(output_dirs.failed_since_ready(manager)) == [(crashed, 1), (crashed, 2)]
 
     async def test_a_file_a_kept_manifest_names_stays_though_stored_again(
         self, tmp_path, monkeypatch

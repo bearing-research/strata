@@ -35,9 +35,11 @@ exhaustive commit history.
   `failed`, each with its files' paths, sizes and sha256 digests;
   `.../folders/{name}/v/{version}/files/{path}` streams one file with a
   `Content-Digest`. A crash's checkpoints can be downloaded, and with
-  `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` set, a failed folder version
-  newer than the last good one is no longer pruned until a later run
-  succeeds. (#1277)
+  `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` set, prune keeps a failed
+  folder version until a later run stores a new successful version, and at
+  least as long as the successful version it follows; it goes in the pass
+  after that one does. A cache hit stores no new version, so it does not
+  release a failed one. (#1277, #1285)
 - **A DuckDB SQL cell reads a REST catalog that vends no credentials.** When a
   catalog's properties set `header.X-Iceberg-Access-Delegation` to something
   other than `vended-credentials` (empty, for a store without STS), DuckDB no
@@ -109,6 +111,12 @@ exhaustive commit history.
   cannot be read is a `404`, as for a missing file, not a `500`.
   `strata artifact pull <id>@v=<n> --to <dir>` rebuilds a folder's files
   instead of writing its manifest. (#1284)
+- **A `# @per_variant` cell's output folder is listed per variant.** A failed
+  variant's folder was kept under the cell's own id, not the variant's, so the
+  folder routes listed only failed versions, without saying which variant, and
+  prune never released them. It is now kept under its variant, the listing
+  carries each version's `variant`, and the file route takes `?variant=`.
+  (#1285)
 - **Promoting or publishing an output folder copies its files.** Promote,
   `strata artifact publish` (`--to` too) and the MCP tools copied a
   `# @output_dir` folder's manifest without the files it names, leaving it

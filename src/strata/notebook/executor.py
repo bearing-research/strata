@@ -1813,7 +1813,13 @@ class CellExecutor:
                 )
                 if not exec_result.success:
                     self._keep_failed_output_dirs(
-                        cell_id, source, result_output_dir, provenance_hash, env_hash, collected
+                        cell_id,
+                        source,
+                        result_output_dir,
+                        provenance_hash,
+                        env_hash,
+                        collected,
+                        variant=fanout_variant,
                     )
 
                 # ⑤ Store artifacts for consumed variables.
@@ -1966,13 +1972,17 @@ class CellExecutor:
         except asyncio.CancelledError:
             if self._received_output_files.get(cell_id):
                 # Cancelled mid-run: keep what the worker already uploaded, as on a loss.
-                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
+                self._keep_failed_output_dirs(
+                    cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
+                )
             raise
         except RemoteExecutionError as e:
             duration_ms = (time.time() - start_time) * 1000
             if self._received_output_files.get(cell_id):
                 # No result came back, so what the worker uploaded is all there is.
-                self._keep_failed_output_dirs(cell_id, source, None, provenance_hash, env_hash)
+                self._keep_failed_output_dirs(
+                    cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
+                )
             error_result = CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
@@ -5646,11 +5656,14 @@ class CellExecutor:
         provenance_hash: str,
         env_hash: str,
         collected: dict[str, bytes | Exception] | None = None,
+        *,
+        variant: str | None = None,
     ) -> None:
         """Keep what a failed run left in its ``# @output_dir`` folders, as failed versions.
 
         ``output_dir`` is ``None`` when no result came back: what a worker uploaded is all.
         *collected* holds folders already collected by :meth:`_collect_output_dirs`.
+        *variant* is the ``# @per_variant`` instance that failed, kept under its own id.
 
         A failed version is never a cache hit or an input; lineage shows it, and its files
         are listed and downloaded through ``GET .../cells/{cell_id}/folders/{name}``. Best
@@ -5672,6 +5685,7 @@ class CellExecutor:
                     source_hash=compute_source_hash(source),
                     source=source,
                     env_hash=env_hash,
+                    variant=variant,
                     collected=(collected or {}).get(name),
                 )
                 artifact_mgr.discard_cell_outputs([staged])
