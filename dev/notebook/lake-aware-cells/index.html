@@ -2451,8 +2451,9 @@ reads this file rather than parsing cell sources:</p>
 <code>&lt;catalog&gt;:&lt;namespace&gt;.&lt;table&gt;</code>. <code>catalog</code> is the configured catalog the URI
 names, or <code>null</code> for a warehouse path or the server's default catalog
 (<code>STRATA_CATALOG_NAME</code>). <code>snapshot_id</code> is <code>null</code> for a table with no snapshots
-yet. A failed run leaves the cell's entry as it was, and a
-cell that stops reading tables, or is deleted, drops out.</p>
+yet. A failed run leaves the cell's entry as it was, a run whose <code>rw</code> mounts
+fail to sync back included, and a cell that stops reading tables, or is
+deleted, drops out.</p>
 <h2 id="what-a-run-moved">What a run moved<a class="headerlink" href="#what-a-run-moved" title="Permanent link">&para;</a></h2>
 <p><code>.strata/reads/index.json</code> lists, for each cell, the bytes its last successful
 run moved onto the machine for each <code>@mount</code>, <code>@table</code> and <code>@fetch</code> input, and

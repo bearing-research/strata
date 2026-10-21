@@ -3190,8 +3190,11 @@ a host can list the files cells wrote to a source without reading each record:</
 </code></pre></div>
 <p><code>principal</code> is the member the run was for (<code>null</code> in personal mode). A cell's entry
 is replaced once its writes are synced back; a failed run, a failed sync-back
-included, leaves it as it was, and a successful run that writes nothing, or the
-cell's deletion, drops it. Loop, SQL and prompt cells do not record writes.</p>
+included, leaves it as it was, and a successful run that writes nothing (a cache
+hit or a run-all batch too), or the cell's deletion, drops it. A <code># @per_variant</code>
+cell's entry lists every variant's files, merged per mount, once every variant has
+succeeded; a path two variants wrote keeps the later one's. Loop, SQL and prompt
+cells do not record writes, so a successful run of one drops the entry too.</p>
 <p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw] [credential=&lt;name&gt;]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. <code>credential=</code> names a <a href="../../reference/notebook-toml/#named-credentials">server-defined credential</a> instead of putting a secret in the cell. On a server that sets <code>STRATA_NOTEBOOK_CREDENTIAL_WRITERS</code>, an <code>rw</code> mount of <code>s3://</code>, <code>gs://</code> or <code>az://</code> must write through a credential its run's principal is listed for (its <code>credential=</code>, or the server's default for that scheme), or the cell fails before it runs; a credential that <code>STRATA_NOTEBOOK_CREDENTIAL_PATHS</code> restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).</p>
 <hr />
 <h2 id="fetch">@fetch<a class="headerlink" href="#fetch" title="Permanent link">&para;</a></h2>

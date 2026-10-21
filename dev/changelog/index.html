@@ -3855,6 +3855,17 @@ exhaustive commit history.</p>
   <code>s3://lake/wh2</code>). Each table is loaded once per run, and a table pinned by
   <code># @cache snapshot</code> is located only when the query runs, so its cache hit
   needs no catalog again. (#1282)</li>
+<li><strong><code>.strata/writes/index.json</code> follows the cell's last good run.</strong> A
+  <code># @per_variant</code> cell's entry kept only its last variant's files, and a
+  variant that failed or wrote nothing replaced or dropped it before the
+  fan-out had succeeded. It now lists every variant's files, merged per mount
+  (a path two variants wrote keeps the later one's), once every variant has
+  succeeded. A cache hit or a run-all batch drops a stale entry, as any good
+  run that writes nothing does, and failing to write the index no longer
+  fails a run whose files were already synced. A cell's reads and tables
+  entries, and its last good run, are now recorded only after its <code>rw</code> mounts
+  are synced back, so a failed sync-back or a failed variant leaves them as
+  they were. (#1283)</li>
 <li><strong>Promoting or publishing an output folder copies its files.</strong> Promote,
   <code>strata artifact publish</code> (<code>--to</code> too) and the MCP tools copied a
   <code># @output_dir</code> folder's manifest without the files it names, leaving it
