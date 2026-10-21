@@ -8,11 +8,15 @@ specific still misses. And a store that is unreachable, refusing, or missing a v
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 import httpx
 import pytest
 
 from strata.artifact.provenance import TransformSpec
 from strata.artifact.store import ArtifactStore
+from strata.notebook import output_dirs
 from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.provenance import derive_subkey
 from strata.notebook.team_store import TeamStore, pull_cell_outputs
@@ -1335,18 +1339,150 @@ async def test_an_output_overtaken_by_a_duplicate_offers_its_canonical_bytes(loc
     assert offered == [b"bytes"]
 
 
-async def test_a_cell_with_an_output_folder_is_neither_offered_nor_pulled(
-    team_store_server, local_manager
-):
-    """A folder's manifest names files kept as their own artifacts, which the store lacks."""
-    from strata.notebook.team_store import publish_cell_outputs
+FOLDER_WRITER = (
+    "# @output_dir ckpt\n"
+    "(ckpt / 'epochs').mkdir()\n"
+    "(ckpt / 'epochs' / 'e0.bin').write_bytes(bytes(range(256)) * 64)\n"
+    "(ckpt / 'final.txt').write_text('done')\n"
+)
+FOLDER_READER = (
+    "seen = sorted(p.relative_to(ckpt).as_posix() for p in ckpt.rglob('*') if p.is_file())\n"
+    "final = (ckpt / 'final.txt').read_text()\n"
+)
 
-    seed_team_result(
-        team_store_server["artifact_dir"],
-        variable="ckpt",
-        blob=b'{"cell_id": "zz", "files": {}}',
-        content_type="dir/manifest",
+
+def _folder_bytes(manager: NotebookArtifactManager, cell_id: str, dest) -> dict[str, bytes]:
+    """Folder ``ckpt`` of *cell_id*, rebuilt from *manager*'s own store."""
+    manifest_id = manager.cell_artifact_id(cell_id, "ckpt")
+    stored = manager.artifact_store.get_latest_version(manifest_id)
+    assert stored is not None
+    blob = manager.artifact_store.read_blob(manifest_id, stored.version)
+    output_dirs.materialize(manager.artifact_store, manifest_id, blob, dest)
+    return {p.relative_to(dest).as_posix(): p.read_bytes() for p in dest.rglob("*") if p.is_file()}
+
+
+async def test_a_folder_alice_ran_rebuilds_in_bobs_notebook(
+    tmp_path, team_store_server, monkeypatch
+):
+    """Alice's run offers each file, then the manifest. Bob's cold notebook, with other cell
+    ids, is served the folder under his own ids, and his reader cell reads it.
+    """
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    def build(name: str, writer: str, reader: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, writer, None)
+        write_cell(notebook_dir, writer, FOLDER_WRITER)
+        add_cell_to_notebook(notebook_dir, reader, writer)
+        write_cell(notebook_dir, reader, FOLDER_READER)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.ensure_venv_synced()
+        return session
+
+    team_config = StrataConfig(
+        cache_dir=tmp_path / "shared-config-cache",
+        notebook_remote_store_url=team_store_server["base_url"],
+        notebook_team_cache_enabled=True,
     )
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: team_config)
+
+    alice = build("alice", "w", "r")
+    alice_run = await CellExecutor(alice).execute_cell("w", FOLDER_WRITER)
+    assert alice_run.success, alice_run.error
+    assert alice_run.cache_hit is False
+
+    bob = build("bob", "bw", "br")
+    bob_executor = CellExecutor(bob)
+    bob_run = await bob_executor.execute_cell("bw", FOLDER_WRITER)
+    assert bob_run.success, bob_run.error
+    assert bob_run.cache_hit is True, "Bob recomputed a folder Alice had already published"
+
+    alice_files = _folder_bytes(alice.get_artifact_manager(), "w", tmp_path / "alice-folder")
+    bob_manager = bob.get_artifact_manager()
+    bob_files = _folder_bytes(bob_manager, "bw", tmp_path / "bob-folder")
+    assert sorted(bob_files) == ["epochs/e0.bin", "final.txt"]
+    assert bob_files == alice_files
+
+    # His manifest names his own file ids, so his store alone rebuilds it.
+    manifest_id = bob_manager.cell_artifact_id("bw", "ckpt")
+    stored = bob_manager.artifact_store.get_latest_version(manifest_id)
+    assert stored is not None
+    blob = bob_manager.artifact_store.read_blob(manifest_id, stored.version)
+    assert blob is not None
+    assert json.loads(blob)["cell_id"] == "bw"
+    for file_id, version, sha256 in output_dirs.file_refs(manifest_id, blob):
+        assert file_id == output_dirs.file_artifact_id(bob_manager, "bw", sha256)
+        landed = bob_manager.artifact_store.get_artifact(file_id, version)
+        assert landed is not None and landed.state == "ready"
+
+    read = await bob_executor.execute_cell("br", FOLDER_READER)
+    assert read.success, read.error
+    assert read.outputs["seen"]["preview"] == ["epochs/e0.bin", "final.txt"]
+    assert read.outputs["final"]["preview"] == "done"
+
+
+def seed_team_folder(
+    artifact_dir, files: dict[str, bytes], *, served: dict[str, bytes], unstored: str | None
+) -> None:
+    """A folder in the shared store under the cell's key, each file named by its own id.
+
+    *served* overrides the bytes a file is stored with; *unstored* names a file the manifest
+    lists but the store never held.
+    """
+    store = ArtifactStore(artifact_dir)
+    entries = {}
+    for index, (rel, data) in enumerate(sorted(files.items())):
+        file_id = f"team_folder_file_{index}"
+        entries[rel] = {
+            "id": file_id,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
+            "version": 1,
+        }
+        if rel == unstored:
+            continue
+        body = served.get(rel, data)
+        version = store.create_artifact(
+            artifact_id=file_id,
+            provenance_hash=hashlib.sha256(file_id.encode()).hexdigest(),
+            transform_spec=TransformSpec(
+                executor="notebook/cell@v1",
+                params={"content_type": "application/octet-stream"},
+                inputs=[],
+            ),
+        )
+        store.blob_store.write_blob(file_id, version, body)
+        store.finalize_artifact(file_id, version, "", None, len(body))
+    seed_team_result(
+        artifact_dir,
+        variable="ckpt",
+        blob=json.dumps({"cell_id": "zz", "files": entries}, sort_keys=True).encode(),
+        content_type=output_dirs.CONTENT_TYPE,
+    )
+
+
+@pytest.mark.parametrize("damage", ["none", "missing", "mismatched", "resized"])
+async def test_a_folder_pull_lands_every_file_or_nothing(
+    team_store_server, local_manager, tmp_path, damage
+):
+    """The second file is the damaged one, so a pull landing files as it went would leave the
+    first behind. A manifest whose files are not all here must never be a hit.
+    """
+    files = {"a.bin": b"first file", "b.bin": b"second file"}
+    seed_team_folder(
+        team_store_server["artifact_dir"],
+        files,
+        served={
+            "mismatched": {"b.bin": b"second fil3"},
+            "resized": {"b.bin": b"second file, longer"},
+        }.get(damage, {}),
+        unstored="b.bin" if damage == "missing" else None,
+    )
+
     store = TeamStore(team_store_server["base_url"])
     try:
         pull = await pull_cell_outputs(
@@ -1358,25 +1494,127 @@ async def test_a_cell_with_an_output_folder_is_neither_offered_nor_pulled(
         )
     finally:
         await store.aclose()
-    assert pull is None
-    assert canonical_provenance(local_manager, "ckpt") is None
 
-    local_manager.store_cell_output(
+    if damage == "none":
+        assert pull is not None
+        assert _folder_bytes(local_manager, CELL_ID, tmp_path / "pulled") == files
+        return
+    assert pull is None
+    assert local_manager.artifact_store.list_versions_by_id_prefix(f"nb_{NOTEBOOK_ID}_") == []
+
+
+def _local_folder(
+    manager: NotebookArtifactManager, tmp_path, *, failed: bool = False, file_failed: bool = False
+) -> None:
+    """A run of cell ``c1`` that kept folder ``ckpt``.
+
+    *file_failed* has the manifest name a version of its file whose store failed.
+    """
+    folder = tmp_path / "run" / output_dirs.OUTPUT_DIRS / "ckpt"
+    folder.mkdir(parents=True)
+    (folder / "a.bin").write_bytes(b"weights")
+    manifest = output_dirs.collect(manager, CELL_ID, tmp_path / "run", "ckpt")
+    if file_failed:
+        described = json.loads(manifest)
+        entry = described["files"]["a.bin"]
+        file_id = output_dirs.file_artifact_id(manager, CELL_ID, entry["sha256"])
+        store = manager.artifact_store
+        entry["version"] = store.create_artifact(
+            file_id,
+            provenance_hash="f" * 64,
+            transform_spec=TransformSpec(executor="notebook/cell@v1", params={}, inputs=[]),
+        )
+        store.write_blob(file_id, entry["version"], b"weights")
+        store.fail_artifact(file_id, entry["version"])
+        manifest = json.dumps(described, sort_keys=True).encode()
+    staged = manager.stage_cell_output(
         cell_id=CELL_ID,
         variable_name="ckpt",
-        blob_data=b'{"cell_id": "c1", "files": {}}',
-        content_type="dir/manifest",
+        blob_data=manifest,
+        content_type=output_dirs.CONTENT_TYPE,
         provenance_hash=derive_subkey(CELL_PROVENANCE, "ckpt"),
     )
-    offered: list[str] = []
+    if failed:
+        manager.discard_cell_outputs([staged])
+    else:
+        manager.finalize_cell_outputs([staged])
 
-    class Recording:
-        async def publish(self, provenance_hash, blob, *, variable_name, **_):
-            offered.append(variable_name)
-            return True
+
+class _RecordingStore:
+    """Takes every offer; the n-th lands as ``landed_<n>``. Holds what *held* maps."""
+
+    def __init__(self, held: dict[str, tuple[str, int]] | None = None):
+        self.offered: list[tuple[str, str | None, bytes]] = []
+        self.held = held or {}
+
+    async def holds(self, provenance_hash, sha256):
+        return self.held.get(sha256)
+
+    async def publish(self, provenance_hash, blob, *, content_type, variable_name=None, **_):
+        data = blob if isinstance(blob, bytes) else blob.read()
+        self.offered.append((content_type, variable_name, data))
+        return (f"landed_{len(self.offered)}", 1)
+
+
+async def test_a_folder_is_offered_file_first_naming_where_each_landed(local_manager, tmp_path):
+    from strata.notebook.team_store import publish_cell_outputs
+
+    _local_folder(local_manager, tmp_path)
+    store = _RecordingStore()
 
     published = await publish_cell_outputs(
-        Recording(), local_manager, cell_id=CELL_ID, consumed_vars={"ckpt"}
+        store, local_manager, cell_id=CELL_ID, consumed_vars={"ckpt"}
     )
+
+    assert published == 1
+    assert [(kind, name) for kind, name, _ in store.offered] == [
+        ("application/octet-stream", None),
+        (output_dirs.CONTENT_TYPE, "ckpt"),
+    ]
+    assert store.offered[0][2] == b"weights"
+    # Every entry names its id: the store mints the manifest's, so none can be read off it.
+    assert json.loads(store.offered[1][2])["files"]["a.bin"]["id"] == "landed_1"
+
+
+async def test_a_file_the_store_holds_is_named_not_sent(local_manager, tmp_path):
+    """Held under this notebook's own file id (a promote put it there), it is still named:
+    the manifest lands under an id the store mints, so it cannot be read off that.
+    """
+    from strata.notebook.team_store import publish_cell_outputs
+
+    _local_folder(local_manager, tmp_path)
+    sha256 = hashlib.sha256(b"weights").hexdigest()
+    own_id = output_dirs.file_artifact_id(local_manager, CELL_ID, sha256)
+    store = _RecordingStore(held={sha256: (own_id, 4)})
+
+    published = await publish_cell_outputs(
+        store, local_manager, cell_id=CELL_ID, consumed_vars={"ckpt"}
+    )
+
+    assert published == 1
+    assert [kind for kind, _, _ in store.offered] == [output_dirs.CONTENT_TYPE]
+    entry = json.loads(store.offered[0][2])["files"]["a.bin"]
+    assert (entry["id"], entry["version"]) == (own_id, 4)
+
+
+@pytest.mark.parametrize("damage", ["failed run", "file failed"])
+async def test_a_folder_that_cannot_be_rebuilt_is_not_offered(local_manager, tmp_path, damage):
+    """A failed run's folder is never a result, and a manifest without its files would be a
+    hit nobody can read.
+    """
+    from strata.notebook.team_store import publish_cell_outputs
+
+    _local_folder(
+        local_manager,
+        tmp_path,
+        failed=damage == "failed run",
+        file_failed=damage == "file failed",
+    )
+    store = _RecordingStore()
+
+    published = await publish_cell_outputs(
+        store, local_manager, cell_id=CELL_ID, consumed_vars={"ckpt"}
+    )
+
     assert published == 0
-    assert offered == []
+    assert store.offered == []
