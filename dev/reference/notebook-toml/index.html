@@ -2647,17 +2647,18 @@ refresh without a restart. This holds on a server and on a worker alike.</p>
 <h3 id="changing-them-while-the-server-runs">Changing them while the server runs<a class="headerlink" href="#changing-them-while-the-server-runs" title="Permanent link">&para;</a></h3>
 <p><code>PUT /v1/admin/notebook-credentials</code> replaces <code>notebook_credentials</code>,
 <code>notebook_mount_credentials</code>, <code>notebook_credential_paths</code>,
-<code>notebook_credential_writers</code> and <code>catalogs</code> together, so a source a host
-connects, rotates, restricts or removes reaches a running server without
-closing its sessions:</p>
+<code>notebook_credential_writers</code>, <code>notebook_credential_read_cost</code> and <code>catalogs</code>
+together, so a source a host connects, rotates, restricts or removes, with its
+egress rate, reaches a running server without closing its sessions:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span><span class="s2">"</span><span class="nv">$STRATA</span><span class="s2">/v1/admin/notebook-credentials"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">'{</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="s1">  "notebook_credentials": {"lab-bucket": {"key": "${file:/run/creds/lab-bucket/key}",</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="s1">                                          "secret": "${file:/run/creds/lab-bucket/secret}"}},</span>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="s1">  "notebook_mount_credentials": {"s3": "lab-bucket"},</span>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="s1">  "notebook_credential_paths": {},</span>
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="s1">  "notebook_credential_writers": null,</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="s1">  "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}}</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="s1">}'</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="s1">  "notebook_credential_read_cost": {"lab-bucket": 0.09},</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="s1">  "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}}</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="s1">}'</span>
 </code></pre></div>
 <ul>
 <li>A value is a literal or a <code>${file:...}</code> reference under one of the server's
@@ -2675,14 +2676,19 @@ closing its sessions:</p>
   body is refused with <code>422</code> naming the field, and changes nothing. Paths <code>{}</code>
   restricts no name; writers <code>null</code> is unset (every name writes), and <code>{}</code>
   makes every name read-only.</li>
-<li>Any other setting left out of the body is replaced by its default, as if unset.</li>
+<li>Any other setting left out of the body is replaced by its default, as if unset.
+  Left out, <code>notebook_credential_read_cost</code> is <code>{}</code>, so no name has a rate and
+  only the size threshold can ask.</li>
+<li><code>notebook_credential_read_cost</code> is dollars per GB for each name, the rate
+  <a href="../../notebook/lake-aware-cells/#asking-before-a-large-read">asking before a large read</a>
+  uses. A rate that is not a number is refused with <code>422</code> naming the field.</li>
 <li>The next run uses the new settings, in a session opened before the call too. A
   running cell keeps what it resolved. A removed name fails its next use naming
   it, as an unknown name does.</li>
 <li>A changed catalog is rebuilt from its new properties at its next use.</li>
 <li>It is validated as the settings are at startup, and a refused body (<code>400</code>)
   changes nothing.</li>
-<li><code>GET</code> returns the five settings. A credential's literal values read
+<li><code>GET</code> returns the six settings, rates as set. A credential's literal values read
   <code>&lt;redacted&gt;</code>; a <code>${...}</code> reference is shown, since it only says where a value
   lives. A catalog shows only the keys known to hold no secret (<code>type</code>,
   <code>warehouse</code>, <code>strata_credential</code>, <code>s3.region</code>, <code>client.region</code>,

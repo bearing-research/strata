@@ -3859,7 +3859,7 @@ carries upload and finalize capabilities; under any other auth mode it returns
 <tr>
 <td><code>STRATA_NOTEBOOK_CREDENTIAL_READ_COST</code></td>
 <td><code>{}</code></td>
-<td>An egress rate in dollars per GB (10^9 bytes) for each credential name, as JSON, e.g. <code>{"lab-gcs": 0.12}</code>. An input that names no credential is rated by its scheme's default (<code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code>); one with no rate costs nothing.</td>
+<td>An egress rate in dollars per GB (10^9 bytes) for each credential name, as JSON, e.g. <code>{"lab-gcs": 0.12}</code>. An input that names no credential is rated by its scheme's default (<code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code>); one with no rate costs nothing. A running server takes new rates with its credentials through <code>PUT /v1/admin/notebook-credentials</code> (see <a href="../notebook-toml/#changing-them-while-the-server-runs">Changing them while the server runs</a>).</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_CONFIRM_READ_MESSAGE</code></td>

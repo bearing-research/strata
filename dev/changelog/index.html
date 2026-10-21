@@ -3785,6 +3785,12 @@ exhaustive commit history.</p>
   <code>POST /v1/jobs</code> take <code>hold_seconds</code>; the machine that runs the job keeps it
   as its cool-down until its next job, so a host can hold each tenant's
   machines for as long as that tenant's next job is worth waiting for. (#1257)</li>
+<li><strong>Read costs change with the credentials, while the server runs.</strong>
+  <code>PUT /v1/admin/notebook-credentials</code> takes <code>notebook_credential_read_cost</code>
+  as a sixth setting, replaced with the others, and <code>GET</code> returns it, so a
+  source a host connects mid-session brings its egress rate and a costly first
+  read through it asks without a restart. A rate that is not a number is
+  refused with <code>422</code>. Left out of a body, the rates are cleared. (#1275)</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
