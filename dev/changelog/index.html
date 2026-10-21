@@ -3866,6 +3866,21 @@ exhaustive commit history.</p>
   entries, and its last good run, are now recorded only after its <code>rw</code> mounts
   are synced back, so a failed sync-back or a failed variant leaves them as
   they were. (#1283)</li>
+<li><strong>An output folder is read more safely from another store.</strong> A store's
+  garbage collection no longer fails for good when it holds a folder manifest
+  it cannot read (an import can store any bytes under that type); that
+  manifest keeps no files, and a notebook's prune keeps every folder file while
+  one is there. Reading a promoted folder as <code>@dataset</code> streams each file to
+  disk instead of holding it in memory, and refuses a file whose bytes are not
+  the ones the manifest names. A folder whose file has a row but lost its bytes
+  is refused before any of its files is copied. A folder naming a file another
+  tenant holds reads that file as missing, in a rebuild, a copy and a
+  publication's archive. <code>strata artifact pull &lt;id&gt;@v=&lt;n&gt; --to &lt;dir&gt;</code> rebuilds
+  a folder's files instead of writing its manifest. (#1284)
+  publication's archive. A publication's archive of a folder manifest that
+  cannot be read is a <code>404</code>, as for a missing file, not a <code>500</code>.
+  <code>strata artifact pull &lt;id&gt;@v=&lt;n&gt; --to &lt;dir&gt;</code> rebuilds a folder's files
+  instead of writing its manifest. (#1284)</li>
 <li><strong>Promoting or publishing an output folder copies its files.</strong> Promote,
   <code>strata artifact publish</code> (<code>--to</code> too) and the MCP tools copied a
   <code># @output_dir</code> folder's manifest without the files it names, leaving it
