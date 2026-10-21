@@ -545,14 +545,18 @@ hit, a reopened notebook and an export show it too.
 
 **A failed run keeps what it wrote.** Its files are stored and its manifest is
 kept as a failed version: never a cache hit and never an input, but lineage
-shows it and `<id>@v=<n>` reads it. A link in the folder, or a file with more
-than one hard link, is left out with a warning.
+shows it, and its files are listed and downloaded over
+[REST](../reference/rest-api.md#read-a-cells-output-folder) like any
+version's. A link in the folder, or a file with more than one hard link, is
+left out with a warning.
 
 **Files go with the last version that names them.** Folder versions are pruned
 like any cell output's earlier values
-([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](../reference/configuration.md#notebook));
-a file no kept version names is removed in the same pass, so old checkpoints do
-not pile up. Pin a folder version to keep its files.
+([`STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS`](../reference/configuration.md#notebook)),
+except that a failed run's version newer than the folder's last good one stays
+until a later run succeeds, so a crash's checkpoints can still be downloaded.
+A file no kept version names is removed in the same pass, so old checkpoints
+do not pile up. Pin a folder version to keep its files.
 
 **On a remote worker** the folder comes back with the run's result, each file
 streamed, so a checkpoint is not held in memory and is not limited by

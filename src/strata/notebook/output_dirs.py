@@ -170,6 +170,30 @@ def unreferenced_files(artifact_mgr: Any) -> list[tuple[str, int]] | None:
     ]
 
 
+def failed_since_ready(artifact_mgr: Any) -> list[tuple[str, int]]:
+    """Each failed manifest version newer than its folder's newest good one.
+
+    Kept through a prune until a later run succeeds, so a crash's files can still be
+    downloaded when the run is recovered. A crash's row with no manifest is kept too; it
+    holds no bytes.
+    """
+    store = artifact_mgr.artifact_store
+    versions = [
+        version
+        for version in store.list_versions_by_id_prefix(f"nb_{artifact_mgr.notebook_id}_cell_")
+        if version.params.get("content_type") == CONTENT_TYPE
+    ]
+    newest_good: dict[str, int] = {}
+    for version in versions:
+        if version.state in ("ready", "superseded"):
+            newest_good[version.id] = max(newest_good.get(version.id, 0), version.version)
+    return [
+        (version.id, version.version)
+        for version in versions
+        if version.state == "failed" and version.version > newest_good.get(version.id, 0)
+    ]
+
+
 def _reused(store: Any, artifact_id: str) -> int | None:
     """The ready version of a file already stored, recorded as used, or ``None``.
 

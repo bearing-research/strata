@@ -5620,8 +5620,9 @@ class CellExecutor:
         ``output_dir`` is ``None`` when no result came back: what a worker uploaded is all.
         *collected* holds folders already collected by :meth:`_collect_output_dirs`.
 
-        A failed version is never a cache hit or an input; lineage shows it, and it can be
-        read by its ``<id>@v=<n>``. Best effort: the run has already failed.
+        A failed version is never a cache hit or an input; lineage shows it, and its files
+        are listed and downloaded through ``GET .../cells/{cell_id}/folders/{name}``. Best
+        effort: the run has already failed.
         """
         names = parse_annotations(source).output_dirs
         if not names:

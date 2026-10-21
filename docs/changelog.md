@@ -28,6 +28,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   reading each cell's `__mount__<name>` record. A failed run or sync-back
   leaves the entry; a run that writes nothing, or deleting the cell, drops it.
   (#1276)
+- **A cell's output folder over HTTP.**
+  `GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}` lists every
+  version of a `# @output_dir` folder, newest first, a failed run's marked
+  `failed`, each with its files' paths, sizes and sha256 digests;
+  `.../folders/{name}/v/{version}/files/{path}` streams one file with a
+  `Content-Digest`. A crash's checkpoints can be downloaded, and with
+  `STRATA_NOTEBOOK_KEEP_SUPERSEDED_VERSIONS` set, a failed folder version
+  newer than the last good one is no longer pruned until a later run
+  succeeds. (#1277)
 
 ### Changed
 

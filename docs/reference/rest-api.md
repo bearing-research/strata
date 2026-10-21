@@ -568,6 +568,29 @@ the resolved index in `X-Strata-Output-Index`. A type Strata does not render
 `application/octet-stream`. What `strata cell output --out`
 and the MCP `save_cell_output` tool read.
 
+### Read a Cell's Output Folder
+
+```
+GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}
+GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}/v/{version}/files/{path}
+```
+
+A [`# @output_dir`](../notebook/annotations.md#output_dir) folder's versions
+and files. `name` must be one of the cell's current `# @output_dir` names, or
+the answer is `404`; neither route takes an artifact URI.
+
+- The first lists every version of the folder, newest first, a failed run's
+  included: `{ "cell_id", "name", "versions": [{ "version", "created_at",
+  "principal", "failed", "files": [{ "path", "size", "sha256" }],
+  "file_count", "total_bytes" }] }`. `failed` is `true` for what a failed run
+  kept. A run still writing, or a crash's version with no manifest, is not
+  listed, nor is a loop cell's per-iteration `@iter=k` version: the loop's
+  last iteration is the cell's own version.
+- The second streams one file of that version as
+  `application/octet-stream`, with `Content-Length` and its sha256 as
+  `Content-Digest: sha-256=:<base64>:` (RFC 9530). `path` is the file's path
+  in the version's `files`, matched exactly; any other path is `404`.
+
 ## Variants
 
 ### Add a Variant

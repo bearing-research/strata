@@ -4483,6 +4483,7 @@ class ArtifactStore:
         collect_latest: bool = False,
         collectable: Collection[tuple[str, int]] = (),
         exempt: Callable[[str], bool] | None = None,
+        spare: Collection[tuple[str, int]] = (),
         dry_run: bool = False,
     ) -> dict:
         """Collect the versions nothing needs, least recently used first.
@@ -4498,8 +4499,9 @@ class ArtifactStore:
         never count); and the ``collectable`` versions, which the caller knows nothing
         needs though each may be its id's current value. With none of the four set
         nothing is collected. A version of an id ``exempt`` accepts goes only as
-        ``collectable``. An id never loses its highest version while keeping a lower
-        one, so a version number is never reused.
+        ``collectable``, and a version in ``spare`` (not its inputs) never goes. An
+        id never loses its highest version while keeping a lower one, so a version
+        number is never reused.
 
         ``tenant`` limits the sweep, and the ``max_bytes`` measure, to that tenant
         and legacy tenantless rows. Returns ``deleted_count``, ``deleted_bytes``,
@@ -4565,7 +4567,7 @@ class ArtifactStore:
 
             protected = self._protected_reachable(
                 conn, current_values=not collect_latest, not_current=set(collectable)
-            )
+            ) | set(spare)
             candidates = [
                 row
                 for row in conn.execute(query + filters, params).fetchall()
