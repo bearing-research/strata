@@ -119,6 +119,10 @@ print(df.head())
 4   105   168.40
 ```
 
+A notebook's `# @output_dir` folder in the store is files, not rows:
+`client.download_folder(artifact_id, version, "out")` rebuilds them in a new
+directory ([output folders](../notebook/annotations.md#output_dir)).
+
 ## 5. Integration with data libraries
 
 === "Pandas"

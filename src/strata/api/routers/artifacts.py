@@ -51,9 +51,11 @@ from strata.services.artifact import artifact_service
 from strata.types import (
     PROVENANCE_MISS_HEADER,
     ArtifactDependentsResponse,
+    ArtifactFolderResponse,
     ArtifactInfoResponse,
     ArtifactLineageResponse,
     ArtifactProvenanceMatchResponse,
+    FolderFile,
     Principal,
     PutArtifactResponse,
     UploadFinalizeRequest,
@@ -1339,6 +1341,68 @@ def get_artifact_data(
             "X-Arrow-Row-Count": str(artifact.row_count or 0),
             **data_headers(),
         },
+    )
+
+
+@router.get("/v1/artifacts/{artifact_id}/v/{version}/files", response_model=ArtifactFolderResponse)
+def get_artifact_folder_files(
+    artifact_id: str, version: int, store: ReadStore, tenant_filter: CurrentTenant
+):
+    """List an ``# @output_dir`` folder's files, each with the artifact version holding it.
+
+    Each file's bytes are read from its own ``/data``. Gated as ``/data`` is.
+    """
+    from strata.notebook import output_dirs
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access
+
+    artifact = _ensure_artifact_access(
+        store.get_artifact(artifact_id, version),
+        tenant_filter,
+    )
+    _authorize_artifact_read(artifact, store)
+    if artifact.state not in ("ready", "superseded"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Artifact is not ready (state={artifact.state})",
+        )
+    if artifact.params.get("content_type") != output_dirs.CONTENT_TYPE:
+        raise HTTPException(status_code=400, detail="Artifact is not an output folder")
+
+    manifest = store.read_blob(artifact_id, version)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Artifact data not found")
+    try:
+        # An import can store any bytes as a folder: refused as a missing artifact is.
+        output_dirs.file_refs(artifact.id, manifest)
+        described = json.loads(manifest)
+        files = []
+        for rel, entry in sorted(described["files"].items()):
+            path = output_dirs.checked_path(rel)
+            file_id, file_version = output_dirs.file_ref(artifact.id, described["cell_id"], entry)
+            # A manifest naming an id grants nothing: another tenant's file reads as missing.
+            if output_dirs.held_file(store, artifact.tenant, file_id, file_version) is None:
+                raise HTTPException(
+                    status_code=404, detail=f"The folder's file {rel} is missing from the store"
+                )
+            files.append(
+                FolderFile(
+                    path=path,
+                    size=int(entry["size"]),
+                    sha256=entry["sha256"],
+                    artifact_id=file_id,
+                    version=file_version,
+                )
+            )
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(
+            status_code=404, detail=f"{artifact_id}@v={version} is not a readable folder manifest"
+        ) from exc
+
+    return ArtifactFolderResponse(
+        artifact_uri=f"strata://artifact/{artifact.id}@v={artifact.version}",
+        artifact_id=artifact.id,
+        version=artifact.version,
+        files=files,
     )
 
 

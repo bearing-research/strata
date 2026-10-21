@@ -5,6 +5,7 @@ Covers the error, retry and parsing paths the live-server integration tests do n
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -453,3 +454,88 @@ class TestMaterializeRequestShape:
         assert artifact.execution == "cache"
         assert artifact.artifact_id == "abc"
         assert artifact.version == 1
+
+
+# --- download_folder ---
+
+
+def _folder_server(paths: list[str], data: bytes = b"x"):
+    """A handler serving a folder listing of *paths*, each file holding *data*."""
+    listing = {
+        "files": [
+            {
+                "path": path,
+                "size": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "artifact_id": f"f{i}",
+                "version": 1,
+            }
+            for i, path in enumerate(paths)
+        ]
+    }
+    served: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/files"):
+            return httpx.Response(200, json=listing)
+        served.append(request.url.path)
+        return httpx.Response(200, content=data)
+
+    return handler, served
+
+
+class TestDownloadFolder:
+    """The listing is the server's word: a path it names never leaves the destination."""
+
+    @pytest.mark.parametrize(
+        "path", ["../escape", "/abs", "a/../../escape", "a//b", "./a", "a\\b", "a/"]
+    )
+    def test_a_path_leaving_the_folder_is_refused_before_any_download(self, tmp_path, path):
+        handler, served = _folder_server(["ok.bin", path])
+        client = _make_client(handler)
+
+        with pytest.raises(ValueError, match="leaves its folder"):
+            client.download_folder("nb_x_cell_w_var_ckpt", 1, tmp_path / "out")
+
+        assert served == []
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_file_not_of_the_listed_size_leaves_nothing(self, tmp_path):
+        handler, _ = _folder_server(["a/one.bin", "b/two.bin"])
+
+        def wrong_size(request: httpx.Request) -> httpx.Response:
+            response = handler(request)
+            if request.url.path.endswith("/files"):
+                listing = response.json()
+                listing["files"][1]["size"] += 1  # the digest still matches
+                return httpx.Response(200, json=listing)
+            return response
+
+        client = _make_client(wrong_size)
+
+        with pytest.raises(ValueError, match="b/two.bin"):
+            client.download_folder("nb_x_cell_w_var_ckpt", 1, tmp_path / "out")
+
+        assert list(tmp_path.iterdir()) == []
+
+    def test_fetch_of_a_folder_names_download_folder(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            spec = {"executor": "notebook/cell@v1", "params": {"content_type": "dir/manifest"}}
+            return httpx.Response(200, json={"state": "ready", "transform_spec": json.dumps(spec)})
+
+        client = _make_client(handler)
+
+        with pytest.raises(ValueError, match="download_folder"):
+            client.fetch("strata://artifact/nb_x_cell_w_var_ckpt@v=1")
+
+    def test_fetch_reads_past_a_spec_it_cannot_parse(self):
+        table = pa.table({"x": [1]})
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/data"):
+                return httpx.Response(200, content=_arrow_ipc_bytes(table))
+            return httpx.Response(200, json={"state": "ready", "transform_spec": "[1]"})
+
+        client = _make_client(handler)
+
+        assert client.fetch("strata://artifact/abc@v=1").equals(table)

@@ -38,6 +38,17 @@ An unnamed result such as `art` is a cache entry: the server keeps it while it
 is used and its retention sweep may collect it later, after which the same call
 computes it again. A named one (`clean`) is kept.
 
+A notebook cell's `# @output_dir` folder promoted to the server is no table:
+`fetch` refuses it and names the call that reads it.
+
+```python
+client.download_folder(artifact_id, version, "checkpoints")
+```
+
+This rebuilds the folder's files in a new or empty directory, checking each
+file's size and sha256 against the folder's listing. On any failure nothing is
+left at the destination.
+
 The client and the server distribution (`strata-notebook`) are independent:
 they share only the JSON wire protocol, and neither depends on the other. Code
 written against the old `strata.client` module imports `strata_client` instead.

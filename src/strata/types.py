@@ -832,6 +832,25 @@ class ArtifactDependentsResponse(BaseModel):
     total_count: int
 
 
+class FolderFile(BaseModel):
+    """One file of an output folder, and the artifact version holding its bytes."""
+
+    path: str
+    size: int
+    sha256: str
+    artifact_id: str
+    version: int
+
+
+class ArtifactFolderResponse(BaseModel):
+    """An ``# @output_dir`` folder version's files, by path."""
+
+    artifact_uri: str
+    artifact_id: str
+    version: int
+    files: list[FolderFile]
+
+
 # --- Executor Protocol v1: stable interface for external executors ---
 # Push: Strata POSTs multipart Arrow IPC inputs to {executor_url}/v1/execute.
 # Pull: the executor GETs /v1/builds/{build_id}/manifest, fetches inputs, uploads, finalizes.

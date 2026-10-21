@@ -556,3 +556,190 @@ class TestAnUnreadableManifest:
         stray_id = output_dirs.file_artifact_id(manager, "w", sha256)
         assert store.get_artifact(stray_id, unnamed["version"]) is not None
         assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES
+
+
+def _reader(base, tenant=None):
+    """A strata-client on *base*; behind the central store's proxy as *tenant*'s member."""
+    from strata_client import StrataClient
+
+    client = StrataClient(base_url=base)
+    if tenant is not None:
+        client._client.headers.update(
+            {
+                "X-Strata-Proxy-Token": PROXY_TOKEN,
+                "X-Tenant-ID": tenant,
+                "X-Strata-Principal": "alice",
+            }
+        )
+    return client
+
+
+def _files_under(root) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def _file_entry(store: ArtifactStore, data: bytes, *, claimed: bytes | None = None, tenant=None):
+    """A stored file and the manifest entry naming it, listed as *claimed*'s bytes if given."""
+    sha256 = hashlib.sha256(data).hexdigest()
+    record = _stored(
+        store,
+        f"nb_x_cell_w_var___file__{sha256}",
+        data,
+        content_type="application/octet-stream",
+        tenant=tenant,
+    )
+    listed = claimed if claimed is not None else data
+    return {
+        "id": record.id,
+        "sha256": hashlib.sha256(listed).hexdigest(),
+        "size": len(listed),
+        "version": record.version,
+    }
+
+
+def _crafted_folder(store: ArtifactStore, files: dict, *, tenant=None):
+    manifest = json.dumps({"cell_id": "w", "files": files}).encode()
+    return _stored(
+        store,
+        "nb_x_cell_w_var_ckpt",
+        manifest,
+        content_type=output_dirs.CONTENT_TYPE,
+        tenant=tenant,
+    )
+
+
+class TestDownloadOverHttp:
+    """strata-client rebuilds a folder from a server, over ``/files`` and each file's ``/data``."""
+
+    def test_a_promoted_folder_rebuilds_with_the_same_bytes(self, team, tmp_path):
+        base, _ = team
+        _, folder = _folder(tmp_path / "alice", FILES)
+        assert _promote(tmp_path / "alice", base, folder.id) == 0
+        out = tmp_path / "pulled" / "ckpt"
+
+        with _reader(base) as client:
+            assert client.download_folder(folder.id, folder.version, out) == out
+
+        assert _files_under(out) == FILES
+        # Nothing staged is left beside it.
+        assert [p.name for p in out.parent.iterdir()] == ["ckpt"]
+
+    def test_the_listing_names_each_files_artifact(self, team, tmp_path):
+        base, _ = team
+        manager, folder = _folder(tmp_path / "alice", FILES)
+        assert _promote(tmp_path / "alice", base, folder.id) == 0
+
+        listing = httpx.get(
+            f"{base}/v1/artifacts/{folder.id}/v/{folder.version}/files", timeout=30
+        ).json()
+
+        assert listing["files"] == [
+            {
+                "path": rel,
+                "size": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "artifact_id": output_dirs.file_artifact_id(
+                    manager, "w", hashlib.sha256(data).hexdigest()
+                ),
+                "version": 1,
+            }
+            for rel, data in sorted(FILES.items())
+        ]
+
+    def test_fetching_a_folder_names_the_call_that_reads_it(self, team, tmp_path):
+        base, _ = team
+        _, folder = _folder(tmp_path / "alice", FILES)
+        assert _promote(tmp_path / "alice", base, folder.id) == 0
+
+        with _reader(base) as client, pytest.raises(ValueError, match="download_folder"):
+            client.fetch(f"strata://artifact/{folder.id}@v={folder.version}")
+
+    def test_a_file_that_is_not_the_listed_bytes_leaves_nothing(self, team, tmp_path):
+        base, team_dir = team
+        store = ArtifactStore(team_dir)
+        # Same size as the listed bytes, so only the digest tells them apart.
+        folder = _crafted_folder(
+            store,
+            {
+                "a/good.bin": _file_entry(store, b"good bytes"),
+                "b/bad.bin": _file_entry(store, b"some bytes", claimed=b"want bytes"),
+            },
+        )
+        out = tmp_path / "pulled" / "ckpt"
+
+        with _reader(base) as client, pytest.raises(ValueError, match="b/bad.bin"):
+            client.download_folder(folder.id, folder.version, out)
+
+        assert list((tmp_path / "pulled").iterdir()) == []
+
+    def test_a_non_empty_destination_is_refused(self, team, tmp_path):
+        base, _ = team
+        _, folder = _folder(tmp_path / "alice", FILES)
+        assert _promote(tmp_path / "alice", base, folder.id) == 0
+        out = tmp_path / "pulled"
+        out.mkdir()
+        (out / "mine.txt").write_bytes(b"keep")
+
+        with _reader(base) as client:
+            with pytest.raises(FileExistsError):
+                client.download_folder(folder.id, folder.version, out)
+            assert _files_under(out) == {"mine.txt": b"keep"}
+
+            # An empty one is filled.
+            (out / "mine.txt").unlink()
+            client.download_folder(folder.id, folder.version, out)
+        assert _files_under(out) == FILES
+
+    def test_a_path_leaving_the_folder_is_refused_by_the_server(self, team, tmp_path):
+        base, team_dir = team
+        store = ArtifactStore(team_dir)
+        folder = _crafted_folder(store, {"../escape": _file_entry(store, b"x")})
+
+        listing = httpx.get(f"{base}/v1/artifacts/{folder.id}/v/{folder.version}/files", timeout=30)
+
+        assert listing.status_code == 404
+        assert "not a readable folder manifest" in listing.json()["detail"]
+
+    @pytest.mark.parametrize("blob", [b"\xff not json", b"[1]", b'{"cell_id": "w", "files": 1}'])
+    def test_an_unreadable_manifest_is_answered_as_missing(self, team, blob):
+        base, team_dir = team
+        junk = _stored(
+            ArtifactStore(team_dir), "nb_x_cell_w_var_ckpt", blob, content_type="dir/manifest"
+        )
+
+        listing = httpx.get(f"{base}/v1/artifacts/{junk.id}/v/{junk.version}/files", timeout=30)
+
+        assert listing.status_code == 404
+
+    def test_an_artifact_that_is_not_a_folder_is_a_400(self, team):
+        base, team_dir = team
+        table = _stored(ArtifactStore(team_dir), "plain", b"rows", content_type="arrow/ipc")
+
+        listing = httpx.get(f"{base}/v1/artifacts/{table.id}/v/{table.version}/files", timeout=30)
+
+        assert listing.status_code == 400
+
+    def test_another_tenants_file_is_refused(self, central, tmp_path):
+        base, central_dir = central
+        store = ArtifactStore(central_dir)
+        theirs = _file_entry(store, b"team-b's weights", tenant="team-b")
+        folder = _crafted_folder(
+            store,
+            {"mine.bin": _file_entry(store, b"mine", tenant="team-a"), "w.bin": theirs},
+            tenant="team-a",
+        )
+        out = tmp_path / "pulled"
+
+        with _reader(base, "team-a") as client:
+            listing = client._client.get(f"/v1/artifacts/{folder.id}/v/{folder.version}/files")
+            assert listing.status_code == 404
+            assert "w.bin is missing" in listing.json()["detail"]
+            assert theirs["id"] not in listing.text
+            with pytest.raises(httpx.HTTPStatusError):
+                client.download_folder(folder.id, folder.version, out)
+
+        assert not out.exists()
