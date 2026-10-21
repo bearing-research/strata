@@ -5243,7 +5243,7 @@ by that team store, after this server's own gate.</p>
 <td><code>GET</code></td>
 <td><code>/v1/artifacts/by-provenance/{hash}</code></td>
 <td>read</td>
-<td>A ready artifact by provenance hash (the team-cache lookup)</td>
+<td>A ready artifact by provenance hash (the team-cache lookup); an <code># @output_dir</code> folder whose files are gone is a miss</td>
 </tr>
 <tr>
 <td><code>PUT</code></td>
@@ -5255,7 +5255,7 @@ by that team store, after this server's own gate.</p>
 <td><code>PUT</code></td>
 <td><code>/v1/artifacts/by-provenance/{hash}</code></td>
 <td>write</td>
-<td>Store a result under a provenance key the caller computed; an <code>artifact_id</code> another tenant holds, at any version, is a <code>409</code></td>
+<td>Store a result under a provenance key the caller computed; the first writer's result stays the answer, unless it is a folder whose files are gone. An <code>artifact_id</code> another tenant holds, at any version, is a <code>409</code></td>
 </tr>
 <tr>
 <td><code>POST</code></td>

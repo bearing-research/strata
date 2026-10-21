@@ -2404,7 +2404,11 @@ nothing needs, least recently used first:</p>
   latest version back, so that version stays. An id the store made up for one
   <code>materialize</code> has no such value;</li>
 <li>it has not been used in the last hour: finishing its build, a cache hit, a
-  read of its data, or a request that names it as an input all count.</li>
+  read of its data, or a request that names it as an input all count;</li>
+<li>it is not a file an <code># @output_dir</code> folder manifest of its tenant names, unless
+  that manifest goes in the same sweep. Under the byte cap a folder goes whole,
+  its manifest with the files no other folder names, once its most recently
+  used member is among the least recently used.</li>
 </ul>
 <p>So <strong>an unnamed result is a cache entry</strong>. Its URI keeps working while it is
 used, and once it is collected the same request computes it again. To keep a

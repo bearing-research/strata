@@ -3910,8 +3910,6 @@ exhaustive commit history.</p>
   the ones the manifest names. A folder whose file has a row but lost its bytes
   is refused before any of its files is copied. A folder naming a file another
   tenant holds reads that file as missing, in a rebuild, a copy and a
-  publication's archive. <code>strata artifact pull &lt;id&gt;@v=&lt;n&gt; --to &lt;dir&gt;</code> rebuilds
-  a folder's files instead of writing its manifest. (#1284)
   publication's archive. A publication's archive of a folder manifest that
   cannot be read is a <code>404</code>, as for a missing file, not a <code>500</code>.
   <code>strata artifact pull &lt;id&gt;@v=&lt;n&gt; --to &lt;dir&gt;</code> rebuilds a folder's files
@@ -3922,6 +3920,17 @@ exhaustive commit history.</p>
   prune never released them. It is now kept under its variant, the listing
   carries each version's <code>variant</code>, and the file route takes <code>?variant=</code>.
   (#1285)</li>
+<li><strong>A store's garbage collection no longer splits an output folder.</strong> A shared
+  store keeps a folder's files and its manifest as separate unnamed results, and
+  idle-days and the byte cap took them independently, so a manifest could
+  outlive a file it names and stay the team cache's answer for a folder no one
+  could pull. A file now goes only with every manifest of its tenant naming it,
+  a file is kept if a manifest naming it is used during the sweep, and the cap
+  evicts a folder whole (its manifest with the files no other folder names)
+  once its most recently used member is among the least recently used. A
+  dry run reports the same. A stored folder whose files are already gone is a
+  miss for <code>GET /v1/artifacts/by-provenance/{hash}</code>, and the next publish of it
+  replaces it rather than getting it back as the first writer's. (#1290)</li>
 <li><strong>Promoting or publishing an output folder copies its files.</strong> Promote,
   <code>strata artifact publish</code> (<code>--to</code> too) and the MCP tools copied a
   <code># @output_dir</code> folder's manifest without the files it names, leaving it
