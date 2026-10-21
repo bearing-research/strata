@@ -4715,20 +4715,24 @@ the resolved index in <code>X-Strata-Output-Index</code>. A type Strata does not
 and the MCP <code>save_cell_output</code> tool read.</p>
 <h3 id="read-a-cells-output-folder">Read a Cell's Output Folder<a class="headerlink" href="#read-a-cells-output-folder" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}
-<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}/v/{version}/files/{path}
+<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>GET /v1/notebooks/{session_id}/cells/{cell_id}/folders/{name}/v/{version}/files/{path}?variant={variant}
 </code></pre></div>
 <p>A <a href="../../notebook/annotations/#output_dir"><code># @output_dir</code></a> folder's versions
 and files. <code>name</code> must be one of the cell's current <code># @output_dir</code> names, or
 the answer is <code>404</code>; neither route takes an artifact URI.</p>
 <ul>
 <li>The first lists every version of the folder, newest first, a failed run's
-  included: <code>{ "cell_id", "name", "versions": [{ "version", "created_at",
-  "principal", "failed", "files": [{ "path", "size", "sha256" }],
+  included: <code>{ "cell_id", "name", "versions": [{ "variant", "version",
+  "created_at", "principal", "failed", "files": [{ "path", "size", "sha256" }],
   "file_count", "total_bytes" }] }</code>. <code>failed</code> is <code>true</code> for what a failed run
   kept. A run still writing, or a crash's version with no manifest, is not
   listed, nor is a loop cell's per-iteration <code>@iter=k</code> version: the loop's
-  last iteration is the cell's own version.</li>
-<li>The second streams one file of that version as
+  last iteration is the cell's own version. A
+  <a href="../../notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant"><code># @per_variant</code></a> cell keeps a
+  folder per variant, each numbered on its own: <code>variant</code> names the instance,
+  and is <code>null</code> for a cell that does not fan out.</li>
+<li>The second streams one file of that version (of that <code>variant</code>'s folder
+  when given) as
   <code>application/octet-stream</code>, with <code>Content-Length</code> and its sha256 as
   <code>Content-Digest: sha-256=:&lt;base64&gt;:</code> (RFC 9530). <code>path</code> is the file's path
   in the version's <code>files</code>, matched exactly; any other path is <code>404</code>.</li>
