@@ -676,6 +676,42 @@ class TestDerivedResultsInheritTheAcl:
                 )
                 assert allowed.status_code == 200, (route, principal, allowed.text)
 
+    def test_a_folder_computed_from_a_denied_table_is_not_listed(self, monkeypatch, tmp_path):
+        import json
+
+        from strata.artifact.provenance import TransformSpec
+        from strata.notebook import output_dirs
+
+        client, store = self._service(monkeypatch, tmp_path)
+        folders = {}
+        for table in ("secret", "public"):
+            top = self._chain(store, f"file://{tmp_path}/wh#{table}.events", f"{table[0]}-")
+            uri = f"strata://artifact/{top}@v=1"
+            folder_id = f"nb_{table[0]}_cell_w_var_ckpt"
+            store.create_artifact(
+                folder_id,
+                folder_id.ljust(64, "0"),
+                transform_spec=TransformSpec(
+                    executor="notebook/cell@v1",
+                    params={"content_type": output_dirs.CONTENT_TYPE},
+                    inputs=[uri],
+                ),
+                input_versions={uri: f"{top}@v=1"},
+                tenant="acme",
+            )
+            manifest = json.dumps({"cell_id": "w", "files": {}}).encode()
+            store.write_blob(folder_id, 1, manifest)
+            store.finalize_artifact(folder_id, 1, "", None, len(manifest))
+            folders[table] = f"/v1/artifacts/{folder_id}/v/1/files"
+
+        denied = client.get(folders["secret"], headers=self._as("bob"))
+        assert denied.status_code == 404, denied.text
+        assert "secret" not in denied.text
+        for principal, table in (("dave", "secret"), ("bob", "public")):
+            allowed = client.get(folders[table], headers=self._as(principal))
+            assert allowed.status_code == 200, (principal, allowed.text)
+            assert allowed.json()["files"] == []
+
     def test_a_lineage_past_the_bound_fails_closed(self, monkeypatch, tmp_path):
         import strata.server as server_module
 

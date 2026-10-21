@@ -76,6 +76,14 @@ exhaustive commit history.
   `put`, `get`, `head`, `list` or `delete`, including the ones a caller
   reports as absent or unknown; an object that is not there is not an
   error. (#1289)
+- **strata-client reads an output folder from a server.**
+  `client.download_folder(artifact_id, version, dest)` rebuilds a promoted
+  `# @output_dir` folder's files in a new or empty directory over HTTP,
+  checking each file's size and sha256, and leaves nothing there when one
+  fails. `GET /v1/artifacts/{id}/v/{n}/files` lists a folder's files with the
+  artifact holding each, gated as `/data` is; a file the folder's tenant does
+  not hold is a `404`. `fetch` of a folder says to call `download_folder`
+  instead of failing to read Arrow. (#1291)
 
 ### Changed
 

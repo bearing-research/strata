@@ -1193,7 +1193,7 @@ The routes the client SDK and the web UI call that no feature page covers.
 The gate column uses these terms:
 
 - **read**: open in both modes. Under principal auth, a route that takes an
-  artifact id (`/v1/artifacts/{id}/v/{n}` and its `lineage` and `dependents`)
+  artifact id (`/v1/artifacts/{id}/v/{n}` and its `lineage`, `dependents` and `files`)
   answers for the caller's tenant's versions and tenantless ones, refuses a
   caller with no tenant (`400`), and lets `admin:*` reach every tenant. Name,
   alias, tag, pending, tag-search and provenance lookups resolve in the
@@ -1215,6 +1215,7 @@ by that team store, after this server's own gate.
 | `DELETE` | `/v1/artifacts/{id}/v/{n}` | personal | Delete a version, its blob and its name pointers; a published version is a `409` until withdrawn |
 | `GET` | `/v1/artifacts/{id}/v/{n}/lineage` | read | The transitive input graph (artifacts and tables), up to `max_depth` |
 | `GET` | `/v1/artifacts/{id}/v/{n}/dependents` | read | Ready artifacts that take this one as a direct input |
+| `GET` | `/v1/artifacts/{id}/v/{n}/files` | read | An `# @output_dir` folder's files, by path: each one's `size`, `sha256`, and the `artifact_id` and `version` whose `/data` serves its bytes. Not a folder is a `400`; a manifest that cannot be read, a path that leaves the folder, or a file the folder's tenant does not hold is a `404` |
 | `GET` | `/v1/artifacts/{id}/v/{n}/tags` | read | The version's tags |
 | `PUT` | `/v1/artifacts/{id}/v/{n}/tags` | write | Set one key/value tag |
 | `DELETE` | `/v1/artifacts/{id}/v/{n}/tags/{key}` | write | Delete one tag |

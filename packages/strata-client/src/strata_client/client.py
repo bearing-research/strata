@@ -19,13 +19,18 @@ Retry behavior:
 """
 
 import asyncio
+import hashlib
 import json
+import os
 import random
 import re
+import shutil
+import tempfile
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypedDict, cast
+from pathlib import Path
+from typing import Any, TypedDict, cast
 
 import httpx
 import pyarrow as pa
@@ -74,6 +79,34 @@ def _provenance_miss(response: httpx.Response) -> bool:
     header counts, so an older server raises instead of answering "no".
     """
     return response.status_code == 404 and PROVENANCE_MISS_HEADER in response.headers
+
+
+#: Content type of an ``# @output_dir`` folder: a manifest naming its files' artifacts.
+FOLDER_CONTENT_TYPE = "dir/manifest"
+
+
+def _refuse_folder(status: Mapping[str, Any], artifact_id: str, version: int) -> None:
+    """Raise if *status*, an artifact's metadata, is a folder: its bytes are no table."""
+    try:
+        content_type = json.loads(status.get("transform_spec") or "{}")["params"]["content_type"]
+    except (ValueError, KeyError, TypeError):
+        return  # a spec it cannot read names no content type, as the server reads one
+    if content_type == FOLDER_CONTENT_TYPE:
+        raise ValueError(
+            f"{artifact_id}@v={version} is an output folder, not a table; read it with "
+            "StrataClient.download_folder(artifact_id, version, dest)"
+        )
+
+
+def _checked_folder_path(rel: str) -> str:
+    """*rel* if it stays inside its folder: the server's listing is not trusted with the disk.
+
+    The server's rule (``output_dirs.checked_path``), restated: this package cannot import it.
+    """
+    parts = rel.split("/")
+    if rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in parts):
+        raise ValueError(f"output folder path {rel!r} leaves its folder")
+    return rel
 
 
 def _table_to_ipc(table: pa.Table) -> bytes:
@@ -424,6 +457,7 @@ class StrataClient:
             status_resp = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
             status_resp.raise_for_status()
             status = status_resp.json()
+            _refuse_folder(status, artifact_id, version)
 
             state = status.get("state", "ready")
 
@@ -691,6 +725,67 @@ class StrataClient:
         response = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
         response.raise_for_status()
         return Artifact(_client=self, artifact_id=artifact_id, version=version)
+
+    def download_folder(self, artifact_id: str, version: int, dest: str | os.PathLike[str]) -> Path:
+        """Rebuild an ``# @output_dir`` folder's files at *dest*, a new or empty directory.
+
+        Each file is streamed from the server and checked against the size and sha256 the
+        folder lists. The files land at *dest* together or not at all.
+
+        Args:
+            artifact_id: The folder's artifact ID.
+            version: Version number.
+            dest: Directory to create; it may exist if it is empty.
+
+        Returns:
+            *dest* as a ``Path``.
+
+        Raises:
+            FileExistsError: If *dest* exists and is not an empty directory.
+            ValueError: If a listed path leaves the folder, or a file is not the listed bytes.
+            httpx.HTTPStatusError: If the artifact is not a readable folder (400, 404), or a
+                file it names is missing from the store (404).
+
+        Example:
+            client.download_folder("nb_ab12_cell_c3d4_var_ckpt", 2, "checkpoints")
+        """
+        dest = Path(dest)
+        if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
+            raise FileExistsError(f"{dest} exists; a folder is downloaded into a new or empty one")
+        response = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}/files")
+        response.raise_for_status()
+        files = response.json()["files"]
+        for entry in files:
+            _checked_folder_path(entry["path"])
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # Beside dest, so moving it into place is a rename within one filesystem.
+        staging = Path(tempfile.mkdtemp(prefix=f".{dest.name}.", dir=dest.parent))
+        try:
+            for entry in files:
+                self._download_folder_file(entry, staging / entry["path"])
+            if dest.exists():
+                dest.rmdir()
+            staging.rename(dest)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        return dest
+
+    def _download_folder_file(self, entry: Mapping[str, Any], target: Path) -> None:
+        """Stream one listed file to *target*, refusing bytes that are not the listed ones."""
+        target.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        size = 0
+        url = f"/v1/artifacts/{entry['artifact_id']}/v/{entry['version']}/data"
+        with self._client.stream("GET", url) as response, open(target, "wb") as out:
+            response.raise_for_status()
+            for chunk in response.iter_bytes():
+                digest.update(chunk)
+                size += len(chunk)
+                out.write(chunk)
+        if size != entry["size"] or digest.hexdigest() != entry["sha256"]:
+            raise ValueError(f"output folder file {entry['path']} is not the bytes listed")
 
     def find_by_provenance(self, provenance_hash: str) -> dict | None:
         """Ask a shared store whether this computation already has a result.
@@ -1271,6 +1366,7 @@ class AsyncStrataClient:
             status_resp = await self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
             status_resp.raise_for_status()
             status = status_resp.json()
+            _refuse_folder(status, artifact_id, version)
 
             state = status.get("state", "ready")
 
