@@ -6,6 +6,7 @@ The tenant test uses the same computation on both sides, so the isolation is sco
 different hashes.
 """
 
+import hashlib
 import json
 
 import httpx
@@ -411,6 +412,66 @@ def test_the_first_writer_of_a_key_wins(personal_server):
         if artifact.provenance_hash == provenance
     ]
     assert len(versions) == 1, "the rejected publish left a row behind"
+
+
+def _publish_folder(base_url: str, provenance: str, contents: list[bytes]) -> tuple[str, list]:
+    """A folder as a notebook publishes one: each file, then the manifest naming where each
+    landed. Returns the manifest's URI and the files' refs."""
+    files = []
+    entries = {}
+    for index, content in enumerate(contents):
+        sha256 = hashlib.sha256(content).hexdigest()
+        landed = _publish_by_provenance(
+            base_url, hashlib.sha256(content + provenance.encode()).hexdigest(), content
+        )
+        assert landed.status_code == 200, landed.text
+        file_id, version = _ref(landed.json()["artifact_uri"])
+        files.append((file_id, version))
+        entries[f"part-{index}.bin"] = {
+            "id": file_id,
+            "version": version,
+            "sha256": sha256,
+            "size": len(content),
+        }
+    manifest = json.dumps({"cell_id": "c1", "files": entries}).encode()
+    stored = _publish_by_provenance(base_url, provenance, manifest, content_type="dir/manifest")
+    assert stored.status_code == 200, stored.text
+    return stored.json()["artifact_uri"], files
+
+
+def test_a_folder_whose_files_are_gone_is_a_miss_and_is_replaced(personal_server):
+    """A key's first writer stays its answer, but not as a folder that cannot be pulled."""
+    base_url = personal_server["base_url"]
+    provenance = "9" * 64
+    first, files = _publish_folder(base_url, provenance, [b"one", b"two"])
+
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    )
+    assert found.status_code == 200
+    again, _ = _publish_folder(base_url, provenance, [b"one", b"two"])
+    assert again == first
+
+    gone = httpx.delete(
+        f"{base_url}/v1/artifacts/{files[1][0]}/v/{files[1][1]}", timeout=LIVE_SERVER_TIMEOUT
+    )
+    assert gone.status_code == 200, gone.text
+
+    missing = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    )
+    assert missing.status_code == 404
+    assert missing.headers.get("X-Strata-Provenance-Miss") == "1"
+
+    replaced, _ = _publish_folder(base_url, provenance, [b"one", b"two"])
+    assert replaced != first
+    found = httpx.get(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}", timeout=LIVE_SERVER_TIMEOUT
+    ).json()
+    assert f"strata://artifact/{found['artifact_id']}@v={found['version']}" == replaced
+    # Still readable where it was; no longer the key's answer.
+    old = ArtifactStore(personal_server["artifact_dir"]).get_artifact(*_ref(first))
+    assert old.state == "superseded"
 
 
 def test_publishing_needs_the_write_scope(team_server):

@@ -4330,6 +4330,100 @@ class ArtifactStore:
                     pending.append(ancestor)
         return reachable
 
+    def _folder_files(self, conn: StoreConnection) -> dict[tuple[str, int], set[tuple[str, int]]]:
+        """Each ``# @output_dir`` manifest version with the stored files it names.
+
+        Only files of the manifest's own tenant count: a reader takes another tenant's
+        file as missing. A manifest without bytes, or not readable, names nothing.
+        """
+        from strata.notebook import output_dirs
+
+        named: dict[tuple[str, int], tuple[str, set[tuple[str, int]]]] = {}
+        for row in conn.execute(
+            "SELECT id, version, tenant, transform_spec FROM artifact_versions "
+            "WHERE transform_spec LIKE ?",
+            (f"%{output_dirs.CONTENT_TYPE}%",),
+        ).fetchall():
+            if _declared_content_type(row["transform_spec"]) != output_dirs.CONTENT_TYPE:
+                continue
+            manifest = self.read_blob(row["id"], row["version"], note_use=False)
+            if manifest is None:
+                continue
+            try:
+                refs = {(fid, fv) for fid, fv, _ in output_dirs.file_refs(row["id"], manifest)}
+            except ValueError:
+                logger.warning(
+                    "%s@v=%d is not a readable folder manifest; it keeps no files",
+                    row["id"],
+                    row["version"],
+                )
+                continue
+            named[(row["id"], row["version"])] = (row["tenant"] or "", refs)
+        tenants = self._readable_tenants(conn, {ref for _, refs in named.values() for ref in refs})
+        return {
+            manifest: {ref for ref in refs if tenants.get(ref) == tenant}
+            for manifest, (tenant, refs) in named.items()
+        }
+
+    @staticmethod
+    def _readable_tenants(
+        conn: StoreConnection, refs: Collection[tuple[str, int]]
+    ) -> dict[tuple[str, int], str]:
+        """The tenant of each version in *refs* whose bytes can be read; the rest are left out."""
+        ids = sorted({artifact_id for artifact_id, _ in refs})
+        tenants: dict[tuple[str, int], str] = {}
+        for start in range(0, len(ids), 500):
+            batch = ids[start : start + 500]
+            placeholders = ", ".join("?" for _ in batch)
+            for row in conn.execute(
+                "SELECT id, version, tenant FROM artifact_versions "
+                f"WHERE id IN ({placeholders}) AND state IN ('ready', 'superseded')",
+                batch,
+            ).fetchall():
+                if (row["id"], row["version"]) in refs:
+                    tenants[(row["id"], row["version"])] = row["tenant"] or ""
+        return tenants
+
+    def folder_is_whole(self, version: ArtifactVersion) -> bool:
+        """Whether every file a folder manifest names is stored as its tenant's.
+
+        ``True`` for any other version; ``False`` for a manifest that cannot be read,
+        from which no reader rebuilds a folder.
+        """
+        from strata.notebook import output_dirs
+
+        if version.params.get("content_type") != output_dirs.CONTENT_TYPE:
+            return True
+        manifest = self.read_blob(version.id, version.version, note_use=False)
+        if manifest is None:
+            return False
+        try:
+            refs = {(fid, fv) for fid, fv, _ in output_dirs.file_refs(version.id, manifest)}
+        except ValueError:
+            return False
+        conn = self._get_connection()
+        try:
+            tenants = self._readable_tenants(conn, refs)
+        finally:
+            conn.close()
+        return all(tenants.get(ref) == (version.tenant or "") for ref in refs)
+
+    def retire_ready(self, artifact_id: str, version: int) -> None:
+        """Supersede a ready version, so it is no longer its provenance's answer.
+
+        It stays readable by id and version, and retention takes it like any other.
+        """
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "UPDATE artifact_versions SET state = 'superseded' "
+                "WHERE id = ? AND version = ? AND state = 'ready'",
+                (artifact_id, version),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def pin_artifact(
         self,
         artifact_id: str,
@@ -4529,7 +4623,8 @@ class ArtifactStore:
         nothing is collected. A version of an id ``exempt`` accepts goes only as
         ``collectable``, and a version in ``spare`` (not its inputs) never goes. An
         id never loses its highest version while keeping a lower one, so a version
-        number is never reused.
+        number is never reused. A folder file goes only with every manifest of its
+        tenant naming it, and the cap evicts a folder whole, at its newest member's use.
 
         ``tenant`` limits the sweep, and the ``max_bytes`` measure, to that tenant;
         ``include_tenantless`` adds the legacy tenantless rows every tenant shares.
@@ -4631,6 +4726,18 @@ class ArtifactStore:
                 size_params.append(tenant)
             store_bytes = int(conn.execute(size_sql, size_params).fetchone()[0])
 
+            # A folder's files are versions of their own. A manifest kept while a file it names
+            # goes is a broken folder, and a by-provenance hit until it goes too.
+            folders = self._folder_files(conn)
+            namers: dict[tuple[str, int], set[tuple[str, int]]] = {}
+            for manifest, files in folders.items():
+                for named in files:
+                    namers.setdefault(named, set()).add(manifest)
+
+            def split(picked: dict[tuple[str, int], Any]) -> set[tuple[str, int]]:
+                """The files in *picked* that a manifest not in it names."""
+                return {key for key in picked if any(m not in picked for m in namers.get(key, ()))}
+
             chosen: dict[tuple[str, int], Any] = {
                 (row["id"], row["version"]): row
                 for row in candidates
@@ -4641,16 +4748,22 @@ class ArtifactStore:
                 for row in candidates:
                     if row["used"] < idle_before:
                         chosen[(row["id"], row["version"])] = row
+            for key in split(chosen):
+                del chosen[key]
             if max_bytes is not None and store_bytes > max_bytes:
                 target = int(max_bytes * _EVICT_TO_FRACTION)
                 remaining = store_bytes - sum(r["byte_size"] or 0 for r in chosen.values())
+                by_key = {(row["id"], row["version"]): row for row in candidates}
                 for row in candidates:
                     if remaining <= target:
                         break
                     key = (row["id"], row["version"])
-                    if key not in chosen:
-                        chosen[key] = row
-                        remaining -= row["byte_size"] or 0
+                    if key in chosen:
+                        continue
+                    unit = self._folder_unit(key, row["used"], folders, namers, by_key, chosen)
+                    for member in unit or ():
+                        chosen[member] = by_key[member]
+                        remaining -= by_key[member]["byte_size"] or 0
 
             if keep_superseded is not None:
                 kept: dict[str, int] = {}
@@ -4661,6 +4774,15 @@ class ArtifactStore:
                     chosen.setdefault((row["id"], row["version"]), row)
 
             chosen = self._with_their_pointers(conn, chosen, candidates)
+            # The gap and pointer rules can keep a manifest; its files stay with it.
+            held: set[tuple[str, int]] = set()
+            while broken := split(chosen):
+                held |= broken
+                chosen = self._with_their_pointers(
+                    conn,
+                    {key: row for key, row in chosen.items() if key not in held},
+                    [row for row in candidates if (row["id"], row["version"]) not in held],
+                )
 
             if dry_run:
                 return {
@@ -4687,8 +4809,13 @@ class ArtifactStore:
             # losing a blob whose row is gone only wastes bytes.
             collected: list[tuple[str, int]] = []
             pending: list[tuple[str, int]] = []
-            # Pointers before their canonicals, so a canonical goes only once nothing reads it.
-            ordered = sorted(chosen.values(), key=lambda r: r["superseded_by"] is None)
+            # Pointers before their canonicals, so a canonical goes only once nothing reads it;
+            # folder files after their manifests, so a file goes only once its folders did.
+            ordered = sorted(
+                chosen.values(),
+                key=lambda r: ((r["id"], r["version"]) in namers, r["superseded_by"] is None),
+            )
+            stayed: set[tuple[str, int]] = set()
             for position, row in enumerate(ordered):
                 # Committed in batches: one transaction over a large sweep holds SQLite's write
                 # lock long enough to stall every writer behind it.
@@ -4701,6 +4828,13 @@ class ArtifactStore:
                         # queueing, so it only gets in if the lock stays free that long.
                         time.sleep(_GC_BATCH_PAUSE_SECONDS)
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
+                if namers.get((artifact_id, version), set()) & stayed:
+                    logger.info(
+                        "garbage_collect: keeping %s@v=%d, a folder naming it stayed.",
+                        artifact_id,
+                        version,
+                    )
+                    continue
 
                 # Re-checked here, not trusted from the SELECT: a hit or a new hold during the
                 # sweep keeps the version. The no-op UPDATE also locks the row, so a use cannot
@@ -4729,6 +4863,7 @@ class ArtifactStore:
                     ),
                 )
                 if claimed.rowcount == 0:
+                    stayed.add((artifact_id, version))
                     logger.info(
                         "garbage_collect: keeping %s@v=%d, used or held since it was selected.",
                         artifact_id,
@@ -4750,6 +4885,7 @@ class ArtifactStore:
                     # pointer wins. Skip it (uncounted, blob untouched) rather than fail the whole
                     # sweep on one race.
                     conn.execute("ROLLBACK TO SAVEPOINT gc_row")
+                    stayed.add((artifact_id, version))
                     logger.info(
                         "garbage_collect: skipping %s@v=%d, something referenced "
                         "it after it was selected.",
@@ -4832,6 +4968,43 @@ class ArtifactStore:
                 changed = True
             if not changed:
                 return chosen
+
+    @staticmethod
+    def _folder_unit(
+        key: tuple[str, int],
+        used: float,
+        folders: dict[tuple[str, int], set[tuple[str, int]]],
+        namers: dict[tuple[str, int], set[tuple[str, int]]],
+        candidates: dict[tuple[str, int], Any],
+        chosen: dict[tuple[str, int], Any],
+    ) -> set[tuple[str, int]] | None:
+        """*key* with its folder, for the byte cap to evict as one; ``None`` if it must stay.
+
+        A file takes every manifest naming it and a manifest the files only it names, each
+        a candidate used no later than *used*: a folder's last use is its newest member's.
+        A file stays while a manifest naming it cannot go.
+        """
+        unit = {key}
+        pending = [key]
+        while pending:
+            node = pending.pop()
+            for manifest in namers.get(node, ()):
+                if manifest in unit or manifest in chosen:
+                    continue
+                if manifest not in candidates or candidates[manifest]["used"] > used:
+                    return None
+                unit.add(manifest)
+                pending.append(manifest)
+            for named in folders.get(node, ()):
+                if named in unit or named in chosen or named not in candidates:
+                    continue
+                if not all(m in unit or m in chosen for m in namers[named]):
+                    continue
+                if candidates[named]["used"] > used:
+                    return None
+                unit.add(named)
+                pending.append(named)
+        return unit
 
     @staticmethod
     def _without_version_gaps(
