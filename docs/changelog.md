@@ -15,6 +15,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `POST /v1/jobs` take `hold_seconds`; the machine that runs the job keeps it
   as its cool-down until its next job, so a host can hold each tenant's
   machines for as long as that tenant's next job is worth waiting for. (#1257)
+- **Read costs change with the credentials, while the server runs.**
+  `PUT /v1/admin/notebook-credentials` takes `notebook_credential_read_cost`
+  as a sixth setting, replaced with the others, and `GET` returns it, so a
+  source a host connects mid-session brings its egress rate and a costly first
+  read through it asks without a restart. A rate that is not a number is
+  refused with `422`. Left out of a body, the rates are cleared. (#1275)
 
 ### Changed
 

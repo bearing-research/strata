@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from strata.config import StrataConfig
 from strata.iceberg.catalog import PyIcebergCatalog
+from tests.notebook import test_mounts
+from tests.notebook.test_read_confirm import _asked, windows
 
 ROUTE = "/v1/admin/notebook-credentials"
 MOUNT_CELL = "# @mount raw s3://lab/raw ro credential=lab\nx = 1"
@@ -117,7 +119,7 @@ async def test_a_session_opened_before_the_put_uses_what_it_set_from_the_next_ru
     assert server.fetched == []
 
 
-def test_the_five_settings_are_replaced_together(tmp_path, server):
+def test_the_six_settings_are_replaced_together(tmp_path, server):
     lab = str(tmp_path / "lab")
     reply = server.client.put(
         ROUTE,
@@ -126,6 +128,7 @@ def test_the_five_settings_are_replaced_together(tmp_path, server):
             "notebook_mount_credentials": {"s3": "lab"},
             "notebook_credential_paths": {"lab": [lab]},
             "notebook_credential_writers": {"lab": ["user_*"]},
+            "notebook_credential_read_cost": {"lab": 0.09},
             "catalogs": {"lake": {"type": "rest", "uri": "https://catalog.example"}},
         },
     )
@@ -134,6 +137,7 @@ def test_the_five_settings_are_replaced_together(tmp_path, server):
     assert server.config.notebook_mount_credentials == {"s3": "lab"}
     assert server.config.notebook_credential_paths == {"lab": [lab]}
     assert server.config.notebook_credential_writers == {"lab": ["user_*"]}
+    assert server.config.notebook_credential_read_cost == {"lab": 0.09}
     assert server.config.catalogs == {"lake": {"type": "rest", "uri": "https://catalog.example"}}
 
     # Left out is replaced too; writers go back to unset, where every name writes.
@@ -141,6 +145,65 @@ def test_the_five_settings_are_replaced_together(tmp_path, server):
     assert server.config.notebook_credentials == {}
     assert server.config.notebook_mount_credentials == {}
     assert server.config.notebook_credential_writers is None
+    assert server.config.notebook_credential_read_cost == {}
+
+
+def test_read_costs_read_back_as_set(server):
+    """A rate is not a secret: it is shown as it is used."""
+    reply = server.client.put(ROUTE, json=_body(notebook_credential_read_cost={"lab": 2}))
+    assert reply.status_code == 200, reply.text
+
+    assert reply.json()["notebook_credential_read_cost"] == {"lab": 2.0}
+    assert server.client.get(ROUTE).json()["notebook_credential_read_cost"] == {"lab": 2.0}
+
+
+@pytest.mark.parametrize("rate", ["cheap", "${LAB_RATE}", [0.09], None])
+def test_a_rate_that_is_not_a_number_is_refused_and_changes_nothing(server, rate):
+    """Refused as startup refuses it, naming the field; a rate is no reference either."""
+    server.config.notebook_credential_read_cost = {"old": 0.02}
+
+    reply = server.client.put(
+        ROUTE,
+        json=_body(
+            notebook_credentials={"lab": {"key": "k"}},
+            notebook_credential_read_cost={"lab": rate},
+        ),
+    )
+
+    assert reply.status_code == 422
+    assert "notebook_credential_read_cost" in reply.text
+    with pytest.raises(ValueError, match="notebook_credential_read_cost"):
+        StrataConfig(notebook_credential_read_cost={"lab": rate})
+    assert server.config.notebook_credential_read_cost == {"old": 0.02}
+    assert server.config.notebook_credentials == {"old": {"key": "old-key"}}
+
+
+@windows
+async def test_a_new_names_rate_makes_a_costly_run_ask_without_a_restart(
+    tmp_path, server, monkeypatch
+):
+    """Amber item 97's done-when, at item 90's level: a name connected through the route
+    brings its rate, and a run reading 250 bytes through it at $10^7 per GB ($2.50) asks
+    before going past $1. Read from the server's live config, not a copy taken at start."""
+    # Imported by module: a Test class imported by name is collected here again.
+    files = test_mounts.TestSharedMountCache._files(
+        "bucket/data", {"a": b"aa" * 50, "b": b"bbb" * 50}
+    )
+    test_mounts._install_fake_fsspec(monkeypatch, test_mounts._FakeRemoteFS(files))
+    server.config.notebook_mount_cache_dir = tmp_path / "mounts"
+    server.config.notebook_confirm_read_cost = 1.0
+    session = _session(tmp_path / "nb", "# @mount data s3://bucket/data ro credential=lab\nx = 1")
+    lab = {"lab": {"key": "lab-key"}}
+
+    asked = []
+    for rates in ({}, {"lab": 10**7}, {}):
+        reply = server.client.put(
+            ROUTE, json=_body(notebook_credentials=lab, notebook_credential_read_cost=rates)
+        )
+        assert reply.status_code == 200, reply.text
+        asked.append(await _asked(session))
+
+    assert asked == [[], ["c1"], []]
 
 
 def _put_secret(server, value: str):

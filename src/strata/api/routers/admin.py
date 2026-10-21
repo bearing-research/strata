@@ -264,6 +264,8 @@ class AdminNotebookCredentialsRequest(BaseModel):
     # restricts nothing; writers ``null`` is unset (every name writes), ``{}`` all read-only.
     notebook_credential_paths: dict[str, list[str]]
     notebook_credential_writers: dict[str, list[str]] | None
+    # Dollars per GB, typed as StrataConfig types it, so a value startup refuses is refused.
+    notebook_credential_read_cost: dict[str, float] = Field(default_factory=dict)
     catalogs: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
@@ -293,6 +295,7 @@ def _serialize_notebook_credentials() -> dict[str, object]:
         "notebook_mount_credentials": config.notebook_mount_credentials,
         "notebook_credential_paths": config.notebook_credential_paths,
         "notebook_credential_writers": config.notebook_credential_writers,
+        "notebook_credential_read_cost": config.notebook_credential_read_cost,
         # Strata resolves no reference in a catalog, so every value there is a literal.
         "catalogs": {
             name: {
@@ -318,7 +321,7 @@ async def get_admin_notebook_credentials():
     dependencies=[require_scope("admin:notebook-credentials")],
 )
 async def replace_admin_notebook_credentials(request: AdminNotebookCredentialsRequest):
-    """Replace the five settings together, used from the next run on.
+    """Replace the six settings together, used from the next run on.
 
     A running cell keeps what it resolved. In this process only: a restart goes back to
     the environment, and each replica of a service takes its own call.
