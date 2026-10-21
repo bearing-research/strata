@@ -16,7 +16,7 @@ import docker
 import httpx
 import pytest
 from testcontainers.core.container import DockerContainer
-from testcontainers.core.waiting_utils import wait_for_logs
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import MountMode, MountSpec
@@ -67,11 +67,8 @@ def fake_gcs_container():
         f"-scheme http -port {_FAKE_GCS_PORT} -public-host localhost:{_FAKE_GCS_PORT}"
     )
     container.with_exposed_ports(_FAKE_GCS_PORT)
-    start_container_or_skip(
-        container,
-        label="fake-gcs-server",
-        ready=lambda c: wait_for_logs(c, "server started at"),
-    )
+    container.waiting_for(LogMessageWaitStrategy("server started at"))
+    start_container_or_skip(container, label="fake-gcs-server")
     try:
         yield container
     finally:

@@ -220,17 +220,15 @@ def make_azurite():
     )
 
 
-def start_container_or_skip(container, *, label: str, ready=None):
+def start_container_or_skip(container, *, label: str):
     """Start a testcontainers container, skipping the module if startup fails.
 
     A failed image pull (a Docker Hub flake, or fork CI without registry secrets) means the
-    backend is unavailable: a skip, not a failure. Only startup and the optional ``ready``
-    probe are converted; later errors propagate. The caller owns ``stop()``.
+    backend is unavailable: a skip, not a failure. Only startup, including the container's
+    wait strategy, is converted; later errors propagate. The caller owns ``stop()``.
     """
     try:
         container.start()
-        if ready is not None:
-            ready(container)
     except Exception as exc:
         try:
             container.stop()
