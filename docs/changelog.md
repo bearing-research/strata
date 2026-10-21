@@ -21,6 +21,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   source a host connects mid-session brings its egress rate and a costly first
   read through it asks without a restart. A rate that is not a number is
   refused with `422`. Left out of a body, the rates are cleared. (#1275)
+- **`.strata/writes/index.json`: the files each cell wrote through its `rw`
+  mounts.** For each cell, its last successful run's writes, one entry per
+  mount with each file's path, size and sha256, plus when it ran and the
+  principal it ran for, so a host lists what a source was written by without
+  reading each cell's `__mount__<name>` record. A failed run or sync-back
+  leaves the entry; a run that writes nothing, or deleting the cell, drops it.
+  (#1276)
 
 ### Changed
 

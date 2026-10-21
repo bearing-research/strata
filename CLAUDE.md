@@ -235,6 +235,7 @@ notebook_dir/
     ├── fetch/             # bytes each @fetch last read
     ├── tables/index.json  # tables each cell's last good run read (table_index.py)
     ├── reads/index.json   # bytes each cell's last good run moved, per input (reads_index.py)
+    ├── writes/index.json  # files each cell's last good run wrote through rw mounts (writes_index.py)
     └── artifacts/         # SQLite + blobs (nb_…@v=N.arrow)
 ```
 

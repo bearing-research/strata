@@ -233,6 +233,27 @@ what produced them. On a remote worker the worker reports them. Each run adds a
 version, since an `rw` cell never serves a cached result. Deleted files are not
 recorded, and are not deleted from a remote mount either.
 
+`.strata/writes/index.json` lists the same for each cell's last successful run, so
+a host can list the files cells wrote to a source without reading each record:
+
+```json
+{
+  "c1a2b3c4": {
+    "ran_at": 1760889600000,
+    "principal": null,
+    "mounts": [
+      {"mount": "out", "uri": "s3://bucket/out",
+       "files": [{"path": "part-0.parquet", "size": 1048576, "sha256": "9f86d0..."}]}
+    ]
+  }
+}
+```
+
+`principal` is the member the run was for (`null` in personal mode). A cell's entry
+is replaced once its writes are synced back; a failed run, a failed sync-back
+included, leaves it as it was, and a successful run that writes nothing, or the
+cell's deletion, drops it. Loop, SQL and prompt cells do not record writes.
+
 Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. On a server that sets `STRATA_NOTEBOOK_CREDENTIAL_WRITERS`, an `rw` mount of `s3://`, `gs://` or `az://` must write through a credential its run's principal is listed for (its `credential=`, or the server's default for that scheme), or the cell fails before it runs; a credential that `STRATA_NOTEBOOK_CREDENTIAL_PATHS` restricts fails in any notebook outside its directories. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---

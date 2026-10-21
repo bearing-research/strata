@@ -540,11 +540,12 @@ class NotebookSession:
             _set_variant_active(self.path, group_id, promote_to)
 
         self.reload()
-        from strata.notebook import reads_index, table_index
+        from strata.notebook import reads_index, table_index, writes_index
 
         live = [c.id for c in self.notebook_state.cells]
         table_index.record(self.path, cell_id, [], live)
         reads_index.record(self.path, cell_id, None, live)
+        writes_index.record(self.path, cell_id, None, live)
 
     def add_variant(self, group: str, author: str | None = None) -> tuple[str, str]:
         """Add a sibling variant to ``group`` by cloning the active variant.

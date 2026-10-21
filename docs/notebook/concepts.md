@@ -139,6 +139,7 @@ my_notebook/
     ├── fetch/                 # The bytes each @fetch last read
     ├── tables/index.json      # The tables each cell's last good run read
     ├── reads/index.json       # The bytes each cell's last good run moved, per input
+    ├── writes/index.json      # The files each cell's last good run wrote through rw mounts
     └── artifacts/
         ├── artifacts.sqlite   # Artifact metadata
         └── blobs/             # Serialized cell outputs
