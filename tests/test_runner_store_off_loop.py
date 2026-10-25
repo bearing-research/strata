@@ -15,10 +15,10 @@ from types import SimpleNamespace
 import anyio.to_thread
 import pyarrow as pa
 import pytest
+from vestigo.build_store import get_build_store
+from vestigo.provenance import TransformSpec
+from vestigo.store import get_artifact_store
 
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import get_artifact_store
-from strata.transforms.build_store import get_build_store
 from strata.transforms.registry import TransformDefinition, TransformRegistry
 from strata.transforms.runner import BuildRunner, RunnerConfig
 from tests.conftest import hold, table_to_ipc_bytes

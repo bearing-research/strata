@@ -30,6 +30,9 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
+    # The ledger: artifact store, build store, SQL dialects, blob backends (ADR 002).
+    # Pinned: it ships from the same tag (release.yml checks the lockstep).
+    "vestigo==0.11.0",
     "pyiceberg[sql-sqlite,sql-postgres]>=0.12.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",
@@ -206,11 +209,12 @@ python-preference = "only-managed"
 # depends on neither. They are workspace members only so `uv sync` installs
 # them editable for the combined test suite.
 [tool.uv.workspace]
-members = ["packages/strata-client", "packages/strata-pool"]
+members = ["packages/strata-client", "packages/strata-pool", "packages/vestigo"]
 
 [tool.uv.sources]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
+vestigo = { workspace = true }
 
 [tool.uv.build-backend]
 # The distribution is strata-notebook; the import package is strata, under src/.
@@ -234,7 +238,7 @@ python = ".venv"
 # notebook cells whose variables the harness injects, and tests rely on stubs
 # and fixture injection; ty can model neither.
 [tool.ty.src]
-include = ["src", "packages/strata-client/src", "packages/strata-pool/src"]
+include = ["src", "packages/strata-client/src", "packages/strata-pool/src", "packages/vestigo/src"]
 
 [tool.ty.rules]
 # Optional deps (ADBC drivers) use guarded imports

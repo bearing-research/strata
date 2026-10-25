@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from strata.sql_backend import (
+from vestigo.sql_backend import (
     SERVER_THREAD_LIMIT,
     PostgresDialect,
     SqliteDialect,
@@ -138,7 +138,7 @@ class TestPostgresConnectionAdapter:
     """The wrapper keeps the store's call sites unchanged."""
 
     def _wrap(self):
-        from strata.sql_backend import _PostgresConnection
+        from vestigo.sql_backend import _PostgresConnection
 
         inner = _FakeInner()
         released = []
@@ -188,7 +188,7 @@ class TestRowBehavesLikeSqliteRow:
     """The store reads results by name, by position, and via dict()."""
 
     def _row(self):
-        from strata.sql_backend import _Row
+        from vestigo.sql_backend import _Row
 
         return _Row(("id", "tenant"), ("a1", "acme"))
 
@@ -280,21 +280,3 @@ class TestThreadLimitAndPoolAreOneNumber:
 
     def test_the_pool_covers_every_thread_token_and_the_event_loop(self):
         assert PostgresDialect("postgresql:///x").max_size == SERVER_THREAD_LIMIT + 1
-
-    def test_the_server_sets_the_thread_limiter_from_the_shared_limit(self, tmp_path, monkeypatch):
-        # A limit other than anyio's default of 40, so a lifespan that left the limiter
-        # alone fails here.
-        import anyio.to_thread
-        from fastapi.testclient import TestClient
-
-        import strata.server as server_module
-
-        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
-        monkeypatch.setenv("STRATA_CACHE_DIR", str(tmp_path / "cache"))
-        monkeypatch.setattr(server_module, "SERVER_THREAD_LIMIT", 7)
-
-        async def total_tokens() -> float:
-            return anyio.to_thread.current_default_thread_limiter().total_tokens
-
-        with TestClient(server_module.app) as client:
-            assert client.portal.call(total_tokens) == 7

@@ -14,9 +14,8 @@ import uuid
 from pathlib import Path
 
 import pytest
-
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import ArtifactStore
+from vestigo.provenance import TransformSpec
+from vestigo.store import ArtifactStore
 
 
 @pytest.fixture
@@ -163,7 +162,7 @@ class TestUse:
 
     def test_a_canonical_promotion_is_a_use(self, store):
         """A notebook output made canonical over another id's equal result is as fresh."""
-        from strata.artifact.store import StagedVersion
+        from vestigo.store import StagedVersion
 
         store.create_artifact("nb_a_cell_c_var_x", "prov-shared")
         store.write_blob("nb_a_cell_c_var_x", 1, b"x")
@@ -353,7 +352,7 @@ class TestWhatIsCollected:
         """One transaction over a 100k-row sweep held SQLite's write lock for seconds, and every
         create_artifact waited behind it.
         """
-        from strata.artifact import store as artifact_store_module
+        from vestigo import store as artifact_store_module
 
         monkeypatch.setattr(artifact_store_module, "_GC_DELETE_BATCH", 2)
         monkeypatch.setattr(artifact_store_module, "_GC_BATCH_PAUSE_SECONDS", 0.0)
@@ -1308,7 +1307,7 @@ class TestWhatAKeptResultNeeds:
 
     def test_the_floor_allows_for_a_use_recorded_late(self, store):
         """Uses are recorded at most every few minutes; a one-hour floor must allow for that lag."""
-        from strata.artifact.store import _USE_RESOLUTION_SECONDS
+        from vestigo.store import _USE_RESOLUTION_SECONDS
 
         read_late = _ready(store)
         long_idle = _ready(store)

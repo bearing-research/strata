@@ -11,7 +11,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from strata.sql_backend import SqlDialect, StoreConnection
+from vestigo.sql_backend import SqlDialect, StoreConnection
+from vestigo.tables import LEDGER_TABLES
 
 logger = logging.getLogger(__name__)
 
@@ -19,30 +20,24 @@ logger = logging.getLogger(__name__)
 # inserts explicit values into one, its generator has to be moved past them.
 _AUTOINCREMENT_COLUMNS: dict[str, str] = {"registry_audit": "seq"}
 
-# Ordered by foreign-key dependency: artifact_versions must exist before the tables that reference
-# it. SQLite never enforced these (no PRAGMA foreign_keys) but Postgres does.
+
+# The ledger's tables first, in its foreign-key order, then Strata's own tables in the same
+# database. SQLite never enforced the foreign keys (no PRAGMA foreign_keys) but Postgres does.
 #
 # stream_owners is deliberately absent: it describes live streams on live nodes, and none survive
-# the migration. So is import_staging: an upload waits seconds for its import, and a caller retrying
-# after the move uploads again. So is build_console_chunks: live console of running builds.
+# the migration. So are the ledger's transient tables, ``vestigo.tables.TRANSIENT_TABLES``.
 #
 # Each entry pairs a table with its primary key, which makes the copy idempotent: a row already in
 # the target is skipped, not rewritten.
 MIGRATED_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("artifact_versions", ("id", "version")),
-    ("artifact_names", ("tenant", "name")),
-    ("artifact_aliases", ("tenant", "name", "alias")),
-    ("artifact_tags", ("tenant", "artifact_id", "version", "key")),
-    ("registry_audit", ("seq",)),
-    ("registry_pending", ("tenant", "name", "alias")),
-    ("artifact_publications", ("token",)),
-    ("artifact_pins", ("artifact_id", "version", "reason")),
+    *LEDGER_TABLES,
+    # Strata's own tables (strata.notebook.worker_store, strata.auth.api_keys), listed
+    # here rather than imported: strata.notebook loads the whole notebook package.
     ("notebook_workers", ("name",)),
     ("notebook_worker_registry", ("id",)),
-    ("artifact_builds", ("build_id",)),
-    ("build_attempts", ("build_id", "attempt")),
     ("api_keys", ("key_id",)),
 )
+
 
 # Rows fetched from the source per round, and per commit on the target.
 _BATCH_ROWS = 500

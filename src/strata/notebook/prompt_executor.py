@@ -13,6 +13,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from vestigo.provenance import derive_subkey
+
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.llm import (
     LlmCompletionResult,
@@ -24,7 +26,6 @@ from strata.notebook.llm import (
     render_prompt_template,
 )
 from strata.notebook.prompt_analyzer import analyze_prompt_cell
-from strata.notebook.provenance import derive_subkey
 from strata.notebook.serializer import _META_SHAPE, _SHAPE_SCALAR, _extract_scalar_from_table
 
 if TYPE_CHECKING:
@@ -415,8 +416,9 @@ async def execute_prompt_cell(
     blob = json.dumps(content, indent=2, default=str).encode()
 
     try:
-        from strata.artifact.provenance import TransformSpec
-        from strata.artifact.store import StagedVersion
+        from vestigo.provenance import TransformSpec
+        from vestigo.store import StagedVersion
+
         from strata.notebook.artifact_integration import caller_principal_id
 
         version = artifact_mgr.artifact_store.create_artifact(

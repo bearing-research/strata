@@ -13,9 +13,13 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 from fastapi.testclient import TestClient
+from vestigo.build_store import (
+    get_build_store,
+    reset_build_store,
+)
+from vestigo.store import get_artifact_store, reset_artifact_store
 
 import strata.server as server_module
-from strata.artifact.store import get_artifact_store, reset_artifact_store
 from strata.config import StrataConfig
 from strata.server import app
 from strata.transforms.build_qos import (
@@ -23,10 +27,6 @@ from strata.transforms.build_qos import (
     BuildQoSConfig,
     reset_build_qos,
     set_build_qos,
-)
-from strata.transforms.build_store import (
-    get_build_store,
-    reset_build_store,
 )
 from strata.transforms.signed_urls import URLSigner
 

@@ -13,13 +13,11 @@ import time
 import anyio.to_thread
 import docker
 import pytest
+from conftest import race_after_pending_read
 from testcontainers.community.postgres import PostgresContainer
-
-from strata.artifact.cli import _server_store as _configured_server_store
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import ArtifactStore
-from strata.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
-from tests.conftest import race_after_pending_read
+from vestigo.provenance import TransformSpec
+from vestigo.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
+from vestigo.store import ArtifactStore
 
 
 def _docker_daemon_reachable() -> bool:
@@ -53,7 +51,7 @@ def store(postgres_dsn, tmp_path):
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
-            "notebook_workers, notebook_worker_registry, schema_version CASCADE;"
+            "schema_version CASCADE;"
         )
         conn.commit()
     finally:
@@ -129,7 +127,7 @@ class TestRoundTrip:
         assert store.id_tenant("held") == "team-a"
 
     def test_another_tenant_cannot_create_under_a_held_id(self, store):
-        from strata.artifact.store import ArtifactIdTaken
+        from vestigo.store import ArtifactIdTaken
 
         store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
 
@@ -142,7 +140,7 @@ class TestRoundTrip:
     def test_another_tenant_cannot_import_under_a_held_id(self, store):
         from dataclasses import replace
 
-        from strata.artifact.store import ArtifactImportConflict
+        from vestigo.store import ArtifactImportConflict
 
         version = store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
         store.write_blob("held", version, b"payload")
@@ -359,7 +357,7 @@ class TestConnectionLimits:
 
 class TestCanonicalPromotion:
     def test_a_runs_outputs_finalize_together_or_not_at_all(self, store):
-        from strata.artifact.store import StagedVersion
+        from vestigo.store import StagedVersion
 
         first = store.create_artifact("a1", "shared-prov", _spec())
         store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
@@ -465,38 +463,6 @@ class TestFindReadyAndSetName:
 
 
 class TestGarbageCollection:
-    def test_a_published_folder_keeps_its_files(self, store, tmp_path):
-        # The walk finds manifests with a LIKE over transform_spec; run it on Postgres.
-        from strata.artifact.transfer import copy_chain
-        from tests.test_folder_transfer import FILES, _folder, _rebuilt
-
-        manager, folder = _folder(tmp_path / "alice", FILES)
-        copy_chain(manager.artifact_store, store, folder, 10)
-        store.publish_artifact(folder.id, folder.version)
-
-        assert store.garbage_collect(max_idle_days=0, collect_latest=True)["deleted_count"] == 0
-        assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES
-
-    def test_a_folder_goes_whole_or_stays_whole(self, store):
-        # Manifests by a LIKE, their files' tenants by a batched IN; run both on Postgres.
-        from tests.test_artifact_retention import _team_folder
-
-        idle, idle_files = _team_folder(store, tenant="a")
-        used, used_files = _team_folder(store, tenant="a")
-        for artifact_id, _ in (idle, *idle_files, *used_files):
-            self._last_used(store, artifact_id, 40 * 86400)
-        self._last_used(store, used[0], 86400)
-
-        dry = store.garbage_collect(max_idle_days=30, dry_run=True)
-        store.garbage_collect(max_idle_days=30)
-
-        reported = {(entry["artifact_id"], entry["version"]) for entry in dry["collected"]}
-        assert reported == {idle, *idle_files}
-        assert all(store.get_artifact(*key) is None for key in reported)
-        assert store.folder_is_whole(store.get_artifact(*used))
-        store.delete_artifact(*used_files[0])
-        assert not store.folder_is_whole(store.get_artifact(*used))
-
     def test_the_current_value_survives_a_rebuild_in_flight(self, store):
         # The spare-the-current-value clause is a correlated NOT EXISTS; run
         # it on the dialect that has never seen it in a unit test.
@@ -710,7 +676,7 @@ class TestGarbageCollection:
 
     def test_cleanup_failed_takes_a_failed_build_row_with_it(self, store, tmp_path):
         """The build row's foreign key refused deleting the failed version it references."""
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         # The fixture's CASCADE drop leaves a prior test's build table without its foreign key.
         conn = store._get_connection()
@@ -927,61 +893,6 @@ class TestConnectionPool:
             dialect.close()
 
 
-class TestConfigurationSelectsTheBackend:
-    """The wiring end to end: a DSN in config produces a Postgres-backed store."""
-
-    def test_a_configured_dsn_produces_a_postgres_backed_store(self, postgres_dsn, tmp_path):
-        from strata.artifact.store import get_artifact_store, reset_artifact_store
-        from strata.config import StrataConfig
-        from strata.server import _init_configured_artifact_store
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_metadata_dsn=postgres_dsn,
-        )
-
-        reset_artifact_store()
-        try:
-            # The same call the server's lifespan makes.
-            _init_configured_artifact_store(config)
-            store = get_artifact_store(config.artifact_dir)
-            assert store is not None
-            assert store._dialect.name == "postgres"
-
-            # And it actually works against the server, not just constructs.
-            version = store.create_artifact("wired", "prov-wired", _spec())
-            store.finalize_artifact("wired", version, "{}", row_count=1, byte_size=1)
-            assert store.get_latest_version("wired") is not None
-
-            # No SQLite file was created alongside it.
-            assert not (config.artifact_dir / "artifacts.sqlite").exists()
-        finally:
-            store = get_artifact_store()
-            if store is not None:
-                store.close()
-            reset_artifact_store()
-
-    def test_no_dsn_still_produces_a_sqlite_store(self, tmp_path):
-        from strata.artifact.store import get_artifact_store, reset_artifact_store
-        from strata.config import StrataConfig
-        from strata.server import _init_configured_artifact_store
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-        )
-        reset_artifact_store()
-        try:
-            _init_configured_artifact_store(config)
-            store = get_artifact_store(config.artifact_dir)
-            assert store is not None
-            assert store._dialect.name == "sqlite"
-            assert (config.artifact_dir / "artifacts.sqlite").exists()
-        finally:
-            reset_artifact_store()
-
-
 class TestBuildStoreSharesTheBackend:
     """Build rows live in the artifact store's database, so they follow it.
 
@@ -990,7 +901,7 @@ class TestBuildStoreSharesTheBackend:
     """
 
     def test_build_created_on_one_node_is_visible_on_another(self, postgres_dsn, tmp_path):
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect_a = PostgresDialect(postgres_dsn)
         dialect_b = PostgresDialect(postgres_dsn)
@@ -1039,7 +950,7 @@ class TestBuildStoreSharesTheBackend:
 
     def test_console_left_by_one_node_is_taken_by_the_other(self, postgres_dsn, tmp_path):
         """A remote cell's console chunk can land on a node that did not dispatch it."""
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect_a = PostgresDialect(postgres_dsn)
         dialect_b = PostgresDialect(postgres_dsn)
@@ -1082,7 +993,7 @@ class TestBuildStoreSharesTheBackend:
 
     def test_the_runner_picks_a_fair_share_per_tenant(self, postgres_dsn, tmp_path):
         """The window query runs on Postgres too: per tenant, without external builds."""
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1127,7 +1038,7 @@ class TestBuildStoreSharesTheBackend:
 
     def test_a_fail_fenced_on_a_claim_needs_that_exact_claim(self, postgres_dsn, tmp_path):
         """The deadline read back from the row matches the one the fence sends."""
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1166,7 +1077,7 @@ class TestBuildStoreSharesTheBackend:
     def test_build_columns_survive_postgres_widths(self, postgres_dsn, tmp_path):
         # Same INTEGER/REAL traps as the artifact store: byte counts are
         # INTEGER and timestamps are REAL in the shared schema.
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1208,7 +1119,7 @@ class TestTheAttemptLedgerOnPostgres:
     """
 
     def test_an_existing_database_gains_the_ledger(self, postgres_dsn, tmp_path):
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1251,98 +1162,6 @@ class TestTheAttemptLedgerOnPostgres:
             assert store.settled_attempts() == []
         finally:
             dialect.close()
-
-
-class TestTheCliOnAPostgresStore:
-    """With a service store's settings, the artifact CLI must open Postgres, not an empty SQLite
-    file.
-    """
-
-    def test_archive_by_token_writes_the_zip_the_route_serves(
-        self, postgres_dsn, tmp_path, monkeypatch
-    ):
-        import argparse
-
-        from strata.api.publication_bundle import bundle_zip
-        from strata.artifact.cli import cmd_archive
-
-        dialect = PostgresDialect(postgres_dsn)
-        try:
-            conn = dialect.connect()
-            conn.executescript(
-                "DROP TABLE IF EXISTS artifact_builds, artifact_versions, artifact_names, "
-                "artifact_aliases, artifact_tags, artifact_publications, artifact_pins, "
-                "registry_audit, registry_pending CASCADE;"
-            )
-            conn.commit()
-            conn.close()
-
-            artifact_dir = tmp_path / "store"
-            store = ArtifactStore(artifact_dir, dialect=dialect)
-            version = store.create_artifact("fig", "prov-fig", _spec())
-            with store.open_blob_writer("fig", version) as writer:
-                writer.write(b"figure bytes")
-            store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
-            publication = store.publish_artifact("fig", version, title="Figure")
-
-            monkeypatch.setenv("STRATA_ARTIFACT_METADATA_DSN", postgres_dsn)
-            monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(artifact_dir))
-            out = tmp_path / "deposit.zip"
-            args = argparse.Namespace(
-                ref=None,
-                token=publication.token,
-                artifact_dir=None,
-                to=str(out),
-                force=False,
-                title=None,
-                author=None,
-                tenant=None,
-                max_depth=10,
-            )
-            assert cmd_archive(args) == 0
-
-            artifact = store.get_artifact("fig", version)
-            bundle_zip(store, artifact, tmp_path / "direct.zip", publication=publication)
-            assert out.read_bytes() == (tmp_path / "direct.zip").read_bytes()
-        finally:
-            dialect.close()
-
-    def test_publish_mints_the_grant_in_the_store_the_server_serves(
-        self, store, tmp_path, monkeypatch, postgres_dsn
-    ):
-        """The publish target is built like the server's store, not from ``artifact_dir`` alone.
-
-        Built from the directory, it was an empty SQLite file: "not found", and a stray database.
-        """
-        import argparse
-
-        from strata.artifact.cli import cmd_publish
-
-        version = store.create_artifact("fig", "prov-fig", _spec())
-        with store.open_blob_writer("fig", version) as writer:
-            writer.write(b"figure bytes")
-        store.finalize_artifact("fig", version, schema_json="", row_count=1, byte_size=12)
-
-        monkeypatch.setenv("STRATA_ARTIFACT_METADATA_DSN", postgres_dsn)
-        monkeypatch.setenv("STRATA_ARTIFACT_DIR", str(tmp_path / "artifacts"))
-        # The suite stubs this out so no test publishes into a developer's own store.
-        monkeypatch.setattr("strata.artifact.cli._server_store", _configured_server_store)
-        args = argparse.Namespace(
-            ref=f"fig@v={version}",
-            artifact_dir=None,
-            format="json",
-            title="Figure",
-            author=None,
-            tenant=None,
-            here=False,
-            into=None,
-            to_url=None,
-            max_depth=10,
-        )
-        assert cmd_publish(args) == 0
-
-        assert [p.artifact_id for p in store.list_publications()] == ["fig"]
-        assert not (tmp_path / "artifacts" / "artifacts.sqlite").exists()
 
 
 class TestTimestampPrecision:
@@ -1642,81 +1461,6 @@ class TestPendingChangeRaces:
         assert [p["artifact_id"] for p in store.list_pending_changes()] == ["m2"]
 
 
-def _worker_entry(name: str, enabled: bool = True) -> dict:
-    return {
-        "name": name,
-        "backend": "executor",
-        "config": {"url": "http://x:1"},
-        "enabled": enabled,
-    }
-
-
-class TestTheNotebookWorkerRegistry:
-    """The service-mode worker registry, shared by every node on the database."""
-
-    def test_unset_then_written_then_emptied(self, store):
-        assert store.notebook_worker_entries() is None
-
-        store.update_notebook_workers(lambda current: [_worker_entry("a"), _worker_entry("b")])
-        assert [e["name"] for e in store.notebook_worker_entries()] == ["a", "b"]
-
-        store.update_notebook_workers(lambda current: [_worker_entry("b", False)])
-        assert store.notebook_worker_entries() == [_worker_entry("b", False)]
-
-        store.update_notebook_workers(lambda current: [])
-        assert store.notebook_worker_entries() == []
-
-    def test_an_unchanged_row_keeps_its_timestamps(self, store):
-        store.update_notebook_workers(lambda current: [_worker_entry("a"), _worker_entry("b")])
-        conn = store._get_connection()
-        try:
-            before = {
-                row["name"]: row["updated_at"]
-                for row in conn.execute("SELECT name, updated_at FROM notebook_workers")
-            }
-        finally:
-            conn.close()
-
-        store.update_notebook_workers(
-            lambda current: [_worker_entry("a"), _worker_entry("b", False)]
-        )
-
-        conn = store._get_connection()
-        try:
-            after = {
-                row["name"]: row["updated_at"]
-                for row in conn.execute("SELECT name, updated_at FROM notebook_workers")
-            }
-        finally:
-            conn.close()
-        assert after["a"] == before["a"]
-        assert after["b"] > before["b"]
-
-    def test_a_raising_change_rolls_back(self, store):
-        store.update_notebook_workers(lambda current: [_worker_entry("a")])
-
-        def refuse(current):
-            raise KeyError("missing")
-
-        with pytest.raises(KeyError):
-            store.update_notebook_workers(refuse)
-
-        assert store.notebook_worker_entries() == [_worker_entry("a")]
-
-    def test_two_nodes_on_one_database_see_each_others_writes(self, postgres_dsn, tmp_path, store):
-        other_dialect = PostgresDialect(postgres_dsn)
-        try:
-            other_node = ArtifactStore(tmp_path / "node2", dialect=other_dialect)
-
-            store.update_notebook_workers(lambda current: [_worker_entry("box")])
-            assert other_node.notebook_worker_entries() == [_worker_entry("box")]
-
-            other_node.update_notebook_workers(lambda current: [*current, _worker_entry("gpu")])
-            assert [e["name"] for e in store.notebook_worker_entries()] == ["box", "gpu"]
-        finally:
-            other_dialect.close()
-
-
 class TestSchemaMigrations:
     """Evolving a Postgres store that already holds data.
 
@@ -1724,7 +1468,7 @@ class TestSchemaMigrations:
     """
 
     def test_a_fresh_database_is_stamped_and_complete(self, store):
-        from strata.artifact.store import _LATEST_SCHEMA_VERSION
+        from vestigo.store import _LATEST_SCHEMA_VERSION
 
         conn = store._get_connection()
         try:
@@ -1741,8 +1485,8 @@ class TestSchemaMigrations:
 
     def test_an_existing_database_is_carried_forward(self, postgres_dsn, tmp_path, store):
         """A new column reaches a store that already has rows."""
-        from strata.artifact.store import _LATEST_SCHEMA_VERSION
-        from strata.sql_backend import PostgresDialect
+        from vestigo.sql_backend import PostgresDialect
+        from vestigo.store import _LATEST_SCHEMA_VERSION
 
         version = store.create_artifact("keeper", "prov-keep", _spec())
         store.finalize_artifact("keeper", version, schema_json="", row_count=1, byte_size=1)
@@ -1781,8 +1525,8 @@ class TestSchemaMigrations:
     def test_existing_publication_tokens_are_hashed_and_still_resolve(
         self, postgres_dsn, tmp_path, store
     ):
-        from strata.artifact.store import publication_id
-        from strata.sql_backend import PostgresDialect
+        from vestigo.sql_backend import PostgresDialect
+        from vestigo.store import publication_id
 
         version = store.create_artifact("fig", "prov-fig", _spec())
         with store.open_blob_writer("fig", version) as writer:
@@ -1830,12 +1574,10 @@ class TestSchemaMigrations:
 
     def test_a_read_only_open_leaves_an_older_database_alone(self, postgres_dsn, tmp_path, store):
         """A shared database older nodes still serve: inspecting it must not migrate it."""
-        from strata.artifact.store import StoreSchemaMismatch
+        from vestigo.store import StoreSchemaMismatch
 
         conn = store._get_connection()
         try:
-            conn.execute("DROP TABLE notebook_workers")
-            conn.execute("DROP TABLE notebook_worker_registry")
             conn.execute("UPDATE schema_version SET version = 8")
             conn.commit()
         finally:
@@ -1853,33 +1595,6 @@ class TestSchemaMigrations:
                 assert not dialect.schema_exists(conn, "notebook_workers")
             finally:
                 conn.close()
-        finally:
-            dialect.close()
-
-    def test_an_existing_database_gains_the_worker_registry(self, postgres_dsn, tmp_path, store):
-        from strata.artifact.store import _LATEST_SCHEMA_VERSION
-
-        conn = store._get_connection()
-        try:
-            conn.execute("DROP TABLE notebook_workers")
-            conn.execute("DROP TABLE notebook_worker_registry")
-            conn.execute("DELETE FROM schema_version WHERE version >= 9")
-            conn.commit()
-        finally:
-            conn.close()
-
-        dialect = PostgresDialect(postgres_dsn)
-        try:
-            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
-            reopened.update_notebook_workers(lambda current: [_worker_entry("box")])
-
-            assert reopened.notebook_worker_entries() == [_worker_entry("box")]
-            conn = reopened._get_connection()
-            try:
-                stamped = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
-            finally:
-                conn.close()
-            assert stamped["v"] == _LATEST_SCHEMA_VERSION
         finally:
             dialect.close()
 

@@ -12,11 +12,10 @@ import json
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
+from conftest import role_credentials
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-
-from strata.artifact.blob_store import AzureBlobStore, GCSBlobStore, S3BlobStore
-from tests.presign_helpers import role_credentials
+from vestigo.blob_store import AzureBlobStore, GCSBlobStore, S3BlobStore
 
 SERVICE_ACCOUNT = "signer@proj.iam.gserviceaccount.com"
 

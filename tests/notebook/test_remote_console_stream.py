@@ -788,7 +788,7 @@ class TestSharedStore:
 
     @pytest.fixture
     def store(self, tmp_path):
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         seed_build_targets(tmp_path, ["a"], [1])
         return BuildStore(tmp_path / "artifacts.sqlite")
@@ -807,7 +807,7 @@ class TestSharedStore:
 
     def test_a_chunk_stored_between_the_read_and_the_delete_is_not_lost(self, store, tmp_path):
         """Another node fills a gap while this one is taking what it read: the next take sees it."""
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         _running_build(store)
         store.append_console_chunk("b1", "stdout", 3, "three\n")
@@ -970,11 +970,11 @@ class TestLogRoute:
         from unittest.mock import MagicMock
 
         from fastapi.testclient import TestClient
+        from vestigo.build_store import get_build_store, reset_build_store
 
         import strata.server as server_module
         from strata.config import StrataConfig
         from strata.server import app
-        from strata.transforms.build_store import get_build_store, reset_build_store
 
         signer = URLSigner(b"secret")
         state = MagicMock()

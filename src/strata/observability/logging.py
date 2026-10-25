@@ -418,6 +418,12 @@ def configure_logging(
     root_logger.addHandler(handler)
     root_logger.propagate = False
 
+    # The ledger package logs under its own name: same handler, level and format.
+    ledger_logger = logging.getLogger("vestigo")
+    ledger_logger.setLevel(root_logger.level)
+    ledger_logger.addHandler(handler)
+    ledger_logger.propagate = False
+
     for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
         uvicorn_logger = logging.getLogger(logger_name)
         uvicorn_logger.handlers = [handler]

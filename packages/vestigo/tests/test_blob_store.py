@@ -9,16 +9,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from strata.artifact import blob_store as blob_store_module
-from strata.artifact.blob_store import (
+from vestigo import blob_store as blob_store_module
+from vestigo.blob_store import (
     BlobStore,
     GCSBlobStore,
     LocalBlobStore,
     S3BlobStore,
-    create_blob_store,
 )
-from strata.config import StrataConfig
 
 
 class TestLocalBlobStore:
@@ -266,7 +263,7 @@ class TestStagedLocalWriter:
     def test_tempfile_discarded_on_exception(self, tmp_path: Path, monkeypatch):
         """The staged tempfile is removed even when commit never runs."""
         captured_path: list[Path] = []
-        from strata.artifact import blob_store as blob_store_module
+        from vestigo import blob_store as blob_store_module
 
         real_mkstemp = blob_store_module.tempfile.mkstemp
 
@@ -291,7 +288,7 @@ class TestStagedLocalWriter:
     def test_commit_exception_propagates_and_cleans_up(self, tmp_path: Path, monkeypatch):
         """If commit raises, the tempfile is still removed."""
         captured_path: list[Path] = []
-        from strata.artifact import blob_store as blob_store_module
+        from vestigo import blob_store as blob_store_module
 
         real_mkstemp = blob_store_module.tempfile.mkstemp
 
@@ -480,7 +477,7 @@ class TestS3BackendAtomicity:
         fake_fs = self._FakeS3FileSystem(tmp_path, open_fails=True)
         store = self._build_store_with_fake_fs(fake_fs)
 
-        from strata.artifact import blob_store as blob_store_module
+        from vestigo import blob_store as blob_store_module
 
         captured_tmp: list[Path] = []
         real_mkstemp = blob_store_module.tempfile.mkstemp
@@ -518,7 +515,7 @@ class TestS3BackendAtomicity:
         fake_fs = self._FakeS3FileSystem(tmp_path)
         store = self._build_store_with_fake_fs(fake_fs)
 
-        from strata.artifact import blob_store as blob_store_module
+        from vestigo import blob_store as blob_store_module
 
         mkstemp_calls: list[str] = []
         real_mkstemp = blob_store_module.tempfile.mkstemp
@@ -648,7 +645,7 @@ class TestGCSCredentialResolution:
         reason="Windows has no Unix mode bits; chmod only toggles the read-only flag",
     )
     def test_inline_key_material_is_written_to_a_private_file(self, tmp_path):
-        from strata.artifact.blob_store import _resolve_gcs_credentials
+        from vestigo.blob_store import _resolve_gcs_credentials
 
         key = '{"type": "service_account", "project_id": "p", "private_key": "k"}'
 
@@ -664,7 +661,7 @@ class TestGCSCredentialResolution:
         # atexit does not run on SIGKILL or an OOM kill, so a random filename
         # would leave one private key behind per hard-killed process. The name
         # is derived from the key, so a restart rewrites the same file.
-        from strata.artifact.blob_store import _resolve_gcs_credentials
+        from vestigo.blob_store import _resolve_gcs_credentials
 
         key = '{"type": "service_account", "private_key": "k"}'
 
@@ -682,7 +679,7 @@ class TestGCSCredentialResolution:
     def test_a_file_left_world_readable_is_tightened(self):
         # A leftover from a previous run, or a temp dir with a permissive
         # umask: the mode has to be fixed rather than assumed.
-        from strata.artifact.blob_store import _resolve_gcs_credentials
+        from vestigo.blob_store import _resolve_gcs_credentials
 
         key = '{"type": "service_account", "private_key": "loose"}'
         path = Path(_resolve_gcs_credentials(key))
@@ -693,7 +690,7 @@ class TestGCSCredentialResolution:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     def test_a_path_is_passed_through_untouched(self):
-        from strata.artifact.blob_store import _resolve_gcs_credentials
+        from vestigo.blob_store import _resolve_gcs_credentials
 
         assert _resolve_gcs_credentials("/etc/strata/gcs-key.json") == "/etc/strata/gcs-key.json"
 
@@ -701,7 +698,7 @@ class TestGCSCredentialResolution:
         # Parsed rather than sniffed for a leading brace, but a bare JSON
         # scalar still parses. A relative filename must not be mistaken for
         # key material just because json.loads accepts it.
-        from strata.artifact.blob_store import _resolve_gcs_credentials
+        from vestigo.blob_store import _resolve_gcs_credentials
 
         assert _resolve_gcs_credentials("123") == "123"
 
@@ -819,7 +816,7 @@ class TestAzureDownloadReader:
                 start += size
 
     def _raw(self):
-        from strata.artifact.blob_store import _AzureDownloadReader
+        from vestigo.blob_store import _AzureDownloadReader
 
         return _AzureDownloadReader(self.Downloader(self.DATA, self.CHUNK_SIZES))
 
@@ -876,7 +873,7 @@ class TestAzureBlobStore:
     def test_azure_key_format_with_prefix(self):
         """The Azure key includes the prefix."""
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         # A fake connection string: key generation needs no real connection.
         store = AzureBlobStore(
@@ -892,7 +889,7 @@ class TestAzureBlobStore:
 
     def test_azure_key_format_without_prefix(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="testaccount",
@@ -907,7 +904,7 @@ class TestAzureBlobStore:
 
     def test_blob_key_format(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="testaccount",
@@ -923,7 +920,7 @@ class TestAzureBlobStore:
     def test_requires_auth_method(self):
         """The Azure store raises without an auth method."""
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         with pytest.raises(ValueError, match="requires one of"):
             AzureBlobStore(
@@ -936,7 +933,7 @@ class TestAzureBlobStore:
     def test_endpoint_url_is_the_host_and_the_account_is_its_first_path_segment(self):
         """The documented meaning of ``STRATA_AZURE_ENDPOINT_URL``, shared with the lake path."""
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="devstoreaccount1",
@@ -951,7 +948,7 @@ class TestAzureBlobStore:
 
     def test_endpoint_url_already_naming_the_account_is_not_doubled(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="devstoreaccount1",
@@ -965,7 +962,7 @@ class TestAzureBlobStore:
 
     def test_endpoint_url_without_an_account_name_is_used_as_given(self):
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         store = AzureBlobStore(
             account_name="",
@@ -989,7 +986,7 @@ class TestAzureBlobStore:
         import os
 
         pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
+        from vestigo.blob_store import AzureBlobStore
 
         connection_string = os.environ.get("STRATA_AZURE_CONNECTION_STRING")
         if not connection_string:
@@ -1007,314 +1004,6 @@ class TestAzureBlobStore:
         result = store.read_blob("artifact-1", 1)
 
         assert result == data
-
-
-class TestCreateBlobStore:
-    def test_creates_local_store_by_default(self, tmp_path: Path, monkeypatch):
-        monkeypatch.delenv("STRATA_ARTIFACT_BLOB_BACKEND", raising=False)
-        monkeypatch.delenv("STRATA_ARTIFACT_S3_BUCKET", raising=False)
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-        )
-
-        store = create_blob_store(config)
-
-        assert isinstance(store, LocalBlobStore)
-
-    def test_creates_s3_store_from_env(self, tmp_path: Path, monkeypatch):
-        pytest.importorskip("moto")
-        import boto3
-        from moto import mock_aws
-
-        with mock_aws():
-            conn = boto3.client("s3", region_name="us-east-1")
-            conn.create_bucket(Bucket="my-bucket")
-
-            monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "s3")
-            monkeypatch.setenv("STRATA_ARTIFACT_S3_BUCKET", "my-bucket")
-            monkeypatch.setenv("STRATA_ARTIFACT_S3_PREFIX", "custom-prefix")
-
-            config = StrataConfig(
-                deployment_mode="personal",
-                artifact_dir=tmp_path / "artifacts",
-                s3_region="us-east-1",
-            )
-
-            store = create_blob_store(config)
-
-            assert isinstance(store, S3BlobStore)
-            assert store.bucket == "my-bucket"
-            assert store.prefix == "custom-prefix"
-
-    def test_raises_without_s3_bucket(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "s3")
-        monkeypatch.delenv("STRATA_ARTIFACT_S3_BUCKET", raising=False)
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-        )
-
-        with pytest.raises(ValueError, match="S3 blob backend requires"):
-            create_blob_store(config)
-
-    def test_raises_without_artifact_dir(self, monkeypatch):
-        monkeypatch.delenv("STRATA_ARTIFACT_BLOB_BACKEND", raising=False)
-
-        config = StrataConfig(
-            deployment_mode="service",
-            auth_mode="trusted_proxy",
-            proxy_token="test-token",
-            artifact_dir=None,
-        )
-
-        with pytest.raises(ValueError, match="requires artifact_dir"):
-            create_blob_store(config)
-
-    def test_creates_gcs_store_from_env(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "gcs")
-        monkeypatch.setenv("STRATA_ARTIFACT_GCS_BUCKET", "my-gcs-bucket")
-        monkeypatch.setenv("STRATA_ARTIFACT_GCS_PREFIX", "custom-prefix")
-        monkeypatch.setenv("STRATA_GCS_ANONYMOUS", "true")
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            gcs_anonymous=True,
-        )
-
-        store = create_blob_store(config)
-
-        assert isinstance(store, GCSBlobStore)
-        assert store.bucket == "my-gcs-bucket"
-        assert store.prefix == "custom-prefix"
-
-    def test_raises_without_gcs_bucket(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "gcs")
-        monkeypatch.delenv("STRATA_ARTIFACT_GCS_BUCKET", raising=False)
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-        )
-
-        with pytest.raises(ValueError, match="GCS blob backend requires"):
-            create_blob_store(config)
-
-    def test_creates_azure_store_from_env(self, tmp_path: Path, monkeypatch):
-        pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
-
-        monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "azure")
-        monkeypatch.setenv("STRATA_ARTIFACT_AZURE_CONTAINER", "my-container")
-        monkeypatch.setenv("STRATA_ARTIFACT_AZURE_PREFIX", "custom-prefix")
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            azure_connection_string="DefaultEndpointsProtocol=https;AccountName=test;AccountKey=dGVzdA==;EndpointSuffix=core.windows.net",
-        )
-
-        store = create_blob_store(config)
-
-        assert isinstance(store, AzureBlobStore)
-        assert store.container_name == "my-container"
-        assert store.prefix == "custom-prefix"
-
-    def test_raises_without_azure_container(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "azure")
-        monkeypatch.delenv("STRATA_ARTIFACT_AZURE_CONTAINER", raising=False)
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-        )
-
-        with pytest.raises(ValueError, match="Azure blob backend requires"):
-            create_blob_store(config)
-
-
-class TestConfigCreateBlobStore:
-    def test_creates_local_store(self, tmp_path: Path):
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_blob_backend="local",
-        )
-
-        store = config.create_blob_store()
-
-        assert isinstance(store, LocalBlobStore)
-
-    def test_creates_s3_store(self, tmp_path: Path):
-        pytest.importorskip("moto")
-        import boto3
-        from moto import mock_aws
-
-        with mock_aws():
-            conn = boto3.client("s3", region_name="us-east-1")
-            conn.create_bucket(Bucket="my-bucket")
-
-            config = StrataConfig(
-                deployment_mode="personal",
-                artifact_dir=tmp_path / "artifacts",
-                artifact_blob_backend="s3",
-                artifact_s3_bucket="my-bucket",
-                artifact_s3_prefix="my-prefix",
-                s3_region="us-east-1",
-            )
-
-            store = config.create_blob_store()
-
-            assert isinstance(store, S3BlobStore)
-            assert store.bucket == "my-bucket"
-            assert store.prefix == "my-prefix"
-
-    def test_raises_without_s3_bucket(self, tmp_path: Path):
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_blob_backend="s3",
-            artifact_s3_bucket=None,
-        )
-
-        with pytest.raises(ValueError, match="requires artifact_s3_bucket"):
-            config.create_blob_store()
-
-    def test_creates_gcs_store(self, tmp_path: Path):
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_blob_backend="gcs",
-            artifact_gcs_bucket="my-gcs-bucket",
-            artifact_gcs_prefix="my-prefix",
-            gcs_anonymous=True,
-        )
-
-        store = config.create_blob_store()
-
-        assert isinstance(store, GCSBlobStore)
-        assert store.bucket == "my-gcs-bucket"
-        assert store.prefix == "my-prefix"
-
-    def test_raises_without_gcs_bucket(self, tmp_path: Path):
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_blob_backend="gcs",
-            artifact_gcs_bucket=None,
-        )
-
-        with pytest.raises(ValueError, match="requires artifact_gcs_bucket"):
-            config.create_blob_store()
-
-    def test_creates_azure_store(self, tmp_path: Path):
-        pytest.importorskip("azure.storage.blob")
-        from strata.artifact.blob_store import AzureBlobStore
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_blob_backend="azure",
-            artifact_azure_container="my-container",
-            artifact_azure_prefix="my-prefix",
-            azure_connection_string="DefaultEndpointsProtocol=https;AccountName=test;AccountKey=dGVzdA==;EndpointSuffix=core.windows.net",
-        )
-
-        store = config.create_blob_store()
-
-        assert isinstance(store, AzureBlobStore)
-        assert store.container_name == "my-container"
-        assert store.prefix == "my-prefix"
-
-    def test_raises_without_azure_container(self, tmp_path: Path):
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_blob_backend="azure",
-            artifact_azure_container=None,
-        )
-
-        with pytest.raises(ValueError, match="requires artifact_azure_container"):
-            config.create_blob_store()
-
-
-class TestConfiguredBackendIsActuallyWired:
-    """The configured blob backend must reach the artifact store.
-
-    ``ArtifactStore`` falls back to ``LocalBlobStore`` when ``blob_store`` is omitted, so an unwired
-    ``STRATA_ARTIFACT_BLOB_BACKEND=s3`` silently writes to local disk.
-    """
-
-    def _init(self, config):
-        from strata.artifact.store import reset_artifact_store
-        from strata.server import _init_configured_artifact_store
-
-        reset_artifact_store()
-        try:
-            _init_configured_artifact_store(config)
-            from strata.artifact.store import get_artifact_store
-
-            return get_artifact_store(config.artifact_dir)
-        finally:
-            pass
-
-    def test_s3_backend_reaches_the_artifact_store(self, tmp_path: Path):
-        pytest.importorskip("moto")
-        import boto3
-        from moto import mock_aws
-
-        from strata.artifact.store import reset_artifact_store
-
-        with mock_aws():
-            boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="wired-bucket")
-            config = StrataConfig(
-                deployment_mode="personal",
-                artifact_dir=tmp_path / "artifacts",
-                artifact_blob_backend="s3",
-                artifact_s3_bucket="wired-bucket",
-                s3_region="us-east-1",
-            )
-            try:
-                store = self._init(config)
-                assert isinstance(store.blob_store, S3BlobStore)
-                assert store.blob_store.bucket == "wired-bucket"
-            finally:
-                reset_artifact_store()
-
-    def test_local_backend_is_unchanged(self, tmp_path: Path):
-        from strata.artifact.store import reset_artifact_store
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-        )
-        assert config.artifact_blob_backend == "local"
-        try:
-            store = self._init(config)
-            assert isinstance(store.blob_store, LocalBlobStore)
-        finally:
-            reset_artifact_store()
-
-    def test_misconfigured_backend_raises_rather_than_degrading(self, tmp_path: Path):
-        """Falling back to local disk hid the misconfiguration and lost artifacts with the pod, so
-        startup fails instead.
-        """
-        from strata.artifact.store import reset_artifact_store
-
-        config = StrataConfig(
-            deployment_mode="personal",
-            artifact_dir=tmp_path / "artifacts",
-            artifact_blob_backend="s3",
-            artifact_s3_bucket=None,
-        )
-        try:
-            with pytest.raises(ValueError, match="requires artifact_s3_bucket"):
-                self._init(config)
-        finally:
-            reset_artifact_store()
 
 
 class TestBackendFailuresAreVisible:

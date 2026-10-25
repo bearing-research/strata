@@ -1,6 +1,6 @@
-"""Unit tests for the pure artifact/name URI parsers in ``strata.artifact.uris``."""
+"""Unit tests for the pure artifact/name URI parsers in ``vestigo.uris``."""
 
-from strata.artifact.uris import (
+from vestigo.uris import (
     LATEST_VERSION,
     parse_artifact_uri,
     parse_name_uri,

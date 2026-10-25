@@ -4,13 +4,12 @@ import time
 import uuid
 
 import pytest
-
-from strata.transforms.build_store import (
+from conftest import seed_build_targets
+from vestigo.build_store import (
     BuildStore,
     get_build_store,
     reset_build_store,
 )
-from tests.conftest import seed_build_targets
 
 
 @pytest.fixture

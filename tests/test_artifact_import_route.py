@@ -78,7 +78,7 @@ class TestIdempotencyByCompleteness:
     """A record already here but missing something is completed, not skipped."""
 
     def test_a_row_whose_bytes_are_missing_is_repaired(self, client, served_dir):
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         _post(client, _metadata("fig", 1, "d" * 64), blob=b"payload")
         store = ArtifactStore(served_dir)
@@ -94,7 +94,7 @@ class TestIdempotencyByCompleteness:
         """The team cache writes results with no inputs and usually gets there first, so promotion
         must fill in their lineage.
         """
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         _post(client, _metadata("rows", 1, "e" * 64))  # as the cache would write it
 
@@ -106,7 +106,7 @@ class TestIdempotencyByCompleteness:
 
     def test_existing_lineage_is_never_rewritten(self, client, served_dir):
         """An import may add history. It may not revise it."""
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         original = json.dumps({"strata://artifact/first@v=1": "first@v=1"})
         _post(client, _metadata("rows", 1, "f" * 64, input_versions=original))
@@ -130,7 +130,7 @@ class TestAnIdTwoComputationsClaim:
     """
 
     def test_a_different_computation_under_a_held_id_is_refused(self, client, served_dir):
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         assert _post(client, _metadata("shared", 1, "a" * 64), blob=b"ALICE").status_code == 200
 
@@ -143,7 +143,7 @@ class TestAnIdTwoComputationsClaim:
 
     def test_remap_lands_it_under_a_fresh_id(self, client, served_dir):
         """Keep both, as for the tenant clash."""
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         _post(client, _metadata("shared", 1, "a" * 64), blob=b"ALICE")
 
@@ -204,7 +204,7 @@ class TestIntegrity:
     )
     def test_a_field_of_the_wrong_shape_is_refused(self, client, served_dir, field):
         """Stored unchecked, a string ``byte_size`` broke every later sweep with a TypeError."""
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         response = _post(client, _metadata("fig", 1, "k" * 64, **field))
 
@@ -212,7 +212,7 @@ class TestIntegrity:
         assert ArtifactStore(served_dir).get_artifact("fig", 1) is None
 
     def test_well_formed_fields_are_kept(self, client, served_dir):
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         edges = json.dumps({"strata://artifact/a@v=1": "a@v=1"})
         metadata = _metadata(
@@ -240,8 +240,9 @@ class TestPublishTo:
     ):
         import argparse
 
+        from vestigo.store import ArtifactStore
+
         from strata.artifact.cli import cmd_publish
-        from strata.artifact.store import ArtifactStore
         from strata.notebook.artifact_integration import NotebookArtifactManager
         from strata.services.artifact import ArtifactService
 

@@ -6,6 +6,7 @@ dependency yields a store while the registry write path is refused.
 
 import pytest
 from fastapi import HTTPException
+from vestigo.store import reset_artifact_store
 
 from strata import server
 from strata.api.dependencies import (
@@ -16,7 +17,6 @@ from strata.api.dependencies import (
     require_build_transport_store,
     runtime_build_store,
 )
-from strata.artifact.store import reset_artifact_store
 from strata.auth.principal import principal_context
 from strata.config import StrataConfig
 from strata.server import ServerState
@@ -148,7 +148,7 @@ class TestArtifactInputTenantGate:
     """
 
     def _seed(self, tmp_path, *, tenant):
-        from strata.artifact.store import get_artifact_store
+        from vestigo.store import get_artifact_store
 
         artifact_dir = tmp_path / "artifacts"
         artifact_dir.mkdir(exist_ok=True)
@@ -212,8 +212,8 @@ class TestArtifactListPaginationIsBounded:
     def test_superseded_is_a_state_the_listing_filters_by(self, tmp_path):
         """Callers are handed superseded versions, so they can list them."""
         from fastapi.testclient import TestClient
+        from vestigo.store import ArtifactStore
 
-        from strata.artifact.store import ArtifactStore
         from strata.server import app
 
         _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
@@ -235,8 +235,8 @@ class TestArtifactListPaginationIsBounded:
     def test_stats_and_usage_count_superseded_versions(self, tmp_path):
         """The Artifacts page shows the superseded count beside the other states."""
         from fastapi.testclient import TestClient
+        from vestigo.store import ArtifactStore
 
-        from strata.artifact.store import ArtifactStore
         from strata.server import app
 
         _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))

@@ -184,7 +184,7 @@ def test_a_copy_taken_during_the_hold_verifies_against_its_own_digests(client, t
     ).fetchall()
     conn.close()
     assert rows, "the cell's run should have stored something to verify"
-    from strata.artifact.store import ArtifactStore
+    from vestigo.store import ArtifactStore
 
     store = ArtifactStore(artifacts)
     for artifact_id, version, digest in rows:

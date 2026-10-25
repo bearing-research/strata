@@ -8,7 +8,7 @@ It works on any cell; the cascade planner only previews what will run.
 This is deliberately a separate pipeline from Core's ``materialize`` SDK
 (``POST /v1/materialize``): cells are in-process, multi-output and
 source-as-transform. The two share only the artifact store
-(``find_by_provenance`` / ``put``) and ``notebook.provenance.derive_subkey``.
+(``find_by_provenance`` / ``put``) and ``vestigo.provenance.derive_subkey``.
 """
 
 from __future__ import annotations
@@ -33,14 +33,16 @@ from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 import anyio.to_thread
 import httpx
 from pydantic import ValidationError
-
-from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
-from strata.artifact.provenance import TransformSpec as ArtifactTransformSpec
+from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
+from vestigo.build_store import get_build_store
+from vestigo.provenance import TransformSpec as ArtifactTransformSpec
+from vestigo.provenance import derive_subkey
 
 # Stdlib json, not orjson: executor.py is imported via ``strata.config`` and must load
 # with core deps only (orjson is in the ``[notebook]`` extra, absent from the Docker
 # image). Batch frames are small dicts.
-from strata.artifact.store import ArtifactVersion, StagedVersion, get_artifact_store
+from vestigo.store import ArtifactVersion, StagedVersion, get_artifact_store
+
 from strata.notebook import console_relay, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
@@ -101,7 +103,6 @@ from strata.notebook.process_tree import (
 from strata.notebook.provenance import (
     compute_provenance_hash,
     compute_source_hash,
-    derive_subkey,
     safe_filename_stem,
 )
 from strata.notebook.quiesce import NotebookQuiesced
@@ -150,7 +151,6 @@ from strata.notebook.workers import (
 )
 from strata.notebook.writer import drop_blanked_secrets
 from strata.observability.tracing import current_trace_context, trace_span
-from strata.transforms.build_store import get_build_store
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 if TYPE_CHECKING:

@@ -322,10 +322,11 @@ class TestReadinessProbesTheArtifactStore:
 
     @pytest.fixture
     def ready(self, tmp_path, monkeypatch):
+        from vestigo import store as artifact_store_module
+        from vestigo.store import ArtifactStore
+
         import strata.server as server_module
         from strata.api.routers import metrics_health
-        from strata.artifact import store as artifact_store_module
-        from strata.artifact.store import ArtifactStore
         from strata.config import StrataConfig
         from strata.server import ServerState
 

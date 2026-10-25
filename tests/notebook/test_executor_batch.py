@@ -573,7 +573,7 @@ async def test_an_edit_during_a_batch_does_not_rename_what_ran(tmp_path: Path):
     assert ran.provenance_hash != as_edited.provenance_hash, "the two sources must differ"
     # Each consumed variable is keyed off the cell's hash, so that is where
     # "which source does this output claim to be" actually shows up.
-    from strata.notebook.provenance import derive_subkey
+    from vestigo.provenance import derive_subkey
 
     store = session.artifact_manager.artifact_store
     assert store.find_by_provenance(derive_subkey(as_edited.provenance_hash, "y")) is None, (

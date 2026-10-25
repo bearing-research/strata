@@ -10,10 +10,10 @@ import pyarrow.ipc as ipc
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from vestigo.store import ArtifactStore
 
 from strata.api.dependencies import current_principal, read_store
 from strata.api.routers.registry import router
-from strata.artifact.store import ArtifactStore
 from strata.types import Principal
 
 

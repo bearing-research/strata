@@ -13,14 +13,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from fastapi.testclient import TestClient
-
-from strata.artifact.blob_store import S3BlobStore
+from vestigo.blob_store import S3BlobStore
 
 
 @pytest.fixture
 def client(tmp_path):
+    from vestigo.store import reset_artifact_store
+
     import strata.server as server_module
-    from strata.artifact.store import reset_artifact_store
     from strata.config import StrataConfig
     from strata.server import ServerState, app
 

@@ -22,7 +22,8 @@ if not _docker_daemon_reachable():
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 
-from strata.artifact.blob_store import AzureBlobStore  # noqa: E402
+from vestigo.blob_store import AzureBlobStore  # noqa: E402
+
 from strata.config import StrataConfig  # noqa: E402
 from tests.conftest import make_azurite, start_container_or_skip  # noqa: E402
 from tests.presign_helpers import run_presigned_job  # noqa: E402

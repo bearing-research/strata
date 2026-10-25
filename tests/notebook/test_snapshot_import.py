@@ -98,7 +98,7 @@ class TestATakenId:
         assert after["rows"] == after["total"] == "ready"
 
     def test_no_artifact_in_the_copy_still_names_the_old_id(self, ran, tmp_path):
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         bundle = _export(ran, tmp_path / "snap.zip")
         source_id = parse_notebook(ran).id
@@ -114,7 +114,8 @@ class TestATakenId:
 
     def test_lineage_resolves_inside_the_copy(self, ran, tmp_path):
         """An edge still naming the old id would resolve to nothing in the imported store."""
-        from strata.artifact.store import ArtifactStore
+        from vestigo.store import ArtifactStore
+
         from strata.services.artifact import ArtifactService
 
         bundle = _export(ran, tmp_path / "snap.zip")

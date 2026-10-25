@@ -160,12 +160,15 @@ def _reset_process_globals():
             streams.shutdown_cleanups()
 
     server_module._state = None
-    from strata.artifact.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
+
     from strata.cache.metadata import reset_caches
+    from strata.notebook.worker_store import reset_notebook_worker_store
     from strata.rate_limiter import reset_rate_limiter
     from strata.tenancy.registry import reset_tenant_registry
 
     reset_artifact_store()
+    reset_notebook_worker_store()
     reset_tenant_registry()
     # The metadata store is a process global and a no-arg ``get_metadata_store()``
     # returns the installed one, so a test's store would leak into later callers
@@ -244,7 +247,8 @@ def _reset_transform_singletons() -> None:
     The build store singleton caches its first db_path, so a later server's builds would land
     in the first server's database and sit in pending.
     """
-    from strata.transforms.build_store import reset_build_store
+    from vestigo.build_store import reset_build_store
+
     from strata.transforms.runner import reset_build_runner
 
     reset_build_store()
@@ -332,8 +336,9 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     ``reset_caches`` resets the global metadata caches first. Raises RuntimeError if the
     server does not answer /health within 20 seconds.
     """
+    from vestigo.store import reset_artifact_store
+
     import strata.server as server_module
-    from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
 
     if reset_caches:
@@ -406,8 +411,9 @@ def run_server_with_context(
     Unlike ``run_server`` it supports ``artifact_dir`` and resets the artifact store on
     cleanup. Raises RuntimeError if the server fails to start.
     """
+    from vestigo.store import reset_artifact_store
+
     from strata import server
-    from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
 
     port = find_free_port()
@@ -607,7 +613,7 @@ def seed_build_targets(
     creates the version first. Opening the artifact store also creates ``artifact_versions``
     in the shared database, without which the key cannot resolve.
     """
-    from strata.artifact.store import ArtifactStore
+    from vestigo.store import ArtifactStore
 
     store = ArtifactStore(artifact_dir)
     try:
@@ -618,51 +624,6 @@ def seed_build_targets(
                 store.finalize_artifact(artifact_id, created, "{}", 1, 4)
     finally:
         store.close()
-
-
-def race_after_pending_read(store, competitor, first, second) -> tuple[object, object]:
-    """Run ``first(store)``, landing ``second(competitor)`` right after it reads the pending row.
-
-    ``competitor`` is a second store whose connections do not wait for a lock. One that finds it
-    held runs ``second`` again once ``first`` is done, as a second process waiting on it would.
-    Returns each call's result, or the ``ValueError`` it raised.
-    """
-    outcomes: dict[str, object] = {}
-    state = {"read": False, "locked": False}
-
-    def call(key, fn, target):
-        try:
-            outcomes[key] = fn(target)
-        except ValueError as exc:
-            outcomes[key] = exc
-
-    class Interleaved:
-        def __init__(self, inner):
-            self._inner = inner
-
-        def __getattr__(self, attr):
-            return getattr(self._inner, attr)
-
-        def execute(self, sql, params=()):
-            if state["read"] and not state["locked"] and "second" not in outcomes:
-                try:
-                    call("second", second, competitor)
-                except competitor.dialect.operational_error:
-                    state["locked"] = True
-            cursor = self._inner.execute(sql, params)
-            if "FROM registry_pending" in sql:
-                state["read"] = True
-            return cursor
-
-    connect = store._get_connection
-    store._get_connection = lambda: Interleaved(connect())
-    try:
-        call("first", first, store)
-    finally:
-        store._get_connection = connect
-    if state["locked"]:
-        call("second", second, competitor)
-    return outcomes["first"], outcomes["second"]
 
 
 def hold(monkeypatch, obj, method: str, *, first_call_only: bool = False) -> SimpleNamespace:

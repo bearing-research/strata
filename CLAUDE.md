@@ -56,7 +56,8 @@ local, S3, GCS, Azure.
 
 ```bash
 uv sync --all-extras                      # install (matches CI)
-uv run pytest                             # all tests
+uv run pytest                             # all Strata tests (tests/)
+uv run pytest packages/vestigo/tests      # the ledger's own suite
 uv run pytest tests/test_smoke.py -v      # one file
 uv run pre-commit run --all-files         # format + lint
 uv run ty check                           # type check (Astral); scoped to shipped code (src + strata-client)
@@ -145,7 +146,7 @@ Artifacts deduplicate by provenance hash, chain into DAG pipelines, and carry
 human-readable name pointers. SQLite metadata + pluggable blob backends
 (`LocalBlobStore`, `S3BlobStore`, `GCSBlobStore`, `AzureBlobStore`). Configure
 via `STRATA_ARTIFACT_BLOB_BACKEND` plus backend-specific env vars (see
-`artifact/blob_store.py`, `config.py`).
+`vestigo/blob_store.py` under `packages/vestigo`, `config.py`).
 
 Two executor protocols:
 - **v1 push**: Strata POSTs multipart (`metadata` + `inputN`) to executor;
@@ -170,8 +171,13 @@ Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`, `iceberg/` (`c
 `schema` evolution, position `deletes`, `equality` deletes, `lake_files`).
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
-Artifact / build: `artifact/` (`store`, `provenance` transform spec and hash,
-`blob_store`, `transfer`, `uris`, `table_export`, `cli`), `transforms/`.
+Ledger (`packages/vestigo/src/vestigo/`, ADR 002): `store`,
+`build_store`, `sql_backend`, `blob_store`, `provenance` (transform spec, hash,
+`derive_subkey`), `uris`, `file_modes`, `tables`. Strata's side: `artifact/`
+(`transfer`, `table_export`, `cli`), `transforms/`, `migrate.py`,
+`notebook/worker_store.py` (the worker registry's own tables). The ledger's
+tests live in `packages/vestigo/tests/` (no `strata` imports there);
+`tests/` keeps the ones that reach into Strata.
 Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
 `api_key_cli`, `run_tokens` for a cell run's own token), `tenancy/` (`tenant`
 config and context, `registry`).
@@ -300,7 +306,7 @@ deliberately do not share the entry point, only the artifact-store substrate.
 | Inputs            | List of table / artifact URIs          | Upstream cell variables (resolved via DAG) |
 | Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out, one artifact per consumed variable via `derive_subkey` |
 | Execution         | Server dispatches to registered HTTP executors (v1-push / v2-pull) or built-in scan planner | Local subprocess harness in notebook venv, or HTTP executor |
-| Shared substrate  | `artifact_store.find_by_provenance` / `put` / `set_name`; `notebook.provenance.derive_subkey` (used by both for sub-artifact keys) |
+| Shared substrate  | `artifact_store.find_by_provenance` / `put` / `set_name`; `vestigo.provenance.derive_subkey` (used by both for sub-artifact keys) |
 
 Trying to force one through the other warps either core's transform contract
 (to encode source + env + multi-output) or imposes HTTP latency on every

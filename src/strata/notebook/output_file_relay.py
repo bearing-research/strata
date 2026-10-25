@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from strata.file_modes import private_dir
+from vestigo.file_modes import private_dir
+
 from strata.notebook import output_dirs
 
 

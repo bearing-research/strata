@@ -164,6 +164,30 @@ jobs:
           STRATA_POOL_POSTGRES_DSN: postgresql://pool:pool@localhost:5432/pool
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
+  # vestigo's own suite lives in packages/vestigo/tests so the package can
+  # leave the repository with its tests. Until ADR 002 E2 closes the ledger's
+  # lazy imports of Strata (GC roots, IPC validation, blob settings) it runs
+  # in the workspace environment, not an isolated one like the client's.
+  vestigo-tests:
+    name: vestigo tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          python-version: "3.12"
+          version: "latest"
+          save-cache: false
+
+      - name: Install the workspace
+        run: uv sync --all-extras
+
+      - name: Run vestigo tests
+        run: uv run pytest packages/vestigo/tests -v
+
   # ty exits non-zero on errors; the unresolved-import warnings configured for
   # guarded optional deps (torch/jax) do not fail the build.
   type-check:
@@ -214,7 +238,7 @@ jobs:
         --ignore=tests/test_presigned_urls_minio.py
         --ignore=tests/test_presigned_urls_azurite.py
         --ignore=tests/test_lake_catalogs_integration.py
-        --ignore=tests/test_artifact_store_postgres.py
+        --ignore=tests/test_postgres_store_strata.py
         --ignore=tests/test_migrate_to_postgres.py
         --ignore=tests/notebook/test_e2e_mounts_s3.py
         --ignore=tests/notebook/test_e2e_mounts_azure.py
@@ -229,7 +253,7 @@ jobs:
         --ignore=tests/test_presigned_urls_minio.py
         --ignore=tests/test_presigned_urls_azurite.py
         --ignore=tests/test_lake_catalogs_integration.py
-        --ignore=tests/test_artifact_store_postgres.py
+        --ignore=tests/test_postgres_store_strata.py
         --ignore=tests/test_migrate_to_postgres.py
         --ignore=tests/notebook
         -n auto --dist loadscope --tb=short
@@ -269,7 +293,7 @@ jobs:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -280,7 +304,7 @@ jobs:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()
@@ -350,7 +374,7 @@ jobs:
           key-prefix: diffcone-e2e
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -361,7 +385,7 @@ jobs:
           key-prefix: diffcone-e2e
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()
@@ -455,7 +479,7 @@ jobs:
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
           env-vars: R_VERSION
-          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -466,7 +490,7 @@ jobs:
           key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()

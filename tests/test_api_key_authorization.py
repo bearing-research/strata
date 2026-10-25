@@ -78,7 +78,8 @@ class TestTenantIsolation:
         from strata.server import app
 
         with TestClient(app) as client:
-            from strata.artifact.store import get_artifact_store
+            from vestigo.store import get_artifact_store
+
             from strata.auth.api_keys import get_api_key_store
 
             keys = get_api_key_store()

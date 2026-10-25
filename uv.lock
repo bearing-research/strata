@@ -18,6 +18,7 @@ members = [
     "strata-client",
     "strata-notebook",
     "strata-pool",
+    "vestigo",
 ]
 
 [[package]]
@@ -4016,6 +4017,7 @@ dependencies = [
     { name = "starlette" },
     { name = "tomli-w" },
     { name = "uvicorn" },
+    { name = "vestigo" },
     { name = "websockets" },
 ]
 
@@ -4167,6 +4169,7 @@ requires-dist = [
     { name = "textual-image", marker = "extra == 'tui'", specifier = ">=0.14.0" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
+    { name = "vestigo", editable = "packages/vestigo" },
     { name = "websockets", specifier = ">=17.1" },
 ]
 provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp"]
@@ -4421,6 +4424,60 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e7/44/8126f9f0c44319b2efc65feaad589cadef4d77ece200ae3c9133d58464d0/verspec-0.1.0.tar.gz", hash = "sha256:c4504ca697b2056cdb4bfa7121461f5a0e81809255b41c03dda4ba823637c01e", size = 27123, upload-time = "2020-11-30T02:24:09.646Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a4/ce/3b6fee91c85626eaf769d617f1be9d2e15c1cca027bbdeb2e0d751469355/verspec-0.1.0-py3-none-any.whl", hash = "sha256:741877d5633cc9464c45a469ae2a31e801e6dbbaa85b9675d481cda100f11c31", size = 19640, upload-time = "2020-11-30T02:24:08.387Z" },
+]
+
+[[package]]
+name = "vestigo"
+version = "0.11.0"
+source = { editable = "packages/vestigo" }
+dependencies = [
+    { name = "pyarrow" },
+]
+
+[package.optional-dependencies]
+azure = [
+    { name = "azure-identity" },
+    { name = "azure-storage-blob" },
+]
+gcs = [
+    { name = "google-cloud-storage" },
+]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
+]
+s3 = [
+    { name = "botocore" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "docker" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-timeout" },
+    { name = "testcontainers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
+    { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
+    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
+    { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
+    { name = "psycopg-pool", marker = "extra == 'postgres'", specifier = ">=3.2" },
+    { name = "pyarrow", specifier = ">=18.0.0" },
+]
+provides-extras = ["postgres", "s3", "gcs", "azure"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "docker", specifier = ">=7.0.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+    { name = "pytest-timeout", specifier = ">=2.3.0" },
+    { name = "testcontainers", specifier = ">=4.15.0" },
 ]
 
 [[package]]

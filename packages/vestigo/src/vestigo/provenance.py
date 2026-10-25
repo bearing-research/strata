@@ -79,3 +79,14 @@ def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSp
     hasher.update(transform_spec.canonical_json.encode("utf-8"))
 
     return hasher.hexdigest()
+
+
+def derive_subkey(parent_hash: str, *labels: str) -> str:
+    """Derive ``sha256("parent_hash:label1:label2:...")`` from a provenance hash.
+
+    Namespaces one computation's outputs: per variable, per display, per iteration
+    and, under ADR 002 §7.1, per build and release. The byte format is wire-stable:
+    changing it invalidates every cached artifact keyed off a derived hash.
+    """
+    pieces = [parent_hash, *labels]
+    return hashlib.sha256(":".join(pieces).encode()).hexdigest()

@@ -3,19 +3,18 @@
 import json
 
 import pytest
-
-from strata.artifact.provenance import (
+from conftest import race_after_pending_read
+from vestigo.provenance import (
     TransformSpec,
     compute_provenance_hash,
     parse_transform_spec,
 )
-from strata.artifact.store import (
+from vestigo.store import (
     ArtifactNotFoundError,
     ArtifactStore,
     ArtifactVersion,
     reset_artifact_store,
 )
-from tests.conftest import race_after_pending_read
 
 
 @pytest.fixture
@@ -418,7 +417,7 @@ class TestCleanup:
 
     def test_cleanup_failed_takes_a_failed_build_row_with_it(self, store):
         """A server build that failed leaves a build row, whose foreign key refused the delete."""
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         builds = BuildStore(store.db_path, dialect=store.dialect)
         version = store.create_artifact("built", "hash-built")
@@ -563,7 +562,7 @@ class TestForeignKeyEnforcement:
         assert store.get_artifact("art-1", 1) is not None
 
     def test_delete_artifact_takes_the_build_row_with_it(self, tmp_path, store):
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         builds = BuildStore(store.db_path)
         self._ready(store, "art-1", "prov-a")
@@ -575,7 +574,7 @@ class TestForeignKeyEnforcement:
         assert builds.get_build("build-1") is None
 
     def test_garbage_collect_takes_build_rows_with_it(self, tmp_path, store):
-        from strata.transforms.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         builds = BuildStore(store.db_path)
         self._ready(store, "art-1", "prov-a")
@@ -690,7 +689,7 @@ class TestVersionPromotion:
     def test_promotion_copies_a_blob_larger_than_one_stream_chunk(self, store):
         # The copy is streamed rather than read into memory; a payload spanning
         # several chunks is what tells a chunk-boundary bug from a working one.
-        from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         payload = bytes(range(256)) * ((BLOB_STREAM_CHUNK_BYTES * 2) // 256 + 3)
         self._ready(store, "art-1", "prov-a", payload)
@@ -718,7 +717,7 @@ class TestVersionPromotion:
 
     def test_promotion_keeps_its_own_bytes_when_another_id_holds_the_provenance(self, store):
         """A non-deterministic cell's twin holds other bytes; the reverted cell gets its own."""
-        from strata.artifact.store import StagedVersion
+        from vestigo.store import StagedVersion
 
         self._ready(store, "art-1", "prov-a", b"mine-bytes")
         self._ready(store, "art-1", "prov-b", b"second")
@@ -939,59 +938,6 @@ class TestVerifyArtifacts:
         findings = store.verify_artifacts()
         assert len(findings) == 1
         assert findings[0]["problem"] == "missing_blob"
-
-
-class TestArtifactVerifyCli:
-    """`strata artifact verify` surfaces store inconsistencies."""
-
-    def _run(self, artifact_dir, fmt="human"):
-        import argparse
-
-        from strata.artifact.cli import cmd_verify
-
-        args = argparse.Namespace(artifact_dir=str(artifact_dir), format=fmt)
-        return cmd_verify(args)
-
-    def test_clean_store_exits_zero(self, store, artifact_dir, capsys):
-        store.create_artifact("good", "prov-g")
-        store.write_blob("good", 1, _ipc_bytes(5))
-        store.finalize_artifact("good", 1, "{}", 5, 100)
-
-        assert self._run(artifact_dir) == 0
-        assert "consistent" in capsys.readouterr().out
-
-    def test_problems_exit_one_with_json(self, store, artifact_dir, capsys):
-        store.create_artifact("bad", "prov-b")
-        store.write_blob("bad", 1, _ipc_bytes(3) + _ipc_bytes(3))
-        store.finalize_artifact("bad", 1, "{}", 6, 100)
-
-        assert self._run(artifact_dir, fmt="json") == 1
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["findings"][0]["problem"] == "invalid_stream"
-
-    def test_missing_dir_exits_two(self, tmp_path):
-        assert self._run(tmp_path / "nope") == 2
-
-    def test_it_names_the_metadata_and_blobs_it_checks(self, store, artifact_dir, capsys):
-        assert self._run(artifact_dir) == 0
-        out = capsys.readouterr().out
-        assert f"metadata {store.db_path}" in out
-        assert f"blobs {store.blob_store.blobs_dir}" in out
-
-    def test_a_remote_store_is_named_by_its_dsn_and_bucket(self, tmp_path):
-        """The artifact dir is not what a Postgres + S3 store verifies."""
-        from strata.artifact.blob_store import S3BlobStore
-        from strata.artifact.cli import _store_location
-        from strata.sql_backend import PostgresDialect
-
-        remote = ArtifactStore.__new__(ArtifactStore)
-        remote._dialect = PostgresDialect("postgresql://strata:s3cret@db:5432/strata")
-        remote.blob_store = S3BlobStore("lake", prefix="artifacts", region="us-east-1")
-
-        metadata, blobs = _store_location(remote)
-
-        assert metadata == "postgresql://strata:***@db:5432/strata"
-        assert blobs == "s3://lake/artifacts"
 
 
 class TestLegacyDefaultTenantNames:
@@ -1628,7 +1574,7 @@ class TestTenantNormalization:
     @staticmethod
     def _staged_over_a_ready_equal(store, provenance):
         """``canonical`` staged with the provenance ``equiv`` already holds ready, in team-a."""
-        from strata.artifact.store import StagedVersion
+        from vestigo.store import StagedVersion
 
         store.create_artifact("equiv", provenance, tenant="team-a")
         store.write_blob("equiv", 1, b"x" * 10)
@@ -1954,7 +1900,7 @@ class TestAnIdTwoComputationsClaim:
 
     @staticmethod
     def _record(provenance: str):
-        from strata.artifact.store import ArtifactVersion
+        from vestigo.store import ArtifactVersion
 
         return ArtifactVersion(
             id="nb_shared_cell_c1_var_rows",
@@ -1983,7 +1929,7 @@ class TestAnIdTwoComputationsClaim:
         """Keeping the existing row would leave the caller's name, tags and descendants on someone
         else's bytes.
         """
-        from strata.artifact.store import ArtifactImportConflict
+        from vestigo.store import ArtifactImportConflict
 
         store.import_artifact(self._record("a" * 64), b"ALICE")
 
@@ -2001,7 +1947,7 @@ class TestAnIdIsHeldByOneTenant:
 
     @pytest.mark.parametrize("holder,caller", [("team-b", "team-a"), ("team-b", None), (None, "a")])
     def test_create_refuses_an_id_another_tenant_holds(self, store, holder, caller):
-        from strata.artifact.store import ArtifactIdTaken
+        from vestigo.store import ArtifactIdTaken
 
         store.create_artifact("nb_x", "a" * 64, tenant=holder)
 
@@ -2019,7 +1965,7 @@ class TestAnIdIsHeldByOneTenant:
     @pytest.mark.parametrize("version", [1, 2])
     def test_import_refuses_an_id_another_tenant_holds(self, store, version):
         """Version 1 is the same computation, which used to resolve onto the other tenant's row."""
-        from strata.artifact.store import ArtifactImportConflict, ArtifactVersion
+        from vestigo.store import ArtifactImportConflict, ArtifactVersion
 
         held = store.create_artifact("nb_x", "a" * 64, tenant="team-b")
         store.write_blob("nb_x", held, b"TEAMB")
@@ -2061,7 +2007,7 @@ class TestTwoIdsOneComputation:
     def _both_finalized(self, store):
         import hashlib
 
-        from strata.artifact.store import StagedVersion
+        from vestigo.store import StagedVersion
 
         _make_ready_artifact(store, self.A, "same-prov")
         vb = store.create_artifact(self.B, "same-prov")
@@ -2103,7 +2049,7 @@ class TestFinalizeTogether:
 
     @staticmethod
     def _staged(store, artifact_id: str, provenance: str):
-        from strata.artifact.store import StagedVersion
+        from vestigo.store import StagedVersion
 
         version = store.create_artifact(artifact_id, provenance)
         store.write_blob(artifact_id, version, b"x")

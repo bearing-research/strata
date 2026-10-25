@@ -18,9 +18,10 @@ import os
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from vestigo.provenance import derive_subkey
+
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
-from strata.notebook.provenance import derive_subkey
 from strata.notebook.serializer import (
     _META_SHAPE,
     _SHAPE_SCALAR,

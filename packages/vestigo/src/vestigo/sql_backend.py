@@ -1,6 +1,6 @@
 """SQL dialect seam for the artifact store: SQLite (personal mode) or Postgres.
 
-What differs between the two lives here, so ``artifact/store.py`` keeps one
+What differs between the two lives here, so ``store.py`` keeps one
 copy of its SQL: placeholder style (``?`` vs ``%s``), autoincrement, numeric
 widths (Postgres ``REAL`` is single precision and ``INTEGER`` 32-bit, which
 would truncate timestamps and overflow ``byte_size`` at 2 GiB), writer
@@ -579,3 +579,26 @@ class PostgresDialect:
         the caller resolves by catching :attr:`integrity_error`.
         """
         conn.execute("SELECT pg_advisory_xact_lock(?)", (advisory_lock_id(key),))
+
+
+def create_tables(dialect: SqlDialect, table: str, ddl: str) -> None:
+    """Create a consumer's own tables beside the ledger's, once per database.
+
+    ``table`` is the one whose presence means ``ddl`` already ran. CREATE TABLE IF NOT
+    EXISTS races in Postgres when every node runs this at startup, so creation is
+    serialized under a lock keyed on the table, then skipped.
+    """
+    conn = dialect.connect()
+    try:
+        if not dialect.supports_legacy_migration:
+            if not dialect.schema_exists(conn, table):
+                dialect.begin_write(conn, f"__{table}_schema__")
+                # Another node may have created it while this one waited for the lock.
+                if not dialect.schema_exists(conn, table):
+                    conn.executescript(dialect.adapt_ddl(ddl))
+                conn.commit()
+            return
+        conn.executescript(dialect.adapt_ddl(ddl))
+        conn.commit()
+    finally:
+        conn.close()

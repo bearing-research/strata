@@ -2,10 +2,11 @@
 
 import hashlib
 
+from vestigo.provenance import derive_subkey
+
 from strata.notebook.provenance import (
     compute_provenance_hash,
     compute_source_hash,
-    derive_subkey,
 )
 
 

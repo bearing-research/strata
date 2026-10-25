@@ -125,7 +125,8 @@ Suggested fix order, cheapest and safest first: 6, 8, 3, 12 (docs), 1,
 Each item says what to prove, where, and how to start. "Lead" marks a
 suspicion from reading code that hasn't been confirmed.
 
-1. **Artifact store, non-atomic steps (lead).** `ArtifactLifecycle.tla`
+1. **Artifact store, non-atomic steps (lead).** `ArtifactLifecycle.tla` (in
+   `packages/vestigo/formal/tla/` since ADR 002)
    treats each store method as one atomic step, which the code doesn't
    guarantee:
    - `finalize_artifact` calls `begin_write` on neither backend. It reads

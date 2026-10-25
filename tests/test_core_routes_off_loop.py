@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from vestigo.store import get_artifact_store
 
-from strata.artifact.store import get_artifact_store
 from tests.conftest import hold, ran_while_held
 
 
@@ -77,19 +77,20 @@ async def test_a_revoked_key_is_refused_after_the_offload(serve, tmp_path):
 def workers_app(serve, tmp_path):
     """A personal server whose worker registry holds one local worker, ``gpu``."""
     from strata.notebook.models import WorkerSpec
+    from strata.notebook.worker_store import get_notebook_worker_store
     from strata.notebook.workers import ManagedWorkerRecord, replace_server_managed_worker_records
 
     app = serve(deployment_mode="personal")
-    store = get_artifact_store(tmp_path / "artifacts")
+    get_artifact_store(tmp_path / "artifacts")
     replace_server_managed_worker_records([ManagedWorkerRecord(worker=WorkerSpec(name="gpu"))])
-    return SimpleNamespace(app=app, store=store)
+    return SimpleNamespace(app=app, store=get_notebook_worker_store())
 
 
 @pytest.mark.parametrize(
     ("gated", "method", "path", "kwargs", "check"),
     [
         pytest.param(
-            "notebook_worker_entries",
+            "entries",
             "GET",
             "/v1/admin/notebook-workers",
             {},
@@ -97,7 +98,7 @@ def workers_app(serve, tmp_path):
             id="list",
         ),
         pytest.param(
-            "update_notebook_workers",
+            "update",
             "PATCH",
             "/v1/admin/notebook-workers/gpu",
             {"json": {"enabled": False}},
@@ -105,7 +106,7 @@ def workers_app(serve, tmp_path):
             id="patch",
         ),
         pytest.param(
-            "update_notebook_workers",
+            "update",
             "DELETE",
             "/v1/admin/notebook-workers/gpu",
             {},
@@ -113,7 +114,7 @@ def workers_app(serve, tmp_path):
             id="delete",
         ),
         pytest.param(
-            "notebook_worker_entries",
+            "entries",
             "POST",
             "/v1/admin/notebook-workers/reload",
             {},

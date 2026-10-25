@@ -24,10 +24,10 @@ from typing import BinaryIO
 
 import anyio
 import httpx
+from vestigo.provenance import derive_subkey
 
 from strata.notebook import output_dirs
 from strata.notebook.artifact_integration import NotebookArtifactManager
-from strata.notebook.provenance import derive_subkey
 from strata.observability.logging import get_logger
 from strata.types import PROVENANCE_MISS_HEADER
 

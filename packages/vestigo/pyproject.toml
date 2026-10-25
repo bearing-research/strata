@@ -1,0 +1,70 @@
+[project]
+name = "vestigo"
+version = "0.11.0"
+description = "The ledger of the shared computation substrate: versioned artifacts, builds and their leases, references, retention, on SQLite or PostgreSQL."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+# A copy of the repository root LICENSE: build backends only take files inside the project.
+license-files = ["LICENSE"]
+authors = [{ name = "Fangchen Li", email = "fangchen.li@outlook.com" }]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+# Metadata is stdlib sqlite3, or PostgreSQL via the extra below. Blobs read and
+# write through pyarrow's filesystems; each cloud's SDK is an extra of its backend.
+dependencies = [
+    "pyarrow>=18.0.0",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
+]
+s3 = [
+    "botocore>=1.35.0",
+]
+gcs = [
+    "google-cloud-storage>=3.0.0",
+]
+azure = [
+    "azure-storage-blob>=12.20.0",
+    "azure-identity>=1.25.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/bearing-research/strata"
+Repository = "https://github.com/bearing-research/strata"
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-timeout>=2.3.0",
+    # The Postgres suite starts a container.
+    "testcontainers>=4.15.0",
+    "docker>=7.0.0",
+]
+
+# pytest stops at the first pyproject.toml with a pytest section, so
+# `pytest packages/vestigo/tests` reads its settings from here.
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 180
+timeout_method = "thread"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests requiring external services",
+]

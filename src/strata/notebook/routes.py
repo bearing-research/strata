@@ -22,8 +22,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from vestigo.file_modes import PASS_THROUGH_DIR, private_dir
 
-from strata.file_modes import PASS_THROUGH_DIR, private_dir
 from strata.notebook import prewarm
 from strata.notebook.authorship import MAX_AUTHOR_LENGTH, resolve_author
 from strata.notebook.dependencies import (

@@ -20,11 +20,11 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.artifact.provenance import TransformSpec, parse_transform_spec
-from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
+from vestigo.provenance import TransformSpec, parse_transform_spec
+from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
-    from strata.artifact.blob_store import BlobStore
+    from vestigo.blob_store import BlobStore
 
 logger = logging.getLogger(__name__)
 
@@ -539,9 +539,10 @@ def _add_superseded_by(conn: StoreConnection, dialect: SqlDialect) -> None:
         conn.execute("ALTER TABLE artifact_versions ADD COLUMN superseded_by TEXT")
 
 
-def _add_notebook_workers(conn: StoreConnection, dialect: SqlDialect) -> None:
-    """Move the server-managed notebook worker registry into the store, from a per-node file."""
-    conn.executescript(dialect.adapt_ddl(_NOTEBOOK_WORKERS_SCHEMA_SQL))
+def _notebook_workers_moved(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Migration 9 once created the notebook worker tables. They are Strata's own now
+    (``strata.notebook.worker_store`` creates them); the number stays so every database's
+    ``schema_version`` row keeps its meaning."""
 
 
 # At most one live link per version, so one revocation withdraws it. Partial, because revoked rows
@@ -648,7 +649,7 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(6, "artifact_versions.last_used_at + minted", _add_use_and_minted),
     _Migration(7, "artifact_versions.superseded_by", _add_superseded_by),
     _Migration(8, "artifact_publications.token hashed", _hash_publication_tokens),
-    _Migration(9, "notebook_workers", _add_notebook_workers),
+    _Migration(9, "notebook_workers (now strata.notebook.worker_store)", _notebook_workers_moved),
     _Migration(10, "artifact_publications: one active per version", _one_active_publication),
     _Migration(11, "fail embedded builds that bound inputs out of order", _fail_misbound_builds),
 ]
@@ -841,23 +842,6 @@ CREATE TABLE IF NOT EXISTS import_staging (
 );
 """
 
-# The server-managed notebook worker registry, shared by every node on this database: one row per
-# worker, in catalogue order. The single registry row records that it has been set, after which the
-# configured ``notebook_workers`` table no longer applies, so an emptied registry stays empty.
-_NOTEBOOK_WORKERS_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS notebook_workers (
-    name TEXT PRIMARY KEY,
-    ordinal INTEGER NOT NULL,
-    spec TEXT NOT NULL,  -- JSON: the WorkerSpec plus "enabled"
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS notebook_worker_registry (
-    id INTEGER PRIMARY KEY,  -- always 1
-    updated_at REAL NOT NULL
-);
-"""
-
 # Legacy migration: tenant columns for existing tables.
 _MIGRATION_SQL = """
 -- Add tenant and principal columns to artifact_versions if they don't exist
@@ -910,7 +894,7 @@ class ArtifactStore:
             StoreSchemaMismatch: the schema is newer than this release, or, with
                 ``read_only``, older or missing.
         """
-        from strata.file_modes import narrow, private_dir, private_file
+        from vestigo.file_modes import narrow, private_dir, private_file
 
         self.artifact_dir = artifact_dir
         self.db_path = artifact_dir / "artifacts.sqlite"
@@ -918,14 +902,14 @@ class ArtifactStore:
         private_dir(artifact_dir)
 
         if blob_store is None:
-            from strata.artifact.blob_store import LocalBlobStore
+            from vestigo.blob_store import LocalBlobStore
 
             self.blobs_dir = artifact_dir / "blobs"
             self.blob_store: BlobStore = LocalBlobStore(self.blobs_dir)
         else:
             self.blob_store = blob_store
             # Back-compat attribute, set for the local store only.
-            from strata.artifact.blob_store import LocalBlobStore
+            from vestigo.blob_store import LocalBlobStore
 
             if isinstance(blob_store, LocalBlobStore):
                 self.blobs_dir = blob_store.blobs_dir
@@ -1005,7 +989,6 @@ class ArtifactStore:
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_PUBLICATION_SCHEMA_SQL))
                 conn.execute(_ACTIVE_PUBLICATION_INDEX_SQL)
-                conn.executescript(self._dialect.adapt_ddl(_NOTEBOOK_WORKERS_SCHEMA_SQL))
                 # Created from the constants, which are the latest shape, so it
                 # is already current and must not replay migrations that would
                 # add what it was born with.
@@ -1123,7 +1106,6 @@ class ArtifactStore:
                 # Born current, so migration 10 will not add it. An existing database may
                 # hold duplicate active rows, which that migration revokes first.
                 conn.execute(_ACTIVE_PUBLICATION_INDEX_SQL)
-            conn.executescript(_NOTEBOOK_WORKERS_SCHEMA_SQL)
             cursor = conn.execute("PRAGMA table_info(registry_audit)")
             audit_columns = {row["name"] for row in cursor.fetchall()}
             if "from_artifact_id" not in audit_columns:
@@ -1690,7 +1672,7 @@ class ArtifactStore:
         # Streamed, not read_blob/write_blob: an artifact can be a multi-GB frame, and pulling it
         # through process memory (a full download and re-upload on object stores) to re-point a
         # pointer would cost more than the run this avoids.
-        from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         copied = 0
         with (
@@ -1745,7 +1727,7 @@ class ArtifactStore:
             raise ValueError(
                 f"{artifact_id}@v={version} reads {row['superseded_by']}, whose blob is gone"
             )
-        from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         with reader_cm as src, self.blob_store.open_blob_writer(artifact_id, version) as dst:
             while chunk := src.read(BLOB_STREAM_CHUNK_BYTES):
@@ -4519,77 +4501,6 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
-        finally:
-            conn.close()
-
-    def notebook_worker_entries(self) -> list[dict[str, Any]] | None:
-        """The server-managed notebook worker registry in order, or ``None`` if never set.
-
-        ``None`` means the configured table applies; ``[]`` means every worker was removed.
-        """
-        conn = self._get_connection()
-        try:
-            return self._notebook_worker_entries(conn)
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _notebook_worker_entries(conn: StoreConnection) -> list[dict[str, Any]] | None:
-        if conn.execute("SELECT 1 FROM notebook_worker_registry WHERE id = 1").fetchone() is None:
-            return None
-        rows = conn.execute("SELECT spec FROM notebook_workers ORDER BY ordinal").fetchall()
-        return [json.loads(row["spec"]) for row in rows]
-
-    def update_notebook_workers(
-        self,
-        change: Callable[[list[dict[str, Any]] | None], list[dict[str, Any]] | None],
-    ) -> list[dict[str, Any]] | None:
-        """Rewrite the notebook worker registry as ``change(current)`` returns it, atomically.
-
-        ``change`` gets the current entries (``None`` if never set) and returns the new
-        list in order, or ``None`` to leave it alone; anything it raises rolls back. Held
-        under a write lock so two nodes editing at once cannot lose either change. Rows
-        are keyed by ``name``, and an unchanged one keeps its ``updated_at``.
-        """
-        conn = self._get_connection()
-        try:
-            self._dialect.begin_write(conn, "__notebook_workers__")
-            stored = {
-                row["name"]: (row["ordinal"], row["spec"])
-                for row in conn.execute("SELECT name, ordinal, spec FROM notebook_workers")
-            }
-            entries = change(self._notebook_worker_entries(conn))
-            if entries is None:
-                conn.rollback()
-                return None
-            now = time.time()
-            for name in stored.keys() - {entry["name"] for entry in entries}:
-                conn.execute("DELETE FROM notebook_workers WHERE name = ?", (name,))
-            for ordinal, entry in enumerate(entries):
-                spec = json.dumps(entry, sort_keys=True)
-                previous = stored.get(entry["name"])
-                if previous is None:
-                    conn.execute(
-                        "INSERT INTO notebook_workers "
-                        "(name, ordinal, spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                        (entry["name"], ordinal, spec, now, now),
-                    )
-                elif previous != (ordinal, spec):
-                    conn.execute(
-                        "UPDATE notebook_workers SET ordinal = ?, spec = ?, updated_at = ? "
-                        "WHERE name = ?",
-                        (ordinal, spec, now, entry["name"]),
-                    )
-            conn.execute(
-                "INSERT INTO notebook_worker_registry (id, updated_at) VALUES (1, ?) "
-                "ON CONFLICT (id) DO UPDATE SET updated_at = excluded.updated_at",
-                (now,),
-            )
-            conn.commit()
-            return entries
-        except BaseException:
-            conn.rollback()
-            raise
         finally:
             conn.close()
 

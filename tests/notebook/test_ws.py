@@ -876,8 +876,8 @@ def registry_worker(tmp_path, monkeypatch):
     the start (``mark_cell_running``) and result frame of each cell run.
     """
 
-    from strata.artifact.store import get_artifact_store
     from strata.notebook.models import WorkerBackendType, WorkerSpec
+    from strata.notebook.worker_store import get_notebook_worker_store
     from strata.notebook.workers import ManagedWorkerRecord, replace_server_managed_worker_records
     from tests.conftest import run_server_with_context
 
@@ -892,14 +892,14 @@ def registry_worker(tmp_path, monkeypatch):
 
         log: list[tuple[str, bool]] = []
         loop_threads: set[int] = set()
-        store = get_artifact_store()
-        real_entries = store.notebook_worker_entries
+        store = get_notebook_worker_store()
+        real_entries = store.entries
 
         def _recording_entries():
             log.append(("read", threading.get_ident() in loop_threads))
             return real_entries()
 
-        monkeypatch.setattr(store, "notebook_worker_entries", _recording_entries)
+        monkeypatch.setattr(store, "entries", _recording_entries)
         yield log, loop_threads
 
 

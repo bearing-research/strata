@@ -17,9 +17,9 @@ import anyio.to_thread
 import pyarrow as pa
 import pytest
 from httpx import ASGITransport, AsyncClient
+from vestigo.provenance import TransformSpec
+from vestigo.store import get_artifact_store
 
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import get_artifact_store
 from tests.conftest import hold, ran_while_held, table_to_ipc_bytes
 
 ARROW = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
@@ -45,8 +45,9 @@ def _on_loop_recorder(monkeypatch, obj, method: str) -> list[bool]:
 @pytest.fixture
 def served(in_process_server):
     """An in-process personal server with the build runtime's stores."""
+    from vestigo.build_store import get_build_store
+
     import strata.server as server_module
-    from strata.transforms.build_store import get_build_store
     from strata.transforms.registry import (
         TransformDefinition,
         TransformRegistry,
