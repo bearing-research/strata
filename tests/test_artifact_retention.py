@@ -331,7 +331,7 @@ class TestWhatIsCollected:
             if meanwhile == "hit":
                 store.find_by_provenance(provenance)
             elif meanwhile == "pin":
-                store.pin_artifact(*key, "review")
+                store.retain(*key, kind="pin", holder="review")
             else:
                 store.set_name("model", *key)
                 store.set_alias("model", "champion", *key)
@@ -430,7 +430,7 @@ class TestCollectable:
         key = _ready(store, "nb_x_cell_c_var___file__aa")
         _last_used(store, key, DAY)
         if hold == "pin":
-            store.pin_artifact(*key, "review")
+            store.retain(*key, kind="pin", holder="review")
         elif hold == "name":
             store.set_name("ckpt", *key)
         elif hold == "recent use":
@@ -438,7 +438,7 @@ class TestCollectable:
         else:
             ref = f"{key[0]}@v={key[1]}"
             reader = _ready(store, "nb_x_cell_d_var_out", inputs={f"strata://artifact/{ref}": ref})
-            store.pin_artifact(*reader, "review")
+            store.retain(*reader, kind="pin", holder="review")
 
         result = store.garbage_collect(collectable=[key], min_idle_seconds=3600)
 
@@ -475,6 +475,7 @@ def _stored(
     size: int,
     tenant: str | None = None,
     content_type: str = "application/octet-stream",
+    requires: list[tuple[str, int]] = (),
 ) -> tuple[str, int]:
     version = store.create_artifact(
         artifact_id,
@@ -484,6 +485,7 @@ def _stored(
         ),
         tenant=tenant,
         minted=not artifact_id.startswith("nb_"),
+        requires=requires,
     )
     store.write_blob(artifact_id, version, blob)
     store.finalize_artifact(artifact_id, version, "", None, size)
@@ -498,7 +500,8 @@ def _team_folder(
     foreign: tuple[str, int] | None = None,
     manifest_id: str | None = None,
 ) -> tuple[tuple[str, int], list[tuple[str, int]]]:
-    """A folder as the team cache stores one: minted ids, each entry naming its file's id.
+    """A folder as the team cache stores one: minted ids, each entry naming its file's id,
+    and the manifest declaring the files it requires, as Strata does when it stores one.
 
     Files are 100 bytes and the manifest 10; *foreign* is one more file to name.
     """
@@ -518,6 +521,7 @@ def _team_folder(
         size=10,
         tenant=tenant,
         content_type="dir/manifest",
+        requires=named,
     )
     return key, stored
 
@@ -639,7 +643,8 @@ class TestFolders:
         assert all(_exists(store, key) for key in (manifest, *files))
 
     def test_a_folder_beside_its_manifest_keeps_its_files(self, store):
-        """A notebook's folder names its files by the manifest's own id, not by an ``id``."""
+        """A notebook's folder names its files by the manifest's own id, not by an ``id``;
+        what it requires is declared the same way."""
         manifest_id = "nb_x_cell_c1_var_out"
         files = [
             _stored(store, f"nb_x_cell_c1_var___file__{i:064x}", b"f", size=100) for i in range(2)
@@ -653,6 +658,7 @@ class TestFolders:
             json.dumps({"cell_id": "c1", "files": entries}).encode(),
             size=10,
             content_type="dir/manifest",
+            requires=files,
         )
         _last_used(store, manifest, DAY)
         for key in files:
@@ -662,10 +668,10 @@ class TestFolders:
 
         assert all(_exists(store, key) for key in (manifest, *files))
 
-    def test_an_unreadable_manifest_neither_stops_the_sweep_nor_keeps_a_file(self, store, caplog):
-        """An import can store any bytes under the folder type; a reader of one gets no folder."""
+    def test_a_manifest_that_declared_nothing_keeps_nothing(self, store):
+        """What a folder holds is what its writer declared, never what its bytes say: an
+        import can store any bytes under the folder type, and declares nothing for them."""
         idle = _ready(store)
-        # An entry without its digest names a file no reader would take.
         half = {"cell_id": "c1", "files": {"a.bin": {"id": idle[0], "version": idle[1]}}}
         bad = [
             _stored(store, str(uuid.uuid4()), blob, size=10, content_type="dir/manifest")
@@ -679,7 +685,6 @@ class TestFolders:
 
         assert not _exists(store, idle)
         assert all(_exists(store, key) for key in bad)
-        assert "not a readable folder manifest" in caplog.text
 
     def test_a_folder_used_mid_sweep_keeps_its_files(self, store, monkeypatch):
         """A pull reads the manifest after the sweep chose the folder: the manifest's row stays,
@@ -1215,7 +1220,7 @@ class TestWhatAKeptResultNeeds:
         """Pinning the version a duplicate build overtook pins the canonical's blob, the only
         bytes it has."""
         canonical, overtaken = self._overtaken(store)
-        store.pin_artifact(*overtaken, "review")
+        store.retain(*overtaken, kind="pin", holder="review")
 
         store.garbage_collect(max_idle_days=30)
 
@@ -1250,7 +1255,7 @@ class TestWhatAKeptResultNeeds:
 
         def pinned_after_choosing(self, conn, chosen, candidates):
             chosen = choose(self, conn, chosen, candidates)
-            store.pin_artifact(*overtaken, "review")
+            store.retain(*overtaken, kind="pin", holder="review")
             return chosen
 
         monkeypatch.setattr(ArtifactStore, "_with_their_pointers", pinned_after_choosing)

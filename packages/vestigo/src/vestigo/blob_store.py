@@ -17,6 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Buffer, Callable, Generator, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
@@ -28,8 +29,6 @@ if TYPE_CHECKING:
 
     from azure.storage.blob import StorageStreamDownloader
 
-    from strata.config import StrataConfig
-
 BLOB_STREAM_CHUNK_BYTES = 64 * 1024
 """Default read/write chunk size for blob streaming callers.
 
@@ -40,6 +39,31 @@ the blob-store streams without extra copying.
 
 
 OBJECT_STORE_OPERATIONS = ("put", "get", "head", "list", "delete")
+
+
+@dataclass(frozen=True)
+class BlobSettings:
+    """Credentials and endpoints for the object-store backends, built by the application.
+
+    Every field is optional: a backend reads only its own, and ``None`` means the
+    provider's own defaults (ambient credentials, the public endpoint).
+    """
+
+    s3_region: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_anonymous: bool = False
+    gcs_default_bucket_location: str | None = None
+    gcs_credentials_json: str | None = None
+    gcs_anonymous: bool = False
+    gcs_endpoint_override: str | None = None
+    azure_account_name: str | None = None
+    azure_account_key: str | None = None
+    azure_connection_string: str | None = None
+    azure_sas_token: str | None = None
+    azure_use_default_credential: bool = False
+    azure_endpoint_url: str | None = None
 
 
 class ObjectStoreErrors:
@@ -617,18 +641,18 @@ class S3BlobStore(BlobStore):
             return False
 
     @classmethod
-    def from_config(
-        cls, config: StrataConfig, bucket: str, prefix: str = "artifacts"
+    def from_settings(
+        cls, settings: BlobSettings, bucket: str, prefix: str = "artifacts"
     ) -> S3BlobStore:
-        """Create an S3BlobStore from Strata configuration's S3 settings."""
+        """An S3BlobStore on the ``s3_*`` fields of *settings*."""
         return cls(
             bucket=bucket,
             prefix=prefix,
-            region=config.s3_region,
-            endpoint_url=config.s3_endpoint_url,
-            access_key=config.s3_access_key,
-            secret_key=config.s3_secret_key,
-            anonymous=config.s3_anonymous,
+            region=settings.s3_region,
+            endpoint_url=settings.s3_endpoint_url,
+            access_key=settings.s3_access_key,
+            secret_key=settings.s3_secret_key,
+            anonymous=settings.s3_anonymous,
         )
 
 
@@ -885,17 +909,17 @@ class GCSBlobStore(BlobStore):
             return False
 
     @classmethod
-    def from_config(
-        cls, config: StrataConfig, bucket: str, prefix: str = "artifacts"
+    def from_settings(
+        cls, settings: BlobSettings, bucket: str, prefix: str = "artifacts"
     ) -> GCSBlobStore:
-        """Create a GCSBlobStore from Strata configuration's GCS settings."""
+        """A GCSBlobStore on the ``gcs_*`` fields of *settings*."""
         return cls(
             bucket=bucket,
             prefix=prefix,
-            default_bucket_location=config.gcs_default_bucket_location,
-            credentials_json=config.gcs_credentials_json,
-            anonymous=config.gcs_anonymous,
-            endpoint_override=config.gcs_endpoint_override,
+            default_bucket_location=settings.gcs_default_bucket_location,
+            credentials_json=settings.gcs_credentials_json,
+            anonymous=settings.gcs_anonymous,
+            endpoint_override=settings.gcs_endpoint_override,
         )
 
 
@@ -1158,67 +1182,17 @@ class AzureBlobStore(BlobStore):
             return False
 
     @classmethod
-    def from_config(
-        cls, config: StrataConfig, container_name: str, prefix: str = "artifacts"
+    def from_settings(
+        cls, settings: BlobSettings, container_name: str, prefix: str = "artifacts"
     ) -> AzureBlobStore:
-        """Create an AzureBlobStore from Strata configuration's Azure settings."""
+        """An AzureBlobStore on the ``azure_*`` fields of *settings*."""
         return cls(
-            account_name=config.azure_account_name or "",
+            account_name=settings.azure_account_name or "",
             container_name=container_name,
             prefix=prefix,
-            account_key=config.azure_account_key,
-            connection_string=config.azure_connection_string,
-            sas_token=config.azure_sas_token,
-            use_default_credential=config.azure_use_default_credential,
-            endpoint_url=config.azure_endpoint_url,
+            account_key=settings.azure_account_key,
+            connection_string=settings.azure_connection_string,
+            sas_token=settings.azure_sas_token,
+            use_default_credential=settings.azure_use_default_credential,
+            endpoint_url=settings.azure_endpoint_url,
         )
-
-
-def create_blob_store(config: StrataConfig) -> BlobStore:
-    """Create a blob store from the ``STRATA_ARTIFACT_*`` environment variables only.
-
-    .. warning::
-
-       ``config``'s own backend fields are ignored (it supplies credentials only),
-       so a backend set in ``pyproject.toml`` silently falls back to local disk.
-       The server uses :meth:`StrataConfig.create_blob_store` instead; prefer it.
-
-    Reads ``STRATA_ARTIFACT_BLOB_BACKEND`` (``local``, ``s3``, ``gcs``, ``azure``)
-    and the matching ``*_BUCKET``/``*_CONTAINER`` and ``*_PREFIX`` variables.
-
-    Raises:
-        ValueError: If required configuration is missing.
-    """
-    backend = os.environ.get("STRATA_ARTIFACT_BLOB_BACKEND", "local").lower()
-
-    if backend == "s3":
-        bucket = os.environ.get("STRATA_ARTIFACT_S3_BUCKET")
-        if not bucket:
-            raise ValueError(
-                "S3 blob backend requires STRATA_ARTIFACT_S3_BUCKET environment variable"
-            )
-        prefix = os.environ.get("STRATA_ARTIFACT_S3_PREFIX", "artifacts")
-        return S3BlobStore.from_config(config, bucket=bucket, prefix=prefix)
-
-    if backend == "gcs":
-        bucket = os.environ.get("STRATA_ARTIFACT_GCS_BUCKET")
-        if not bucket:
-            raise ValueError(
-                "GCS blob backend requires STRATA_ARTIFACT_GCS_BUCKET environment variable"
-            )
-        prefix = os.environ.get("STRATA_ARTIFACT_GCS_PREFIX", "artifacts")
-        return GCSBlobStore.from_config(config, bucket=bucket, prefix=prefix)
-
-    if backend == "azure":
-        container = os.environ.get("STRATA_ARTIFACT_AZURE_CONTAINER")
-        if not container:
-            raise ValueError(
-                "Azure blob backend requires STRATA_ARTIFACT_AZURE_CONTAINER environment variable"
-            )
-        prefix = os.environ.get("STRATA_ARTIFACT_AZURE_PREFIX", "artifacts")
-        return AzureBlobStore.from_config(config, container_name=container, prefix=prefix)
-
-    if config.artifact_dir is None:
-        raise ValueError("Local blob store requires artifact_dir in configuration")
-    blobs_dir = config.artifact_dir / "blobs"
-    return LocalBlobStore(blobs_dir)

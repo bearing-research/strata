@@ -38,6 +38,7 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `../packages/vestigo/formal/tla/Artifact_GCRebuild.cfg` | One id with GC on. Finds finding 1 |
 | `../packages/vestigo/formal/tla/Artifact_CrossIdDedup.cfg` | Two ids sharing a provenance, GC off. Finds finding 2 |
 | `../packages/vestigo/formal/tla/Artifact_Patched.cfg` | Both ids, GC on, with the proposed fix. **All invariants hold** (5,997,420 distinct states, exhaustive, about 2 min) |
+| `../packages/vestigo/formal/tla/Artifact_Retention.cfg` | Both ids, GC on, patched, with retention roots and required edges (ADR 002 E2, `MaxVer = 2`). **All invariants and `HeldIsKept` hold** (3,597,345 distinct states, exhaustive, about 4 min) |
 | `../packages/vestigo/formal/tla/BuildLease.tla` | Model of one build and its lease: `BuildRunner` claim / reclaim / heartbeat / publish / finalize / complete / fail, and the v2 pull routes (manifest, upload, finalize) |
 | `../packages/vestigo/formal/tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
 | `../packages/vestigo/formal/tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
@@ -65,6 +66,7 @@ TLC="java -cp $PWD/tla2tools.jar tlc2.TLC -deadlock -workers auto"
 $TLC -config Artifact_GCRebuild.cfg    ArtifactLifecycle.tla   # violation
 $TLC -config Artifact_CrossIdDedup.cfg ArtifactLifecycle.tla   # violation
 $TLC -config Artifact_Patched.cfg      ArtifactLifecycle.tla   # passes
+$TLC -config Artifact_Retention.cfg    ArtifactLifecycle.tla   # passes
 $TLC -config Build_RunnerPath.cfg      BuildLease.tla          # violation
 $TLC -config Build_PullPath.cfg        BuildLease.tla          # violation
 $TLC -config Build_Patched.cfg         BuildLease.tla          # passes
@@ -709,6 +711,8 @@ A model helps only while it matches the code. Suggested practice:
 - Run the `*_Patched.cfg` configs in CI once the fixes land.
   `Artifact_Patched` takes about 2 minutes. With `MaxVer = 2` it runs in
   about 2 seconds (27k states) and still catches findings 1 and 2.
+  `Artifact_Retention` takes about 4 minutes; `Retention = FALSE` in the
+  other configs keeps their state spaces as they were.
   `Build_Patched`, `Admission_Patched` and `Staleness_Patched` take a
   few seconds each.
 - Move each counterexample test into `tests/` with its assertion

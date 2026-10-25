@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from vestigo.provenance import TransformSpec
 from vestigo.store import ArtifactStore, StagedVersion
 
+from strata.artifact.retention import complete_upgrade, requirements
 from strata.auth.principal import get_principal
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
@@ -69,6 +70,7 @@ class NotebookArtifactManager:
         self.artifact_dir = artifact_dir
 
         self.artifact_store = ArtifactStore(artifact_dir)
+        complete_upgrade(self.artifact_store)
 
     def prune(self, keep_superseded: int, min_idle_seconds: float) -> dict:
         """Drop each cell output's values older than its newest *keep_superseded*.
@@ -287,6 +289,7 @@ class NotebookArtifactManager:
             transform_spec=transform_spec,
             input_versions=input_versions,
             principal=principal,
+            requires=requirements(artifact_id, content_type, blob_data),
         )
 
         self.artifact_store.blob_store.write_blob(artifact_id, version, blob_data)

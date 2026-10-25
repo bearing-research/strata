@@ -91,7 +91,8 @@ def target(postgres_dsn, tmp_path):
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_builds, api_keys, stream_owners, "
             "artifact_versions, artifact_names, artifact_aliases, artifact_tags, "
-            "registry_audit, registry_pending, artifact_publications, artifact_pins, "
+            "registry_audit, registry_pending, artifact_publications, retention_roots, "
+            "retention_edges, "
             "notebook_workers, notebook_worker_registry CASCADE;"
         )
         conn.commit()
@@ -153,7 +154,7 @@ class TestMigration:
     ):
         version = populated_sqlite.get_latest_version("a1").version
         link = populated_sqlite.publish_artifact("a1", version, title="paper figure")
-        populated_sqlite.pin_artifact("a1", version, "snapshot", pinned_by="ops")
+        populated_sqlite.retain("a1", version, kind="pin", holder="snapshot", created_by="ops")
         gpu = {"name": "gpu", "backend": "executor", "config": {"url": "http://gpu:9"}}
         _workers(populated_sqlite).update(lambda _current: [{**gpu, "enabled": True}])
 
@@ -167,7 +168,7 @@ class TestMigration:
         assert publication is not None
         assert (publication.artifact_id, publication.version) == ("a1", version)
         assert publication.title == "paper figure"
-        assert [(p["artifact_id"], p["reason"]) for p in migrated.list_pins()] == [
+        assert [(p["artifact_id"], p["holder"]) for p in migrated.retention_roots()] == [
             ("a1", "snapshot")
         ]
         # The registry row matters too: without it the configured table applies again.
@@ -263,7 +264,8 @@ class TestMigration:
             conn.executescript(
                 "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
                 "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
-                "registry_pending, artifact_publications, artifact_pins, "
+                "registry_pending, artifact_publications, retention_roots, retention_edges, "
+                "store_upgrades, "
                 "notebook_workers, notebook_worker_registry CASCADE;"
             )
             conn.commit()
@@ -290,7 +292,8 @@ class TestMigration:
             conn.executescript(
                 "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
                 "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
-                "registry_pending, artifact_publications, artifact_pins, "
+                "registry_pending, artifact_publications, retention_roots, retention_edges, "
+                "store_upgrades, "
                 "notebook_workers, notebook_worker_registry CASCADE;"
             )
             conn.commit()

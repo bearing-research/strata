@@ -28,7 +28,8 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     from strata.config import StrataConfig
 
     try:
-        target = StrataConfig(artifact_metadata_dsn=dsn).create_metadata_dialect()
+        config = StrataConfig(artifact_metadata_dsn=dsn)
+        target = config.create_metadata_dialect()
     except ValueError as exc:
         print(f"Refused: {exc}")
         return 1
@@ -67,7 +68,12 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         # source in place (columns, indexes, WAL), which --dry-run must not do.
         from vestigo.store import ArtifactStore
 
-        ArtifactStore(artifact_dir)
+        from strata.artifact.retention import complete_upgrade
+
+        # With the configured blob backend: the upgrade reads folder manifests, and
+        # a store whose bytes live on S3 names no files from the local directory.
+        blob_store = config.create_blob_store() if config.artifact_blob_backend != "local" else None
+        complete_upgrade(ArtifactStore(artifact_dir, blob_store=blob_store))
 
         result = migrate(source, target, allow_nonempty_target=args.allow_nonempty_target)
         print(f"Copied {result.total_copied} rows, skipped {result.total_skipped} already present.")

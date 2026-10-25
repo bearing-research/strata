@@ -232,10 +232,10 @@ class TestInACentralStore:
         other = ArtifactStore(artifact_dir)
         import_artifact = ArtifactStore.import_artifact
 
-        def team_a_lands_first(self, record, blob):
+        def team_a_lands_first(self, record, blob, requires=()):
             if record.id == "fig" and record.tenant == "team-b":
                 import_artifact(other, replace(record, tenant="team-a"), b"team-a's bytes")
-            return import_artifact(self, record, blob)
+            return import_artifact(self, record, blob, requires=requires)
 
         monkeypatch.setattr(ArtifactStore, "import_artifact", team_a_lands_first)
         _stage(base, headers=_headers("team-b"))

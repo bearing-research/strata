@@ -26,6 +26,7 @@ from urllib.parse import quote
 import httpx
 from vestigo.store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
 
+from strata.artifact.retention import requirements
 from strata.artifact.transfer import remap_input_versions
 from strata.notebook import output_dirs
 from strata.notebook.models import DatasetSpec
@@ -384,12 +385,13 @@ def _land(
 
 def _import(store: ArtifactStore, record: ArtifactVersion, blob: bytes | Path) -> str:
     """Import *record* with *blob*; return the ref it landed on."""
+    required = requirements(record.id, record.params.get("content_type"), blob)
     try:
-        return store.import_artifact(record, blob).ref
+        return store.import_artifact(record, blob, requires=required).ref
     except ArtifactImportConflict:
         # A clone of this notebook made the same id for other bytes.
         fresh = replace(record, id=f"{record.id}@import={uuid.uuid4().hex[:8]}")
-        return store.import_artifact(fresh, blob).ref
+        return store.import_artifact(fresh, blob, requires=required).ref
 
 
 def _land_folder_files(

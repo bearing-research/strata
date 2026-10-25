@@ -826,7 +826,7 @@ class TestRefreshSupersede:
         if hold == "publish":
             store.publish_artifact("art-2", 1)
         else:
-            store.pin_artifact("art-2", 1, "review")
+            store.retain("art-2", 1, kind="pin", holder="review")
 
         assert store.delete_artifact("art-1", 1)
 
@@ -846,7 +846,7 @@ class TestRefreshSupersede:
         if hold == "publish":
             store.publish_artifact("art-2", 1)
         else:
-            store.pin_artifact("art-2", 1, "review")
+            store.retain("art-2", 1, kind="pin", holder="review")
         store.blob_store.delete_blob("art-1", 1)
 
         with pytest.raises(ValueError, match="whose blob is gone"):

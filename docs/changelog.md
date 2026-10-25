@@ -11,6 +11,20 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **The ledger stands alone (ADR 002 E2).** `vestigo` imports nothing of
+  Strata: blob credentials arrive as `BlobSettings`, the Arrow validator
+  `verify_artifacts` runs is registered by Strata (`register_validator`), and
+  what a version holds or requires is recorded in two new tables.
+  `retention_roots` replaces `artifact_pins` (existing pins are converted by
+  schema migration 12 and the old table dropped; the pin routes are unchanged),
+  and `retention_edges` records what a version requires: an output folder's
+  manifest requires its files, declared when the manifest is stored and, for
+  folders stored before this release, when the upgraded store is first opened.
+  Garbage collection protects the closure of the roots over those edges
+  instead of reading manifests, and a folder whose files are gone reads as
+  missing (`requirements_met`). The package suite runs in CI in a venv with
+  only the ledger installed, and `ArtifactLifecycle.tla` models the roots and
+  edges (`Artifact_Retention.cfg`). (#1295)
 - **A strata-pool job names how long its machine stays warm.** `submit` and
   `POST /v1/jobs` take `hold_seconds`; the machine that runs the job keeps it
   as its cool-down until its next job, so a host can hold each tenant's

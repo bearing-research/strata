@@ -12,7 +12,7 @@ import hashlib
 import json
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -24,6 +24,8 @@ from vestigo.store import (
     ImportedArtifact,
     Publication,
 )
+
+from strata.artifact.retention import requirements
 
 if TYPE_CHECKING:
     from strata.types import ArtifactLineageResponse, LineageNode
@@ -62,7 +64,10 @@ class PublicationTarget(Protocol):
     db_path: Path
 
     def import_artifact(
-        self, record: ArtifactVersion, blob: bytes | Path | None
+        self,
+        record: ArtifactVersion,
+        blob: bytes | Path | None,
+        requires: Collection[tuple[str, int]] = (),
     ) -> ImportedArtifact: ...
 
     def find_by_provenance(
@@ -95,12 +100,19 @@ class RemoteStore:
         # store" check never accidentally matches.
         self.db_path = Path(f"<remote:{self.base_url}>")
 
-    def import_artifact(self, record: ArtifactVersion, blob: bytes | Path | None):
+    def import_artifact(
+        self,
+        record: ArtifactVersion,
+        blob: bytes | Path | None,
+        requires: Collection[tuple[str, int]] = (),
+    ):
         """Upload the bytes, then POST the record naming them; return where they landed.
 
         The bytes are streamed to the staging route and checked there against their
-        digest, so a file is never read into memory.
+        digest, so a file is never read into memory. *requires* is not sent: the
+        receiving server reads it off the bytes, as its import route does for everyone.
         """
+        del requires
         import httpx
         from vestigo.store import ImportedArtifact
 
@@ -408,9 +420,14 @@ def _copy_record(
     blob: bytes | None = None,
 ) -> ImportedArtifact:
     """Import one version into *target* with *blob*, or else its bytes in *source*."""
+    content_type = record.params.get("content_type")
     if blob is not None:
         digest = hashlib.sha256(blob).hexdigest()
-        return target.import_artifact(replace(record, content_sha256=digest), blob)
+        return target.import_artifact(
+            replace(record, content_sha256=digest),
+            blob,
+            requires=requirements(record.id, content_type, blob),
+        )
     with tempfile.TemporaryDirectory(prefix="strata_copy_") as workdir:
         # Spooled to disk, so an artifact never sits whole in memory.
         reader_cm = source.open_blob_reader(record.id, record.version)
@@ -423,7 +440,9 @@ def _copy_record(
                     hasher.update(chunk)
                     out.write(chunk)
             record = replace(record, content_sha256=hasher.hexdigest())
-        return target.import_artifact(record, path)
+        return target.import_artifact(
+            record, path, requires=requirements(record.id, content_type, path)
+        )
 
 
 def _copy_folder_files(

@@ -50,7 +50,7 @@ def store(postgres_dsn, tmp_path):
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
-            "notebook_workers, notebook_worker_registry, schema_version CASCADE;"
+            "notebook_workers, notebook_worker_registry, store_upgrades, schema_version CASCADE;"
         )
         conn.commit()
     finally:
@@ -157,7 +157,8 @@ class TestTheCliOnAPostgresStore:
             conn = dialect.connect()
             conn.executescript(
                 "DROP TABLE IF EXISTS artifact_builds, artifact_versions, artifact_names, "
-                "artifact_aliases, artifact_tags, artifact_publications, artifact_pins, "
+                "artifact_aliases, artifact_tags, artifact_publications, retention_roots, "
+                "retention_edges, "
                 "registry_audit, registry_pending CASCADE;"
             )
             conn.commit()
@@ -309,7 +310,7 @@ class TestGarbageCollection:
             conn.close()
 
     def test_a_published_folder_keeps_its_files(self, store, tmp_path):
-        # The walk finds manifests with a LIKE over transform_spec; run it on Postgres.
+        # The walk follows the edges the import wrote; run it on Postgres.
         from strata.artifact.transfer import copy_chain
         from tests.test_folder_transfer import FILES, _folder, _rebuilt
 
@@ -321,7 +322,7 @@ class TestGarbageCollection:
         assert _rebuilt(store, folder.id, folder.version, tmp_path / "out") == FILES
 
     def test_a_folder_goes_whole_or_stays_whole(self, store):
-        # Manifests by a LIKE, their files' tenants by a batched IN; run both on Postgres.
+        # The requirement join and the wholeness query, on Postgres.
         from tests.test_artifact_retention import _team_folder
 
         idle, idle_files = _team_folder(store, tenant="a")
@@ -336,9 +337,9 @@ class TestGarbageCollection:
         reported = {(entry["artifact_id"], entry["version"]) for entry in dry["collected"]}
         assert reported == {idle, *idle_files}
         assert all(store.get_artifact(*key) is None for key in reported)
-        assert store.folder_is_whole(store.get_artifact(*used))
+        assert store.requirements_met(store.get_artifact(*used))
         store.delete_artifact(*used_files[0])
-        assert not store.folder_is_whole(store.get_artifact(*used))
+        assert not store.requirements_met(store.get_artifact(*used))
 
 
 class TestSchemaMigrations:

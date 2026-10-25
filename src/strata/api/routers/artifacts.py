@@ -46,6 +46,7 @@ from strata.api.dependencies import (
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.api.served_bytes import data_headers
+from strata.artifact.retention import requirements
 from strata.artifact.transfer import PROMOTION_TAG
 from strata.services.artifact import artifact_service
 from strata.types import (
@@ -691,7 +692,9 @@ def _land_import(
             )
 
     try:
-        landed = store.import_artifact(record, blob)
+        landed = store.import_artifact(
+            record, blob, requires=requirements(record.id, record.params.get("content_type"), blob)
+        )
     except ArtifactImportConflict as exc:
         # Another import of this id@v=N with a different computation committed
         # after the check above.
@@ -810,7 +813,7 @@ def _store_put_by_provenance(
     # write to the tenant.
     existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
     if existing is not None and existing.state == "ready":
-        if store.folder_is_whole(existing):
+        if store.requirements_met(existing):
             return PutArtifactResponse(
                 artifact_uri=f"strata://artifact/{existing.id}@v={existing.version}",
                 hit=True,
@@ -855,6 +858,7 @@ def _store_put_by_provenance(
             # A notebook storing a cell output names its id and reads it back as
             # "latest"; an upload that named nothing got an id nobody resolves.
             minted=not named_id,
+            requires=requirements(artifact_id, content_type, data_path),
         )
     except ArtifactIdTaken as exc:
         # The caller names the id, so it can name somebody else's. The store refuses
@@ -909,7 +913,7 @@ def find_artifact_by_provenance(
     artifact = store.find_by_provenance(provenance_hash, tenant=lookup_tenant)
     # A folder whose files are gone cannot be pulled; the puller recomputes and its
     # publish takes the key over.
-    if artifact is None or not store.folder_is_whole(artifact):
+    if artifact is None or not store.requirements_met(artifact):
         raise HTTPException(
             status_code=404,
             detail="No artifact has been computed for that provenance hash",
@@ -1125,23 +1129,33 @@ def pin_artifact(
     principal: CurrentPrincipal,
     store: ArtifactStore = store_for_scope("artifacts:pin"),
 ):
-    """Hold a version and every ancestor against garbage collection.
+    """Hold a version, every ancestor and what it requires against garbage collection.
 
-    One pin per reason; pinning again under the same reason refreshes it.
+    A pin is a retention root of kind ``pin`` whose holder is its reason: one per reason,
+    and pinning again under the same reason refreshes it.
     """
     from strata.server import _ensure_artifact_access
 
     _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
     try:
-        return store.pin_artifact(
+        root = store.retain(
             artifact_id,
             version,
-            request.reason,
+            kind="pin",
+            holder=request.reason,
             tenant=tenant_filter,
-            pinned_by=principal.id if principal is not None else None,
+            created_by=principal.id if principal is not None else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "artifact_id": root["artifact_id"],
+        "version": root["version"],
+        "reason": root["holder"],
+        "tenant": root["tenant"],
+        "pinned_by": root["created_by"],
+        "pinned_at": root["created_at"],
+    }
 
 
 @router.delete("/v1/artifacts/{artifact_id}/v/{version}/pin")
@@ -1153,7 +1167,7 @@ def unpin_artifact(
     store: ArtifactStore = store_for_scope("artifacts:pin"),
 ):
     """Release the pin placed under ``reason``."""
-    if not store.unpin_artifact(artifact_id, version, reason, tenant=tenant_filter):
+    if not store.release(artifact_id, version, kind="pin", holder=reason, tenant=tenant_filter):
         raise HTTPException(status_code=404, detail="No pin with that reason on this version")
     return {"unpinned": True, "artifact_id": artifact_id, "version": version, "reason": reason}
 

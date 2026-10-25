@@ -8,10 +8,13 @@ with compare-and-set and approval, retention and race-safe garbage
 collection, all in one transaction discipline on SQLite or PostgreSQL, with
 blob backends for local disk, S3, GCS and Azure.
 
-Strata is its first consumer, and until ADR 002 E2 lands the package is not
-usable on its own: garbage collection, verification and the S3 settings still
-import Strata. *Vestigo* is Latin for "I track down, I trace":
-the ledger traces every artifact back to the computation and inputs that made it.
+Strata is its first consumer. The package imports nothing of Strata: a
+consumer passes blob settings in (`BlobSettings`), registers the validators
+`verify_artifacts` runs per content type (`register_validator`), and records
+what a version holds (`retain`) or requires (`require`, `requires=` on
+`create_artifact`), which garbage collection protects as one closure.
+*Vestigo* is Latin for "I track down, I trace": the ledger traces every
+artifact back to the computation and inputs that made it.
 <!-- --8<-- [end:body] -->
 
 ## Formal models

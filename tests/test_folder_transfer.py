@@ -166,9 +166,9 @@ class TestPromote:
         sent = []
         real_import = RemoteStore.import_artifact
 
-        def spy(self, record, blob):
+        def spy(self, record, blob, requires=()):
             sent.append(record.id)
-            return real_import(self, record, blob)
+            return real_import(self, record, blob, requires=requires)
 
         monkeypatch.setattr(RemoteStore, "import_artifact", spy)
 
@@ -404,7 +404,7 @@ class TestRetention:
         elif hold == "name":
             central.set_name("team/ckpt", folder.id, folder.version)
         else:
-            central.pin_artifact(folder.id, folder.version, "paper")
+            central.retain(folder.id, folder.version, kind="pin", holder="paper")
 
         swept = central.garbage_collect(max_idle_days=0, collect_latest=True)
 
@@ -414,7 +414,7 @@ class TestRetention:
     def test_a_superseded_file_version_a_pinned_folder_names_survives(self, tmp_path, monkeypatch):
         manager, folder = _folder(tmp_path / "alice", FILES)
         store = manager.artifact_store
-        store.pin_artifact(folder.id, folder.version, "paper")
+        store.retain(folder.id, folder.version, kind="pin", holder="paper")
         # Each file stored again under its id, as two runs storing it at once make.
         monkeypatch.setattr(output_dirs, "_reused", lambda store, artifact_id: None)
         _folder(tmp_path / "alice", FILES, provenance="e5" * 32)
@@ -515,9 +515,7 @@ class TestAnUnreadableManifest:
             ),
         ],
     )
-    def test_garbage_collection_completes_past_a_held_one(
-        self, tmp_path, artifact_id, blob, caplog
-    ):
+    def test_garbage_collection_completes_past_a_held_one(self, tmp_path, artifact_id, blob):
         from strata.artifact.transfer import copy_chain
 
         manager, folder = _folder(tmp_path / "alice", FILES)
@@ -530,8 +528,8 @@ class TestAnUnreadableManifest:
         central.garbage_collect(max_idle_days=0, collect_latest=True)
 
         assert central.get_artifact(junk.id, junk.version) is not None
+        assert central.requirements_met(junk)  # it declared nothing, so nothing is missing
         assert _rebuilt(central, folder.id, folder.version, tmp_path / "out") == FILES
-        assert f"{artifact_id}@v=1 is not a readable folder manifest" in caplog.text
 
     def test_a_notebook_prune_keeps_every_folder_file(self, tmp_path):
         """What the unreadable one names is unknown, so no folder file is taken."""

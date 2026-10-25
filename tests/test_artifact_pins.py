@@ -52,7 +52,7 @@ def _superseded_chain(store, tenant=None):
 class TestPinsInTheStore:
     def test_a_pinned_version_and_its_ancestors_survive_a_sweep(self, store):
         rows, figure = _superseded_chain(store)
-        store.pin_artifact("figure", figure, "snapshot:s1", pinned_by="amber")
+        store.retain("figure", figure, kind="pin", holder="snapshot:s1", created_by="amber")
 
         store.garbage_collect(max_idle_days=0)
 
@@ -61,8 +61,8 @@ class TestPinsInTheStore:
 
     def test_once_released_the_chain_is_collected(self, store):
         rows, figure = _superseded_chain(store)
-        store.pin_artifact("figure", figure, "snapshot:s1")
-        assert store.unpin_artifact("figure", figure, "snapshot:s1")
+        store.retain("figure", figure, kind="pin", holder="snapshot:s1")
+        assert store.release("figure", figure, kind="pin", holder="snapshot:s1")
 
         result = store.garbage_collect(max_idle_days=0)
 
@@ -72,23 +72,23 @@ class TestPinsInTheStore:
 
     def test_two_holders_release_independently(self, store):
         rows, figure = _superseded_chain(store)
-        store.pin_artifact("figure", figure, "snapshot:s1")
-        store.pin_artifact("figure", figure, "review:42")
+        store.retain("figure", figure, kind="pin", holder="snapshot:s1")
+        store.retain("figure", figure, kind="pin", holder="review:42")
         # Pinning again under a reason refreshes it rather than stacking.
-        store.pin_artifact("figure", figure, "snapshot:s1", pinned_by="again")
+        store.retain("figure", figure, kind="pin", holder="snapshot:s1", created_by="again")
 
-        assert store.unpin_artifact("figure", figure, "snapshot:s1")
+        assert store.release("figure", figure, kind="pin", holder="snapshot:s1")
         store.garbage_collect(max_idle_days=0)
 
         assert store.get_artifact("figure", figure) is not None
-        assert [pin["reason"] for pin in store.list_pins("figure", figure)] == ["review:42"]
+        assert [pin["holder"] for pin in store.retention_roots("figure", figure)] == ["review:42"]
 
     def test_a_pin_needs_a_version_that_exists_and_a_reason(self, store):
         _version(store, "rows", b"[1]")
         with pytest.raises(ValueError, match="not found"):
-            store.pin_artifact("rows", 99, "snapshot:s1")
-        with pytest.raises(ValueError, match="reason"):
-            store.pin_artifact("rows", 1, "  ")
+            store.retain("rows", 99, kind="pin", holder="snapshot:s1")
+        with pytest.raises(ValueError, match="holder"):
+            store.retain("rows", 1, kind="pin", holder="  ")
 
 
 @pytest.fixture
@@ -198,7 +198,7 @@ class TestTheRoutesInServiceMode:
             headers=_as("amber", "acme", "artifacts:pin"),
         )
         assert released.status_code == 200
-        assert store.list_pins("figure", figure) == []
+        assert store.retention_roots("figure", figure) == []
 
     def test_another_tenants_version_cannot_be_pinned(self, service):
         client, store = service
@@ -211,7 +211,7 @@ class TestTheRoutesInServiceMode:
         )
 
         assert response.status_code in (403, 404)
-        assert store.list_pins("figure", figure) == []
+        assert store.retention_roots("figure", figure) == []
 
 
 class TestATenantsSweep:
@@ -301,7 +301,7 @@ class TestATenantsSweep:
         figure = _version(
             store, "figure", b"PNG", inputs={f"strata://artifact/{ref}": ref}, tenant="b"
         )
-        store.pin_artifact("figure", figure, "snapshot:s1")
+        store.retain("figure", figure, kind="pin", holder="snapshot:s1")
 
         response = self._sweep(client, _as("amber", "a", "artifacts:gc"))
 
