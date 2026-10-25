@@ -28,6 +28,12 @@ def _docker_daemon_reachable() -> bool:
         return False
 
 
+if not _docker_daemon_reachable():
+    pytest.skip("Docker daemon is not running", allow_module_level=True)
+
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
+
 @pytest.fixture(scope="module")
 def postgres_dsn():
     """A live Postgres, shared across this module (container startup is slow)."""
