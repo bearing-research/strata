@@ -69,7 +69,7 @@ jobs:
       - name: Run Postgres-backed artifact store tests
         run: |
           uv run pytest \
-            tests/test_artifact_store_postgres.py \
+            packages/vestigo/tests/test_artifact_store_postgres.py \
             tests/test_migrate_to_postgres.py \
             -v --tb=short -p no:cacheprovider
 

@@ -89,6 +89,18 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **The ledger is its own package, vestigo.** The artifact store, build store,
+  SQL dialects, blob backends, provenance and artifact URIs now ship as
+  `vestigo`, which `strata-notebook` pins exactly and installs with it.
+  Imports of `strata.artifact.store`, `strata.artifact.blob_store`,
+  `strata.artifact.provenance`, `strata.artifact.uris`,
+  `strata.transforms.build_store`, `strata.sql_backend` and
+  `strata.file_modes` become `vestigo.<module>`, and
+  `strata.notebook.provenance.derive_subkey` is
+  `vestigo.provenance.derive_subkey`. The notebook worker registry's tables are
+  created by Strata (`strata.notebook.worker_store`) rather than by the store;
+  an existing database needs no action. (#1294)
+
 - **The team cache shares an output folder.** A cell's `# @output_dir` folder
   was neither offered to nor served from the team cache, so a teammate always
   ran it. A publish now offers each file the folder names, then its manifest

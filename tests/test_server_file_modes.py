@@ -7,10 +7,13 @@ state was every tenant's metadata, publication links and blobs handed to every c
 from __future__ import annotations
 
 import stat
+import sys
 from pathlib import Path
 
 import pytest
 from vestigo.file_modes import PASS_THROUGH_DIR
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes do not apply")
 
 
 def _mode(path: Path) -> int:
