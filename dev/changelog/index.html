@@ -3781,6 +3781,20 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger stands alone (ADR 002 E2).</strong> <code>vestigo</code> imports nothing of
+  Strata: blob credentials arrive as <code>BlobSettings</code>, the Arrow validator
+  <code>verify_artifacts</code> runs is registered by Strata (<code>register_validator</code>), and
+  what a version holds or requires is recorded in two new tables.
+  <code>retention_roots</code> replaces <code>artifact_pins</code> (existing pins are converted by
+  schema migration 12 and the old table dropped; the pin routes are unchanged),
+  and <code>retention_edges</code> records what a version requires: an output folder's
+  manifest requires its files, declared when the manifest is stored and, for
+  folders stored before this release, when the upgraded store is first opened.
+  Garbage collection protects the closure of the roots over those edges
+  instead of reading manifests, and a folder whose files are gone reads as
+  missing (<code>requirements_met</code>). The package suite runs in CI in a venv with
+  only the ledger installed, and <code>ArtifactLifecycle.tla</code> models the roots and
+  edges (<code>Artifact_Retention.cfg</code>). (#1295)</li>
 <li><strong>A strata-pool job names how long its machine stays warm.</strong> <code>submit</code> and
   <code>POST /v1/jobs</code> take <code>hold_seconds</code>; the machine that runs the job keeps it
   as its cool-down until its next job, so a host can hold each tenant's
