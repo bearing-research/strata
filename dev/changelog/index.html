@@ -3859,14 +3859,29 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>The team cache shares an output folder.</strong> A cell's <code># @output_dir</code> folder
+<li>
+<p><strong>The ledger is its own package, vestigo.</strong> The artifact store, build store,
+  SQL dialects, blob backends, provenance and artifact URIs now ship as
+  <code>vestigo</code>, which <code>strata-notebook</code> pins exactly and installs with it.
+  Imports of <code>strata.artifact.store</code>, <code>strata.artifact.blob_store</code>,
+  <code>strata.artifact.provenance</code>, <code>strata.artifact.uris</code>,
+  <code>strata.transforms.build_store</code>, <code>strata.sql_backend</code> and
+  <code>strata.file_modes</code> become <code>vestigo.&lt;module&gt;</code>, and
+  <code>strata.notebook.provenance.derive_subkey</code> is
+  <code>vestigo.provenance.derive_subkey</code>. The notebook worker registry's tables are
+  created by Strata (<code>strata.notebook.worker_store</code>) rather than by the store;
+  an existing database needs no action. (#1294)</p>
+</li>
+<li>
+<p><strong>The team cache shares an output folder.</strong> A cell's <code># @output_dir</code> folder
   was neither offered to nor served from the team cache, so a teammate always
   ran it. A publish now offers each file the folder names, then its manifest
   naming where each landed; a file the store already holds is not sent again.
   A pull fetches every file, checks its sha256 and size against the manifest,
   and lands the files under the notebook's own ids before the manifest, so the
   folder rebuilds and downstream cells read it; a missing or altered file lands
-  nothing and the cell runs locally. (#1281)</li>
+  nothing and the cell runs locally. (#1281)</p>
+</li>
 <li><strong>Upgrading from 0.10 or earlier: artifacts over a table rebuild once.</strong>
   Since 0.11 a table input's recorded version carries its reading fingerprint
   (format version and name mapping) as well as its snapshot and schema, so
