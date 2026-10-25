@@ -1,0 +1,296 @@
+"""Retention as data (ADR 002 §7.4): roots say why a version is kept, edges what it needs.
+
+The store reads no blob to learn either. A writer declares what its version requires with
+the row; a holder retains a version under a kind and a holder of its own.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+import uuid
+
+import pytest
+from vestigo.provenance import TransformSpec
+from vestigo.store import RETENTION_SCHEMA_VERSION, ArtifactStore, ArtifactVersion
+
+
+@pytest.fixture
+def store(tmp_path) -> ArtifactStore:
+    return ArtifactStore(tmp_path / "artifacts")
+
+
+def _ready(
+    store: ArtifactStore,
+    artifact_id: str | None = None,
+    *,
+    tenant: str | None = None,
+    requires=(),
+    content_type: str = "application/octet-stream",
+) -> tuple[str, int]:
+    """A ready, idle, minted version: what a sweep takes unless something holds it."""
+    artifact_id = artifact_id or str(uuid.uuid4())
+    version = store.create_artifact(
+        artifact_id,
+        f"prov-{uuid.uuid4()}",
+        TransformSpec(executor="x@v1", params={"content_type": content_type}, inputs=[]),
+        tenant=tenant,
+        minted=True,
+        requires=requires,
+    )
+    store.write_blob(artifact_id, version, b"x" * 100)
+    store.finalize_artifact(artifact_id, version, "", None, 100)
+    _idle(store, artifact_id, version)
+    return artifact_id, version
+
+
+def _idle(store: ArtifactStore, artifact_id: str, version: int) -> None:
+    conn = store._get_connection()
+    try:
+        conn.execute(
+            "UPDATE artifact_versions SET created_at = 0, last_used_at = ? "
+            "WHERE id = ? AND version = ?",
+            (time.time() - 40 * 86400, artifact_id, version),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _sweep(store: ArtifactStore) -> int:
+    return store.garbage_collect(max_idle_days=30, collect_latest=True)["deleted_count"]
+
+
+def _edges(store: ArtifactStore) -> set[tuple[str, int, str, int]]:
+    conn = store._get_connection()
+    try:
+        return {
+            (r["from_artifact_id"], r["from_version"], r["to_artifact_id"], r["to_version"])
+            for r in conn.execute("SELECT * FROM retention_edges").fetchall()
+        }
+    finally:
+        conn.close()
+
+
+class TestRoots:
+    def test_a_root_is_returned_and_listed(self, store):
+        key = _ready(store)
+
+        root = store.retain(*key, kind="pin", holder="review:7", created_by="amber")
+
+        assert (root["kind"], root["holder"], root["created_by"]) == ("pin", "review:7", "amber")
+        assert root["created_at"] == pytest.approx(time.time(), abs=5)
+        assert store.retention_roots(*key) == [root]
+        assert store.retention_roots(kind="pin") == [root]
+        assert store.retention_roots(kind="head") == []
+
+    def test_retaining_again_refreshes_who_and_when(self, store):
+        key = _ready(store)
+        first = store.retain(*key, kind="pin", holder="review", created_by="a")
+
+        again = store.retain(*key, kind="pin", holder="review", created_by="b")
+
+        assert again["created_by"] == "b"
+        assert again["created_at"] >= first["created_at"]
+        assert len(store.retention_roots(*key)) == 1
+
+    def test_a_root_holds_its_version_and_its_chain(self, store):
+        upstream = _ready(store)
+        ref = f"{upstream[0]}@v={upstream[1]}"
+        held = store.create_artifact(
+            "held", "prov-h", input_versions={f"strata://artifact/{ref}": ref}, minted=True
+        )
+        store.write_blob("held", held, b"h")
+        store.finalize_artifact("held", held, "", None, 1)
+        _idle(store, "held", held)
+        store.retain("held", held, kind="pin", holder="review")
+
+        assert _sweep(store) == 0
+        assert store.release("held", held, kind="pin", holder="review")
+        assert _sweep(store) == 2
+
+    def test_two_holders_release_independently(self, store):
+        key = _ready(store)
+        store.retain(*key, kind="pin", holder="review")
+        store.retain(*key, kind="head", holder="latest")
+
+        assert store.release(*key, kind="pin", holder="review")
+        assert not store.release(*key, kind="pin", holder="review")
+        assert [r["kind"] for r in store.retention_roots(*key)] == ["head"]
+        assert _sweep(store) == 0
+
+    def test_a_root_needs_a_version_a_kind_and_a_holder(self, store):
+        key = _ready(store)
+        with pytest.raises(ValueError, match="not found"):
+            store.retain(key[0], 99, kind="pin", holder="x")
+        with pytest.raises(ValueError, match="holder"):
+            store.retain(*key, kind="pin", holder=" ")
+        with pytest.raises(ValueError, match="holder"):
+            store.retain(*key, kind="", holder="x")
+
+    def test_another_tenants_version_cannot_be_retained(self, store):
+        theirs = _ready(store, tenant="b")
+
+        with pytest.raises(ValueError, match="not found"):
+            store.retain(*theirs, kind="pin", holder="x", tenant="a")
+        assert store.retain(*theirs, kind="pin", holder="x", tenant="b")["tenant"] == "b"
+        assert not store.release(*theirs, kind="pin", holder="x", tenant="a")
+        assert store.retention_roots(tenant="a") == []
+
+    def test_a_deleted_version_takes_its_roots_with_it(self, store):
+        key = _ready(store)
+        store.retain(*key, kind="pin", holder="review")
+
+        assert store.delete_artifact(*key)
+
+        assert store.retention_roots(*key) == []
+
+
+class TestRequirements:
+    def test_what_a_version_requires_is_recorded_with_its_row(self, store):
+        parts = [_ready(store) for _ in range(2)]
+
+        whole = _ready(store, "whole", requires=[*parts, *parts, ("whole", 1)])
+
+        assert whole == ("whole", 1)
+        assert _edges(store) == {(*whole, *part) for part in parts}
+
+    def test_a_held_version_keeps_what_it_requires(self, store):
+        parts = [_ready(store) for _ in range(2)]
+        whole = _ready(store, requires=parts)
+        store.retain(*whole, kind="pin", holder="review")
+
+        assert _sweep(store) == 0
+        assert all(store.get_artifact(*part) is not None for part in parts)
+
+    def test_an_idle_version_goes_with_what_it_requires(self, store):
+        parts = [_ready(store) for _ in range(2)]
+        whole = _ready(store, requires=parts)
+
+        assert _sweep(store) == 3
+        assert store.get_artifact(*whole) is None
+        assert _edges(store) == set()
+
+    def test_a_requirement_stays_while_its_requirer_is_used(self, store):
+        parts = [_ready(store) for _ in range(2)]
+        whole = _ready(store, requires=parts)
+        store.record_use(*whole)
+
+        assert _sweep(store) == 0
+
+    def test_a_requirement_of_another_tenant_is_not_kept(self, store):
+        theirs = _ready(store, tenant="b")
+        mine = _ready(store, tenant="a")
+        whole = _ready(store, tenant="a", requires=[theirs, mine])
+        store.record_use(*whole)
+
+        assert _sweep(store) == 1
+        assert store.get_artifact(*theirs) is None
+        assert store.get_artifact(*mine) is not None
+        assert not store.requirements_met(store.get_artifact(*whole))
+
+    def test_requirements_met_reads_the_stored_versions(self, store):
+        part = _ready(store)
+        whole = _ready(store, requires=[part])
+        plain = _ready(store)
+
+        assert store.requirements_met(store.get_artifact(*whole))
+        assert store.requirements_met(store.get_artifact(*plain))
+        store.delete_artifact(*part)
+        assert not store.requirements_met(store.get_artifact(*whole))
+
+    def test_requirements_can_be_declared_after_the_fact(self, store):
+        part = _ready(store)
+        whole = _ready(store)
+
+        store.require(*whole, [part])
+        store.require(*whole, [part])
+
+        assert _edges(store) == {(*whole, *part)}
+        with pytest.raises(ValueError, match="not found"):
+            store.require("nope", 1, [part])
+
+    def test_an_import_records_what_the_record_requires(self, store, tmp_path):
+        part = _ready(store)
+        record = ArtifactVersion(
+            id="copied",
+            version=3,
+            state="ready",
+            provenance_hash="prov-copied",
+            schema_json="",
+            row_count=None,
+            byte_size=1,
+            created_at=1.0,
+            transform_spec=None,
+            input_versions=None,
+            tenant="",
+            principal=None,
+            content_sha256=None,
+        )
+
+        landed = store.import_artifact(record, b"m", requires=[part])
+
+        assert (landed.id, landed.version, landed.written) == ("copied", 3, True)
+        assert _edges(store) == {("copied", 3, *part)}
+
+    def test_versions_declaring_a_content_type(self, store):
+        manifest = _ready(store, content_type="dir/manifest")
+        _ready(store, content_type="dir/manifesto")
+        _ready(store)
+
+        declared = store.versions_declaring("dir/manifest")
+
+        assert [(v.id, v.version) for v in declared] == [manifest]
+
+
+class TestTheMigration:
+    """A store from before this schema holds pins in a table of their own and no edges."""
+
+    def _before_retention(self, store: ArtifactStore, pins) -> None:
+        conn = sqlite3.connect(store.db_path)
+        try:
+            conn.executescript(
+                "DROP TABLE retention_roots; DROP TABLE retention_edges;"
+                "CREATE TABLE artifact_pins (artifact_id TEXT NOT NULL, version INTEGER NOT NULL,"
+                " reason TEXT NOT NULL, tenant TEXT NOT NULL DEFAULT '', pinned_by TEXT,"
+                " pinned_at REAL NOT NULL, PRIMARY KEY (artifact_id, version, reason));"
+            )
+            conn.executemany(
+                "INSERT INTO artifact_pins VALUES (?, ?, ?, ?, ?, ?)",
+                [(a, v, reason, tenant, by, 123.0) for a, v, reason, tenant, by in pins],
+            )
+            conn.execute(
+                "DELETE FROM schema_version WHERE version >= ?", (RETENTION_SCHEMA_VERSION,)
+            )
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?, 0)",
+                (RETENTION_SCHEMA_VERSION - 1,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_pins_become_roots_and_their_table_goes(self, store, tmp_path):
+        key = _ready(store, tenant="t")
+        self._before_retention(store, [(*key, "snapshot", "t", "ops"), (*key, "review", "t", None)])
+
+        reopened = ArtifactStore(tmp_path / "artifacts")
+
+        assert reopened.upgraded_from == RETENTION_SCHEMA_VERSION - 1
+        assert {
+            (r["holder"], r["tenant"], r["created_by"], r["created_at"])
+            for r in reopened.retention_roots(*key)
+        } == {
+            ("review", "t", None, 123.0),
+            ("snapshot", "t", "ops", 123.0),
+        }
+        conn = sqlite3.connect(store.db_path)
+        try:
+            names = {
+                row[0]
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+        finally:
+            conn.close()
+        assert "artifact_pins" not in names
+        assert ArtifactStore(tmp_path / "artifacts").upgraded_from is None

@@ -67,7 +67,9 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         # source in place (columns, indexes, WAL), which --dry-run must not do.
         from vestigo.store import ArtifactStore
 
-        ArtifactStore(artifact_dir)
+        from strata.artifact.retention import complete_upgrade
+
+        complete_upgrade(ArtifactStore(artifact_dir))
 
         result = migrate(source, target, allow_nonempty_target=args.allow_nonempty_target)
         print(f"Copied {result.total_copied} rows, skipped {result.total_skipped} already present.")

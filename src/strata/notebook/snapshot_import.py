@@ -24,6 +24,7 @@ from typing import Any
 
 from vestigo.store import ArtifactStore, ArtifactVersion
 
+from strata.artifact.retention import requirements
 from strata.artifact.transfer import RECORD_FIELDS, remap_input_versions
 from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION
 
@@ -376,7 +377,11 @@ def _import_records(
         try:
             with archive.open(f"artifacts/{old_ref}") as src, open(blob_path, "wb") as dst:
                 shutil.copyfileobj(src, dst, _COPY_CHUNK_BYTES)
-            imported = store.import_artifact(record, blob_path)
+            imported = store.import_artifact(
+                record,
+                blob_path,
+                requires=requirements(record.id, record.params.get("content_type"), blob_path),
+            )
         finally:
             blob_path.unlink(missing_ok=True)
         remap[old_ref] = imported.ref

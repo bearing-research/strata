@@ -42,6 +42,10 @@ from pyiceberg.types import (
 from strata_client.client import StrataClient
 
 from strata.config import StrataConfig
+from strata.fast_io import register_arrow_validator
+
+# The server and the CLI register it at startup; tests verify stores directly.
+register_arrow_validator()
 
 # Global-state isolation
 

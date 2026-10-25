@@ -102,6 +102,18 @@ def validate_ipc_stream(data: _BytesLike) -> int:
     return rows
 
 
+def register_arrow_validator() -> None:
+    """Teach the ledger to check Arrow blobs when it verifies a store.
+
+    Core transforms write ``arrow/ipc`` or declare no content type at all; a notebook's
+    JSON, image or pickled outputs declare theirs and are checked for their digest only.
+    """
+    from vestigo.store import register_validator
+
+    register_validator("arrow/ipc", validate_ipc_stream)
+    register_validator("", validate_ipc_stream)
+
+
 def validate_ipc_stream_reader(source) -> tuple[int, str]:
     """Bounded-memory :func:`validate_ipc_stream` over a readable file-like.
 

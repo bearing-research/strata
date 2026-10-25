@@ -593,6 +593,9 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     """
     from vestigo.store import get_artifact_store
 
+    from strata.artifact.retention import complete_upgrade
+    from strata.fast_io import register_arrow_validator
+
     backend = (config.artifact_blob_backend or "local").lower()
     blob_store = None
     if backend != "local":
@@ -605,6 +608,9 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
         logger.info("artifact_metadata_backend_initialized", backend=dialect.name)
 
     store = get_artifact_store(config.artifact_dir, blob_store=blob_store, dialect=dialect)
+    register_arrow_validator()
+    if store is not None:
+        complete_upgrade(store)
 
     # The notebook worker registry is Strata's own table in the same database (ADR 002 §3).
     # Earlier releases kept it in a file here, one copy per node.

@@ -165,9 +165,8 @@ jobs:
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
   # vestigo's own suite lives in packages/vestigo/tests so the package can
-  # leave the repository with its tests. Until ADR 002 E2 closes the ledger's
-  # lazy imports of Strata (GC roots, IPC validation, blob settings) it runs
-  # in the workspace environment, not an isolated one like the client's.
+  # leave the repository with its tests. It runs in an isolated venv like the
+  # client's: the ledger imports nothing of Strata (ADR 002 E2).
   vestigo-tests:
     name: vestigo tests
     runs-on: ubuntu-latest
@@ -182,11 +181,24 @@ jobs:
           version: "latest"
           save-cache: false
 
-      - name: Install the workspace
-        run: uv sync --all-extras
+      - name: Create an isolated venv with ONLY the ledger
+        run: |
+          uv venv .venv-vestigo
+          # Strata is deliberately not installed: the ledger stands on its own (ADR 002 E2).
+          uv pip install --python .venv-vestigo "./packages/vestigo[postgres,s3,gcs,azure]" \
+            --group packages/vestigo/pyproject.toml:dev
+
+      - name: Assert Strata is absent
+        run: |
+          .venv-vestigo/bin/python - <<'PY'
+          import importlib.util
+          for mod in ("strata", "strata_client", "fastapi", "pyiceberg", "duckdb"):
+              assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
+          print("strata absent: the ledger installs alone")
+          PY
 
       - name: Run vestigo tests
-        run: uv run pytest packages/vestigo/tests -v
+        run: .venv-vestigo/bin/python -m pytest packages/vestigo/tests -v -p no:cacheprovider
 
   # ty exits non-zero on errors; the unresolved-import warnings configured for
   # guarded optional deps (torch/jax) do not fail the build.

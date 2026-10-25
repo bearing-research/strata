@@ -1202,6 +1202,28 @@ class StrataConfig(BaseSettings):
 
         return PostgresDialect(dsn)
 
+    def blob_settings(self):
+        """The object-store credentials and endpoints, as the ledger's blob backends take them."""
+        from vestigo.blob_store import BlobSettings
+
+        return BlobSettings(
+            s3_region=self.s3_region,
+            s3_endpoint_url=self.s3_endpoint_url,
+            s3_access_key=self.s3_access_key,
+            s3_secret_key=self.s3_secret_key,
+            s3_anonymous=self.s3_anonymous,
+            gcs_default_bucket_location=self.gcs_default_bucket_location,
+            gcs_credentials_json=self.gcs_credentials_json,
+            gcs_anonymous=self.gcs_anonymous,
+            gcs_endpoint_override=self.gcs_endpoint_override,
+            azure_account_name=self.azure_account_name,
+            azure_account_key=self.azure_account_key,
+            azure_connection_string=self.azure_connection_string,
+            azure_sas_token=self.azure_sas_token,
+            azure_use_default_credential=self.azure_use_default_credential,
+            azure_endpoint_url=self.azure_endpoint_url,
+        )
+
     def create_blob_store(self):
         """Create the artifact blob store for ``artifact_blob_backend``.
 
@@ -1220,8 +1242,8 @@ class StrataConfig(BaseSettings):
         if backend == "s3":
             if not self.artifact_s3_bucket:
                 raise ValueError("S3 blob backend requires artifact_s3_bucket configuration")
-            return S3BlobStore.from_config(
-                self,
+            return S3BlobStore.from_settings(
+                self.blob_settings(),
                 bucket=self.artifact_s3_bucket,
                 prefix=self.artifact_s3_prefix,
             )
@@ -1229,8 +1251,8 @@ class StrataConfig(BaseSettings):
         if backend == "gcs":
             if not self.artifact_gcs_bucket:
                 raise ValueError("GCS blob backend requires artifact_gcs_bucket configuration")
-            return GCSBlobStore.from_config(
-                self,
+            return GCSBlobStore.from_settings(
+                self.blob_settings(),
                 bucket=self.artifact_gcs_bucket,
                 prefix=self.artifact_gcs_prefix,
             )
@@ -1240,8 +1262,8 @@ class StrataConfig(BaseSettings):
                 raise ValueError(
                     "Azure blob backend requires artifact_azure_container configuration"
                 )
-            return AzureBlobStore.from_config(
-                self,
+            return AzureBlobStore.from_settings(
+                self.blob_settings(),
                 container_name=self.artifact_azure_container,
                 prefix=self.artifact_azure_prefix,
             )

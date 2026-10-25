@@ -12,9 +12,26 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pyarrow as pa
 import pytest
 from vestigo.build_store import reset_build_store
-from vestigo.store import reset_artifact_store
+from vestigo.store import register_validator, reset_artifact_store
+
+
+def _arrow_rows(data: bytes) -> int:
+    """Rows in exactly one Arrow IPC stream; trailing bytes (a second stream) are an error."""
+    if not data:
+        return 0
+    buf = pa.BufferReader(pa.py_buffer(data))
+    rows = sum(batch.num_rows for batch in pa.ipc.open_stream(buf))
+    if buf.tell() != len(data):
+        raise ValueError(f"{len(data) - buf.tell()} bytes after the stream's end")
+    return rows
+
+
+# The application registers its formats at startup; this suite stands in for one.
+register_validator("arrow/ipc", _arrow_rows)
+register_validator("", _arrow_rows)
 
 
 @pytest.fixture(autouse=True)

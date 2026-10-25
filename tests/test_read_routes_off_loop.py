@@ -45,7 +45,7 @@ def served(in_process_server):
         byte_size=len(ARROW),
         content_sha256=hashlib.sha256(ARROW).hexdigest(),
     )
-    store.pin_artifact("art", version, "kept")
+    store.retain("art", version, kind="pin", holder="kept")
     publication = store.publish_artifact("art", version)
     builds = runtime_build_store()
     builds.create_build("bld", "art", version, "local@v1")
@@ -108,7 +108,7 @@ _ROUTES = [
     ),
     pytest.param(
         "store",
-        "pin_artifact",
+        "retain",
         "POST",
         "/v1/artifacts/art/v/{v}/pin",
         {"json": {"reason": "paper"}},
@@ -117,7 +117,7 @@ _ROUTES = [
     ),
     pytest.param(
         "store",
-        "unpin_artifact",
+        "release",
         "DELETE",
         "/v1/artifacts/art/v/{v}/pin",
         {"params": {"reason": "kept"}},

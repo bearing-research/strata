@@ -99,7 +99,9 @@ def test_the_store_built_from_the_documented_endpoint_setting_reaches_azurite(
     config = StrataConfig(cache_dir=tmp_path / "cache", metadata_db=tmp_path / "meta.sqlite")
     assert config.azure_connection_string is None
 
-    store = AzureBlobStore.from_config(config, container_name=CONTAINER, prefix="by-endpoint")
+    store = AzureBlobStore.from_settings(
+        config.blob_settings(), container_name=CONTAINER, prefix="by-endpoint"
+    )
 
     store.write_blob("blob", 3, b"reached through the host form")
     assert store.blob_exists("blob", 3)

@@ -1,5 +1,5 @@
 {
-  "source": "ADR 002 §3, §9 E0; packages/vestigo/src/vestigo/tables.py and src/strata/notebook/worker_store.py as of E1 (#1294)",
+  "source": "ADR 002 §3, §7.4, §9 E0; packages/vestigo/src/vestigo/tables.py and src/strata/notebook/worker_store.py as of E2",
   "notes": [
     "ledger lists every table the package creates, in the foreign-key order a copy must follow (artifact_versions first).",
     "migrated=false tables are rebuilt or left behind by `strata migrate`: schema_version is the target's own, import_staging and build_console_chunks hold only live rows.",
@@ -38,9 +38,20 @@
       "primary_key": ["token"]
     },
     {
-      "name": "artifact_pins",
+      "name": "retention_roots",
       "migrated": true,
-      "primary_key": ["artifact_id", "version", "reason"]
+      "primary_key": ["kind", "holder", "artifact_id", "version"]
+    },
+    {
+      "name": "retention_edges",
+      "migrated": true,
+      "primary_key": [
+        "from_artifact_id",
+        "from_version",
+        "to_artifact_id",
+        "to_version",
+        "kind"
+      ]
     },
     {
       "name": "artifact_builds",
@@ -65,7 +76,10 @@
       "name": "notebook_worker_registry",
       "created_by": "src/strata/notebook/worker_store.py"
     },
-    { "name": "api_keys", "created_by": "src/strata/auth/api_keys.py" },
+    {
+      "name": "api_keys",
+      "created_by": "src/strata/auth/api_keys.py"
+    },
     {
       "name": "stream_owners",
       "created_by": "src/strata/streaming/ownership.py"

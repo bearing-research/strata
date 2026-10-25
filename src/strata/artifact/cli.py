@@ -52,7 +52,7 @@ def _open_store_or_raise(artifact_dir_arg: str | None, *, read_only: bool) -> Ar
         if not (artifact_dir / "artifacts.sqlite").exists():
             print(f"no artifact store in {artifact_dir}", file=sys.stderr)
             return None
-        return ArtifactStore(artifact_dir, read_only=read_only)
+        return _upgraded(ArtifactStore(artifact_dir, read_only=read_only))
 
     from strata.config import StrataConfig
 
@@ -75,12 +75,22 @@ def _configured_store(
 ) -> ArtifactStore:
     """The store *config* describes under *artifact_dir*: its metadata DSN and blob backend."""
     blob_store = config.create_blob_store() if config.artifact_blob_backend != "local" else None
-    return ArtifactStore(
-        artifact_dir,
-        blob_store=blob_store,
-        dialect=config.create_metadata_dialect(),
-        read_only=read_only,
+    return _upgraded(
+        ArtifactStore(
+            artifact_dir,
+            blob_store=blob_store,
+            dialect=config.create_metadata_dialect(),
+            read_only=read_only,
+        )
     )
+
+
+def _upgraded(store: ArtifactStore) -> ArtifactStore:
+    """*store*, with Strata's part of any schema upgrade its open applied."""
+    from strata.artifact.retention import complete_upgrade
+
+    complete_upgrade(store)
+    return store
 
 
 class AmbiguousRefError(ValueError):
@@ -413,7 +423,7 @@ def _publication_target(
 
     into = getattr(args, "into", None)
     if into:
-        return ArtifactStore(Path(into)), str(into)
+        return _upgraded(ArtifactStore(Path(into))), str(into)
 
     if getattr(args, "here", False):
         return source, str(source.artifact_dir)
@@ -925,6 +935,9 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if store is None:
         return 2
 
+    from strata.fast_io import register_arrow_validator
+
+    register_arrow_validator()
     findings = store.verify_artifacts()
     metadata, blobs = _store_location(store)
 

@@ -4452,7 +4452,10 @@ s3 = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "anyio" },
+    { name = "cryptography" },
     { name = "docker" },
+    { name = "moto", extra = ["s3"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-timeout" },
@@ -4473,7 +4476,10 @@ provides-extras = ["postgres", "s3", "gcs", "azure"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anyio", specifier = ">=4.0.0" },
+    { name = "cryptography", specifier = ">=42.0.0" },
     { name = "docker", specifier = ">=7.0.0" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-timeout", specifier = ">=2.3.0" },

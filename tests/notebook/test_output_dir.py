@@ -308,10 +308,54 @@ class TestTheFileSweep:
         assert read.success, read.error
         assert read.outputs["seen"]["preview"] == ["new.txt", "same.txt"]
 
+    async def test_a_store_from_before_edges_declares_its_folders_when_opened(self, tmp_path):
+        """A ledger upgrade creates the edges table empty; Strata reads the manifests it
+        stored before and declares their files once, wherever it opens the store."""
+        import sqlite3
+
+        from vestigo.store import RETENTION_SCHEMA_VERSION
+
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+
+        session, _ = await self._two_runs(tmp_path)
+        manager = session.get_artifact_manager()
+        manifest_id = manager.cell_artifact_id("w", "ckpt")
+        conn = sqlite3.connect(manager.artifact_store.db_path)
+        try:
+            conn.execute("DELETE FROM retention_edges")
+            conn.execute(
+                "DELETE FROM schema_version WHERE version >= ?", (RETENTION_SCHEMA_VERSION,)
+            )
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?, 0)",
+                (RETENTION_SCHEMA_VERSION - 1,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        reopened = NotebookArtifactManager(manager.notebook_id, manager.artifact_dir).artifact_store
+
+        assert reopened.upgraded_from == RETENTION_SCHEMA_VERSION - 1
+        for version in (1, 2):
+            assert reopened.requirements_met(reopened.get_artifact(manifest_id, version))
+        conn = sqlite3.connect(reopened.db_path)
+        try:
+            edges = conn.execute(
+                "SELECT from_version, COUNT(*) FROM retention_edges "
+                "WHERE from_artifact_id = ? GROUP BY from_version ORDER BY from_version",
+                (manifest_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        assert edges == [(1, 2), (2, 2)]
+
     async def test_a_pinned_earlier_manifest_keeps_its_files(self, tmp_path):
         session, _ = await self._two_runs(tmp_path)
         manager = session.get_artifact_manager()
-        manager.artifact_store.pin_artifact(manager.cell_artifact_id("w", "ckpt"), 1, "review")
+        manager.artifact_store.retain(
+            manager.cell_artifact_id("w", "ckpt"), 1, kind="pin", holder="review"
+        )
 
         manager.prune(keep_superseded=0, min_idle_seconds=0)
 
@@ -528,7 +572,9 @@ class TestTheFileSweep:
         executor = CellExecutor(session)
         assert (await executor.execute_cell("w", WRITER)).success
         manager = session.get_artifact_manager()
-        manager.artifact_store.pin_artifact(manager.cell_artifact_id("w", "ckpt"), 1, "review")
+        manager.artifact_store.retain(
+            manager.cell_artifact_id("w", "ckpt"), 1, kind="pin", holder="review"
+        )
         # A second copy of each file under the same id, as two runs storing it at once make.
         monkeypatch.setattr(output_dirs, "_reused", lambda store, artifact_id: None)
         assert (await executor.execute_cell_rerun("w", WRITER)).success

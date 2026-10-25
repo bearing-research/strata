@@ -51,7 +51,7 @@ def store(postgres_dsn, tmp_path):
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
-            "schema_version CASCADE;"
+            "retention_roots, retention_edges, schema_version CASCADE;"
         )
         conn.commit()
     finally:
@@ -578,7 +578,7 @@ class TestGarbageCollection:
         for artifact_id in (loose, pinned):
             self._ready(store, artifact_id, f"prov-{artifact_id}")
             self._last_used(store, artifact_id, 7200)
-        store.pin_artifact(pinned, 1, "review")
+        store.retain(pinned, 1, kind="pin", holder="review")
 
         result = store.garbage_collect(collectable=[(loose, 1), (pinned, 1)], min_idle_seconds=3600)
 
@@ -609,7 +609,7 @@ class TestGarbageCollection:
             version = store.create_artifact(artifact_id, "prov-dup", _spec())
             store.write_blob(artifact_id, version, b"bytes")
             store.finalize_artifact(artifact_id, version, "{}", row_count=0, byte_size=5)
-        store.pin_artifact("a2", 1, "review")
+        store.retain("a2", 1, kind="pin", holder="review")
 
         assert store.delete_artifact("a1", 1)
 
@@ -625,7 +625,7 @@ class TestGarbageCollection:
         if hold == "publish":
             store.publish_artifact("a2", 1)
         else:
-            store.pin_artifact("a2", 1, "review")
+            store.retain("a2", 1, kind="pin", holder="review")
         store.blob_store.delete_blob("a1", 1)
 
         with pytest.raises(ValueError, match="whose blob is gone"):

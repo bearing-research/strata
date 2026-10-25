@@ -182,6 +182,25 @@ class ArtifactVersion:
         return spec.params if spec is not None else {}
 
 
+def _version_from_row(row: Any) -> ArtifactVersion:
+    """An ``ArtifactVersion`` from a row holding its thirteen columns, by name."""
+    return ArtifactVersion(
+        id=row["id"],
+        version=row["version"],
+        state=row["state"],
+        provenance_hash=row["provenance_hash"],
+        schema_json=row["schema_json"],
+        row_count=row["row_count"],
+        byte_size=row["byte_size"],
+        created_at=row["created_at"],
+        transform_spec=row["transform_spec"],
+        input_versions=row["input_versions"],
+        tenant=row["tenant"],
+        principal=row["principal"],
+        content_sha256=row["content_sha256"],
+    )
+
+
 @dataclass(frozen=True)
 class StagedVersion:
     """A ``building`` version whose bytes are written, waiting to be made ready."""
@@ -322,6 +341,21 @@ CREATE TABLE IF NOT EXISTS schema_version (
 """
 
 # The shape every database had before this mechanism existed.
+_VALIDATORS: dict[str, Callable[[bytes], int | None]] = {}
+
+
+def register_validator(content_type: str, validate: Callable[[bytes], int | None]) -> None:
+    """Teach :meth:`ArtifactStore.verify_artifacts` to check blobs of one declared content type.
+
+    *validate* takes the bytes and returns the row count they hold (``None`` when the
+    type has no rows), or raises ``ValueError`` for bytes that do not parse. The ledger
+    records the content type per version and knows nothing of the formats; the
+    application registers a validator per format at startup, and a type without one is
+    checked for its digest only.
+    """
+    _VALIDATORS[content_type] = validate
+
+
 _BASELINE_SCHEMA_VERSION = 0
 
 
@@ -640,6 +674,51 @@ def _fail_misbound_builds(conn: StoreConnection, dialect: SqlDialect) -> None:
         )
 
 
+def _add_retention(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Retention as data: roots say why a version is kept, edges what it needs (ADR 002 §7.4).
+
+    Pins become roots of kind ``pin`` and their table goes. Edges start empty: the
+    application writes what its existing compound versions require.
+    """
+    conn.executescript(
+        dialect.adapt_ddl(
+            """
+            CREATE TABLE IF NOT EXISTS retention_roots (
+                tenant TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL,
+                holder TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                created_by TEXT,
+                PRIMARY KEY (kind, holder, artifact_id, version)
+            );
+            CREATE INDEX IF NOT EXISTS idx_retention_roots_version
+            ON retention_roots(artifact_id, version);
+            CREATE TABLE IF NOT EXISTS retention_edges (
+                tenant TEXT NOT NULL DEFAULT '',
+                from_artifact_id TEXT NOT NULL,
+                from_version INTEGER NOT NULL,
+                to_artifact_id TEXT NOT NULL,
+                to_version INTEGER NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'requires',
+                PRIMARY KEY (from_artifact_id, from_version, to_artifact_id, to_version, kind)
+            );
+            CREATE INDEX IF NOT EXISTS idx_retention_edges_to
+            ON retention_edges(to_artifact_id, to_version);
+            """
+        )
+    )
+    if dialect.schema_exists(conn, "artifact_pins"):
+        conn.execute(
+            "INSERT INTO retention_roots "
+            "(tenant, kind, holder, artifact_id, version, created_at, created_by) "
+            "SELECT tenant, 'pin', reason, artifact_id, version, pinned_at, pinned_by "
+            "FROM artifact_pins"
+        )
+        conn.execute("DROP TABLE artifact_pins")
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
@@ -652,7 +731,12 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(9, "notebook_workers (now strata.notebook.worker_store)", _notebook_workers_moved),
     _Migration(10, "artifact_publications: one active per version", _one_active_publication),
     _Migration(11, "fail embedded builds that bound inputs out of order", _fail_misbound_builds),
+    _Migration(12, "retention_roots + retention_edges; pins become roots", _add_retention),
 ]
+
+RETENTION_SCHEMA_VERSION = 12
+"""The first schema whose folders are kept by edges; a store upgraded from below it has
+manifests whose requirements nobody has written yet."""
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
 
@@ -813,20 +897,38 @@ CREATE INDEX IF NOT EXISTS idx_publications_artifact
 ON artifact_publications(artifact_id, version);
 CREATE INDEX IF NOT EXISTS idx_publications_tenant ON artifact_publications(tenant);
 
--- A hold on an artifact version and everything behind it, for a reason the
--- store has no other way to know: a snapshot a platform must be able to
--- restore, a review still open. A root for garbage collection, as a
--- publication is. One row per reason, so two holders release independently.
-CREATE TABLE IF NOT EXISTS artifact_pins (
+-- Why a version is kept, for a reason the store has no other way to know: a
+-- pin (kind 'pin', the holder its reason) is a snapshot a platform must be
+-- able to restore, a review still open. A root for garbage collection, as a
+-- name or a publication is. One row per holder, so two release independently.
+CREATE TABLE IF NOT EXISTS retention_roots (
+    tenant TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL,
+    holder TEXT NOT NULL,
     artifact_id TEXT NOT NULL,
     version INTEGER NOT NULL,
-    reason TEXT NOT NULL,
-    tenant TEXT NOT NULL DEFAULT '',
-    pinned_by TEXT,
-    pinned_at REAL NOT NULL,
-    PRIMARY KEY (artifact_id, version, reason)
+    created_at REAL NOT NULL,
+    created_by TEXT,
+    PRIMARY KEY (kind, holder, artifact_id, version)
 );
-CREATE INDEX IF NOT EXISTS idx_pins_tenant ON artifact_pins(tenant);
+CREATE INDEX IF NOT EXISTS idx_retention_roots_version
+ON retention_roots(artifact_id, version);
+
+-- What a version needs beside its lineage: a folder manifest requires the file
+-- versions it names, a checkpoint its components. Kept while the requirer is,
+-- and evicted with it. Declared by the writer as data; the store reads no
+-- blob to learn them. 'requires' is the one kind so far.
+CREATE TABLE IF NOT EXISTS retention_edges (
+    tenant TEXT NOT NULL DEFAULT '',
+    from_artifact_id TEXT NOT NULL,
+    from_version INTEGER NOT NULL,
+    to_artifact_id TEXT NOT NULL,
+    to_version INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'requires',
+    PRIMARY KEY (from_artifact_id, from_version, to_artifact_id, to_version, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_retention_edges_to
+ON retention_edges(to_artifact_id, to_version);
 
 -- Bytes uploaded ahead of the import that names them (PUT
 -- /v1/artifacts/import/blobs/{sha256}). Per tenant: a digest is no proof of
@@ -930,6 +1032,10 @@ class ArtifactStore:
         # has to be taught about; see strata/sql_backend.py for what differs.
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(self.db_path)
 
+        self.upgraded_from: int | None = None
+        """The schema version this open found, when it migrated the store; else ``None``.
+        The application finishes an upgrade that needs its knowledge, such as writing the
+        requirements of compound versions stored before ``RETENTION_SCHEMA_VERSION``."""
         if read_only:
             self._require_current_schema()
         else:
@@ -1133,13 +1239,16 @@ class ArtifactStore:
         tenant: str | None = None,
         principal: str | None = None,
         minted: bool = False,
+        requires: Collection[tuple[str, int]] = (),
     ) -> int:
         """Create a new artifact version in "building" state and return its number.
 
         Versions are numbered ``MAX(version) + 1`` per id. ``input_versions`` maps input
         URI to version for staleness checks. ``minted`` means the caller made the id up
         (``uuid4``) for this computation, so retention may collect its latest version;
-        later versions of a minted id stay minted.
+        later versions of a minted id stay minted. ``requires`` names the versions this
+        one needs beside its inputs (a folder's files): retention keeps them while it is
+        kept and evicts them with it.
 
         Raises:
             ArtifactIdTaken: If a version of ``artifact_id`` belongs to another tenant.
@@ -1185,10 +1294,79 @@ class ArtifactStore:
                     1 if minted or was_minted else 0,
                 ),
             )
+            self._write_requirements(conn, artifact_id, version, tenant, requires)
             conn.commit()
             return version
         finally:
             conn.close()
+
+    @staticmethod
+    def _write_requirements(
+        conn: StoreConnection,
+        artifact_id: str,
+        version: int,
+        tenant: str | None,
+        requires: Collection[tuple[str, int]],
+    ) -> None:
+        """Record what a version needs, on the transaction that writes its row."""
+        for to_id, to_version in sorted(set(requires)):
+            if (to_id, to_version) == (artifact_id, version):
+                continue
+            conn.execute(
+                "INSERT INTO retention_edges "
+                "(tenant, from_artifact_id, from_version, to_artifact_id, to_version, kind) "
+                "VALUES (?, ?, ?, ?, ?, 'requires') "
+                "ON CONFLICT (from_artifact_id, from_version, to_artifact_id, to_version, kind) "
+                "DO NOTHING",
+                (tenant if tenant is not None else "", artifact_id, version, to_id, to_version),
+            )
+
+    def require(
+        self, artifact_id: str, version: int, requires: Collection[tuple[str, int]]
+    ) -> None:
+        """Declare what a stored version requires, after the fact; idempotent.
+
+        For versions written before their writer declared requirements. A new version
+        declares them on ``create_artifact`` or ``import_artifact``, with its row.
+
+        Raises:
+            ValueError: If the version does not exist.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            self._write_requirements(conn, artifact_id, version, row["tenant"], requires)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def versions_declaring(self, content_type: str) -> list[ArtifactVersion]:
+        """Every version whose transform spec declares *content_type*, in any state."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, version, state, provenance_hash, schema_json,
+                       row_count, byte_size, created_at, transform_spec,
+                       input_versions, tenant, principal, content_sha256
+                FROM artifact_versions
+                WHERE transform_spec LIKE ? ESCAPE '\\'
+                ORDER BY id, version
+                """,
+                (f"%{_like_literal(content_type)}%",),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            version
+            for version in (_version_from_row(row) for row in rows)
+            if _declared_content_type(version.transform_spec) == content_type
+        ]
 
     @staticmethod
     def _held_by_another_tenant(
@@ -1305,6 +1483,8 @@ class ArtifactStore:
         for migration in _MIGRATIONS:
             if migration.version <= current:
                 continue
+            if self.upgraded_from is None:
+                self.upgraded_from = current
             logger.info(
                 "Applying schema migration %d (%s)", migration.version, migration.description
             )
@@ -1456,13 +1636,17 @@ class ArtifactStore:
             conn.close()
 
     def import_artifact(
-        self, record: ArtifactVersion, blob: bytes | Path | None
+        self,
+        record: ArtifactVersion,
+        blob: bytes | Path | None,
+        requires: Collection[tuple[str, int]] = (),
     ) -> ImportedArtifact:
         """Copy an artifact from another store, keeping its id and version.
 
         The version is preserved because lineage edges name ``id@v=N``;
         ``create_artifact`` would renumber. The row is written as in the source,
-        including ``provenance_hash``, ``principal`` and ``created_at``.
+        including ``provenance_hash``, ``principal`` and ``created_at``; ``requires`` is
+        what it needs here (see :meth:`create_artifact`), recorded with the row.
 
         Returns where the record landed. When the store already holds that exact
         ``id@v=N``, or the same computation under another id (one ready row per
@@ -1540,6 +1724,7 @@ class ArtifactStore:
                     attempt,
                 ),
             )
+            self._write_requirements(conn, record.id, record.version, record.tenant, requires)
             conn.commit()
         finally:
             conn.close()
@@ -4097,7 +4282,7 @@ class ArtifactStore:
                     f"{artifact_id}@v={version} is published (publication id "
                     f"{published['token']}); revoke the publication before deleting it"
                 )
-            # A published or pinned version reading these bytes through superseded_by gets
+            # A published or retained version reading these bytes through superseded_by gets
             # its own copy first: deleting this version must not empty a link somebody holds.
             ref = f"{artifact_id}@v={version}"
             held_pointers = conn.execute(
@@ -4107,8 +4292,8 @@ class ArtifactStore:
                   AND (EXISTS (SELECT 1 FROM artifact_publications pub
                                WHERE pub.artifact_id = av.id AND pub.version = av.version
                                  AND pub.revoked_at IS NULL)
-                       OR EXISTS (SELECT 1 FROM artifact_pins p
-                                  WHERE p.artifact_id = av.id AND p.version = av.version))
+                       OR EXISTS (SELECT 1 FROM retention_roots r
+                                  WHERE r.artifact_id = av.id AND r.version = av.version))
                 """,
                 (ref,),
             ).fetchall()
@@ -4201,6 +4386,16 @@ class ArtifactStore:
             "DELETE FROM artifact_tags WHERE artifact_id = ? AND version = ?",
             (artifact_id, version),
         )
+        conn.execute(
+            "DELETE FROM retention_roots WHERE artifact_id = ? AND version = ?",
+            (artifact_id, version),
+        )
+        # Its own requirements go with it; an edge pointing at it stays, so the version
+        # that required it reads as missing one (``requirements_met``).
+        conn.execute(
+            "DELETE FROM retention_edges WHERE from_artifact_id = ? AND from_version = ?",
+            (artifact_id, version),
+        )
         if self._dialect.schema_exists(conn, "artifact_builds"):
             conn.execute(
                 "DELETE FROM artifact_builds WHERE artifact_id = ? AND version = ?",
@@ -4217,17 +4412,14 @@ class ArtifactStore:
         """Every version something holds, with its whole chain of inputs.
 
         Roots: names and aliases; pending alias changes; publications (revoked ones
-        too) and pins; running builds; and with ``current_values`` the current value
-        of every caller-named id, except those in ``not_current``. A held
-        ``# @output_dir`` manifest holds each file version it names. Deliberately not
-        tenant-scoped: over-protecting is free, and proving chains never cross tenants
-        is not.
+        too) and retention roots; running builds; and with ``current_values`` the
+        current value of every caller-named id, except those in ``not_current``. A
+        held version holds what it requires. Deliberately not tenant-scoped:
+        over-protecting is free, and proving chains never cross tenants is not.
         """
-        from strata.notebook import output_dirs
-
         roots_sql = (
             "SELECT artifact_id, version FROM artifact_publications "
-            "UNION SELECT artifact_id, version FROM artifact_pins "
+            "UNION SELECT artifact_id, version FROM retention_roots "
             "UNION SELECT artifact_id, version FROM artifact_names "
             "UNION SELECT artifact_id, version FROM artifact_aliases "
             "UNION SELECT artifact_id, version FROM registry_pending "
@@ -4264,16 +4456,15 @@ class ArtifactStore:
                 "WHERE superseded_by IS NOT NULL"
             ).fetchall()
         }
-        # A folder's files are not edges. Only the manifests the walk reaches are read.
-        manifests: set[tuple[str, int]] = {
-            (row["id"], row["version"])
-            for row in conn.execute(
-                "SELECT id, version, transform_spec FROM artifact_versions "
-                "WHERE transform_spec LIKE ?",
-                (f"%{output_dirs.CONTENT_TYPE}%",),
-            ).fetchall()
-            if _declared_content_type(row["transform_spec"]) == output_dirs.CONTENT_TYPE
-        }
+        # What a version requires beside its inputs: a folder's files, a checkpoint's parts.
+        required: dict[tuple[str, int], list[tuple[str, int]]] = {}
+        for row in conn.execute(
+            "SELECT from_artifact_id, from_version, to_artifact_id, to_version "
+            "FROM retention_edges WHERE kind = 'requires'"
+        ).fetchall():
+            required.setdefault((row["from_artifact_id"], row["from_version"]), []).append(
+                (row["to_artifact_id"], row["to_version"])
+            )
 
         reachable: set[tuple[str, int]] = set()
         pending = list(roots)
@@ -4284,20 +4475,7 @@ class ArtifactStore:
             reachable.add(node)
             if node in canonical:
                 pending.append(canonical[node])
-            if node in manifests:
-                manifest = self.read_blob(*node, note_use=False)
-                if manifest is not None:
-                    try:
-                        pending += [
-                            (fid, fv) for fid, fv, _ in output_dirs.file_refs(node[0], manifest)
-                        ]
-                    except ValueError:
-                        # An import can hold any bytes under this type; one bad row must not
-                        # stop every sweep of the store. It names nothing, so holds nothing.
-                        logger.warning(
-                            "%s@v=%d is not a readable folder manifest; it holds no files",
-                            *node,
-                        )
+            pending += required.get(node, ())
             recorded_inputs = inputs.get(node)
             if not recorded_inputs:
                 continue
@@ -4312,83 +4490,56 @@ class ArtifactStore:
                     pending.append(ancestor)
         return reachable
 
-    def _folder_files(self, conn: StoreConnection) -> dict[tuple[str, int], set[tuple[str, int]]]:
-        """Each ``# @output_dir`` manifest version with the stored files it names.
-
-        Only files of the manifest's own tenant count: a reader takes another tenant's
-        file as missing. A manifest without bytes, or not readable, names nothing.
-        """
-        from strata.notebook import output_dirs
-
-        named: dict[tuple[str, int], tuple[str, set[tuple[str, int]]]] = {}
-        for row in conn.execute(
-            "SELECT id, version, tenant, transform_spec FROM artifact_versions "
-            "WHERE transform_spec LIKE ?",
-            (f"%{output_dirs.CONTENT_TYPE}%",),
-        ).fetchall():
-            if _declared_content_type(row["transform_spec"]) != output_dirs.CONTENT_TYPE:
-                continue
-            manifest = self.read_blob(row["id"], row["version"], note_use=False)
-            if manifest is None:
-                continue
-            try:
-                refs = {(fid, fv) for fid, fv, _ in output_dirs.file_refs(row["id"], manifest)}
-            except ValueError:
-                logger.warning(
-                    "%s@v=%d is not a readable folder manifest; it keeps no files",
-                    row["id"],
-                    row["version"],
-                )
-                continue
-            named[(row["id"], row["version"])] = (row["tenant"] or "", refs)
-        tenants = self._readable_tenants(conn, {ref for _, refs in named.values() for ref in refs})
-        return {
-            manifest: {ref for ref in refs if tenants.get(ref) == tenant}
-            for manifest, (tenant, refs) in named.items()
-        }
-
     @staticmethod
-    def _readable_tenants(
-        conn: StoreConnection, refs: Collection[tuple[str, int]]
-    ) -> dict[tuple[str, int], str]:
-        """The tenant of each version in *refs* whose bytes can be read; the rest are left out."""
-        ids = sorted({artifact_id for artifact_id, _ in refs})
-        tenants: dict[tuple[str, int], str] = {}
-        for start in range(0, len(ids), 500):
-            batch = ids[start : start + 500]
-            placeholders = ", ".join("?" for _ in batch)
-            for row in conn.execute(
-                "SELECT id, version, tenant FROM artifact_versions "
-                f"WHERE id IN ({placeholders}) AND state IN ('ready', 'superseded')",
-                batch,
-            ).fetchall():
-                if (row["id"], row["version"]) in refs:
-                    tenants[(row["id"], row["version"])] = row["tenant"] or ""
-        return tenants
+    def _required_versions(
+        conn: StoreConnection,
+    ) -> dict[tuple[str, int], set[tuple[str, int]]]:
+        """Each version that requires something, with the stored versions it requires.
 
-    def folder_is_whole(self, version: ArtifactVersion) -> bool:
-        """Whether every file a folder manifest names is stored as its tenant's.
-
-        ``True`` for any other version; ``False`` for a manifest that cannot be read,
-        from which no reader rebuilds a folder.
+        Only versions of the requirer's own tenant count: a reader takes another tenant's
+        as missing. A requirement that is gone, or never arrived, is left out.
         """
-        from strata.notebook import output_dirs
+        required: dict[tuple[str, int], set[tuple[str, int]]] = {}
+        for row in conn.execute(
+            """
+            SELECT e.from_artifact_id, e.from_version, e.to_artifact_id, e.to_version
+            FROM retention_edges e
+            JOIN artifact_versions t
+              ON t.id = e.to_artifact_id AND t.version = e.to_version
+            WHERE e.kind = 'requires' AND t.state IN ('ready', 'superseded')
+              AND COALESCE(t.tenant, '') = e.tenant
+            """
+        ).fetchall():
+            required.setdefault((row["from_artifact_id"], row["from_version"]), set()).add(
+                (row["to_artifact_id"], row["to_version"])
+            )
+        return required
 
-        if version.params.get("content_type") != output_dirs.CONTENT_TYPE:
-            return True
-        manifest = self.read_blob(version.id, version.version, note_use=False)
-        if manifest is None:
-            return False
-        try:
-            refs = {(fid, fv) for fid, fv, _ in output_dirs.file_refs(version.id, manifest)}
-        except ValueError:
-            return False
+    def requirements_met(self, version: ArtifactVersion) -> bool:
+        """Whether every version *version* requires is stored as its tenant's.
+
+        ``True`` for a version requiring nothing; ``False`` for a folder whose file is
+        gone, from which no reader rebuilds a folder.
+        """
         conn = self._get_connection()
         try:
-            tenants = self._readable_tenants(conn, refs)
+            missing = conn.execute(
+                """
+                SELECT 1 FROM retention_edges e
+                WHERE e.from_artifact_id = ? AND e.from_version = ? AND e.kind = 'requires'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM artifact_versions t
+                      WHERE t.id = e.to_artifact_id AND t.version = e.to_version
+                        AND t.state IN ('ready', 'superseded')
+                        AND COALESCE(t.tenant, '') = ?
+                  )
+                LIMIT 1
+                """,
+                (version.id, version.version, version.tenant or ""),
+            ).fetchone()
         finally:
             conn.close()
-        return all(tenants.get(ref) == (version.tenant or "") for ref in refs)
+        return missing is None
 
     def retire_ready(self, artifact_id: str, version: int) -> None:
         """Supersede a ready version, so it is no longer its provenance's answer.
@@ -4406,26 +4557,29 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def pin_artifact(
+    def retain(
         self,
         artifact_id: str,
         version: int,
-        reason: str,
         *,
+        kind: str,
+        holder: str,
         tenant: str | None = None,
-        pinned_by: str | None = None,
+        created_by: str | None = None,
     ) -> dict:
-        """Hold a version and its chain against garbage collection.
+        """Hold a version, its chain and what it requires against garbage collection.
 
-        Idempotent per reason: pinning again refreshes who and when.
+        *kind* says what the holder is (``pin``); *holder* which one (a pin's reason).
+        Idempotent per holder: holding again refreshes who and when.
 
         Raises:
             ValueError: If the version does not exist or belongs to another tenant,
-                or the reason is empty.
+                or *kind* or *holder* is empty.
         """
-        reason = reason.strip()
-        if not reason:
-            raise ValueError("a pin needs a reason")
+        kind = kind.strip()
+        holder = holder.strip()
+        if not kind or not holder:
+            raise ValueError("a retention root needs a kind and a holder")
         effective_tenant = tenant if tenant is not None else ""
         conn = self._get_connection()
         try:
@@ -4437,33 +4591,43 @@ class ArtifactStore:
                 raise ValueError(f"Artifact {artifact_id}@v={version} not found")
             if tenant is not None and (row["tenant"] or "") not in (effective_tenant, ""):
                 raise ValueError(f"Artifact {artifact_id}@v={version} not found")
-            pinned_at = time.time()
+            created_at = time.time()
             conn.execute(
-                "INSERT INTO artifact_pins "
-                "(artifact_id, version, reason, tenant, pinned_by, pinned_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT (artifact_id, version, reason) DO UPDATE SET "
-                "pinned_by = excluded.pinned_by, pinned_at = excluded.pinned_at",
-                (artifact_id, version, reason, effective_tenant, pinned_by, pinned_at),
+                "INSERT INTO retention_roots "
+                "(tenant, kind, holder, artifact_id, version, created_at, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (kind, holder, artifact_id, version) DO UPDATE SET "
+                "created_by = excluded.created_by, created_at = excluded.created_at",
+                (effective_tenant, kind, holder, artifact_id, version, created_at, created_by),
             )
             conn.commit()
             return {
                 "artifact_id": artifact_id,
                 "version": version,
-                "reason": reason,
+                "kind": kind,
+                "holder": holder,
                 "tenant": effective_tenant,
-                "pinned_by": pinned_by,
-                "pinned_at": pinned_at,
+                "created_by": created_by,
+                "created_at": created_at,
             }
         finally:
             conn.close()
 
-    def unpin_artifact(
-        self, artifact_id: str, version: int, reason: str, *, tenant: str | None = None
+    def release(
+        self,
+        artifact_id: str,
+        version: int,
+        *,
+        kind: str,
+        holder: str,
+        tenant: str | None = None,
     ) -> bool:
-        """Release one hold. Returns False if there was no such pin."""
-        sql = "DELETE FROM artifact_pins WHERE artifact_id = ? AND version = ? AND reason = ?"
-        params: list[Any] = [artifact_id, version, reason]
+        """Let go of one hold. Returns False if there was no such root."""
+        sql = (
+            "DELETE FROM retention_roots "
+            "WHERE artifact_id = ? AND version = ? AND kind = ? AND holder = ?"
+        )
+        params: list[Any] = [artifact_id, version, kind, holder]
         if tenant is not None:
             sql += " AND tenant = ?"
             params.append(tenant)
@@ -4475,29 +4639,33 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def list_pins(
+    def retention_roots(
         self,
         artifact_id: str | None = None,
         version: int | None = None,
         *,
+        kind: str | None = None,
         tenant: str | None = None,
     ) -> list[dict]:
-        """Pins, oldest first, optionally for one version and one tenant."""
+        """Roots, oldest first, optionally for one version, one kind and one tenant."""
         clauses: list[str] = []
         params: list[Any] = []
-        if artifact_id is not None:
-            clauses.append("artifact_id = ?")
-            params.append(artifact_id)
-        if version is not None:
-            clauses.append("version = ?")
-            params.append(version)
-        if tenant is not None:
-            clauses.append("tenant = ?")
-            params.append(tenant)
-        sql = "SELECT artifact_id, version, reason, tenant, pinned_by, pinned_at FROM artifact_pins"
+        for column, value in (
+            ("artifact_id", artifact_id),
+            ("version", version),
+            ("kind", kind),
+            ("tenant", tenant),
+        ):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+        sql = (
+            "SELECT artifact_id, version, kind, holder, tenant, created_by, created_at "
+            "FROM retention_roots"
+        )
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY pinned_at ASC"
+        sql += " ORDER BY created_at ASC"
         conn = self._get_connection()
         try:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
@@ -4637,9 +4805,10 @@ class ArtifactStore:
                 size_params.append(tenant)
             store_bytes = int(conn.execute(size_sql, size_params).fetchone()[0])
 
-            # A folder's files are versions of their own. A manifest kept while a file it names
-            # goes is a broken folder, and a by-provenance hit until it goes too.
-            folders = self._folder_files(conn)
+            # A folder's files are versions of their own, which its manifest requires. A
+            # manifest kept while a file it names goes is a broken folder, and a
+            # by-provenance hit until it goes too.
+            folders = self._required_versions(conn)
             namers: dict[tuple[str, int], set[tuple[str, int]]] = {}
             for manifest, files in folders.items():
                 for named in files:
@@ -4758,8 +4927,8 @@ class ArtifactStore:
                                       WHERE n.artifact_id = ? AND n.version = ?)
                       AND NOT EXISTS (SELECT 1 FROM artifact_aliases a
                                       WHERE a.artifact_id = ? AND a.version = ?)
-                      AND NOT EXISTS (SELECT 1 FROM artifact_pins p
-                                      WHERE p.artifact_id = ? AND p.version = ?)
+                      AND NOT EXISTS (SELECT 1 FROM retention_roots r
+                                      WHERE r.artifact_id = ? AND r.version = ?)
                       AND NOT EXISTS (SELECT 1 FROM artifact_publications pub
                                       WHERE pub.artifact_id = ? AND pub.version = ?)
                       AND NOT EXISTS (SELECT 1 FROM artifact_versions ptr
@@ -5058,16 +5227,12 @@ class ArtifactStore:
     def verify_artifacts(self, tenant: str | None = None) -> list[dict]:
         """Check every ready or superseded artifact's blob against its metadata.
 
-        The blob must exist and match its recorded digest. An Arrow blob (a declared
-        ``arrow/ipc`` content type, or none, as core transforms write) must also parse as
-        one IPC stream and match ``row_count`` when one was recorded; a notebook's JSON,
-        image or pickled outputs are not Arrow. Returns one ``{"artifact_id", "version",
-        "state", "problem", "detail"}`` dict per problem; empty means consistent.
+        The blob must exist and match its recorded digest. A blob whose declared content
+        type has a registered validator (:func:`register_validator`) must also parse, and
+        match ``row_count`` when one was recorded. Returns one ``{"artifact_id",
+        "version", "state", "problem", "detail"}`` dict per problem; empty means
+        consistent.
         """
-        import pyarrow as pa
-
-        from strata.fast_io import validate_ipc_stream
-
         conn = self._get_connection()
         try:
             query = """
@@ -5110,10 +5275,11 @@ class ArtifactStore:
                 )
                 continue
 
-            if _declared_content_type(row["transform_spec"]) in ("", "arrow/ipc"):
+            validate = _VALIDATORS.get(_declared_content_type(row["transform_spec"]))
+            if validate is not None:
                 try:
-                    readable_rows = validate_ipc_stream(data)
-                except (ValueError, pa.ArrowInvalid) as e:
+                    readable_rows = validate(data)
+                except ValueError as e:
                     findings.append(
                         {
                             "artifact_id": artifact_id,

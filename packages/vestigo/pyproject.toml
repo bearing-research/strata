@@ -52,9 +52,13 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-timeout>=2.3.0",
-    # The Postgres suite starts a container.
+    # The Postgres suite starts a container and drives the store off the loop.
     "testcontainers>=4.15.0",
     "docker>=7.0.0",
+    "anyio>=4.0.0",
+    # The presigned-signing tests mint an RSA key; the S3 tests mock the service.
+    "cryptography>=42.0.0",
+    "moto[s3]>=5.0.0",
 ]
 
 # pytest stops at the first pyproject.toml with a pytest section, so
