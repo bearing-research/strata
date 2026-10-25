@@ -1,0 +1,45 @@
+{
+  "source": "ADR 002 §6.3",
+  "domain_charset": "^[a-z0-9_\\-./]+$",
+  "role_rule": "NFKC-normalized identifier, UTF-8 encoded; nonempty",
+  "classes": {
+    "complete": "Built at publish time from the cell's input_specs: one edge per upstream variable, role = variable name, position 0. Positional executors use role 'input' and the index.",
+    "reconstructed": "Built once from a stored TransformSpec whose roles were never recorded: role 'input', positional. Partially reconstructed provenance; never replaced, never claimed equivalent to a complete node.",
+    "leaf": "An external input: no edges, payload = the URI without its version."
+  },
+  "domains": [
+    {
+      "domain": "strata/cell",
+      "class": "complete",
+      "payload": "canonical bytes of executor plus params (the TransformSpec minus inputs)"
+    },
+    {
+      "domain": "strata/cell-reconstructed",
+      "class": "reconstructed",
+      "payload": "canonical bytes of executor plus params"
+    },
+    {
+      "domain": "strata/table",
+      "class": "leaf",
+      "payload": "table URI without version"
+    },
+    {
+      "domain": "strata/fetch",
+      "class": "leaf",
+      "payload": "fetch URI without version"
+    },
+    {
+      "domain": "strata/dataset",
+      "class": "leaf",
+      "payload": "dataset URI without version"
+    }
+  ],
+  "links": [
+    {
+      "kind": "reconstructed_from",
+      "from_domain": "strata/cell",
+      "to_domain": "strata/cell-reconstructed",
+      "meaning": "A rerun's complete node points at the historical reconstructed node; neither identity changes."
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "source": "ADR 002 §7.1; strata.notebook.provenance.derive_subkey",
+  "rule": "derive_subkey(parent, *labels) = sha256_hex(':'.join([parent, *labels]))",
+  "parent": "e47125968b3b71049fbc4802d1e40a71ea1359decfabacf70b34588037d4ff0c",
+  "lookup_labels": ["x"],
+  "notes": [
+    "The parent is sha256_hex('parent'); any hex digest works, the rule treats it as text.",
+    "Strata's cache lookup for variable x is derive_subkey(parent, 'x'), the cached_output key.",
+    "Every build-labelled key differs from the lookup key by construction, so stochastic runs and checkpoints are persisted and never served as cache hits."
+  ],
+  "vectors": [
+    {
+      "name": "cached_output",
+      "labels": ["x"],
+      "key": "c8185297943f64d801437803c8794d79ad12842c453c0e43a49d0e393258bda2"
+    },
+    {
+      "name": "variant_output",
+      "nested": [["variant=a"], ["x"]],
+      "key": "8020ae13bdfe054907395027148758ecba8372a111c3398558fe5884b1c5ad84"
+    },
+    {
+      "name": "display",
+      "labels": ["__display__0"],
+      "key": "2b105f8af166089a0c792e71ecfd521e5093ee1878c748aeb6fbb3ad5daa1040"
+    },
+    {
+      "name": "console",
+      "labels": ["__console__"],
+      "key": "24f63d77957c1cbddc2c6172d94fbab6b8194aa4268be9af93d2e44b0c3d4847"
+    },
+    {
+      "name": "checkpoint_output",
+      "labels": ["build=b1", "release=3", "model"],
+      "key": "333731783085f650d4ca03f3000c88ea270e366ac250363e2d5cbbf0b37341bd"
+    },
+    {
+      "name": "stochastic_output",
+      "labels": ["build=b1", "model"],
+      "key": "b9e01a2147494a8ff8b27924c5e9798f7f0a3770b9c43085c6b2b954128549ce"
+    }
+  ]
+}
