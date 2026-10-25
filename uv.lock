@@ -4450,6 +4450,15 @@ s3 = [
     { name = "botocore" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "docker" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-timeout" },
+    { name = "testcontainers" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
@@ -4461,6 +4470,15 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=18.0.0" },
 ]
 provides-extras = ["postgres", "s3", "gcs", "azure"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "docker", specifier = ">=7.0.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+    { name = "pytest-timeout", specifier = ">=2.3.0" },
+    { name = "testcontainers", specifier = ">=4.15.0" },
+]
 
 [[package]]
 name = "virtualenv"

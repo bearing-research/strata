@@ -164,6 +164,30 @@ jobs:
           STRATA_POOL_POSTGRES_DSN: postgresql://pool:pool@localhost:5432/pool
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
+  # vestigo's own suite lives in packages/vestigo/tests so the package can
+  # leave the repository with its tests. Until ADR 002 E2 closes the ledger's
+  # lazy imports of Strata (GC roots, IPC validation, blob settings) it runs
+  # in the workspace environment, not an isolated one like the client's.
+  vestigo-tests:
+    name: vestigo tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          python-version: "3.12"
+          version: "latest"
+          save-cache: false
+
+      - name: Install the workspace
+        run: uv sync --all-extras
+
+      - name: Run vestigo tests
+        run: uv run pytest packages/vestigo/tests -v
+
   # ty exits non-zero on errors; the unresolved-import warnings configured for
   # guarded optional deps (torch/jax) do not fail the build.
   type-check:

@@ -56,7 +56,8 @@ local, S3, GCS, Azure.
 
 ```bash
 uv sync --all-extras                      # install (matches CI)
-uv run pytest                             # all tests
+uv run pytest                             # all Strata tests (tests/)
+uv run pytest packages/vestigo/tests      # the ledger's own suite
 uv run pytest tests/test_smoke.py -v      # one file
 uv run pre-commit run --all-files         # format + lint
 uv run ty check                           # type check (Astral); scoped to shipped code (src + strata-client)
@@ -174,7 +175,9 @@ Ledger (`packages/vestigo/src/vestigo/`, ADR 002): `store`,
 `build_store`, `sql_backend`, `blob_store`, `provenance` (transform spec, hash,
 `derive_subkey`), `uris`, `file_modes`, `tables`. Strata's side: `artifact/`
 (`transfer`, `table_export`, `cli`), `transforms/`, `migrate.py`,
-`notebook/worker_store.py` (the worker registry's own tables).
+`notebook/worker_store.py` (the worker registry's own tables). The ledger's
+tests live in `packages/vestigo/tests/` (no `strata` imports there);
+`tests/` keeps the ones that reach into Strata.
 Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
 `api_key_cli`, `run_tokens` for a cell run's own token), `tenancy/` (`tenant`
 config and context, `registry`).

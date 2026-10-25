@@ -46,3 +46,25 @@ Repository = "https://github.com/bearing-research/strata"
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-timeout>=2.3.0",
+    # The Postgres suite starts a container.
+    "testcontainers>=4.15.0",
+    "docker>=7.0.0",
+]
+
+# pytest stops at the first pyproject.toml with a pytest section, so
+# `pytest packages/vestigo/tests` reads its settings from here.
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 180
+timeout_method = "thread"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests requiring external services",
+]
