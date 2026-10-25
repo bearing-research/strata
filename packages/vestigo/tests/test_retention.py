@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 from vestigo.provenance import TransformSpec
-from vestigo.store import RETENTION_SCHEMA_VERSION, ArtifactStore, ArtifactVersion
+from vestigo.store import RETENTION_SCHEMA_VERSION, ArtifactStore, ArtifactVersion, _add_retention
 
 
 @pytest.fixture
@@ -210,6 +210,29 @@ class TestRequirements:
         with pytest.raises(ValueError, match="not found"):
             store.require("nope", 1, [part])
 
+    def test_many_declare_in_one_transaction_or_not_at_all(self, store):
+        part = _ready(store)
+        first = _ready(store)
+        second = _ready(store)
+
+        with pytest.raises(ValueError, match="nope"):
+            store.require_many({first: [part], ("nope", 1): [part]})
+        assert _edges(store) == set()
+
+        store.require_many({first: [part], second: [part, first]})
+        assert _edges(store) == {(*first, *part), (*second, *part), (*second, *first)}
+
+    def test_a_consumer_upgrade_step_is_recorded_once(self, store, tmp_path):
+        """A step the store cannot do itself (it reads no blob) is marked in the store."""
+        assert not store.upgrade_applied("folders")
+
+        store.mark_upgrade_applied("folders")
+        store.mark_upgrade_applied("folders")
+
+        assert store.upgrade_applied("folders")
+        assert ArtifactStore(tmp_path / "artifacts").upgrade_applied("folders")
+        assert not store.upgrade_applied("checkpoints")
+
     def test_an_import_records_what_the_record_requires(self, store, tmp_path):
         part = _ready(store)
         record = ArtifactVersion(
@@ -237,6 +260,12 @@ class TestRequirements:
         manifest = _ready(store, content_type="dir/manifest")
         _ready(store, content_type="dir/manifesto")
         _ready(store)
+
+        store.create_artifact(
+            "still-building",
+            "prov-building",
+            TransformSpec(executor="x@v1", params={"content_type": "dir/manifest"}, inputs=[]),
+        )
 
         declared = store.versions_declaring("dir/manifest")
 
@@ -276,7 +305,6 @@ class TestTheMigration:
 
         reopened = ArtifactStore(tmp_path / "artifacts")
 
-        assert reopened.upgraded_from == RETENTION_SCHEMA_VERSION - 1
         assert {
             (r["holder"], r["tenant"], r["created_by"], r["created_at"])
             for r in reopened.retention_roots(*key)
@@ -293,4 +321,18 @@ class TestTheMigration:
         finally:
             conn.close()
         assert "artifact_pins" not in names
-        assert ArtifactStore(tmp_path / "artifacts").upgraded_from is None
+
+    def test_the_migration_is_idempotent(self, store):
+        """Two processes opening an old store together both come out at the same place."""
+        key = _ready(store, tenant="t")
+        self._before_retention(store, [(*key, "snapshot", "t", "ops")])
+
+        conn = store._get_connection()
+        try:
+            _add_retention(conn, store._dialect)
+            _add_retention(conn, store._dialect)
+            conn.commit()
+        finally:
+            conn.close()
+
+        assert [r["holder"] for r in store.retention_roots(*key)] == ["snapshot"]

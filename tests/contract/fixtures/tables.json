@@ -49,9 +49,13 @@
         "from_artifact_id",
         "from_version",
         "to_artifact_id",
-        "to_version",
-        "kind"
+        "to_version"
       ]
+    },
+    {
+      "name": "store_upgrades",
+      "migrated": true,
+      "primary_key": ["name"]
     },
     {
       "name": "artifact_builds",

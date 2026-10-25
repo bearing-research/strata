@@ -310,11 +310,11 @@ class TestTheFileSweep:
 
     async def test_a_store_from_before_edges_declares_its_folders_when_opened(self, tmp_path):
         """A ledger upgrade creates the edges table empty; Strata reads the manifests it
-        stored before and declares their files once, wherever it opens the store."""
+        stored before and declares their files, wherever it opens the store, until the
+        store records that it has."""
         import sqlite3
 
-        from vestigo.store import RETENTION_SCHEMA_VERSION
-
+        from strata.artifact.retention import FOLDER_EDGES_UPGRADE
         from strata.notebook.artifact_integration import NotebookArtifactManager
 
         session, _ = await self._two_runs(tmp_path)
@@ -323,20 +323,14 @@ class TestTheFileSweep:
         conn = sqlite3.connect(manager.artifact_store.db_path)
         try:
             conn.execute("DELETE FROM retention_edges")
-            conn.execute(
-                "DELETE FROM schema_version WHERE version >= ?", (RETENTION_SCHEMA_VERSION,)
-            )
-            conn.execute(
-                "INSERT INTO schema_version (version, applied_at) VALUES (?, 0)",
-                (RETENTION_SCHEMA_VERSION - 1,),
-            )
+            conn.execute("DELETE FROM store_upgrades")
             conn.commit()
         finally:
             conn.close()
 
         reopened = NotebookArtifactManager(manager.notebook_id, manager.artifact_dir).artifact_store
 
-        assert reopened.upgraded_from == RETENTION_SCHEMA_VERSION - 1
+        assert reopened.upgrade_applied(FOLDER_EDGES_UPGRADE)
         for version in (1, 2):
             assert reopened.requirements_met(reopened.get_artifact(manifest_id, version))
         conn = sqlite3.connect(reopened.db_path)

@@ -14,7 +14,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -678,45 +678,52 @@ def _add_retention(conn: StoreConnection, dialect: SqlDialect) -> None:
     """Retention as data: roots say why a version is kept, edges what it needs (ADR 002 §7.4).
 
     Pins become roots of kind ``pin`` and their table goes. Edges start empty: the
-    application writes what its existing compound versions require.
+    application writes what its existing compound versions require, and records in
+    ``store_upgrades`` that it has.
+
+    Statement by statement rather than one script, so the migration lock holds
+    throughout (``executescript`` commits first), and idempotent, so two processes
+    opening the same old store both come out at the same place.
     """
-    conn.executescript(
-        dialect.adapt_ddl(
-            """
-            CREATE TABLE IF NOT EXISTS retention_roots (
-                tenant TEXT NOT NULL DEFAULT '',
-                kind TEXT NOT NULL,
-                holder TEXT NOT NULL,
-                artifact_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                created_at REAL NOT NULL,
-                created_by TEXT,
-                PRIMARY KEY (kind, holder, artifact_id, version)
-            );
-            CREATE INDEX IF NOT EXISTS idx_retention_roots_version
-            ON retention_roots(artifact_id, version);
-            CREATE TABLE IF NOT EXISTS retention_edges (
-                tenant TEXT NOT NULL DEFAULT '',
-                from_artifact_id TEXT NOT NULL,
-                from_version INTEGER NOT NULL,
-                to_artifact_id TEXT NOT NULL,
-                to_version INTEGER NOT NULL,
-                kind TEXT NOT NULL DEFAULT 'requires',
-                PRIMARY KEY (from_artifact_id, from_version, to_artifact_id, to_version, kind)
-            );
-            CREATE INDEX IF NOT EXISTS idx_retention_edges_to
-            ON retention_edges(to_artifact_id, to_version);
-            """
-        )
-    )
+    for statement in _RETENTION_DDL:
+        conn.execute(dialect.adapt_ddl(statement))
     if dialect.schema_exists(conn, "artifact_pins"):
         conn.execute(
             "INSERT INTO retention_roots "
             "(tenant, kind, holder, artifact_id, version, created_at, created_by) "
             "SELECT tenant, 'pin', reason, artifact_id, version, pinned_at, pinned_by "
-            "FROM artifact_pins"
+            "FROM artifact_pins WHERE true "
+            "ON CONFLICT (kind, holder, artifact_id, version) DO NOTHING"
         )
-        conn.execute("DROP TABLE artifact_pins")
+        conn.execute("DROP TABLE IF EXISTS artifact_pins")
+
+
+_RETENTION_DDL: tuple[str, ...] = (
+    """CREATE TABLE IF NOT EXISTS retention_roots (
+        tenant TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL,
+        holder TEXT NOT NULL,
+        artifact_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        created_at REAL NOT NULL,
+        created_by TEXT,
+        PRIMARY KEY (kind, holder, artifact_id, version)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_retention_roots_version "
+    "ON retention_roots(artifact_id, version)",
+    "CREATE INDEX IF NOT EXISTS idx_retention_roots_tenant ON retention_roots(tenant)",
+    """CREATE TABLE IF NOT EXISTS retention_edges (
+        tenant TEXT NOT NULL DEFAULT '',
+        from_artifact_id TEXT NOT NULL,
+        from_version INTEGER NOT NULL,
+        to_artifact_id TEXT NOT NULL,
+        to_version INTEGER NOT NULL,
+        PRIMARY KEY (from_artifact_id, from_version, to_artifact_id, to_version)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_retention_edges_to "
+    "ON retention_edges(to_artifact_id, to_version)",
+    "CREATE TABLE IF NOT EXISTS store_upgrades (name TEXT PRIMARY KEY, applied_at REAL NOT NULL)",
+)
 
 
 _MIGRATIONS: list[_Migration] = [
@@ -913,22 +920,31 @@ CREATE TABLE IF NOT EXISTS retention_roots (
 );
 CREATE INDEX IF NOT EXISTS idx_retention_roots_version
 ON retention_roots(artifact_id, version);
+CREATE INDEX IF NOT EXISTS idx_retention_roots_tenant
+ON retention_roots(tenant);
 
 -- What a version needs beside its lineage: a folder manifest requires the file
 -- versions it names, a checkpoint its components. Kept while the requirer is,
 -- and evicted with it. Declared by the writer as data; the store reads no
--- blob to learn them. 'requires' is the one kind so far.
+-- blob to learn them.
 CREATE TABLE IF NOT EXISTS retention_edges (
     tenant TEXT NOT NULL DEFAULT '',
     from_artifact_id TEXT NOT NULL,
     from_version INTEGER NOT NULL,
     to_artifact_id TEXT NOT NULL,
     to_version INTEGER NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'requires',
-    PRIMARY KEY (from_artifact_id, from_version, to_artifact_id, to_version, kind)
+    PRIMARY KEY (from_artifact_id, from_version, to_artifact_id, to_version)
 );
 CREATE INDEX IF NOT EXISTS idx_retention_edges_to
 ON retention_edges(to_artifact_id, to_version);
+
+-- The consumer's part of a schema upgrade, done once per database: a step the
+-- store cannot do itself (it reads no blob) is recorded here when complete, so
+-- a crash between the migration and the step redoes the step, not skips it.
+CREATE TABLE IF NOT EXISTS store_upgrades (
+    name TEXT PRIMARY KEY,
+    applied_at REAL NOT NULL
+);
 
 -- Bytes uploaded ahead of the import that names them (PUT
 -- /v1/artifacts/import/blobs/{sha256}). Per tenant: a digest is no proof of
@@ -1031,8 +1047,6 @@ class ArtifactStore:
         # Every query goes through _get_connection, so the dialect is the one place a second backend
         # has to be taught about; see strata/sql_backend.py for what differs.
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(self.db_path)
-
-        self.upgraded_from: int | None = None
         """The schema version this open found, when it migrated the store; else ``None``.
         The application finishes an upgrade that needs its knowledge, such as writing the
         requirements of compound versions stored before ``RETENTION_SCHEMA_VERSION``."""
@@ -1079,10 +1093,7 @@ class ArtifactStore:
                 # Fast path: a store is constructed per session in several places and the lock below
                 # is global, so take it only while the schema is missing.
                 if self._dialect.schema_exists(conn):
-                    # Existing database: it may still be behind. Under the same
-                    # global lock the creation path takes, since two replicas
-                    # starting together would otherwise both apply migration N.
-                    self._dialect.begin_write(conn, "__schema__")
+                    # Existing database: it may still be behind.
                     self._apply_schema_migrations(conn)
                     return
 
@@ -1314,9 +1325,9 @@ class ArtifactStore:
                 continue
             conn.execute(
                 "INSERT INTO retention_edges "
-                "(tenant, from_artifact_id, from_version, to_artifact_id, to_version, kind) "
-                "VALUES (?, ?, ?, ?, ?, 'requires') "
-                "ON CONFLICT (from_artifact_id, from_version, to_artifact_id, to_version, kind) "
+                "(tenant, from_artifact_id, from_version, to_artifact_id, to_version) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT (from_artifact_id, from_version, to_artifact_id, to_version) "
                 "DO NOTHING",
                 (tenant if tenant is not None else "", artifact_id, version, to_id, to_version),
             )
@@ -1332,21 +1343,54 @@ class ArtifactStore:
         Raises:
             ValueError: If the version does not exist.
         """
+        self.require_many({(artifact_id, version): requires})
+
+    def require_many(
+        self, requirements: Mapping[tuple[str, int], Collection[tuple[str, int]]]
+    ) -> None:
+        """Declare what each of several stored versions requires, in one transaction.
+
+        Raises:
+            ValueError: If any version does not exist; nothing is written then.
+        """
         conn = self._get_connection()
         try:
-            row = conn.execute(
-                "SELECT tenant FROM artifact_versions WHERE id = ? AND version = ?",
-                (artifact_id, version),
-            ).fetchone()
-            if row is None:
-                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
-            self._write_requirements(conn, artifact_id, version, row["tenant"], requires)
+            for (artifact_id, version), requires in requirements.items():
+                row = conn.execute(
+                    "SELECT tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                    (artifact_id, version),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+                self._write_requirements(conn, artifact_id, version, row["tenant"], requires)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def upgrade_applied(self, name: str) -> bool:
+        """Whether the consumer's upgrade step *name* has run on this database."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT 1 FROM store_upgrades WHERE name = ?", (name,)).fetchone()
+        finally:
+            conn.close()
+        return row is not None
+
+    def mark_upgrade_applied(self, name: str) -> None:
+        """Record that the consumer's upgrade step *name* has run; idempotent."""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO store_upgrades (name, applied_at) VALUES (?, ?) "
+                "ON CONFLICT (name) DO NOTHING",
+                (name, time.time()),
+            )
             conn.commit()
         finally:
             conn.close()
 
     def versions_declaring(self, content_type: str) -> list[ArtifactVersion]:
-        """Every version whose transform spec declares *content_type*, in any state."""
+        """Every current (ready or superseded) version whose spec declares *content_type*."""
         conn = self._get_connection()
         try:
             rows = conn.execute(
@@ -1356,6 +1400,7 @@ class ArtifactStore:
                        input_versions, tenant, principal, content_sha256
                 FROM artifact_versions
                 WHERE transform_spec LIKE ? ESCAPE '\\'
+                  AND state IN ('ready', 'superseded')
                 ORDER BY id, version
                 """,
                 (f"%{_like_literal(content_type)}%",),
@@ -1465,8 +1510,14 @@ class ArtifactStore:
             )
 
     def _apply_schema_migrations(self, conn: StoreConnection) -> None:
-        """Bring one database up to ``_LATEST_SCHEMA_VERSION``; a cheap no-op once current."""
+        """Bring one database up to ``_LATEST_SCHEMA_VERSION``; a cheap no-op once current.
+
+        Under the write lock the creation path takes, from the version read to the
+        commit: two processes opening a database together would otherwise both apply
+        migration N, and the loser of a non-idempotent one would fail.
+        """
         conn.executescript(self._dialect.adapt_ddl(_SCHEMA_VERSION_SQL))
+        self._dialect.begin_write(conn, "__schema__")
         row = conn.execute("SELECT MAX(version) AS version FROM schema_version").fetchone()
         current = row["version"] if row is not None and row["version"] is not None else None
 
@@ -1483,8 +1534,6 @@ class ArtifactStore:
         for migration in _MIGRATIONS:
             if migration.version <= current:
                 continue
-            if self.upgraded_from is None:
-                self.upgraded_from = current
             logger.info(
                 "Applying schema migration %d (%s)", migration.version, migration.description
             )
@@ -1493,11 +1542,7 @@ class ArtifactStore:
         conn.commit()
 
     def _stamp_schema_version(self, conn: StoreConnection, version: int) -> None:
-        """Record a schema version, at most once.
-
-        A check rather than an upsert because the dialects spell upserts differently;
-        the migration lock makes the race impossible.
-        """
+        """Record a schema version, at most once (the caller holds the migration lock)."""
         existing = conn.execute(
             "SELECT 1 FROM schema_version WHERE version = ?", (version,)
         ).fetchone()
@@ -4459,8 +4504,7 @@ class ArtifactStore:
         # What a version requires beside its inputs: a folder's files, a checkpoint's parts.
         required: dict[tuple[str, int], list[tuple[str, int]]] = {}
         for row in conn.execute(
-            "SELECT from_artifact_id, from_version, to_artifact_id, to_version "
-            "FROM retention_edges WHERE kind = 'requires'"
+            "SELECT from_artifact_id, from_version, to_artifact_id, to_version FROM retention_edges"
         ).fetchall():
             required.setdefault((row["from_artifact_id"], row["from_version"]), []).append(
                 (row["to_artifact_id"], row["to_version"])
@@ -4506,7 +4550,7 @@ class ArtifactStore:
             FROM retention_edges e
             JOIN artifact_versions t
               ON t.id = e.to_artifact_id AND t.version = e.to_version
-            WHERE e.kind = 'requires' AND t.state IN ('ready', 'superseded')
+            WHERE t.state IN ('ready', 'superseded')
               AND COALESCE(t.tenant, '') = e.tenant
             """
         ).fetchall():
@@ -4526,7 +4570,7 @@ class ArtifactStore:
             missing = conn.execute(
                 """
                 SELECT 1 FROM retention_edges e
-                WHERE e.from_artifact_id = ? AND e.from_version = ? AND e.kind = 'requires'
+                WHERE e.from_artifact_id = ? AND e.from_version = ?
                   AND NOT EXISTS (
                       SELECT 1 FROM artifact_versions t
                       WHERE t.id = e.to_artifact_id AND t.version = e.to_version

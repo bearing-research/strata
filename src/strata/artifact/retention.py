@@ -10,9 +10,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from vestigo.store import RETENTION_SCHEMA_VERSION, ArtifactStore
+from vestigo.store import ArtifactStore
 
 logger = logging.getLogger(__name__)
+
+FOLDER_EDGES_UPGRADE = "folder_manifests_require_their_files"
 
 
 def requirements(
@@ -39,19 +41,22 @@ def requirements(
 def complete_upgrade(store: ArtifactStore) -> None:
     """Record the requirements of folders stored before the ledger kept them as edges.
 
-    A store this open migrated from below ``RETENTION_SCHEMA_VERSION`` holds manifests
-    whose files only their bytes name. The ledger reads no blob, so Strata writes the
-    edges once, here, at every place it opens a store it may have upgraded.
+    A store from before ``retention_edges`` holds manifests whose files only their bytes
+    name. The ledger reads no blob, so Strata reads each stored manifest once, writes
+    the edges in one transaction and marks the step done in the store itself; a crash
+    before the mark redoes the step, and a fresh store marks it on first open.
     """
     from strata.notebook import output_dirs
 
-    if store.upgraded_from is None or store.upgraded_from >= RETENTION_SCHEMA_VERSION:
+    if store.upgrade_applied(FOLDER_EDGES_UPGRADE):
         return
-    written = 0
+    declared: dict[tuple[str, int], list[tuple[str, int]]] = {}
     for manifest in store.versions_declaring(output_dirs.CONTENT_TYPE):
         blob = store.read_blob(manifest.id, manifest.version, note_use=False)
         required = requirements(manifest.id, output_dirs.CONTENT_TYPE, blob)
         if required:
-            store.require(manifest.id, manifest.version, required)
-            written += 1
-    logger.info("Recorded the files of %d folder manifests stored before this release", written)
+            declared[(manifest.id, manifest.version)] = required
+    store.require_many(declared)
+    store.mark_upgrade_applied(FOLDER_EDGES_UPGRADE)
+    if declared:
+        logger.info("Recorded the files of %d folder manifests stored before edges", len(declared))
