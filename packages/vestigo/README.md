@@ -8,7 +8,9 @@ with compare-and-set and approval, retention and race-safe garbage
 collection, all in one transaction discipline on SQLite or PostgreSQL, with
 blob backends for local disk, S3, GCS and Azure.
 
-Strata is its first consumer. *Vestigo* is Latin for "I track down, I trace":
+Strata is its first consumer, and until ADR 002 E2 lands the package is not
+usable on its own: garbage collection, verification and the S3 settings still
+import Strata. *Vestigo* is Latin for "I track down, I trace":
 the ledger traces every artifact back to the computation and inputs that made it.
 <!-- --8<-- [end:body] -->
 

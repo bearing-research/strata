@@ -31,12 +31,6 @@ CREATE TABLE IF NOT EXISTS notebook_worker_registry (
 );
 """
 
-TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("notebook_workers", ("name",)),
-    ("notebook_worker_registry", ("id",)),
-)
-"""The registry's tables with their primary keys, for ``strata migrate``."""
-
 
 class NotebookWorkerStore:
     """Reads and atomic rewrites of the worker registry."""
@@ -124,21 +118,21 @@ class NotebookWorkerStore:
 _worker_store: NotebookWorkerStore | None = None
 
 
-def open_notebook_worker_store(
-    db_path: Path, dialect: SqlDialect | None = None
-) -> NotebookWorkerStore:
-    """Open the process-wide registry store on the artifact database.
+def get_notebook_worker_store() -> NotebookWorkerStore | None:
+    """The registry on the artifact store's database, or ``None`` without an artifact store.
 
-    The server does this once at startup, so no request ever creates the schema.
+    Created beside the artifact store singleton on first use; the server's startup is
+    that first use, so no request creates the schema.
     """
     global _worker_store
     if _worker_store is None:
-        _worker_store = NotebookWorkerStore(db_path, dialect=dialect)
-    return _worker_store
+        from vestigo.store import get_artifact_store
 
-
-def get_notebook_worker_store() -> NotebookWorkerStore | None:
-    """The store startup opened, or ``None`` on a server without an artifact store."""
+        artifact_store = get_artifact_store()
+        if artifact_store is not None:
+            _worker_store = NotebookWorkerStore(
+                artifact_store.db_path, dialect=artifact_store.dialect
+            )
     return _worker_store
 
 

@@ -14,7 +14,7 @@ from vestigo.provenance import derive_subkey
 from vestigo.store import ArtifactStore
 from vestigo.tables import LEDGER_TABLES, TRANSIENT_TABLES
 
-from strata.migrate import migrated_tables
+from strata.migrate import MIGRATED_TABLES
 
 FIXTURES = Path(__file__).parent / "fixtures"
 OUTPUT_KEYS = json.loads((FIXTURES / "output_keys.json").read_text(encoding="utf-8"))
@@ -78,9 +78,9 @@ def test_fixture_matches_the_packages_table_list() -> None:
 
 
 def test_migrate_copies_the_ledger_first_then_stratas_tables() -> None:
-    assert migrated_tables()[: len(LEDGER_TABLES)] == LEDGER_TABLES
+    assert MIGRATED_TABLES[: len(LEDGER_TABLES)] == LEDGER_TABLES
     strata_owned = {t["name"] for t in TABLES["strata_owned"]}
-    assert {name for name, _ in migrated_tables()[len(LEDGER_TABLES) :]} <= strata_owned
+    assert {name for name, _ in MIGRATED_TABLES[len(LEDGER_TABLES) :]} <= strata_owned
 
 
 def test_provenance_domains_fit_the_charset() -> None:

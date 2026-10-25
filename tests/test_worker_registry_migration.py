@@ -1,4 +1,4 @@
-"""Adding a column to a store that already holds data, on SQLite and Postgres."""
+"""Migration 9 is a tombstone: the worker registry's tables come from NotebookWorkerStore."""
 
 from __future__ import annotations
 

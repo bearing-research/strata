@@ -9,7 +9,7 @@ from vestigo.build_store import get_build_store, reset_build_store
 from vestigo.store import get_artifact_store, reset_artifact_store
 
 from strata.config import StrataConfig
-from strata.notebook.worker_store import get_notebook_worker_store, open_notebook_worker_store
+from strata.notebook.worker_store import get_notebook_worker_store
 from strata.notebook.writer import create_notebook
 from strata.transforms.build_qos import TenantQuotaExceededError
 from strata.transforms.registry import (
@@ -157,9 +157,7 @@ def personal_mode_app(personal_mode_config):
     reset_transform_registry()
     reset_build_store()
 
-    store = get_artifact_store(personal_mode_config.artifact_dir)
-    # The worker registry beside it, as the real lifespan opens it.
-    open_notebook_worker_store(store.db_path, dialect=store.dialect)
+    get_artifact_store(personal_mode_config.artifact_dir)
 
     # Personal mode ships the embedded registry (the real lifespan does this).
     from strata.transforms.registry import TransformRegistry, set_transform_registry

@@ -29,12 +29,14 @@ _AUTOINCREMENT_COLUMNS: dict[str, str] = {"registry_audit": "seq"}
 #
 # Each entry pairs a table with its primary key, which makes the copy idempotent: a row already in
 # the target is skipped, not rewritten.
-def migrated_tables() -> tuple[tuple[str, tuple[str, ...]], ...]:
-    # Imported here: strata.notebook loads the whole notebook package, which a migration
-    # of the metadata never needs.
-    from strata.notebook.worker_store import TABLES as NOTEBOOK_WORKER_TABLES
-
-    return (*LEDGER_TABLES, *NOTEBOOK_WORKER_TABLES, ("api_keys", ("key_id",)))
+MIGRATED_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    *LEDGER_TABLES,
+    # Strata's own tables (strata.notebook.worker_store, strata.auth.api_keys), listed
+    # here rather than imported: strata.notebook loads the whole notebook package.
+    ("notebook_workers", ("name",)),
+    ("notebook_worker_registry", ("id",)),
+    ("api_keys", ("key_id",)),
+)
 
 
 # Rows fetched from the source per round, and per commit on the target.
@@ -111,7 +113,7 @@ def plan_migration(source: SqlDialect, target: SqlDialect) -> MigrationPlan:
 
     src_conn = source.connect()
     try:
-        for table, _ in migrated_tables():
+        for table, _ in MIGRATED_TABLES:
             if _table_exists(source, src_conn, table):
                 plan.source_counts[table] = _count(src_conn, table)
             else:
@@ -123,7 +125,7 @@ def plan_migration(source: SqlDialect, target: SqlDialect) -> MigrationPlan:
 
     tgt_conn = target.connect()
     try:
-        for table, _ in migrated_tables():
+        for table, _ in MIGRATED_TABLES:
             if _table_exists(target, tgt_conn, table):
                 plan.target_counts[table] = _count(tgt_conn, table)
             else:
@@ -184,7 +186,7 @@ def migrate(
         # Opened inside the try: if this raises -- Postgres unreachable, pool
         # timeout -- the source connection above still has to be closed.
         tgt_conn = target.connect()
-        for table, key_columns in migrated_tables():
+        for table, key_columns in MIGRATED_TABLES:
             if not _table_exists(source, src_conn, table) or plan.source_counts[table] == 0:
                 result.copied[table] = 0
                 result.skipped[table] = 0

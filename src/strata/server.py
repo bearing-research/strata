@@ -609,12 +609,12 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     # The notebook worker registry is Strata's own table in the same database (ADR 002 §3).
     # Earlier releases kept it in a file here, one copy per node.
     if store is not None and config.artifact_dir is not None:
-        from strata.notebook.worker_store import open_notebook_worker_store
+        from strata.notebook.worker_store import get_notebook_worker_store
         from strata.notebook.workers import import_worker_registry_file
 
-        import_worker_registry_file(
-            config.artifact_dir, open_notebook_worker_store(store.db_path, dialect=store.dialect)
-        )
+        workers = get_notebook_worker_store()
+        if workers is not None:
+            import_worker_registry_file(config.artifact_dir, workers)
 
     # API keys share the artifact database and backend. Created here so the
     # per-request auth middleware never creates the schema.
