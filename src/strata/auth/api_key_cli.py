@@ -12,8 +12,9 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from computation_core.file_modes import private_dir, private_file
+
 from strata.auth.api_keys import ApiKeyStore
-from strata.file_modes import private_dir, private_file
 
 _SECONDS_PER_DAY = 86400.0
 
@@ -38,7 +39,7 @@ def _open_store(args: argparse.Namespace) -> ApiKeyStore:
             raise SystemExit(f"invalid configuration: {exc}") from exc
         artifact_dir = config.artifact_dir or Path.home() / ".strata" / "artifacts"
     if args.dsn:
-        from strata.sql_backend import PostgresDialect
+        from computation_core.sql_backend import PostgresDialect
 
         dialect = PostgresDialect(args.dsn)
 

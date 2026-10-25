@@ -248,7 +248,7 @@ class ScanBuildManager:
 
     def mark_stream_artifact_failed(self, state: ServerState, stream_state: StreamState) -> None:
         """Best-effort transition a stream-backed artifact to failed state."""
-        from strata.artifact.store import get_artifact_store
+        from computation_core.store import get_artifact_store
 
         store = get_artifact_store(state.config.artifact_dir)
         if store is None:
@@ -271,7 +271,8 @@ class ScanBuildManager:
         group straight to the blob (bounded memory) and finalizes ready/failed on its
         own, so a slow or dropped reader cannot poison the cache entry.
         """
-        from strata.artifact.store import get_artifact_store
+        from computation_core.store import get_artifact_store
+
         from strata.transforms.build_qos import record_build_output_bytes
 
         plan = stream_state.plan
@@ -419,7 +420,7 @@ class ScanBuildManager:
         Re-reads the blob one record batch at a time in a worker thread for the
         integrity gate. The sole finalizer for scan builds.
         """
-        from strata.artifact.store import get_artifact_store
+        from computation_core.store import get_artifact_store
 
         store = get_artifact_store(state.config.artifact_dir)
         if store is None:

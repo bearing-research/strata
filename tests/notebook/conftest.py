@@ -272,10 +272,11 @@ def notebook_executor_server(monkeypatch):
 @pytest.fixture
 def notebook_build_server(tmp_path: Path):
     """Run a real service-mode Strata server for signed notebook build tests."""
+    from computation_core.build_store import get_build_store, reset_build_store
+    from computation_core.store import get_artifact_store, reset_artifact_store
+
     import strata.server as server_module
-    from strata.artifact.store import get_artifact_store, reset_artifact_store
     from strata.server import ServerState, app
-    from strata.transforms.build_store import get_build_store, reset_build_store
 
     port = find_free_port()
     artifact_dir = tmp_path / "service-artifacts"
@@ -328,10 +329,11 @@ def notebook_build_server(tmp_path: Path):
 @pytest.fixture
 def notebook_personal_server(tmp_path: Path):
     """Run a real personal-mode Strata server for signed notebook transport tests."""
+    from computation_core.build_store import get_build_store, reset_build_store
+    from computation_core.store import get_artifact_store, reset_artifact_store
+
     import strata.server as server_module
-    from strata.artifact.store import get_artifact_store, reset_artifact_store
     from strata.server import ServerState, app
-    from strata.transforms.build_store import get_build_store, reset_build_store
 
     port = find_free_port()
     artifact_dir = tmp_path / "personal-artifacts"

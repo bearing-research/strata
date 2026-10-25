@@ -15,6 +15,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "computation-core",
     "strata-client",
     "strata-notebook",
     "strata-pool",
@@ -656,6 +657,42 @@ sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
 ]
+
+[[package]]
+name = "computation-core"
+version = "0.11.0"
+source = { editable = "packages/computation-core" }
+dependencies = [
+    { name = "pyarrow" },
+]
+
+[package.optional-dependencies]
+azure = [
+    { name = "azure-identity" },
+    { name = "azure-storage-blob" },
+]
+gcs = [
+    { name = "google-cloud-storage" },
+]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
+]
+s3 = [
+    { name = "botocore" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
+    { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
+    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
+    { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
+    { name = "psycopg-pool", marker = "extra == 'postgres'", specifier = ">=3.2" },
+    { name = "pyarrow", specifier = ">=18.0.0" },
+]
+provides-extras = ["postgres", "s3", "gcs", "azure"]
 
 [[package]]
 name = "contourpy"
@@ -4000,6 +4037,7 @@ version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
+    { name = "computation-core" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "filelock" },
@@ -4130,6 +4168,7 @@ requires-dist = [
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
     { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
     { name = "cloudpickle", marker = "extra == 'notebook'", specifier = ">=3.0.0" },
+    { name = "computation-core", editable = "packages/computation-core" },
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },
     { name = "fastapi", specifier = ">=0.115.0" },

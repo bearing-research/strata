@@ -9,16 +9,16 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from computation_core.build_store import get_build_store, reset_build_store
+from computation_core.provenance import TransformSpec
+from computation_core.store import get_artifact_store, reset_artifact_store
 
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import get_artifact_store, reset_artifact_store
 from strata.transforms.build_qos import (
     BuildQoS,
     BuildQoSConfig,
     reset_build_qos,
     set_build_qos,
 )
-from strata.transforms.build_store import get_build_store, reset_build_store
 from strata.transforms.registry import (
     TransformDefinition,
     TransformRegistry,

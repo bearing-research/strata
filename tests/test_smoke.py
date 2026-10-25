@@ -280,7 +280,8 @@ class TestEndToEnd:
         """A running server and a client for it."""
         import socket
 
-        from strata.artifact.store import reset_artifact_store
+        from computation_core.store import reset_artifact_store
+
         from strata.cache.metadata import reset_caches
 
         sock = socket.socket()

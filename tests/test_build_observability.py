@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from computation_core.build_store import BuildStore
 
 from strata.observability.logging import BuildContext, get_request_context
 from strata.transforms.build_metrics import (
@@ -16,7 +17,6 @@ from strata.transforms.build_metrics import (
     init_build_metrics,
     reset_build_metrics,
 )
-from strata.transforms.build_store import BuildStore
 from tests.conftest import seed_build_targets
 
 

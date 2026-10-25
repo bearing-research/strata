@@ -11,8 +11,8 @@ import json
 import httpx
 import pyarrow as pa
 import pytest
+from computation_core.store import ArtifactStore
 
-from strata.artifact.store import ArtifactStore
 from tests.conftest import (
     LIVE_SERVER_TIMEOUT,
     run_server_with_context,
@@ -143,10 +143,10 @@ def test_an_admin_can_name_a_tenant(team_server):
 
 def test_a_service_store_without_auth_does_not_answer_for_everyone(tmp_path, monkeypatch):
     """With no authenticated caller there is no tenant, and the unscoped answer is everyone's."""
+    from computation_core.store import reset_artifact_store
     from fastapi.testclient import TestClient
 
     import strata.server as server_module
-    from strata.artifact.store import reset_artifact_store
     from strata.config import StrataConfig
     from strata.server import ServerState, app
 

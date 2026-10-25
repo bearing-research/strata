@@ -11,8 +11,8 @@ from __future__ import annotations
 from typing import Any
 
 import pyarrow as pa
+from computation_core.store import ArtifactStore, ArtifactVersion
 
-from strata.artifact.store import ArtifactStore, ArtifactVersion
 from strata.iceberg.catalog import IcebergWriter, PyIcebergCatalog, TableWrite
 from strata.observability.logging import get_logger
 

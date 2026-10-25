@@ -4,13 +4,14 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from computation_core.build_store import get_build_store, reset_build_store
+from computation_core.store import get_artifact_store, reset_artifact_store
 from fastapi.testclient import TestClient
 
-from strata.artifact.store import get_artifact_store, reset_artifact_store
 from strata.config import StrataConfig
+from strata.notebook.worker_store import get_notebook_worker_store
 from strata.notebook.writer import create_notebook
 from strata.transforms.build_qos import TenantQuotaExceededError
-from strata.transforms.build_store import get_build_store, reset_build_store
 from strata.transforms.registry import (
     TransformRegistry,
     reset_transform_registry,
@@ -779,7 +780,7 @@ class TestNotebookWorkerAdminApi:
         created = personal_mode_app.post("/v1/admin/notebook-workers", json=entry)
         assert created.status_code == 200
         assert [w["name"] for w in created.json()["configured_workers"]] == ["gpu-a100"]
-        assert [e["name"] for e in get_artifact_store().notebook_worker_entries()] == ["gpu-a100"]
+        assert [e["name"] for e in get_notebook_worker_store().entries()] == ["gpu-a100"]
 
         offered = _offered()["gpu-a100"]
         assert offered["source"] == "server"
@@ -1203,7 +1204,7 @@ class TestProvenanceDeduplication:
         artifact_uri = resp1.json()["artifact_uri"]
 
         # Simulate build completion directly in the artifact store.
-        from strata.artifact.store import get_artifact_store
+        from computation_core.store import get_artifact_store
 
         store = get_artifact_store()
         assert store is not None

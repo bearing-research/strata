@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import anyio.to_thread
+from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
+from computation_core.store import BuildLeaseLost
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -24,8 +26,6 @@ from strata.api.dependencies import (
     build_transport_available,
     runtime_build_store,
 )
-from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
-from strata.artifact.store import BuildLeaseLost
 from strata.services.build import build_service
 from strata.transforms.signed_urls import lease_attempt, lease_token
 from strata.types import BuildStatusResponse
@@ -411,9 +411,10 @@ async def append_build_log(
     build this process is not running is accepted and dropped, since failing the
     worker's cell over a console chunk would be worse than a missing line.
     """
+    from computation_core.build_store import get_build_store
+
     from strata.notebook import console_relay
     from strata.server import get_state
-    from strata.transforms.build_store import get_build_store
 
     try:
         expires_float = float(expires_at)

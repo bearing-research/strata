@@ -182,8 +182,8 @@ def test_a_stream_miss_nobody_fetches_fails_its_artifact(tmp_path, temp_warehous
     import time
 
     import httpx
+    from computation_core.store import ArtifactStore
 
-    from strata.artifact.store import ArtifactStore
     from tests.conftest import run_server_with_context
 
     (tmp_path / "cache").mkdir()

@@ -13,9 +13,9 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from computation_core.store import ArtifactStore
 from strata_client.client import StrataClient
 
-from strata.artifact.store import ArtifactStore
 from tests.conftest import LIVE_SERVER_TIMEOUT, run_server_with_context, table_to_ipc_bytes
 
 PROXY_TOKEN = "by-provenance-token"

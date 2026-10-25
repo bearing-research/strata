@@ -65,17 +65,6 @@ def compute_source_hash(source: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def derive_subkey(parent_hash: str, *labels: str) -> str:
-    """Derive ``sha256("parent_hash:label1:label2:...")`` from a provenance hash.
-
-    Namespaces per-variable, per-display and per-iteration keys off a cell's
-    hash. The byte format is wire-stable: changing it invalidates every cached
-    artifact keyed off a derived hash.
-    """
-    pieces = [parent_hash, *labels]
-    return hashlib.sha256(":".join(pieces).encode()).hexdigest()
-
-
 def safe_filename_stem(variable_name: str) -> str:
     """Case-collision-proof filename stem for a per-variable blob.
 

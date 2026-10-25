@@ -322,10 +322,11 @@ class TestReadinessProbesTheArtifactStore:
 
     @pytest.fixture
     def ready(self, tmp_path, monkeypatch):
+        from computation_core import store as artifact_store_module
+        from computation_core.store import ArtifactStore
+
         import strata.server as server_module
         from strata.api.routers import metrics_health
-        from strata.artifact import store as artifact_store_module
-        from strata.artifact.store import ArtifactStore
         from strata.config import StrataConfig
         from strata.server import ServerState
 

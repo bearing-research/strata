@@ -12,9 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from computation_core.store import ArtifactStore
 from fastapi.testclient import TestClient
-
-from strata.artifact.store import ArtifactStore
 
 
 @pytest.fixture
@@ -95,8 +94,9 @@ class TestPinsInTheStore:
 @pytest.fixture
 def service(monkeypatch, tmp_path):
     """The real app over a service-mode, trusted-proxy server."""
+    from computation_core.store import get_artifact_store, reset_artifact_store
+
     import strata.server as server_module
-    from strata.artifact.store import get_artifact_store, reset_artifact_store
     from strata.config import StrataConfig
     from strata.server import ServerState, app
 

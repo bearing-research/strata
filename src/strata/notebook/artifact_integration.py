@@ -17,14 +17,15 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import ArtifactStore, StagedVersion
+from computation_core.provenance import TransformSpec
+from computation_core.store import ArtifactStore, StagedVersion
+
 from strata.auth.principal import get_principal
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
 
 if TYPE_CHECKING:
-    from strata.artifact.store import ArtifactVersion
+    from computation_core.store import ArtifactVersion
 
 
 # A cell run creates and finalizes its outputs in one pass, and no build runner writes

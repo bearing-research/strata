@@ -363,7 +363,7 @@ class TestTheFileSweep:
     async def test_a_failed_manifest_a_crash_left_without_bytes_does_not_stop_the_sweep(
         self, tmp_path
     ):
-        from strata.artifact.provenance import TransformSpec
+        from computation_core.provenance import TransformSpec
 
         session, _ = await self._two_runs(tmp_path)
         manager = session.get_artifact_manager()
@@ -488,7 +488,8 @@ class TestTheFileSweep:
 
     def test_a_failed_version_follows_the_good_one_just_before_it(self, tmp_path):
         """Spared while the good version just below it is stored, not while an older one is."""
-        from strata.artifact.provenance import TransformSpec
+        from computation_core.provenance import TransformSpec
+
         from strata.notebook.artifact_integration import NotebookArtifactManager
 
         manager = NotebookArtifactManager("nb", tmp_path)

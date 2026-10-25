@@ -18,8 +18,9 @@ MALFORMED = ["events", "a.b.c", "file:///wh#a.b.c", "file:///wh#.events", "file:
 
 @pytest.fixture
 def client(tmp_path):
+    from computation_core.store import reset_artifact_store
+
     import strata.server as server_module
-    from strata.artifact.store import reset_artifact_store
     from strata.config import StrataConfig
     from strata.server import ServerState, app
 
@@ -172,8 +173,9 @@ class TestWarehouseWithNoCatalogOnAService:
     def test_a_transform_input_is_400_naming_the_setting(
         self, tmp_path, monkeypatch, sql_transform
     ):
+        from computation_core.store import reset_artifact_store
+
         import strata.server as server_module
-        from strata.artifact.store import reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import ServerState, app
 

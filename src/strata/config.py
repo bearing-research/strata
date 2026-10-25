@@ -1198,7 +1198,7 @@ class StrataConfig(BaseSettings):
                 "installed. Install strata-notebook[postgres]."
             ) from exc
 
-        from strata.sql_backend import PostgresDialect
+        from computation_core.sql_backend import PostgresDialect
 
         return PostgresDialect(dsn)
 
@@ -1208,7 +1208,7 @@ class StrataConfig(BaseSettings):
         Raises:
             ValueError: If the backend's bucket, container or ``artifact_dir`` is unset.
         """
-        from strata.artifact.blob_store import (
+        from computation_core.blob_store import (
             AzureBlobStore,
             GCSBlobStore,
             LocalBlobStore,

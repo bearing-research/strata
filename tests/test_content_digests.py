@@ -10,8 +10,8 @@ import hashlib
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from computation_core.store import ArtifactStore
 
-from strata.artifact.store import ArtifactStore
 from tests.conftest import prepared_venv
 
 

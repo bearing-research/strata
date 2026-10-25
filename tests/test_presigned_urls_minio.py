@@ -8,8 +8,7 @@ from __future__ import annotations
 import docker
 import httpx
 import pytest
-
-from strata.artifact.blob_store import S3BlobStore
+from computation_core.blob_store import S3BlobStore
 
 
 def _docker_daemon_reachable() -> bool:

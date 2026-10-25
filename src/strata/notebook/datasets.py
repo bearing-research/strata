@@ -24,8 +24,8 @@ from typing import Any, Protocol
 from urllib.parse import quote
 
 import httpx
+from computation_core.store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
 
-from strata.artifact.store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
 from strata.artifact.transfer import remap_input_versions
 from strata.notebook import output_dirs
 from strata.notebook.models import DatasetSpec
@@ -295,7 +295,7 @@ def registry_for(config: Any, tenant: str | None = None) -> Registry:
         from strata.auth.principal import remote_store_headers
 
         return RemoteRegistry(str(remote), remote_store_headers(config))
-    from strata.artifact.store import get_artifact_store
+    from computation_core.store import get_artifact_store
 
     store = get_artifact_store(getattr(config, "artifact_dir", None))
     if store is None:

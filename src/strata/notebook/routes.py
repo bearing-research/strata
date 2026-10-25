@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import anyio.to_thread
 import httpx
+from computation_core.file_modes import PASS_THROUGH_DIR, private_dir
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from strata.file_modes import PASS_THROUGH_DIR, private_dir
 from strata.notebook import prewarm
 from strata.notebook.authorship import MAX_AUTHOR_LENGTH, resolve_author
 from strata.notebook.dependencies import (

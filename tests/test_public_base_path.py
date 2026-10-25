@@ -172,7 +172,8 @@ def published(request, tmp_path):
 
     ``public`` is the origin and base path the server's links must start with.
     """
-    from strata.artifact.store import ArtifactStore
+    from computation_core.store import ArtifactStore
+
     from tests.conftest import run_server_with_context
 
     artifact_dir = tmp_path / "artifacts"

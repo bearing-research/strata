@@ -835,7 +835,7 @@ def _served_store():
 
     The server's own instance, with its configured metadata DSN and blob backend.
     """
-    from strata.artifact.store import get_artifact_store
+    from computation_core.store import get_artifact_store
 
     return get_artifact_store()
 

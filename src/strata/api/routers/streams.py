@@ -15,10 +15,10 @@ from urllib.parse import quote
 import anyio.to_thread
 import pyarrow as pa
 import pyarrow.ipc as ipc
+from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream
 from strata.observability.logging import get_logger
 from strata.observability.pool_metrics import get_pool_tracker
@@ -141,7 +141,7 @@ async def get_stream(stream_id: str, request: Request):
             headers={"Retry-After": str(exc.retry_after)},
         )
 
-    from strata.artifact.store import get_artifact_store
+    from computation_core.store import get_artifact_store
 
     try:
         store = get_artifact_store(state.config.artifact_dir)

@@ -15,8 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
-from strata.artifact.store import ArtifactStore, ArtifactVersion
+from computation_core.store import ArtifactStore, ArtifactVersion
 
 
 @pytest.fixture
@@ -184,7 +183,7 @@ def _rewind_to_raw_tokens(store: ArtifactStore, token: str) -> None:
     and in its audit entries, with the schema stamped before that migration."""
     import sqlite3
 
-    from strata.artifact.store import publication_id
+    from computation_core.store import publication_id
 
     conn = sqlite3.connect(store.db_path)
     try:
@@ -236,7 +235,7 @@ class TestTokensAreHashedAtRest:
         assert store.list_publications() == []
 
     def test_the_migration_hashes_existing_tokens_and_old_links_keep_working(self, tmp_path):
-        from strata.artifact.store import _LATEST_SCHEMA_VERSION
+        from computation_core.store import _LATEST_SCHEMA_VERSION
 
         store = ArtifactStore(tmp_path / "old")
         publication = store.publish_artifact("fig", _ready_artifact(store, "fig", b"x"))
@@ -279,10 +278,10 @@ class TestTokensAreHashedAtRest:
         assert reopened.get_publication(second.token).id == second.id
 
     def test_an_old_link_still_opens_the_page_after_the_upgrade(self, tmp_path):
+        from computation_core.store import reset_artifact_store
         from fastapi.testclient import TestClient
 
         import strata.server as server_module
-        from strata.artifact.store import reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import ServerState, app
 
@@ -306,10 +305,10 @@ class TestTokensAreHashedAtRest:
             reset_artifact_store()
 
     def test_only_the_response_that_mints_it_carries_the_link(self, tmp_path):
+        from computation_core.store import reset_artifact_store
         from fastapi.testclient import TestClient
 
         import strata.server as server_module
-        from strata.artifact.store import reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import ServerState, app
 
@@ -776,10 +775,10 @@ class TestTheBytesAreServedAsData:
 
     @staticmethod
     def _client(monkeypatch, tmp_path):
+        from computation_core.store import get_artifact_store, reset_artifact_store
         from fastapi.testclient import TestClient
 
         import strata.server as server_module
-        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import ServerState, app
 
@@ -793,7 +792,7 @@ class TestTheBytesAreServedAsData:
         return TestClient(app), get_artifact_store(artifact_dir)
 
     def _published_data(self, monkeypatch, tmp_path, content_type):
-        from strata.artifact.provenance import TransformSpec
+        from computation_core.provenance import TransformSpec
 
         client, store = self._client(monkeypatch, tmp_path)
         version = store.create_artifact(
@@ -906,7 +905,7 @@ class TestPublishDestination:
         assert str(tmp_path / "source") in out
 
     def test_into_sends_it_somewhere_named(self, tmp_path, capsys):
-        from strata.artifact.store import ArtifactStore
+        from computation_core.store import ArtifactStore
 
         elsewhere = tmp_path / "elsewhere"
         out, figure = self._publish(tmp_path, capsys, into=str(elsewhere))
@@ -923,8 +922,9 @@ class TestPublishDestination:
         import argparse
         import shlex
 
+        from computation_core.store import ArtifactStore
+
         from strata.artifact.cli import cmd_unpublish
-        from strata.artifact.store import ArtifactStore
 
         elsewhere = tmp_path / "else where"
         out, _ = self._publish(tmp_path, capsys, into=str(elsewhere))
@@ -940,9 +940,10 @@ class TestPublishDestination:
         """The route answers 410 for a withdrawn token, so its built zip is just disk in use."""
         import argparse
 
+        from computation_core.store import ArtifactStore
+
         from strata.api.publication_bundle import ARCHIVE_CACHE_DIRNAME, cached_bundle_zip
         from strata.artifact.cli import cmd_unpublish
-        from strata.artifact.store import ArtifactStore
 
         self._publish(tmp_path, capsys, here=True)
         store = ArtifactStore(tmp_path / "source")
@@ -960,7 +961,7 @@ class TestPublishDestination:
         assert not (tmp_path / "source" / ARCHIVE_CACHE_DIRNAME / publication.id).exists()
 
     def test_here_keeps_it_in_the_source_store(self, tmp_path, capsys):
-        from strata.artifact.store import ArtifactStore
+        from computation_core.store import ArtifactStore
 
         self._publish(tmp_path, capsys, here=True)
 
@@ -1117,7 +1118,8 @@ class TestImportAcrossStores:
         """
         import json
 
-        from strata.artifact.provenance import TransformSpec
+        from computation_core.provenance import TransformSpec
+
         from strata.artifact.transfer import copy_chain
         from strata.services.artifact import ArtifactService
 
@@ -1892,10 +1894,10 @@ class TestWhatPublishingRequires:
 
     @staticmethod
     def _service(monkeypatch, tmp_path, acl):
+        from computation_core.store import get_artifact_store, reset_artifact_store
         from fastapi.testclient import TestClient
 
         import strata.server as server_module
-        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import ServerState, app
 
@@ -1963,7 +1965,7 @@ class TestWhatPublishingRequires:
 
 
 def _scan_of(table_uri: str):
-    from strata.artifact.provenance import TransformSpec
+    from computation_core.provenance import TransformSpec
 
     return TransformSpec(executor="scan@v1", params={"table": table_uri}, inputs=[table_uri])
 

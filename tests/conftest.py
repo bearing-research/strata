@@ -160,12 +160,15 @@ def _reset_process_globals():
             streams.shutdown_cleanups()
 
     server_module._state = None
-    from strata.artifact.store import reset_artifact_store
+    from computation_core.store import reset_artifact_store
+
     from strata.cache.metadata import reset_caches
+    from strata.notebook.worker_store import reset_notebook_worker_store
     from strata.rate_limiter import reset_rate_limiter
     from strata.tenancy.registry import reset_tenant_registry
 
     reset_artifact_store()
+    reset_notebook_worker_store()
     reset_tenant_registry()
     # The metadata store is a process global and a no-arg ``get_metadata_store()``
     # returns the installed one, so a test's store would leak into later callers
@@ -244,7 +247,8 @@ def _reset_transform_singletons() -> None:
     The build store singleton caches its first db_path, so a later server's builds would land
     in the first server's database and sit in pending.
     """
-    from strata.transforms.build_store import reset_build_store
+    from computation_core.build_store import reset_build_store
+
     from strata.transforms.runner import reset_build_runner
 
     reset_build_store()
@@ -332,8 +336,9 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     ``reset_caches`` resets the global metadata caches first. Raises RuntimeError if the
     server does not answer /health within 20 seconds.
     """
+    from computation_core.store import reset_artifact_store
+
     import strata.server as server_module
-    from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
 
     if reset_caches:
@@ -406,8 +411,9 @@ def run_server_with_context(
     Unlike ``run_server`` it supports ``artifact_dir`` and resets the artifact store on
     cleanup. Raises RuntimeError if the server fails to start.
     """
+    from computation_core.store import reset_artifact_store
+
     from strata import server
-    from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
 
     port = find_free_port()
@@ -607,7 +613,7 @@ def seed_build_targets(
     creates the version first. Opening the artifact store also creates ``artifact_versions``
     in the shared database, without which the key cannot resolve.
     """
-    from strata.artifact.store import ArtifactStore
+    from computation_core.store import ArtifactStore
 
     store = ArtifactStore(artifact_dir)
     try:

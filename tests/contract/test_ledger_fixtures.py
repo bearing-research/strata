@@ -9,11 +9,12 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from computation_core.build_store import BuildStore
+from computation_core.provenance import derive_subkey
+from computation_core.store import ArtifactStore
+from computation_core.tables import LEDGER_TABLES, TRANSIENT_TABLES
 
-from strata.artifact.store import ArtifactStore
 from strata.migrate import MIGRATED_TABLES
-from strata.notebook.provenance import derive_subkey
-from strata.transforms.build_store import BuildStore
 
 FIXTURES = Path(__file__).parent / "fixtures"
 OUTPUT_KEYS = json.loads((FIXTURES / "output_keys.json").read_text(encoding="utf-8"))
@@ -58,39 +59,28 @@ def _fresh_store_tables(tmp_path: Path) -> set[str]:
     return {name for (name,) in rows if name != "sqlite_sequence"}
 
 
-def test_fresh_store_creates_exactly_the_ledger_tables_plus_the_pending_split(
-    tmp_path: Path,
-) -> None:
-    """E0 baseline: the store's tables are the ledger list plus what E1 splits out of store.py."""
-    ledger = {t["name"] for t in TABLES["ledger"]}
-    pending_split = {t["name"] for t in TABLES["strata_owned"] if t.get("split_out_in") == "E1"}
-    assert _fresh_store_tables(tmp_path) == ledger | pending_split
+def test_fresh_store_creates_exactly_the_ledger_tables(tmp_path: Path) -> None:
+    assert _fresh_store_tables(tmp_path) == {t["name"] for t in TABLES["ledger"]}
 
 
-def test_other_strata_owned_tables_are_not_created_by_the_store(tmp_path: Path) -> None:
-    elsewhere = {t["name"] for t in TABLES["strata_owned"] if "split_out_in" not in t}
-    assert elsewhere
-    assert not (_fresh_store_tables(tmp_path) & elsewhere)
-
-
-def test_copy_order_and_primary_keys_match_migrate() -> None:
-    """migrate.py composes the ledger list with Strata's own; the ledger part must agree."""
-    ledger = {t["name"] for t in TABLES["ledger"]}
-    fixture_order = [t["name"] for t in TABLES["ledger"] if t["migrated"]]
-    migrate_order = [name for name, _ in MIGRATED_TABLES if name in ledger]
-    assert migrate_order == fixture_order
-    migrate_pks = dict(MIGRATED_TABLES)
-    for table in TABLES["ledger"]:
-        if table["migrated"]:
-            assert tuple(table["primary_key"]) == migrate_pks[table["name"]], table["name"]
-        else:
-            assert table["name"] not in migrate_pks, table["name"]
-
-
-def test_non_ledger_migrated_tables_are_all_declared_strata_owned() -> None:
-    ledger = {t["name"] for t in TABLES["ledger"]}
+def test_strata_owned_tables_are_not_created_by_the_ledger(tmp_path: Path) -> None:
     strata_owned = {t["name"] for t in TABLES["strata_owned"]}
-    assert {name for name, _ in MIGRATED_TABLES} - ledger <= strata_owned
+    assert strata_owned
+    assert not (_fresh_store_tables(tmp_path) & strata_owned)
+
+
+def test_fixture_matches_the_packages_table_list() -> None:
+    """The package publishes its own list; the fixture is what a second implementation reads."""
+    migrated = [(t["name"], tuple(t["primary_key"])) for t in TABLES["ledger"] if t["migrated"]]
+    assert migrated == list(LEDGER_TABLES)
+    transient = {t["name"] for t in TABLES["ledger"] if not t["migrated"]}
+    assert transient == set(TRANSIENT_TABLES)
+
+
+def test_migrate_copies_the_ledger_first_then_stratas_tables() -> None:
+    assert MIGRATED_TABLES[: len(LEDGER_TABLES)] == LEDGER_TABLES
+    strata_owned = {t["name"] for t in TABLES["strata_owned"]}
+    assert {name for name, _ in MIGRATED_TABLES[len(LEDGER_TABLES) :]} <= strata_owned
 
 
 def test_provenance_domains_fit_the_charset() -> None:

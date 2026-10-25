@@ -21,6 +21,14 @@ from typing import Annotated, BinaryIO, NamedTuple
 import anyio.to_thread
 import pyarrow as pa
 import pyarrow.ipc as ipc
+from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
+from computation_core.store import (
+    ArtifactIdTaken,
+    ArtifactImportConflict,
+    ArtifactStore,
+    ArtifactVersion,
+    reject_unsafe_artifact_id,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as FastPath
 from fastapi.responses import StreamingResponse
@@ -38,14 +46,6 @@ from strata.api.dependencies import (
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.api.served_bytes import data_headers
-from strata.artifact.blob_store import BLOB_STREAM_CHUNK_BYTES
-from strata.artifact.store import (
-    ArtifactIdTaken,
-    ArtifactImportConflict,
-    ArtifactStore,
-    ArtifactVersion,
-    reject_unsafe_artifact_id,
-)
 from strata.artifact.transfer import PROMOTION_TAG
 from strata.services.artifact import artifact_service
 from strata.types import (
@@ -315,8 +315,8 @@ def _store_put(
         except Exception:
             input_versions[input_uri] = input_uri
 
-    from strata.artifact.provenance import TransformSpec as ArtifactTransformSpec
-    from strata.artifact.provenance import compute_provenance_hash
+    from computation_core.provenance import TransformSpec as ArtifactTransformSpec
+    from computation_core.provenance import compute_provenance_hash
 
     artifact_transform = ArtifactTransformSpec(
         executor=executor,
@@ -801,7 +801,7 @@ def _store_put_by_provenance(
     byte_size: int,
 ) -> PutArtifactResponse:
     """The by-provenance PUT's store work, in one thread: none of it may run on the loop."""
-    from strata.artifact.provenance import TransformSpec as ArtifactTransformSpec
+    from computation_core.provenance import TransformSpec as ArtifactTransformSpec
 
     tenant_id = principal.tenant if principal else None
 

@@ -19,11 +19,11 @@ from types import SimpleNamespace
 import anyio.to_thread
 import pyarrow as pa
 import pytest
+from computation_core.blob_store import LocalBlobStore
+from computation_core.provenance import TransformSpec
+from computation_core.store import get_artifact_store
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact.blob_store import LocalBlobStore
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import get_artifact_store
 from tests.conftest import ran_while_held, table_to_ipc_bytes
 
 ARROW = table_to_ipc_bytes(pa.table({"x": [1, 2, 3]}))
@@ -323,7 +323,8 @@ async def test_a_publication_reads_its_blob_off_the_loop(served, suffix):
 
 @pytest.fixture
 def runner(served, tmp_path):
-    from strata.transforms.build_store import get_build_store, reset_build_store
+    from computation_core.build_store import get_build_store, reset_build_store
+
     from strata.transforms.registry import TransformDefinition, TransformRegistry
     from strata.transforms.runner import BuildRunner, RunnerConfig
 

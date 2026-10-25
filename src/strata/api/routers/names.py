@@ -14,6 +14,7 @@ from __future__ import annotations
 import functools
 
 import anyio.to_thread
+from computation_core.store import ArtifactNotFoundError
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -25,7 +26,6 @@ from strata.api.dependencies import (
     WriteStore,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
-from strata.artifact.store import ArtifactNotFoundError
 from strata.types import (
     InputChangeInfo,
     NameResolveResponse,

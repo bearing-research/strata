@@ -11,9 +11,9 @@ import re
 import uuid
 from typing import TYPE_CHECKING, NamedTuple
 
+from computation_core.provenance import TransformSpec, compute_provenance_hash
 from pyiceberg.exceptions import NoSuchTableError
 
-from strata.artifact.provenance import TransformSpec, compute_provenance_hash
 from strata.iceberg.catalog import WarehouseNotFound, object_store_unreachable
 from strata.iceberg.schema import UnsupportedTableFormatError
 from strata.types import (
@@ -24,7 +24,7 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
-    from strata.artifact.store import ArtifactStore, ArtifactVersion
+    from computation_core.store import ArtifactStore, ArtifactVersion
 
 
 def table_input_version(plan: ReadPlan) -> str:

@@ -10,9 +10,10 @@ import json
 import logging
 
 import pytest
+from computation_core.store import ArtifactStore, get_artifact_store
 
-from strata.artifact.store import ArtifactStore, get_artifact_store
 from strata.notebook.models import WorkerBackendType, WorkerSpec
+from strata.notebook.worker_store import NotebookWorkerStore
 from strata.notebook.workers import (
     ManagedWorkerRecord,
     create_server_managed_worker_record,
@@ -38,6 +39,17 @@ def _names() -> list[str]:
     return [record.worker.name for record in get_server_managed_worker_records()]
 
 
+def _registry_at(artifact_dir) -> NotebookWorkerStore:
+    """The worker registry on a store's database, as the server wires it at startup."""
+    store = ArtifactStore(artifact_dir)
+    return NotebookWorkerStore(store.db_path, dialect=store.dialect)
+
+
+def _entries():
+    store = get_artifact_store()
+    return NotebookWorkerStore(store.db_path, dialect=store.dialect).entries()
+
+
 @pytest.fixture
 def server(tmp_path):
     """A server state with an artifact store to persist into."""
@@ -59,7 +71,7 @@ class TestPersistence:
     def test_an_admin_change_is_written_to_the_store(self, server):
         replace_server_managed_worker_records([ManagedWorkerRecord(_worker("gpu-a100"), True)])
 
-        entries = get_artifact_store().notebook_worker_entries()
+        entries = _entries()
 
         assert entries is not None and [e["name"] for e in entries] == ["gpu-a100"]
         assert not (server.config.artifact_dir / "notebook_workers.json").exists()
@@ -76,13 +88,13 @@ class TestPersistence:
         _configure("from-config")
         replace_server_managed_worker_records([])
 
-        assert get_artifact_store().notebook_worker_entries() == []
+        assert _entries() == []
         assert get_server_managed_worker_records() == []
 
     def test_an_unset_registry_falls_back_to_the_configured_table(self, server):
         _configure("from-config")
 
-        assert get_artifact_store().notebook_worker_entries() is None
+        assert _entries() is None
         assert _names() == ["from-config"]
 
     def test_the_first_change_starts_from_the_configured_table(self, server):
@@ -156,8 +168,8 @@ class TestSharedAcrossNodes:
         """A second node opens its own store on the same metadata; no per-node copy."""
         replace_server_managed_worker_records([ManagedWorkerRecord(_worker("box"), True)])
 
-        other_node = ArtifactStore(server.config.artifact_dir)
-        entries = other_node.notebook_worker_entries()
+        other_node = _registry_at(server.config.artifact_dir)
+        entries = other_node.entries()
 
         assert entries is not None and [e["name"] for e in entries] == ["box"]
 
@@ -178,13 +190,13 @@ class TestImportFromTheFile:
         return path
 
     def test_the_file_is_imported_once_and_renamed(self, tmp_path, caplog):
-        store = ArtifactStore(tmp_path / "artifacts")
+        store = _registry_at(tmp_path / "artifacts")
         path = self._write(tmp_path / "artifacts", "box", "off")
 
         with caplog.at_level(logging.WARNING, logger="strata.notebook.workers"):
             import_worker_registry_file(tmp_path / "artifacts", store)
 
-        entries = store.notebook_worker_entries()
+        entries = store.entries()
         assert entries is not None
         assert [(e["name"], e["enabled"]) for e in entries] == [("box", True), ("off", False)]
         assert not path.exists()
@@ -192,16 +204,16 @@ class TestImportFromTheFile:
         assert "Imported 2 notebook workers" in caplog.text
 
         # An admin change after the import is not undone by starting again.
-        store.update_notebook_workers(lambda current: [])
+        store.update(lambda current: [])
         import_worker_registry_file(tmp_path / "artifacts", store)
-        assert store.notebook_worker_entries() == []
+        assert store.entries() == []
 
     def test_a_stale_file_does_not_overwrite_a_registry_already_in_the_store(
         self, tmp_path, caplog
     ):
         """A second node starting with an old copy must not clobber what the first set."""
-        store = ArtifactStore(tmp_path / "artifacts")
-        store.update_notebook_workers(
+        store = _registry_at(tmp_path / "artifacts")
+        store.update(
             lambda current: [{**_worker("current").model_dump(mode="json"), "enabled": True}]
         )
         path = self._write(tmp_path / "artifacts", "stale")
@@ -209,14 +221,14 @@ class TestImportFromTheFile:
         with caplog.at_level(logging.WARNING, logger="strata.notebook.workers"):
             import_worker_registry_file(tmp_path / "artifacts", store)
 
-        entries = store.notebook_worker_entries()
+        entries = store.entries()
         assert entries is not None and [e["name"] for e in entries] == ["current"]
         assert path.with_name("notebook_workers.json.migrated").exists()
         assert "already holds a notebook worker registry" in caplog.text
 
     def test_a_file_naming_a_worker_twice_imports_its_last_entry(self, tmp_path, caplog):
         # A 0.8.0 admin change could write such a file, and the import then failed startup.
-        store = ArtifactStore(tmp_path / "artifacts")
+        store = _registry_at(tmp_path / "artifacts")
         path = tmp_path / "artifacts" / "notebook_workers.json"
         path.write_text(
             json.dumps(
@@ -231,7 +243,7 @@ class TestImportFromTheFile:
         with caplog.at_level(logging.WARNING, logger="strata.notebook.workers"):
             import_worker_registry_file(tmp_path / "artifacts", store)
 
-        entries = store.notebook_worker_entries()
+        entries = store.entries()
         assert entries is not None
         assert [(e["name"], e["config"]["url"]) for e in entries] == [
             ("cpu", "http://gpu.internal:9000"),
@@ -240,7 +252,7 @@ class TestImportFromTheFile:
         assert "worker(s) gpu more than once" in caplog.text
 
     def test_an_earlier_migrated_copy_is_never_replaced(self, tmp_path):
-        store = ArtifactStore(tmp_path / "artifacts")
+        store = _registry_at(tmp_path / "artifacts")
         artifact_dir = tmp_path / "artifacts"
         self._write(artifact_dir, "imported")
         import_worker_registry_file(artifact_dir, store)
@@ -256,7 +268,7 @@ class TestImportFromTheFile:
         assert "third" in (artifact_dir / "notebook_workers.json.migrated.2").read_text()
 
     def test_an_unreadable_file_is_left_in_place(self, tmp_path, caplog):
-        store = ArtifactStore(tmp_path / "artifacts")
+        store = _registry_at(tmp_path / "artifacts")
         path = tmp_path / "artifacts" / "notebook_workers.json"
         path.write_text("{ this is not json")
 
@@ -264,7 +276,7 @@ class TestImportFromTheFile:
             import_worker_registry_file(tmp_path / "artifacts", store)
 
         assert path.exists()
-        assert store.notebook_worker_entries() is None
+        assert store.entries() is None
         assert "was not imported" in caplog.text
 
     def test_server_startup_imports_the_file(self, tmp_path):
@@ -317,7 +329,7 @@ class TestAStoreErrorFailsClosed:
         def _outage(self):
             raise RuntimeError("pool timeout")
 
-        monkeypatch.setattr(ArtifactStore, "notebook_worker_entries", _outage)
+        monkeypatch.setattr(NotebookWorkerStore, "entries", _outage)
 
         with pytest.raises(RuntimeError, match="pool timeout"):
             resolve_worker_spec(notebook, "evil")

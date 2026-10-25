@@ -9,8 +9,8 @@ import uuid
 from pathlib import Path
 
 import httpx
+from computation_core.provenance import TransformSpec
 
-from strata.artifact.provenance import TransformSpec
 from strata.notebook.remote_bundle import SCHEMA_VERSION, unpack_notebook_output_bundle
 from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_MANIFEST_VERSION,

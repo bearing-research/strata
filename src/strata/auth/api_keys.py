@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
+from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
     from strata.types import Principal

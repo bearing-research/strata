@@ -11,7 +11,8 @@ import json
 import time
 from typing import Any
 
-from strata.notebook.provenance import derive_subkey
+from computation_core.provenance import derive_subkey
+
 from strata.notebook.widget_analyzer import analyze_widget_cell, descriptor_provenance
 
 

@@ -8,12 +8,18 @@ from __future__ import annotations
 
 import docker
 import pytest
+from computation_core.provenance import TransformSpec
+from computation_core.sql_backend import PostgresDialect, SqliteDialect
+from computation_core.store import ArtifactStore
 from testcontainers.community.postgres import PostgresContainer
 
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import ArtifactStore
 from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
-from strata.sql_backend import PostgresDialect, SqliteDialect
+from strata.notebook.worker_store import NotebookWorkerStore
+
+
+def _workers(store):
+    """Strata's worker registry store on the same database as *store*."""
+    return NotebookWorkerStore(store.db_path, dialect=store.dialect)
 
 
 def _insert_dangling_build(db_path, build_id: str) -> None:
@@ -92,6 +98,8 @@ def target(postgres_dsn, tmp_path):
         conn.close()
 
     ArtifactStore(tmp_path / "tgt", dialect=dialect)
+    # Strata's own table beside the ledger, as server startup creates it.
+    NotebookWorkerStore(tmp_path / "tgt" / "artifacts.sqlite", dialect=dialect)
     yield dialect
     dialect.close()
 
@@ -146,7 +154,7 @@ class TestMigration:
         link = populated_sqlite.publish_artifact("a1", version, title="paper figure")
         populated_sqlite.pin_artifact("a1", version, "snapshot", pinned_by="ops")
         gpu = {"name": "gpu", "backend": "executor", "config": {"url": "http://gpu:9"}}
-        populated_sqlite.update_notebook_workers(lambda _current: [{**gpu, "enabled": True}])
+        _workers(populated_sqlite).update(lambda _current: [{**gpu, "enabled": True}])
 
         result = migrate(self._source(tmp_path), target)
         assert result.total_rejected == 0
@@ -162,7 +170,7 @@ class TestMigration:
             ("a1", "snapshot")
         ]
         # The registry row matters too: without it the configured table applies again.
-        assert migrated.notebook_worker_entries() == [{**gpu, "enabled": True}]
+        assert _workers(migrated).entries() == [{**gpu, "enabled": True}]
 
     def test_timestamps_survive_the_move(self, populated_sqlite, target, tmp_path):
         original = populated_sqlite.get_latest_version("a1")
@@ -225,7 +233,7 @@ class TestMigration:
         # garbage_collect, cleanup_failed and delete_artifact remove artifact_versions
         # rows without touching artifact_builds, so a real store holds references Postgres
         # refuses and SQLite never checked. One bad row must not strand the migration.
-        from strata.transforms.build_store import BuildStore
+        from computation_core.build_store import BuildStore
 
         BuildStore(tmp_path / "src" / "artifacts.sqlite")
         _insert_dangling_build(tmp_path / "src" / "artifacts.sqlite", "orphan")
@@ -313,7 +321,7 @@ class TestMigration:
 
         This needs a per-row savepoint; a single-row batch could not show the loss.
         """
-        from strata.transforms.build_store import BuildStore
+        from computation_core.build_store import BuildStore
 
         builds = BuildStore(tmp_path / "src" / "artifacts.sqlite")
         version = populated_sqlite.get_latest_version("a1").version
@@ -362,15 +370,17 @@ class TestMigration:
         # A table added to the store without an entry here is silently left behind.
         import sqlite3
 
+        from computation_core.build_store import BuildStore
+
         from strata.auth.api_keys import ApiKeyStore
         from strata.streaming.ownership import StreamOwnershipStore
-        from strata.transforms.build_store import BuildStore
 
         db = tmp_path / "all" / "artifacts.sqlite"
         ArtifactStore(db.parent)
         BuildStore(db)
         ApiKeyStore(db)
         StreamOwnershipStore(db)
+        NotebookWorkerStore(db)
         conn = sqlite3.connect(str(db))
         try:
             tables = {

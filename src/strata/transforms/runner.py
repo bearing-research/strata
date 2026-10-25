@@ -32,16 +32,17 @@ from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
 import httpx
+from computation_core.store import BuildLeaseLost
 
-from strata.artifact.store import BuildLeaseLost
 from strata.tenancy.tenant import DEFAULT_TENANT_ID, reset_tenant_id, set_tenant_id
 
 if TYPE_CHECKING:
-    from strata.artifact.store import ArtifactStore
+    from computation_core.build_store import BuildState, BuildStore
+    from computation_core.store import ArtifactStore
+
     from strata.cache.disk import CachedFetcher
     from strata.config import StrataConfig
     from strata.planner import ReadPlanner
-    from strata.transforms.build_store import BuildState, BuildStore
     from strata.transforms.registry import TransformRegistry
 
 logger = logging.getLogger(__name__)

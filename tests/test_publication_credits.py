@@ -11,8 +11,7 @@ import json
 
 import httpx
 import pytest
-
-from strata.artifact.store import ArtifactStore
+from computation_core.store import ArtifactStore
 
 ORCID = "0000-0002-1825-0097"
 
@@ -195,7 +194,7 @@ class TestTheCrate:
 
 def _chain(store, steps: int, principal: str | None = None) -> str:
     """``steps`` artifacts, each computed from the one before; returns the last id."""
-    from strata.artifact.provenance import TransformSpec
+    from computation_core.provenance import TransformSpec
 
     previous = None
     for i in range(steps):

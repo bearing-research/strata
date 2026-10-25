@@ -16,7 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.artifact.store import ArtifactStore, ArtifactVersion, StoreSchemaMismatch
+from computation_core.store import ArtifactStore, ArtifactVersion, StoreSchemaMismatch
+
 from strata.artifact.transfer import (
     PublicationTarget,
     RemoteStore,
@@ -720,8 +721,9 @@ def cmd_archive(args: argparse.Namespace) -> int:
     :func:`write_bundle` (shared with the HTTP route); this adds the CLI parts: which store to
     open, and whether writing into an occupied directory is a mistake.
     """
+    from computation_core.store import Publication
+
     from strata.api.publication_bundle import PUBLICATION_MAX_DEPTH, bundle_zip, write_bundle
-    from strata.artifact.store import Publication
 
     token = getattr(args, "token", None)
     if (token is None) == (args.ref is None):
@@ -892,9 +894,15 @@ def _pull_folder(
 
 def _store_location(store: ArtifactStore) -> tuple[str, str]:
     """Where *store* keeps its metadata and its blobs, printable (no password)."""
-    from strata.artifact.blob_store import AzureBlobStore, GCSBlobStore, LocalBlobStore, S3BlobStore
+    from computation_core.blob_store import (
+        AzureBlobStore,
+        GCSBlobStore,
+        LocalBlobStore,
+        S3BlobStore,
+    )
+    from computation_core.sql_backend import PostgresDialect
+
     from strata.migrate_cli import _redact
-    from strata.sql_backend import PostgresDialect
 
     dialect = store.dialect
     metadata = _redact(dialect.dsn) if isinstance(dialect, PostgresDialect) else str(store.db_path)

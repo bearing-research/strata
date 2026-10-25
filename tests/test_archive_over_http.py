@@ -17,9 +17,8 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
-
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import ArtifactStore
+from computation_core.provenance import TransformSpec
+from computation_core.store import ArtifactStore
 
 TABLE = pa.table({"id": [1, 2, 3], "value": [0.1, 0.2, 0.3]})
 

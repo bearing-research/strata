@@ -1,9 +1,9 @@
 {
-  "source": "ADR 002 §3, §9 E0; src/strata/artifact/store.py and src/strata/transforms/build_store.py at 07537a3",
+  "source": "ADR 002 §3, §9 E0; src/strata/notebook/worker_store.py and src/strata/transforms/build_store.py at 07537a3",
   "notes": [
     "ledger lists every table the package creates, in the foreign-key order a copy must follow (artifact_versions first).",
     "migrated=false tables are rebuilt or left behind by `strata migrate`: schema_version is the target's own, import_staging and build_console_chunks hold only live rows.",
-    "strata_owned tables share the database and the dialect but belong to Strata; the two created by store.py today are split out in E1."
+    "strata_owned tables share the database and the dialect but belong to Strata and are created by Strata modules, never by the ledger."
   ],
   "ledger": [
     {
@@ -59,13 +59,11 @@
   "strata_owned": [
     {
       "name": "notebook_workers",
-      "created_by": "src/strata/artifact/store.py",
-      "split_out_in": "E1"
+      "created_by": "src/strata/notebook/worker_store.py"
     },
     {
       "name": "notebook_worker_registry",
-      "created_by": "src/strata/artifact/store.py",
-      "split_out_in": "E1"
+      "created_by": "src/strata/notebook/worker_store.py"
     },
     { "name": "api_keys", "created_by": "src/strata/auth/api_keys.py" },
     {

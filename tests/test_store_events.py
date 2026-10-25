@@ -8,12 +8,12 @@ from __future__ import annotations
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from computation_core.store import ArtifactStore
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from strata.api.dependencies import current_principal, read_store
 from strata.api.routers.registry import router
-from strata.artifact.store import ArtifactStore
 from strata.types import Principal
 
 

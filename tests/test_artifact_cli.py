@@ -8,10 +8,10 @@ import json
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from computation_core.provenance import TransformSpec
+from computation_core.store import ArtifactStore, reset_artifact_store
 
 from strata.artifact.cli import cmd_lineage, cmd_list, cmd_pull, cmd_show
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import ArtifactStore, reset_artifact_store
 
 
 def _ipc_bytes(num_rows: int) -> bytes:
@@ -195,7 +195,8 @@ class TestWhichStoreACommandReads:
         """With server settings in the shell, --artifact-dir must not pair a local store's rows with
         the team bucket's bytes.
         """
-        from strata.artifact.blob_store import LocalBlobStore
+        from computation_core.blob_store import LocalBlobStore
+
         from strata.artifact.cli import _open_store
 
         monkeypatch.setenv("STRATA_ARTIFACT_BLOB_BACKEND", "s3")
@@ -677,8 +678,9 @@ class TestReadOnlyCommandsDoNotMigrate:
         assert "start this release's server on it once" in err
 
     def test_a_write_command_still_migrates(self, old_store):
+        from computation_core.store import _LATEST_SCHEMA_VERSION
+
         from strata.artifact.cli import _open_store
-        from strata.artifact.store import _LATEST_SCHEMA_VERSION
 
         artifact_dir, db_path = old_store
 

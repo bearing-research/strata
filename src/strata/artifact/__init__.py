@@ -1,2 +1,3 @@
-"""Artifacts: the versioned store and its name pointers, blob backends, transfer between
-stores, URI parsing, Iceberg export and the ``strata artifact`` CLI."""
+"""Strata's side of artifacts: transfer between stores, Iceberg export and the ``strata
+artifact`` CLI. The store itself, its blob backends and the URI grammar live in
+``computation_core`` (ADR 002)."""

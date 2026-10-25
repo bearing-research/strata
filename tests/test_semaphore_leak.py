@@ -410,10 +410,10 @@ class TestSemaphoreInvariants:
 @pytest.fixture
 def in_process(tmp_path):
     """An in-process personal server over its own state, with stream cleanup torn down after."""
+    from computation_core.store import reset_artifact_store
     from fastapi.testclient import TestClient
 
     import strata.server as server_module
-    from strata.artifact.store import reset_artifact_store
     from strata.server import ServerState, app
     from strata.tenancy.registry import reset_tenant_registry
 
@@ -492,7 +492,8 @@ class TestAStreamFetchThatFailsReleasesEverything:
     def test_a_store_error_after_the_build_frees_the_admission_slot(
         self, in_process, temp_warehouse, monkeypatch
     ):
-        from strata.artifact.store import ArtifactStore
+        from computation_core.store import ArtifactStore
+
         from strata.tenancy.registry import get_tenant_registry
 
         client, state = in_process
@@ -517,10 +518,10 @@ class TestAStreamFetchThatFailsReleasesEverything:
         """
         from types import SimpleNamespace
 
+        from computation_core import store as artifact_store_module
         from starlette.requests import ClientDisconnect
 
         from strata.api.routers.streams import get_stream
-        from strata.artifact import store as artifact_store_module
         from strata.tenancy.registry import get_tenant_registry
 
         client, state = in_process
@@ -551,7 +552,8 @@ class TestAStreamFetchThatFailsReleasesEverything:
     def test_a_failure_before_the_build_frees_the_admission_slot(
         self, in_process, temp_warehouse, monkeypatch, failing
     ):
-        from strata.artifact import store as artifact_store_module
+        from computation_core import store as artifact_store_module
+
         from strata.tenancy.registry import get_tenant_registry
 
         client, state = in_process
@@ -579,7 +581,8 @@ class TestAStreamFetchThatFailsReleasesEverything:
     ):
         import sqlite3
 
-        from strata.artifact.store import ArtifactStore, get_artifact_store
+        from computation_core.store import ArtifactStore, get_artifact_store
+
         from strata.streaming import StreamState
 
         _, state = in_process

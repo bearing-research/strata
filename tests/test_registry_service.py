@@ -100,8 +100,8 @@ class TestTenantScope:
 
     @staticmethod
     def _team_store(tmp_path):
-        from strata.artifact.provenance import TransformSpec
-        from strata.artifact.store import ArtifactStore
+        from computation_core.provenance import TransformSpec
+        from computation_core.store import ArtifactStore
 
         store = ArtifactStore(tmp_path / "artifacts")
         store.create_artifact("m1", "p1", TransformSpec("e", {}, []), tenant="team")
@@ -128,8 +128,8 @@ class TestTenantScope:
         ]
 
     def test_the_whole_store_summary_keeps_each_tenants_readers_apart(self, tmp_path):
-        from strata.artifact.provenance import TransformSpec
-        from strata.artifact.store import ArtifactStore
+        from computation_core.provenance import TransformSpec
+        from computation_core.store import ArtifactStore
 
         store = ArtifactStore(tmp_path / "artifacts")
         for tenant in ("team-a", "team-b"):

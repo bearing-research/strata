@@ -9,9 +9,9 @@ from types import SimpleNamespace
 import httpx
 import pyarrow as pa
 import pytest
+from computation_core.store import ArtifactStore
 from pyiceberg.catalog.sql import SqlCatalog
 
-from strata.artifact.store import ArtifactStore
 from strata.artifact.table_export import EXPORT_TAG, export_artifact
 from strata.notebook.artifact_integration import NotebookArtifactManager
 
@@ -433,10 +433,10 @@ class TestWhoMayExport:
 
     @staticmethod
     def _service(monkeypatch, tmp_path, **overrides):
+        from computation_core.store import get_artifact_store, reset_artifact_store
         from fastapi.testclient import TestClient
 
         import strata.server as server_module
-        from strata.artifact.store import get_artifact_store, reset_artifact_store
         from strata.config import StrataConfig
         from strata.server import ServerState, app
 
@@ -459,7 +459,7 @@ class TestWhoMayExport:
         """A ready tabular version, stamped with a tenant as a notebook write-back is."""
         import hashlib
 
-        from strata.artifact.provenance import TransformSpec
+        from computation_core.provenance import TransformSpec
 
         version = store.create_artifact(
             artifact_id,
@@ -552,7 +552,7 @@ class TestWhoMayExport:
 
     def test_an_artifact_read_from_a_denied_table_is_not_exported(self, tmp_path, monkeypatch):
         """Exporting copies the bytes into a table the caller can scan, so it is a read of them."""
-        from strata.artifact.store import get_artifact_store
+        from computation_core.store import get_artifact_store
 
         client, _ = self._service(
             monkeypatch,
@@ -584,7 +584,7 @@ class TestWhoMayExport:
 
     def test_another_tenants_table_is_not_overwritten(self, tmp_path, monkeypatch):
         """The table ACL has no write verb, so the tenant that exported a table owns it."""
-        from strata.artifact.store import get_artifact_store
+        from computation_core.store import get_artifact_store
 
         client, _ = self._service(monkeypatch, tmp_path, service_writes_enabled=True)
         store = get_artifact_store(tmp_path / "service-artifacts")

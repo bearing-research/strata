@@ -22,7 +22,7 @@ from strata.notebook.models import NotebookState, WorkerBackendType, WorkerSpec
 from strata.notebook.remote_executor import NOTEBOOK_EXECUTOR_TRANSFORM_REF
 
 if TYPE_CHECKING:
-    from strata.artifact.store import ArtifactStore
+    from strata.notebook.worker_store import NotebookWorkerStore
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +260,22 @@ def _configured_managed_worker_records() -> list[ManagedWorkerRecord]:
         return []
 
 
+def _registry_store() -> NotebookWorkerStore | None:
+    """The registry's store, created beside the artifact store the first time it is needed."""
+    from computation_core.store import get_artifact_store
+
+    from strata.notebook.worker_store import get_notebook_worker_store
+
+    store = get_notebook_worker_store()
+    if store is None:
+        artifact_store = get_artifact_store()
+        if artifact_store is not None:
+            store = get_notebook_worker_store(
+                artifact_store.db_path, dialect=artifact_store.dialect
+            )
+    return store
+
+
 def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
     """Return the server-managed notebook worker registry.
 
@@ -267,11 +283,9 @@ def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
     node sharing that store shows up here at once. Until the registry is first set, the
     ``[tool.strata.transforms]`` table applies; after that, editing it has no effect.
     """
-    from strata.artifact.store import get_artifact_store
-
-    store = get_artifact_store()
+    store = _registry_store()
     if store is not None:
-        entries = store.notebook_worker_entries()
+        entries = store.entries()
         if entries is not None:
             return _parse_managed_worker_records(entries)
     return _configured_managed_worker_records()
@@ -284,9 +298,7 @@ def _change_server_managed_worker_records(
 
     Without an artifact store (a scan-only service server) the registry lives in memory.
     """
-    from strata.artifact.store import get_artifact_store
-
-    store = get_artifact_store()
+    store = _registry_store()
     if store is None:
         from strata.server import get_state
 
@@ -304,7 +316,7 @@ def _change_server_managed_worker_records(
         )
         return _serialize_managed_worker_records(change(records))
 
-    store.update_notebook_workers(apply)
+    store.update(apply)
     return get_server_managed_worker_records()
 
 
@@ -374,7 +386,7 @@ def update_server_managed_worker_record(
     return _change_server_managed_worker_records(change)
 
 
-def import_worker_registry_file(artifact_dir: Path, store: ArtifactStore) -> None:
+def import_worker_registry_file(artifact_dir: Path, store: NotebookWorkerStore) -> None:
     """Move the registry earlier releases kept in ``notebook_workers.json`` into the store.
 
     Imported only while the store holds no registry, so a node starting with a stale
@@ -408,7 +420,7 @@ def import_worker_registry_file(artifact_dir: Path, store: ArtifactStore) -> Non
             path,
             ", ".join(repeated),
         )
-    imported = store.update_notebook_workers(lambda current: entries if current is None else None)
+    imported = store.update(lambda current: entries if current is None else None)
     # Never replace an earlier copy: it may be the only record of what was imported.
     migrated = path.with_name(path.name + ".migrated")
     suffix = 1

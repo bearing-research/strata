@@ -5,14 +5,15 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-
-from strata.artifact.store import (
+from computation_core.store import (
     _BASELINE_SCHEMA_VERSION,
     _LATEST_SCHEMA_VERSION,
     _MIGRATIONS,
     ArtifactStore,
     StoreSchemaMismatch,
 )
+
+from strata.notebook.worker_store import NotebookWorkerStore
 
 
 def _columns(db_path) -> set[str]:
@@ -133,7 +134,6 @@ class TestAReadOnlyOpen:
     def test_an_older_database_is_refused_untouched(self, tmp_path):
         db_path = ArtifactStore(tmp_path / "old").db_path
         conn = sqlite3.connect(db_path)
-        conn.execute("DROP TABLE notebook_workers")
         conn.execute("DELETE FROM schema_version WHERE version >= 9")
         conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (8, 0)")
         conn.commit()
@@ -183,17 +183,17 @@ class TestTheWorkerRegistryMigration:
     def test_a_database_from_before_it_gains_the_tables(self, tmp_path):
         db_path = ArtifactStore(tmp_path / "old").db_path
         conn = sqlite3.connect(db_path)
-        conn.execute("DROP TABLE notebook_workers")
-        conn.execute("DROP TABLE notebook_worker_registry")
         conn.execute("DELETE FROM schema_version WHERE version >= 9")
         conn.commit()
         conn.close()
 
+        # Migration 9 is a tombstone: Strata's worker store creates the tables itself.
         reopened = ArtifactStore(tmp_path / "old")
+        workers = NotebookWorkerStore(reopened.db_path, dialect=reopened.dialect)
         entry = {"name": "box", "backend": "executor", "enabled": True}
-        reopened.update_notebook_workers(lambda current: [entry])
+        workers.update(lambda current: [entry])
 
-        assert reopened.notebook_worker_entries() == [entry]
+        assert workers.entries() == [entry]
         assert _version(db_path) == _LATEST_SCHEMA_VERSION
 
 
@@ -217,7 +217,7 @@ class TestConstantsAndMigrationsAgree:
 
 
 def _ready(store, artifact_id, executor, inputs, input_versions=None) -> None:
-    from strata.artifact.provenance import TransformSpec
+    from computation_core.provenance import TransformSpec
 
     spec = TransformSpec(executor=executor, params={"sql": "SELECT 1"}, inputs=inputs)
     version = store.create_artifact(
@@ -261,7 +261,7 @@ class TestTheMisboundBuildMigration:
 @pytest.mark.parametrize("dialect_name", ["sqlite"])
 def test_column_exists_reports_truthfully(tmp_path, dialect_name):
     """The primitive every migration is built from."""
-    from strata.sql_backend import SqliteDialect
+    from computation_core.sql_backend import SqliteDialect
 
     store = ArtifactStore(tmp_path / "s")
     dialect = SqliteDialect(store.db_path)

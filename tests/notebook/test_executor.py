@@ -1323,7 +1323,7 @@ class Person:
 
     def test_two_tenants_stage_inputs_of_one_notebook(self, sample_notebook, tmp_path):
         """Two tenants running notebooks with one notebook id each stage their own copy."""
-        from strata.artifact.store import ArtifactStore
+        from computation_core.store import ArtifactStore
 
         store = ArtifactStore(tmp_path / "service-store")
         staging = tmp_path / "staging"
@@ -3318,7 +3318,8 @@ class TestLoopCellExecution:
 
     def test_a_start_from_seed_overtaken_by_a_duplicate_reads_its_canonical(self, loop_notebook):
         """A seed version dedup overtook has no bytes of its own; the seed reads through it."""
-        from strata.artifact.provenance import TransformSpec
+        from computation_core.provenance import TransformSpec
+
         from strata.notebook.annotations import LoopAnnotation
 
         _, session = loop_notebook

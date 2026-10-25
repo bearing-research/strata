@@ -6,8 +6,9 @@ import argparse
 import os
 from pathlib import Path
 
+from computation_core.sql_backend import SqliteDialect
+
 from strata.migrate import migrate, plan_migration
-from strata.sql_backend import SqliteDialect
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
@@ -64,7 +65,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
         # Only for a real run: ArtifactStore's schema init upgrades a legacy
         # source in place (columns, indexes, WAL), which --dry-run must not do.
-        from strata.artifact.store import ArtifactStore
+        from computation_core.store import ArtifactStore
 
         ArtifactStore(artifact_dir)
 

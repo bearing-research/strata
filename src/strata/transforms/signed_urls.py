@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import Any
 from urllib.parse import urlencode
 
-from strata.artifact.store import ArtifactVersion, attempt_blob_id
+from computation_core.store import ArtifactVersion, attempt_blob_id
 
 
 def lease_token(lease_owner: str | None, lease_expires_at: float | None) -> str:

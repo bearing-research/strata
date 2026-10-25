@@ -1,5 +1,11 @@
 """Transforms: base class, built-ins (scan@v1, duckdb_sql@v1), registry and build runner."""
 
+from computation_core.build_store import (
+    BuildState,
+    BuildStore,
+    get_build_store,
+)
+
 from strata.transforms.base import (
     Transform,
     _run_transform,
@@ -7,11 +13,6 @@ from strata.transforms.base import (
     list_transforms,
     register_transform,
     run_transform,  # Deprecated, use _run_transform internally
-)
-from strata.transforms.build_store import (
-    BuildState,
-    BuildStore,
-    get_build_store,
 )
 from strata.transforms.duckdb_sql import (
     DuckDBSQLParams,

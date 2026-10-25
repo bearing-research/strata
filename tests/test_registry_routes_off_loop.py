@@ -11,10 +11,10 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
+from computation_core.provenance import TransformSpec
+from computation_core.store import get_artifact_store
 from httpx import ASGITransport, AsyncClient
 
-from strata.artifact.provenance import TransformSpec
-from strata.artifact.store import get_artifact_store
 from tests.conftest import hold, ran_while_held
 
 PROTECTED = ["gold", "silver", "bronze"]

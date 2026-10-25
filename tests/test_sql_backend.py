@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from strata.sql_backend import (
+from computation_core.sql_backend import (
     SERVER_THREAD_LIMIT,
     PostgresDialect,
     SqliteDialect,
@@ -138,7 +138,7 @@ class TestPostgresConnectionAdapter:
     """The wrapper keeps the store's call sites unchanged."""
 
     def _wrap(self):
-        from strata.sql_backend import _PostgresConnection
+        from computation_core.sql_backend import _PostgresConnection
 
         inner = _FakeInner()
         released = []
@@ -188,7 +188,7 @@ class TestRowBehavesLikeSqliteRow:
     """The store reads results by name, by position, and via dict()."""
 
     def _row(self):
-        from strata.sql_backend import _Row
+        from computation_core.sql_backend import _Row
 
         return _Row(("id", "tenant"), ("a1", "acme"))
 
