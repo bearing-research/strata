@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from computation_core.store import ArtifactStore, ArtifactVersion, Publication
+    from vestigo.store import ArtifactStore, ArtifactVersion, Publication
 
 # Extension by content type for the file inside a bundle; ``.bin`` helps nobody.
 BUNDLE_EXTENSIONS = {
@@ -261,7 +261,7 @@ def cached_bundle_zip(
 
 def drop_cached_bundles(store: ArtifactStore, token: str) -> None:
     """Remove every cached archive of the publication *token* (raw, or its id)."""
-    from computation_core.store import publication_key
+    from vestigo.store import publication_key
 
     cache_dir = _archive_cache_dir(store, publication_key(token))
     if cache_dir.exists():
@@ -274,7 +274,7 @@ def remove_token_named_archives(artifact_dir: Path) -> int:
     Earlier releases named them so. Nothing looks them up now (the cache is keyed by
     publication id and rebuilds on request), and a listing is no place for working links.
     """
-    from computation_core.store import publication_key
+    from vestigo.store import publication_key
 
     root = artifact_dir / ARCHIVE_CACHE_DIRNAME
     if not root.is_dir():

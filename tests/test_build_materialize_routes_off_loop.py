@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import anyio.to_thread
 import pyarrow as pa
 import pytest
-from computation_core.provenance import TransformSpec
-from computation_core.store import get_artifact_store
 from httpx import ASGITransport, AsyncClient
+from vestigo.provenance import TransformSpec
+from vestigo.store import get_artifact_store
 
 from tests.conftest import hold, ran_while_held, table_to_ipc_bytes
 
@@ -45,7 +45,7 @@ def _on_loop_recorder(monkeypatch, obj, method: str) -> list[bool]:
 @pytest.fixture
 def served(in_process_server):
     """An in-process personal server with the build runtime's stores."""
-    from computation_core.build_store import get_build_store
+    from vestigo.build_store import get_build_store
 
     import strata.server as server_module
     from strata.transforms.registry import (

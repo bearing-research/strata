@@ -13,8 +13,8 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from computation_core.store import get_artifact_store
 from httpx import ASGITransport, AsyncClient
+from vestigo.store import get_artifact_store
 
 from tests.conftest import hold, ran_while_held
 

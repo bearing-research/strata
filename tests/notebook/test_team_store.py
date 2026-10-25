@@ -13,8 +13,8 @@ import json
 
 import httpx
 import pytest
-from computation_core.provenance import TransformSpec, derive_subkey
-from computation_core.store import ArtifactStore
+from vestigo.provenance import TransformSpec, derive_subkey
+from vestigo.store import ArtifactStore
 
 from strata.notebook import output_dirs
 from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -1180,7 +1180,7 @@ async def test_under_the_promoted_policy_a_cell_run_offers_nothing(
     On a personal server, offering every intermediate would share everything a researcher computes.
     Pulls are unchanged, so Bob is checked for a miss.
     """
-    from computation_core.store import ArtifactStore
+    from vestigo.store import ArtifactStore
 
     from strata.config import StrataConfig
     from strata.notebook.executor import CellExecutor

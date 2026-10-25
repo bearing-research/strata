@@ -10,7 +10,7 @@ import json
 import logging
 
 import pytest
-from computation_core.store import ArtifactStore, get_artifact_store
+from vestigo.store import ArtifactStore, get_artifact_store
 
 from strata.notebook.models import WorkerBackendType, WorkerSpec
 from strata.notebook.worker_store import NotebookWorkerStore

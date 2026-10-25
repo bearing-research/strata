@@ -12,13 +12,13 @@ import functools
 from typing import Annotated, NamedTuple
 
 import anyio.to_thread
-from computation_core.build_store import BuildStore
+from fastapi import Depends, HTTPException
+from vestigo.build_store import BuildStore
 
 # Imported at runtime, not under TYPE_CHECKING: the aliases below embed these in ``Annotated[...]``,
 # and FastAPI resolves hints against the router module's globals, where a string forward ref would
 # not resolve.
-from computation_core.store import ArtifactStore
-from fastapi import Depends, HTTPException
+from vestigo.store import ArtifactStore
 
 from strata.observability.pool_metrics import get_pool_tracker
 from strata.types import Principal, TableIdentity
@@ -177,8 +177,8 @@ def build_transport_available() -> bool:
 
 def runtime_build_store() -> BuildStore | None:
     """Resolve the runtime build store, or ``None`` when no ``artifact_dir`` is set."""
-    from computation_core.build_store import get_build_store
-    from computation_core.store import get_artifact_store
+    from vestigo.build_store import get_build_store
+    from vestigo.store import get_artifact_store
 
     from strata.server import get_state
 

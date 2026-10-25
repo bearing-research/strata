@@ -11,8 +11,8 @@ import json
 import threading
 
 import pytest
-from computation_core.store import ArtifactStore
 from fastapi import HTTPException
+from vestigo.store import ArtifactStore
 
 
 @pytest.fixture

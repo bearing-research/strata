@@ -4,9 +4,9 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from computation_core.build_store import get_build_store, reset_build_store
-from computation_core.store import get_artifact_store, reset_artifact_store
 from fastapi.testclient import TestClient
+from vestigo.build_store import get_build_store, reset_build_store
+from vestigo.store import get_artifact_store, reset_artifact_store
 
 from strata.config import StrataConfig
 from strata.notebook.worker_store import get_notebook_worker_store, open_notebook_worker_store
@@ -1206,7 +1206,7 @@ class TestProvenanceDeduplication:
         artifact_uri = resp1.json()["artifact_uri"]
 
         # Simulate build completion directly in the artifact store.
-        from computation_core.store import get_artifact_store
+        from vestigo.store import get_artifact_store
 
         store = get_artifact_store()
         assert store is not None

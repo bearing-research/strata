@@ -15,9 +15,9 @@ from types import SimpleNamespace
 import anyio.to_thread
 import pyarrow as pa
 import pytest
-from computation_core.build_store import get_build_store
-from computation_core.provenance import TransformSpec
-from computation_core.store import get_artifact_store
+from vestigo.build_store import get_build_store
+from vestigo.provenance import TransformSpec
+from vestigo.store import get_artifact_store
 
 from strata.transforms.registry import TransformDefinition, TransformRegistry
 from strata.transforms.runner import BuildRunner, RunnerConfig

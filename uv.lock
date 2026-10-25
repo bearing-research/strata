@@ -15,10 +15,10 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "computation-core",
     "strata-client",
     "strata-notebook",
     "strata-pool",
+    "vestigo",
 ]
 
 [[package]]
@@ -657,42 +657,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
 ]
-
-[[package]]
-name = "computation-core"
-version = "0.11.0"
-source = { editable = "packages/computation-core" }
-dependencies = [
-    { name = "pyarrow" },
-]
-
-[package.optional-dependencies]
-azure = [
-    { name = "azure-identity" },
-    { name = "azure-storage-blob" },
-]
-gcs = [
-    { name = "google-cloud-storage" },
-]
-postgres = [
-    { name = "psycopg", extra = ["binary"] },
-    { name = "psycopg-pool" },
-]
-s3 = [
-    { name = "botocore" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
-    { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
-    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
-    { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
-    { name = "psycopg-pool", marker = "extra == 'postgres'", specifier = ">=3.2" },
-    { name = "pyarrow", specifier = ">=18.0.0" },
-]
-provides-extras = ["postgres", "s3", "gcs", "azure"]
 
 [[package]]
 name = "contourpy"
@@ -4037,7 +4001,6 @@ version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
-    { name = "computation-core" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "filelock" },
@@ -4054,6 +4017,7 @@ dependencies = [
     { name = "starlette" },
     { name = "tomli-w" },
     { name = "uvicorn" },
+    { name = "vestigo" },
     { name = "websockets" },
 ]
 
@@ -4168,7 +4132,6 @@ requires-dist = [
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
     { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
     { name = "cloudpickle", marker = "extra == 'notebook'", specifier = ">=3.0.0" },
-    { name = "computation-core", editable = "packages/computation-core" },
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -4206,6 +4169,7 @@ requires-dist = [
     { name = "textual-image", marker = "extra == 'tui'", specifier = ">=0.14.0" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
+    { name = "vestigo", editable = "packages/vestigo" },
     { name = "websockets", specifier = ">=17.1" },
 ]
 provides-extras = ["otel", "azure", "s3", "gcs", "postgres", "notebook", "sql", "sql-postgres", "sql-sqlite", "sql-snowflake", "sql-bigquery", "sql-duckdb", "tui", "mcp"]
@@ -4461,6 +4425,42 @@ sdist = { url = "https://files.pythonhosted.org/packages/e7/44/8126f9f0c44319b2e
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a4/ce/3b6fee91c85626eaf769d617f1be9d2e15c1cca027bbdeb2e0d751469355/verspec-0.1.0-py3-none-any.whl", hash = "sha256:741877d5633cc9464c45a469ae2a31e801e6dbbaa85b9675d481cda100f11c31", size = 19640, upload-time = "2020-11-30T02:24:08.387Z" },
 ]
+
+[[package]]
+name = "vestigo"
+version = "0.11.0"
+source = { editable = "packages/vestigo" }
+dependencies = [
+    { name = "pyarrow" },
+]
+
+[package.optional-dependencies]
+azure = [
+    { name = "azure-identity" },
+    { name = "azure-storage-blob" },
+]
+gcs = [
+    { name = "google-cloud-storage" },
+]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
+]
+s3 = [
+    { name = "botocore" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
+    { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
+    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
+    { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
+    { name = "psycopg-pool", marker = "extra == 'postgres'", specifier = ">=3.2" },
+    { name = "pyarrow", specifier = ">=18.0.0" },
+]
+provides-extras = ["postgres", "s3", "gcs", "azure"]
 
 [[package]]
 name = "virtualenv"

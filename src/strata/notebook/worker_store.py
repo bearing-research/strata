@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
+from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS notebook_workers (

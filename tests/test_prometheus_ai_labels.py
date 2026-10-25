@@ -23,7 +23,7 @@ SERVICE = {
 
 @pytest.fixture
 def scrape(tmp_path):
-    from computation_core.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
 
     import strata.server as server_module
     from strata.config import StrataConfig

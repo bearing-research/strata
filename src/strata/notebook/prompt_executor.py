@@ -13,7 +13,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from computation_core.provenance import derive_subkey
+from vestigo.provenance import derive_subkey
 
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.llm import (
@@ -416,8 +416,8 @@ async def execute_prompt_cell(
     blob = json.dumps(content, indent=2, default=str).encode()
 
     try:
-        from computation_core.provenance import TransformSpec
-        from computation_core.store import StagedVersion
+        from vestigo.provenance import TransformSpec
+        from vestigo.store import StagedVersion
 
         from strata.notebook.artifact_integration import caller_principal_id
 

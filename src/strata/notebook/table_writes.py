@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from computation_core.store import StagedVersion
+from vestigo.store import StagedVersion
 
 from strata.notebook.harness_user import running_server_config
 from strata.notebook.models import TableWriteSpec

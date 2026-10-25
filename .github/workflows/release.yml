@@ -103,24 +103,24 @@ jobs:
               )
               sys.exit(1)
 
-          # computation-core is a runtime dependency of strata-notebook, pinned
+          # vestigo is a runtime dependency of strata-notebook, pinned
           # exactly, so the pin, the package and the tag must all agree.
-          with open("packages/computation-core/pyproject.toml", "rb") as f:
+          with open("packages/vestigo/pyproject.toml", "rb") as f:
               core_version = tomllib.load(f)["project"]["version"]
           if core_version != version:
               print(
-                  f"::error::computation-core version {core_version!r} doesn't match the "
-                  f"release version {version!r}. Keep packages/computation-core/pyproject.toml "
+                  f"::error::vestigo version {core_version!r} doesn't match the "
+                  f"release version {version!r}. Keep packages/vestigo/pyproject.toml "
                   "in lockstep with the root pyproject.toml.",
                   file=sys.stderr,
               )
               sys.exit(1)
           with open("pyproject.toml", "rb") as f:
               dependencies = tomllib.load(f)["project"]["dependencies"]
-          if f"computation-core=={version}" not in dependencies:
+          if f"vestigo=={version}" not in dependencies:
               print(
-                  f"::error::pyproject.toml must depend on 'computation-core=={version}' "
-                  f"(found {[d for d in dependencies if d.startswith('computation-core')]}).",
+                  f"::error::pyproject.toml must depend on 'vestigo=={version}' "
+                  f"(found {[d for d in dependencies if d.startswith('vestigo')]}).",
                   file=sys.stderr,
               )
               sys.exit(1)
@@ -306,11 +306,11 @@ jobs:
           path: dist
           if-no-files-found: error
 
-  # --- computation-core wheel (the ledger strata-notebook depends on) --
+  # --- vestigo wheel (the ledger strata-notebook depends on) --
   # Same shape as client-wheel; wheel-test installs it beside the notebook
   # wheel, since PyPI cannot resolve the pin until this run publishes it.
   core-wheel:
-    name: wheel · computation-core
+    name: wheel · vestigo
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -324,22 +324,22 @@ jobs:
           python-version: "3.12"
           version: "latest"
 
-      - name: Build the computation-core wheel + sdist
-        run: uv build --package computation-core --out-dir dist
+      - name: Build the vestigo wheel + sdist
+        run: uv build --package vestigo --out-dir dist
 
-      - name: Smoke-test the computation-core wheel
+      - name: Smoke-test the vestigo wheel
         run: |
           set -euo pipefail
-          CORE_WHEEL=$(ls dist/computation_core-*-py3-none-any.whl | head -1)
+          CORE_WHEEL=$(ls dist/vestigo-*-py3-none-any.whl | head -1)
           echo "::notice::Testing core wheel ${CORE_WHEEL}"
           uv venv /tmp/core-smoke
           VIRTUAL_ENV=/tmp/core-smoke uv pip install \
             --index https://pypi.org/simple/ "${CORE_WHEEL}"
           /tmp/core-smoke/bin/python -c "
-          from computation_core.build_store import BuildStore
-          from computation_core.sql_backend import SqliteDialect
-          from computation_core.store import ArtifactStore
-          print('computation_core imports ok')
+          from vestigo.build_store import BuildStore
+          from vestigo.sql_backend import SqliteDialect
+          from vestigo.store import ArtifactStore
+          print('vestigo imports ok')
           "
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
@@ -386,7 +386,7 @@ jobs:
           set -euo pipefail
 
           WHEEL=$(ls dist/strata_notebook-*-py3-none-any.whl | head -1)
-          CORE_WHEEL=$(ls dist/computation_core-*-py3-none-any.whl | head -1)
+          CORE_WHEEL=$(ls dist/vestigo-*-py3-none-any.whl | head -1)
           echo "::notice::Testing wheel ${WHEEL} with ${CORE_WHEEL}"
 
           # Strata's runtime guard requires a uv-managed venv (the `uv =`

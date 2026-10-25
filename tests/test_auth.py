@@ -480,7 +480,7 @@ class TestArtifactReadAcl:
 
     @pytest.fixture
     def store(self, tmp_path):
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         return ArtifactStore(tmp_path / "artifacts")
 
@@ -488,7 +488,7 @@ class TestArtifactReadAcl:
     def _artifact(table_uri):
         from unittest.mock import MagicMock
 
-        from computation_core.provenance import TransformSpec
+        from vestigo.provenance import TransformSpec
 
         art = MagicMock()
         art.transform_spec = TransformSpec(
@@ -549,7 +549,7 @@ class TestArtifactReadAcl:
         # scoping is the gate.
         from unittest.mock import MagicMock
 
-        from computation_core.provenance import TransformSpec
+        from vestigo.provenance import TransformSpec
 
         server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
         art = MagicMock()
@@ -588,8 +588,8 @@ class TestDerivedResultsInheritTheAcl:
 
     @staticmethod
     def _service(monkeypatch, tmp_path):
-        from computation_core.store import get_artifact_store, reset_artifact_store
         from fastapi.testclient import TestClient
+        from vestigo.store import get_artifact_store, reset_artifact_store
 
         import strata.server as server_module
         from strata.server import ServerState, app
@@ -615,7 +615,7 @@ class TestDerivedResultsInheritTheAcl:
         import io
 
         import pyarrow as pa
-        from computation_core.provenance import TransformSpec
+        from vestigo.provenance import TransformSpec
 
         version = store.create_artifact(
             artifact_id,
@@ -678,7 +678,7 @@ class TestDerivedResultsInheritTheAcl:
     def test_a_folder_computed_from_a_denied_table_is_not_listed(self, monkeypatch, tmp_path):
         import json
 
-        from computation_core.provenance import TransformSpec
+        from vestigo.provenance import TransformSpec
 
         from strata.notebook import output_dirs
 
@@ -726,7 +726,7 @@ class TestDerivedResultsInheritTheAcl:
 
     def test_the_chain_is_read_one_level_at_a_time(self, tmp_path):
         """The walk costs a query per level of the lineage, not one per ancestor."""
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         store = ArtifactStore(tmp_path / "artifacts")
         parents = []

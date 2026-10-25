@@ -835,7 +835,7 @@ def _served_store():
 
     The server's own instance, with its configured metadata DSN and blob backend.
     """
-    from computation_core.store import get_artifact_store
+    from vestigo.store import get_artifact_store
 
     return get_artifact_store()
 

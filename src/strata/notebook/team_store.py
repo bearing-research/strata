@@ -24,7 +24,7 @@ from typing import BinaryIO
 
 import anyio
 import httpx
-from computation_core.provenance import derive_subkey
+from vestigo.provenance import derive_subkey
 
 from strata.notebook import output_dirs
 from strata.notebook.artifact_integration import NotebookArtifactManager

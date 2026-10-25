@@ -17,8 +17,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
-from computation_core.store import (
+from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
+from vestigo.store import (
     ArtifactStore,
     ArtifactVersion,
     ImportedArtifact,
@@ -102,7 +102,7 @@ class RemoteStore:
         digest, so a file is never read into memory.
         """
         import httpx
-        from computation_core.store import ImportedArtifact
+        from vestigo.store import ImportedArtifact
 
         metadata = record_metadata(record)
         params = {"remap": "true"} if self._remap else None

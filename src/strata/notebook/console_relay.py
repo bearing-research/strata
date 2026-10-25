@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import anyio.to_thread
 
 if TYPE_CHECKING:
-    from computation_core.build_store import BuildStore
+    from vestigo.build_store import BuildStore
 
 logger = logging.getLogger(__name__)
 

@@ -11,9 +11,9 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
-from computation_core.provenance import TransformSpec
-from computation_core.store import get_artifact_store
 from httpx import ASGITransport, AsyncClient
+from vestigo.provenance import TransformSpec
+from vestigo.store import get_artifact_store
 
 from tests.conftest import hold, ran_while_held
 

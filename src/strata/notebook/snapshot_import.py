@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from computation_core.store import ArtifactStore, ArtifactVersion
+from vestigo.store import ArtifactStore, ArtifactVersion
 
 from strata.artifact.transfer import RECORD_FIELDS, remap_input_versions
 from strata.notebook.snapshot import SNAPSHOT_FORMAT_VERSION

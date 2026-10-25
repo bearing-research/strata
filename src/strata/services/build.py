@@ -12,8 +12,8 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from computation_core.build_store import BuildState
-    from computation_core.store import ArtifactStore
+    from vestigo.build_store import BuildState
+    from vestigo.store import ArtifactStore
 
     from strata.transforms.signed_urls import URLSigner
 

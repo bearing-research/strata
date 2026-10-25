@@ -1,6 +1,6 @@
 """Transforms: base class, built-ins (scan@v1, duckdb_sql@v1), registry and build runner."""
 
-from computation_core.build_store import (
+from vestigo.build_store import (
     BuildState,
     BuildStore,
     get_build_store,

@@ -51,7 +51,7 @@ class _StubWarmer:
 
 @pytest.fixture
 def cache_client(tmp_path):
-    from computation_core.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
 
     import strata.server as server_module
     from strata.config import StrataConfig
@@ -371,7 +371,7 @@ class TestAsyncWarmerPresent:
 @pytest.fixture
 def acl_cache_client(tmp_path):
     """Service mode + trusted proxy with a deny rule on ``*:denied.*``."""
-    from computation_core.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
 
     import strata.server as server_module
     from strata.config import AclConfig, AclRule, StrataConfig
@@ -453,7 +453,7 @@ class TestWarmTakesTheScanIdentity:
     @pytest.fixture
     def lake_state(self, tmp_path):
         """Service mode with a named catalog ``lake`` whose ``denied`` namespace is denied."""
-        from computation_core.store import reset_artifact_store
+        from vestigo.store import reset_artifact_store
 
         import strata.server as server_module
         from strata.config import AclConfig, AclRule, StrataConfig
@@ -556,7 +556,7 @@ class TestWarmJobsAreTenantScoped:
 
     @pytest.fixture
     def tenant_state(self, tmp_path):
-        from computation_core.store import reset_artifact_store
+        from vestigo.store import reset_artifact_store
 
         import strata.server as server_module
         from strata.config import StrataConfig

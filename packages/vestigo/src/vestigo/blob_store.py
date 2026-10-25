@@ -240,7 +240,7 @@ class LocalBlobStore(BlobStore):
 
     def __init__(self, blobs_dir: Path):
         """Initialize the store over ``blobs_dir``."""
-        from computation_core.file_modes import private_dir
+        from vestigo.file_modes import private_dir
 
         self.blobs_dir = blobs_dir
         private_dir(self.blobs_dir)

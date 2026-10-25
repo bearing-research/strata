@@ -9,9 +9,9 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from computation_core.build_store import reset_build_store
-from computation_core.provenance import TransformSpec
-from computation_core.store import get_artifact_store, reset_artifact_store
+from vestigo.build_store import reset_build_store
+from vestigo.provenance import TransformSpec
+from vestigo.store import get_artifact_store, reset_artifact_store
 
 from strata.transforms.registry import (
     TransformDefinition,
@@ -41,7 +41,7 @@ def artifact_store(artifact_dir):
 @pytest.fixture
 def build_store(artifact_dir):
     reset_build_store()
-    from computation_core.build_store import get_build_store
+    from vestigo.build_store import get_build_store
 
     seed_build_targets(artifact_dir)
     db_path = artifact_dir / "artifacts.sqlite"
@@ -57,7 +57,7 @@ def clock_build_store(artifact_dir):
     Sleeping past a lease measures timer resolution plus a SQLite round-trip, which flakes on
     Windows' ~15ms ``time.time`` granularity.
     """
-    from computation_core.build_store import BuildStore
+    from vestigo.build_store import BuildStore
 
     # The shared database, not a file of its own: build rows carry a foreign key into
     # artifact_versions, and the artifacts come from the artifact_store fixture.

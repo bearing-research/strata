@@ -189,7 +189,7 @@ def checked_path(rel: str) -> str:
 def _file_provenance(artifact_id: str, sha256: str) -> str:
     """Unique to the file's id: the store dedups equal provenance across ids, which would
     leave one cell's file reading another cell's bytes and swept with them."""
-    from computation_core.provenance import derive_subkey
+    from vestigo.provenance import derive_subkey
 
     return derive_subkey(sha256, artifact_id)
 
@@ -329,7 +329,7 @@ def _store_opened(
         return {"sha256": sha256, "size": size, "version": reused}
 
     # Here, not at the top: a worker imports this module and has no artifact store.
-    from computation_core.provenance import TransformSpec
+    from vestigo.provenance import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,
@@ -369,7 +369,7 @@ def store_received(
     reused = _reused(store, artifact_id)
     if reused is not None:
         return {"sha256": sha256, "size": size, "version": reused}
-    from computation_core.provenance import TransformSpec
+    from vestigo.provenance import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,

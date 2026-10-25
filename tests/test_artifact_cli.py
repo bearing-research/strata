@@ -8,8 +8,8 @@ import json
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
-from computation_core.provenance import TransformSpec
-from computation_core.store import ArtifactStore, reset_artifact_store
+from vestigo.provenance import TransformSpec
+from vestigo.store import ArtifactStore, reset_artifact_store
 
 from strata.artifact.cli import cmd_lineage, cmd_list, cmd_pull, cmd_show
 
@@ -195,7 +195,7 @@ class TestWhichStoreACommandReads:
         """With server settings in the shell, --artifact-dir must not pair a local store's rows with
         the team bucket's bytes.
         """
-        from computation_core.blob_store import LocalBlobStore
+        from vestigo.blob_store import LocalBlobStore
 
         from strata.artifact.cli import _open_store
 
@@ -678,7 +678,7 @@ class TestReadOnlyCommandsDoNotMigrate:
         assert "start this release's server on it once" in err
 
     def test_a_write_command_still_migrates(self, old_store):
-        from computation_core.store import _LATEST_SCHEMA_VERSION
+        from vestigo.store import _LATEST_SCHEMA_VERSION
 
         from strata.artifact.cli import _open_store
 

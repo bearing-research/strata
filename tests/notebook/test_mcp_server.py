@@ -796,7 +796,7 @@ class TestPromoteReaches:
         from types import SimpleNamespace
 
         import httpx
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         import strata.notebook.mcp_server as mcp_module
         from strata.notebook.mcp_server import _promote
@@ -832,7 +832,7 @@ class TestPublish:
 
         The page route reads only the server's store, so a link minted elsewhere is dead.
         """
-        from computation_core.store import get_artifact_store
+        from vestigo.store import get_artifact_store
 
         from strata.notebook.mcp_server import _publish
 
@@ -854,8 +854,8 @@ class TestPublish:
         """
         from types import SimpleNamespace
 
-        from computation_core.blob_store import LocalBlobStore
-        from computation_core.store import get_artifact_store
+        from vestigo.blob_store import LocalBlobStore
+        from vestigo.store import get_artifact_store
 
         import strata.server as server_module
         from strata.notebook.mcp_server import _publish
@@ -881,7 +881,7 @@ class TestPublish:
 @pytest.mark.asyncio
 async def test_publish_records_who_published_it_and_whose_it_is(sm_with_a_stored_output, tmp_path):
     """Without the caller stamped, the audit row names nobody (REST and CLI stamp it too)."""
-    from computation_core.store import get_artifact_store
+    from vestigo.store import get_artifact_store
 
     from strata.auth.principal import principal_context
     from strata.notebook.mcp_server import _publish

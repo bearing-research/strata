@@ -6,7 +6,7 @@ import argparse
 import os
 from pathlib import Path
 
-from computation_core.sql_backend import SqliteDialect
+from vestigo.sql_backend import SqliteDialect
 
 from strata.migrate import migrate, plan_migration
 
@@ -65,7 +65,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
         # Only for a real run: ArtifactStore's schema init upgrades a legacy
         # source in place (columns, indexes, WAL), which --dry-run must not do.
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         ArtifactStore(artifact_dir)
 

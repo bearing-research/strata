@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, Any, BinaryIO
 
 import filelock
 import tomli_w
-from computation_core.file_modes import private_dir
 from packaging.requirements import Requirement
+from vestigo.file_modes import private_dir
 
 from strata.notebook.dependencies import rscript_env, uv_env
 from strata.notebook.harness_user import (

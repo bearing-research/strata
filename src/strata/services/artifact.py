@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, NamedTuple
 
-from computation_core.provenance import parse_transform_spec
+from vestigo.provenance import parse_transform_spec
 
 from strata.types import (
     ArtifactDependentsResponse,
@@ -20,7 +20,7 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
-    from computation_core.store import ArtifactStore, ArtifactVersion
+    from vestigo.store import ArtifactStore, ArtifactVersion
 
 
 def _input_version_to_artifact_ref(

@@ -1198,7 +1198,7 @@ class StrataConfig(BaseSettings):
                 "installed. Install strata-notebook[postgres]."
             ) from exc
 
-        from computation_core.sql_backend import PostgresDialect
+        from vestigo.sql_backend import PostgresDialect
 
         return PostgresDialect(dsn)
 
@@ -1208,7 +1208,7 @@ class StrataConfig(BaseSettings):
         Raises:
             ValueError: If the backend's bucket, container or ``artifact_dir`` is unset.
         """
-        from computation_core.blob_store import (
+        from vestigo.blob_store import (
             AzureBlobStore,
             GCSBlobStore,
             LocalBlobStore,

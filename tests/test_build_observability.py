@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from computation_core.build_store import BuildStore
+from vestigo.build_store import BuildStore
 
 from strata.observability.logging import BuildContext, get_request_context
 from strata.transforms.build_metrics import (

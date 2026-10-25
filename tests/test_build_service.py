@@ -90,7 +90,7 @@ def test_assemble_manifest_reads_a_name_at_the_version_admission_recorded(
     captured_manifest, tmp_path
 ):
     """A name moved after admission: the executor still gets the bytes the provenance hashed."""
-    from computation_core.store import ArtifactStore
+    from vestigo.store import ArtifactStore
 
     store = ArtifactStore(tmp_path / "artifacts")
     for version in (1, 2):
@@ -117,7 +117,7 @@ def test_assemble_manifest_reads_a_name_at_the_version_admission_recorded(
 def test_a_manifest_input_carries_its_stored_size_and_an_unknown_one_none(tmp_path):
     """A core build's inputs carry the store's recorded sizes, the shape the notebook sends;
     a version still being written has none, so the field is left out."""
-    from computation_core.store import ArtifactStore
+    from vestigo.store import ArtifactStore
 
     from strata.transforms.signed_urls import URLSigner
 

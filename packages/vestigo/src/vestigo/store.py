@@ -20,11 +20,11 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from computation_core.provenance import TransformSpec, parse_transform_spec
-from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection
+from vestigo.provenance import TransformSpec, parse_transform_spec
+from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
-    from computation_core.blob_store import BlobStore
+    from vestigo.blob_store import BlobStore
 
 logger = logging.getLogger(__name__)
 
@@ -894,7 +894,7 @@ class ArtifactStore:
             StoreSchemaMismatch: the schema is newer than this release, or, with
                 ``read_only``, older or missing.
         """
-        from computation_core.file_modes import narrow, private_dir, private_file
+        from vestigo.file_modes import narrow, private_dir, private_file
 
         self.artifact_dir = artifact_dir
         self.db_path = artifact_dir / "artifacts.sqlite"
@@ -902,14 +902,14 @@ class ArtifactStore:
         private_dir(artifact_dir)
 
         if blob_store is None:
-            from computation_core.blob_store import LocalBlobStore
+            from vestigo.blob_store import LocalBlobStore
 
             self.blobs_dir = artifact_dir / "blobs"
             self.blob_store: BlobStore = LocalBlobStore(self.blobs_dir)
         else:
             self.blob_store = blob_store
             # Back-compat attribute, set for the local store only.
-            from computation_core.blob_store import LocalBlobStore
+            from vestigo.blob_store import LocalBlobStore
 
             if isinstance(blob_store, LocalBlobStore):
                 self.blobs_dir = blob_store.blobs_dir
@@ -1672,7 +1672,7 @@ class ArtifactStore:
         # Streamed, not read_blob/write_blob: an artifact can be a multi-GB frame, and pulling it
         # through process memory (a full download and re-upload on object stores) to re-point a
         # pointer would cost more than the run this avoids.
-        from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         copied = 0
         with (
@@ -1727,7 +1727,7 @@ class ArtifactStore:
             raise ValueError(
                 f"{artifact_id}@v={version} reads {row['superseded_by']}, whose blob is gone"
             )
-        from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
+        from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
         with reader_cm as src, self.blob_store.open_blob_writer(artifact_id, version) as dst:
             while chunk := src.read(BLOB_STREAM_CHUNK_BYTES):

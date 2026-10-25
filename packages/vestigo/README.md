@@ -1,4 +1,4 @@
-# computation-core
+# vestigo
 
 <!-- --8<-- [start:body] -->
 The ledger of the shared computation substrate, factored out of Strata's
@@ -8,8 +8,8 @@ with compare-and-set and approval, retention and race-safe garbage
 collection, all in one transaction discipline on SQLite or PostgreSQL, with
 blob backends for local disk, S3, GCS and Azure.
 
-Strata is its first consumer. The package name is a placeholder until the
-first standalone release.
+Strata is its first consumer. *Vestigo* is Latin for "I track down, I trace":
+the ledger traces every artifact back to the computation and inputs that made it.
 <!-- --8<-- [end:body] -->
 
 ## Formal models

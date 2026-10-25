@@ -160,7 +160,7 @@ def _reset_process_globals():
             streams.shutdown_cleanups()
 
     server_module._state = None
-    from computation_core.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
 
     from strata.cache.metadata import reset_caches
     from strata.notebook.worker_store import reset_notebook_worker_store
@@ -247,7 +247,7 @@ def _reset_transform_singletons() -> None:
     The build store singleton caches its first db_path, so a later server's builds would land
     in the first server's database and sit in pending.
     """
-    from computation_core.build_store import reset_build_store
+    from vestigo.build_store import reset_build_store
 
     from strata.transforms.runner import reset_build_runner
 
@@ -336,7 +336,7 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     ``reset_caches`` resets the global metadata caches first. Raises RuntimeError if the
     server does not answer /health within 20 seconds.
     """
-    from computation_core.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
 
     import strata.server as server_module
     from strata.server import ServerState, app
@@ -411,7 +411,7 @@ def run_server_with_context(
     Unlike ``run_server`` it supports ``artifact_dir`` and resets the artifact store on
     cleanup. Raises RuntimeError if the server fails to start.
     """
-    from computation_core.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
 
     from strata import server
     from strata.server import ServerState, app
@@ -613,7 +613,7 @@ def seed_build_targets(
     creates the version first. Opening the artifact store also creates ``artifact_versions``
     in the shared database, without which the key cannot resolve.
     """
-    from computation_core.store import ArtifactStore
+    from vestigo.store import ArtifactStore
 
     store = ArtifactStore(artifact_dir)
     try:

@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from computation_core.file_modes import private_file
+from vestigo.file_modes import private_file
 
 # ANSI helpers, tty-gated (mirrors strata.notebook.cli).
 _USE_COLOR = sys.stdout.isatty()

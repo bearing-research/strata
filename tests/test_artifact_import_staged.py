@@ -11,7 +11,7 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from computation_core.store import IMPORT_STAGING_TTL_SECONDS, ArtifactStore
+from vestigo.store import IMPORT_STAGING_TTL_SECONDS, ArtifactStore
 
 PROXY_TOKEN = "import-proxy-token"
 BLOB = b"the bytes of a figure"

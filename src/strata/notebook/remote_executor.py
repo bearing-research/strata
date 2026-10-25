@@ -21,11 +21,11 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
 from strata.notebook import output_dirs
 from strata.notebook.annotations import parse_annotations

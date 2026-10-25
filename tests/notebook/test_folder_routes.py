@@ -133,7 +133,7 @@ class TestTheListing:
         assert [f["path"] for f in versions[0]["files"]] == ["final.pt"]
 
     async def test_a_row_a_crash_left_without_bytes_is_not_listed(self, client, opened):
-        from computation_core.provenance import TransformSpec
+        from vestigo.provenance import TransformSpec
 
         session = opened(SUCCESS)
         assert await _run(session, SUCCESS)
@@ -252,7 +252,7 @@ class TestAFile:
             assert response.status_code == 404, name
 
     async def test_a_file_the_manifest_names_by_id_is_served_from_there(self, client, opened):
-        from computation_core.provenance import TransformSpec
+        from vestigo.provenance import TransformSpec
 
         session = opened(SUCCESS)
         assert await _run(session, SUCCESS)

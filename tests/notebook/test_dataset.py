@@ -9,7 +9,7 @@ import types
 
 import pyarrow as pa
 import pytest
-from computation_core.provenance import TransformSpec
+from vestigo.provenance import TransformSpec
 
 from strata.notebook import datasets as datasets_module
 from strata.notebook.annotations import parse_annotations
@@ -371,7 +371,7 @@ class TestLineage:
         ]
 
     def test_an_ancestor_the_notebook_already_holds_is_reused(self, tmp_path):
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         from strata.artifact.cli import _walk_lineage
         from strata.notebook.models import DatasetSpec
@@ -422,7 +422,7 @@ class TestSameIdOtherBytes:
         return downloads
 
     def test_a_local_row_with_the_id_but_another_computation_is_not_bound(self, tmp_path):
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         from strata.notebook.models import DatasetSpec
 
@@ -484,7 +484,7 @@ class TestSameIdOtherBytes:
         assert out.outputs["score"]["preview"] == 999
 
     def test_a_local_row_with_the_id_and_the_computation_is_reused(self, tmp_path):
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         from strata.notebook.models import DatasetSpec
 
@@ -507,7 +507,7 @@ class TestTenant:
     """On a multi-tenant server, a session resolves names as its own tenant."""
 
     def test_names_resolve_in_the_sessions_tenant(self, tmp_path):
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         from strata.notebook.models import DatasetSpec
 
@@ -527,7 +527,7 @@ class TestTenant:
             )
 
     def test_another_tenants_version_is_not_handed_over(self, tmp_path):
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         store = ArtifactStore(tmp_path / "registry")
         _store_version(store, b"{}", content_type="json/object", artifact_id="m", tenant="acme")

@@ -1,6 +1,6 @@
-"""Unit tests for the pure artifact/name URI parsers in ``computation_core.uris``."""
+"""Unit tests for the pure artifact/name URI parsers in ``vestigo.uris``."""
 
-from computation_core.uris import (
+from vestigo.uris import (
     LATEST_VERSION,
     parse_artifact_uri,
     parse_name_uri,

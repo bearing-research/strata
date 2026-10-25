@@ -13,7 +13,7 @@ from typing import Protocol
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
-from computation_core.file_modes import private_dir
+from vestigo.file_modes import private_dir
 
 from strata.cache.metrics import get_eviction_tracker
 from strata.cache.stats import get_cache_histogram

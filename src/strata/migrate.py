@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from computation_core.sql_backend import SqlDialect, StoreConnection
-from computation_core.tables import LEDGER_TABLES
+from vestigo.sql_backend import SqlDialect, StoreConnection
+from vestigo.tables import LEDGER_TABLES
 
 from strata.notebook.worker_store import TABLES as NOTEBOOK_WORKER_TABLES
 
@@ -26,7 +26,7 @@ _AUTOINCREMENT_COLUMNS: dict[str, str] = {"registry_audit": "seq"}
 # database. SQLite never enforced the foreign keys (no PRAGMA foreign_keys) but Postgres does.
 #
 # stream_owners is deliberately absent: it describes live streams on live nodes, and none survive
-# the migration. So are the ledger's transient tables, ``computation_core.tables.TRANSIENT_TABLES``.
+# the migration. So are the ledger's transient tables, ``vestigo.tables.TRANSIENT_TABLES``.
 #
 # Each entry pairs a table with its primary key, which makes the copy idempotent: a row already in
 # the target is skipped, not rewritten.

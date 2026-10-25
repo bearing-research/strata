@@ -14,10 +14,10 @@ from __future__ import annotations
 import functools
 
 import anyio.to_thread
-from computation_core.store import ArtifactNotFoundError
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from vestigo.store import ArtifactNotFoundError
 
 from strata.api.dependencies import (
     CurrentPrincipal,

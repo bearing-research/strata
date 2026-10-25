@@ -419,7 +419,7 @@ def configure_logging(
     root_logger.propagate = False
 
     # The ledger package logs under its own name: same handler, level and format.
-    ledger_logger = logging.getLogger("computation_core")
+    ledger_logger = logging.getLogger("vestigo")
     ledger_logger.setLevel(root_logger.level)
     ledger_logger.addHandler(handler)
     ledger_logger.propagate = False

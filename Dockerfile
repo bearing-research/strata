@@ -38,7 +38,7 @@ ENV UV_PYTHON=3.13
 WORKDIR /build
 COPY LICENSE README.md pyproject.toml uv.lock ./
 COPY src ./src
-# computation-core is the ledger strata depends on; strata-client and
+# vestigo is the ledger strata depends on; strata-client and
 # strata-pool are workspace members copied only so the workspace resolves.
 COPY packages ./packages
 
@@ -71,10 +71,10 @@ RUN mkdir -p dist && \
       --output-file dist/runtime-requirements.txt
 
 # Build the root package and the ledger (pure Python, py3-none-any wheels).
-# --no-emit-workspace left computation-core out of the requirements above.
+# --no-emit-workspace left vestigo out of the requirements above.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv build --wheel --out-dir dist && \
-    uv build --wheel --package computation-core --out-dir dist
+    uv build --wheel --package vestigo --out-dir dist
 
 # =============================================================================
 # Stage 2: Runtime

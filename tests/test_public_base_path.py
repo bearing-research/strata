@@ -172,7 +172,7 @@ def published(request, tmp_path):
 
     ``public`` is the origin and base path the server's links must start with.
     """
-    from computation_core.store import ArtifactStore
+    from vestigo.store import ArtifactStore
 
     from tests.conftest import run_server_with_context
 

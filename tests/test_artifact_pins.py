@@ -12,8 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from computation_core.store import ArtifactStore
 from fastapi.testclient import TestClient
+from vestigo.store import ArtifactStore
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ class TestPinsInTheStore:
 @pytest.fixture
 def service(monkeypatch, tmp_path):
     """The real app over a service-mode, trusted-proxy server."""
-    from computation_core.store import get_artifact_store, reset_artifact_store
+    from vestigo.store import get_artifact_store, reset_artifact_store
 
     import strata.server as server_module
     from strata.config import StrataConfig

@@ -8,7 +8,7 @@ It works on any cell; the cascade planner only previews what will run.
 This is deliberately a separate pipeline from Core's ``materialize`` SDK
 (``POST /v1/materialize``): cells are in-process, multi-output and
 source-as-transform. The two share only the artifact store
-(``find_by_provenance`` / ``put``) and ``computation_core.provenance.derive_subkey``.
+(``find_by_provenance`` / ``put``) and ``vestigo.provenance.derive_subkey``.
 """
 
 from __future__ import annotations
@@ -32,16 +32,16 @@ from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 
 import anyio.to_thread
 import httpx
-from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
-from computation_core.build_store import get_build_store
-from computation_core.provenance import TransformSpec as ArtifactTransformSpec
-from computation_core.provenance import derive_subkey
+from pydantic import ValidationError
+from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
+from vestigo.build_store import get_build_store
+from vestigo.provenance import TransformSpec as ArtifactTransformSpec
+from vestigo.provenance import derive_subkey
 
 # Stdlib json, not orjson: executor.py is imported via ``strata.config`` and must load
 # with core deps only (orjson is in the ``[notebook]`` extra, absent from the Docker
 # image). Batch frames are small dicts.
-from computation_core.store import ArtifactVersion, StagedVersion, get_artifact_store
-from pydantic import ValidationError
+from vestigo.store import ArtifactVersion, StagedVersion, get_artifact_store
 
 from strata.notebook import console_relay, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names

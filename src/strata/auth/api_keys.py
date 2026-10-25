@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
+from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
 
 if TYPE_CHECKING:
     from strata.types import Principal

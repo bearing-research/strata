@@ -264,7 +264,7 @@ class TestUnifiedMaterialize:
         finalizes: the data it serves is the canonical's, the store holds the bytes once, and
         retention collects the overtaken row without touching them.
         """
-        from computation_core.store import ArtifactStore
+        from vestigo.store import ArtifactStore
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]

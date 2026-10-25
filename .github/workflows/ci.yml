@@ -269,7 +269,7 @@ jobs:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/computation-core/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -280,7 +280,7 @@ jobs:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/computation-core/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()
@@ -350,7 +350,7 @@ jobs:
           key-prefix: diffcone-e2e
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/computation-core/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -361,7 +361,7 @@ jobs:
           key-prefix: diffcone-e2e
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/computation-core/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()
@@ -455,7 +455,7 @@ jobs:
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
           env-vars: R_VERSION
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/computation-core/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -466,7 +466,7 @@ jobs:
           key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/computation-core/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()

@@ -12,12 +12,12 @@ from urllib.parse import parse_qs, urlparse
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
-from computation_core.build_store import (
+from fastapi.testclient import TestClient
+from vestigo.build_store import (
     get_build_store,
     reset_build_store,
 )
-from computation_core.store import get_artifact_store, reset_artifact_store
-from fastapi.testclient import TestClient
+from vestigo.store import get_artifact_store, reset_artifact_store
 
 import strata.server as server_module
 from strata.config import StrataConfig

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import docker
 import pytest
-from computation_core.provenance import TransformSpec
-from computation_core.sql_backend import PostgresDialect, SqliteDialect
-from computation_core.store import ArtifactStore
 from testcontainers.community.postgres import PostgresContainer
+from vestigo.provenance import TransformSpec
+from vestigo.sql_backend import PostgresDialect, SqliteDialect
+from vestigo.store import ArtifactStore
 
 from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
 from strata.notebook.worker_store import NotebookWorkerStore
@@ -233,7 +233,7 @@ class TestMigration:
         # garbage_collect, cleanup_failed and delete_artifact remove artifact_versions
         # rows without touching artifact_builds, so a real store holds references Postgres
         # refuses and SQLite never checked. One bad row must not strand the migration.
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         BuildStore(tmp_path / "src" / "artifacts.sqlite")
         _insert_dangling_build(tmp_path / "src" / "artifacts.sqlite", "orphan")
@@ -321,7 +321,7 @@ class TestMigration:
 
         This needs a per-row savepoint; a single-row batch could not show the loss.
         """
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         builds = BuildStore(tmp_path / "src" / "artifacts.sqlite")
         version = populated_sqlite.get_latest_version("a1").version
@@ -370,7 +370,7 @@ class TestMigration:
         # A table added to the store without an entry here is silently left behind.
         import sqlite3
 
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         from strata.auth.api_keys import ApiKeyStore
         from strata.streaming.ownership import StreamOwnershipStore

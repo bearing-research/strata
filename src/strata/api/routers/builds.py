@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Any
 
 import anyio.to_thread
-from computation_core.blob_store import BLOB_STREAM_CHUNK_BYTES
-from computation_core.store import BuildLeaseLost
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
+from vestigo.store import BuildLeaseLost
 
 from strata.api.dependencies import (
     BuildTransportStore,
@@ -411,7 +411,7 @@ async def append_build_log(
     build this process is not running is accepted and dropped, since failing the
     worker's cell over a console chunk would be worse than a missing line.
     """
-    from computation_core.build_store import get_build_store
+    from vestigo.build_store import get_build_store
 
     from strata.notebook import console_relay
     from strata.server import get_state

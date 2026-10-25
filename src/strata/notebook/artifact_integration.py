@@ -17,15 +17,15 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from computation_core.provenance import TransformSpec
-from computation_core.store import ArtifactStore, StagedVersion
+from vestigo.provenance import TransformSpec
+from vestigo.store import ArtifactStore, StagedVersion
 
 from strata.auth.principal import get_principal
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
 
 if TYPE_CHECKING:
-    from computation_core.store import ArtifactVersion
+    from vestigo.store import ArtifactVersion
 
 
 # A cell run creates and finalizes its outputs in one pass, and no build runner writes

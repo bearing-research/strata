@@ -58,7 +58,7 @@ def client(tmp_path):
     # SELECT; a finalizer raising in a collection while it is open leaves pytest holding the
     # traceback, whose frames keep that cursor and so a read lock that fails the test's write.
     gc.collect()
-    from computation_core.store import reset_artifact_store
+    from vestigo.store import reset_artifact_store
 
     import strata.server as server_module
     from strata.config import StrataConfig

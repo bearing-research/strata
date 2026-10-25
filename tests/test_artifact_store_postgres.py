@@ -13,10 +13,10 @@ import time
 import anyio.to_thread
 import docker
 import pytest
-from computation_core.provenance import TransformSpec
-from computation_core.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
-from computation_core.store import ArtifactStore
 from testcontainers.community.postgres import PostgresContainer
+from vestigo.provenance import TransformSpec
+from vestigo.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
+from vestigo.store import ArtifactStore
 
 from strata.artifact.cli import _server_store as _configured_server_store
 from strata.notebook.worker_store import NotebookWorkerStore
@@ -135,7 +135,7 @@ class TestRoundTrip:
         assert store.id_tenant("held") == "team-a"
 
     def test_another_tenant_cannot_create_under_a_held_id(self, store):
-        from computation_core.store import ArtifactIdTaken
+        from vestigo.store import ArtifactIdTaken
 
         store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
 
@@ -148,7 +148,7 @@ class TestRoundTrip:
     def test_another_tenant_cannot_import_under_a_held_id(self, store):
         from dataclasses import replace
 
-        from computation_core.store import ArtifactImportConflict
+        from vestigo.store import ArtifactImportConflict
 
         version = store.create_artifact("held", "prov-held", _spec(), tenant="team-a")
         store.write_blob("held", version, b"payload")
@@ -365,7 +365,7 @@ class TestConnectionLimits:
 
 class TestCanonicalPromotion:
     def test_a_runs_outputs_finalize_together_or_not_at_all(self, store):
-        from computation_core.store import StagedVersion
+        from vestigo.store import StagedVersion
 
         first = store.create_artifact("a1", "shared-prov", _spec())
         store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
@@ -716,7 +716,7 @@ class TestGarbageCollection:
 
     def test_cleanup_failed_takes_a_failed_build_row_with_it(self, store, tmp_path):
         """The build row's foreign key refused deleting the failed version it references."""
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         # The fixture's CASCADE drop leaves a prior test's build table without its foreign key.
         conn = store._get_connection()
@@ -937,7 +937,7 @@ class TestConfigurationSelectsTheBackend:
     """The wiring end to end: a DSN in config produces a Postgres-backed store."""
 
     def test_a_configured_dsn_produces_a_postgres_backed_store(self, postgres_dsn, tmp_path):
-        from computation_core.store import get_artifact_store, reset_artifact_store
+        from vestigo.store import get_artifact_store, reset_artifact_store
 
         from strata.config import StrataConfig
         from strata.server import _init_configured_artifact_store
@@ -970,7 +970,7 @@ class TestConfigurationSelectsTheBackend:
             reset_artifact_store()
 
     def test_no_dsn_still_produces_a_sqlite_store(self, tmp_path):
-        from computation_core.store import get_artifact_store, reset_artifact_store
+        from vestigo.store import get_artifact_store, reset_artifact_store
 
         from strata.config import StrataConfig
         from strata.server import _init_configured_artifact_store
@@ -998,7 +998,7 @@ class TestBuildStoreSharesTheBackend:
     """
 
     def test_build_created_on_one_node_is_visible_on_another(self, postgres_dsn, tmp_path):
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect_a = PostgresDialect(postgres_dsn)
         dialect_b = PostgresDialect(postgres_dsn)
@@ -1047,7 +1047,7 @@ class TestBuildStoreSharesTheBackend:
 
     def test_console_left_by_one_node_is_taken_by_the_other(self, postgres_dsn, tmp_path):
         """A remote cell's console chunk can land on a node that did not dispatch it."""
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect_a = PostgresDialect(postgres_dsn)
         dialect_b = PostgresDialect(postgres_dsn)
@@ -1090,7 +1090,7 @@ class TestBuildStoreSharesTheBackend:
 
     def test_the_runner_picks_a_fair_share_per_tenant(self, postgres_dsn, tmp_path):
         """The window query runs on Postgres too: per tenant, without external builds."""
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1135,7 +1135,7 @@ class TestBuildStoreSharesTheBackend:
 
     def test_a_fail_fenced_on_a_claim_needs_that_exact_claim(self, postgres_dsn, tmp_path):
         """The deadline read back from the row matches the one the fence sends."""
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1174,7 +1174,7 @@ class TestBuildStoreSharesTheBackend:
     def test_build_columns_survive_postgres_widths(self, postgres_dsn, tmp_path):
         # Same INTEGER/REAL traps as the artifact store: byte counts are
         # INTEGER and timestamps are REAL in the shared schema.
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1216,7 +1216,7 @@ class TestTheAttemptLedgerOnPostgres:
     """
 
     def test_an_existing_database_gains_the_ledger(self, postgres_dsn, tmp_path):
-        from computation_core.build_store import BuildStore
+        from vestigo.build_store import BuildStore
 
         dialect = PostgresDialect(postgres_dsn)
         try:
@@ -1730,7 +1730,7 @@ class TestSchemaMigrations:
     """
 
     def test_a_fresh_database_is_stamped_and_complete(self, store):
-        from computation_core.store import _LATEST_SCHEMA_VERSION
+        from vestigo.store import _LATEST_SCHEMA_VERSION
 
         conn = store._get_connection()
         try:
@@ -1747,8 +1747,8 @@ class TestSchemaMigrations:
 
     def test_an_existing_database_is_carried_forward(self, postgres_dsn, tmp_path, store):
         """A new column reaches a store that already has rows."""
-        from computation_core.sql_backend import PostgresDialect
-        from computation_core.store import _LATEST_SCHEMA_VERSION
+        from vestigo.sql_backend import PostgresDialect
+        from vestigo.store import _LATEST_SCHEMA_VERSION
 
         version = store.create_artifact("keeper", "prov-keep", _spec())
         store.finalize_artifact("keeper", version, schema_json="", row_count=1, byte_size=1)
@@ -1787,8 +1787,8 @@ class TestSchemaMigrations:
     def test_existing_publication_tokens_are_hashed_and_still_resolve(
         self, postgres_dsn, tmp_path, store
     ):
-        from computation_core.sql_backend import PostgresDialect
-        from computation_core.store import publication_id
+        from vestigo.sql_backend import PostgresDialect
+        from vestigo.store import publication_id
 
         version = store.create_artifact("fig", "prov-fig", _spec())
         with store.open_blob_writer("fig", version) as writer:
@@ -1836,7 +1836,7 @@ class TestSchemaMigrations:
 
     def test_a_read_only_open_leaves_an_older_database_alone(self, postgres_dsn, tmp_path, store):
         """A shared database older nodes still serve: inspecting it must not migrate it."""
-        from computation_core.store import StoreSchemaMismatch
+        from vestigo.store import StoreSchemaMismatch
 
         conn = store._get_connection()
         try:
@@ -1861,7 +1861,7 @@ class TestSchemaMigrations:
             dialect.close()
 
     def test_an_existing_database_gains_the_worker_registry(self, postgres_dsn, tmp_path, store):
-        from computation_core.store import _LATEST_SCHEMA_VERSION
+        from vestigo.store import _LATEST_SCHEMA_VERSION
 
         conn = store._get_connection()
         try:

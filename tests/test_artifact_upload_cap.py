@@ -13,8 +13,8 @@ import tempfile
 import httpx
 import pyarrow as pa
 import pytest
-from computation_core.provenance import TransformSpec
-from computation_core.store import ArtifactStore
+from vestigo.provenance import TransformSpec
+from vestigo.store import ArtifactStore
 
 from tests.conftest import run_server_with_context, table_to_ipc_bytes
 

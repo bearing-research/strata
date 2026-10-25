@@ -8,7 +8,7 @@ from __future__ import annotations
 import docker
 import httpx
 import pytest
-from computation_core.blob_store import S3BlobStore
+from vestigo.blob_store import S3BlobStore
 
 
 def _docker_daemon_reachable() -> bool:

@@ -11,8 +11,8 @@ import functools
 
 import anyio.to_thread
 import pyarrow as pa
-from computation_core.blob_store import get_object_store_errors
 from fastapi import APIRouter, HTTPException, Response
+from vestigo.blob_store import get_object_store_errors
 
 from strata.api.dependencies import require_scope
 from strata.cache.metrics import get_eviction_tracker
@@ -89,7 +89,7 @@ async def health_ready():
     import asyncio
     import json
 
-    from computation_core.store import get_artifact_store
+    from vestigo.store import get_artifact_store
 
     from strata.cache.metadata import get_metadata_store
     from strata.server import _check_readiness, _get_active_scan_count, _get_qos_metrics, get_state

@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
-from computation_core.file_modes import PASS_THROUGH_DIR, private_dir, private_file
-from computation_core.provenance import derive_subkey
+from vestigo.file_modes import PASS_THROUGH_DIR, private_dir, private_file
+from vestigo.provenance import derive_subkey
 
 from strata.notebook import console_relay, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
@@ -103,7 +103,7 @@ from strata.notebook.ws_payloads import (
 )
 
 if TYPE_CHECKING:
-    from computation_core.store import ArtifactVersion
+    from vestigo.store import ArtifactVersion
 
     from strata.notebook.artifact_integration import NotebookArtifactManager
     from strata.notebook.pool import WarmProcessPool

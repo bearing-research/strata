@@ -9,10 +9,10 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from computation_core.build_store import BuildStore
-from computation_core.provenance import derive_subkey
-from computation_core.store import ArtifactStore
-from computation_core.tables import LEDGER_TABLES, TRANSIENT_TABLES
+from vestigo.build_store import BuildStore
+from vestigo.provenance import derive_subkey
+from vestigo.store import ArtifactStore
+from vestigo.tables import LEDGER_TABLES, TRANSIENT_TABLES
 
 from strata.migrate import MIGRATED_TABLES
 

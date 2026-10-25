@@ -34,14 +34,14 @@ run everything, conventions, gotchas and the prioritized next steps.
 
 | File | Purpose |
 | --- | --- |
-| `../packages/computation-core/formal/tla/ArtifactLifecycle.tla` | Model of `artifact_versions`: create, write blob, fail, `finalize_artifact`, `force_finalize_canonical`, `garbage_collect` |
-| `../packages/computation-core/formal/tla/Artifact_GCRebuild.cfg` | One id with GC on. Finds finding 1 |
-| `../packages/computation-core/formal/tla/Artifact_CrossIdDedup.cfg` | Two ids sharing a provenance, GC off. Finds finding 2 |
-| `../packages/computation-core/formal/tla/Artifact_Patched.cfg` | Both ids, GC on, with the proposed fix. **All invariants hold** (5,997,420 distinct states, exhaustive, about 2 min) |
-| `../packages/computation-core/formal/tla/BuildLease.tla` | Model of one build and its lease: `BuildRunner` claim / reclaim / heartbeat / publish / finalize / complete / fail, and the v2 pull routes (manifest, upload, finalize) |
-| `../packages/computation-core/formal/tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
-| `../packages/computation-core/formal/tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
-| `../packages/computation-core/formal/tla/Build_Patched.cfg` | Runners and executors with the proposed fix. **All invariants hold** (exhaustive) |
+| `../packages/vestigo/formal/tla/ArtifactLifecycle.tla` | Model of `artifact_versions`: create, write blob, fail, `finalize_artifact`, `force_finalize_canonical`, `garbage_collect` |
+| `../packages/vestigo/formal/tla/Artifact_GCRebuild.cfg` | One id with GC on. Finds finding 1 |
+| `../packages/vestigo/formal/tla/Artifact_CrossIdDedup.cfg` | Two ids sharing a provenance, GC off. Finds finding 2 |
+| `../packages/vestigo/formal/tla/Artifact_Patched.cfg` | Both ids, GC on, with the proposed fix. **All invariants hold** (5,997,420 distinct states, exhaustive, about 2 min) |
+| `../packages/vestigo/formal/tla/BuildLease.tla` | Model of one build and its lease: `BuildRunner` claim / reclaim / heartbeat / publish / finalize / complete / fail, and the v2 pull routes (manifest, upload, finalize) |
+| `../packages/vestigo/formal/tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
+| `../packages/vestigo/formal/tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
+| `../packages/vestigo/formal/tla/Build_Patched.cfg` | Runners and executors with the proposed fix. **All invariants hold** (exhaustive) |
 | `tla/Admission.tla` | Model of one tenant's `ResizableLimiter` (acquire with deadline, release, cancel while queued) and the `TenantRegistry` LRU that owns it |
 | `tla/Admission_Py312.cfg` | CPython 3.12 `asyncio.Condition` semantics. Finds finding 8 |
 | `tla/Admission_Eviction.cfg` | LRU eviction of a limiter in use. Finds findings 9 and 10 |
@@ -61,7 +61,7 @@ it into `tests/` as a regression test. `formal/` sits outside
 curl -sSLO https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
 TLC="java -cp $PWD/tla2tools.jar tlc2.TLC -deadlock -workers auto"
 # The artifact and build models moved with the code they model (ADR 002).
-(cd packages/computation-core/formal/tla
+(cd packages/vestigo/formal/tla
 $TLC -config Artifact_GCRebuild.cfg    ArtifactLifecycle.tla   # violation
 $TLC -config Artifact_CrossIdDedup.cfg ArtifactLifecycle.tla   # violation
 $TLC -config Artifact_Patched.cfg      ArtifactLifecycle.tla   # passes

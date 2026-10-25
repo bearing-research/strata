@@ -145,7 +145,7 @@ Artifacts deduplicate by provenance hash, chain into DAG pipelines, and carry
 human-readable name pointers. SQLite metadata + pluggable blob backends
 (`LocalBlobStore`, `S3BlobStore`, `GCSBlobStore`, `AzureBlobStore`). Configure
 via `STRATA_ARTIFACT_BLOB_BACKEND` plus backend-specific env vars (see
-`computation_core/blob_store.py` under `packages/computation-core`, `config.py`).
+`vestigo/blob_store.py` under `packages/vestigo`, `config.py`).
 
 Two executor protocols:
 - **v1 push**: Strata POSTs multipart (`metadata` + `inputN`) to executor;
@@ -170,7 +170,7 @@ Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`, `iceberg/` (`c
 `schema` evolution, position `deletes`, `equality` deletes, `lake_files`).
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
-Ledger (`packages/computation-core/src/computation_core/`, ADR 002): `store`,
+Ledger (`packages/vestigo/src/vestigo/`, ADR 002): `store`,
 `build_store`, `sql_backend`, `blob_store`, `provenance` (transform spec, hash,
 `derive_subkey`), `uris`, `file_modes`, `tables`. Strata's side: `artifact/`
 (`transfer`, `table_export`, `cli`), `transforms/`, `migrate.py`,
@@ -303,7 +303,7 @@ deliberately do not share the entry point, only the artifact-store substrate.
 | Inputs            | List of table / artifact URIs          | Upstream cell variables (resolved via DAG) |
 | Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out, one artifact per consumed variable via `derive_subkey` |
 | Execution         | Server dispatches to registered HTTP executors (v1-push / v2-pull) or built-in scan planner | Local subprocess harness in notebook venv, or HTTP executor |
-| Shared substrate  | `artifact_store.find_by_provenance` / `put` / `set_name`; `computation_core.provenance.derive_subkey` (used by both for sub-artifact keys) |
+| Shared substrate  | `artifact_store.find_by_provenance` / `put` / `set_name`; `vestigo.provenance.derive_subkey` (used by both for sub-artifact keys) |
 
 Trying to force one through the other warps either core's transform contract
 (to encode source + env + multi-output) or imposes HTTP latency on every

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from computation_core.store import (
+from vestigo.store import (
     _BASELINE_SCHEMA_VERSION,
     _LATEST_SCHEMA_VERSION,
     _MIGRATIONS,
@@ -217,7 +217,7 @@ class TestConstantsAndMigrationsAgree:
 
 
 def _ready(store, artifact_id, executor, inputs, input_versions=None) -> None:
-    from computation_core.provenance import TransformSpec
+    from vestigo.provenance import TransformSpec
 
     spec = TransformSpec(executor=executor, params={"sql": "SELECT 1"}, inputs=inputs)
     version = store.create_artifact(
@@ -261,7 +261,7 @@ class TestTheMisboundBuildMigration:
 @pytest.mark.parametrize("dialect_name", ["sqlite"])
 def test_column_exists_reports_truthfully(tmp_path, dialect_name):
     """The primitive every migration is built from."""
-    from computation_core.sql_backend import SqliteDialect
+    from vestigo.sql_backend import SqliteDialect
 
     store = ArtifactStore(tmp_path / "s")
     dialect = SqliteDialect(store.db_path)

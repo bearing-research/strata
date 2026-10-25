@@ -269,7 +269,7 @@ class TestAVersionOvertakenByADuplicate:
     """A version dedup overtook keeps no bytes and reads its canonical's through the store."""
 
     def _overtaken(self, manager, artifact_id: str) -> int:
-        from computation_core.provenance import TransformSpec
+        from vestigo.provenance import TransformSpec
 
         store = manager.artifact_store
         spec = TransformSpec(executor="notebook/cell@v1", params={}, inputs=[])
@@ -323,7 +323,7 @@ class TestPublishedArtifactsDashboard:
     def test_groups_named_and_tagged_artifacts_per_cell(self, tmp_path, monkeypatch):
         import asyncio
 
-        from computation_core.store import get_artifact_store, reset_artifact_store
+        from vestigo.store import get_artifact_store, reset_artifact_store
 
         import strata.server as server_module
         from strata.notebook.routes import list_notebook_published_artifacts
@@ -365,7 +365,7 @@ class TestPublishedArtifactsDashboard:
         import asyncio
         import threading
 
-        from computation_core.store import get_artifact_store, reset_artifact_store
+        from vestigo.store import get_artifact_store, reset_artifact_store
 
         import strata.server as server_module
         from strata.notebook.routes import list_notebook_published_artifacts
@@ -658,7 +658,7 @@ class TestOneRunsOutputsTogether:
     def test_a_crash_between_two_outputs_leaves_the_earlier_run_current(
         self, tmp_path, monkeypatch
     ):
-        from computation_core.blob_store import LocalBlobStore
+        from vestigo.blob_store import LocalBlobStore
 
         from strata.notebook.executor import CellExecutor
 

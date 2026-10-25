@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
+from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
 
 _OWNERSHIP_SCHEMA_SQL = """
 -- Stream ownership: which node can serve a given stream, and until when.

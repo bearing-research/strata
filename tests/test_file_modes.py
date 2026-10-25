@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from computation_core.file_modes import PASS_THROUGH_DIR, narrow, private_dir
-from computation_core.store import ArtifactStore
+from vestigo.file_modes import PASS_THROUGH_DIR, narrow, private_dir
+from vestigo.store import ArtifactStore
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes do not apply")
 
@@ -85,21 +85,19 @@ class TestTheArtifactStore:
 
     def test_journals_sqlite_deletes_while_the_store_opens_are_skipped(self, tmp_path, monkeypatch):
         """A live server's last connection closing deletes them between any check and the chmod."""
-        import computation_core.file_modes
+        import vestigo.file_modes
 
         db = ArtifactStore(tmp_path / "artifacts").db_path
         held = _held_open(db)
         assert all(p.exists() for p in _journals(db))
-        real_narrow = computation_core.file_modes.narrow
+        real_narrow = vestigo.file_modes.narrow
 
         def narrow_after_the_other_process_closes(path, mode):
             if path in _journals(db):
                 held.close()
             real_narrow(path, mode)
 
-        monkeypatch.setattr(
-            computation_core.file_modes, "narrow", narrow_after_the_other_process_closes
-        )
+        monkeypatch.setattr(vestigo.file_modes, "narrow", narrow_after_the_other_process_closes)
 
         store = ArtifactStore(tmp_path / "artifacts")
 

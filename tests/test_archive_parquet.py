@@ -15,7 +15,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pyarrow.parquet as pq
 import pytest
-from computation_core.store import ArtifactStore
+from vestigo.store import ArtifactStore
 
 from strata.artifact.cli import cmd_archive
 

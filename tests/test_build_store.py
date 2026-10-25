@@ -4,7 +4,7 @@ import time
 import uuid
 
 import pytest
-from computation_core.build_store import (
+from vestigo.build_store import (
     BuildStore,
     get_build_store,
     reset_build_store,

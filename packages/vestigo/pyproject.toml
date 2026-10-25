@@ -1,5 +1,5 @@
 [project]
-name = "computation-core"
+name = "vestigo"
 version = "0.11.0"
 description = "The ledger of the shared computation substrate: versioned artifacts, builds and their leases, references, retention, on SQLite or PostgreSQL."
 readme = "README.md"

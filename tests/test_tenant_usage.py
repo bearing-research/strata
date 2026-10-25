@@ -11,7 +11,7 @@ import json
 import httpx
 import pyarrow as pa
 import pytest
-from computation_core.store import ArtifactStore
+from vestigo.store import ArtifactStore
 
 from tests.conftest import (
     LIVE_SERVER_TIMEOUT,
@@ -143,8 +143,8 @@ def test_an_admin_can_name_a_tenant(team_server):
 
 def test_a_service_store_without_auth_does_not_answer_for_everyone(tmp_path, monkeypatch):
     """With no authenticated caller there is no tenant, and the unscoped answer is everyone's."""
-    from computation_core.store import reset_artifact_store
     from fastapi.testclient import TestClient
+    from vestigo.store import reset_artifact_store
 
     import strata.server as server_module
     from strata.config import StrataConfig

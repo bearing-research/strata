@@ -280,7 +280,7 @@ class TestEndToEnd:
         """A running server and a client for it."""
         import socket
 
-        from computation_core.store import reset_artifact_store
+        from vestigo.store import reset_artifact_store
 
         from strata.cache.metadata import reset_caches
 

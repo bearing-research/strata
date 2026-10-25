@@ -15,7 +15,7 @@ import zipfile
 
 import httpx
 import pytest
-from computation_core.store import ArtifactStore
+from vestigo.store import ArtifactStore
 
 from strata.artifact.transfer import RemoteStore
 from strata.notebook import output_dirs
@@ -61,7 +61,7 @@ def _rebuilt(store: ArtifactStore, artifact_id: str, version: int, dest) -> dict
 
 def _stored(store: ArtifactStore, artifact_id: str, blob: bytes, *, content_type, tenant=None):
     """A version holding *blob* under *artifact_id*, as an import could leave one."""
-    from computation_core.provenance import TransformSpec
+    from vestigo.provenance import TransformSpec
 
     version = store.create_artifact(
         artifact_id=artifact_id,

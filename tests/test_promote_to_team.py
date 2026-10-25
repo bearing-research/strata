@@ -12,7 +12,7 @@ import json
 
 import httpx
 import pytest
-from computation_core.store import ArtifactStore
+from vestigo.store import ArtifactStore
 
 from strata.artifact.transfer import PROMOTION_TAG
 from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -316,7 +316,7 @@ class TestAHitSaysWhichPromotionItCameFrom:
         assert "nb_promotion" not in row["tags"]
 
     def test_a_pull_reports_the_promotion(self, team_store, tmp_path):
-        from computation_core.provenance import derive_subkey
+        from vestigo.provenance import derive_subkey
 
         from strata.artifact.transfer import RemoteStore, promote_artifact
         from strata.notebook.team_store import TeamStore, pull_cell_outputs
@@ -355,7 +355,7 @@ class TestAHitSaysWhichPromotionItCameFrom:
         assert pull.promotion == "taxi/rows"
 
     def test_a_result_offered_by_a_cache_publish_names_no_promotion(self, team_store, tmp_path):
-        from computation_core.provenance import derive_subkey
+        from vestigo.provenance import derive_subkey
 
         from strata.notebook.team_store import TeamStore, pull_cell_outputs
 

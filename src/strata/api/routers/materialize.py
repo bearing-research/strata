@@ -46,7 +46,7 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
-    from computation_core.store import ArtifactStore, ArtifactVersion
+    from vestigo.store import ArtifactStore, ArtifactVersion
 
     from strata.server import ServerState
 
@@ -212,7 +212,7 @@ async def materialize_artifact(request: MaterializeRequest):
     """
     import uuid
 
-    from computation_core.provenance import TransformSpec
+    from vestigo.provenance import TransformSpec
 
     from strata.auth.principal import get_principal
     from strata.server import _get_artifact_store, _retry_after_header, get_state
@@ -295,8 +295,8 @@ async def materialize_artifact(request: MaterializeRequest):
 
     # Queue a build record for the build runner.
     if state.config.transforms_runtime_enabled:
-        from computation_core.build_store import get_build_store
-        from computation_core.store import get_artifact_store
+        from vestigo.build_store import get_build_store
+        from vestigo.store import get_artifact_store
 
         from strata.transforms.build_qos import (
             BuildQoSError,
@@ -445,8 +445,8 @@ async def _handle_identity_materialize(
     """
     import uuid
 
-    from computation_core.provenance import TransformSpec as ArtifactTransformSpec
-    from computation_core.store import get_artifact_store
+    from vestigo.provenance import TransformSpec as ArtifactTransformSpec
+    from vestigo.store import get_artifact_store
 
     from strata.auth.principal import get_principal
     from strata.server import _retry_after_header, get_state
