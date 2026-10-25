@@ -1,0 +1,76 @@
+{
+  "source": "ADR 002 §3, §9 E0; src/strata/artifact/store.py and src/strata/transforms/build_store.py at 07537a3",
+  "notes": [
+    "ledger lists every table the package creates, in the foreign-key order a copy must follow (artifact_versions first).",
+    "migrated=false tables are rebuilt or left behind by `strata migrate`: schema_version is the target's own, import_staging and build_console_chunks hold only live rows.",
+    "strata_owned tables share the database and the dialect but belong to Strata; the two created by store.py today are split out in E1."
+  ],
+  "ledger": [
+    {
+      "name": "artifact_versions",
+      "migrated": true,
+      "primary_key": ["id", "version"]
+    },
+    {
+      "name": "artifact_names",
+      "migrated": true,
+      "primary_key": ["tenant", "name"]
+    },
+    {
+      "name": "artifact_aliases",
+      "migrated": true,
+      "primary_key": ["tenant", "name", "alias"]
+    },
+    {
+      "name": "artifact_tags",
+      "migrated": true,
+      "primary_key": ["tenant", "artifact_id", "version", "key"]
+    },
+    { "name": "registry_audit", "migrated": true, "primary_key": ["seq"] },
+    {
+      "name": "registry_pending",
+      "migrated": true,
+      "primary_key": ["tenant", "name", "alias"]
+    },
+    {
+      "name": "artifact_publications",
+      "migrated": true,
+      "primary_key": ["token"]
+    },
+    {
+      "name": "artifact_pins",
+      "migrated": true,
+      "primary_key": ["artifact_id", "version", "reason"]
+    },
+    {
+      "name": "artifact_builds",
+      "migrated": true,
+      "primary_key": ["build_id"]
+    },
+    {
+      "name": "build_attempts",
+      "migrated": true,
+      "primary_key": ["build_id", "attempt"]
+    },
+    { "name": "schema_version", "migrated": false },
+    { "name": "import_staging", "migrated": false },
+    { "name": "build_console_chunks", "migrated": false }
+  ],
+  "strata_owned": [
+    {
+      "name": "notebook_workers",
+      "created_by": "src/strata/artifact/store.py",
+      "split_out_in": "E1"
+    },
+    {
+      "name": "notebook_worker_registry",
+      "created_by": "src/strata/artifact/store.py",
+      "split_out_in": "E1"
+    },
+    { "name": "api_keys", "created_by": "src/strata/auth/api_keys.py" },
+    {
+      "name": "stream_owners",
+      "created_by": "src/strata/streaming/ownership.py"
+    }
+  ]
+}

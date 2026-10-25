@@ -1,0 +1,73 @@
+{
+  "protocol": "CGD1",
+  "hash_version": 1,
+  "source": "RFC 003 §6.1-6.2; ADR 001 G",
+  "scope": "000102030405060708090a0b0c0d0e0f",
+  "domain": "test",
+  "interface_version": 1,
+  "vectors": [
+    {
+      "name": "G0",
+      "status": "verified",
+      "inputs": [],
+      "outputs": [],
+      "roots": [],
+      "effect_contract_utf8": "",
+      "execution_contract_utf8": "",
+      "definition_id": "2ede8db764ecbfe775384ca97950c39b3011a53a4447e8bf23882f2314e6cb33"
+    },
+    {
+      "name": "G1",
+      "status": "unverified",
+      "reason": "ADR 001 G describes G1 as input x, output y, contracts none:v1 and finite:v1 with fixed placeholder and producer bytes, but no document in the pack states those bytes. The digest cannot be reproduced until they are published; the pack's README records that G1 was not recomputed.",
+      "definition_id": "927a075ee17272e407c29977720073d095a138fa7703d225b4c376ce10ca472c"
+    },
+    {
+      "name": "S1",
+      "status": "strata_computed",
+      "reason": "G1's shape with stated bytes, so the ports and roots layout is pinned: placeholder = 0x01 * 32, producer = 0x02 * 32, the producer is the one root. Computed by the Python reference encoder, not independently verified.",
+      "inputs": [
+        {
+          "name": "x",
+          "type_contract_utf8": "none:v1",
+          "placeholder_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y",
+          "type_contract_utf8": "finite:v1",
+          "producer_hex": "0202020202020202020202020202020202020202020202020202020202020202"
+        }
+      ],
+      "roots_hex": [
+        "0202020202020202020202020202020202020202020202020202020202020202"
+      ],
+      "effect_contract_utf8": "",
+      "execution_contract_utf8": "",
+      "definition_id": "32f056e602e7c6f4002d6d587a5525be601c8023a620ca0b625e9e06bdba7a43"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "duplicate_input_name",
+      "inputs": ["x", "x"],
+      "outputs": [],
+      "roots": 1
+    },
+    {
+      "name": "duplicate_output_name",
+      "inputs": [],
+      "outputs": ["y", "y"],
+      "roots": 1
+    },
+    {
+      "name": "name_on_both_sides",
+      "inputs": ["x"],
+      "outputs": ["x"],
+      "roots": 1
+    },
+    { "name": "duplicate_root", "inputs": [], "outputs": [], "roots": 2 }
+  ]
+}

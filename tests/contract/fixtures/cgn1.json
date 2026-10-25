@@ -1,0 +1,111 @@
+{
+  "protocol": "CGN1",
+  "hash_protocol_version": 1,
+  "source": "RFC 003 §4.1 (first three vectors, verified mechanically); ADR 002 §6.3 (role and scope rules, remaining vectors)",
+  "scope": "000102030405060708090a0b0c0d0e0f",
+  "domain": "test",
+  "payload_version": 1,
+  "notes": [
+    "payload_utf8 is the payload as a UTF-8 string; every payload here is ASCII.",
+    "An edge target names another vector; its node_id is the target bytes.",
+    "pair_reversed_insertion lists the pair edges in the other order and must hash the same.",
+    "nfkc_ligature_role uses U+FB01 (the fi ligature); NFKC folds it to 'fi', so it equals nfkc_plain_role.",
+    "byte_order_roles sorts by UTF-8 bytes, so 'Z' (0x5a) precedes 'a' (0x61)."
+  ],
+  "vectors": [
+    {
+      "name": "empty",
+      "payload_utf8": "",
+      "edges": [],
+      "node_id": "88916cfb7a8a9b39c22a76859b2c1e6945f2c600fcf0462e437cabbbdda26e6d"
+    },
+    {
+      "name": "A",
+      "payload_utf8": "A",
+      "edges": [],
+      "node_id": "36d8751dec7a15f1b6e58342e805e8c1c433887dc07b28614eed994d73420e1c"
+    },
+    {
+      "name": "pair",
+      "payload_utf8": "pair",
+      "edges": [
+        { "role": "left", "position": 0, "target": "A" },
+        { "role": "right", "position": 1, "target": "A" }
+      ],
+      "node_id": "411b12672ccc00f4a0af01d6ed298b0cf71593514a0d6dcd22b6eea05e7c5be2"
+    },
+    {
+      "name": "pair_reversed_insertion",
+      "payload_utf8": "pair",
+      "edges": [
+        { "role": "right", "position": 1, "target": "A" },
+        { "role": "left", "position": 0, "target": "A" }
+      ],
+      "node_id": "411b12672ccc00f4a0af01d6ed298b0cf71593514a0d6dcd22b6eea05e7c5be2"
+    },
+    {
+      "name": "uppercase_role",
+      "payload_utf8": "pair",
+      "edges": [{ "role": "Weights", "position": 0, "target": "A" }],
+      "node_id": "ac08c64c002e6508ac0ad70b0d284463c8b67bb9dec4d4d57558fcfa9f85af4b"
+    },
+    {
+      "name": "non_ascii_role",
+      "payload_utf8": "pair",
+      "edges": [{ "role": "données", "position": 0, "target": "A" }],
+      "node_id": "de134ea19b198755cb6f098bdbc14b384d0fc3b2aaa8bfad805f39702a833422"
+    },
+    {
+      "name": "nfkc_ligature_role",
+      "payload_utf8": "pair",
+      "edges": [{ "role": "ﬁt", "position": 0, "target": "A" }],
+      "node_id": "7a936d8429f0cbbe2fde8f860fe05e7569510286bab95fcda590d1c78b93aa4d"
+    },
+    {
+      "name": "nfkc_plain_role",
+      "payload_utf8": "pair",
+      "edges": [{ "role": "fit", "position": 0, "target": "A" }],
+      "node_id": "7a936d8429f0cbbe2fde8f860fe05e7569510286bab95fcda590d1c78b93aa4d"
+    },
+    {
+      "name": "byte_order_roles",
+      "payload_utf8": "pair",
+      "edges": [
+        { "role": "Z", "position": 0, "target": "A" },
+        { "role": "a", "position": 1, "target": "A" }
+      ],
+      "node_id": "5ec37705eb9c75f1127054f500616904286b4f836c54e9f1f3465b7f14f824bd"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "duplicate_port",
+      "domain": "test",
+      "payload_utf8": "pair",
+      "edges": [
+        { "role": "left", "position": 0, "target": "A" },
+        { "role": "left", "position": 0, "target": "A" }
+      ]
+    },
+    {
+      "name": "uppercase_domain",
+      "domain": "Test",
+      "payload_utf8": "",
+      "edges": []
+    },
+    { "name": "empty_domain", "domain": "", "payload_utf8": "", "edges": [] },
+    {
+      "name": "empty_role",
+      "domain": "test",
+      "payload_utf8": "pair",
+      "edges": [{ "role": "", "position": 0, "target": "A" }]
+    }
+  ],
+  "scope_rule": {
+    "rule": "identity_scope = sha256(utf8('scope:' + tenant))[:16]; tenant is '' for tenantless rows",
+    "vectors": [
+      { "tenant": "", "scope": "5614ea74b489e754cf2dc8bc79dffe65" },
+      { "tenant": "acme", "scope": "d8f1626b99573876161d5b72c6a0d499" }
+    ]
+  }
+}

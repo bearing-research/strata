@@ -1,0 +1,84 @@
+{
+  "source": "ADR 001, Summary of mandatory tests; steps from ADR 002 §9",
+  "steps": ["E0", "E1", "E2", "E3", "E4a", "E4b", "E5", "out-of-scope"],
+  "notes": [
+    "ADR 001 says PublicationId and publication; ADR 002 §7 renames the event a release, so two rows below say release where ADR 001's table says publication."
+  ],
+  "rows": [
+    {
+      "test": "Identical structural training nodes in two cells",
+      "required_result": "No implicit shared execution",
+      "step": "E4b"
+    },
+    {
+      "test": "Repeated invocation site",
+      "required_result": "Distinct occurrence instances",
+      "step": "E4a"
+    },
+    {
+      "test": "Alias moves after input binding",
+      "required_result": "Existing run still sees exact bound versions",
+      "step": "E4a"
+    },
+    {
+      "test": "Two outputs of one invocation",
+      "required_result": "Same release id",
+      "step": "E4a"
+    },
+    {
+      "test": "Multi-slot query publication",
+      "required_result": "Atomic all-or-none authority",
+      "step": "E4a"
+    },
+    {
+      "test": "Two attempts race for a slot",
+      "required_result": "At most one accepted winner",
+      "step": "E4a"
+    },
+    {
+      "test": "Lost publication response then retry after alias movement",
+      "required_result": "Original release returned, aliases unchanged",
+      "step": "E4a"
+    },
+    {
+      "test": "Stale checkpoint attempt",
+      "required_result": "Rejected, earlier accepted checkpoints valid",
+      "step": "E4a"
+    },
+    {
+      "test": "GC pin acquisition race",
+      "required_result": "Reference acquisition and deletion claim cannot both win",
+      "step": "E2"
+    },
+    {
+      "test": "Delayed delete versus object reuse",
+      "required_result": "Exact object generation enforced",
+      "step": "E2"
+    },
+    {
+      "test": "CGN1 / CGD1 fixtures",
+      "required_result": "Cross-language byte identity equality",
+      "step": "E0"
+    },
+    {
+      "test": "Declared graph cycle",
+      "required_result": "Rejected",
+      "step": "E3"
+    },
+    {
+      "test": "Observed PyTorch graph changes",
+      "required_result": "Outer structural ID unchanged",
+      "step": "E5"
+    },
+    {
+      "test": "Legacy unknown producer",
+      "required_result": "Imported without fabricated execution",
+      "step": "E3"
+    },
+    {
+      "test": "Fixed-capacity Spark billing",
+      "required_result": "No fabricated infrastructure savings",
+      "step": "out-of-scope"
+    }
+  ]
+}

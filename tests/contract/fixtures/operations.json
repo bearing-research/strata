@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://strata.dev/contract/operations.json",
+  "title": "Typed transaction operations (ADR 002 §7.3)",
+  "description": "Operations a caller passes to ledger.publish; the library interprets them inside the publication transaction, on the same connection, under the same begin_write key. Arbitrary SQL is not an operation.",
+  "type": "array",
+  "items": { "$ref": "#/$defs/operation" },
+  "$defs": {
+    "operation": {
+      "oneOf": [
+        { "$ref": "#/$defs/CheckBuildLease" },
+        { "$ref": "#/$defs/AssertReferenceRevision" },
+        { "$ref": "#/$defs/AssignAuthority" },
+        { "$ref": "#/$defs/AdvanceReference" },
+        { "$ref": "#/$defs/InsertAuditEvent" }
+      ]
+    },
+    "CheckBuildLease": {
+      "description": "Fail the transaction unless this attempt still holds the build's lease and its write window is open.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "build_id", "attempt"],
+      "properties": {
+        "op": { "const": "CheckBuildLease" },
+        "build_id": { "type": "string", "minLength": 1 },
+        "attempt": { "type": "string", "minLength": 1 }
+      }
+    },
+    "AssertReferenceRevision": {
+      "description": "Fail unless the named reference is at the expected revision (compare-and-set guard).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name", "expected_revision"],
+      "properties": {
+        "op": { "const": "AssertReferenceRevision" },
+        "name": { "type": "string", "minLength": 1 },
+        "expected_revision": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "AssignAuthority": {
+      "description": "Make this release the single authoritative winner of an output slot; fails if the slot already has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "target", "release_id"],
+      "properties": {
+        "op": { "const": "AssignAuthority" },
+        "target": { "type": "string", "minLength": 1 },
+        "release_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "AdvanceReference": {
+      "description": "Move a mutable reference to the outputs of this release.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "name", "release_id"],
+      "properties": {
+        "op": { "const": "AdvanceReference" },
+        "name": { "type": "string", "minLength": 1 },
+        "release_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "InsertAuditEvent": {
+      "description": "Append one audit row in the same transaction.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "event"],
+      "properties": {
+        "op": { "const": "InsertAuditEvent" },
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action"],
+          "properties": {
+            "action": { "type": "string", "minLength": 1 },
+            "principal": { "type": "string" },
+            "details": { "type": "object" }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    [
+      { "op": "CheckBuildLease", "build_id": "b1", "attempt": "a1" },
+      {
+        "op": "AssertReferenceRevision",
+        "name": "model/latest",
+        "expected_revision": 7
+      },
+      {
+        "op": "AssignAuthority",
+        "target": "slot:report/q3",
+        "release_id": "r9"
+      },
+      { "op": "AdvanceReference", "name": "model/latest", "release_id": "r9" },
+      {
+        "op": "InsertAuditEvent",
+        "event": { "action": "release.accept", "principal": "alice" }
+      }
+    ],
+    []
+  ],
+  "counterexamples": [
+    {
+      "name": "unknown_op",
+      "value": [{ "op": "RunSql", "sql": "DELETE FROM artifact_versions" }]
+    },
+    {
+      "name": "extra_field",
+      "value": [
+        {
+          "op": "CheckBuildLease",
+          "build_id": "b1",
+          "attempt": "a1",
+          "sql": "x"
+        }
+      ]
+    },
+    {
+      "name": "missing_field",
+      "value": [{ "op": "AdvanceReference", "name": "model/latest" }]
+    },
+    {
+      "name": "nested_sql",
+      "value": [
+        {
+          "op": "InsertAuditEvent",
+          "event": { "action": "x", "sql": "DELETE FROM artifact_versions" }
+        }
+      ]
+    },
+    {
+      "name": "negative_revision",
+      "value": [
+        {
+          "op": "AssertReferenceRevision",
+          "name": "n",
+          "expected_revision": -1
+        }
+      ]
+    }
+  ]
+}
