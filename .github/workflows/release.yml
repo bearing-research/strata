@@ -6,7 +6,8 @@ name: Release
 # then pushes the server image to ghcr.io/bearing-research/strata.
 #
 # Trusted publishers must exist on PyPI and TestPyPI (Owner: bearing-research,
-# Repo: strata, Workflow: release.yml, Environment: testpypi / pypi).
+# Repo: strata, Workflow: release.yml, Environment: testpypi / pypi), one per
+# project: strata-notebook, strata-client, strata-pool, vestigo.
 
 on:
   push:
@@ -469,11 +470,23 @@ jobs:
           pattern: dist-*
           merge-multiple: true
 
+      # vestigo goes first, alone: strata-notebook pins it, so an index must
+      # never hold a notebook whose ledger the publish then failed to upload.
+      - name: Set the ledger apart
+        run: mkdir dist-core && mv dist/vestigo-* dist-core/
+
+      - name: Publish vestigo to TestPyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist-core/
+          # Lets a workflow_dispatch re-run finish after a partial failure.
+          skip-existing: true
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          # Lets a workflow_dispatch re-run finish after a partial failure.
           skip-existing: true
 
   # --- PyPI publish (gated by manual approval) -----------------------
@@ -496,13 +509,23 @@ jobs:
           pattern: dist-*
           merge-multiple: true
 
-      - name: Publish to PyPI
+      # The ledger first, as on TestPyPI.
+      - name: Set the ledger apart
+        run: mkdir dist-core && mv dist/vestigo-* dist-core/
+
+      - name: Publish vestigo to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
         with:
+          packages-dir: dist-core/
           # Uploads are per file, and a failure part-way leaves the earlier
           # ones live; without this a retry 400s on them and never reaches the
           # package that failed. A tag still never republishes: pre-flight
           # fails the run when any package version disagrees with the tag.
+          skip-existing: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
+        with:
           skip-existing: true
 
   # --- server image (ghcr.io) ----------------------------------------

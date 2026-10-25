@@ -13,7 +13,7 @@ from vestigo.provenance import TransformSpec
 from vestigo.sql_backend import PostgresDialect, SqliteDialect
 from vestigo.store import ArtifactStore
 
-from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
+from strata.migrate import migrate, migrated_tables, plan_migration
 from strata.notebook.worker_store import NotebookWorkerStore
 
 
@@ -394,15 +394,15 @@ class TestMigration:
             conn.close()
 
         ephemeral = {"stream_owners", "import_staging", "build_console_chunks", "schema_version"}
-        assert tables - ephemeral == {table for table, _ in MIGRATED_TABLES}
+        assert tables - ephemeral == {table for table, _ in migrated_tables()}
 
     def test_stream_owners_is_not_migrated(self):
         # It records which node serves a live stream; none survive the move.
-        assert "stream_owners" not in {table for table, _ in MIGRATED_TABLES}
+        assert "stream_owners" not in {table for table, _ in migrated_tables()}
 
     def test_artifact_versions_is_copied_before_its_dependents(self):
         # Postgres enforces the foreign keys from artifact_builds and
         # artifact_names into artifact_versions; SQLite never did.
-        order = [table for table, _ in MIGRATED_TABLES]
+        order = [table for table, _ in migrated_tables()]
         assert order.index("artifact_versions") < order.index("artifact_names")
         assert order.index("artifact_versions") < order.index("artifact_builds")

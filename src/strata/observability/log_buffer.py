@@ -23,7 +23,7 @@ DEFAULT_CAPACITY = 10_000
 _LEVELS = {"debug": 10, "info": 20, "warning": 30, "error": 40, "critical": 50}
 
 # Loggers the buffer attaches to (mirrors ``configure_logging``).
-_ATTACH_LOGGERS = ("strata", "uvicorn", "uvicorn.error", "uvicorn.access")
+_ATTACH_LOGGERS = ("strata", "vestigo", "uvicorn", "uvicorn.error", "uvicorn.access")
 
 
 class RingBufferLogHandler(logging.Handler):

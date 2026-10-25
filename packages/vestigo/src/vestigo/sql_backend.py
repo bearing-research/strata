@@ -593,7 +593,9 @@ def create_tables(dialect: SqlDialect, table: str, ddl: str) -> None:
         if not dialect.supports_legacy_migration:
             if not dialect.schema_exists(conn, table):
                 dialect.begin_write(conn, f"__{table}_schema__")
-                conn.executescript(dialect.adapt_ddl(ddl))
+                # Another node may have created it while this one waited for the lock.
+                if not dialect.schema_exists(conn, table):
+                    conn.executescript(dialect.adapt_ddl(ddl))
                 conn.commit()
             return
         conn.executescript(dialect.adapt_ddl(ddl))
