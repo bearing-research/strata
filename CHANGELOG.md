@@ -22,7 +22,7 @@ exhaustive commit history.
   instead of reading manifests, and a folder whose files are gone reads as
   missing (`requirements_met`). The package suite runs in CI in a venv with
   only the ledger installed, and `ArtifactLifecycle.tla` models the roots and
-  edges (`Artifact_Retention.cfg`). (#E2PR)
+  edges (`Artifact_Retention.cfg`). (#1295)
 - **A strata-pool job names how long its machine stays warm.** `submit` and
   `POST /v1/jobs` take `hold_seconds`; the machine that runs the job keeps it
   as its cool-down until its next job, so a host can hold each tenant's
