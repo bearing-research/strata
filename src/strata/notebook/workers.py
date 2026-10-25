@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import anyio.to_thread
@@ -20,9 +20,7 @@ import httpx
 
 from strata.notebook.models import NotebookState, WorkerBackendType, WorkerSpec
 from strata.notebook.remote_executor import NOTEBOOK_EXECUTOR_TRANSFORM_REF
-
-if TYPE_CHECKING:
-    from strata.notebook.worker_store import NotebookWorkerStore
+from strata.notebook.worker_store import NotebookWorkerStore, get_notebook_worker_store
 
 logger = logging.getLogger(__name__)
 
@@ -260,22 +258,6 @@ def _configured_managed_worker_records() -> list[ManagedWorkerRecord]:
         return []
 
 
-def _registry_store() -> NotebookWorkerStore | None:
-    """The registry's store, created beside the artifact store the first time it is needed."""
-    from computation_core.store import get_artifact_store
-
-    from strata.notebook.worker_store import get_notebook_worker_store
-
-    store = get_notebook_worker_store()
-    if store is None:
-        artifact_store = get_artifact_store()
-        if artifact_store is not None:
-            store = get_notebook_worker_store(
-                artifact_store.db_path, dialect=artifact_store.dialect
-            )
-    return store
-
-
 def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
     """Return the server-managed notebook worker registry.
 
@@ -283,7 +265,7 @@ def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
     node sharing that store shows up here at once. Until the registry is first set, the
     ``[tool.strata.transforms]`` table applies; after that, editing it has no effect.
     """
-    store = _registry_store()
+    store = get_notebook_worker_store()
     if store is not None:
         entries = store.entries()
         if entries is not None:
@@ -298,7 +280,7 @@ def _change_server_managed_worker_records(
 
     Without an artifact store (a scan-only service server) the registry lives in memory.
     """
-    store = _registry_store()
+    store = get_notebook_worker_store()
     if store is None:
         from strata.server import get_state
 

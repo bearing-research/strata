@@ -38,8 +38,8 @@ ENV UV_PYTHON=3.13
 WORKDIR /build
 COPY LICENSE README.md pyproject.toml uv.lock ./
 COPY src ./src
-# strata-client is a workspace member, not a server dependency; copied only so
-# the workspace resolves during `uv export` / `uv build`.
+# computation-core is the ledger strata depends on; strata-client and
+# strata-pool are workspace members copied only so the workspace resolves.
 COPY packages ./packages
 
 # Export the exact runtime dependency set from uv.lock; the runtime stage
@@ -70,9 +70,11 @@ RUN mkdir -p dist && \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 
-# Build only the root package (pure Python, one py3-none-any wheel).
+# Build the root package and the ledger (pure Python, py3-none-any wheels).
+# --no-emit-workspace left computation-core out of the requirements above.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv build --wheel --out-dir dist
+    uv build --wheel --out-dir dist && \
+    uv build --wheel --package computation-core --out-dir dist
 
 # =============================================================================
 # Stage 2: Runtime

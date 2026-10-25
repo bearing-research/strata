@@ -579,3 +579,24 @@ class PostgresDialect:
         the caller resolves by catching :attr:`integrity_error`.
         """
         conn.execute("SELECT pg_advisory_xact_lock(?)", (advisory_lock_id(key),))
+
+
+def create_tables(dialect: SqlDialect, table: str, ddl: str) -> None:
+    """Create a consumer's own tables beside the ledger's, once per database.
+
+    ``table`` is the one whose presence means ``ddl`` already ran. CREATE TABLE IF NOT
+    EXISTS races in Postgres when every node runs this at startup, so creation is
+    serialized under a lock keyed on the table, then skipped.
+    """
+    conn = dialect.connect()
+    try:
+        if not dialect.supports_legacy_migration:
+            if not dialect.schema_exists(conn, table):
+                dialect.begin_write(conn, f"__{table}_schema__")
+                conn.executescript(dialect.adapt_ddl(ddl))
+                conn.commit()
+            return
+        conn.executescript(dialect.adapt_ddl(ddl))
+        conn.commit()
+    finally:
+        conn.close()

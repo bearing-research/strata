@@ -77,13 +77,14 @@ async def test_a_revoked_key_is_refused_after_the_offload(serve, tmp_path):
 def workers_app(serve, tmp_path):
     """A personal server whose worker registry holds one local worker, ``gpu``."""
     from strata.notebook.models import WorkerSpec
-    from strata.notebook.worker_store import get_notebook_worker_store
+    from strata.notebook.worker_store import open_notebook_worker_store
     from strata.notebook.workers import ManagedWorkerRecord, replace_server_managed_worker_records
 
     app = serve(deployment_mode="personal")
-    get_artifact_store(tmp_path / "artifacts")
+    store = get_artifact_store(tmp_path / "artifacts")
+    workers = open_notebook_worker_store(store.db_path, dialect=store.dialect)
     replace_server_managed_worker_records([ManagedWorkerRecord(worker=WorkerSpec(name="gpu"))])
-    return SimpleNamespace(app=app, store=get_notebook_worker_store())
+    return SimpleNamespace(app=app, store=workers)
 
 
 @pytest.mark.parametrize(

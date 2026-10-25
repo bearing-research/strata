@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection
+from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS notebook_workers (
@@ -44,26 +44,10 @@ class NotebookWorkerStore:
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         self.db_path = db_path
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
-        self._init_schema()
+        create_tables(self._dialect, "notebook_workers", _SCHEMA_SQL)
 
     def _get_connection(self) -> StoreConnection:
         return self._dialect.connect()
-
-    def _init_schema(self) -> None:
-        conn = self._get_connection()
-        try:
-            if not self._dialect.supports_legacy_migration:
-                # CREATE TABLE IF NOT EXISTS races in Postgres when every node runs this at
-                # startup, so creation is serialized, then skipped.
-                if not self._dialect.schema_exists(conn, "notebook_workers"):
-                    self._dialect.begin_write(conn, "__notebook_workers_schema__")
-                    conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
-                    conn.commit()
-                return
-            conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
-            conn.commit()
-        finally:
-            conn.close()
 
     def entries(self) -> list[dict[str, Any]] | None:
         """The registry in order, or ``None`` if never set.
@@ -140,14 +124,21 @@ class NotebookWorkerStore:
 _worker_store: NotebookWorkerStore | None = None
 
 
-def get_notebook_worker_store(
-    db_path: Path | None = None,
-    dialect: SqlDialect | None = None,
-) -> NotebookWorkerStore | None:
-    """The process-wide registry store, created on the first call that passes ``db_path``."""
+def open_notebook_worker_store(
+    db_path: Path, dialect: SqlDialect | None = None
+) -> NotebookWorkerStore:
+    """Open the process-wide registry store on the artifact database.
+
+    The server does this once at startup, so no request ever creates the schema.
+    """
     global _worker_store
-    if _worker_store is None and db_path is not None:
+    if _worker_store is None:
         _worker_store = NotebookWorkerStore(db_path, dialect=dialect)
+    return _worker_store
+
+
+def get_notebook_worker_store() -> NotebookWorkerStore | None:
+    """The store startup opened, or ``None`` on a server without an artifact store."""
     return _worker_store
 
 

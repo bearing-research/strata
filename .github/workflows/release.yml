@@ -103,6 +103,28 @@ jobs:
               )
               sys.exit(1)
 
+          # computation-core is a runtime dependency of strata-notebook, pinned
+          # exactly, so the pin, the package and the tag must all agree.
+          with open("packages/computation-core/pyproject.toml", "rb") as f:
+              core_version = tomllib.load(f)["project"]["version"]
+          if core_version != version:
+              print(
+                  f"::error::computation-core version {core_version!r} doesn't match the "
+                  f"release version {version!r}. Keep packages/computation-core/pyproject.toml "
+                  "in lockstep with the root pyproject.toml.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          with open("pyproject.toml", "rb") as f:
+              dependencies = tomllib.load(f)["project"]["dependencies"]
+          if f"computation-core=={version}" not in dependencies:
+              print(
+                  f"::error::pyproject.toml must depend on 'computation-core=={version}' "
+                  f"(found {[d for d in dependencies if d.startswith('computation-core')]}).",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
           changelog = open("CHANGELOG.md").read()
           if not re.search(rf"^##\s+{re.escape(version)}(?:\s|$)", changelog, re.MULTILINE):
               print(
@@ -284,6 +306,48 @@ jobs:
           path: dist
           if-no-files-found: error
 
+  # --- computation-core wheel (the ledger strata-notebook depends on) --
+  # Same shape as client-wheel; wheel-test installs it beside the notebook
+  # wheel, since PyPI cannot resolve the pin until this run publishes it.
+  core-wheel:
+    name: wheel · computation-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          python-version: "3.12"
+          version: "latest"
+
+      - name: Build the computation-core wheel + sdist
+        run: uv build --package computation-core --out-dir dist
+
+      - name: Smoke-test the computation-core wheel
+        run: |
+          set -euo pipefail
+          CORE_WHEEL=$(ls dist/computation_core-*-py3-none-any.whl | head -1)
+          echo "::notice::Testing core wheel ${CORE_WHEEL}"
+          uv venv /tmp/core-smoke
+          VIRTUAL_ENV=/tmp/core-smoke uv pip install \
+            --index https://pypi.org/simple/ "${CORE_WHEEL}"
+          /tmp/core-smoke/bin/python -c "
+          from computation_core.build_store import BuildStore
+          from computation_core.sql_backend import SqliteDialect
+          from computation_core.store import ArtifactStore
+          print('computation_core imports ok')
+          "
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist-core
+          path: dist
+          if-no-files-found: error
+
   # --- wheel smoke test ----------------------------------------------
   # Installs the wheel in a fresh venv and checks imports, console scripts,
   # /health and the frontend bundle, so a missing dep or broken entry point
@@ -292,7 +356,7 @@ jobs:
     name: Smoke-test the wheel · python ${{ matrix.python }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: wheel
+    needs: [wheel, core-wheel]
     strategy:
       # One wheel for every 3.12+: checked on each interpreter, not just
       # setup-uv's default.
@@ -303,6 +367,11 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist-notebook
+          path: dist
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist-core
           path: dist
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
@@ -317,14 +386,16 @@ jobs:
           set -euo pipefail
 
           WHEEL=$(ls dist/strata_notebook-*-py3-none-any.whl | head -1)
-          echo "::notice::Testing wheel ${WHEEL}"
+          CORE_WHEEL=$(ls dist/computation_core-*-py3-none-any.whl | head -1)
+          echo "::notice::Testing wheel ${WHEEL} with ${CORE_WHEEL}"
 
           # Strata's runtime guard requires a uv-managed venv (the `uv =`
-          # marker in pyvenv.cfg).
+          # marker in pyvenv.cfg). The ledger wheel comes from this run:
+          # the notebook wheel pins the version PyPI gets only after this job.
           uv venv /tmp/strata-smoke
           VIRTUAL_ENV=/tmp/strata-smoke uv pip install \
             --index https://pypi.org/simple/ \
-            "${WHEEL}"
+            "${WHEEL}" "${CORE_WHEEL}"
 
           echo "--- import smoke ---"
           # The HTTP client ships in strata-client; this package exposes only
@@ -384,7 +455,7 @@ jobs:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [wheel, client-wheel, pool-wheel, wheel-test]
+    needs: [wheel, client-wheel, pool-wheel, core-wheel, wheel-test]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/strata-notebook

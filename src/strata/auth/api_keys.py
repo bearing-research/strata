@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection
+from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
 
 if TYPE_CHECKING:
     from strata.types import Principal
@@ -108,27 +108,10 @@ class ApiKeyStore:
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         self.db_path = db_path
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
-        self._init_schema()
+        create_tables(self._dialect, "api_keys", _API_KEY_SCHEMA_SQL)
 
     def _get_connection(self) -> StoreConnection:
         return self._dialect.connect()
-
-    def _init_schema(self) -> None:
-        conn = self._get_connection()
-        try:
-            if not self._dialect.supports_legacy_migration:
-                # CREATE TABLE IF NOT EXISTS races in Postgres when every node
-                # runs this at startup, so creation is serialized, then skipped.
-                if not self._dialect.schema_exists(conn, "api_keys"):
-                    self._dialect.begin_write(conn, "__api_key_schema__")
-                    conn.executescript(self._dialect.adapt_ddl(_API_KEY_SCHEMA_SQL))
-                    conn.commit()
-                return
-
-            conn.executescript(self._dialect.adapt_ddl(_API_KEY_SCHEMA_SQL))
-            conn.commit()
-        finally:
-            conn.close()
 
     def create_key(
         self,

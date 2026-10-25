@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection
+from computation_core.sql_backend import SqlDialect, SqliteDialect, StoreConnection, create_tables
 
 _OWNERSHIP_SCHEMA_SQL = """
 -- Stream ownership: which node can serve a given stream, and until when.
@@ -32,26 +32,10 @@ class StreamOwnershipStore:
     def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         self.db_path = db_path
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
-        self._init_schema()
+        create_tables(self._dialect, "stream_owners", _OWNERSHIP_SCHEMA_SQL)
 
     def _get_connection(self) -> StoreConnection:
         return self._dialect.connect()
-
-    def _init_schema(self) -> None:
-        conn = self._get_connection()
-        try:
-            if not self._dialect.supports_legacy_migration:
-                # CREATE TABLE IF NOT EXISTS races in Postgres, and every node runs this at startup.
-                if not self._dialect.schema_exists(conn, "stream_owners"):
-                    self._dialect.begin_write(conn, "__stream_owner_schema__")
-                    conn.executescript(self._dialect.adapt_ddl(_OWNERSHIP_SCHEMA_SQL))
-                    conn.commit()
-                return
-
-            conn.executescript(self._dialect.adapt_ddl(_OWNERSHIP_SCHEMA_SQL))
-            conn.commit()
-        finally:
-            conn.close()
 
     def claim(self, stream_id: str, node_url: str, ttl_seconds: float) -> None:
         """Record this node as the one serving ``stream_id``; the newest claim wins.
