@@ -1346,9 +1346,13 @@ class CellExecutor:
             runtime_identity=runtime_identity,
         )
         input_hashes = self._collect_input_hashes(cell_id)
-        config, table_fingerprints, table_snapshots, table_weights = await self._weigh_tables(
-            annotations, source
-        )
+        (
+            config,
+            table_fingerprints,
+            table_snapshots,
+            table_weights,
+            table_refs,
+        ) = await self._weigh_tables(annotations, source)
         weights += table_weights
         table_reads = []
         if annotations.tables:
@@ -1368,6 +1372,8 @@ class CellExecutor:
             fetch_error_code,
         ) = await self._resolve_fetches(annotations.fetches, weights=weights)
         self._fetch_refs[cell_id] = fetch_refs
+        # Every output this run stages, whatever stages it, carries the tables it read.
+        self.session.get_artifact_manager().record_table_refs(cell_id, table_refs)
         self._fetch_times[cell_id] = fetch_times
         dataset_fingerprints, datasets, dataset_error = await self._resolve_datasets(
             annotations.datasets
@@ -1945,7 +1951,6 @@ class CellExecutor:
                             collected=collected,
                             local_run=local_run,
                             stochastic=prov.annotations.stochastic,
-                            table_refs=_table_refs(prov),
                         )
                     except TableWriteError as exc:
                         stored_ok, store_error = False, str(exc)
@@ -2724,7 +2729,6 @@ class CellExecutor:
                             build_env=str(result.get("build_env") or ""),
                             hardware=result.get("hardware") or {},
                             collected=collected,
-                            table_refs=_table_refs(prov),
                         )
                     except TableWriteError as exc:
                         stored_ok, store_error = False, str(exc)
@@ -4477,8 +4481,8 @@ class CellExecutor:
 
     async def _weigh_tables(
         self, annotations: CellAnnotations, source: str
-    ) -> tuple[Any, list[str], dict[str, int | None], list[InputWeight]]:
-        """A cell's tables: the config they resolve in, fingerprints, snapshots, weights.
+    ) -> tuple[Any, list[str], dict[str, int | None], list[InputWeight], dict[str, str]]:
+        """A cell's tables: the config they resolve in, fingerprints, snapshots, weights, refs.
 
         A DuckDB cell's catalog tables are inputs like its @table ones, though only the
         @table ones are weighed.
@@ -4507,7 +4511,14 @@ class CellExecutor:
             for spec in annotations.tables
             if spec.name in sizes
         ]
-        return config, fingerprints, snapshots, weights
+        # The run's reads for its structural node: ``uri@v=<snapshot>`` by name.
+        refs = {
+            spec.name: f"{spec.uri}@v={snapshots[spec.name]}"
+            if snapshots.get(spec.name) is not None
+            else spec.uri
+            for spec in tables
+        }
+        return config, fingerprints, snapshots, weights, refs
 
     async def estimate_reads(self, cell_id: str, source: str) -> ReadEstimate:
         """What *cell_id*'s inputs would move onto its machine, weighed before it runs.
@@ -4527,7 +4538,7 @@ class CellExecutor:
         )
         if cache is None and listings:
             weights = await self._ask_worker_cache(machine, mount_specs, weights, listings)
-        _, table_fingerprints, _, table_weights = await self._weigh_tables(annotations, source)
+        _, table_fingerprints, _, table_weights, _ = await self._weigh_tables(annotations, source)
         weights += table_weights
         if annotations.fetches:
             from strata.notebook.fetch import FetchCache, guard_settings
@@ -5465,7 +5476,6 @@ class CellExecutor:
         collected: dict[str, bytes | Exception] | None = None,
         local_run: LocalRun | None = None,
         stochastic: bool = False,
-        table_refs: dict[str, str] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
@@ -5620,7 +5630,6 @@ class CellExecutor:
                         hardware=hardware,
                         extra_params=self._fetch_params(cell_id),
                         computation_key=provenance_hash,
-                        table_refs=table_refs,
                     )
                 )
                 staged_names.append((var_name, content_type))
@@ -8179,7 +8188,6 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=executed_source,
                 env_hash=env_hash,
-                table_refs=_table_refs(prov),
             )
         except (UnsafeRunFile, TableWriteError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -8281,15 +8289,6 @@ def display_metadata_params(display_output: dict[str, Any], count: int) -> dict[
 
 # The variable a cell output's id names, before any ``@ckpt=`` / ``@variant=`` label.
 _OUTPUT_VARIABLE = re.compile(r"_var_([^@]+)")
-
-
-def _table_refs(prov: _CellProvenance) -> dict[str, str]:
-    """A run's ``@table`` reads as ``uri@v=<snapshot>`` by name, for its structural node."""
-    refs: dict[str, str] = {}
-    for spec in prov.annotations.tables:
-        snapshot = prov.table_snapshots.get(spec.name)
-        refs[spec.name] = f"{spec.uri}@v={snapshot}" if snapshot is not None else spec.uri
-    return refs
 
 
 def _fenced_result(exc: RunFenced) -> dict[str, Any]:

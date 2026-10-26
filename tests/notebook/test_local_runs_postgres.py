@@ -43,7 +43,7 @@ def postgres_dsn():
 
 @pytest.fixture(autouse=True)
 def ledger_on_postgres(postgres_dsn, monkeypatch):
-    """Each test opens its notebook's ledger on a clean Postgres schema."""
+    """Each test opens its notebook's ledger on a clean Postgres schema, one pool per test."""
     dialect = PostgresDialect(postgres_dsn)
     conn = dialect.connect()
     try:
@@ -51,7 +51,9 @@ def ledger_on_postgres(postgres_dsn, monkeypatch):
         conn.commit()
     finally:
         conn.close()
-    monkeypatch.setattr(test_local_runs, "_dialect", lambda: PostgresDialect(postgres_dsn))
+    monkeypatch.setattr(test_local_runs, "_dialect", lambda: dialect)
+    yield
+    dialect.close()
 
 
 class TestGate1OnPostgres(test_local_runs.TestGate1):

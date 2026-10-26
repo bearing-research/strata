@@ -18,7 +18,6 @@ import pytest
 from vestigo.provenance import checkpoint_output_key, derive_subkey, run_output_key
 from vestigo.releases import ReleaseRejected
 
-from strata.notebook.artifact_integration import NotebookArtifactManager
 from strata.notebook.executor import CellExecutor
 from strata.notebook.local_runs import LocalRun, LocalRuns, RunFenced, RunRefused
 from strata.notebook.parser import parse_notebook
@@ -79,13 +78,8 @@ def _notebook(tmp_path: Path, train: str = TRAIN) -> tuple[NotebookSession, Cell
     # Only a consumed variable is stored, so a reader of ``score`` follows.
     add_cell_to_notebook(notebook_dir, "report", "evaluate")
     write_cell(notebook_dir, "report", "report = score\n")
-    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir, ledger_dialect=_dialect())
     session.refresh_environment_runtime()
-    dialect = _dialect()
-    if dialect is not None:
-        session.artifact_manager = NotebookArtifactManager(
-            session.notebook_state.id, notebook_dir / ".strata" / "artifacts", dialect=dialect
-        )
     return session, CellExecutor(session)
 
 

@@ -79,6 +79,9 @@ class NotebookArtifactManager:
 
         self.artifact_store = ArtifactStore(artifact_dir, dialect=dialect)
         complete_upgrade(self.artifact_store)
+        # The tables each cell's current run read (``uri@v=<snapshot>`` by name), recorded
+        # when its provenance is computed; every output the run stages carries them.
+        self._table_refs: dict[str, dict[str, str]] = {}
         # The ledger's builds and releases, on the store's database: a local run's
         # execution and its checkpoints (``local_runs``).
         self.build_store = BuildStore(
@@ -215,6 +218,10 @@ class NotebookArtifactManager:
         results.sort(key=lambda pair: pair[0])
         return results
 
+    def record_table_refs(self, cell_id: str, table_refs: dict[str, str]) -> None:
+        """Note what tables *cell_id*'s next outputs read, for their structural node."""
+        self._table_refs[cell_id] = dict(table_refs)
+
     def store_cell_output(self, **kwargs: Any) -> ArtifactVersion:
         """Store one cell output and make it current; arguments as for :meth:`stage_cell_output`."""
         return self.finalize_cell_outputs([self.stage_cell_output(**kwargs)])[0]
@@ -240,7 +247,6 @@ class NotebookArtifactManager:
         hardware: dict[str, Any] | None = None,
         extra_params: dict[str, str] | None = None,
         computation_key: str | None = None,
-        table_refs: dict[str, str] | None = None,
     ) -> StagedVersion:
         """Write a cell output's bytes as a ``building`` version nobody reads yet.
 
@@ -312,7 +318,10 @@ class NotebookArtifactManager:
             principal=principal,
             requires=requirements(artifact_id, content_type, blob_data),
             definition=cell_definition(
-                self.artifact_store, transform_spec, input_versions, tables=table_refs
+                self.artifact_store,
+                transform_spec,
+                input_versions,
+                tables=self._table_refs.get(cell_id),
             ),
             computation_key=computation_key,
         )

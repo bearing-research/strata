@@ -221,6 +221,16 @@ async def execute_sql_cell(
         except LakeError as exc:
             return _error_result(f"connection {spec.name!r}: {exc}", start_time)
         runtime_spec = lake.spec
+    # The catalog tables this run reads, for its outputs' structural node.
+    artifact_mgr.record_table_refs(
+        cell_id,
+        {
+            read["uri"]: f"{read['uri']}@v={read['snapshot_id']}"
+            if read["snapshot_id"] is not None
+            else read["uri"]
+            for read in (lake.reads if lake is not None else [])
+        },
+    )
     try:
         # Lacks only pinned tables' locations, and a pinned cell opens no connection
         # until the query, which is confined again once they are located.
