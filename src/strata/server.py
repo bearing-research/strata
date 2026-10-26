@@ -593,7 +593,7 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     """
     from vestigo.store import get_artifact_store
 
-    from strata.artifact.retention import complete_upgrade
+    from strata.artifact.upgrades import complete_upgrade
     from strata.fast_io import register_arrow_validator
 
     backend = (config.artifact_blob_backend or "local").lower()

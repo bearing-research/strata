@@ -14,12 +14,13 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from vestigo.graph import GRAPH_DDL, GraphStore, NodeId, NodeSpec
 from vestigo.provenance import TransformSpec, parse_transform_spec
 from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
@@ -726,6 +727,22 @@ _RETENTION_DDL: tuple[str, ...] = (
 )
 
 
+def _add_graph(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """The structural graph (ADR 002 §6) and the node a version was produced by.
+
+    ``definition_id`` is nullable and unindexed by the migration's reading of
+    old rows: the application reconstructs nodes for them as its own upgrade step
+    (``store_upgrades``), as it did for folder edges.
+    """
+    for statement in GRAPH_DDL:
+        conn.execute(dialect.adapt_ddl(statement))
+    if not dialect.column_exists(conn, "artifact_versions", "definition_id"):
+        conn.execute("ALTER TABLE artifact_versions ADD COLUMN definition_id TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_versions_definition ON artifact_versions(definition_id)"
+    )
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
@@ -739,6 +756,7 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(10, "artifact_publications: one active per version", _one_active_publication),
     _Migration(11, "fail embedded builds that bound inputs out of order", _fail_misbound_builds),
     _Migration(12, "retention_roots + retention_edges; pins become roots", _add_retention),
+    _Migration(13, "nodes + node_inputs; artifact_versions.definition_id", _add_graph),
 ]
 
 RETENTION_SCHEMA_VERSION = 12
@@ -780,8 +798,12 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     last_used_at REAL,  -- Last finalize, hit or read; NULL reads as created_at (migration 6)
     minted INTEGER NOT NULL DEFAULT 0,  -- 1 = the store made up the id (migration 6)
     superseded_by TEXT,  -- id@v=N whose blob this reads, having none of its own (migration 7)
+    definition_id TEXT,  -- the structural node this version was produced by (migration 13)
     PRIMARY KEY (id, version)
 );
+
+-- The producing node, for "every version of this definition" (migration 13)
+CREATE INDEX IF NOT EXISTS idx_versions_definition ON artifact_versions(definition_id);
 
 -- Index for provenance lookup (deduplication)
 CREATE INDEX IF NOT EXISTS idx_provenance ON artifact_versions(provenance_hash);
@@ -817,6 +839,11 @@ CREATE TABLE IF NOT EXISTS artifact_names (
 -- Index for name lookup without tenant (personal mode)
 CREATE INDEX IF NOT EXISTS idx_names_name ON artifact_names(name);
 """
+
+# The structural graph (ADR 002 §6): content-addressed nodes and their input ports,
+# under an identity scope derived from the tenant. Written by the application with
+# a version (definition_id) or on its own; never garbage collected here.
+_SCHEMA_SQL += "\n" + ";\n".join(GRAPH_DDL) + ";\n"
 
 # Registry tables (aliases / tags / audit). Run unconditionally at init; CREATE IF NOT EXISTS makes
 # it idempotent for fresh and existing databases.
@@ -1251,6 +1278,7 @@ class ArtifactStore:
         principal: str | None = None,
         minted: bool = False,
         requires: Collection[tuple[str, int]] = (),
+        definition: Sequence[NodeSpec] = (),
     ) -> int:
         """Create a new artifact version in "building" state and return its number.
 
@@ -1259,7 +1287,9 @@ class ArtifactStore:
         (``uuid4``) for this computation, so retention may collect its latest version;
         later versions of a minted id stay minted. ``requires`` names the versions this
         one needs beside its inputs (a folder's files): retention keeps them while it is
-        kept and evicts them with it.
+        kept and evicts them with it. ``definition`` is the structure that produced it
+        (ADR 002 §6.3): nodes written to :attr:`graph` on this transaction, the last of
+        them recorded as the version's ``definition_id``.
 
         Raises:
             ArtifactIdTaken: If a version of ``artifact_id`` belongs to another tenant.
@@ -1283,13 +1313,17 @@ class ArtifactStore:
             version, was_minted = int(row["next_version"]), row["was_minted"]
 
             input_versions_json = json.dumps(input_versions) if input_versions else None
+            definition_id = (
+                self.graph.put_batch_on(conn, definition, tenant=tenant)[-1] if definition else None
+            )
 
             conn.execute(
                 """
                 INSERT INTO artifact_versions
                     (id, version, state, provenance_hash, created_at,
-                     transform_spec, input_versions, tenant, principal, minted)
-                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?, ?)
+                     transform_spec, input_versions, tenant, principal, minted,
+                     definition_id)
+                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     artifact_id,
@@ -1303,6 +1337,7 @@ class ArtifactStore:
                     tenant if tenant is not None else "",
                     principal,
                     1 if minted or was_minted else 0,
+                    definition_id,
                 ),
             )
             self._write_requirements(conn, artifact_id, version, tenant, requires)
@@ -1331,6 +1366,76 @@ class ArtifactStore:
                 "DO NOTHING",
                 (tenant if tenant is not None else "", artifact_id, version, to_id, to_version),
             )
+
+    @cached_property
+    def graph(self) -> GraphStore:
+        """The structural graph this ledger holds (ADR 002 §6)."""
+        return GraphStore(self._get_connection, self._dialect)
+
+    def definition_of(
+        self, artifact_id: str, version: int, *, tenant: str | None = None
+    ) -> NodeId | None:
+        """The node that produced a version, or ``None`` when none is recorded.
+
+        Only a version of *tenant*: its node lives in that tenant's scope, where an
+        edge from another scope could not reach it.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT definition_id FROM artifact_versions "
+                "WHERE id = ? AND version = ? AND tenant = ?",
+                (artifact_id, version, tenant if tenant is not None else ""),
+            ).fetchone()
+        finally:
+            conn.close()
+        return None if row is None else row["definition_id"]
+
+    def set_definitions(self, definitions: Mapping[tuple[str, int], NodeId]) -> None:
+        """Record the producing node of versions that have none, in one transaction.
+
+        For rows written before their writer recorded nodes; a version already
+        attributed to a node keeps it.
+        """
+        conn = self._get_connection()
+        try:
+            for (artifact_id, version), node in definitions.items():
+                conn.execute(
+                    "UPDATE artifact_versions SET definition_id = ? "
+                    "WHERE id = ? AND version = ? AND definition_id IS NULL",
+                    (node, artifact_id, version),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def versions_lacking_definition(self, executor: str | None = None) -> list[ArtifactVersion]:
+        """Current versions with a transform spec and no producing node, oldest first.
+
+        With *executor*, only the versions of that executor, selected in SQL by the
+        prefix every stored spec starts with (``canonical_json`` sorts its keys).
+        Oldest first is dependency order for rows one store wrote: a version's
+        inputs were stored before it.
+        """
+        conn = self._get_connection()
+        try:
+            sql = """
+                SELECT id, version, state, provenance_hash, schema_json,
+                       row_count, byte_size, created_at, transform_spec,
+                       input_versions, tenant, principal, content_sha256
+                FROM artifact_versions
+                WHERE definition_id IS NULL AND transform_spec IS NOT NULL
+                  AND state IN ('ready', 'superseded')
+            """
+            params: tuple[str, ...] = ()
+            if executor is not None:
+                prefix = json.dumps({"executor": executor})[:-1] + ","
+                sql += " AND transform_spec LIKE ? ESCAPE '\\'"
+                params = (_like_literal(prefix) + "%",)
+            rows = conn.execute(sql + " ORDER BY created_at, id, version", params).fetchall()
+        finally:
+            conn.close()
+        return [_version_from_row(row) for row in rows]
 
     def require(
         self, artifact_id: str, version: int, requires: Collection[tuple[str, int]]

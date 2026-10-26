@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING, Any, Literal
 from vestigo.provenance import TransformSpec
 from vestigo.store import ArtifactStore, StagedVersion
 
-from strata.artifact.retention import complete_upgrade, requirements
+from strata.artifact.graph import cell_definition
+from strata.artifact.retention import requirements
+from strata.artifact.upgrades import complete_upgrade
 from strata.auth.principal import get_principal
 from strata.notebook.models import ArtifactInfo
 from strata.notebook.quiesce import assert_writable
@@ -290,6 +292,7 @@ class NotebookArtifactManager:
             input_versions=input_versions,
             principal=principal,
             requires=requirements(artifact_id, content_type, blob_data),
+            definition=cell_definition(self.artifact_store, transform_spec, input_versions),
         )
 
         self.artifact_store.blob_store.write_blob(artifact_id, version, blob_data)

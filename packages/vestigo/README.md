@@ -12,7 +12,10 @@ Strata is its first consumer. The package imports nothing of Strata: a
 consumer passes blob settings in (`BlobSettings`), registers the validators
 `verify_artifacts` runs per content type (`register_validator`), and records
 what a version holds (`retain`) or requires (`require`, `requires=` on
-`create_artifact`), which garbage collection protects as one closure.
+`create_artifact`), which garbage collection protects as one closure. A
+structural graph of content-addressed nodes (`graph`) records what produced
+a version (`definition_id`) and is walked with bounded traversals; the
+ledger never parses a node's payload.
 *Vestigo* is Latin for "I track down, I trace": the ledger traces every
 artifact back to the computation and inputs that made it.
 <!-- --8<-- [end:body] -->

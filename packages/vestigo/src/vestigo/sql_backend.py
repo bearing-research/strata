@@ -53,6 +53,7 @@ _DDL_TYPE_REWRITES = (
     ("INTEGER PRIMARY KEY AUTOINCREMENT", "autoincrement_pk"),
     (r"\bREAL\b", "float_type"),
     (r"\bINTEGER\b", "integer_type"),
+    (r"\bBLOB\b", "blob_type"),
 )
 
 
@@ -178,6 +179,11 @@ class SqlDialect(Protocol):
         ...
 
     @property
+    def blob_type(self) -> str:
+        """Column type for opaque bytes (Postgres has no ``BLOB``)."""
+        ...
+
+    @property
     def integrity_error(self) -> type[Exception]:
         """Exception raised when a constraint is violated.
 
@@ -278,6 +284,10 @@ class SqliteDialect:
     def integer_type(self) -> str:
         # SQLite INTEGER widens to 8 bytes as needed.
         return "INTEGER"
+
+    @property
+    def blob_type(self) -> str:
+        return "BLOB"
 
     @property
     def integrity_error(self) -> type[Exception]:
@@ -538,6 +548,10 @@ class PostgresDialect:
     def integer_type(self) -> str:
         # Postgres INTEGER is int4; byte_size reaches 2 GiB.
         return "BIGINT"
+
+    @property
+    def blob_type(self) -> str:
+        return "BYTEA"
 
     @property
     def integrity_error(self) -> type[Exception]:

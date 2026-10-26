@@ -51,7 +51,8 @@ def store(postgres_dsn, tmp_path):
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
-            "retention_roots, retention_edges, store_upgrades, schema_version CASCADE;"
+            "retention_roots, retention_edges, store_upgrades, nodes, node_inputs, "
+            "schema_version CASCADE;"
         )
         conn.commit()
     finally:
@@ -1722,3 +1723,48 @@ class TestOneActivePublicationPerVersion:
                 conn.close()
         finally:
             dialect.close()
+
+
+class TestGraph:
+    """Gate 2's graph steps on Postgres: the recursive walk and the batch write."""
+
+    def test_put_batch_read_back_and_walk(self, store):
+        from vestigo.graph import Edge, NodeSpec, Traversal
+
+        leaf = NodeSpec(domain="test/table", payload=b"s3://bucket/events")
+        first = NodeSpec(domain="test/cell", payload=b"a", edges=(Edge("rows", 0, 0),))
+        second = NodeSpec(
+            domain="test/cell", payload=b"b", edges=(Edge("left", 0, 0), Edge("right", 0, 1))
+        )
+        ids = store.graph.put_batch([leaf, first, second])
+        assert store.graph.put_batch([leaf, first, second]) == ids
+        leaf_id, first_id, second_id = ids
+
+        record = store.graph.get(second_id)
+        assert record is not None and record.payload == b"b"
+        assert [(p.role, p.target_node_id) for p in store.graph.inputs(second_id)] == [
+            ("left", leaf_id),
+            ("right", first_id),
+        ]
+        assert set(store.graph.ancestors([second_id])) == {leaf_id, first_id}
+        assert set(store.graph.dependents(leaf_id)) == {first_id, second_id}
+        assert store.graph.topological_order([second_id]) == [leaf_id, first_id, second_id]
+        assert store.graph.ancestors([second_id], traversal=Traversal(max_depth=1)) == [
+            leaf_id,
+            first_id,
+        ] or set(store.graph.ancestors([second_id], traversal=Traversal(max_depth=1))) == {
+            leaf_id,
+            first_id,
+        }
+
+    def test_a_version_records_its_definition(self, store):
+        from vestigo.graph import NodeSpec
+
+        version = store.create_artifact(
+            "a1", "prov-1", _spec(), definition=[NodeSpec("test/cell", b"x")]
+        )
+        node = store.definition_of("a1", version)
+        assert node is not None
+        assert store.graph.get(node) is not None
+        store.finalize_artifact("a1", version, "{}", row_count=0, byte_size=0)
+        assert store.versions_lacking_definition() == []

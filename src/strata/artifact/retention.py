@@ -38,7 +38,7 @@ def requirements(
         return []
 
 
-def complete_upgrade(store: ArtifactStore) -> None:
+def record_folder_edges(store: ArtifactStore) -> None:
     """Record the requirements of folders stored before the ledger kept them as edges.
 
     A store from before ``retention_edges`` holds manifests whose files only their bytes

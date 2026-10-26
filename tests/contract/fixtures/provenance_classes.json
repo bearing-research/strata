@@ -32,6 +32,11 @@
       "domain": "strata/dataset",
       "class": "leaf",
       "payload": "dataset URI without version"
+    },
+    {
+      "domain": "strata/artifact",
+      "class": "leaf",
+      "payload": "artifact URI without version; an upstream version with no recorded node"
     }
   ],
   "links": [
