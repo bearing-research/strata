@@ -3781,6 +3781,25 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger has releases (ADR 002 E4a).</strong> A build is an execution, its
+  attempts the tries that may write its bytes, and a release the event that
+  makes a set of staged outputs current together: <code>vestigo.releases</code> adds
+  <code>build_releases</code>, <code>release_references</code> and <code>release_authorities</code> (schema
+  migration 14) with <code>release_id</code> and <code>computation_key</code> on versions and
+  <code>occurrence</code> and <code>attempt</code> on builds. A <code>building</code> build accepts any number
+  of <code>checkpoint</code> releases and stays building; its <code>final</code> release completes
+  it. Acceptance is fenced on the attempt's lease and write window, ordered by
+  sequence, and refused until every output's bytes are stored at the declared
+  size, which on object storage is the only commit point. A resume opens a new
+  attempt, fences the old one and abandons what it left unsettled; a retried
+  acceptance returns the original release. The typed operations of the E0
+  contract (<code>vestigo.operations</code>: <code>CheckBuildLease</code>, <code>AssertReferenceRevision</code>,
+  <code>AssignAuthority</code>, <code>AdvanceReference</code>, <code>InsertAuditEvent</code>) run inside the
+  acceptance transaction, in order, or not at all; a reference holds its
+  release's outputs as a retention root. <code>checkpoint_output_key</code> and
+  <code>run_output_key</code> derive the labelled output keys of §7.1. Gate 2 (ADR 002 §8)
+  runs in the package suite on SQLite and PostgreSQL, and <code>BuildLease.tla</code>
+  checks that only the lease holder's checkpoints are accepted. (#1298)</li>
 <li><strong>The ledger holds a structural graph (ADR 002 E3).</strong> <code>vestigo.graph</code> stores
   content-addressed nodes (<code>nodes</code>, <code>node_inputs</code>, schema migration 13) under an
   identity scope derived from the tenant, with the <code>CGN1</code>/<code>CGD1</code> encoders the
