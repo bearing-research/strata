@@ -3781,6 +3781,21 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger holds a structural graph (ADR 002 E3).</strong> <code>vestigo.graph</code> stores
+  content-addressed nodes (<code>nodes</code>, <code>node_inputs</code>, schema migration 13) under an
+  identity scope derived from the tenant, with the <code>CGN1</code>/<code>CGD1</code> encoders the
+  contract fixtures pin: <code>put_batch</code> writes a structure in one transaction,
+  batch entries may name earlier ones by index, and <code>ancestors</code>, <code>dependents</code>
+  and <code>topological_order</code> walk it with depth and size bounds on both backends.
+  A version names the node that produced it (<code>definition_id</code>, <code>definition=</code> on
+  <code>create_artifact</code>). Every cell output a notebook run stores now carries its
+  cell's definition: one <code>strata/cell</code> node per run, its payload the executor and the
+  defining params (what a run recorded about itself, such as its duration, is
+  left out), one edge per upstream variable under the variable's name, fetches
+  and datasets as leaves. Versions from before the graph get a
+  <code>strata/cell-reconstructed</code> node with positional <code>input</code> roles when the
+  upgraded store is first opened (<code>artifact/graph.py</code>; the per-store upgrade
+  steps now live in <code>artifact/upgrades.py</code>). (#1296)</li>
 <li><strong>The ledger stands alone (ADR 002 E2).</strong> <code>vestigo</code> imports nothing of
   Strata: blob credentials arrive as <code>BlobSettings</code>, the Arrow validator
   <code>verify_artifacts</code> runs is registered by Strata (<code>register_validator</code>), and
