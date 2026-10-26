@@ -3,6 +3,8 @@ registered for its declared content type; the ledger knows no format itself."""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 from vestigo.provenance import TransformSpec
@@ -10,8 +12,10 @@ from vestigo.store import _VALIDATORS, ArtifactStore, register_validator
 
 
 @pytest.fixture
-def store(tmp_path) -> ArtifactStore:
-    return ArtifactStore(tmp_path / "artifacts")
+def store(tmp_path) -> Iterator[ArtifactStore]:
+    store = ArtifactStore(tmp_path / "artifacts")
+    yield store
+    store.close()
 
 
 @pytest.fixture

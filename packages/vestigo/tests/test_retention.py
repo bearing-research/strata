@@ -9,6 +9,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterator
 
 import pytest
 
@@ -17,8 +18,10 @@ from vestigo.store import RETENTION_SCHEMA_VERSION, ArtifactStore, ArtifactVersi
 
 
 @pytest.fixture
-def store(tmp_path) -> ArtifactStore:
-    return ArtifactStore(tmp_path / "artifacts")
+def store(tmp_path) -> Iterator[ArtifactStore]:
+    store = ArtifactStore(tmp_path / "artifacts")
+    yield store
+    store.close()
 
 
 def _ready(

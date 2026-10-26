@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import random
 import sqlite3
+from collections.abc import Iterator
+from contextlib import closing
 
 import pytest
 
@@ -26,8 +28,10 @@ from vestigo.store import ArtifactStore
 
 
 @pytest.fixture
-def store(tmp_path) -> ArtifactStore:
-    return ArtifactStore(tmp_path / "artifacts")
+def store(tmp_path) -> Iterator[ArtifactStore]:
+    store = ArtifactStore(tmp_path / "artifacts")
+    yield store
+    store.close()
 
 
 LEAF = NodeSpec(domain="test/table", payload=b"s3://bucket/events")
@@ -106,9 +110,9 @@ class TestPutBatch:
         elsewhere = ArtifactStore(tmp_path / "other").graph.put_batch(THREE)
 
         assert once == again == elsewhere
-        conn = sqlite3.connect(store.db_path)
-        assert conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 3
-        assert conn.execute("SELECT COUNT(*) FROM node_inputs").fetchone()[0] == 3
+        with closing(sqlite3.connect(store.db_path)) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 3
+            assert conn.execute("SELECT COUNT(*) FROM node_inputs").fetchone()[0] == 3
 
     def test_an_edge_may_name_a_stored_node_by_id(self, store):
         (leaf,) = store.graph.put_batch([LEAF])

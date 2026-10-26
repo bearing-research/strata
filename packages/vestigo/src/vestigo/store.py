@@ -2037,73 +2037,73 @@ class ArtifactStore:
         if reader_cm is None:
             return None
 
-        conn = self._get_connection()
-        try:
-            # Same write serialization as create_artifact: MAX(version)+1 must
-            # not race a concurrent create for this id.
-            self._dialect.begin_write(conn, artifact_id)
-            if self._held_by_another_tenant(conn, artifact_id, tenant):
-                conn.rollback()
-                raise ArtifactIdTaken(f"{artifact_id} already exists under another tenant")
-            row = conn.execute(
-                "SELECT COALESCE(MAX(version), 0) + 1 AS next_version, "
-                "COALESCE(MAX(minted), 0) AS was_minted "
-                "FROM artifact_versions WHERE id = ?",
-                (artifact_id,),
-            ).fetchone()
-            new_version = int(row["next_version"])
-            conn.execute(
-                """
-                INSERT INTO artifact_versions
-                    (id, version, state, provenance_hash, created_at,
-                     transform_spec, input_versions, tenant, principal, minted,
-                     release_id, computation_key)
-                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    artifact_id,
-                    new_version,
-                    source.provenance_hash,
-                    time.time(),
-                    source.transform_spec,
-                    source.input_versions,
-                    source.tenant if source.tenant is not None else "",
-                    source.principal,
-                    row["was_minted"],
-                    source.release_id,
-                    source.computation_key,
-                ),
-            )
-            # What the source requires (a folder's files), the copy requires: retention
-            # would otherwise take them from under the current value.
-            conn.execute(
-                "INSERT INTO retention_edges "
-                "(tenant, from_artifact_id, from_version, to_artifact_id, to_version) "
-                "SELECT tenant, from_artifact_id, ?, to_artifact_id, to_version "
-                "FROM retention_edges WHERE from_artifact_id = ? AND from_version = ?",
-                (new_version, artifact_id, version),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        # Entered here, not at the copy: refusing the id or a failed transaction below
+        # must close it too, and on an object store it is an open response body.
+        with reader_cm as reader:
+            conn = self._get_connection()
+            try:
+                # Same write serialization as create_artifact: MAX(version)+1 must
+                # not race a concurrent create for this id.
+                self._dialect.begin_write(conn, artifact_id)
+                if self._held_by_another_tenant(conn, artifact_id, tenant):
+                    conn.rollback()
+                    raise ArtifactIdTaken(f"{artifact_id} already exists under another tenant")
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) + 1 AS next_version, "
+                    "COALESCE(MAX(minted), 0) AS was_minted "
+                    "FROM artifact_versions WHERE id = ?",
+                    (artifact_id,),
+                ).fetchone()
+                new_version = int(row["next_version"])
+                conn.execute(
+                    """
+                    INSERT INTO artifact_versions
+                        (id, version, state, provenance_hash, created_at,
+                         transform_spec, input_versions, tenant, principal, minted,
+                         release_id, computation_key)
+                    VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        artifact_id,
+                        new_version,
+                        source.provenance_hash,
+                        time.time(),
+                        source.transform_spec,
+                        source.input_versions,
+                        source.tenant if source.tenant is not None else "",
+                        source.principal,
+                        row["was_minted"],
+                        source.release_id,
+                        source.computation_key,
+                    ),
+                )
+                # What the source requires (a folder's files), the copy requires: retention
+                # would otherwise take them from under the current value.
+                conn.execute(
+                    "INSERT INTO retention_edges "
+                    "(tenant, from_artifact_id, from_version, to_artifact_id, to_version) "
+                    "SELECT tenant, from_artifact_id, ?, to_artifact_id, to_version "
+                    "FROM retention_edges WHERE from_artifact_id = ? AND from_version = ?",
+                    (new_version, artifact_id, version),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
-        # Streamed, not read_blob/write_blob: an artifact can be a multi-GB frame, and pulling it
-        # through process memory (a full download and re-upload on object stores) to re-point a
-        # pointer would cost more than the run this avoids.
-        from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
+            # Streamed, not read_blob/write_blob: an artifact can be a multi-GB frame, and
+            # pulling it through process memory (a full download and re-upload on object
+            # stores) to re-point a pointer would cost more than the run this avoids.
+            from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 
-        copied = 0
-        with (
-            reader_cm as reader,
-            self.blob_store.open_blob_writer(artifact_id, new_version) as writer,
-        ):
-            # Hashed in passing: the bytes go by anyway, and reading them again for the digest would
-            # be wasteful.
-            hasher = hashlib.sha256()
-            while chunk := reader.read(BLOB_STREAM_CHUNK_BYTES):
-                writer.write(chunk)
-                hasher.update(chunk)
-                copied += len(chunk)
+            copied = 0
+            with self.blob_store.open_blob_writer(artifact_id, new_version) as writer:
+                # Hashed in passing: the bytes go by anyway, and reading them again for the
+                # digest would be wasteful.
+                hasher = hashlib.sha256()
+                while chunk := reader.read(BLOB_STREAM_CHUNK_BYTES):
+                    writer.write(chunk)
+                    hasher.update(chunk)
+                    copied += len(chunk)
 
         # Canonical, not finalize_artifact: the caller resolves by *this* id, and dedup onto
         # another id holding the provenance (two notebooks running the same cell) would drop the

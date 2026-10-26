@@ -1,6 +1,7 @@
 """Tests for build state store (server-mode transforms)."""
 
 import uuid
+from contextlib import closing
 
 import pytest
 from conftest import seed_build_targets
@@ -498,14 +499,15 @@ class TestLeases:
         assert build_store.reclaim_expired_build(build_id, "runner-b")
         assert build_store.get_build(build_id).attempt is None
         # Nor does a claim carry one: the fenced attempt cannot complete the build.
-        assert not build_store.complete_attempt_within(
-            build_store._get_connection(),
-            build_id,
-            "a1",
-            artifact_id=None,
-            version=None,
-            now=clock(),
-        )
+        with closing(build_store._get_connection()) as conn:
+            assert not build_store.complete_attempt_within(
+                conn,
+                build_id,
+                "a1",
+                artifact_id=None,
+                version=None,
+                now=clock(),
+            )
         assert build_store.get_build(build_id).state == "building"
 
     def test_a_claim_is_exact_in_complete_within(self, build_store, clock):

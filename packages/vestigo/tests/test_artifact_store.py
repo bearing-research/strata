@@ -31,7 +31,9 @@ def artifact_dir(tmp_path):
 @pytest.fixture
 def store(artifact_dir):
     """An artifact store."""
-    return ArtifactStore(artifact_dir)
+    store = ArtifactStore(artifact_dir)
+    yield store
+    store.close()
 
 
 class TestTransformSpec:
@@ -829,6 +831,28 @@ class TestVersionPromotion:
             store.promote_version("art-1", version)
         assert store.get_artifact("art-1", 2) is None
         assert store.promote_version("art-1", version, tenant="acme").version == 2
+
+    def test_a_refused_promotion_closes_the_source_reader(self, store, monkeypatch):
+        from vestigo.store import ArtifactIdTaken
+
+        version = store.create_artifact("art-1", "prov-a", tenant="acme")
+        store.blob_store.write_blob("art-1", version, b"theirs")
+        store.finalize_artifact("art-1", version, "{}", 1, 6)
+        readers = []
+        open_reader = store.blob_store.open_blob_reader
+
+        def tracked(artifact_id, version):
+            reader = open_reader(artifact_id, version)
+            readers.append(reader)
+            return reader
+
+        monkeypatch.setattr(store.blob_store, "open_blob_reader", tracked)
+
+        with pytest.raises(ArtifactIdTaken):
+            store.promote_version("art-1", version, tenant="globex")
+
+        # On an object store the reader is a response body; left open it holds a connection.
+        assert len(readers) == 1 and readers[0].closed
 
     def test_promotion_keeps_the_canonical_id_when_dedup_diverts(self, store):
         # Another artifact already holds this provenance in ready state, so
