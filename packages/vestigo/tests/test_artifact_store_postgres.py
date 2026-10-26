@@ -14,6 +14,7 @@ import anyio.to_thread
 import docker
 import pytest
 from conftest import race_after_pending_read
+from gate2 import Gate2
 from testcontainers.community.postgres import PostgresContainer
 from vestigo.provenance import TransformSpec
 from vestigo.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
@@ -52,6 +53,7 @@ def store(postgres_dsn, tmp_path):
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
             "retention_roots, retention_edges, store_upgrades, nodes, node_inputs, "
+            "build_releases, release_references, release_authorities, "
             "schema_version CASCADE;"
         )
         conn.commit()
@@ -1768,3 +1770,15 @@ class TestGraph:
         assert store.graph.get(node) is not None
         store.finalize_artifact("a1", version, "{}", row_count=0, byte_size=0)
         assert store.versions_lacking_definition() == []
+
+
+@pytest.fixture
+def ledger(store):
+    """Gate 2's ledger over the Postgres-backed store."""
+    from gate2 import make_ledger
+
+    return make_ledger(store)
+
+
+class TestGate2(Gate2):
+    """Gate 2 (ADR 002 §8) on PostgreSQL."""

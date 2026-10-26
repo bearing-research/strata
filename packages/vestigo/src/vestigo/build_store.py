@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS artifact_builds (
     params TEXT,  -- JSON object of transform params (for pull model)
     name TEXT,  -- Optional name pointer to set after completion
     logs TEXT,  -- Executor stderr/stdout logs (text blob for debugging)
+    occurrence TEXT,  -- Which instance of a repeated site this is (a sweep's variant)
+    attempt TEXT,  -- The attempt holding the lease; a release from any other is rejected
     FOREIGN KEY (artifact_id, version) REFERENCES artifact_versions(id, version)
 );
 
@@ -112,6 +114,8 @@ class BuildState:
     params: dict | None = None
     name: str | None = None
     logs: str | None = None
+    occurrence: str | None = None
+    attempt: str | None = None
 
     # Used by auth checks.
     @property
@@ -189,6 +193,8 @@ def _row_to_build_state(row: Any) -> BuildState:
         params=params,
         name=name,
         logs=logs,
+        occurrence=row["occurrence"],
+        attempt=row["attempt"],
     )
 
 
@@ -248,6 +254,7 @@ class BuildStore:
                     self._dialect.begin_write(conn, "__build_schema__")
                     conn.executescript(self._dialect.adapt_ddl(_CONSOLE_SCHEMA_SQL))
                     conn.commit()
+                self._add_release_columns(conn)
                 return
 
             cursor = conn.execute(
@@ -285,8 +292,17 @@ class BuildStore:
             conn.executescript(_ATTEMPT_SCHEMA_SQL)
             conn.executescript(_CONSOLE_SCHEMA_SQL)
             conn.commit()
+            self._add_release_columns(conn)
         finally:
             conn.close()
+
+    def _add_release_columns(self, conn: StoreConnection) -> None:
+        """The columns ADR 002 §7.2 added, on a database from before them (either dialect)."""
+        for column in ("occurrence", "attempt"):
+            if not self._dialect.column_exists(conn, "artifact_builds", column):
+                self._dialect.begin_write(conn, "__build_schema__")
+                conn.execute(f"ALTER TABLE artifact_builds ADD COLUMN {column} TEXT")
+                conn.commit()
 
     def create_build(
         self,
@@ -300,10 +316,13 @@ class BuildStore:
         input_uris: list[str] | None = None,
         params: dict | None = None,
         name: str | None = None,
+        occurrence: str | None = None,
     ) -> BuildState:
         """Create a build record in ``pending`` state.
 
-        ``name`` is a name pointer to set once the build completes.
+        ``name`` is a name pointer to set once the build completes. ``occurrence``
+        names which instance of a repeated site this is (a sweep's variant), so two
+        builds of one structure at one site stay distinct executions.
         """
         conn = self._get_connection()
         try:
@@ -316,8 +335,8 @@ class BuildStore:
                 INSERT INTO artifact_builds
                     (build_id, artifact_id, version, state, executor_ref,
                      executor_url, tenant_id, principal_id, created_at,
-                     input_uris, params, name)
-                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
+                     input_uris, params, name, occurrence)
+                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     build_id,
@@ -331,6 +350,7 @@ class BuildStore:
                     input_uris_json,
                     params_json,
                     name,
+                    occurrence,
                 ),
             )
             conn.commit()
@@ -348,9 +368,112 @@ class BuildStore:
                 input_uris=input_uris,
                 params=params,
                 name=name,
+                occurrence=occurrence,
             )
         finally:
             conn.close()
+
+    def open_attempt(
+        self,
+        build_id: str,
+        attempt: str,
+        *,
+        writable_until: float,
+        lease_owner: str | None = None,
+        lease_duration_seconds: float = 60.0,
+    ) -> bool:
+        """Make *attempt* the build's current attempt, fencing every earlier one.
+
+        A pending build starts; a building one continues (a resume). The attempt's
+        write window is recorded as ``record_attempt`` does. Returns False when the
+        build is not active.
+        """
+        conn = self._get_connection()
+        try:
+            self._dialect.begin_write(conn, build_id)
+            now = self._clock()
+            opened = self.open_attempt_within(
+                conn,
+                build_id,
+                attempt,
+                writable_until=writable_until,
+                lease_owner=lease_owner,
+                lease_expires_at=now + lease_duration_seconds,
+                now=now,
+            )
+            conn.commit()
+            return opened
+        finally:
+            conn.close()
+
+    def open_attempt_within(
+        self,
+        conn: StoreConnection,
+        build_id: str,
+        attempt: str,
+        *,
+        writable_until: float,
+        lease_owner: str | None,
+        lease_expires_at: float,
+        now: float,
+    ) -> bool:
+        """As :meth:`open_attempt`, on the caller's transaction."""
+        row = conn.execute(
+            "SELECT artifact_id, version, state FROM artifact_builds WHERE build_id = ?",
+            (build_id,),
+        ).fetchone()
+        if row is None or row["state"] not in ("pending", "building"):
+            return False
+        conn.execute(
+            """
+            UPDATE artifact_builds
+            SET state = 'building', attempt = ?,
+                started_at = COALESCE(started_at, ?),
+                lease_owner = COALESCE(?, lease_owner),
+                lease_expires_at = ?
+            WHERE build_id = ?
+            """,
+            (attempt, now, lease_owner, lease_expires_at, build_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO build_attempts (build_id, artifact_id, version, attempt, writable_until)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(build_id, attempt) DO UPDATE SET writable_until = CASE
+                WHEN excluded.writable_until > build_attempts.writable_until
+                THEN excluded.writable_until
+                ELSE build_attempts.writable_until
+            END
+            """,
+            (build_id, row["artifact_id"], row["version"], attempt, writable_until),
+        )
+        return True
+
+    def complete_attempt_within(
+        self,
+        conn: StoreConnection,
+        build_id: str,
+        attempt: str,
+        *,
+        artifact_id: str | None,
+        version: int | None,
+        now: float,
+    ) -> bool:
+        """Complete the build on the caller's transaction, fenced on *attempt*.
+
+        The build is repointed at ``artifact_id``/``version`` when given (a release's
+        first output). Returns True if *attempt* was current and the build is now ready.
+        """
+        cursor = conn.execute(
+            """
+            UPDATE artifact_builds
+            SET state = 'ready', completed_at = ?,
+                artifact_id = COALESCE(?, artifact_id), version = COALESCE(?, version)
+            WHERE build_id = ? AND state = 'building' AND attempt = ?
+            """,
+            (now, artifact_id, version, build_id, attempt),
+        )
+        return cursor.rowcount > 0
 
     def get_build(self, build_id: str) -> BuildState | None:
         """Get a build by ID, or None if not found."""
@@ -363,7 +486,7 @@ class BuildStore:
                        started_at, completed_at, error_message, error_code,
                        input_byte_count, output_byte_count,
                        lease_owner, lease_expires_at,
-                       input_uris, params, name, logs
+                       input_uris, params, name, logs, occurrence, attempt
                 FROM artifact_builds
                 WHERE build_id = ?
                 """,
@@ -516,7 +639,7 @@ class BuildStore:
                        started_at, completed_at, error_message, error_code,
                        input_byte_count, output_byte_count,
                        lease_owner, lease_expires_at,
-                       input_uris, params, name, logs
+                       input_uris, params, name, logs, occurrence, attempt
                 FROM artifact_builds
                 WHERE state = 'building'
                   AND lease_expires_at IS NOT NULL
@@ -794,7 +917,7 @@ class BuildStore:
                        started_at, completed_at, error_message, error_code,
                        input_byte_count, output_byte_count,
                        lease_owner, lease_expires_at,
-                       input_uris, params, name, logs
+                       input_uris, params, name, logs, occurrence, attempt
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY tenant_id ORDER BY created_at ASC
@@ -830,7 +953,7 @@ class BuildStore:
                            started_at, completed_at, error_message, error_code,
                            input_byte_count, output_byte_count,
                            lease_owner, lease_expires_at,
-                           input_uris, params, name, logs
+                           input_uris, params, name, logs, occurrence, attempt
                     FROM artifact_builds
                     WHERE tenant_id = ? AND state = ?
                     ORDER BY created_at DESC
@@ -846,7 +969,7 @@ class BuildStore:
                            started_at, completed_at, error_message, error_code,
                            input_byte_count, output_byte_count,
                            lease_owner, lease_expires_at,
-                           input_uris, params, name, logs
+                           input_uris, params, name, logs, occurrence, attempt
                     FROM artifact_builds
                     WHERE tenant_id = ?
                     ORDER BY created_at DESC

@@ -173,10 +173,14 @@ Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
 Ledger (`packages/vestigo/src/vestigo/`, ADR 002): `store`,
 `build_store`, `sql_backend`, `blob_store`, `provenance` (transform spec, hash,
-`derive_subkey`), `graph` (content-addressed structural nodes, `CGN1`/`CGD1`
-encoders, bounded traversal; `definition_id` on a version), `uris`,
-`file_modes`, `tables`; it imports nothing of Strata (blob settings, content
-validators, retention roots and required edges, node specs are passed in).
+`derive_subkey`, labelled output keys), `graph` (content-addressed structural
+nodes, `CGN1`/`CGD1` encoders, bounded traversal; `definition_id` on a version),
+`releases` (a build's checkpoint and final releases, fenced on its attempt's
+lease; references, authorities) with `operations` (the typed operations a
+release runs in its transaction), `uris`, `file_modes`, `tables`; it imports
+nothing of Strata (blob settings, content validators, retention roots and
+required edges, node specs are passed in). Gate 2 (ADR 002 §8) lives in
+`packages/vestigo/tests/gate2.py`, run on SQLite and Postgres.
 Strata's side: `artifact/` (`transfer`, `table_export`, `cli`, `retention` for
 what a version requires, `graph` for a cell's node and the reconstruction of
 old rows, `upgrades` for the per-store steps run wherever a store is opened),
