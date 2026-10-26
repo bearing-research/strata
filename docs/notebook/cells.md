@@ -109,6 +109,46 @@ It appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-r
 
 > Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op). A cell that stores no variable is cached too, keyed on its own provenance, so a cell whose whole point is the side effect needs `# @nocache` to re-fire.
 
+#### Checkpoints: `strata.checkpoint`, `strata.restore`, `strata.head`
+
+A long cell can publish its state as it goes. Each local Python run is an
+execution of the notebook's ledger, and three calls on the ambient client speak
+to it from inside the cell:
+
+```python
+state = strata.restore()  # None on a fresh run
+model, epoch = (state["model"], state["epoch"]) if state else (make_model(), 0)
+while epoch < 20:
+    epoch += 1
+    train_one_epoch(model)
+    sequence = strata.checkpoint(model=model, epoch=epoch)  # returns 1, 2, 3, ...
+    if is_best(model):
+        strata.head("model", sequence)  # a named pointer at this checkpoint
+```
+
+- `strata.checkpoint(**parts)` stores the parts (any value a cell variable can
+  hold) as one checkpoint of the run and returns its sequence number. It does
+  not block the cell: the bytes are written beside the run, and the server
+  accepts the checkpoint while the cell keeps going.
+- `strata.restore()` returns the parts of the checkpoint this run continues
+  from as `{name: value}`, or `None` when it starts from nothing. A run that
+  died after a checkpoint (a crash, a cancel, a server restart) continues from
+  its latest checkpoint on the next ordinary run; the sequence numbers carry
+  on from there. A rerun (`↻`, `--rerun`) starts fresh and never restores.
+- `strata.head(name, sequence)` points the run's named head (`model`,
+  `best`, ...) at one of its checkpoints. Prune keeps every checkpoint a head
+  points at and the latest checkpoint of a run still open; the rest are
+  collected like any other version.
+
+The cell's variables are stored as before once it returns; they are the run's
+final result, and a cell downstream sees only those. To start a new run from a
+checkpoint's parts instead of from nothing (a branch: try another learning rate
+from epoch 12), pass the release to run with: `strata cell run <dir> <cell>
+--init <release_id>` or `?init=` on the execute route. The branch is its own
+run under its own provenance key, so it never serves or overwrites the plain
+run's cache. The calls exist only on a local Python run; on a remote worker, an
+R cell or a prompt cell they raise a `RuntimeError` saying so.
+
 ### Library cells (cross-cell defs and classes)
 
 Top-level `def` and `class` definitions are shared across cells via a synthetic Python module: write a helper once, call it anywhere.
@@ -226,6 +266,7 @@ A cell on a [worker](workers.md) runs in a `work/` of its own, made for the run 
 | `# @write_table …` | Write a variable into an Iceberg table when the run succeeds (see [`@write_table`](annotations.md#write_table)) |
 | `# @output_dir X`  | Give the cell a folder whose contents are an output (see [`@output_dir`](annotations.md#output_dir)) |
 | `# @nocache`       | Always re-execute; never serve a cache hit       |
+| `# @stochastic`    | Every run persists beside the cache and never serves it (see [`@stochastic`](annotations.md#stochastic)) |
 | `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)    |
 
 See [Cell Annotations][a] for the full reference.

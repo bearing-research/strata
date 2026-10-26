@@ -146,7 +146,7 @@ class _FakeExecutor:
             execution_method="cold",
         )
 
-    async def execute_cell(self, cell_id, source):
+    async def execute_cell(self, cell_id, source, *, init=None):
         self.calls.append(("normal", cell_id))
         return self._result(cell_id, cache_hit=True)
 

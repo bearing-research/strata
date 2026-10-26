@@ -277,6 +277,9 @@ class CellAnnotations:
     sql: SqlAnnotation | None = None
     cache: CachePolicy | None = None
 
+    # ``# @stochastic``: every run's outputs persist as their own versions (keyed by the
+    # run's build), never served from cache; implies ``nocache``.
+    stochastic: bool = False
     # ``# @nocache``: always re-execute, never serve a cache hit. For side effects or fresh
     # randomness, where replaying a cached result would skip the effect. Any language.
     nocache: bool = False
@@ -408,6 +411,11 @@ def parse_annotations(source: str) -> CellAnnotations:
         elif key == "nocache":
             # ``# @nocache`` -> always re-run; ``# @nocache off`` re-enables caching.
             result.nocache = value.strip().lower() not in ("off", "false", "no", "0")
+
+        elif key == "stochastic":
+            result.stochastic = value.strip().lower() not in ("off", "false", "no", "0")
+            if result.stochastic:
+                result.nocache = True
 
         elif key == "name":
             if value:

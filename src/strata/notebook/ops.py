@@ -285,12 +285,16 @@ class NotebookOps(Protocol):
         """Return a compact per-cell status and staleness summary."""
         ...
 
-    async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
+    async def run_cell(
+        self, cell_id: str, *, mode: str = "normal", init: str | None = None
+    ) -> RunResult:
         """Execute one cell and return its outcome.
 
         ``mode``: ``normal`` uses the cache and materializes stale upstreams; ``rerun``
         bypasses the target's cache but still materializes upstreams; ``force`` runs
-        against whatever upstream artifacts already exist.
+        against whatever upstream artifacts already exist. ``init`` branches a normal
+        run from an accepted release of this notebook: the cell starts from its parts
+        (``strata.restore()``) as a new execution.
 
         Raises
         ------
@@ -481,7 +485,9 @@ class LocalNotebookOps:
         if not ok:
             raise NotebookOpsError(err or "notebook venv is not usable")
 
-    async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
+    async def run_cell(
+        self, cell_id: str, *, mode: str = "normal", init: str | None = None
+    ) -> RunResult:
         """Execute one cell (see :meth:`NotebookOps.run_cell`).
 
         Assumes the environment is ready: call :meth:`sync_environment` first.
@@ -489,9 +495,11 @@ class LocalNotebookOps:
         cell = self._session.notebook_state.get_cell(cell_id)
         if cell is None:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        if init is not None and mode != "normal":
+            raise NotebookOpsError("a branch (init) is a normal run; it takes no mode")
         executor = self._ensure_executor()
         if mode == "normal":
-            result = await executor.execute_cell(cell_id, cell.source)
+            result = await executor.execute_cell(cell_id, cell.source, init=init)
         elif mode == "rerun":
             result = await executor.execute_cell_rerun(cell_id, cell.source)
         elif mode == "force":
@@ -979,7 +987,9 @@ class RemoteNotebookOps:
 
     # -- execution -----------------------------------------------------------
 
-    async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
+    async def run_cell(
+        self, cell_id: str, *, mode: str = "normal", init: str | None = None
+    ) -> RunResult:
         """Execute one cell on the server; the server owns its venv, so there is no client sync."""
         import asyncio
 
@@ -988,7 +998,7 @@ class RemoteNotebookOps:
             "POST",
             f"/v1/notebooks/{self._session_id}/cells/{cell_id}/execute",
             cell_id=cell_id,
-            params={"mode": mode},
+            params={"mode": mode, **({"init": init} if init else {})},
         )
         return _run_result_from_wire(data)
 

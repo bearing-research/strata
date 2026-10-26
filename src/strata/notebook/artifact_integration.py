@@ -17,7 +17,9 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from vestigo.build_store import BuildStore
 from vestigo.provenance import TransformSpec
+from vestigo.releases import ReleaseStore
 from vestigo.store import ArtifactStore, StagedVersion
 
 from strata.artifact.graph import cell_definition
@@ -73,6 +75,12 @@ class NotebookArtifactManager:
 
         self.artifact_store = ArtifactStore(artifact_dir)
         complete_upgrade(self.artifact_store)
+        # The ledger's builds and releases, on the store's database: a local run's
+        # execution and its checkpoints (``local_runs``).
+        self.build_store = BuildStore(
+            self.artifact_store.db_path, dialect=self.artifact_store.dialect
+        )
+        self.release_store = ReleaseStore(self.artifact_store, self.build_store)
 
     def prune(self, keep_superseded: int, min_idle_seconds: float) -> dict:
         """Drop each cell output's values older than its newest *keep_superseded*.
@@ -99,11 +107,14 @@ class NotebookArtifactManager:
 
         self.artifact_store.sweep_zombie_builds(_ABANDONED_BUILD_SECONDS)
         # A folder file is not a value with versions: a manifest may name any of them.
+        # A checkpoint is nobody's current value: it goes unless a head holds it or a
+        # resume would start from it.
         result = self.artifact_store.garbage_collect(
             keep_superseded=keep_superseded,
             min_idle_seconds=min_idle_seconds,
             exempt=is_file_id,
             spare=failed_since_ready(self),
+            collectable=self.release_store.collectable_checkpoints(),
         )
         # After the values: a folder file goes once no manifest version left names it.
         files = unreferenced_files(self)
@@ -224,6 +235,7 @@ class NotebookArtifactManager:
         principal: str | None | Literal[_Default.CALLER] = _Default.CALLER,
         hardware: dict[str, Any] | None = None,
         extra_params: dict[str, str] | None = None,
+        computation_key: str | None = None,
     ) -> StagedVersion:
         """Write a cell output's bytes as a ``building`` version nobody reads yet.
 
@@ -247,6 +259,8 @@ class NotebookArtifactManager:
             principal: Who computed the bytes. Defaults to the member the run is
                 for (``caller_principal_id``); a result pulled from a shared store
                 passes its publisher, even when that is ``None``.
+            computation_key: The cell run's parent hash, which every output and
+                checkpoint of one bound computation shares (ADR 002 §7.1).
         """
         # Artifacts live under the notebook dir: a write during a copy would
         # leave the copy's runtime.json and artifacts out of step.
@@ -293,6 +307,7 @@ class NotebookArtifactManager:
             principal=principal,
             requires=requirements(artifact_id, content_type, blob_data),
             definition=cell_definition(self.artifact_store, transform_spec, input_versions),
+            computation_key=computation_key,
         )
 
         self.artifact_store.blob_store.write_blob(artifact_id, version, blob_data)

@@ -39,6 +39,7 @@ _ser = _load_local_module("serializer.py", "_nb_serializer")
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
+_channel = _load_local_module("run_channel.py", "_nb_run_channel")
 _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 _work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
 
@@ -227,6 +228,10 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
         headers=headers,
         promote_url=manifest.get("strata_promote_url") or None,
         inputs=input_uris,
+        # The executor's pipe, when it opened one: ``strata.checkpoint`` publishes over it.
+        channel=_channel.from_pipe(
+            manifest, serialize=_ser.serialize_value, deserialize=_ser.deserialize_value
+        ),
     )
     namespace["strata"] = client
     return client

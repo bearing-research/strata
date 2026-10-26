@@ -1126,6 +1126,12 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     run_p.add_argument(
         "--no-sync", action="store_true", help="Skip `uv sync`; use the existing .venv/bin/python"
     )
+    run_p.add_argument(
+        "--init",
+        default=None,
+        metavar="RELEASE",
+        help="Branch: start the cell from this accepted release's parts (strata.restore())",
+    )
     run_p.add_argument("--format", choices=["human", "json"], default="json")
     run_p.set_defaults(func=cell_run_main)
 
@@ -1924,7 +1930,7 @@ async def _cell_run_async(args: argparse.Namespace) -> int:
                 return rc
         mode = "force" if args.force else "rerun" if args.rerun else "normal"
         try:
-            result = await ops.run_cell(args.cell_id, mode=mode)
+            result = await ops.run_cell(args.cell_id, mode=mode, init=args.init)
         except NotebookOpsError as exc:
             return _emit_op_error(exc, args.format)
     finally:

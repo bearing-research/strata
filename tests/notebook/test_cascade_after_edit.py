@@ -307,9 +307,11 @@ class TestCascadeAfterEdit:
                 art = artifact_mgr.artifact_store.get_latest_version(c1_x_id)
                 assert art is not None, "Precondition: c1:x artifact must exist"
 
-                # Delete the artifact row so it looks missing.
+                # Delete the artifact row so it looks missing (the build of the run
+                # that made it still points at it, so the key check is off for this).
                 conn = artifact_mgr.artifact_store._get_connection()
                 try:
+                    conn.execute("PRAGMA foreign_keys = OFF")
                     conn.execute(
                         "DELETE FROM artifact_versions WHERE id = ?",
                         (c1_x_id,),

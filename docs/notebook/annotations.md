@@ -656,6 +656,29 @@ headless `strata run`) each cell executes once, so two consumers of a
 
 ---
 
+## @stochastic
+
+Mark a cell whose runs are **samples**: every run executes (as `@nocache`) and
+every run's outputs are **kept**, each under its own run rather than under the
+cell's provenance key.
+
+```python
+# @stochastic
+import numpy as np
+
+rng = np.random.default_rng()
+draw = rng.normal(size=1000)
+```
+
+A `@nocache` cell re-executes but each run's outputs replace the last under the
+same key. A `@stochastic` cell's outputs are keyed by the run that made them,
+so the ledger holds every sample side by side, each tracing back to the same
+inputs and source, and none of them is ever served as a cache hit. Use it for a
+seedless simulation, a random search, anything where the point is the spread
+of runs rather than the one answer.
+
+---
+
 ## Prompt Cell Annotations
 
 Prompt cells (language `prompt`) accept an additional set of annotations that

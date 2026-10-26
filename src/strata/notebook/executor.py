@@ -19,7 +19,9 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
+import sys
 import tempfile
 import time
 import uuid
@@ -36,7 +38,7 @@ from pydantic import ValidationError
 from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 from vestigo.build_store import get_build_store
 from vestigo.provenance import TransformSpec as ArtifactTransformSpec
-from vestigo.provenance import derive_subkey
+from vestigo.provenance import derive_subkey, run_output_key
 
 # Stdlib json, not orjson: executor.py is imported via ``strata.config`` and must load
 # with core deps only (orjson is in the ``[notebook]`` extra, absent from the Docker
@@ -66,6 +68,14 @@ from strata.notebook.harness_user import (
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.layout import WORK_DIR
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
+from strata.notebook.local_runs import (
+    RESTORE_DIR,
+    LocalRun,
+    LocalRuns,
+    RunFenced,
+    RunRefused,
+    relay_events,
+)
 from strata.notebook.models import (
     CellLanguage,
     CellOutput,
@@ -123,6 +133,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
+from strata.notebook.run_channel import EVENTS_FD_ENV
 from strata.notebook.serializer import ContentType
 from strata.notebook.table_writes import (
     StagedOutput,
@@ -697,6 +708,11 @@ class CellExecutor:
         # DAG cycle guard for recursive materialization. Per-instance is correct: each
         # top-level call makes a fresh CellExecutor.
         self._materializing: set[str] = set()
+        # Local runs in flight, by cell: the build each holds and the task renewing its
+        # lease (``local_runs``). Closed when the run's outputs are stored, or on exit.
+        self._open_runs: dict[str, tuple[LocalRun, asyncio.Task[None]]] = {}
+        # ``init=`` of a pending branch run, by cell (design note 10 §4).
+        self._branch_inits: dict[str, str] = {}
         # Upstreams this run settled, with their results, so the caller can tell a watching
         # client what became of them. Two kinds: each failure along a broken chain, and a
         # cell that previously errored and now ran clean (nothing else would retract the
@@ -760,14 +776,21 @@ class CellExecutor:
         cell_id: str,
         source: str,
         timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
+        *,
+        init: str | None = None,
     ) -> CellExecutionResult:
-        """Materialise a cell: ensure inputs, check cache, execute, store."""
+        """Materialise a cell: ensure inputs, check cache, execute, store.
+
+        ``init`` branches: the cell starts from that accepted release's parts
+        (``strata.restore()``), as a new execution of the same definition.
+        """
         return await self._execute_cell(
             cell_id,
             source,
             timeout_seconds,
             materialize_upstreams=True,
             use_cache=True,
+            init=init,
         )
 
     async def execute_cell_force(
@@ -796,6 +819,15 @@ class CellExecutor:
             materialize_upstreams=True,
             use_cache=False,
         )
+
+    def _local_runs(self) -> LocalRuns:
+        return LocalRuns(self.session.get_artifact_manager())
+
+    async def _close_open_run(self, cell_id: str) -> None:
+        """End the cell's local run, if one is open: stop renewing, settle its build."""
+        opened = self._open_runs.pop(cell_id, None)
+        if opened is not None:
+            await self._local_runs().close(opened[0], opened[1])
 
     async def run_cell_tests(self, cell_id: str, test_source: str) -> CellTestResult:
         """Run a Python cell's unit tests and persist the result.
@@ -1031,6 +1063,7 @@ class CellExecutor:
         *,
         materialize_upstreams: bool,
         use_cache: bool,
+        init: str | None = None,
     ) -> CellExecutionResult:
         """Shared execution entrypoint with explicit cache/materialization policy.
 
@@ -1046,6 +1079,7 @@ class CellExecutor:
                     timeout_seconds,
                     materialize_upstreams=materialize_upstreams,
                     use_cache=use_cache,
+                    init=init,
                 )
         scope = self._run_scope
         earlier = scope.get(cell_id)
@@ -1057,14 +1091,21 @@ class CellExecutor:
         worker = effective_worker_name(
             self.session.notebook_state, cell_id, parse_annotations(source).worker
         )
-        with one_policy_read(notebook_state, await read_worker_policy(notebook_state, worker)):
-            result = await self._dispatch_cell(
-                cell_id,
-                source,
-                timeout_seconds,
-                materialize_upstreams=materialize_upstreams,
-                use_cache=use_cache,
-            )
+        if init is not None:
+            self._branch_inits[cell_id] = init
+        try:
+            with one_policy_read(notebook_state, await read_worker_policy(notebook_state, worker)):
+                result = await self._dispatch_cell(
+                    cell_id,
+                    source,
+                    timeout_seconds,
+                    materialize_upstreams=materialize_upstreams,
+                    use_cache=use_cache,
+                )
+        finally:
+            self._branch_inits.pop(cell_id, None)
+            # A run the pipeline left open (it raised, or the cell failed) ends here.
+            await self._close_open_run(cell_id)
         if result.success:
             scope[cell_id] = result
         return result
@@ -1485,6 +1526,10 @@ class CellExecutor:
             # Scope provenance to this variant so each instance caches independently.
             if fanout_variant is not None:
                 provenance_hash = derive_subkey(provenance_hash, f"variant={fanout_variant}")
+            # A branch is a new computation: its initial state is bound, never defined.
+            init = self._branch_inits.get(cell_id)
+            if init is not None:
+                provenance_hash = derive_subkey(provenance_hash, f"init={init}")
 
             # RW mounts have side effects: not cacheable. A rerun bypasses the cache but still
             # records a cacheable leaf's console, or the next plain run replays an older one.
@@ -1777,6 +1822,37 @@ class CellExecutor:
 
                 venv_path = self.session.venv_python
 
+                # A local run is an execution of the ledger: a build with an attempt whose
+                # lease this process renews, open until its outputs are stored.
+                local_run: LocalRun | None = None
+                if worker_spec is not None and worker_spec.backend == WorkerBackendType.LOCAL:
+                    try:
+                        local_run = await anyio.to_thread.run_sync(
+                            functools.partial(
+                                self._local_runs().open,
+                                cell_id=cell_id,
+                                computation_key=provenance_hash,
+                                variant=fanout_variant,
+                                input_versions=self._input_refs(cell_id, fanout_variant),
+                                timeout_seconds=timeout_seconds,
+                                resume=use_cache,
+                                init=init,
+                            )
+                        )
+                    except RunRefused as exc:
+                        return CellExecutionResult(
+                            cell_id=cell_id, success=False, error=str(exc), execution_method="error"
+                        )
+                    self._open_runs[cell_id] = (
+                        local_run,
+                        self._local_runs().start_renewing(local_run),
+                    )
+                    restore = await anyio.to_thread.run_sync(
+                        self._restore_manifest, local_run, output_dir
+                    )
+                else:
+                    restore = None
+
                 (
                     result,
                     result_output_dir,
@@ -1797,6 +1873,8 @@ class CellExecutor:
                     tables=manifest_tables,
                     cell_id=cell_id,
                     cell_provenance_hash=provenance_hash,
+                    local_run=local_run,
+                    restore=restore,
                 )
                 if remote_build_id and remote_metadata.get("remote_transport") == "signed":
                     remote_metadata["remote_build_state"] = "ready"
@@ -1864,9 +1942,12 @@ class CellExecutor:
                             # travels with the bytes.
                             build_duration_ms=exec_result.duration_ms,
                             collected=collected,
+                            local_run=local_run,
+                            stochastic=prov.annotations.stochastic,
                         )
                     except TableWriteError as exc:
                         stored_ok, store_error = False, str(exc)
+                    await self._close_open_run(cell_id)
                     if not stored_ok:
                         logger.error(
                             "Cell %s executed OK but artifact storage failed.",
@@ -2788,11 +2869,15 @@ class CellExecutor:
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
         cell_provenance_hash: str | None = None,
+        local_run: LocalRun | None = None,
+        restore: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Dispatch one cell execution through the selected worker backend.
 
         *result_dir* is an empty server-only directory an embedded worker's result is
-        unpacked into.
+        unpacked into. *local_run* is the local path's execution, whose checkpoint
+        events it releases; *restore* is the manifest entry naming what the cell
+        starts from.
         """
         if worker_spec.backend == WorkerBackendType.LOCAL:
             return await self._dispatch_local(
@@ -2806,6 +2891,8 @@ class CellExecutor:
                 mutation_defines=mutation_defines,
                 tables=tables,
                 cell_id=cell_id,
+                local_run=local_run,
+                restore=restore,
             )
 
         if is_embedded_executor_worker(worker_spec):
@@ -2862,11 +2949,18 @@ class CellExecutor:
         mutation_defines: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
+        local_run: LocalRun | None = None,
+        restore: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run the direct local execution path."""
         result = None
         execution_method = "cold"
         resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
+        on_event = (
+            self._local_runs().event_handler(local_run, output_dir)
+            if local_run is not None
+            else None
+        )
         with self._run_token(timeout_seconds) as run_token:
             manifest_path = self._write_manifest(
                 source,
@@ -2878,6 +2972,7 @@ class CellExecutor:
                 tables=tables,
                 cell_id=cell_id,
                 run_token=run_token,
+                restore=restore,
             )
 
             # Without an interpreter nothing runs, not even in a pre-started warm process:
@@ -2885,13 +2980,17 @@ class CellExecutor:
             if self.pool is not None and venv_path is not None:
                 from strata.notebook.pool import PooledCellExecutor
 
-                pool_result = await PooledCellExecutor.execute_with_pool(
-                    self.pool,
-                    manifest_path,
-                    self.session.path,
-                    timeout_seconds,
-                    run_token=run_token,
-                )
+                try:
+                    pool_result = await PooledCellExecutor.execute_with_pool(
+                        self.pool,
+                        manifest_path,
+                        self.session.path,
+                        timeout_seconds,
+                        run_token=run_token,
+                        on_event=on_event,
+                    )
+                except RunFenced as exc:
+                    return _fenced_result(exc), output_dir, "warm", resolved_mounts
                 if pool_result is not None:
                     result = pool_result
                     execution_method = "warm"
@@ -2909,6 +3008,7 @@ class CellExecutor:
                     venv_path,
                     timeout_seconds,
                     run_token=run_token,
+                    on_event=on_event,
                 )
 
         return result, output_dir, execution_method, resolved_mounts
@@ -4729,12 +4829,14 @@ class CellExecutor:
         cell_id: str | None = None,
         folder_mounts: dict[str, dict[str, str]] | None = None,
         run_token: str | None = None,
+        restore: dict[str, Any] | None = None,
     ) -> Path:
         """Write the harness manifest for one local execution.
 
         *folder_mounts* replaces the run's own ``# @output_dir`` folders: a loop's live
         outside each iteration's run directory. A *run_token* is not written, only
-        announced: it follows on the harness's stdin.
+        announced: it follows on the harness's stdin. *restore* names the release and
+        the part files ``strata.restore()`` returns (``_restore_manifest``).
         """
         manifest_mounts = {
             name: {
@@ -4767,6 +4869,8 @@ class CellExecutor:
             manifest["loop"] = loop_config
         if run_token is not None:
             manifest["run_token_on_stdin"] = True
+        if restore is not None:
+            manifest["restore"] = restore
         manifest_path = output_dir / "manifest.json"
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f)
@@ -5331,6 +5435,16 @@ class CellExecutor:
     # ⑤ Store output artifacts
     # ------------------------------------------------------------------
 
+    def _release_nothing(self, cell_id: str, local_run: LocalRun | None) -> bool:
+        """Complete a run that stores no variable: an empty ``final`` release ends its build."""
+        if local_run is None:
+            return True
+        try:
+            self._local_runs().finalize(local_run, [])
+        except Exception:
+            logger.exception("Failed to complete the run of cell %s", cell_id)
+        return True
+
     def _store_outputs(
         self,
         cell_id: str,
@@ -5346,6 +5460,8 @@ class CellExecutor:
         build_duration_ms: float = 0.0,
         hardware: dict[str, Any] | None = None,
         collected: dict[str, bytes | Exception] | None = None,
+        local_run: LocalRun | None = None,
+        stochastic: bool = False,
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
@@ -5353,11 +5469,13 @@ class CellExecutor:
         *collected* holds folders already collected by :meth:`_collect_output_dirs`.
 
         With ``variant`` set, ids get an ``@variant={name}`` suffix so fan-out
-        instances do not collide.
+        instances do not collide. With a *local_run*, the outputs become its ``final``
+        release; *stochastic* keys them by the run (``# @stochastic``) so every run's
+        persist beside the cached key, which none of them matches.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
-            return True
+            return self._release_nothing(cell_id, local_run)
 
         artifact_mgr = self.session.get_artifact_manager()
         input_versions = self._input_refs(cell_id, variant)
@@ -5379,7 +5497,7 @@ class CellExecutor:
         # serialize is skipped rather than failing the cell.
         leaf_vars = set(cell.defines) if not consumed_vars and self.store_leaf_outputs else set()
         if not consumed_vars and not leaf_vars:
-            return True
+            return self._release_nothing(cell_id, local_run)
 
         all_stored = True
         staged: list[StagedVersion] = []
@@ -5409,6 +5527,11 @@ class CellExecutor:
             ".rds",
         ]
 
+        def output_key(var_name: str) -> str:
+            if stochastic and local_run is not None:
+                return run_output_key(provenance_hash, local_run.build_id, var_name)
+            return derive_subkey(provenance_hash, var_name)
+
         output_dir_names = set(parse_annotations(source or cell.source).output_dirs)
         for var_name in consumed_vars | leaf_vars:
             if var_name in output_dir_names:
@@ -5425,6 +5548,8 @@ class CellExecutor:
                             env_hash=env_hash,
                             variant=variant,
                             collected=(collected or {}).get(var_name),
+                            output_key=output_key(var_name),
+                            computation_key=provenance_hash,
                         )
                     )
                 except UnsafeRunFile:
@@ -5472,7 +5597,7 @@ class CellExecutor:
                 blob_data = read_run_file(output_dir, output_file.name)
 
                 content_type = content_type_map.get(ext, "pickle/object")
-                var_provenance = derive_subkey(provenance_hash, var_name)
+                var_provenance = output_key(var_name)
 
                 staged.append(
                     artifact_mgr.stage_cell_output(
@@ -5490,6 +5615,7 @@ class CellExecutor:
                         build_duration_ms=build_duration_ms,
                         hardware=hardware,
                         extra_params=self._fetch_params(cell_id),
+                        computation_key=provenance_hash,
                     )
                 )
                 staged_names.append((var_name, content_type))
@@ -5529,9 +5655,15 @@ class CellExecutor:
             if not all_stored:
                 artifact_mgr.discard_cell_outputs(staged)
                 return False
-            stored = artifact_mgr.finalize_cell_outputs(staged)
+            # A local run's outputs are its final release, which completes its build.
+            stored = (
+                self._local_runs().finalize(local_run, staged)
+                if local_run is not None
+                else artifact_mgr.finalize_cell_outputs(staged)
+            )
         except Exception:
             logger.exception("Failed to store the outputs of cell %s", cell_id)
+            artifact_mgr.discard_cell_outputs(staged)
             # A leaf's record is best-effort and never fails the cell.
             return not consumed_vars
 
@@ -5622,10 +5754,13 @@ class CellExecutor:
         env_hash: str,
         variant: str | None = None,
         collected: bytes | Exception | None = None,
+        output_key: str | None = None,
+        computation_key: str | None = None,
     ) -> StagedVersion:
         """Keep a ``# @output_dir`` folder's files and stage its manifest as the output.
 
         *collected* is the folder already collected by :meth:`_collect_output_dirs`.
+        *output_key* replaces the output's derived key (a ``# @stochastic`` run's).
         """
         artifact_mgr = self.session.get_artifact_manager()
         if isinstance(collected, Exception):
@@ -5641,13 +5776,49 @@ class CellExecutor:
             variable_name=name,
             blob_data=manifest,
             content_type=output_dirs.CONTENT_TYPE,
-            provenance_hash=derive_subkey(provenance_hash, name),
+            provenance_hash=output_key or derive_subkey(provenance_hash, name),
             input_versions=input_versions,
             source_hash=source_hash,
             source=source,
             env_hash=env_hash,
             variant=variant,
+            computation_key=computation_key,
         )
+
+    def _restore_manifest(self, run: LocalRun, output_dir: Path) -> dict[str, Any] | None:
+        """The manifest's ``restore`` entry: the release's parts, written as input files.
+
+        A resumed run continues its build's checkpoint sequence; a branch starts its own.
+        """
+        release_id = run.restores_from
+        if release_id is None:
+            return None
+        artifact_mgr = self.session.get_artifact_manager()
+        bundle = artifact_mgr.release_store.bundle(release_id)
+        if bundle is None or bundle.release.state != "accepted":
+            raise RuntimeError(f"Release {release_id} is not an accepted release of this notebook")
+        (output_dir / RESTORE_DIR).mkdir(exist_ok=True)
+        parts: dict[str, dict[str, str]] = {}
+        for version in bundle.outputs:
+            match = _OUTPUT_VARIABLE.search(version.id)
+            if match is None:
+                continue
+            name = match.group(1)
+            content_type = version.params.get("content_type") or "pickle/object"
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
+            file_name = f"{RESTORE_DIR}/{safe_filename_stem(name)}{ext}"
+            blob = artifact_mgr.load_artifact_data(version.id, version.version)
+            self._write_input_file(output_dir / file_name, blob, content_type, version.id)
+            parts[name] = {
+                "content_type": content_type,
+                "file": file_name,
+                "uri": f"strata://artifact/{version.id}@v={version.version}",
+            }
+        return {
+            "release_id": release_id,
+            "sequence": bundle.release.sequence if run.resumed_from else 0,
+            "parts": parts,
+        }
 
     def _keep_failed_output_dirs(
         self,
@@ -6149,10 +6320,12 @@ class CellExecutor:
         timeout_seconds: float,
         *,
         run_token: str | None = None,
+        on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Run the harness via uv, or as the harness user; no-op if ``venv_python`` is None.
 
-        A *run_token* goes to the harness on its stdin.
+        A *run_token* goes to the harness on its stdin. With *on_event*, the harness
+        gets a pipe for its event lines (``run_channel``), relayed there in order.
         """
         if venv_python is None:
             return {
@@ -6187,17 +6360,38 @@ class CellExecutor:
 
         hand_over(manifest_path.parent, harness_user)
         lifeline_fds, lifeline_vars = lifeline_handoff()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(self.session.path),
-            stdin=asyncio.subprocess.PIPE if run_token is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # ``uv run`` must find the notebook's .venv, not the server's environment.
-            env=uv_env(identity_env(self._harness_env(lifeline_vars), harness_user)),
-            pass_fds=lifeline_fds,
-            **spawn_kwargs(harness_user),
-            **subprocess_kwargs_for_new_group(),
+        # The event pipe: the harness inherits the write end and keeps it from its
+        # children, so EOF on the read end is the harness exiting. None on Windows,
+        # which passes no descriptors.
+        events_fds: tuple[int, ...] = ()
+        events_vars: dict[str, str] = {}
+        read_fd = -1
+        if on_event is not None and sys.platform != "win32":
+            read_fd, write_fd = os.pipe()
+            events_fds = (write_fd,)
+            events_vars = {EVENTS_FD_ENV: str(write_fd)}
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(self.session.path),
+                stdin=asyncio.subprocess.PIPE if run_token is not None else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                # ``uv run`` must find the notebook's .venv, not the server's environment.
+                env=uv_env(
+                    identity_env(self._harness_env({**lifeline_vars, **events_vars}), harness_user)
+                ),
+                pass_fds=(*lifeline_fds, *events_fds),
+                **spawn_kwargs(harness_user),
+                **subprocess_kwargs_for_new_group(),
+            )
+        finally:
+            for fd in events_fds:
+                os.close(fd)
+        relay = (
+            asyncio.create_task(relay_events(read_fd, on_event, proc))
+            if events_fds and on_event is not None
+            else None
         )
 
         try:
@@ -6210,6 +6404,8 @@ class CellExecutor:
                 "Cell execution cancelled; terminating harness subprocess tree pid=%s",
                 proc.pid,
             )
+            if relay is not None:
+                relay.cancel()
             try:
                 await asyncio.shield(terminate_subprocess_tree(proc))
             except Exception:
@@ -6219,8 +6415,14 @@ class CellExecutor:
                 )
             raise
         except TimeoutError:
+            if relay is not None:
+                relay.cancel()
             await terminate_subprocess_tree(proc)
             raise TimeoutError()
+        # Drained to EOF: the harness has exited, so every line it wrote is in.
+        fenced = await relay if relay is not None else None
+        if fenced is not None:
+            return _fenced_result(fenced)
 
         # Separate from manifest.json and user files like result.json. Absent means the
         # harness crashed before its finally block (typically an import error): surface
@@ -8059,6 +8261,15 @@ def display_metadata_params(display_output: dict[str, Any], count: int) -> dict[
         "display": json.dumps(metadata, sort_keys=True, default=str),
         "display_count": str(count),
     }
+
+
+# The variable a cell output's id names, before any ``@ckpt=`` / ``@variant=`` label.
+_OUTPUT_VARIABLE = re.compile(r"_var_([^@]+)")
+
+
+def _fenced_result(exc: RunFenced) -> dict[str, Any]:
+    """A harness result for a run whose attempt lost its build mid-cell."""
+    return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
 
 
 _ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {

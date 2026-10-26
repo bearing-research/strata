@@ -9,9 +9,10 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from strata.notebook.harness_env import configured_allowlist, harness_env
 from strata.notebook.harness_user import (
@@ -22,12 +23,14 @@ from strata.notebook.harness_user import (
     spawn_kwargs,
 )
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
+from strata.notebook.local_runs import RunFenced
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
     kill_subprocess_tree_nowait,
     subprocess_kwargs_for_new_group,
     terminate_subprocess_tree,
 )
+from strata.notebook.run_channel import is_event_line
 
 if TYPE_CHECKING:
     import asyncio.subprocess
@@ -251,11 +254,13 @@ class PooledCellExecutor:
         timeout_seconds: float = 30,
         *,
         run_token: str | None = None,
+        on_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> dict | None:
         """Execute a cell using a warm process from the pool.
 
         Returns None when no warm process is available; the caller then cold-spawns. A
-        *run_token* follows the manifest path on the worker's stdin.
+        *run_token* follows the manifest path on the worker's stdin. Event lines the
+        worker writes ahead of its result (``run_channel``) go to *on_event*, in order.
 
         Raises:
             TimeoutError: the cell exceeded ``timeout_seconds`` in the worker. This is
@@ -282,17 +287,20 @@ class PooledCellExecutor:
             warm_proc.process.stdin.write(manifest_str)
             await warm_proc.process.stdin.drain()
 
-            result_json = await asyncio.wait_for(
-                warm_proc.process.stdout.readline(),
-                timeout=timeout_seconds,
-            )
-
-            if result_json:
-                result_data = json.loads(result_json.decode())
-                return result_data
-            else:
-                logger.warning("Warm process returned empty result")
-                return None
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
+            while True:
+                result_json = await asyncio.wait_for(
+                    warm_proc.process.stdout.readline(),
+                    timeout=deadline - asyncio.get_running_loop().time(),
+                )
+                if not result_json:
+                    logger.warning("Warm process returned empty result")
+                    return None
+                text = result_json.decode()
+                if on_event is not None and is_event_line(text):
+                    await on_event(json.loads(text))
+                    continue
+                return json.loads(text)
 
         except asyncio.CancelledError:
             logger.info(
@@ -313,6 +321,11 @@ class PooledCellExecutor:
             # the caller re-run the cell cold: twice the timeout, and side
             # effects run twice.
             logger.warning("Warm process execution timed out")
+            raise
+        except RunFenced:
+            # Nothing the cell does now counts; cold would run it twice, so not None.
+            if warm_proc.process.returncode is None:
+                await asyncio.shield(terminate_subprocess_tree(warm_proc.process))
             raise
         except Exception as e:
             logger.error(f"Error executing with warm process: {e}")

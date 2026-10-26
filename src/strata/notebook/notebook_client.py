@@ -139,6 +139,7 @@ class StrataClient:
         headers: dict[str, str] | None = None,
         promote_url: str | None = None,
         inputs: dict[str, str] | None = None,
+        channel: Any = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -155,6 +156,9 @@ class StrataClient:
         # Variable name -> artifact URI for this cell's inputs, so a cell can promote an
         # upstream result by the name it reads it under.
         self._inputs = dict(inputs or {})
+        # The run's checkpoint channel (``run_channel.RunChannel``); None where the cell
+        # runs without one, such as on a remote worker.
+        self._channel = channel
 
     def _stamp_cell(self, artifact: Artifact, name: str | None) -> None:
         """Tag a named artifact with the originating cell; best effort, errors swallowed."""
@@ -366,6 +370,41 @@ class StrataClient:
             body,
         )
 
+    # -- The run's own releases (ADR 002 E4b) ---------------------------------
+
+    def checkpoint(self, **parts: Any) -> int:
+        """Publish a checkpoint of this run made of the named *parts*; returns its sequence.
+
+        The parts are stored like outputs and become current together, under one
+        release, while the cell keeps running. Returns once the parts are written;
+        the server accepts the release in the background.
+        """
+        return self._channel_for("checkpoint").checkpoint(**parts)
+
+    def restore(self) -> dict[str, Any] | None:
+        """The parts this run starts from, or ``None`` on a fresh start.
+
+        A run resumed after an interruption gets its newest accepted checkpoint; a run
+        branched from a release gets that release's parts.
+        """
+        return self._channel_for("restore").restore()
+
+    def head(self, name: str, sequence: int) -> None:
+        """Point the cell's head *name* at this run's checkpoint *sequence*.
+
+        A head keeps its checkpoint through pruning; ``best-validation`` is the usual
+        one.
+        """
+        self._channel_for("head").head(name, sequence)
+
+    def _channel_for(self, what: str) -> Any:
+        if self._channel is None:
+            raise RuntimeError(
+                f"strata.{what}() needs a local Python cell run: this run has no checkpoint "
+                "channel (a remote worker, an R cell or code outside a cell)."
+            )
+        return self._channel
+
     def get_registry_audit(self, name: str | None = None, limit: int = 100) -> list[dict]:
         path = f"/v1/registry/audit?limit={limit}"
         if name:
@@ -373,6 +412,6 @@ class StrataClient:
         return self._request("GET", path).get("entries", [])
 
     def close(self) -> None:
-        # urllib opens a connection per request. Present so cells written against
-        # StrataClient's .close() keep working.
-        return None
+        # urllib opens a connection per request; only the channel holds anything open.
+        if self._channel is not None:
+            self._channel.close()
