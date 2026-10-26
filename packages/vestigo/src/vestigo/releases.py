@@ -4,15 +4,16 @@ A build is an execution; its attempts are the tries that may write its bytes; a
 release is one event that makes a set of staged outputs current together. A
 ``building`` build accepts any number of ``checkpoint`` releases and stays
 building; its ``final`` release ends it. Acceptance is fenced: a release whose
-attempt no longer holds the build's lease, or whose write window has closed, is
-rejected, so a resumed execution's old attempt can never publish over the new one.
-Acceptance follows confirmed completion: every staged output's bytes must be in the
-blob store at the declared size before the row becomes current, which on storage
-with no atomic rename is the only commit point there is.
+attempt is no longer the build's, whose lease has lapsed, or whose write window
+has closed, is rejected, so a resumed execution's old attempt can never publish
+over the new one. Acceptance follows confirmed completion: every output staged
+under the release must be declared, and its bytes must be in the blob store at the
+declared size before the row becomes current, which on storage with no atomic
+rename is the only commit point there is.
 
 The typed operations a caller passes with the release (:mod:`vestigo.operations`)
 run inside the acceptance transaction, in order; one that fails leaves nothing
-behind and the release where it was.
+behind and the release where it was. A release belongs to its build's tenant.
 """
 
 from __future__ import annotations
@@ -133,16 +134,30 @@ def _release_from_row(row) -> Release:
 
 
 def lease_held(conn: StoreConnection, build_id: str, attempt: str, now: float) -> bool:
-    """Whether *attempt* is the build's current attempt and may still write."""
+    """Whether *attempt* is the build's current attempt and may still write.
+
+    It may not once the build's lease has lapsed (another runner may reclaim the
+    build) or its write window has closed.
+    """
     row = conn.execute(
-        "SELECT b.state, b.attempt, a.writable_until FROM artifact_builds b "
+        "SELECT b.state, b.attempt, b.lease_expires_at, a.writable_until FROM artifact_builds b "
         "LEFT JOIN build_attempts a ON a.build_id = b.build_id AND a.attempt = ? "
         "WHERE b.build_id = ?",
         (attempt, build_id),
     ).fetchone()
     if row is None or row["state"] != "building" or row["attempt"] != attempt:
         return False
+    if row["lease_expires_at"] is not None and row["lease_expires_at"] < now:
+        return False
     return row["writable_until"] is not None and row["writable_until"] > now
+
+
+def _tenant_of(conn: StoreConnection, build_id: str) -> str:
+    """The build's tenant, ``''`` for the default; the build must exist."""
+    row = conn.execute(
+        "SELECT tenant_id FROM artifact_builds WHERE build_id = ?", (build_id,)
+    ).fetchone()
+    return row["tenant_id"] or ""
 
 
 class ReleaseStore:
@@ -175,11 +190,15 @@ class ReleaseStore:
         """Open a release the attempt will stage outputs for; ``preparing`` until accepted.
 
         *sequence* defaults to the next of the build's *kind*. The attempt must hold
-        the build's lease now, as it must again at acceptance.
+        the build's lease now, as it must again at acceptance. *tenant* defaults to
+        the build's and may not differ from it.
 
         Raises:
-            ValueError: *kind* is not ``checkpoint`` or ``final``.
+            ValueError: *kind* is not ``checkpoint`` or ``final``, or *tenant* is
+                not the build's.
             ReleaseRejected: the attempt does not hold the lease.
+            ReleaseError: the build already has a *kind* release at *sequence*, or
+                *release_id* is taken.
         """
         if kind not in KINDS:
             raise ValueError(f"kind must be one of {KINDS}, not {kind!r}")
@@ -190,6 +209,7 @@ class ReleaseStore:
             if not lease_held(conn, build_id, attempt, now):
                 conn.rollback()
                 raise ReleaseRejected(f"attempt {attempt} does not hold build {build_id}")
+            tenant = self._release_tenant(conn, build_id, tenant)
             if sequence is None:
                 row = conn.execute(
                     "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence "
@@ -199,7 +219,7 @@ class ReleaseStore:
                 sequence = int(row["next_sequence"])
             release = Release(
                 release_id=release_id or uuid.uuid4().hex,
-                tenant=tenant if tenant is not None else "",
+                tenant=tenant,
                 build_id=build_id,
                 attempt=attempt,
                 kind=kind,
@@ -208,33 +228,44 @@ class ReleaseStore:
                 created_at=now,
                 settled_at=None,
             )
-            conn.execute(
-                "INSERT INTO build_releases (release_id, tenant, build_id, attempt, kind, "
-                "sequence, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    release.release_id,
-                    release.tenant,
-                    build_id,
-                    attempt,
-                    kind,
-                    sequence,
-                    "preparing",
-                    now,
-                ),
-            )
+            try:
+                conn.execute(
+                    "INSERT INTO build_releases (release_id, tenant, build_id, attempt, kind, "
+                    "sequence, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        release.release_id,
+                        release.tenant,
+                        build_id,
+                        attempt,
+                        kind,
+                        sequence,
+                        "preparing",
+                        now,
+                    ),
+                )
+            except self._dialect.integrity_error as exc:
+                conn.rollback()
+                raise ReleaseError(
+                    f"release {release.release_id}, or {kind} sequence {sequence} of build "
+                    f"{build_id}, already exists"
+                ) from exc
             conn.commit()
             return release
         finally:
             conn.close()
 
-    def attach(self, release_id: str, versions: Sequence[tuple[str, int]]) -> int:
+    def attach(self, release_id: str, attempt: str, versions: Sequence[tuple[str, int]]) -> int:
         """Stage existing ``building`` rows under the release (a build's own target row).
 
         A row created with ``release_id`` needs no attaching. Returns how many rows
         were attached; a row that is ready or under another release is left alone.
+
+        Raises:
+            ValueError: the release does not exist or is not *attempt*'s.
         """
         conn = self._connect()
         try:
+            self._own(conn, release_id, attempt)
             attached = 0
             for artifact_id, version in versions:
                 attached += conn.execute(
@@ -247,10 +278,15 @@ class ReleaseStore:
         finally:
             conn.close()
 
-    def mark_prepared(self, release_id: str) -> bool:
-        """The producer says every output is staged; ``prepared`` until accepted."""
+    def mark_prepared(self, release_id: str, attempt: str) -> bool:
+        """The producer says every output is staged; ``prepared`` until accepted.
+
+        Raises:
+            ValueError: the release does not exist or is not *attempt*'s.
+        """
         conn = self._connect()
         try:
+            self._own(conn, release_id, attempt)
             cursor = conn.execute(
                 "UPDATE build_releases SET state = 'prepared' "
                 "WHERE release_id = ? AND state = 'preparing'",
@@ -275,10 +311,12 @@ class ReleaseStore:
         returns it unchanged, so a caller whose response was lost can retry.
 
         Raises:
-            ReleaseRejected: the attempt lost the lease; the release is now rejected.
+            ReleaseRejected: the attempt lost the lease, or the build stopped
+                building under it; the release is now rejected.
             ReleaseOutOfOrder: an earlier release of the kind is still unsettled.
-            ReleaseIncomplete: an output is not staged under this release, or its
-                bytes are missing or the wrong size.
+            ReleaseIncomplete: an output is not staged under this release, its
+                bytes are missing or the wrong size, or a row staged under the
+                release is not in *staged*.
             OperationFailed: an operation's condition did not hold.
             ValueError: the release does not exist or is settled another way.
         """
@@ -316,22 +354,29 @@ class ReleaseStore:
                 )
             self._check_outputs(conn, release, staged)
             try:
-                for op in operations:
-                    self._apply(conn, op, release.tenant, release.release_id, now)
+                self._run(conn, operations, release.tenant, release.release_id, now)
                 self._artifacts._promote_staged(conn, list(staged), now)
                 if release.kind == "final":
                     target = conn.execute(
                         "SELECT artifact_id, version FROM artifact_builds WHERE build_id = ?",
                         (release.build_id,),
                     ).fetchone()
-                    self._builds.complete_attempt_within(
+                    if not self._builds.complete_attempt_within(
                         conn,
                         release.build_id,
                         release.attempt,
                         artifact_id=staged[0].artifact_id if staged else None,
                         version=staged[0].version if staged else None,
                         now=now,
-                    )
+                    ):
+                        # Every build writer here takes the build's key, but a consumer's
+                        # own transaction need not: the release must not outlive the build.
+                        conn.rollback()
+                        self._settle(release_id, "rejected")
+                        raise ReleaseRejected(
+                            f"build {release.build_id} is no longer building under attempt "
+                            f"{release.attempt}"
+                        )
                     # A build made before its outputs existed targets a placeholder row;
                     # once the build points at a real output (or ends with none) the
                     # placeholder is a failed row for GC, not a building one forever.
@@ -362,10 +407,15 @@ class ReleaseStore:
         finally:
             conn.close()
 
-    def abandon(self, release_id: str) -> bool:
-        """Give up an unsettled release; its staged rows stay ``building`` for GC."""
+    def abandon(self, release_id: str, attempt: str) -> bool:
+        """Give up an unsettled release; its staged rows stay ``building`` for GC.
+
+        Raises:
+            ValueError: the release does not exist or is not *attempt*'s.
+        """
         conn = self._connect()
         try:
+            self._own(conn, release_id, attempt)
             cursor = conn.execute(
                 "UPDATE build_releases SET state = 'abandoned', settled_at = ? "
                 "WHERE release_id = ? AND state IN ('preparing', 'prepared')",
@@ -395,8 +445,9 @@ class ReleaseStore:
         many releases were abandoned.
 
         Raises:
-            ValueError: the build is not pending or building, or ``from_release`` is
-                not an accepted release of it.
+            ValueError: the build is not pending or building, another attempt's lease
+                on it is still live, or ``from_release`` is not an accepted release
+                of it.
         """
         conn = self._connect()
         try:
@@ -420,7 +471,9 @@ class ReleaseStore:
                 resumed_from=from_release,
             ):
                 conn.rollback()
-                raise ValueError(f"build {build_id} is not active")
+                raise ValueError(
+                    f"build {build_id} is not active, or another attempt's lease on it is live"
+                )
             cursor = conn.execute(
                 "UPDATE build_releases SET state = 'abandoned', settled_at = ? "
                 "WHERE build_id = ? AND attempt <> ? AND state IN ('preparing', 'prepared')",
@@ -444,11 +497,12 @@ class ReleaseStore:
         What a producer does between releases, such as pointing a head at a checkpoint
         accepted earlier (its own or an earlier attempt's). Fenced like acceptance:
         *attempt* must hold the build's lease. All or nothing; an audit event names
-        the build.
+        the build. *tenant* defaults to the build's and may not differ from it.
 
         Raises:
             ReleaseRejected: the attempt does not hold the lease.
             OperationFailed: an operation's condition did not hold.
+            ValueError: *tenant* is not the build's.
         """
         conn = self._connect()
         try:
@@ -457,9 +511,9 @@ class ReleaseStore:
             if not lease_held(conn, build_id, attempt, now):
                 conn.rollback()
                 raise ReleaseRejected(f"attempt {attempt} does not hold build {build_id}")
+            tenant = self._release_tenant(conn, build_id, tenant)
             try:
-                for op in operations:
-                    self._apply(conn, op, tenant if tenant is not None else "", build_id, now)
+                self._run(conn, operations, tenant, build_id, now)
                 conn.commit()
             except OperationFailed:
                 conn.rollback()
@@ -583,6 +637,25 @@ class ReleaseStore:
         ).fetchone()
         return None if row is None else _release_from_row(row)
 
+    def _own(self, conn: StoreConnection, release_id: str, attempt: str) -> Release:
+        """The release, which must be *attempt*'s own: no other attempt touches it."""
+        release = self._get_on(conn, release_id)
+        if release is None:
+            raise ValueError(f"release {release_id} does not exist")
+        if release.attempt != attempt:
+            raise ValueError(
+                f"release {release_id} is attempt {release.attempt}'s, not {attempt}'s"
+            )
+        return release
+
+    def _release_tenant(self, conn: StoreConnection, build_id: str, tenant: str | None) -> str:
+        """The tenant a release of the build runs under: the build's, or *tenant* if the same."""
+        owner = _tenant_of(conn, build_id)
+        if tenant is not None and tenant != owner:
+            conn.rollback()
+            raise ValueError(f"build {build_id} belongs to tenant {owner!r}, not {tenant!r}")
+        return owner
+
     def _outputs_on(self, conn: StoreConnection, release_id: str) -> list[ArtifactVersion]:
         return self._artifacts._versions_where(conn, "release_id = ?", (release_id,))
 
@@ -600,8 +673,23 @@ class ReleaseStore:
     def _check_outputs(
         self, conn: StoreConnection, release: Release, staged: Sequence[StagedVersion]
     ) -> None:
-        """Every output is a building row of this release whose bytes are all there."""
+        """Every output is a building row of this release whose bytes are all there,
+        and every building row of the release is an output."""
         blobs = self._artifacts.blob_store
+        declared = {(item.artifact_id, item.version) for item in staged}
+        rows = conn.execute(
+            "SELECT id, version FROM artifact_versions WHERE release_id = ? AND state = 'building'",
+            (release.release_id,),
+        ).fetchall()
+        undeclared = [
+            f"{r['id']}@v={r['version']}" for r in rows if (r["id"], r["version"]) not in declared
+        ]
+        if undeclared:
+            conn.rollback()
+            raise ReleaseIncomplete(
+                f"staged under release {release.release_id} but not declared: "
+                + ", ".join(undeclared)
+            )
         for item in staged:
             row = conn.execute(
                 "SELECT state, release_id FROM artifact_versions WHERE id = ? AND version = ?",
@@ -620,10 +708,32 @@ class ReleaseStore:
                     f"{'none' if size is None else size} stored"
                 )
 
-    def _apply(
-        self, conn: StoreConnection, op: Operation, tenant: str, subject: str, now: float
+    def _run(
+        self,
+        conn: StoreConnection,
+        operations: Sequence[Operation],
+        tenant: str,
+        subject: str,
+        now: float,
     ) -> None:
-        """One operation on the caller's transaction; *subject* names an audit row."""
+        """The operations in order on the caller's transaction; *subject* names an audit row."""
+        if any(isinstance(op, InsertAuditEvent) for op in operations):
+            # Before the transaction's first write, as the audit lock requires.
+            self._artifacts._serialize_audit(conn)
+        asserted: dict[str, int] = {}
+        for op in operations:
+            self._apply(conn, op, tenant, subject, now, asserted)
+
+    def _apply(
+        self,
+        conn: StoreConnection,
+        op: Operation,
+        tenant: str,
+        subject: str,
+        now: float,
+        asserted: dict[str, int],
+    ) -> None:
+        """One operation; *asserted* carries each asserted revision to the advance it guards."""
         if isinstance(op, CheckBuildLease):
             if not lease_held(conn, op.build_id, op.attempt, now):
                 raise OperationFailed(f"attempt {op.attempt} does not hold build {op.build_id}")
@@ -637,6 +747,7 @@ class ReleaseStore:
                 raise OperationFailed(
                     f"reference {op.name} is at revision {revision}, not {op.expected_revision}"
                 )
+            asserted[op.name] = revision
         elif isinstance(op, AssignAuthority):
             conn.execute(
                 "INSERT INTO release_authorities (tenant, target, release_id, created_at) "
@@ -650,7 +761,9 @@ class ReleaseStore:
             if row["release_id"] != op.release_id:
                 raise OperationFailed(f"slot {op.target} already belongs to {row['release_id']}")
         elif isinstance(op, AdvanceReference):
-            self._advance(conn, tenant, op.name, op.release_id, now)
+            self._advance(conn, tenant, op.name, op.release_id, now, asserted.get(op.name))
+            if op.name in asserted:
+                asserted[op.name] += 1
         elif isinstance(op, InsertAuditEvent):
             conn.execute(
                 "INSERT INTO registry_audit (at, actor, action, name, value, tenant) "
@@ -671,20 +784,43 @@ class ReleaseStore:
 
     @staticmethod
     def _advance(
-        conn: StoreConnection, tenant: str, name: str, release_id: str, now: float
+        conn: StoreConnection,
+        tenant: str,
+        name: str,
+        release_id: str,
+        now: float,
+        expected: int | None,
     ) -> None:
-        """Point the reference at the release and hold its outputs as the reference's root."""
-        cursor = conn.execute(
-            "UPDATE release_references SET release_id = ?, revision = revision + 1, "
-            "updated_at = ? WHERE tenant = ? AND name = ?",
-            (release_id, now, tenant, name),
-        )
-        if cursor.rowcount == 0:
+        """Point the reference at the release and hold its outputs as the reference's root.
+
+        With *expected* (the revision this transaction asserted), the move is one
+        statement guarded on it: a reference another transaction moved meanwhile, a
+        plain read would not see on Postgres, moves nobody and the operation fails.
+        """
+        if expected is None:
             conn.execute(
                 "INSERT INTO release_references (tenant, name, release_id, revision, updated_at) "
-                "VALUES (?, ?, ?, 1, ?)",
+                "VALUES (?, ?, ?, 1, ?) ON CONFLICT (tenant, name) DO UPDATE SET "
+                "release_id = excluded.release_id, revision = release_references.revision + 1, "
+                "updated_at = excluded.updated_at",
                 (tenant, name, release_id, now),
             )
+        elif expected == 0:
+            moved = conn.execute(
+                "INSERT INTO release_references (tenant, name, release_id, revision, updated_at) "
+                "VALUES (?, ?, ?, 1, ?) ON CONFLICT (tenant, name) DO NOTHING",
+                (tenant, name, release_id, now),
+            ).rowcount
+            if moved == 0:
+                raise OperationFailed(f"reference {name} was created by another release")
+        else:
+            moved = conn.execute(
+                "UPDATE release_references SET release_id = ?, revision = revision + 1, "
+                "updated_at = ? WHERE tenant = ? AND name = ? AND revision = ?",
+                (release_id, now, tenant, name, expected),
+            ).rowcount
+            if moved == 0:
+                raise OperationFailed(f"reference {name} moved past revision {expected}")
         conn.execute(
             "DELETE FROM retention_roots WHERE tenant = ? AND kind = ? AND holder = ?",
             (tenant, HEAD_ROOT_KIND, name),

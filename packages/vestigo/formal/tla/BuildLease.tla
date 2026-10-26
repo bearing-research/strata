@@ -1,41 +1,49 @@
 ------------------------------- MODULE BuildLease -------------------------------
 (***************************************************************************)
-(* Model of one transform build and the lease that fences it.             *)
+(* Model of one build (BuildStore) and the lease that fences it.           *)
 (*                                                                         *)
 (* Two ways a build gets executed, each with its own actors:              *)
 (*                                                                         *)
-(*   Runners   : BuildRunner._execute_build (transforms/runner.py). Claims *)
-(*               with claim_build / reclaim_expired_build, renews through  *)
-(*               the heartbeat loop, writes the blob with                  *)
-(*               publish_blob_from_path, then finalize_artifact, then      *)
-(*               complete_build(lease_owner=me). On error: fail_build +    *)
-(*               fail_artifact.                                            *)
+(*   Runners   : a consumer's in-process runner. Claims with claim_build   *)
+(*               or reclaim_expired_build, renews with renew_lease, writes *)
+(*               the blob, finalizes the artifact fenced on its exact      *)
+(*               claim (a BuildFence), then complete_build(lease_owner).   *)
+(*               On error: fail_build plus fail_artifact. A runner also    *)
+(*               stands for a release's attempt: open_attempt (or          *)
+(*               ReleaseStore.resume) makes it the build's current one.    *)
 (*                                                                         *)
-(*   Executors : the v2 pull protocol (api/routers/builds.py). GET         *)
-(*               manifest claims or renews the lease as owner "ext" and    *)
-(*               mints signed URLs plus a lease token; POST upload writes  *)
-(*               the blob (checked: signature, build still active); POST   *)
-(*               finalize checks the lease token, runs                     *)
-(*               finalize_and_set_name, then complete_build(owner="ext").  *)
+(*   Executors : a consumer's pull protocol for external executors. The    *)
+(*               manifest claims or renews the lease as the shared owner   *)
+(*               "ext" and hands out a signed upload URL plus a lease      *)
+(*               token; upload writes the blob (signature checked, build   *)
+(*               still active); finalize checks the token, promotes the    *)
+(*               artifact, then complete_build(lease_owner = "ext").       *)
 (*                                                                         *)
-(* A lease token is modelled as the lease epoch: every claim, reclaim and  *)
-(* manifest renewal changes (lease_owner, lease_expires_at), so it bumps   *)
-(* the epoch. Blob bytes are modelled as "who wrote them". Two attempts of *)
-(* a nondeterministic transform (or one reading a moving input) write      *)
-(* different bytes; for a byte-deterministic transform some violations     *)
-(* below are harmless (see formal/README.md).                              *)
+(* A lease token is modelled as the lease epoch: every claim, reclaim,     *)
+(* opened attempt and manifest renewal changes the lease, so it bumps the  *)
+(* epoch. The attempt column is modelled by the epoch too: open_attempt    *)
+(* rotates it, and claim_build and reclaim_expired_build clear it, which   *)
+(* fences the lapsed attempt exactly as a bump does. Blob bytes are        *)
+(* modelled as "who wrote them". Two attempts of a nondeterministic        *)
+(* transform (or one reading a moving input) write different bytes; for a  *)
+(* byte-deterministic transform some violations below are harmless.       *)
 (*                                                                         *)
 (* Time is abstracted: a runner's lease may expire at any moment (a GC     *)
 (* pause, a blocked event loop, a DB outage longer than the lease), and a  *)
 (* signed URL stays valid for an arbitrary time after it is minted.        *)
 (* Executor lease expiry is not modelled.                                  *)
 (*                                                                         *)
-(* Releases (ADR 002 §7.2): while a build runs, its attempt may accept any *)
-(* number of checkpoint releases (ReleaseStore.accept). Patched, every     *)
-(* acceptance is fenced on the lease exactly as the final one is; a        *)
-(* release by an attempt that no longer holds it is rejected. Unpatched,   *)
-(* nothing fences a checkpoint, and a fenced attempt publishes over the    *)
-(* attempt that took over.                                                 *)
+(* Releases (ADR 002 section 7.2): while a build runs, its attempt may     *)
+(* accept any number of checkpoint releases (ReleaseStore.accept).         *)
+(* Patched, every acceptance is fenced as lease_held is: the attempt must  *)
+(* be the build's current one and its lease must not have lapsed; a        *)
+(* release by any other attempt is rejected. Unpatched, nothing fences a   *)
+(* checkpoint, and a fenced attempt publishes over the attempt that took   *)
+(* over.                                                                   *)
+(*                                                                         *)
+(* Patched = FALSE is the lifecycle before the fixes the violating         *)
+(* configurations (Build_RunnerPath, Build_PullPath) found; TRUE is the    *)
+(* code as it is (Build_Patched).                                          *)
 (***************************************************************************)
 EXTENDS Naturals
 
@@ -43,7 +51,7 @@ CONSTANTS
     Runners,      \* in-process BuildRunner instances (e.g. two server nodes)
     Executors,    \* external pull-model executors
     MaxEpoch,     \* bound on lease generations
-    Patched       \* FALSE = the code as it is; TRUE = the proposed fix
+    Patched       \* FALSE = before the fixes; TRUE = the code as it is
 
 None   == "none"
 Ext    == "ext"                \* _EXTERNAL_LEASE_OWNER: shared by every executor
@@ -108,6 +116,9 @@ Init ==
 
 HoldsLease(a, o) == owner = o /\ tok[a] = epoch
 
+\* lease_held: a is the build's current attempt and its lease has not lapsed.
+Fenced(a) == tok[a] = epoch /\ ~expired
+
 \* finalize_artifact / finalize_and_set_name on the artifact row, as seen by
 \* attempt a: promote with a's slot, or no-op if already ready.
 PromoteArtifact(a) ==
@@ -123,6 +134,17 @@ PromoteArtifact(a) ==
 
 Claim(r) ==                                   \* claim_build
     /\ pc[r] = "idle" /\ build = "pending" /\ epoch < MaxEpoch
+    /\ build' = "building" /\ owner' = r /\ epoch' = epoch + 1 /\ expired' = FALSE
+    /\ tok' = [tok EXCEPT ![r] = epoch + 1]
+    /\ pc' = [pc EXCEPT ![r] = "exec"]
+    /\ UNCHANGED <<art, blobs, chosen, digest, url, staleFail, staleBytes, staleRelease>>
+
+\* open_attempt / ReleaseStore.resume: r becomes the build's attempt, fencing
+\* every earlier one. Patched, a live lease is taken over by no other attempt
+\* (open_attempt_within refuses it); unpatched, nothing checks the lease.
+OpenAttempt(r) ==
+    /\ pc[r] = "idle" /\ build \in Active /\ epoch < MaxEpoch
+    /\ Patched => (owner = None \/ expired)
     /\ build' = "building" /\ owner' = r /\ epoch' = epoch + 1 /\ expired' = FALSE
     /\ tok' = [tok EXCEPT ![r] = epoch + 1]
     /\ pc' = [pc EXCEPT ![r] = "exec"]
@@ -244,11 +266,11 @@ ExecComplete(e) ==                            \* complete_build(lease_owner="ext
 (* Releases                                                                *)
 
 \* ReleaseStore.accept of a checkpoint by attempt a, owner o, while the build
-\* runs. Patched, acceptance requires the lease (lease_held); unpatched, the
+\* runs. Patched, acceptance requires the fence (lease_held); unpatched, the
 \* checkpoint is accepted whoever holds it. The build stays building either way.
 Checkpoint(a, o) ==
     /\ pc[a] \in {"exec", "published"} /\ build = "building"
-    /\ LET accepted == ~Patched \/ HoldsLease(a, o) IN
+    /\ LET accepted == ~Patched \/ Fenced(a) IN
        staleRelease' = (staleRelease \/ (accepted /\ ~HoldsLease(a, o)))
     /\ UNCHANGED <<build, owner, epoch, expired, art, blobs, chosen, digest, pc, tok, url,
                    staleFail, staleBytes>>
@@ -257,7 +279,7 @@ Checkpoint(a, o) ==
 Next ==
     \/ Expire
     \/ \E r \in Runners :
-        \/ Claim(r) \/ Renew(r) \/ Reclaim(r) \/ Publish(r) \/ Checkpoint(r, r)
+        \/ Claim(r) \/ OpenAttempt(r) \/ Renew(r) \/ Reclaim(r) \/ Publish(r) \/ Checkpoint(r, r)
         \/ RunnerFinalize(r) \/ RunnerComplete(r) \/ RunnerError(r) \/ RunnerFail(r)
     \/ \E e \in Executors :
         \/ Manifest(e) \/ UrlExpire(e) \/ Upload(e) \/ ExecFinalize(e) \/ ExecComplete(e)

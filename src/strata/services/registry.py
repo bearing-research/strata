@@ -73,7 +73,8 @@ class RegistryService:
         # Keyed by tenant too: two tenants may each have a name of the same spelling.
         # ``scope`` None reads every tenant, and the default tenant is stored as ''.
         found: dict[tuple[str | None, str], dict[tuple[str, str], dict]] = {}
-        for read_tenant, artifact_id, reference in store.list_name_reads(tenant=scope):
+        reads = store.list_name_reads() if scope is None else store.list_name_reads(tenant=scope)
+        for read_tenant, artifact_id, reference in reads:
             cell = _CELL_ARTIFACT_ID.match(artifact_id)
             if cell is None:
                 continue

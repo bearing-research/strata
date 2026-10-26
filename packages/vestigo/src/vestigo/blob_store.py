@@ -11,6 +11,7 @@ import hmac
 import io
 import logging
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -309,6 +310,9 @@ class LocalBlobStore(BlobStore):
                 os.fsync(handle.fileno())
                 handle.close()
                 os.replace(tmp_path, path)
+                # The rename is in the directory, which has its own write-back; without
+                # this a power loss can keep the metadata row and lose the file.
+                _fsync_dir(path.parent)
             except BaseException:
                 if not handle.closed:
                     handle.close()
@@ -335,9 +339,10 @@ class LocalBlobStore(BlobStore):
     def delete_blob(self, artifact_id: str, version: int) -> bool:
         """Delete blob from local filesystem."""
         path = self._blob_path(artifact_id, version)
-        if not path.exists():
-            return False
-        path.unlink()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False  # absent, or a concurrent sweep got there first
         return True
 
     def remove_stale_temp_files(self, idle_seconds: float) -> int:
@@ -355,12 +360,28 @@ class LocalBlobStore(BlobStore):
         return removed
 
 
+def _fsync_dir(path: Path) -> None:
+    """Flush a directory's entries (a rename or unlink in it) to disk; a no-op on Windows."""
+    if sys.platform == "win32":
+        return  # directories cannot be opened for fsync there
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _upload_to_arrow_fs(fs: Any, key: str, source_path: Path) -> None:
     """Stream *source_path* to *key* on a PyArrow object-store filesystem, all or nothing.
 
     Leaving the stream's ``with`` completes the upload even when the copy raised, so a
     failure would leave a truncated object at the final key, which ``blob_exists`` then
     reports as present and an import retry skips rewriting. The object is deleted instead.
+
+    Not atomic for an overwrite: the object store has no rename (``move`` is a copy and
+    a delete, and S3's copy stops at 5 GB), so the final key is written in place. A
+    failed overwrite loses the previous object, and the truncated one is visible to
+    another node between the stream's close and the delete.
     """
     try:
         with open(source_path, "rb") as src, fs.open_output_stream(key) as dst:
@@ -375,6 +396,42 @@ def _upload_to_arrow_fs(fs: Any, key: str, source_path: Path) -> None:
         except OSError as exc:
             logger.warning("Could not remove the partial upload at %s: %s", key, exc)
         raise
+
+
+def _arrow_fs_blob_exists(fs: Any, key: str) -> bool:
+    """Whether ``key`` is an object; a backend error propagates rather than reading as absent."""
+    import pyarrow.fs as pafs
+
+    with _object_store_errors.counting("head"):
+        info = fs.get_file_info(key)
+    return info.type == pafs.FileType.File
+
+
+def _arrow_fs_blob_size(fs: Any, key: str) -> int | None:
+    """The object's size, or ``None`` when absent; a backend error propagates."""
+    import pyarrow.fs as pafs
+
+    with _object_store_errors.counting("head"):
+        info = fs.get_file_info(key)
+    if info.type != pafs.FileType.File:
+        return None
+    return int(info.size) if info.size is not None else None
+
+
+def _arrow_fs_delete_blob(fs: Any, key: str) -> bool:
+    """Delete ``key``; False when it was not there, and a backend error propagates.
+
+    The caller removes the metadata row regardless, so a swallowed error would
+    orphan the object with nothing left to retry it.
+    """
+    if not _arrow_fs_blob_exists(fs, key):
+        return False
+    try:
+        with _object_store_errors.counting("delete"):
+            fs.delete_file(key)
+    except FileNotFoundError:
+        return False  # another sweep got there first
+    return True
 
 
 class S3BlobStore(BlobStore):
@@ -397,8 +454,15 @@ class S3BlobStore(BlobStore):
 
         Without ``access_key``/``secret_key`` credentials come from the environment or
         IAM; ``endpoint_url`` targets an S3-compatible service.
+
+        Raises:
+            ValueError: only one of ``access_key`` and ``secret_key`` was given, which
+                would otherwise fall back to ambient credentials without a word.
         """
         import pyarrow.fs as pafs
+
+        if bool(access_key) != bool(secret_key):
+            raise ValueError("S3 needs both access_key and secret_key, or neither")
 
         self.bucket = bucket
         self.prefix = prefix.strip("/")
@@ -561,14 +625,12 @@ class S3BlobStore(BlobStore):
     def open_blob_reader(
         self, artifact_id: str, version: int
     ) -> AbstractContextManager[BinaryIO] | None:
-        """Open a streaming reader for an S3 blob."""
-        import pyarrow as pa
-
+        """Open a streaming reader for an S3 blob; a backend error propagates."""
         key = self._s3_key(artifact_id, version)
         try:
             with _object_store_errors.counting("get"):
                 return self._fs.open_input_stream(key)
-        except (FileNotFoundError, pa.ArrowIOError):
+        except FileNotFoundError:
             return None
 
     def _upload_from_path(self, key: str, source_path: Path) -> None:
@@ -590,55 +652,16 @@ class S3BlobStore(BlobStore):
         self._upload_from_path(key, source_path)
 
     def blob_exists(self, artifact_id: str, version: int) -> bool:
-        """Check if blob exists in S3."""
-        import pyarrow.fs as pafs
-
-        key = self._s3_key(artifact_id, version)
-        try:
-            with _object_store_errors.counting("head"):
-                info = self._fs.get_file_info(key)
-            return info.type == pafs.FileType.File
-        except Exception:
-            # A backend error is not "absent"; log it rather than report a
-            # confident False.
-            logger.exception(
-                "blob_exists failed for %s@v=%d; reporting absent", artifact_id, version
-            )
-            return False
+        """Check if blob exists in S3; a backend error propagates."""
+        return _arrow_fs_blob_exists(self._fs, self._s3_key(artifact_id, version))
 
     def blob_size(self, artifact_id: str, version: int) -> int | None:
-        """Return blob size from S3 object metadata."""
-        import pyarrow.fs as pafs
-
-        key = self._s3_key(artifact_id, version)
-        try:
-            with _object_store_errors.counting("head"):
-                info = self._fs.get_file_info(key)
-        except Exception:
-            logger.exception(
-                "blob_size failed for %s@v=%d; reporting unknown", artifact_id, version
-            )
-            return None
-        if info.type != pafs.FileType.File:
-            return None
-        return int(info.size) if info.size is not None else None
+        """Return blob size from S3 object metadata; a backend error propagates."""
+        return _arrow_fs_blob_size(self._fs, self._s3_key(artifact_id, version))
 
     def delete_blob(self, artifact_id: str, version: int) -> bool:
-        """Delete blob from S3."""
-        key = self._s3_key(artifact_id, version)
-        try:
-            if not self.blob_exists(artifact_id, version):
-                return False
-            with _object_store_errors.counting("delete"):
-                self._fs.delete_file(key)
-            return True
-        except Exception:
-            # The caller removes the metadata row regardless, so a silent False
-            # would orphan the object with nothing left to retry it.
-            logger.exception(
-                "delete_blob failed for %s@v=%d; object orphaned", artifact_id, version
-            )
-            return False
+        """Delete blob from S3; a backend error propagates."""
+        return _arrow_fs_delete_blob(self._fs, self._s3_key(artifact_id, version))
 
     @classmethod
     def from_settings(
@@ -675,9 +698,14 @@ def _resolve_gcs_credentials(credentials: str) -> str:
     hard-killed process leaves one file, rewritten by the next start) and removed
     at normal exit; anything else is passed through as a path. On Windows the 0600
     does not apply; prefer a mounted credential file there.
+
+    Raises:
+        OSError: the predictable path holds something that is not this user's own
+            regular file (a planted symlink or file, in a shared temp dir).
     """
     import atexit
     import json
+    import stat
 
     text = credentials.strip()
     try:
@@ -690,8 +718,19 @@ def _resolve_gcs_credentials(credentials: str) -> str:
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
     path = Path(tempfile.gettempdir()) / f"vestigo_gcs_{digest}.json"
     # Created with mode 0o600 so the key is never world-readable; the chmod
-    # below fixes a file left behind by a previous run.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # below fixes a file left behind by a previous run. O_NOFOLLOW and the fstat
+    # check keep the key out of another user's file at this name; the truncate
+    # waits for them so the key never lands in one.
+    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or (hasattr(os, "getuid") and info.st_uid != os.getuid()):
+            raise PermissionError(f"{path} is not a regular file owned by this user")
+        os.ftruncate(fd, 0)
+    except BaseException:
+        os.close(fd)
+        raise
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
     os.chmod(path, 0o600)
@@ -719,7 +758,9 @@ class GCSBlobStore(BlobStore):
 
         ``default_bucket_location`` is a location for new buckets (``US``,
         ``europe-west1``), not a project id. ``credentials_json`` is a key file path
-        or the JSON itself.
+        or the JSON itself; either way it is handed to the client through the
+        process-wide ``GOOGLE_APPLICATION_CREDENTIALS``, the only credential source
+        PyArrow's client reads, so two stores in one process share the last one set.
         """
         import pyarrow.fs as pafs
 
@@ -732,12 +773,9 @@ class GCSBlobStore(BlobStore):
         if default_bucket_location:
             kwargs["default_bucket_location"] = default_bucket_location
         if credentials_json:
-            kwargs["access_token"] = None  # Disable token auth
             # GOOGLE_APPLICATION_CREDENTIALS must be a file path, but operators
             # paste key material into ...CREDENTIALS_JSON (an env var in most
             # containers). Spill it to a private file so both readings work.
-            import os
-
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _resolve_gcs_credentials(
                 credentials_json
             )
@@ -837,14 +875,12 @@ class GCSBlobStore(BlobStore):
     def open_blob_reader(
         self, artifact_id: str, version: int
     ) -> AbstractContextManager[BinaryIO] | None:
-        """Open a streaming reader for a GCS blob."""
-        import pyarrow as pa
-
+        """Open a streaming reader for a GCS blob; a backend error propagates."""
         key = self._gcs_key(artifact_id, version)
         try:
             with _object_store_errors.counting("get"):
                 return self._fs.open_input_stream(key)
-        except (FileNotFoundError, pa.ArrowIOError):
+        except FileNotFoundError:
             return None
 
     def _upload_from_path(self, key: str, source_path: Path) -> None:
@@ -866,47 +902,16 @@ class GCSBlobStore(BlobStore):
         self._upload_from_path(key, source_path)
 
     def blob_exists(self, artifact_id: str, version: int) -> bool:
-        """Check if blob exists in GCS."""
-        import pyarrow.fs as pafs
-
-        key = self._gcs_key(artifact_id, version)
-        try:
-            with _object_store_errors.counting("head"):
-                info = self._fs.get_file_info(key)
-            return info.type == pafs.FileType.File
-        except Exception:
-            return False
+        """Check if blob exists in GCS; a backend error propagates."""
+        return _arrow_fs_blob_exists(self._fs, self._gcs_key(artifact_id, version))
 
     def blob_size(self, artifact_id: str, version: int) -> int | None:
-        """Return blob size from GCS object metadata."""
-        import pyarrow.fs as pafs
-
-        key = self._gcs_key(artifact_id, version)
-        try:
-            with _object_store_errors.counting("head"):
-                info = self._fs.get_file_info(key)
-        except Exception:
-            return None
-        if info.type != pafs.FileType.File:
-            return None
-        return int(info.size) if info.size is not None else None
+        """Return blob size from GCS object metadata; a backend error propagates."""
+        return _arrow_fs_blob_size(self._fs, self._gcs_key(artifact_id, version))
 
     def delete_blob(self, artifact_id: str, version: int) -> bool:
-        """Delete blob from GCS."""
-        key = self._gcs_key(artifact_id, version)
-        try:
-            if not self.blob_exists(artifact_id, version):
-                return False
-            with _object_store_errors.counting("delete"):
-                self._fs.delete_file(key)
-            return True
-        except Exception:
-            # The caller removes the metadata row regardless, so a silent False
-            # would orphan the object with nothing left to retry it.
-            logger.exception(
-                "delete_blob failed for %s@v=%d; object orphaned", artifact_id, version
-            )
-            return False
+        """Delete blob from GCS; a backend error propagates."""
+        return _arrow_fs_delete_blob(self._fs, self._gcs_key(artifact_id, version))
 
     @classmethod
     def from_settings(

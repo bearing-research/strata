@@ -72,6 +72,13 @@ class TestUriScheme:
         yield
         uris.set_uri_scheme(uris.DEFAULT_URI_SCHEME)
 
+    def test_a_negative_version_is_not_a_pinned_uri(self):
+        with pytest.raises(ValueError, match="not a pinned version"):
+            uris.artifact_uri("abc", LATEST_VERSION)
+        with pytest.raises(ValueError, match="not a pinned version"):
+            uris.artifact_uri("abc", -7)
+        assert uris.artifact_uri("abc", 0) == "vestigo://artifact/abc@v=0"
+
     def test_the_default_is_vestigo(self):
         assert uris.uri_scheme() == "vestigo"
         assert uris.artifact_uri("abc", 3) == "vestigo://artifact/abc@v=3"

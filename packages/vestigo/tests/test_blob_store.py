@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import shutil
 import stat
 import sys
@@ -104,6 +105,40 @@ class TestLocalBlobStore:
         result = store.delete_blob("nonexistent", 1)
 
         assert result is False
+
+    def test_a_delete_that_loses_the_race_reports_absent(self, tmp_path: Path, monkeypatch):
+        """Two sweeps on one blob dir: the loser gets False, as on the object stores."""
+        store = LocalBlobStore(tmp_path / "blobs")
+        store.write_blob("artifact-1", 1, b"x")
+        real_unlink = Path.unlink
+
+        def unlink_after_the_other_sweep(self, *args, **kwargs):
+            os.unlink(self)  # the other sweep gets there first
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", unlink_after_the_other_sweep)
+
+        assert store.delete_blob("artifact-1", 1) is False
+        assert not store.blob_exists("artifact-1", 1)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="directories cannot be fsynced there")
+    def test_the_directory_is_fsynced_once_the_blob_is_in_place(self, tmp_path: Path, monkeypatch):
+        """A durable file under a directory entry that is not is lost at power loss."""
+        store = LocalBlobStore(tmp_path / "blobs")
+        synced: list[tuple[bool, bool]] = []
+        real_fsync = os.fsync
+
+        def recording_fsync(fd):
+            is_dir = stat.S_ISDIR(os.fstat(fd).st_mode)
+            synced.append((is_dir, store.blob_exists("artifact-1", 1)))
+            real_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", recording_fsync)
+
+        store.write_blob("artifact-1", 1, b"payload")
+
+        # The file first (not yet renamed), then its directory with the blob in place.
+        assert synced == [(False, False), (True, True)]
 
     def test_multiple_versions(self, tmp_path: Path):
         """Multiple versions of one artifact are stored separately."""
@@ -364,87 +399,116 @@ class TestPublishBlobFromPath:
         assert store.read_blob("artifact-1", 1) == b"v2-bytes"
 
 
+class _FakeOutputStream:
+    """Completes on exit even after an error, as PyArrow's object-store streams do."""
+
+    def __init__(
+        self,
+        sink: Path,
+        record: list[str],
+        *,
+        fail_on_open: bool = False,
+        fail_on_write: int | None = None,
+    ):
+        self._sink = sink
+        self._record = record
+        self._writes = 0
+        self._fail_on_write = fail_on_write
+        if fail_on_open:
+            self._record.append("open_failed")
+            raise OSError("simulated s3 open failure")
+        self._handle = open(sink, "wb")
+        self._record.append(f"open:{sink.name}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._handle.close()
+        self._record.append("close")
+
+    def write(self, data: bytes) -> None:
+        self._writes += 1
+        if self._writes == self._fail_on_write:
+            raise OSError("simulated s3 write failure")
+        self._handle.write(data)
+
+
+class _FakeArrowFileSystem:
+    """The PyArrow filesystem surface the S3 and GCS stores use, over a local directory.
+
+    ``backend_error`` is raised by every call, as an unreachable or forbidden bucket would.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        open_fails: bool = False,
+        open_raises_on_call: int | None = None,
+        fail_on_write: int | None = None,
+        backend_error: Exception | None = None,
+    ):
+        self.root = root
+        self._fail_on_write = fail_on_write
+        self._record: list[str] = []
+        self.open_fails = open_fails
+        self._open_raises_on_call = open_raises_on_call
+        self._open_calls = 0
+        self.backend_error = backend_error
+
+    def _sink(self, key: str) -> Path:
+        if self.backend_error is not None:
+            raise self.backend_error
+        return self.root / key.replace("/", "_")
+
+    def open_output_stream(self, key: str):
+        self._open_calls += 1
+        sink = self._sink(key)
+        if self.open_fails or self._open_calls == self._open_raises_on_call:
+            return _FakeOutputStream(sink, self._record, fail_on_open=True)
+        return _FakeOutputStream(sink, self._record, fail_on_write=self._fail_on_write)
+
+    def open_input_stream(self, key: str):
+        sink = self._sink(key)
+        if not sink.exists():
+            raise FileNotFoundError(key)
+        return open(sink, "rb")
+
+    def get_file_info(self, key: str):
+        import pyarrow.fs as pafs
+
+        sink = self._sink(key)
+        if not sink.exists():
+            return pafs.FileInfo(key, type=pafs.FileType.NotFound)
+        return pafs.FileInfo(key, type=pafs.FileType.File, size=sink.stat().st_size)
+
+    def delete_file(self, key: str) -> None:
+        self._record.append("delete")
+        sink = self._sink(key)
+        if not sink.exists():
+            raise FileNotFoundError(key)
+        sink.unlink()
+
+
+def _arrow_store(cls, fake_fs, prefix: str = "artifacts"):
+    """An S3 or GCS store over ``fake_fs``, without the real client its constructor builds."""
+    store = cls.__new__(cls)
+    store.bucket = "fake-bucket"
+    store.prefix = prefix
+    store._fs = fake_fs
+    return store
+
+
 class TestS3BackendAtomicity:
     """Writer atomicity for S3BlobStore over a fake PyArrow filesystem."""
 
-    class _FakeOutputStream:
-        """Completes on exit even after an error, as PyArrow's object-store streams do."""
-
-        def __init__(
-            self,
-            sink: Path,
-            record: list[str],
-            *,
-            fail_on_open: bool = False,
-            fail_on_write: int | None = None,
-        ):
-            self._sink = sink
-            self._record = record
-            self._writes = 0
-            self._fail_on_write = fail_on_write
-            if fail_on_open:
-                self._record.append("open_failed")
-                raise OSError("simulated s3 open failure")
-            self._handle = open(sink, "wb")
-            self._record.append(f"open:{sink.name}")
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            self._handle.close()
-            self._record.append("close")
-
-        def write(self, data: bytes) -> None:
-            self._writes += 1
-            if self._writes == self._fail_on_write:
-                raise OSError("simulated s3 write failure")
-            self._handle.write(data)
-
-    class _FakeS3FileSystem:
-        def __init__(
-            self,
-            root: Path,
-            *,
-            open_fails: bool = False,
-            open_raises_on_call: int | None = None,
-            fail_on_write: int | None = None,
-        ):
-            self.root = root
-            self._fail_on_write = fail_on_write
-            self._record: list[str] = []
-            self.open_fails = open_fails
-            self._open_raises_on_call = open_raises_on_call
-            self._open_calls = 0
-
-        def open_output_stream(self, key: str):
-            self._open_calls += 1
-            sink = self.root / key.replace("/", "_")
-            if self.open_fails or self._open_calls == self._open_raises_on_call:
-                return TestS3BackendAtomicity._FakeOutputStream(
-                    sink, self._record, fail_on_open=True
-                )
-            return TestS3BackendAtomicity._FakeOutputStream(
-                sink, self._record, fail_on_write=self._fail_on_write
-            )
-
-        def delete_file(self, key: str) -> None:
-            self._record.append("delete")
-            sink = self.root / key.replace("/", "_")
-            if not sink.exists():
-                raise FileNotFoundError(key)
-            sink.unlink()
-
     def _build_store_with_fake_fs(self, fake_fs, prefix: str = "artifacts") -> S3BlobStore:
-        store = S3BlobStore.__new__(S3BlobStore)
-        store.bucket = "fake-bucket"
-        store.prefix = prefix
-        store._fs = fake_fs
-        return store
+        return _arrow_store(S3BlobStore, fake_fs, prefix)
 
     def test_writer_commit_produces_remote_object(self, tmp_path: Path):
         """A clean writer context publishes the full payload."""
-        fake_fs = self._FakeS3FileSystem(tmp_path)
+        fake_fs = _FakeArrowFileSystem(tmp_path)
         store = self._build_store_with_fake_fs(fake_fs)
 
         with store.open_blob_writer("artifact-1", 1) as writer:
@@ -458,7 +522,7 @@ class TestS3BackendAtomicity:
 
     def test_writer_exception_never_opens_remote_stream(self, tmp_path: Path):
         """An exception inside the writer context skips the remote upload entirely."""
-        fake_fs = self._FakeS3FileSystem(tmp_path)
+        fake_fs = _FakeArrowFileSystem(tmp_path)
         store = self._build_store_with_fake_fs(fake_fs)
 
         class BoomError(RuntimeError):
@@ -475,7 +539,7 @@ class TestS3BackendAtomicity:
 
     def test_writer_open_failure_cleans_up_staged_tempfile(self, tmp_path: Path, monkeypatch):
         """If the upload fails at open, the local tempfile is still removed."""
-        fake_fs = self._FakeS3FileSystem(tmp_path, open_fails=True)
+        fake_fs = _FakeArrowFileSystem(tmp_path, open_fails=True)
         store = self._build_store_with_fake_fs(fake_fs)
 
         from vestigo import blob_store as blob_store_module
@@ -500,7 +564,7 @@ class TestS3BackendAtomicity:
     def test_a_failed_upload_leaves_no_object_at_the_key(self, tmp_path: Path):
         """Leaving the stream completes the upload, so a copy that failed midway used to leave
         a truncated object, which blob_exists reported and an import retry then kept."""
-        fake_fs = self._FakeS3FileSystem(tmp_path, fail_on_write=2)
+        fake_fs = _FakeArrowFileSystem(tmp_path, fail_on_write=2)
         store = self._build_store_with_fake_fs(fake_fs)
         source = tmp_path / "incoming.bin"
         source.write_bytes(b"x" * (3 * blob_store_module.BLOB_STREAM_CHUNK_BYTES))
@@ -513,7 +577,7 @@ class TestS3BackendAtomicity:
 
     def test_publish_from_path_skips_double_staging(self, tmp_path: Path, monkeypatch):
         """publish_blob_from_path uploads the source directly, without mkstemp."""
-        fake_fs = self._FakeS3FileSystem(tmp_path)
+        fake_fs = _FakeArrowFileSystem(tmp_path)
         store = self._build_store_with_fake_fs(fake_fs)
 
         from vestigo import blob_store as blob_store_module
@@ -544,85 +608,48 @@ class TestS3BackendAtomicity:
 
 
 class TestS3BlobStore:
-    """Key generation and reads for S3BlobStore.
+    """Key generation and construction for S3BlobStore.
 
-    PyArrow's S3FileSystem uses its own C++ AWS SDK, which moto cannot mock; full coverage needs
-    real S3 or LocalStack.
+    PyArrow's S3FileSystem uses its own C++ AWS SDK, which moto cannot mock; the I/O paths run
+    over ``_FakeArrowFileSystem`` below, and the round trip needs LocalStack or MinIO.
     """
 
-    @pytest.fixture
-    def s3_store_mock(self):
-        """An S3BlobStore with mocked S3 for key tests."""
-        pytest.importorskip("moto")
-        import boto3
-        from moto import mock_aws
-
-        with mock_aws():
-            conn = boto3.client("s3", region_name="us-east-1")
-            conn.create_bucket(Bucket="test-bucket")
-
-            store = S3BlobStore(
-                bucket="test-bucket",
-                prefix="artifacts",
-                region="us-east-1",
-            )
-            yield store
-
-    def test_s3_key_format(self, s3_store_mock: S3BlobStore):
+    def test_s3_key_format(self):
         """The S3 key includes bucket and prefix."""
-        key = s3_store_mock._s3_key("abc123", 5)
+        store = S3BlobStore(bucket="test-bucket", prefix="artifacts", anonymous=True)
 
-        assert key == "test-bucket/artifacts/abc123@v=5.arrow"
+        assert store._s3_key("abc123", 5) == "test-bucket/artifacts/abc123@v=5.arrow"
 
     def test_s3_key_without_prefix(self):
-        pytest.importorskip("moto")
-        import boto3
-        from moto import mock_aws
+        store = S3BlobStore(bucket="test-bucket", prefix="", anonymous=True)
 
-        with mock_aws():
-            conn = boto3.client("s3", region_name="us-east-1")
-            conn.create_bucket(Bucket="test-bucket")
+        assert store._s3_key("abc123", 5) == "test-bucket/abc123@v=5.arrow"
 
-            store = S3BlobStore(
-                bucket="test-bucket",
-                prefix="",
-                region="us-east-1",
-            )
+    def test_blob_key_format(self):
+        store = S3BlobStore(bucket="test-bucket", prefix="artifacts", anonymous=True)
 
-            key = store._s3_key("abc123", 5)
-            assert key == "test-bucket/abc123@v=5.arrow"
+        assert store._blob_key("abc123", 5) == "abc123@v=5.arrow"
 
-    def test_blob_key_format(self, s3_store_mock: S3BlobStore):
-        key = s3_store_mock._blob_key("abc123", 5)
+    @pytest.mark.parametrize("half", [{"access_key": "AKIA"}, {"secret_key": "s3cret"}])
+    def test_half_a_key_pair_is_refused(self, half):
+        # One key alone would fall back to ambient credentials, for I/O and signing both.
+        with pytest.raises(ValueError, match="both access_key and secret_key"):
+            S3BlobStore(bucket="test-bucket", **half)
 
-        assert key == "abc123@v=5.arrow"
-
-    def test_read_nonexistent_blob(self, s3_store_mock: S3BlobStore):
-        """Reading a missing blob returns None (moto cannot back writes, but reads work)."""
-        result = s3_store_mock.read_blob("nonexistent", 1)
-
-        assert result is None
-
-    def test_blob_exists_nonexistent(self, s3_store_mock: S3BlobStore):
-        assert not s3_store_mock.blob_exists("nonexistent", 1)
-
-    @pytest.mark.skip(reason="Requires actual S3/LocalStack - PyArrow doesn't work with moto")
+    @pytest.mark.skipif(
+        not os.environ.get("VESTIGO_S3_ENDPOINT_URL"),
+        reason="set VESTIGO_S3_ENDPOINT_URL (LocalStack or MinIO) to run the S3 round trip",
+    )
     def test_write_and_read_blob_integration(self):
-        """Round-trip against real S3; skipped unless LocalStack is configured.
+        """Round-trip against an S3 endpoint with the ``test``/``test`` key pair.
 
         Set VESTIGO_S3_ENDPOINT_URL=http://localhost:4566 and VESTIGO_S3_REGION=us-east-1.
         """
-        import os
-
-        endpoint = os.environ.get("VESTIGO_S3_ENDPOINT_URL")
-        if not endpoint:
-            pytest.skip("VESTIGO_S3_ENDPOINT_URL not set")
-
         store = S3BlobStore(
             bucket="test-bucket",
             prefix="artifacts",
-            region="us-east-1",
-            endpoint_url=endpoint,
+            region=os.environ.get("VESTIGO_S3_REGION", "us-east-1"),
+            endpoint_url=os.environ["VESTIGO_S3_ENDPOINT_URL"],
             access_key="test",
             secret_key="test",
         )
@@ -690,6 +717,25 @@ class TestGCSCredentialResolution:
 
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="no O_NOFOLLOW or file owners there")
+    def test_a_symlink_planted_at_the_predictable_name_is_not_followed(self, tmp_path, monkeypatch):
+        # The name is derived from the key and visible in the temp dir; another user who
+        # saw it plants a link there and the next start would write the key through it.
+        from vestigo.blob_store import _resolve_gcs_credentials
+
+        monkeypatch.setattr(blob_store_module.tempfile, "gettempdir", lambda: str(tmp_path))
+        key = '{"type": "service_account", "private_key": "SECRET"}'
+        target = tmp_path / "theirs.txt"
+        target.write_text("")
+        planted = Path(_resolve_gcs_credentials(key))
+        planted.unlink()
+        planted.symlink_to(target)
+
+        with pytest.raises(OSError):
+            _resolve_gcs_credentials(key)
+
+        assert target.read_text() == ""
+
     def test_a_path_is_passed_through_untouched(self):
         from vestigo.blob_store import _resolve_gcs_credentials
 
@@ -745,46 +791,19 @@ class TestGCSBlobStore:
 
         assert key == "abc123@v=5.arrow"
 
-    def test_read_nonexistent_blob(self):
-        """The connection fails, but the read returns None."""
-        store = GCSBlobStore(
-            bucket="nonexistent-bucket-xyz123",
-            prefix="artifacts",
-            anonymous=True,
-        )
-
-        # This should return None due to connection/not-found errors
-        result = store.read_blob("nonexistent", 1)
-
-        assert result is None
-
-    def test_blob_exists_nonexistent(self):
-        store = GCSBlobStore(
-            bucket="nonexistent-bucket-xyz123",
-            prefix="artifacts",
-            anonymous=True,
-        )
-
-        # This should return False due to connection/not-found errors
-        assert not store.blob_exists("nonexistent", 1)
-
-    @pytest.mark.skip(reason="Requires actual GCS or fake-gcs-server")
+    @pytest.mark.skipif(
+        not os.environ.get("VESTIGO_GCS_ENDPOINT_OVERRIDE"),
+        reason="set VESTIGO_GCS_ENDPOINT_OVERRIDE (fake-gcs-server) to run the GCS round trip",
+    )
     def test_write_and_read_blob_integration(self):
-        """Round-trip against real GCS; skipped unless fake-gcs-server or credentials are set.
+        """Round-trip against a GCS endpoint, anonymously.
 
-        For fake-gcs-server: VESTIGO_GCS_ENDPOINT_OVERRIDE=http://localhost:4443 and
-        VESTIGO_GCS_ANONYMOUS=true.
+        For fake-gcs-server: VESTIGO_GCS_ENDPOINT_OVERRIDE=localhost:4443.
         """
-        import os
-
-        endpoint = os.environ.get("VESTIGO_GCS_ENDPOINT_OVERRIDE")
-        if not endpoint:
-            pytest.skip("VESTIGO_GCS_ENDPOINT_OVERRIDE not set")
-
         store = GCSBlobStore(
             bucket="test-bucket",
             prefix="artifacts",
-            endpoint_override=endpoint,
+            endpoint_override=os.environ["VESTIGO_GCS_ENDPOINT_OVERRIDE"],
             anonymous=True,
         )
 
@@ -793,6 +812,160 @@ class TestGCSBlobStore:
         result = store.read_blob("artifact-1", 1)
 
         assert result == data
+
+
+@pytest.mark.parametrize("cls", [S3BlobStore, GCSBlobStore], ids=["s3", "gcs"])
+class TestArrowBackendsOverAFakeFilesystem:
+    """The S3 and GCS I/O paths, and their one error contract, over ``_FakeArrowFileSystem``."""
+
+    def test_write_publish_exists_size_delete(self, cls, tmp_path: Path):
+        store = _arrow_store(cls, _FakeArrowFileSystem(tmp_path / "bucket"))
+        (tmp_path / "bucket").mkdir()
+
+        assert store.read_blob("artifact-1", 1) is None
+        assert store.blob_exists("artifact-1", 1) is False
+        assert store.blob_size("artifact-1", 1) is None
+        assert store.delete_blob("artifact-1", 1) is False
+
+        store.write_blob("artifact-1", 1, b"streamed")
+        assert store.read_blob("artifact-1", 1) == b"streamed"
+        assert store.blob_exists("artifact-1", 1) is True
+        assert store.blob_size("artifact-1", 1) == len(b"streamed")
+
+        source = tmp_path / "incoming.bin"
+        source.write_bytes(b"published")
+        store.publish_blob_from_path("artifact-1", 1, source)
+        assert store.read_blob("artifact-1", 1) == b"published"
+
+        assert store.delete_blob("artifact-1", 1) is True
+        assert store.blob_exists("artifact-1", 1) is False
+        assert store.delete_blob("artifact-1", 1) is False
+
+    def test_a_backend_error_on_read_is_not_absent(self, cls, tmp_path: Path):
+        """ACCESS_DENIED, a bad region or a timeout used to read as None: an artifact whose
+        blob is "gone", a 404, an integrity finding, all silent."""
+        denied = OSError("AWS Error ACCESS_DENIED during HeadObject operation")
+        store = _arrow_store(cls, _FakeArrowFileSystem(tmp_path, backend_error=denied))
+
+        with pytest.raises(OSError, match="ACCESS_DENIED"):
+            store.read_blob("artifact-1", 1)
+        with pytest.raises(OSError, match="ACCESS_DENIED"):
+            store.open_blob_reader("artifact-1", 1)
+
+    def test_exists_size_and_delete_propagate_a_backend_error(self, cls, tmp_path: Path):
+        """``delete_blob`` matters most: the caller removes the metadata row regardless, so a
+        False that meant "could not reach the bucket" orphaned the object for good."""
+        reset = OSError("connection reset")
+        store = _arrow_store(cls, _FakeArrowFileSystem(tmp_path, backend_error=reset))
+
+        for call in (store.blob_exists, store.blob_size, store.delete_blob):
+            with pytest.raises(OSError, match="connection reset"):
+                call("artifact-1", 1)
+
+    def test_a_delete_that_loses_the_race_reports_absent(self, cls, tmp_path: Path):
+        fake_fs = _FakeArrowFileSystem(tmp_path)
+        store = _arrow_store(cls, fake_fs)
+        store.write_blob("artifact-1", 1, b"x")
+        real_delete = fake_fs.delete_file
+
+        def delete_after_the_other_sweep(key):
+            (tmp_path / key.replace("/", "_")).unlink()
+            real_delete(key)
+
+        fake_fs.delete_file = delete_after_the_other_sweep
+
+        assert store.delete_blob("artifact-1", 1) is False
+
+
+class _FakeBlobClient:
+    """One blob of a fake Azure container, over a local file."""
+
+    def __init__(self, path: Path, record: list[str]):
+        from azure.core.exceptions import ResourceNotFoundError
+
+        self._path = path
+        self._record = record
+        self._absent = ResourceNotFoundError
+
+    def upload_blob(self, data, overwrite: bool = False) -> None:
+        self._record.append(f"upload:overwrite={overwrite}")
+        self._path.write_bytes(data.read())
+
+    def download_blob(self):
+        if not self._path.exists():
+            raise self._absent(f"{self._path.name} not found")
+        content = self._path.read_bytes()
+        return SimpleNamespace(chunks=lambda: iter([content[:3], content[3:]]))
+
+    def exists(self) -> bool:
+        return self._path.exists()
+
+    def get_blob_properties(self):
+        if not self._path.exists():
+            raise self._absent(f"{self._path.name} not found")
+        return SimpleNamespace(size=self._path.stat().st_size)
+
+    def delete_blob(self) -> None:
+        if not self._path.exists():
+            raise self._absent(f"{self._path.name} not found")
+        self._path.unlink()
+
+
+class _FakeContainerClient:
+    def __init__(self, root: Path):
+        self.root = root
+        self.record: list[str] = []
+
+    def get_blob_client(self, key: str) -> _FakeBlobClient:
+        return _FakeBlobClient(self.root / key.replace("/", "_"), self.record)
+
+
+class TestAzureBackendOverAFakeClient:
+    """The Azure I/O paths over a fake ``ContainerClient``, keyed like the real one."""
+
+    def _store(self, tmp_path: Path):
+        pytest.importorskip("azure.core.exceptions")
+        from vestigo.blob_store import AzureBlobStore
+
+        store = AzureBlobStore.__new__(AzureBlobStore)
+        store.prefix = "artifacts"
+        store._client = _FakeContainerClient(tmp_path)
+        return store
+
+    def test_write_publish_exists_size_delete(self, tmp_path: Path):
+        store = self._store(tmp_path)
+
+        assert store.read_blob("artifact-1", 1) is None
+        assert store.blob_exists("artifact-1", 1) is False
+        assert store.blob_size("artifact-1", 1) is None
+        assert store.delete_blob("artifact-1", 1) is False
+
+        store.write_blob("artifact-1", 1, b"streamed")
+        assert store.read_blob("artifact-1", 1) == b"streamed"
+        assert store.blob_exists("artifact-1", 1) is True
+        assert store.blob_size("artifact-1", 1) == len(b"streamed")
+        assert (tmp_path / "artifacts_artifact-1@v=1.arrow").exists()
+
+        source = tmp_path / "incoming.bin"
+        source.write_bytes(b"published")
+        store.publish_blob_from_path("artifact-1", 1, source)
+        assert store.read_blob("artifact-1", 1) == b"published"
+        assert store._client.record == ["upload:overwrite=True"] * 2
+
+        assert store.delete_blob("artifact-1", 1) is True
+        assert store.blob_exists("artifact-1", 1) is False
+        assert store.delete_blob("artifact-1", 1) is False
+
+    def test_a_failed_writer_uploads_nothing(self, tmp_path: Path):
+        store = self._store(tmp_path)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            with store.open_blob_writer("artifact-1", 1) as writer:
+                writer.write(b"partial")
+                raise RuntimeError("boom")
+
+        assert store._client.record == []
+        assert store.blob_exists("artifact-1", 1) is False
 
 
 class TestAzureDownloadReader:
@@ -977,27 +1150,23 @@ class TestAzureBlobStore:
             store._client.url == "https://acct.blob.core.windows.net/test-container?sv=2024&sig=abc"
         )
 
-    @pytest.mark.skip(reason="Requires actual Azure Storage or Azurite emulator")
+    @pytest.mark.skipif(
+        not os.environ.get("VESTIGO_AZURE_CONNECTION_STRING"),
+        reason="set VESTIGO_AZURE_CONNECTION_STRING (Azurite) to run the Azure round trip",
+    )
     def test_write_and_read_blob_integration(self):
-        """Round-trip against real Azure Storage; skipped unless Azurite or a connection string is
-        set.
+        """Round-trip against an Azure endpoint.
 
-            VESTIGO_AZURE_CONNECTION_STRING=UseDevelopmentStorage=true
+        For Azurite: VESTIGO_AZURE_CONNECTION_STRING=UseDevelopmentStorage=true
         """
-        import os
-
         pytest.importorskip("azure.storage.blob")
         from vestigo.blob_store import AzureBlobStore
-
-        connection_string = os.environ.get("VESTIGO_AZURE_CONNECTION_STRING")
-        if not connection_string:
-            pytest.skip("VESTIGO_AZURE_CONNECTION_STRING not set")
 
         store = AzureBlobStore(
             account_name="devstoreaccount1",  # Azurite default
             container_name="test-container",
             prefix="artifacts",
-            connection_string=connection_string,
+            connection_string=os.environ["VESTIGO_AZURE_CONNECTION_STRING"],
         )
 
         data = b"test artifact data"
@@ -1005,72 +1174,3 @@ class TestAzureBlobStore:
         result = store.read_blob("artifact-1", 1)
 
         assert result == data
-
-
-class TestBackendFailuresAreVisible:
-    """``blob_exists``, ``blob_size`` and ``delete_blob`` must not turn backend errors into
-    confident answers.
-
-    ``delete_blob`` matters most: the metadata row is removed regardless, so a silent False orphans
-    the object for good. The logger is monkeypatched because package logging bypasses ``caplog``.
-    """
-
-    def _store(self, *, info_error=None, delete_error=None):
-        import pyarrow.fs as pafs
-
-        store = S3BlobStore.__new__(S3BlobStore)
-        store.bucket = "b"
-        store.prefix = "p"
-
-        class _Fs:
-            def get_file_info(self, key):
-                if info_error is not None:
-                    raise info_error
-                return SimpleNamespace(type=pafs.FileType.File, size=123)
-
-            def delete_file(self, key):
-                if delete_error is not None:
-                    raise delete_error
-
-        store._fs = _Fs()
-        return store
-
-    def _capture(self, monkeypatch):
-        messages: list[str] = []
-        monkeypatch.setattr(
-            blob_store_module.logger,
-            "exception",
-            lambda msg, *a, **k: messages.append(msg % a if a else msg),
-        )
-        return messages
-
-    def test_blob_exists_logs_the_backend_error(self, monkeypatch):
-        messages = self._capture(monkeypatch)
-        store = self._store(info_error=OSError("connection reset"))
-
-        assert store.blob_exists("a", 1) is False
-        assert any("blob_exists failed" in m for m in messages)
-
-    def test_blob_size_logs_the_backend_error(self, monkeypatch):
-        messages = self._capture(monkeypatch)
-        store = self._store(info_error=OSError("connection reset"))
-
-        assert store.blob_size("a", 1) is None
-        assert any("blob_size failed" in m for m in messages)
-
-    def test_delete_blob_logs_the_orphaned_object(self, monkeypatch):
-        """The object exists, so the delete is attempted, and its failure orphans it."""
-        messages = self._capture(monkeypatch)
-        store = self._store(delete_error=OSError("connection reset"))
-
-        assert store.delete_blob("a", 1) is False
-        assert any("orphaned" in m for m in messages)
-
-    def test_a_healthy_backend_logs_nothing(self, monkeypatch):
-        messages = self._capture(monkeypatch)
-        store = self._store()
-
-        assert store.blob_exists("a", 1) is True
-        assert store.blob_size("a", 1) == 123
-        assert store.delete_blob("a", 1) is True
-        assert messages == []

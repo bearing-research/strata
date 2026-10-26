@@ -20,7 +20,7 @@ import logging
 import re
 import sqlite3
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -369,30 +369,60 @@ def _row_factory(cursor: Any) -> Any:
     return lambda values: _Row(columns, tuple(values))
 
 
+# Command tags of statements that leave no row uncommitted. ``SELECT`` covers the advisory
+# lock and ``setval``, which hold no write of their own; anything else counts as a write.
+_READ_TAGS = frozenset({"SELECT", "SHOW", "EXPLAIN", "SET", "SAVEPOINT", "RELEASE", "ROLLBACK"})
+
+
+class _Lease:
+    """A thread's checked-out raw connection, with how many wrappers hold it.
+
+    ``dirty`` is whether a write ran since the last commit or rollback. Wrappers on
+    any thread release through this record, so a close from another thread still
+    returns the connection.
+    """
+
+    __slots__ = ("depth", "dirty", "raw")
+
+    def __init__(self, raw: Any) -> None:
+        self.raw = raw
+        self.depth = 1
+        self.dirty = False
+
+
 class _PostgresConnection:
     """Adapts a psycopg connection to the surface the store expects.
 
     ``execute`` translates qmark to pyformat; ``executescript`` (absent in psycopg)
-    runs the store's own multi-statement DDL.
+    runs the store's own multi-statement DDL. Usable as a context manager; one
+    dropped without ``close()`` releases itself when collected, with a warning.
     """
 
-    def __init__(self, inner: Any, release: Any) -> None:
-        self._inner = inner
+    def __init__(self, lease: _Lease, release: Callable[[_Lease], None]) -> None:
+        self._lease = lease
+        self._inner = lease.raw
         self._release = release
         self._closed = False
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
-        return self._inner.execute(translate_placeholders(sql), params)
+        cursor = self._inner.execute(translate_placeholders(sql), params)
+        # The server's command tag says what ran, so no SQL is parsed here.
+        if (cursor.statusmessage or "").split(" ", 1)[0] not in _READ_TAGS:
+            self._lease.dirty = True
+        return cursor
 
     def executescript(self, sql: str) -> Any:
         # No parameters, so skip translate_placeholders' percent-escaping.
+        self._lease.dirty = True
         return self._inner.execute(sql)
 
     def commit(self) -> None:
         self._inner.commit()
+        self._lease.dirty = False
 
     def rollback(self) -> None:
         self._inner.rollback()
+        self._lease.dirty = False
 
     def close(self) -> None:
         """Return the connection to the pool rather than closing it.
@@ -402,7 +432,21 @@ class _PostgresConnection:
         if self._closed:
             return
         self._closed = True
-        self._release()
+        self._release(self._lease)
+
+    def __enter__(self) -> _PostgresConnection:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        # Unreleased, the thread would keep this connection and its open transaction
+        # for the life of the process.
+        if getattr(self, "_closed", True):
+            return
+        logger.warning("an artifact-store connection was dropped without close(); releasing it")
+        self.close()
 
 
 class PostgresDialect:
@@ -416,7 +460,7 @@ class PostgresDialect:
         self._pool: Any = None
         self._pool_lock = threading.Lock()
         self._closed = False
-        # Per-thread (connection, depth) for re-entrant acquisition.
+        # Per-thread ``_Lease`` for re-entrant acquisition.
         self._local = threading.local()
 
     def _get_pool(self) -> Any:
@@ -436,11 +480,14 @@ class PostgresDialect:
                     # lock (paused container, "idle in transaction") would hang every other
                     # node. No ``statement_timeout``: it would break slow maintenance like
                     # ``garbage_collect``.
+                    # ``check`` costs an empty round trip per checkout; without it every
+                    # connection idle across a server restart fails once in a store call.
                     self._pool = ConnectionPool(
                         self.dsn,
                         min_size=_POOL_MIN_SIZE,
                         max_size=self.max_size,
                         timeout=_POOL_TIMEOUT_SECONDS,
+                        check=ConnectionPool.check_connection,
                         kwargs={
                             "row_factory": _row_factory,
                             "connect_timeout": _CONNECT_TIMEOUT_SECONDS,
@@ -457,36 +504,45 @@ class PostgresDialect:
         when the outermost holder closes it. The store acquires nested connections in
         several places, so without this a bounded pool deadlocks.
 
-        A nested call joins the outer transaction. That is sound only while every
-        nesting runs after the outer work was committed or rolled back; a nested write
-        inside uncommitted outer work would break it.
+        A nested call joins the outer transaction, so its commit or rollback would decide
+        the outer's uncommitted writes (SQLite's independent connections cannot). It is
+        refused while the outer holds a write it has not committed or rolled back, and
+        while the outer transaction has failed, where no statement could run anyway.
+
+        Raises:
+            RuntimeError: the thread's connection has uncommitted writes or a failed
+                transaction.
         """
-        state = self._local
-        conn = getattr(state, "conn", None)
-        if conn is not None:
-            state.depth += 1
-            return _PostgresConnection(conn, self._release)
+        lease = getattr(self._local, "lease", None)
+        if lease is not None and lease.depth > 0:
+            from psycopg.pq import TransactionStatus
 
-        raw = self._get_pool().getconn()
-        state.conn = raw
-        state.depth = 1
-        return _PostgresConnection(raw, self._release)
+            status = lease.raw.info.transaction_status
+            if status == TransactionStatus.INERROR:
+                raise RuntimeError(
+                    "this thread's artifact-store connection is in a failed transaction; "
+                    "roll it back or close it before acquiring another"
+                )
+            if lease.dirty and status == TransactionStatus.INTRANS:
+                raise RuntimeError(
+                    "this thread's artifact-store connection has uncommitted writes; "
+                    "commit or roll them back before acquiring a nested connection"
+                )
+            lease.depth += 1
+            return _PostgresConnection(lease, self._release)
 
-    def _release(self) -> None:
-        state = self._local
-        if getattr(state, "conn", None) is None:
-            # Release from a non-owning thread (cross-thread close or double release).
-            # Decrementing would drive depth negative and putconn(None), losing the real
-            # connection from a bounded pool.
-            logger.warning("ignoring artifact-store connection release from a non-owning thread")
+        lease = _Lease(self._get_pool().getconn())
+        self._local.lease = lease
+        return _PostgresConnection(lease, self._release)
+
+    def _release(self, lease: _Lease) -> None:
+        lease.depth -= 1
+        if lease.depth > 0:
             return
 
-        state.depth -= 1
-        if state.depth > 0:
-            return
-
-        raw = state.conn
-        state.conn = None
+        raw = lease.raw
+        if getattr(self._local, "lease", None) is lease:
+            self._local.lease = None
 
         pool = self._pool
         if self._closed or pool is None:

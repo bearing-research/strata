@@ -160,6 +160,7 @@ def reconstruct_definitions(store: ArtifactStore) -> None:
     if store.upgrade_applied(CELL_DEFINITIONS_UPGRADE):
         return
     filled: dict[tuple[str, int], NodeId] = {}
+    by_tenant: dict[str | None, dict[tuple[str, int], NodeId]] = {}
     for version in store.versions_lacking_definition(executor=CELL_EXECUTOR):
         spec = version.spec
         if not is_cell_output(spec):
@@ -175,10 +176,12 @@ def reconstruct_definitions(store: ArtifactStore) -> None:
             tenant=version.tenant or None,
             known=filled,
         )
-        filled[(version.id, version.version)] = store.graph.put_batch(
-            specs, tenant=version.tenant or None
-        )[-1]
-    store.set_definitions(filled)
+        node = store.graph.put_batch(specs, tenant=version.tenant or None)[-1]
+        filled[(version.id, version.version)] = node
+        by_tenant.setdefault(version.tenant or None, {})[(version.id, version.version)] = node
+    # A definition is checked against its tenant's scope, so one call per tenant.
+    for tenant, definitions in by_tenant.items():
+        store.set_definitions(definitions, tenant=tenant)
     store.mark_upgrade_applied(CELL_DEFINITIONS_UPGRADE)
     if filled:
         logger.info(

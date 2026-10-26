@@ -1,4 +1,7 @@
-"""Adding a column to a store that already holds data, on SQLite and Postgres."""
+"""Adding a column to a store that already holds data, on SQLite.
+
+The Postgres half lives in ``test_artifact_store_postgres.py``.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,15 @@ def _columns(db_path) -> set[str]:
     conn = sqlite3.connect(db_path)
     try:
         return {row[1] for row in conn.execute("PRAGMA table_info(artifact_versions)")}
+    finally:
+        conn.close()
+
+
+def _schema(db_path) -> set[tuple[str, str]]:
+    """Every table and index with its DDL."""
+    conn = sqlite3.connect(db_path)
+    try:
+        return set(conn.execute("SELECT name, sql FROM sqlite_master").fetchall())
     finally:
         conn.close()
 
@@ -127,6 +139,72 @@ class TestExistingDatabase:
             ArtifactStore(tmp_path / "s")
 
 
+class TestTwoFirstBoots:
+    """Two processes creating one SQLite store together both come out at the latest version."""
+
+    def test_the_fresh_stamp_runs_under_the_write_lock(self, tmp_path):
+        """Interleaved at the stamp: the first boot has read 'absent' and not yet
+        inserted when the second boot finds the tables. Under the lock the second
+        waits (its no-wait connection reports the lock instead); without it the
+        second stamps every version first and the first boot's insert collides."""
+        import threading
+        import time
+
+        from vestigo.sql_backend import SqliteDialect
+
+        class NoWait(SqliteDialect):
+            def connect(self):
+                conn = sqlite3.connect(str(self.db_path), timeout=0.05)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.row_factory = sqlite3.Row
+                return conn
+
+        target = tmp_path / "artifacts"
+        second: dict[str, object] = {}
+
+        def boot_second():
+            try:
+                second["store"] = ArtifactStore(target, dialect=NoWait(target / "artifacts.sqlite"))
+            except sqlite3.OperationalError as exc:
+                second["error"] = exc
+
+        original = ArtifactStore._stamp_schema_version
+
+        def interleaved(self, conn, version):
+            if version != _LATEST_SCHEMA_VERSION or "ran" in second:
+                return original(self, conn, version)
+            second["ran"] = True
+            stamped = conn.execute(
+                "SELECT 1 FROM schema_version WHERE version = ?", (version,)
+            ).fetchone()
+            if stamped is not None:
+                return
+            other = threading.Thread(target=boot_second)
+            other.start()
+            other.join(timeout=10)
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                (version, time.time()),
+            )
+
+        ArtifactStore._stamp_schema_version = interleaved
+        try:
+            first = ArtifactStore(target)
+        finally:
+            ArtifactStore._stamp_schema_version = original
+
+        assert "store" not in second, "the second boot got in between the read and the insert"
+        assert "locked" in str(second["error"])
+        assert _version(first.db_path) == _LATEST_SCHEMA_VERSION
+        assert ArtifactStore(target).stats()["total_versions"] == 0
+        conn = sqlite3.connect(first.db_path)
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 1
+        finally:
+            conn.close()
+
+
 class TestAReadOnlyOpen:
     """For commands that only inspect: the store stays exactly as it was."""
 
@@ -138,16 +216,22 @@ class TestAReadOnlyOpen:
         conn.commit()
         conn.close()
 
+        before = _schema(db_path)
+
         with pytest.raises(StoreSchemaMismatch, match="version 8, older"):
             ArtifactStore(tmp_path / "old", read_only=True)
 
         assert _version(db_path) == 8
-        conn = sqlite3.connect(db_path)
-        try:
-            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-        finally:
-            conn.close()
-        assert "notebook_workers" not in tables
+        assert _schema(db_path) == before
+
+    def test_a_missing_store_is_refused_before_anything_is_created(self, tmp_path):
+        target = tmp_path / "nope" / "artifacts"
+
+        with pytest.raises(StoreSchemaMismatch, match="No artifact store"):
+            ArtifactStore(target, read_only=True)
+
+        assert not target.exists()
+        assert not target.parent.exists()
 
     def test_a_database_from_before_versioning_is_refused(self, tmp_path):
         db_path = ArtifactStore(tmp_path / "old").db_path
@@ -207,40 +291,7 @@ def _ready(store, artifact_id, executor, inputs, input_versions=None) -> None:
     store.finalize_artifact(artifact_id, version, "{}", 1, 1)
 
 
-class TestTheMisboundBuildMigration:
-    def test_fails_embedded_builds_over_eleven_inputs_and_what_read_them(self, tmp_path):
-        """Their bytes bound input10 before input2; anything built over them inherits that."""
-        store = ArtifactStore(tmp_path / "s")
-        twelve = [f"vestigo://artifact/in{i}@v=1" for i in range(12)]
-        _ready(store, "wide", "local://duckdb_sql@v1", twelve)
-        _ready(store, "wide_bare", "duckdb_sql@v1", twelve[:11])
-        _ready(
-            store,
-            "reader",
-            "local://duckdb_sql@v1",
-            ["vestigo://name/wide"],
-            {"vestigo://name/wide": "wide@v=1"},
-        )
-        _ready(store, "narrow", "local://duckdb_sql@v1", twelve[:10])
-        _ready(store, "remote", "pandas_script@v1", twelve)
-        conn = sqlite3.connect(store.db_path)
-        conn.execute("DELETE FROM schema_version WHERE version >= 11")
-        conn.commit()
-        conn.close()
-
-        reopened = ArtifactStore(tmp_path / "s")
-
-        states = {a: reopened.get_artifact(a, 1).state for a in ("wide", "wide_bare", "reader")}
-        assert states == {"wide": "failed", "wide_bare": "failed", "reader": "failed"}
-        assert reopened.find_by_provenance("hash-wide") is None
-        assert reopened.find_by_provenance("hash-reader") is None
-        assert reopened.find_by_provenance("hash-narrow") is not None
-        assert reopened.find_by_provenance("hash-remote") is not None
-        assert _version(reopened.db_path) == _LATEST_SCHEMA_VERSION
-
-
-@pytest.mark.parametrize("dialect_name", ["sqlite"])
-def test_column_exists_reports_truthfully(tmp_path, dialect_name):
+def test_column_exists_reports_truthfully(tmp_path):
     """The primitive every migration is built from."""
     from vestigo.sql_backend import SqliteDialect
 

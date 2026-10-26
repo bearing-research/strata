@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-import struct
+import gc
+import logging
+import os
+import threading
 from pathlib import Path
 
+import pytest
+
+from vestigo import sql_backend
 from vestigo.sql_backend import (
     SERVER_THREAD_LIMIT,
     PostgresDialect,
@@ -128,21 +134,31 @@ class _FakeInner:
 
     def __init__(self):
         self.executed: list[tuple[str, tuple]] = []
+        self.statusmessage = None
 
     def execute(self, sql, params=()):
         self.executed.append((sql, tuple(params)))
+        # The command tag psycopg exposes on the cursor, from the statement's verb.
+        self.statusmessage = sql.split(None, 1)[0].upper()
         return self
+
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return None
 
 
 class TestPostgresConnectionAdapter:
     """The wrapper keeps the store's call sites unchanged."""
 
     def _wrap(self):
-        from vestigo.sql_backend import _PostgresConnection
+        from vestigo.sql_backend import _Lease, _PostgresConnection
 
         inner = _FakeInner()
         released = []
-        return _PostgresConnection(inner, lambda: released.append(1)), inner, released
+        lease = _Lease(inner)
+        return _PostgresConnection(lease, lambda lease: released.append(1)), inner, released
 
     def test_execute_translates_placeholders(self):
         conn, inner, _ = self._wrap()
@@ -163,7 +179,8 @@ class TestPostgresConnectionAdapter:
 
     def test_begin_write_takes_an_advisory_lock_on_the_key(self):
         conn, inner, _ = self._wrap()
-        PostgresDialect("postgresql:///x").begin_write(conn, "a1")
+        with conn:
+            PostgresDialect("postgresql:///x").begin_write(conn, "a1")
         sql, params = inner.executed[0]
         assert "pg_advisory_xact_lock" in sql
         assert params == (advisory_lock_id("a1"),)
@@ -182,6 +199,37 @@ class TestPostgresConnectionAdapter:
         conn.close()
         conn.close()
         assert released == [1]
+
+    def test_the_context_manager_releases_on_exit(self):
+        conn, _, released = self._wrap()
+        with conn as entered:
+            assert entered is conn
+            assert released == []
+        assert released == [1]
+
+    def test_a_dropped_wrapper_releases_itself_with_a_warning(self, caplog):
+        # The ledger closes in a finally everywhere; this is for a consumer that does not.
+        conn, _, released = self._wrap()
+        with caplog.at_level(logging.WARNING, logger="vestigo.sql_backend"):
+            del conn
+            gc.collect()
+        assert released == [1]
+        assert any("without close()" in r.getMessage() for r in caplog.records)
+
+    def test_writes_mark_the_lease_dirty_until_commit_or_rollback(self):
+        # Decided by the server's command tag: the advisory lock is a SELECT and not a write.
+        conn, _, _ = self._wrap()
+        with conn:
+            conn.execute("SELECT pg_advisory_xact_lock(?)", (1,))
+            assert conn._lease.dirty is False
+            conn.execute("INSERT INTO t VALUES (?)", (1,))
+            assert conn._lease.dirty is True
+            conn.commit()
+            assert conn._lease.dirty is False
+            conn.executescript("CREATE TABLE a (x TEXT);")
+            assert conn._lease.dirty is True
+            conn.rollback()
+            assert conn._lease.dirty is False
 
 
 class TestRowBehavesLikeSqliteRow:
@@ -250,17 +298,9 @@ class TestPostgresDialectRendering:
         assert SqliteDialect(Path("x")).autoincrement_pk == "INTEGER PRIMARY KEY AUTOINCREMENT"
 
     def test_float_type_is_double_precision(self):
-        # Not REAL: see test_real_would_lose_timestamp_precision below.
+        # Not REAL, which is single precision and drops a timestamp's sub-second part;
+        # TestTimestampPrecision in the Postgres suite checks that against a live server.
         assert PostgresDialect("postgresql:///x").float_type == "DOUBLE PRECISION"
-
-    def test_real_would_lose_timestamp_precision(self):
-        # Why float_type exists: Postgres REAL is single precision, and these columns hold
-        # epoch seconds. A realistic created_at loses its sub-second part in 32 bits,
-        # silently.
-        created_at = 1787000000.123456
-        through_single = struct.unpack("f", struct.pack("f", created_at))[0]
-        assert through_single != created_at
-        assert abs(through_single - created_at) > 1.0
 
     def test_legacy_migration_is_not_supported(self):
         # No deployed Postgres history exists, so the sqlite_master / PRAGMA /
@@ -280,3 +320,145 @@ class TestThreadLimitAndPoolAreOneNumber:
 
     def test_the_pool_covers_every_thread_token_and_the_event_loop(self):
         assert PostgresDialect("postgresql:///x").max_size == SERVER_THREAD_LIMIT + 1
+
+
+def _docker_daemon_reachable() -> bool:
+    try:
+        import docker
+
+        docker.from_env().ping()
+        return True
+    except Exception:
+        return False
+
+
+@pytest.fixture(scope="module")
+def postgres_dsn():
+    """A live Postgres for the pooled-connection tests; skipped without Docker."""
+    if not _docker_daemon_reachable():
+        if os.environ.get("VESTIGO_REQUIRE_DOCKER"):
+            raise RuntimeError("VESTIGO_REQUIRE_DOCKER is set and the Docker daemon is unreachable")
+        pytest.skip("Docker daemon is not running")
+    from testcontainers.community.postgres import PostgresContainer
+
+    with PostgresContainer("postgres:18-alpine") as container:
+        yield container.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+
+
+@pytest.fixture
+def dialect(postgres_dsn):
+    dialect = PostgresDialect(postgres_dsn)
+    with dialect.connect() as conn:
+        conn.executescript("DROP TABLE IF EXISTS t; CREATE TABLE t (x INT)")
+        conn.commit()
+    yield dialect
+    dialect.close()
+
+
+def _count(dialect) -> int:
+    with dialect.connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+class TestPooledConnectionLifecycle:
+    """What a thread's pooled connection does across wrappers, threads and failures."""
+
+    def test_a_wrapper_dropped_after_a_failed_statement_does_not_poison_the_thread(
+        self, dialect, caplog
+    ):
+        import psycopg
+
+        def forgets_to_close() -> None:
+            conn = dialect.connect()
+            try:
+                conn.execute("SELECT * FROM no_such_table")
+            except psycopg.Error:
+                return
+
+        with caplog.at_level(logging.WARNING, logger="vestigo.sql_backend"):
+            forgets_to_close()
+            gc.collect()
+
+        assert any("without close()" in r.getMessage() for r in caplog.records)
+        # The next acquisition on this thread is a clean connection, not the failed one.
+        with dialect.connect() as again:
+            assert again.execute("SELECT 1").fetchone()[0] == 1
+
+    def test_a_nested_connect_on_a_failed_transaction_is_refused(self, dialect):
+        import psycopg
+
+        outer = dialect.connect()
+        try:
+            with pytest.raises(psycopg.Error):
+                outer.execute("SELECT * FROM no_such_table")
+            with pytest.raises(RuntimeError, match="failed transaction"):
+                dialect.connect()
+            outer.rollback()
+            with dialect.connect() as inner:
+                assert inner.execute("SELECT 1").fetchone()[0] == 1
+        finally:
+            outer.close()
+
+    def test_a_nested_connect_over_uncommitted_writes_is_refused(self, dialect):
+        # Joined, the inner's rollback would discard the outer's INSERT and its commit would
+        # publish it; refused, the outer's own decision stands.
+        outer = dialect.connect()
+        try:
+            outer.execute("INSERT INTO t VALUES (1)")
+            with pytest.raises(RuntimeError, match="uncommitted writes"):
+                dialect.connect()
+            outer.commit()
+            # The store nests reads after its commit; those stay allowed.
+            with dialect.connect() as inner:
+                inner.execute("SELECT 1").fetchone()
+                inner.rollback()
+            outer.execute("INSERT INTO t VALUES (2)")
+            outer.rollback()
+        finally:
+            outer.close()
+        assert _count(dialect) == 1
+
+    def test_a_nested_connect_after_reads_shares_the_connection(self, dialect):
+        outer = dialect.connect()
+        try:
+            outer.execute("SELECT 1").fetchone()
+            dialect.begin_write(outer, "a1")
+            inner = dialect.connect()
+            try:
+                assert inner._inner is outer._inner
+            finally:
+                inner.close()
+            # The inner's close keeps the outer's connection checked out.
+            assert dialect._local.lease.depth == 1
+        finally:
+            outer.close()
+        assert dialect._local.lease is None
+
+    def test_a_close_from_another_thread_returns_the_connection(self, postgres_dsn, monkeypatch):
+        # Released through the record captured at connect, not the closing thread's state.
+        monkeypatch.setattr(sql_backend, "_POOL_TIMEOUT_SECONDS", 2.0)
+        dialect = PostgresDialect(postgres_dsn, max_size=1)
+        try:
+            box: dict[str, object] = {}
+            thread = threading.Thread(target=lambda: box.__setitem__("conn", dialect.connect()))
+            thread.start()
+            thread.join()
+            box["conn"].close()
+            with dialect.connect() as conn:
+                assert conn.execute("SELECT 1").fetchone()[0] == 1
+        finally:
+            dialect.close()
+
+    def test_a_connection_the_server_dropped_is_not_handed_out(self, dialect, postgres_dsn):
+        # After a restart or failover every idle pooled connection is dead; the pool checks
+        # before handing one out, so no store call fails for it.
+        import psycopg
+
+        with dialect.connect() as conn:
+            pid = conn.execute("SELECT pg_backend_pid()").fetchone()[0]
+        with psycopg.connect(postgres_dsn, autocommit=True) as killer:
+            assert killer.execute("SELECT pg_terminate_backend(%s)", (pid,)).fetchone()[0]
+        with dialect.connect() as conn:
+            assert conn.execute("SELECT pg_backend_pid()").fetchone()[0] != pid

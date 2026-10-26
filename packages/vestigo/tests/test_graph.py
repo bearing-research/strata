@@ -17,6 +17,7 @@ from vestigo.graph import (
     NodeSpec,
     Traversal,
     canonical_role,
+    cgd1_envelope,
     identity_scope,
     node_id,
 )
@@ -37,6 +38,49 @@ THREE = [LEAF, FIRST, SECOND]
 
 def _hex(n: int) -> str:
     return f"{n:064x}"
+
+
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _Recording:
+    """A connection that records the node ids each ``INSERT INTO nodes`` carries, and
+    hands back a node's ports in a foreign collation's order (glibc's en_US.utf8)."""
+
+    def __init__(self, inner, inserted: list[str], port_order: list[str]):
+        self._inner = inner
+        self._inserted = inserted
+        self._port_order = port_order
+
+    def __getattr__(self, attr):
+        return getattr(self._inner, attr)
+
+    def execute(self, sql, params=()):
+        if sql.startswith("INSERT INTO nodes"):
+            self._inserted.append(params[1])
+        cursor = self._inner.execute(sql, params)
+        if sql.startswith("SELECT role, position, target_node_id FROM node_inputs"):
+            rows = sorted(cursor.fetchall(), key=lambda r: self._port_order.index(r["role"]))
+            return _Rows(rows)
+        return cursor
+
+
+@pytest.fixture
+def recording(store):
+    """The store's graph on recording connections; yields the recorded insert ids."""
+    inserted: list[str] = []
+    connect = store.graph._connect
+    store.graph._connect = lambda: _Recording(connect(), inserted, GLIBC_ORDER)
+    yield inserted
+    store.graph._connect = connect
+
+
+GLIBC_ORDER = ["a", "b", "\u00e9", "_x", "Z"]
 
 
 class TestPutBatch:
@@ -124,15 +168,48 @@ class TestPutBatch:
         assert one == two
         assert [p.role for p in store.graph.inputs(one)] == ["file"]
 
+    def test_a_role_is_an_identifier(self, store):
+        for role in ("a b", "1x", "x\n", "left-table", "a.b"):
+            with pytest.raises(ValueError, match="not an identifier"):
+                store.graph.put_batch([LEAF, NodeSpec("test/cell", b"a", (Edge(role, 0, 0),))])
+        assert canonical_role("\ufb01le") == b"file"
+        assert canonical_role("donn\u00e9es") == "données".encode()
+
+    def test_ports_come_in_the_encoders_order_whatever_the_backend_collates(self, store, recording):
+        # glibc's en_US.utf8 orders these a, b, é, _x, Z; the encoder's byte order does not.
+        edges = tuple(Edge(role, 0, 0) for role in GLIBC_ORDER)
+        _, mixed = store.graph.put_batch([LEAF, NodeSpec("test/cell", b"m", edges)])
+
+        assert [p.role for p in store.graph.inputs(mixed)] == ["Z", "_x", "a", "b", "\u00e9"]
+
+    def test_nodes_are_inserted_in_id_order(self, store, recording):
+        leaves = [NodeSpec("test/table", bytes([i])) for i in range(6)]
+        ids = store.graph.put_batch(leaves)
+        assert ids != sorted(ids), "the batch happens to be in id order; pick other payloads"
+
+        descending = [leaves[ids.index(i)] for i in sorted(ids, reverse=True)]
+        recording.clear()
+        assert store.graph.put_batch(descending) == sorted(ids, reverse=True)
+        assert recording == sorted(ids)
+
+
+class TestEncoders:
+    SCOPE = identity_scope(None)
+    A = b"\x01" * 32
+
+    def test_a_non_ascii_port_name_is_refused_as_a_port_name(self):
+        with pytest.raises(ValueError, match="not lowercase ASCII"):
+            cgd1_envelope(self.SCOPE, "test", 1, [("\u00e9", b"", self.A, True)], [], [self.A])
+        with pytest.raises(ValueError, match="not lowercase ASCII"):
+            cgd1_envelope(self.SCOPE, "test", 1, [], [("\u00e9", b"", self.A)], [self.A])
+
 
 class TestTraversal:
     def test_ancestors_dependents_and_topological_order(self, store):
         leaf, first, second = store.graph.put_batch(THREE)
 
-        assert store.graph.ancestors([second]) == sorted([leaf, first]) or store.graph.ancestors(
-            [second]
-        ) == [leaf, first]
-        assert set(store.graph.ancestors([second])) == {leaf, first}
+        # Both are direct inputs of second, so depth ties and the id decides.
+        assert store.graph.ancestors([second]) == sorted([leaf, first])
         assert store.graph.ancestors([leaf]) == []
         assert set(store.graph.dependents(leaf)) == {first, second}
         assert store.graph.dependents(second) == []
@@ -149,6 +226,21 @@ class TestTraversal:
         ids = store.graph.put_batch(chain)
         # A chain has one node per depth, so depth order is the chain reversed.
         assert store.graph.ancestors([ids[-1]]) == ids[-2::-1]
+
+    def test_a_depth_bound_below_one_is_refused(self):
+        for depth in (0, -5):
+            with pytest.raises(ValueError, match="below 1"):
+                Traversal(max_depth=depth)
+        assert Traversal(max_depth=1).max_depth == 1
+
+    def test_a_root_the_store_lacks_is_refused(self, store):
+        leaf, first, second = store.graph.put_batch(THREE)
+        with pytest.raises(ValueError, match="not in the store"):
+            store.graph.topological_order(["e" * 64])
+        with pytest.raises(ValueError, match="not in the store"):
+            store.graph.topological_order([second, "e" * 64])
+        # Walks from an unknown node answer with what they reach: nothing.
+        assert store.graph.ancestors(["e" * 64]) == []
 
     def test_a_walk_stops_at_its_depth_bound(self, store):
         chain = [LEAF] + [
@@ -217,7 +309,7 @@ class TestDefinitions:
         v2 = store.create_artifact("old", "prov-2", spec)
         store.finalize_artifact("old", v2, "{}", 1, 1)
         unfinished = store.create_artifact("building", "prov-3", spec)
-        _, _, second = store.graph.put_batch(THREE)
+        leaf, first, second = store.graph.put_batch(THREE)
 
         lacking = [(v.id, v.version) for v in store.versions_lacking_definition()]
         assert lacking == [("old", 1), ("old", 2)]
@@ -227,12 +319,21 @@ class TestDefinitions:
         assert store.versions_lacking_definition(executor="x_v1") == []
         assert store.versions_lacking_definition(executor="x@v") == []
 
-        store.set_definitions({("old", 1): second, ("old", 2): _hex(5)})
-        store.set_definitions({("old", 1): _hex(6)})
+        store.set_definitions({("old", 1): second, ("old", 2): first})
+        store.set_definitions({("old", 1): leaf})
 
         assert store.definition_of("old", 1) == second
-        assert store.definition_of("old", 2) == _hex(5)
+        assert store.definition_of("old", 2) == first
         assert store.versions_lacking_definition() == []
+
+    def test_a_definition_must_be_a_node_the_store_holds(self, store):
+        """A string that is not a node of the version's scope is refused, not recorded."""
+        spec = TransformSpec("x@v1", {}, [])
+        v1 = store.create_artifact("old", "prov-1", spec)
+        store.finalize_artifact("old", v1, "{}", 1, 1)
+        with pytest.raises(ValueError):
+            store.set_definitions({("old", 1): _hex(5)})
+        assert store.definition_of("old", 1) is None
 
 
 class TestMigration:

@@ -4455,10 +4455,11 @@ dev = [
     { name = "anyio" },
     { name = "cryptography" },
     { name = "docker" },
-    { name = "moto", extra = ["s3"] },
+    { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-timeout" },
+    { name = "ruff" },
     { name = "testcontainers" },
 ]
 
@@ -4479,10 +4480,11 @@ dev = [
     { name = "anyio", specifier = ">=4.0.0" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "docker", specifier = ">=7.0.0" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
+    { name = "pre-commit", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-timeout", specifier = ">=2.3.0" },
+    { name = "ruff", specifier = "==0.17.1" },
     { name = "testcontainers", specifier = ">=4.15.0" },
 ]
 
