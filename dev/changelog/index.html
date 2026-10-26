@@ -3781,6 +3781,14 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Gate 1 on both backends, with the table leaf (ADR 002 E5).</strong> Gate 1
+  runs on PostgreSQL too (<code>tests/notebook/test_local_runs_postgres.py</code>, the
+  integration workflow's Postgres step), and <code>NotebookSession</code> takes the
+  ledger's SQL dialect at construction. A cell's structural node gets a
+  <code>strata/table</code> leaf per table it read: the executor records a run's
+  <code># @table</code> and DuckDB catalog reads when it computes provenance, SQL cells
+  record their lake reads, and every output the run stages carries them, so
+  the graph answers which cells read a table and at which snapshot. (#1300)</li>
 <li><strong>A local cell run is an execution with checkpoints (ADR 002 E4b).</strong> Every
   locally run Python cell now gets a build and an attempt in the notebook's
   ledger, its lease renewed by the server while the cell runs, and the
