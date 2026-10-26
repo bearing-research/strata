@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 from conftest import seed_build_targets
+
 from vestigo.build_store import (
     BuildStore,
     get_build_store,

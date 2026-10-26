@@ -67,7 +67,7 @@ class BlobSettings:
 
 
 class ObjectStoreErrors:
-    """Failed object-store calls by operation, for ``strata_object_store_errors_total``."""
+    """Failed object-store calls by operation, for the consumer's error metric."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -190,7 +190,7 @@ class BlobStore(ABC):
         """Return a URL that reads this blob straight from the object store, or ``None``.
 
         ``None`` means the backend cannot sign one (local disk, or credentials this
-        process cannot sign with), and the caller keeps serving bytes through Strata.
+        process cannot sign with), and the caller serves the bytes itself.
         """
         return None
 
@@ -231,7 +231,7 @@ class BlobStore(ABC):
     def _staged_local_writer(
         commit: Callable[[Path], None],
         *,
-        prefix: str = "strata_blob_",
+        prefix: str = "vestigo_blob_",
     ) -> Generator[BinaryIO]:
         """Stage writes through a local tempfile and pass it to ``commit(path)`` on clean exit.
 
@@ -455,7 +455,7 @@ class S3BlobStore(BlobStore):
         except ImportError:
             logger.warning(
                 "S3 presigning with role credentials needs botocore: "
-                "pip install 'strata-notebook[s3]'; keeping Strata URLs"
+                "pip install 'vestigo[s3]'; the caller serves the bytes"
             )
             return None
         return botocore.session.get_session().get_credentials()
@@ -581,7 +581,7 @@ class S3BlobStore(BlobStore):
         key = self._s3_key(artifact_id, version)
         return self._staged_local_writer(
             lambda staged: self._upload_from_path(key, staged),
-            prefix="strata_s3_blob_",
+            prefix="vestigo_s3_blob_",
         )
 
     def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:
@@ -688,7 +688,7 @@ def _resolve_gcs_credentials(credentials: str) -> str:
         return credentials
 
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-    path = Path(tempfile.gettempdir()) / f"strata_gcs_{digest}.json"
+    path = Path(tempfile.gettempdir()) / f"vestigo_gcs_{digest}.json"
     # Created with mode 0o600 so the key is never world-readable; the chmod
     # below fixes a file left behind by a previous run.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -770,7 +770,7 @@ class GCSBlobStore(BlobStore):
         except ImportError:
             logger.warning(
                 "GCS presigning needs google-cloud-storage: "
-                "pip install 'strata-notebook[gcs]'; keeping Strata URLs"
+                "pip install 'vestigo[gcs]'; the caller serves the bytes"
             )
             return None
         try:
@@ -857,7 +857,7 @@ class GCSBlobStore(BlobStore):
         key = self._gcs_key(artifact_id, version)
         return self._staged_local_writer(
             lambda staged: self._upload_from_path(key, staged),
-            prefix="strata_gcs_blob_",
+            prefix="vestigo_gcs_blob_",
         )
 
     def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:
@@ -983,7 +983,7 @@ class AzureBlobStore(BlobStore):
         except ImportError as e:
             raise ImportError(
                 "Azure Blob Storage support requires the 'azure' extra. "
-                "Install with: pip install strata-notebook[azure]"
+                "Install with: pip install 'vestigo[azure]'"
             ) from e
 
         self.account_name = account_name
@@ -1139,7 +1139,7 @@ class AzureBlobStore(BlobStore):
         key = self._azure_key(artifact_id, version)
         return self._staged_local_writer(
             lambda staged: self._upload_from_path(key, staged),
-            prefix="strata_azure_blob_",
+            prefix="vestigo_azure_blob_",
         )
 
     def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:

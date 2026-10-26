@@ -11,6 +11,7 @@ import time
 import uuid
 
 import pytest
+
 from vestigo.provenance import TransformSpec
 from vestigo.store import RETENTION_SCHEMA_VERSION, ArtifactStore, ArtifactVersion, _add_retention
 
@@ -98,7 +99,7 @@ class TestRoots:
         upstream = _ready(store)
         ref = f"{upstream[0]}@v={upstream[1]}"
         held = store.create_artifact(
-            "held", "prov-h", input_versions={f"strata://artifact/{ref}": ref}, minted=True
+            "held", "prov-h", input_versions={f"vestigo://artifact/{ref}": ref}, minted=True
         )
         store.write_blob("held", held, b"h")
         store.finalize_artifact("held", held, "", None, 1)

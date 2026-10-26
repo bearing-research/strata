@@ -20,6 +20,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from vestigo import uris
 from vestigo.graph import GRAPH_DDL, GraphStore, NodeId, NodeSpec
 from vestigo.provenance import TransformSpec, parse_transform_spec
 from vestigo.releases import RELEASE_DDL
@@ -119,7 +120,10 @@ def _ancestor_of(input_uri: str, recorded: object) -> tuple[str, int] | None:
     """
     if not isinstance(recorded, str):
         return None
-    if not (input_uri.startswith("strata://artifact/") or input_uri.startswith("strata://name/")):
+    if not (
+        input_uri.startswith(uris.artifact_uri_prefix())
+        or input_uri.startswith(uris.name_uri_prefix())
+    ):
         return None
     artifact_id, separator, version = recorded.partition("@v=")
     if not separator or not version.isdigit():
@@ -582,8 +586,8 @@ def _add_superseded_by(conn: StoreConnection, dialect: SqlDialect) -> None:
 
 
 def _notebook_workers_moved(conn: StoreConnection, dialect: SqlDialect) -> None:
-    """Migration 9 once created the notebook worker tables. They are Strata's own now
-    (``strata.notebook.worker_store`` creates them); the number stays so every database's
+    """Migration 9 once created the notebook worker tables. They belong to the consumer
+    now, which creates them itself; the number stays so every database's
     ``schema_version`` row keeps its meaning."""
 
 
@@ -772,7 +776,7 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(6, "artifact_versions.last_used_at + minted", _add_use_and_minted),
     _Migration(7, "artifact_versions.superseded_by", _add_superseded_by),
     _Migration(8, "artifact_publications.token hashed", _hash_publication_tokens),
-    _Migration(9, "notebook_workers (now strata.notebook.worker_store)", _notebook_workers_moved),
+    _Migration(9, "notebook_workers (now the consumer's)", _notebook_workers_moved),
     _Migration(10, "artifact_publications: one active per version", _one_active_publication),
     _Migration(11, "fail embedded builds that bound inputs out of order", _fail_misbound_builds),
     _Migration(12, "retention_roots + retention_edges; pins become roots", _add_retention),
@@ -795,9 +799,9 @@ class StoreSchemaMismatch(RuntimeError):
 
 def _newer_schema_error(current: int) -> StoreSchemaMismatch:
     return StoreSchemaMismatch(
-        f"The artifact store's schema is version {current}, newer than this Strata "
-        f"supports ({_LATEST_SCHEMA_VERSION}). Upgrade Strata, or restore a backup "
-        "taken before the upgrade."
+        f"The artifact store's schema is version {current}, newer than this vestigo "
+        f"supports ({_LATEST_SCHEMA_VERSION}). Upgrade the application, or restore a "
+        "backup taken before the upgrade."
     )
 
 
@@ -1103,7 +1107,7 @@ class ArtifactStore:
                     continue
 
         # Every query goes through _get_connection, so the dialect is the one place a second backend
-        # has to be taught about; see strata/sql_backend.py for what differs.
+        # has to be taught about; see sql_backend.py for what differs.
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(self.db_path)
         """The schema version this open found, when it migrated the store; else ``None``.
         The application finishes an upgrade that needs its knowledge, such as writing the
@@ -1144,7 +1148,7 @@ class ArtifactStore:
         """Create the schema, or migrate an existing database to the latest version."""
         conn = self._get_connection()
         try:
-            # The migration below upgrades databases from older Strata versions in SQLite's own
+            # The migration below upgrades databases from older versions in SQLite's own
             # vocabulary (sqlite_master, PRAGMA, rowid). A newer backend has no such history and
             # goes straight to the current schema.
             if not self._dialect.supports_legacy_migration:
@@ -1648,10 +1652,9 @@ class ArtifactStore:
         if current is None or current < _LATEST_SCHEMA_VERSION:
             raise StoreSchemaMismatch(
                 f"The artifact store's schema is version {current or _BASELINE_SCHEMA_VERSION}, "
-                f"older than this Strata ({_LATEST_SCHEMA_VERSION}). This command only reads, "
-                "so it does not migrate it. Back the store up, then start this release's "
-                "server on it once (a notebook's store migrates when the notebook is "
-                "opened); or inspect it with the release that wrote it."
+                f"older than this vestigo ({_LATEST_SCHEMA_VERSION}). This command only reads, "
+                "so it does not migrate it. Back the store up, then open it once with a "
+                "writer of this version; or inspect it with the version that wrote it."
             )
 
     def _apply_schema_migrations(self, conn: StoreConnection) -> None:
@@ -1672,8 +1675,8 @@ class ArtifactStore:
             current = _BASELINE_SCHEMA_VERSION
             self._stamp_schema_version(conn, current)
         elif current > _LATEST_SCHEMA_VERSION:
-            # A newer Strata migrated this store; running on it would write rows that
-            # Strata does not expect.
+            # A newer vestigo migrated this store; this one would write rows it does not
+            # expect.
             raise _newer_schema_error(current)
 
         for migration in _MIGRATIONS:
@@ -4184,7 +4187,7 @@ class ArtifactStore:
 
         return NameStatus(
             name=name,
-            artifact_uri=f"strata://artifact/{artifact.id}@v={artifact.version}",
+            artifact_uri=uris.artifact_uri(artifact.id, artifact.version),
             artifact_id=artifact.id,
             version=artifact.version,
             state=artifact.state,
@@ -4255,7 +4258,7 @@ class ArtifactStore:
         """
         # Inputs are recorded as "artifact_id@v=N" or as the full URI.
         search_pattern = _like_literal(f'"{artifact_id}@v={version}"')
-        uri_pattern = _like_literal(f'"strata://artifact/{artifact_id}@v={version}"')
+        uri_pattern = _like_literal(f'"{uris.artifact_uri(artifact_id, version)}"')
 
         conn = self._get_connection()
         try:
@@ -4313,7 +4316,7 @@ class ArtifactStore:
                 if artifact.input_versions:
                     try:
                         input_vers = json.loads(artifact.input_versions)
-                        exact_uri = f"strata://artifact/{artifact_id}@v={version}"
+                        exact_uri = uris.artifact_uri(artifact_id, version)
                         # Match the exact dependency entry instead of substring prefixes.
                         for uri, ver in input_vers.items():
                             if uri == exact_uri or ver == input_version_used or ver == exact_uri:
@@ -4331,11 +4334,11 @@ class ArtifactStore:
     def list_name_reads(self, tenant: str | None = None) -> list[tuple[str | None, str, str]]:
         """Return ``(tenant, artifact_id, reference)`` for each ready artifact that read a name.
 
-        ``reference`` is what follows ``strata://name/`` in its inputs, e.g.
+        ``reference`` is what follows the name-URI prefix in its inputs, e.g.
         ``taxi/model@champion``. The returned tenant is ``None`` for the default tenant.
         ``tenant`` of ``None`` reads every tenant.
         """
-        prefix = "strata://name/"
+        prefix = uris.name_uri_prefix()
         query = (
             "SELECT id, tenant, input_versions FROM artifact_versions "
             "WHERE state = 'ready' AND input_versions LIKE ?"
@@ -4718,7 +4721,7 @@ class ArtifactStore:
             for uri, recorded in json.loads(recorded_inputs).items():
                 # Parsed as the lineage walk parses it, so that what GC protects
                 # and what a publication's chain will follow cannot drift apart:
-                # a "strata://name/" edge records the concrete version it read
+                # a name-URI edge records the concrete version it read
                 # in its value, and that ancestor is as reachable as any other.
                 # Anything else is a table or an external leaf.
                 ancestor = _ancestor_of(uri, recorded)

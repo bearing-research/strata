@@ -674,8 +674,8 @@ class TestReadOnlyCommandsDoNotMigrate:
         assert rc == 2
         assert max(self._versions(db_path)) == 5
         err = capsys.readouterr().err
-        assert "version 5, older than this Strata" in err
-        assert "start this release's server on it once" in err
+        assert "version 5, older than this vestigo" in err
+        assert "open it once with a writer of this version" in err
 
     def test_a_write_command_still_migrates(self, old_store):
         from vestigo.store import _LATEST_SCHEMA_VERSION

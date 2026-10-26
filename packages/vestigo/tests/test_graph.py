@@ -11,6 +11,7 @@ import random
 import sqlite3
 
 import pytest
+
 from vestigo.graph import (
     Edge,
     NodeSpec,

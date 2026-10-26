@@ -5,7 +5,6 @@ description = "The ledger of the shared computation substrate: versioned artifac
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-# A copy of the repository root LICENSE: build backends only take files inside the project.
 license-files = ["LICENSE"]
 authors = [{ name = "Fangchen Li", email = "fangchen.li@outlook.com" }]
 classifiers = [
@@ -40,8 +39,9 @@ azure = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bearing-research/strata"
-Repository = "https://github.com/bearing-research/strata"
+Homepage = "https://github.com/bearing-research/vestigo"
+Repository = "https://github.com/bearing-research/vestigo"
+Changelog = "https://github.com/bearing-research/vestigo/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14"]
@@ -61,8 +61,6 @@ dev = [
     "moto[s3]>=5.0.0",
 ]
 
-# pytest stops at the first pyproject.toml with a pytest section, so
-# `pytest packages/vestigo/tests` reads its settings from here.
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -72,3 +70,10 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests requiring external services",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

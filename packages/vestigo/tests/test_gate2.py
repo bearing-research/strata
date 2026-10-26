@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from gate2 import Gate2, Ledger, make_ledger
+
 from vestigo.store import ArtifactStore
 
 

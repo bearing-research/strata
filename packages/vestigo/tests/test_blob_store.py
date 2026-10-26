@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from vestigo import blob_store as blob_store_module
 from vestigo.blob_store import (
     BlobStore,
@@ -317,7 +318,7 @@ class TestStagedLocalWriter:
         observed_state: dict[str, object] = {}
 
         with BlobStore._staged_local_writer(
-            lambda _path: None, prefix="strata_handle_test_"
+            lambda _path: None, prefix="vestigo_handle_test_"
         ) as writer:
             observed_state["handle"] = writer
 
@@ -532,7 +533,7 @@ class TestS3BackendAtomicity:
 
         store.publish_blob_from_path("artifact-1", 1, source)
 
-        blob_prefix_calls = [p for p in mkstemp_calls if p.startswith("strata_s3_blob_")]
+        blob_prefix_calls = [p for p in mkstemp_calls if p.startswith("vestigo_s3_blob_")]
         assert blob_prefix_calls == [], (
             "publish_blob_from_path should not route through the staged-writer tempfile"
         )
@@ -609,13 +610,13 @@ class TestS3BlobStore:
     def test_write_and_read_blob_integration(self):
         """Round-trip against real S3; skipped unless LocalStack is configured.
 
-        Set STRATA_S3_ENDPOINT_URL=http://localhost:4566 and STRATA_S3_REGION=us-east-1.
+        Set VESTIGO_S3_ENDPOINT_URL=http://localhost:4566 and VESTIGO_S3_REGION=us-east-1.
         """
         import os
 
-        endpoint = os.environ.get("STRATA_S3_ENDPOINT_URL")
+        endpoint = os.environ.get("VESTIGO_S3_ENDPOINT_URL")
         if not endpoint:
-            pytest.skip("STRATA_S3_ENDPOINT_URL not set")
+            pytest.skip("VESTIGO_S3_ENDPOINT_URL not set")
 
         store = S3BlobStore(
             bucket="test-bucket",
@@ -636,8 +637,8 @@ class TestS3BlobStore:
 class TestGCSCredentialResolution:
     """``GOOGLE_APPLICATION_CREDENTIALS`` gets a path and nothing else.
 
-    Operators paste key material into ``STRATA_GCS_CREDENTIALS_JSON``, often as an env var; handed
-    straight to Google it fails only at first blob access.
+    Operators paste key material into the consumer's credentials setting, often an env var;
+    handed straight to Google it fails only at first blob access.
     """
 
     @pytest.mark.skipif(
@@ -692,7 +693,7 @@ class TestGCSCredentialResolution:
     def test_a_path_is_passed_through_untouched(self):
         from vestigo.blob_store import _resolve_gcs_credentials
 
-        assert _resolve_gcs_credentials("/etc/strata/gcs-key.json") == "/etc/strata/gcs-key.json"
+        assert _resolve_gcs_credentials("/etc/vestigo/gcs-key.json") == "/etc/vestigo/gcs-key.json"
 
     def test_a_json_scalar_is_treated_as_a_path(self):
         # Parsed rather than sniffed for a leading brace, but a bare JSON
@@ -771,14 +772,14 @@ class TestGCSBlobStore:
     def test_write_and_read_blob_integration(self):
         """Round-trip against real GCS; skipped unless fake-gcs-server or credentials are set.
 
-        For fake-gcs-server: STRATA_GCS_ENDPOINT_OVERRIDE=http://localhost:4443 and
-        STRATA_GCS_ANONYMOUS=true.
+        For fake-gcs-server: VESTIGO_GCS_ENDPOINT_OVERRIDE=http://localhost:4443 and
+        VESTIGO_GCS_ANONYMOUS=true.
         """
         import os
 
-        endpoint = os.environ.get("STRATA_GCS_ENDPOINT_OVERRIDE")
+        endpoint = os.environ.get("VESTIGO_GCS_ENDPOINT_OVERRIDE")
         if not endpoint:
-            pytest.skip("STRATA_GCS_ENDPOINT_OVERRIDE not set")
+            pytest.skip("VESTIGO_GCS_ENDPOINT_OVERRIDE not set")
 
         store = GCSBlobStore(
             bucket="test-bucket",
@@ -931,7 +932,7 @@ class TestAzureBlobStore:
             )
 
     def test_endpoint_url_is_the_host_and_the_account_is_its_first_path_segment(self):
-        """The documented meaning of ``STRATA_AZURE_ENDPOINT_URL``, shared with the lake path."""
+        """The documented meaning of ``azure_endpoint_url``."""
         pytest.importorskip("azure.storage.blob")
         from vestigo.blob_store import AzureBlobStore
 
@@ -981,16 +982,16 @@ class TestAzureBlobStore:
         """Round-trip against real Azure Storage; skipped unless Azurite or a connection string is
         set.
 
-            STRATA_AZURE_CONNECTION_STRING=UseDevelopmentStorage=true
+            VESTIGO_AZURE_CONNECTION_STRING=UseDevelopmentStorage=true
         """
         import os
 
         pytest.importorskip("azure.storage.blob")
         from vestigo.blob_store import AzureBlobStore
 
-        connection_string = os.environ.get("STRATA_AZURE_CONNECTION_STRING")
+        connection_string = os.environ.get("VESTIGO_AZURE_CONNECTION_STRING")
         if not connection_string:
-            pytest.skip("STRATA_AZURE_CONNECTION_STRING not set")
+            pytest.skip("VESTIGO_AZURE_CONNECTION_STRING not set")
 
         store = AzureBlobStore(
             account_name="devstoreaccount1",  # Azurite default

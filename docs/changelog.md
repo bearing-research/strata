@@ -11,6 +11,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **The ledger's URI scheme is a setting.** `vestigo` artifact and name
+  URIs carry a per-process scheme (`vestigo.uris.set_uri_scheme`, default
+  `vestigo`); Strata sets `strata` in its package init, so every persisted
+  URI is unchanged. The package copy is mirrored from its own repository,
+  where it names nothing of Strata in messages, temp-file prefixes or test
+  gates. (#1301)
 - **Gate 1 on both backends, with the table leaf (ADR 002 E5).** Gate 1
   runs on PostgreSQL too (`tests/notebook/test_local_runs_postgres.py`, the
   integration workflow's Postgres step), and `NotebookSession` takes the

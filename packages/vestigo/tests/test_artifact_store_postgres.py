@@ -16,6 +16,7 @@ import pytest
 from conftest import race_after_pending_read
 from gate2 import Gate2
 from testcontainers.community.postgres import PostgresContainer
+
 from vestigo.provenance import TransformSpec
 from vestigo.sql_backend import SERVER_THREAD_LIMIT, PostgresDialect, advisory_lock_id
 from vestigo.store import ArtifactStore
@@ -174,9 +175,9 @@ class TestRoundTrip:
         """The ACL's lineage walk: rows matched on (id, version) pairs, read by column name."""
         scan = TransformSpec(executor="scan@v1", params={}, inputs=["file:///wh#secret.events"])
         store.create_artifact("scan", "p-scan", scan)
-        mid_input = "strata://artifact/scan@v=1"
+        mid_input = "vestigo://artifact/scan@v=1"
         store.create_artifact("mid", "p-mid", _spec(), input_versions={mid_input: "scan@v=1"})
-        top_input = "strata://name/mid"
+        top_input = "vestigo://name/mid"
         store.create_artifact("top", "p-top", _spec(), input_versions={top_input: "mid@v=1"})
 
         specs = store.ancestor_transform_specs(store.get_artifact("top", 1), max_depth=10)
@@ -184,7 +185,7 @@ class TestRoundTrip:
         assert sorted(specs) == sorted([scan.canonical_json, _spec().canonical_json])
 
     def test_name_reads_are_listed_per_tenant(self, store):
-        edges = {"strata://name/taxi/model@champion": "m@v=1"}
+        edges = {"vestigo://name/taxi/model@champion": "m@v=1"}
         for artifact_id, tenant in (("ours", "team-a"), ("theirs", "team-b")):
             version = store.create_artifact(
                 artifact_id, f"p-{artifact_id}", _spec(), input_versions=edges, tenant=tenant
@@ -1603,10 +1604,14 @@ class TestSchemaMigrations:
 
     def test_an_existing_database_fails_misbound_builds(self, postgres_dsn, tmp_path, store):
         """Embedded SQL over 11+ inputs bound input10 before input2, as did what read it."""
-        twelve = [f"strata://artifact/in{i}@v=1" for i in range(12)]
+        twelve = [f"vestigo://artifact/in{i}@v=1" for i in range(12)]
         builds = {
             "wide": ("local://duckdb_sql@v1", twelve, None),
-            "reader": ("duckdb_sql@v1", ["strata://name/wide"], {"strata://name/wide": "wide@v=1"}),
+            "reader": (
+                "duckdb_sql@v1",
+                ["vestigo://name/wide"],
+                {"vestigo://name/wide": "wide@v=1"},
+            ),
             "narrow": ("local://duckdb_sql@v1", twelve[:10], None),
         }
         for artifact_id, (executor, inputs, input_versions) in builds.items():

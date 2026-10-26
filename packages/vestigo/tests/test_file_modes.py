@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from vestigo.file_modes import PASS_THROUGH_DIR, narrow, private_dir
 from vestigo.store import ArtifactStore
 
