@@ -317,9 +317,13 @@ class ReleaseStore:
             self._check_outputs(conn, release, staged)
             try:
                 for op in operations:
-                    self._apply(conn, op, release, now)
+                    self._apply(conn, op, release.tenant, release.release_id, now)
                 self._artifacts._promote_staged(conn, list(staged), now)
                 if release.kind == "final":
+                    target = conn.execute(
+                        "SELECT artifact_id, version FROM artifact_builds WHERE build_id = ?",
+                        (release.build_id,),
+                    ).fetchone()
                     self._builds.complete_attempt_within(
                         conn,
                         release.build_id,
@@ -328,6 +332,18 @@ class ReleaseStore:
                         version=staged[0].version if staged else None,
                         now=now,
                     )
+                    # A build made before its outputs existed targets a placeholder row;
+                    # once the build points at a real output (or ends with none) the
+                    # placeholder is a failed row for GC, not a building one forever.
+                    if not staged or (target["artifact_id"], target["version"]) != (
+                        staged[0].artifact_id,
+                        staged[0].version,
+                    ):
+                        conn.execute(
+                            "UPDATE artifact_versions SET state = 'failed' "
+                            "WHERE id = ? AND version = ? AND state = 'building'",
+                            (target["artifact_id"], target["version"]),
+                        )
                 conn.execute(
                     "UPDATE build_releases SET state = 'accepted', settled_at = ? "
                     "WHERE release_id = ?",
@@ -368,20 +384,31 @@ class ReleaseStore:
         writable_until: float,
         lease_owner: str | None = None,
         lease_duration_seconds: float = 60.0,
+        from_release: str | None = None,
     ) -> int:
         """Continue the build in a new attempt, fencing every earlier one.
 
         The build keeps its identity and its accepted releases; the old attempt can no
-        longer release, and whatever it left unsettled is abandoned. Returns how many
-        releases were abandoned.
+        longer release, and whatever it left unsettled is abandoned. ``from_release``
+        is the accepted release of this build the new attempt starts from, recorded
+        on the attempt (ADR 001 C: an explicit release, never an alias). Returns how
+        many releases were abandoned.
 
         Raises:
-            ValueError: the build is not pending or building.
+            ValueError: the build is not pending or building, or ``from_release`` is
+                not an accepted release of it.
         """
         conn = self._connect()
         try:
             self._dialect.begin_write(conn, build_id)
             now = self._clock()
+            if from_release is not None:
+                source = self._get_on(conn, from_release)
+                if source is None or source.build_id != build_id or source.state != "accepted":
+                    conn.rollback()
+                    raise ValueError(
+                        f"release {from_release} is not an accepted release of build {build_id}"
+                    )
             if not self._builds.open_attempt_within(
                 conn,
                 build_id,
@@ -390,6 +417,7 @@ class ReleaseStore:
                 lease_owner=lease_owner,
                 lease_expires_at=now + lease_duration_seconds,
                 now=now,
+                resumed_from=from_release,
             ):
                 conn.rollback()
                 raise ValueError(f"build {build_id} is not active")
@@ -403,7 +431,92 @@ class ReleaseStore:
         finally:
             conn.close()
 
+    def apply(
+        self,
+        build_id: str,
+        attempt: str,
+        operations: Sequence[Operation],
+        *,
+        tenant: str | None = None,
+    ) -> None:
+        """Run *operations* as the build's *attempt*, outside any acceptance.
+
+        What a producer does between releases, such as pointing a head at a checkpoint
+        accepted earlier (its own or an earlier attempt's). Fenced like acceptance:
+        *attempt* must hold the build's lease. All or nothing; an audit event names
+        the build.
+
+        Raises:
+            ReleaseRejected: the attempt does not hold the lease.
+            OperationFailed: an operation's condition did not hold.
+        """
+        conn = self._connect()
+        try:
+            self._dialect.begin_write(conn, build_id)
+            now = self._clock()
+            if not lease_held(conn, build_id, attempt, now):
+                conn.rollback()
+                raise ReleaseRejected(f"attempt {attempt} does not hold build {build_id}")
+            try:
+                for op in operations:
+                    self._apply(conn, op, tenant if tenant is not None else "", build_id, now)
+                conn.commit()
+            except OperationFailed:
+                conn.rollback()
+                raise
+            except self._dialect.integrity_error as exc:
+                conn.rollback()
+                raise OperationFailed(f"the ledger refused the operations: {exc}") from exc
+        finally:
+            conn.close()
+
     # --- Reading ---
+
+    def latest_accepted(self, build_id: str, kind: str = "checkpoint") -> Release | None:
+        """The build's accepted release of *kind* with the highest sequence, or None."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM build_releases WHERE build_id = ? AND kind = ? "
+                "AND state = 'accepted' ORDER BY sequence DESC LIMIT 1",
+                (build_id, kind),
+            ).fetchone()
+        finally:
+            conn.close()
+        return None if row is None else _release_from_row(row)
+
+    def collectable_checkpoints(self, *, tenant: str | None = None) -> list[tuple[str, int]]:
+        """The checkpoint outputs nothing but a retention root may still need.
+
+        Every output of an accepted ``checkpoint`` release, except the newest accepted
+        checkpoint of each build still ``building`` (what a resume starts from). Roots
+        are the collector's to honor; this only says which rows are not current values.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT av.id, av.version
+                FROM artifact_versions av
+                JOIN build_releases r ON r.release_id = av.release_id
+                JOIN artifact_builds b ON b.build_id = r.build_id
+                WHERE r.kind = 'checkpoint' AND r.state = 'accepted'
+                  AND COALESCE(av.tenant, '') = COALESCE(?, '')
+                  AND NOT (
+                    b.state = 'building'
+                    AND r.sequence = (
+                      SELECT MAX(sequence) FROM build_releases
+                      WHERE build_id = r.build_id AND kind = 'checkpoint'
+                        AND state = 'accepted'
+                    )
+                  )
+                ORDER BY av.id, av.version
+                """,
+                (tenant,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [(row["id"], row["version"]) for row in rows]
 
     def get(self, release_id: str) -> Release | None:
         conn = self._connect()
@@ -507,8 +620,10 @@ class ReleaseStore:
                     f"{'none' if size is None else size} stored"
                 )
 
-    def _apply(self, conn: StoreConnection, op: Operation, release: Release, now: float) -> None:
-        tenant = release.tenant
+    def _apply(
+        self, conn: StoreConnection, op: Operation, tenant: str, subject: str, now: float
+    ) -> None:
+        """One operation on the caller's transaction; *subject* names an audit row."""
         if isinstance(op, CheckBuildLease):
             if not lease_held(conn, op.build_id, op.attempt, now):
                 raise OperationFailed(f"attempt {op.attempt} does not hold build {op.build_id}")
@@ -544,7 +659,7 @@ class ReleaseStore:
                     now,
                     op.event.principal,
                     op.event.action,
-                    release.release_id,
+                    subject,
                     json.dumps(dict(op.event.details), sort_keys=True)
                     if op.event.details
                     else None,

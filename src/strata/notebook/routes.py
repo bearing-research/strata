@@ -3590,12 +3590,14 @@ async def execute_cell(
     mode: str = "normal",
     confirm_reads: bool = False,
     approve_reads: bool = False,
+    init: str | None = None,
 ) -> dict:
     """Execute a cell and return its outputs and stdout/stderr.
 
     ``mode`` mirrors the WS run modes: ``normal`` (cache on, cascade stale
     upstreams), ``rerun`` (bypass the target's cache, still cascade), or ``force``
-    (run against existing upstream artifacts).
+    (run against existing upstream artifacts). ``init`` branches a normal run from
+    an accepted release of this notebook (``strata.restore()`` returns its parts).
 
     A run that reads past the host's threshold goes ahead and records it did unasked,
     unless ``confirm_reads``: then it answers 409 ``large_read`` with the estimate.
@@ -3605,6 +3607,8 @@ async def execute_cell(
 
     if mode not in ("normal", "rerun", "force"):
         raise HTTPException(status_code=400, detail=f"unknown run mode {mode!r}")
+    if init is not None and mode != "normal":
+        raise HTTPException(status_code=400, detail="a branch (init) is a normal run")
 
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
@@ -3654,6 +3658,7 @@ async def execute_cell(
             cell_id,
             notebook_id,
             mode=mode,  # narrowed by the validation above
+            init=init,
         )
     except NotebookBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

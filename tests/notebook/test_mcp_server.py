@@ -118,7 +118,9 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
     sm, session_id, _ = sm_with_session
     seen = {}
 
-    async def fake_broadcast(session, cell_id, execution_state, notebook_id, mode="normal"):
+    async def fake_broadcast(
+        session, cell_id, execution_state, notebook_id, mode="normal", init=None
+    ):
         seen["args"] = (cell_id, notebook_id, mode)
 
         class _Result:
@@ -182,7 +184,9 @@ async def test_run_cell_caps_console_returned_to_the_agent(sm_with_session, monk
     sm, session_id, _ = sm_with_session
     flood = "x" * 50_000
 
-    async def fake_broadcast(session, cell_id, execution_state, notebook_id, mode="normal"):
+    async def fake_broadcast(
+        session, cell_id, execution_state, notebook_id, mode="normal", init=None
+    ):
         class _Result:
             def to_dict(self):
                 return {
@@ -229,7 +233,9 @@ def test_get_variable_defined_and_undefined(sm_with_session):
 async def test_run_snippet_adds_then_runs_in_one_call(sm_with_session, monkeypatch):
     sm, session_id, _ = sm_with_session
 
-    async def fake_broadcast(session, cell_id, execution_state, notebook_id, mode="normal"):
+    async def fake_broadcast(
+        session, cell_id, execution_state, notebook_id, mode="normal", init=None
+    ):
         class _Result:
             def to_dict(self):
                 return {

@@ -44,8 +44,12 @@ CREATE TABLE IF NOT EXISTS artifact_builds (
     logs TEXT,  -- Executor stderr/stdout logs (text blob for debugging)
     occurrence TEXT,  -- Which instance of a repeated site this is (a sweep's variant)
     attempt TEXT,  -- The attempt holding the lease; a release from any other is rejected
+    computation_key TEXT,  -- The bound computation this build runs (a resume finds it by this)
     FOREIGN KEY (artifact_id, version) REFERENCES artifact_versions(id, version)
 );
+
+-- Index for finding the open build of a computation (a resume)
+CREATE INDEX IF NOT EXISTS idx_build_computation ON artifact_builds(computation_key);
 
 -- Index for state queries (e.g., find pending builds)
 CREATE INDEX IF NOT EXISTS idx_build_state ON artifact_builds(state);
@@ -71,6 +75,7 @@ CREATE TABLE IF NOT EXISTS build_attempts (
     version INTEGER NOT NULL,
     attempt TEXT NOT NULL,
     writable_until REAL NOT NULL,  -- Nothing can write the attempt's key after this
+    resumed_from TEXT,  -- The accepted release this attempt continues from, if any
     PRIMARY KEY (build_id, attempt)
 );
 """
@@ -116,6 +121,7 @@ class BuildState:
     logs: str | None = None
     occurrence: str | None = None
     attempt: str | None = None
+    computation_key: str | None = None
 
     # Used by auth checks.
     @property
@@ -139,6 +145,18 @@ class BuildState:
             "input_byte_count": self.input_byte_count,
             "output_byte_count": self.output_byte_count,
         }
+
+
+@dataclass
+class AttemptState:
+    """One ``build_attempts`` row: a try at writing the build's bytes."""
+
+    build_id: str
+    attempt: str
+    artifact_id: str
+    version: int
+    writable_until: float
+    resumed_from: str | None = None
 
 
 def _row_to_build_state(row: Any) -> BuildState:
@@ -195,6 +213,7 @@ def _row_to_build_state(row: Any) -> BuildState:
         logs=logs,
         occurrence=row["occurrence"],
         attempt=row["attempt"],
+        computation_key=row["computation_key"],
     )
 
 
@@ -298,11 +317,20 @@ class BuildStore:
 
     def _add_release_columns(self, conn: StoreConnection) -> None:
         """The columns ADR 002 §7.2 added, on a database from before them (either dialect)."""
-        for column in ("occurrence", "attempt"):
-            if not self._dialect.column_exists(conn, "artifact_builds", column):
+        for table, column in (
+            ("artifact_builds", "occurrence"),
+            ("artifact_builds", "attempt"),
+            ("artifact_builds", "computation_key"),
+            ("build_attempts", "resumed_from"),
+        ):
+            if not self._dialect.column_exists(conn, table, column):
                 self._dialect.begin_write(conn, "__build_schema__")
-                conn.execute(f"ALTER TABLE artifact_builds ADD COLUMN {column} TEXT")
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
                 conn.commit()
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_build_computation ON artifact_builds(computation_key)"
+        )
+        conn.commit()
 
     def create_build(
         self,
@@ -317,12 +345,15 @@ class BuildStore:
         params: dict | None = None,
         name: str | None = None,
         occurrence: str | None = None,
+        computation_key: str | None = None,
     ) -> BuildState:
         """Create a build record in ``pending`` state.
 
         ``name`` is a name pointer to set once the build completes. ``occurrence``
         names which instance of a repeated site this is (a sweep's variant), so two
         builds of one structure at one site stay distinct executions.
+        ``computation_key`` is the bound computation the build runs; with the
+        occurrence, it is what :meth:`find_open_build` looks a resume up by.
         """
         conn = self._get_connection()
         try:
@@ -335,8 +366,8 @@ class BuildStore:
                 INSERT INTO artifact_builds
                     (build_id, artifact_id, version, state, executor_ref,
                      executor_url, tenant_id, principal_id, created_at,
-                     input_uris, params, name, occurrence)
-                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     input_uris, params, name, occurrence, computation_key)
+                VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     build_id,
@@ -351,6 +382,7 @@ class BuildStore:
                     params_json,
                     name,
                     occurrence,
+                    computation_key,
                 ),
             )
             conn.commit()
@@ -369,6 +401,7 @@ class BuildStore:
                 params=params,
                 name=name,
                 occurrence=occurrence,
+                computation_key=computation_key,
             )
         finally:
             conn.close()
@@ -381,10 +414,12 @@ class BuildStore:
         writable_until: float,
         lease_owner: str | None = None,
         lease_duration_seconds: float = 60.0,
+        resumed_from: str | None = None,
     ) -> bool:
         """Make *attempt* the build's current attempt, fencing every earlier one.
 
-        A pending build starts; a building one continues (a resume). The attempt's
+        A pending build starts; a building one continues (a resume, whose attempt
+        names the accepted release it starts from in ``resumed_from``). The attempt's
         write window is recorded as ``record_attempt`` does. Returns False when the
         build is not active.
         """
@@ -400,6 +435,7 @@ class BuildStore:
                 lease_owner=lease_owner,
                 lease_expires_at=now + lease_duration_seconds,
                 now=now,
+                resumed_from=resumed_from,
             )
             conn.commit()
             return opened
@@ -416,6 +452,7 @@ class BuildStore:
         lease_owner: str | None,
         lease_expires_at: float,
         now: float,
+        resumed_from: str | None = None,
     ) -> bool:
         """As :meth:`open_attempt`, on the caller's transaction."""
         row = conn.execute(
@@ -437,17 +474,77 @@ class BuildStore:
         )
         conn.execute(
             """
-            INSERT INTO build_attempts (build_id, artifact_id, version, attempt, writable_until)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO build_attempts
+                (build_id, artifact_id, version, attempt, writable_until, resumed_from)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(build_id, attempt) DO UPDATE SET writable_until = CASE
                 WHEN excluded.writable_until > build_attempts.writable_until
                 THEN excluded.writable_until
                 ELSE build_attempts.writable_until
             END
             """,
-            (build_id, row["artifact_id"], row["version"], attempt, writable_until),
+            (build_id, row["artifact_id"], row["version"], attempt, writable_until, resumed_from),
         )
         return True
+
+    def get_attempt(self, build_id: str, attempt: str) -> AttemptState | None:
+        """One attempt's record, or None."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT build_id, artifact_id, version, attempt, writable_until, resumed_from "
+                "FROM build_attempts WHERE build_id = ? AND attempt = ?",
+                (build_id, attempt),
+            ).fetchone()
+            if row is None:
+                return None
+            return AttemptState(
+                build_id=row["build_id"],
+                attempt=row["attempt"],
+                artifact_id=row["artifact_id"],
+                version=row["version"],
+                writable_until=row["writable_until"],
+                resumed_from=row["resumed_from"],
+            )
+        finally:
+            conn.close()
+
+    def find_open_build(
+        self,
+        computation_key: str,
+        *,
+        occurrence: str | None = None,
+        tenant_id: str | None = None,
+    ) -> BuildState | None:
+        """The newest ``building`` build of a computation at an occurrence, or None.
+
+        What a run of the same computation resumes, whether or not its lease has
+        lapsed: the caller reads ``lease_expires_at`` to tell a crashed run from one
+        still going.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT build_id, artifact_id, version, state, executor_ref,
+                       executor_url, tenant_id, principal_id, created_at,
+                       started_at, completed_at, error_message, error_code,
+                       input_byte_count, output_byte_count,
+                       lease_owner, lease_expires_at,
+                       input_uris, params, name, logs, occurrence, attempt,
+                       computation_key
+                FROM artifact_builds
+                WHERE computation_key = ? AND state = 'building'
+                  AND COALESCE(occurrence, '') = COALESCE(?, '')
+                  AND COALESCE(tenant_id, '') = COALESCE(?, '')
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (computation_key, occurrence, tenant_id),
+            ).fetchone()
+            return None if row is None else _row_to_build_state(row)
+        finally:
+            conn.close()
 
     def complete_attempt_within(
         self,
@@ -486,7 +583,8 @@ class BuildStore:
                        started_at, completed_at, error_message, error_code,
                        input_byte_count, output_byte_count,
                        lease_owner, lease_expires_at,
-                       input_uris, params, name, logs, occurrence, attempt
+                       input_uris, params, name, logs, occurrence, attempt,
+                       computation_key
                 FROM artifact_builds
                 WHERE build_id = ?
                 """,
@@ -639,7 +737,8 @@ class BuildStore:
                        started_at, completed_at, error_message, error_code,
                        input_byte_count, output_byte_count,
                        lease_owner, lease_expires_at,
-                       input_uris, params, name, logs, occurrence, attempt
+                       input_uris, params, name, logs, occurrence, attempt,
+                       computation_key
                 FROM artifact_builds
                 WHERE state = 'building'
                   AND lease_expires_at IS NOT NULL
@@ -917,7 +1016,8 @@ class BuildStore:
                        started_at, completed_at, error_message, error_code,
                        input_byte_count, output_byte_count,
                        lease_owner, lease_expires_at,
-                       input_uris, params, name, logs, occurrence, attempt
+                       input_uris, params, name, logs, occurrence, attempt,
+                       computation_key
                 FROM (
                     SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY tenant_id ORDER BY created_at ASC
@@ -953,7 +1053,8 @@ class BuildStore:
                            started_at, completed_at, error_message, error_code,
                            input_byte_count, output_byte_count,
                            lease_owner, lease_expires_at,
-                           input_uris, params, name, logs, occurrence, attempt
+                           input_uris, params, name, logs, occurrence, attempt,
+                       computation_key
                     FROM artifact_builds
                     WHERE tenant_id = ? AND state = ?
                     ORDER BY created_at DESC
@@ -969,7 +1070,8 @@ class BuildStore:
                            started_at, completed_at, error_message, error_code,
                            input_byte_count, output_byte_count,
                            lease_owner, lease_expires_at,
-                           input_uris, params, name, logs, occurrence, attempt
+                           input_uris, params, name, logs, occurrence, attempt,
+                       computation_key
                     FROM artifact_builds
                     WHERE tenant_id = ?
                     ORDER BY created_at DESC

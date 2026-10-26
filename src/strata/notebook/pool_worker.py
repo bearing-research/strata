@@ -57,6 +57,7 @@ _MISSING = object()
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
+_channel = _load_local_module("run_channel.py", "_nb_run_channel")
 _lifeline = _load_local_module("lifeline.py", "_nb_lifeline")
 _work_dir = _load_local_module("work_dir.py", "_nb_work_dir")
 
@@ -175,11 +176,12 @@ def _inject_tables(manifest: dict, namespace: dict[str, Any]) -> None:
         namespace[f"{table_name}_snapshot"] = spec.get("snapshot_id")
 
 
-def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
+def _inject_client(manifest: dict, namespace: dict[str, Any], protocol_stream: Any) -> Any:
     """Inject an ambient ``strata`` client, as ``harness.inject_client`` does.
 
     Returns the client so the caller can close it, or ``None`` if no
-    ``strata_url`` is set.
+    ``strata_url`` is set. ``strata.checkpoint`` writes its event lines on
+    *protocol_stream*, ahead of this worker's result line.
     """
     url = manifest.get("strata_url")
     if not url:
@@ -203,6 +205,12 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
         headers=headers,
         promote_url=manifest.get("strata_promote_url") or None,
         inputs=input_uris,
+        channel=_channel.over_stream(
+            manifest,
+            protocol_stream,
+            serialize=_ser.serialize_value,
+            deserialize=_ser.deserialize_value,
+        ),
     )
     namespace["strata"] = client
     return client
@@ -293,7 +301,7 @@ def execute_harness(manifest: dict) -> dict:
 
             _inject_mounts(manifest, namespace)
             _inject_tables(manifest, namespace)
-            ambient_client = _inject_client(manifest, namespace)
+            ambient_client = _inject_client(manifest, namespace, old_stdout)
             display_capture.install(namespace)
 
             namespace_before = set(namespace.keys())

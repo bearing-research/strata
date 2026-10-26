@@ -467,6 +467,9 @@ use the cache and materialize stale upstreams), `rerun` (bypass the target
 cell's cache, still materialize upstreams), or `force` (run against whatever
 upstream artifacts already exist). An unrecognized mode returns `400`.
 While another cell in the notebook runs, the request is refused with `409`.
+`init=<release_id>` starts a `normal` run as a branch from that accepted
+checkpoint (its parts come back from `strata.restore()`); with any other mode
+it returns `400`.
 
 A run whose inputs would move more than the server's
 [threshold](../notebook/lake-aware-cells.md#asking-before-a-large-read) goes ahead

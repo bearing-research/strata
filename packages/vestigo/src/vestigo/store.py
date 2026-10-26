@@ -171,6 +171,10 @@ class ArtifactVersion:
     # SHA-256 of the stored bytes, recorded at finalize. None on rows written
     # before the column existed, until something asks (``content_digest``).
     content_sha256: str | None = None
+    # The release that made this version current, and the bound computation it belongs
+    # to (ADR 002 §7.1); None for rows from before releases.
+    release_id: str | None = None
+    computation_key: str | None = None
 
     @cached_property
     def spec(self) -> TransformSpec | None:
@@ -200,6 +204,8 @@ def _version_from_row(row: Any) -> ArtifactVersion:
         tenant=row["tenant"],
         principal=row["principal"],
         content_sha256=row["content_sha256"],
+        release_id=row["release_id"],
+        computation_key=row["computation_key"],
     )
 
 
@@ -1454,7 +1460,8 @@ class ArtifactStore:
             sql = """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal, content_sha256
+                       input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                 FROM artifact_versions
                 WHERE definition_id IS NULL AND transform_spec IS NOT NULL
                   AND state IN ('ready', 'superseded')
@@ -1534,7 +1541,8 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal, content_sha256
+                       input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                 FROM artifact_versions
                 WHERE transform_spec LIKE ? ESCAPE '\\'
                   AND state IN ('ready', 'superseded')
@@ -1952,7 +1960,8 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal, content_sha256
+                       input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                 FROM artifact_versions
                 WHERE id = ? AND provenance_hash = ? AND tenant = ?
                   AND state IN ('ready', 'superseded')
@@ -1978,6 +1987,8 @@ class ArtifactStore:
                 tenant=row["tenant"],
                 principal=row["principal"],
                 content_sha256=row["content_sha256"],
+                release_id=row["release_id"],
+                computation_key=row["computation_key"],
             )
         finally:
             conn.close()
@@ -2187,7 +2198,8 @@ class ArtifactStore:
             f"""
             SELECT id, version, state, provenance_hash, schema_json,
                    row_count, byte_size, created_at, transform_spec,
-                   input_versions, tenant, principal, content_sha256
+                   input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
             FROM artifact_versions WHERE {where}
             ORDER BY created_at, id, version
             """,
@@ -2526,7 +2538,8 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal, content_sha256
+                       input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                 FROM artifact_versions
                 WHERE id = ? AND version = ?
                 """,
@@ -2549,6 +2562,8 @@ class ArtifactStore:
                 tenant=row["tenant"],
                 principal=row["principal"],
                 content_sha256=row["content_sha256"],
+                release_id=row["release_id"],
+                computation_key=row["computation_key"],
             )
         finally:
             conn.close()
@@ -2582,7 +2597,8 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal, content_sha256
+                       input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                 FROM artifact_versions
                 WHERE id = ? AND state IN ('ready', 'superseded')
                 ORDER BY version DESC
@@ -2607,6 +2623,8 @@ class ArtifactStore:
                 tenant=row["tenant"],
                 principal=row["principal"],
                 content_sha256=row["content_sha256"],
+                release_id=row["release_id"],
+                computation_key=row["computation_key"],
             )
         finally:
             conn.close()
@@ -2622,7 +2640,8 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal, content_sha256
+                       input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                 FROM artifact_versions
                 WHERE id LIKE ? ESCAPE '\\'
                 ORDER BY id, version
@@ -2646,6 +2665,8 @@ class ArtifactStore:
                 tenant=row["tenant"],
                 principal=row["principal"],
                 content_sha256=row["content_sha256"],
+                release_id=row["release_id"],
+                computation_key=row["computation_key"],
             )
             for row in rows
         ]
@@ -2701,7 +2722,7 @@ class ArtifactStore:
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
                            input_versions, tenant, principal, content_sha256,
-                           last_used_at
+                           release_id, computation_key, last_used_at
                     FROM artifact_versions
                     WHERE provenance_hash = ? AND state = 'ready' AND tenant = ?
                     ORDER BY created_at DESC
@@ -2715,7 +2736,7 @@ class ArtifactStore:
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
                            input_versions, tenant, principal, content_sha256,
-                           last_used_at
+                           release_id, computation_key, last_used_at
                     FROM artifact_versions
                     WHERE provenance_hash = ? AND state = 'ready'
                       AND (tenant = '' OR tenant IS NULL)
@@ -2744,6 +2765,8 @@ class ArtifactStore:
                 tenant=row["tenant"],
                 principal=row["principal"],
                 content_sha256=row["content_sha256"],
+                release_id=row["release_id"],
+                computation_key=row["computation_key"],
             )
         finally:
             conn.close()
@@ -4241,7 +4264,8 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal, content_sha256
+                           input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                     FROM artifact_versions
                     WHERE state = 'ready'
                       AND tenant = ?
@@ -4255,7 +4279,8 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal, content_sha256
+                           input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                     FROM artifact_versions
                     WHERE state = 'ready'
                       AND (input_versions LIKE ? ESCAPE '\\' OR input_versions LIKE ? ESCAPE '\\')
@@ -4280,6 +4305,8 @@ class ArtifactStore:
                     tenant=row["tenant"],
                     principal=row["principal"],
                     content_sha256=row["content_sha256"],
+                    release_id=row["release_id"],
+                    computation_key=row["computation_key"],
                 )
 
                 input_version_used = f"{artifact_id}@v={version}"
@@ -4383,7 +4410,7 @@ class ArtifactStore:
                     SELECT DISTINCT av.id, av.version, av.state, av.provenance_hash,
                            av.schema_json, av.row_count, av.byte_size, av.created_at,
                            av.transform_spec, av.input_versions, av.tenant, av.principal,
-                           av.content_sha256
+                           av.content_sha256, av.release_id, av.computation_key
                     FROM artifact_versions av
                     INNER JOIN artifact_names an
                         ON av.id = an.artifact_id AND av.version = an.version
@@ -4411,7 +4438,8 @@ class ArtifactStore:
                 query = """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal, content_sha256
+                           input_versions, tenant, principal, content_sha256,
+                   release_id, computation_key
                     FROM artifact_versions
                 """
                 params = []
@@ -4449,6 +4477,8 @@ class ArtifactStore:
                     tenant=row["tenant"],
                     principal=row["principal"],
                     content_sha256=row["content_sha256"],
+                    release_id=row["release_id"],
+                    computation_key=row["computation_key"],
                 )
                 for row in cursor.fetchall()
             ]

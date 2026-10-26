@@ -18,7 +18,8 @@ a version (`definition_id`) and is walked with bounded traversals; the
 ledger never parses a node's payload. A build's releases (`releases`) make
 its outputs current together, any number of checkpoints and one final, each
 fenced on the attempt's lease and accepted only once every output's bytes
-are stored; the typed operations a release carries (`operations`) move
+are stored, and a build is found again by its computation
+(`find_open_build`) for the attempt that resumes it; the typed operations a release carries (`operations`) move
 references and assign authorities in the same transaction.
 *Vestigo* is Latin for "I track down, I trace": the ledger traces every
 artifact back to the computation and inputs that made it.

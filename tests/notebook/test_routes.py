@@ -3041,7 +3041,7 @@ def test_execute_cell_mode_dispatches(client, tmp_path, monkeypatch, mode, metho
     called: list[str] = []
 
     def _fake(name):
-        async def _run(self, cell_id, source):
+        async def _run(self, cell_id, source, *, init=None):
             called.append(name)
             return CellExecutionResult(
                 cell_id=cell_id, success=True, duration_ms=1.0, execution_method="cold"
@@ -3082,7 +3082,7 @@ def test_rest_execute_broadcasts_to_ws_spectators(client, tmp_path, monkeypatch)
     write_cell(notebook_dir, "c1", "x = 1\n")
     session_id = open_session_id(client, notebook_dir)
 
-    async def _fake_exec(self, cell_id, source):
+    async def _fake_exec(self, cell_id, source, *, init=None):
         return CellExecutionResult(
             cell_id=cell_id, success=True, duration_ms=1.0, execution_method="cold"
         )

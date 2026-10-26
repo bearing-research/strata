@@ -185,9 +185,14 @@ Strata's side: `artifact/` (`transfer`, `table_export`, `cli`, `retention` for
 what a version requires, `graph` for a cell's node and the reconstruction of
 old rows, `upgrades` for the per-store steps run wherever a store is opened),
 `fast_io.register_arrow_validator`, `transforms/`, `migrate.py`,
-`notebook/worker_store.py` (the worker registry's own tables). The ledger's
+`notebook/worker_store.py` (the worker registry's own tables),
+`notebook/local_runs.py` (a local cell run's build, attempt and lease; its
+checkpoint and head events become releases) with `notebook/run_channel.py`
+(the cell side of `strata.checkpoint` / `restore` / `head`, over a pipe fd for
+the cold harness or the warm worker's protocol stdout). The ledger's
 tests live in `packages/vestigo/tests/` (no `strata` imports there);
-`tests/` keeps the ones that reach into Strata.
+`tests/` keeps the ones that reach into Strata, Gate 1 (ADR 002 §8) among
+them in `tests/notebook/test_local_runs.py`.
 Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
 `api_key_cli`, `run_tokens` for a cell run's own token), `tenancy/` (`tenant`
 config and context, `registry`).
@@ -280,6 +285,16 @@ Python cells:
 6. Store each consumed variable as `nb_{notebook_id}_cell_{cell_id}_var_{var}`
 7. Broadcast `cell_status` / `cell_output` / `cell_console` over WebSocket
 
+Every local Python run is an execution of the notebook's ledger: a build (found
+again by its `computation_key`, the provenance hash) with an attempt whose lease
+the server renews while the cell runs. `strata.checkpoint(**parts)` in the cell
+is an accepted `checkpoint` release, the stored outputs are the `final` release
+(a run that stores nothing releases an empty final), `strata.head(name, seq)`
+advances a reference. A run that dies after a checkpoint resumes from it on the
+next normal run (`strata.restore()` hands the parts back); a rerun starts fresh;
+`execute_cell(init=<release_id>)` branches from an accepted release under a
+derived provenance key.
+
 Prompt cells (`prompt_executor.py`): no subprocess; render `{{ var }}` template,
 dispatch via `llm.chat_completion` (Anthropic native tool-use when
 `@output_schema` is set, otherwise OpenAI-compat), validate against schema with
@@ -367,7 +382,7 @@ configuration surface.
 Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
 `mount <name> <uri> [ro|rw]`, `table`, `fetch`, `dataset`,
 `write_table <var> <table> append|overwrite|merge`, `output_dir <name>`,
-`nocache`, `after`, `loop max_iter= carry= [start_from=]`,
+`nocache`, `stochastic`, `after`, `loop max_iter= carry= [start_from=]`,
 `loop_until <expr>`.
 
 Prompt cells: `name`, `model`, `temperature`, `max_tokens`, `system`,

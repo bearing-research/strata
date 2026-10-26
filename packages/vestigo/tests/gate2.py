@@ -62,15 +62,30 @@ def make_ledger(store: ArtifactStore) -> Ledger:
     return Ledger(store, builds, ReleaseStore(store, builds, clock=clock), clock)
 
 
-def _build(ledger: Ledger, attempt: str = "a1", *, occurrence: str | None = None) -> str:
+def _build(
+    ledger: Ledger,
+    attempt: str = "a1",
+    *,
+    occurrence: str | None = None,
+    computation_key: str = PARENT,
+) -> str:
     """A building build under *attempt*, whose target row is the final output."""
     build_id = uuid.uuid4().hex
     target = f"final-{build_id}"
     version = ledger.store.create_artifact(
-        target, run_output_key(PARENT, build_id, "model"), SPEC, computation_key=PARENT, minted=True
+        target,
+        run_output_key(computation_key, build_id, "model"),
+        SPEC,
+        computation_key=computation_key,
+        minted=True,
     )
     ledger.builds.create_build(
-        build_id, target, version, executor_ref="train@v1", occurrence=occurrence
+        build_id,
+        target,
+        version,
+        executor_ref="train@v1",
+        occurrence=occurrence,
+        computation_key=computation_key,
     )
     assert ledger.builds.open_attempt(
         build_id, attempt, writable_until=ledger.clock() + 3600, lease_owner="runner-1"
@@ -100,7 +115,11 @@ def _stage(
 ) -> StagedVersion:
     """One output of a checkpoint release: its own key, its bytes written unless told not to."""
     artifact_id = f"{release.build_id}-{release.kind}-{release.sequence}-{name}"
-    key = checkpoint_output_key(PARENT, release.build_id, release.sequence, name)
+    key = (
+        run_output_key(PARENT, release.build_id, name)
+        if release.kind == "final"
+        else checkpoint_output_key(PARENT, release.build_id, release.sequence, name)
+    )
     version = ledger.store.create_artifact(
         artifact_id, key, SPEC, computation_key=PARENT, minted=True, release_id=release.release_id
     )
@@ -436,3 +455,125 @@ class Gate2:
         )
         (output,) = ledger.releases.bundle(release.release_id).outputs
         assert output.input_versions is not None and "features@v=3" in output.input_versions
+
+    def test_a_resume_binds_the_attempt_to_an_explicit_accepted_release(self, ledger: Ledger):
+        build_id = _build(ledger)
+        first = _checkpoint(ledger, build_id)
+        unsettled = ledger.releases.prepare(build_id, "a1", "checkpoint")
+
+        with pytest.raises(ValueError, match="not an accepted release"):
+            ledger.releases.resume(
+                build_id,
+                "a2",
+                writable_until=ledger.clock() + 3600,
+                from_release=unsettled.release_id,
+            )
+        ledger.releases.resume(
+            build_id,
+            "a2",
+            writable_until=ledger.clock() + 3600,
+            from_release=first.release.release_id,
+        )
+
+        attempt = ledger.builds.get_attempt(build_id, "a2")
+        assert attempt is not None and attempt.resumed_from == first.release.release_id
+        assert ledger.builds.get_attempt(build_id, "a1").resumed_from is None
+        assert ledger.releases.latest_accepted(build_id).release_id == first.release.release_id
+
+    def test_a_computation_finds_its_open_build_until_the_final_release(self, ledger: Ledger):
+        # Other tests leave builds of PARENT open in a shared store; this computation is its own.
+        key = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+        build_id = _build(ledger, occurrence="variant=a", computation_key=key)
+        assert ledger.builds.find_open_build(key) is None
+        assert ledger.builds.find_open_build(key, occurrence="variant=a").build_id == build_id
+
+        # A lapsed lease is still the computation's open build: what a resume continues.
+        ledger.clock.now += 120
+        assert ledger.builds.find_open_build(key, occurrence="variant=a").build_id == build_id
+
+        ledger.releases.resume(build_id, "a2", writable_until=ledger.clock() + 3600)
+        final = ledger.releases.prepare(build_id, "a2", "final")
+        staged = [_stage(ledger, final, "model", b"done")]
+        ledger.releases.accept(final.release_id, staged)
+        assert ledger.builds.find_open_build(key, occurrence="variant=a") is None
+
+    def test_the_final_release_retargets_the_build_and_fails_its_placeholder(self, ledger: Ledger):
+        build_id = _build(ledger)
+        placeholder = ledger.builds.get_build(build_id)
+        assert _state(ledger, placeholder) == "building"
+
+        final = ledger.releases.prepare(build_id, "a1", "final")
+        staged = [_stage(ledger, final, "model", b"done"), _stage(ledger, final, "metrics", b"{}")]
+        ledger.releases.accept(final.release_id, staged)
+
+        build = ledger.builds.get_build(build_id)
+        assert (build.artifact_id, build.version) == (staged[0].artifact_id, staged[0].version)
+        assert build.state == "ready"
+        assert (
+            ledger.store.get_artifact(placeholder.artifact_id, placeholder.version).state
+            == "failed"
+        )
+
+    def test_an_empty_final_release_ends_the_build_and_retires_its_placeholder(
+        self, ledger: Ledger
+    ):
+        """A run that stores nothing still completes: nothing is left building."""
+        key = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
+        build_id = _build(ledger, computation_key=key)
+        placeholder = ledger.builds.get_build(build_id)
+
+        final = ledger.releases.prepare(build_id, "a1", "final")
+        ledger.releases.accept(final.release_id, [])
+
+        build = ledger.builds.get_build(build_id)
+        assert build.state == "ready"
+        assert (build.artifact_id, build.version) == (placeholder.artifact_id, placeholder.version)
+        assert _state(ledger, placeholder) == "failed"
+        assert ledger.builds.find_open_build(key) is None
+
+    def test_a_head_set_between_releases_is_fenced_on_the_attempt(self, ledger: Ledger):
+        build_id = _build(ledger)
+        best = _checkpoint(ledger, build_id)
+        _checkpoint(ledger, build_id)
+
+        ledger.releases.apply(
+            build_id, "a1", [AdvanceReference("train/best", best.release.release_id)]
+        )
+        assert ledger.releases.reference("train/best") == (best.release.release_id, 1)
+
+        # The new attempt may point a head at the old attempt's checkpoint; the old one may not.
+        ledger.releases.resume(build_id, "a2", writable_until=ledger.clock() + 3600)
+        with pytest.raises(ReleaseRejected):
+            ledger.releases.apply(
+                build_id, "a1", [AdvanceReference("train/best", best.release.release_id)]
+            )
+        ledger.releases.apply(
+            build_id, "a2", [AdvanceReference("train/best", best.release.release_id)]
+        )
+        assert ledger.releases.reference("train/best") == (best.release.release_id, 2)
+        with pytest.raises(OperationFailed):
+            ledger.releases.apply(build_id, "a2", [AssertReferenceRevision("train/best", 1)])
+
+    def test_collectable_checkpoints_spare_the_newest_of_an_open_build(self, ledger: Ledger):
+        build_id = _build(ledger)
+        first = _checkpoint(ledger, build_id)
+        second = _checkpoint(ledger, build_id)
+
+        def rows(bundle):
+            return sorted((v.id, v.version) for v in bundle.outputs)
+
+        assert ledger.releases.collectable_checkpoints() == rows(first)
+
+        # Collectable is not collected: a root still holds what it names.
+        ledger.releases.apply(
+            build_id, "a1", [AdvanceReference("train/best", first.release.release_id)]
+        )
+        final = ledger.releases.prepare(build_id, "a1", "final")
+        ledger.releases.accept(final.release_id, [_stage(ledger, final, "model", b"done")])
+        collectable = ledger.releases.collectable_checkpoints()
+        assert collectable == sorted(rows(first) + rows(second))
+
+        result = ledger.store.garbage_collect(collectable=collectable, collect_latest=True)
+        assert result["deleted_count"] == len(second.outputs)
+        assert all(_state(ledger, v) == "ready" for v in first.outputs)
+        assert all(ledger.store.get_artifact(v.id, v.version) is None for v in second.outputs)

@@ -562,7 +562,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
     warm_calls = 0
 
     async def fake_execute_with_pool(
-        pool, manifest_path, notebook_dir, timeout_seconds=30, *, run_token=None
+        pool, manifest_path, notebook_dir, timeout_seconds=30, *, run_token=None, on_event=None
     ):
         nonlocal warm_calls
         warm_calls += 1
@@ -598,6 +598,8 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         build_duration_ms=0.0,
         hardware=None,
         collected=None,
+        local_run=None,
+        stochastic=False,
     ):
         return True
 
@@ -1909,7 +1911,9 @@ async def test_cell_cancel_interrupts_running_execution(notebook_session, monkey
     cell_id = session.notebook_state.cells[0].id
     cancelled = asyncio.Event()
 
-    async def fake_execute_cell(self, cell_id: str, source: str, timeout_seconds: float = 30):
+    async def fake_execute_cell(
+        self, cell_id: str, source: str, timeout_seconds: float = 30, *, init=None
+    ):
         del self, cell_id, source, timeout_seconds
         try:
             await asyncio.sleep(60)
@@ -2276,7 +2280,7 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
             self.on_prompt_delta = None
             self.upstream_results = {}
 
-        async def execute_cell(self, cell_id, source):
+        async def execute_cell(self, cell_id, source, *, init=None):
             assert self.on_prompt_delta is not None
             for chunk in ("hel", "lo"):
                 await self.on_prompt_delta(
@@ -2583,7 +2587,7 @@ class _GatedStubExecutor:
         # reads them to tell a client about those cells.
         self.upstream_results = {}
 
-    async def execute_cell(self, cell_id, source):
+    async def execute_cell(self, cell_id, source, *, init=None):
         from strata.notebook.executor import CellExecutionResult
 
         type(self).started.set()

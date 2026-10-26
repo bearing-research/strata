@@ -2199,6 +2199,7 @@ async def execute_cell_exclusive(
     mode: Literal["normal", "force", "rerun"] = "normal",
     operation: Callable[[NotebookExecutionState], Coroutine[Any, Any, CellExecutionResult | None]]
     | None = None,
+    init: str | None = None,
 ) -> CellExecutionResult | None:
     """Reserve, execute and release for the non-WS drivers (REST, MCP).
 
@@ -2218,7 +2219,9 @@ async def execute_cell_exclusive(
     task = asyncio.create_task(
         operation(execution_state)
         if operation is not None
-        else execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id, mode=mode),
+        else execute_cell_and_broadcast(
+            session, cell_id, execution_state, notebook_id, mode=mode, init=init
+        ),
         name=f"notebook-exec-{notebook_id}-{cell_id}",
     )
     async with execution_state.control_lock:
@@ -2249,6 +2252,7 @@ async def execute_cell_and_broadcast(
     execution_state: NotebookExecutionState,
     notebook_id: str,
     mode: Literal["normal", "force", "rerun"] = "normal",
+    init: str | None = None,
 ) -> CellExecutionResult | None:
     """Execute a cell and broadcast the live frames to every spectator.
 
@@ -2276,7 +2280,7 @@ async def execute_cell_and_broadcast(
             elif mode == "rerun":
                 result = await executor.execute_cell_rerun(cell_id, cell.source)
             else:
-                result = await executor.execute_cell(cell_id, cell.source)
+                result = await executor.execute_cell(cell_id, cell.source, init=init)
 
         # Before broadcasting, so the payload carries this run's metadata.
         session.record_execution(

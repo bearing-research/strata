@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 
 import httpx
@@ -863,17 +864,21 @@ class TestAmbientPromoteWiring:
 
         monkeypatch.setattr(module._client_mod, "StrataClient", _Client)
         inject = module.inject_client if path == "harness" else module._inject_client
+        # The warm worker's client writes its event lines on the protocol stream.
+        extra = () if path == "harness" else (io.StringIO(),)
         inject(
             {
                 "strata_url": "http://store.example",
                 "strata_cell_id": "c2",
                 "strata_promote_url": "http://nb.local/v1/notebooks/sess-1",
+                "output_dir": ".",
                 "inputs": {
                     "rows": {"uri": "strata://artifact/nb_rows@v=3", "file": "rows.json"},
                     "unstored": {"file": "x.pickle"},
                 },
             },
             {},
+            *extra,
         )
 
         assert captured["promote_url"] == "http://nb.local/v1/notebooks/sess-1"
