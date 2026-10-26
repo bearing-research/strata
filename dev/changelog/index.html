@@ -3781,6 +3781,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger's URI scheme is a setting.</strong> <code>vestigo</code> artifact and name
+  URIs carry a per-process scheme (<code>vestigo.uris.set_uri_scheme</code>, default
+  <code>vestigo</code>); Strata sets <code>strata</code> in its package init, so every persisted
+  URI is unchanged. The package copy is mirrored from its own repository,
+  where it names nothing of Strata in messages, temp-file prefixes or test
+  gates. (#1301)</li>
 <li><strong>Gate 1 on both backends, with the table leaf (ADR 002 E5).</strong> Gate 1
   runs on PostgreSQL too (<code>tests/notebook/test_local_runs_postgres.py</code>, the
   integration workflow's Postgres step), and <code>NotebookSession</code> takes the
