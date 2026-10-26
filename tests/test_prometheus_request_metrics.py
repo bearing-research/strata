@@ -12,6 +12,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from vestigo.blob_store import S3BlobStore
 
@@ -145,12 +146,8 @@ class _RefusingBucket(BaseHTTPRequestHandler):
         if length:
             self.rfile.read(length)
         missing = "missing" in self.path
-        if missing and "list-type=2" in self.path:
-            # Arrow lists the key as a directory after a 404; nothing is under it either.
-            status, body = 200, b"<ListBucketResult><KeyCount>0</KeyCount></ListBucketResult>"
-        else:
-            status, code = (404, "NoSuchKey") if missing else (403, "AccessDenied")
-            body = f"<Error><Code>{code}</Code></Error>".encode()
+        status, code = (404, "NoSuchKey") if missing else (403, "AccessDenied")
+        body = f"<Error><Code>{code}</Code></Error>".encode()
         if self.command == "HEAD":
             body = b""
         self.send_response(status)
@@ -190,7 +187,7 @@ def _store_errors(operation: str) -> str:
 
 def test_a_put_to_a_refusing_bucket_counts_one_put_error(client, refusing_s3):
     before = _scrape(client)
-    with pytest.raises(OSError):
+    with pytest.raises(ClientError, match="AccessDenied"):
         refusing_s3.write_blob("art", 1, b"payload")
     after = _scrape(client)
 
@@ -200,7 +197,8 @@ def test_a_put_to_a_refusing_bucket_counts_one_put_error(client, refusing_s3):
 def test_a_refused_head_propagates_and_counts(client, refusing_s3):
     """Only a missing object is absent; a refusal reaches the caller and the scrape."""
     before = _scrape(client)
-    with pytest.raises(OSError, match="ACCESS_DENIED"):
+    # A HEAD carries no body, so the SDK reports the status alone.
+    with pytest.raises(ClientError, match=r"\(403\).*Forbidden"):
         refusing_s3.blob_exists("art", 1)
     after = _scrape(client)
 

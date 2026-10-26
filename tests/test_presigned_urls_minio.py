@@ -118,7 +118,6 @@ def test_role_credentials_sign_urls_the_store_accepts(minio, store, monkeypatch,
 
     with role_credentials(
         monkeypatch,
-        tmp_path,
         temporary["AccessKeyId"],
         temporary["SecretAccessKey"],
         temporary["SessionToken"],

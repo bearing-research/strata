@@ -138,6 +138,39 @@ def _never_publish_into_the_real_store(monkeypatch):
     monkeypatch.setattr("strata.artifact.cli._server_store", lambda: None)
 
 
+@pytest.fixture(scope="session")
+def _no_cloud_config_dir(tmp_path_factory):
+    return tmp_path_factory.mktemp("no-cloud-config")
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_cloud_credentials(monkeypatch, _no_cloud_config_dir):
+    """The object-store SDKs read the developer's own credentials; a test must see none.
+
+    boto3 resolves its chain when a client is built, through whatever ``~/.aws``
+    configures; a store built without credentials is what several tests assert on.
+    """
+    for name in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_ROLE_ARN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AZURE_STORAGE_CONNECTION_STRING",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(_no_cloud_config_dir / "no-aws-config"))
+    monkeypatch.setenv(
+        "AWS_SHARED_CREDENTIALS_FILE", str(_no_cloud_config_dir / "no-aws-credentials")
+    )
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+
 @pytest.fixture(autouse=True)
 def _allow_testclient_host(monkeypatch):
     """The in-process clients send ``Host: testserver`` or ``test``; personal mode refuses both."""

@@ -69,12 +69,12 @@ azure = [
     # PyIceberg reads Azure lake tables' metadata through adlfs.
     "adlfs>=2026.0.0",
 ]
-# Presigned build-manifest URLs (STRATA_ARTIFACT_PRESIGNED_URLS) from an S3 role
-# rather than a key pair, and from GCS. Reading and writing blobs needs neither.
-# Notebook `s3://` and `gs://` mounts resolve in Strata's own process, through
-# s3fs and gcsfs.
+# The S3 and GCS artifact blob backends, with their presigned build-manifest
+# URLs (STRATA_ARTIFACT_PRESIGNED_URLS), run on each cloud's SDK, as
+# `vestigo[s3]` and `vestigo[gcs]` do. Notebook `s3://` and `gs://` mounts
+# resolve in Strata's own process, through s3fs and gcsfs.
 s3 = [
-    "botocore>=1.35.0",
+    "boto3>=1.35.0",
     "s3fs>=2026.3.0",
 ]
 gcs = [

@@ -81,9 +81,9 @@ def _gcs_filesystem() -> pafs.FileSystem:
                 if _config.gcs_credentials_json:
                     import os
 
-                    from vestigo.blob_store import _resolve_gcs_credentials
+                    from strata.iceberg.gcs_credentials import resolve_gcs_credentials
 
-                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _resolve_gcs_credentials(
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = resolve_gcs_credentials(
                         _config.gcs_credentials_json
                     )
                 if _config.gcs_anonymous:

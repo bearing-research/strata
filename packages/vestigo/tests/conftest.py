@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -47,6 +48,55 @@ def _reset_singletons():
     yield
     reset_artifact_store()
     reset_build_store()
+
+
+@pytest.fixture(scope="session")
+def _no_cloud_config_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("no-cloud-config")
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_cloud_credentials(monkeypatch: pytest.MonkeyPatch, _no_cloud_config_dir: Path):
+    """The SDKs read the developer's own credentials; a test must see none.
+
+    A store built without credentials is what several tests assert on, and boto3 resolves
+    its chain when the client is built, through whatever ``~/.aws`` configures.
+    """
+    for name in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_ROLE_ARN",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AZURE_STORAGE_CONNECTION_STRING",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(_no_cloud_config_dir / "no-aws-config"))
+    monkeypatch.setenv(
+        "AWS_SHARED_CREDENTIALS_FILE", str(_no_cloud_config_dir / "no-aws-credentials")
+    )
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+
+def docker_or_skip() -> None:
+    """Skip the module when the Docker daemon is unreachable; fail it where Docker is required.
+
+    Only possible locally: CI sets ``VESTIGO_REQUIRE_DOCKER`` so a missing daemon cannot
+    skip a container-backed suite to green.
+    """
+    import docker
+
+    try:
+        docker.from_env().ping()
+    except Exception:
+        if os.environ.get("VESTIGO_REQUIRE_DOCKER"):
+            raise RuntimeError("VESTIGO_REQUIRE_DOCKER is set and the Docker daemon is unreachable")
+        pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 
 BUILD_TARGET_IDS: tuple[str, ...] = (
@@ -140,7 +190,7 @@ def _serve(handler: type[http.server.BaseHTTPRequestHandler]) -> Iterator[str]:
 
 @contextmanager
 def role_credentials(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, access_key: str, secret_key: str, token: str
+    monkeypatch: pytest.MonkeyPatch, access_key: str, secret_key: str, token: str
 ) -> Iterator[list[str]]:
     """Serve temporary credentials the way an ECS task role does, with no other source.
 
@@ -168,20 +218,7 @@ def role_credentials(
         def log_message(self, *args):
             return None
 
-    for name in (
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-        "AWS_PROFILE",
-        "AWS_DEFAULT_PROFILE",
-        "AWS_ROLE_ARN",
-        "AWS_WEB_IDENTITY_TOKEN_FILE",
-        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "no-config"))
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-credentials"))
-    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    # Every other source is out already: ``_no_ambient_cloud_credentials`` runs first.
     with _serve(Role) as base:
         monkeypatch.setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", f"{base}/role")
         yield seen

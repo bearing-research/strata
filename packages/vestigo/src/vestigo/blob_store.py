@@ -7,8 +7,8 @@ artifact store's database.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import io
+import json
 import logging
 import os
 import sys
@@ -19,7 +19,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Buffer, Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -41,6 +40,10 @@ the blob-store streams without extra copying.
 
 OBJECT_STORE_OPERATIONS = ("put", "get", "head", "list", "delete")
 
+GCS_READ_CHUNK_BYTES = 8 * 1024 * 1024
+"""What a GCS reader fetches per request; the SDK's default of 40 MiB is what a reader
+holds in memory, whatever the caller's read size."""
+
 
 @dataclass(frozen=True)
 class BlobSettings:
@@ -55,7 +58,6 @@ class BlobSettings:
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
     s3_anonymous: bool = False
-    gcs_default_bucket_location: str | None = None
     gcs_credentials_json: str | None = None
     gcs_anonymous: bool = False
     gcs_endpoint_override: str | None = None
@@ -74,22 +76,9 @@ class ObjectStoreErrors:
         self._lock = threading.Lock()
         self._counts = dict.fromkeys(OBJECT_STORE_OPERATIONS, 0)
 
-    @contextmanager
-    def counting(
-        self, operation: str, absent: tuple[type[BaseException], ...] = (FileNotFoundError,)
-    ) -> Generator[None]:
-        """Count an exception raised in the block, then re-raise it unchanged.
-
-        ``absent`` is how the backend says the object is not there, an answer and not a fault.
-        """
-        try:
-            yield
-        except absent:
-            raise
-        except Exception:
-            with self._lock:
-                self._counts[operation] += 1
-            raise
+    def record(self, operation: str) -> None:
+        with self._lock:
+            self._counts[operation] += 1
 
     def snapshot(self) -> dict[str, int]:
         with self._lock:
@@ -102,18 +91,6 @@ _object_store_errors = ObjectStoreErrors()
 def get_object_store_errors() -> ObjectStoreErrors:
     """The process-wide object-store error counts."""
     return _object_store_errors
-
-
-def _sigv4_context(secret_key: str, region: str) -> tuple[str, str, bytes]:
-    """``(amz_date, credential scope, signing key)`` for an S3 SigV4 signature now."""
-    from datetime import UTC, datetime
-
-    now = datetime.now(UTC)
-    datestamp = now.strftime("%Y%m%d")
-    key = f"AWS4{secret_key}".encode()
-    for part in (datestamp, region, "s3", "aws4_request"):
-        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
-    return now.strftime("%Y%m%dT%H%M%SZ"), f"{datestamp}/{region}/s3/aws4_request", key
 
 
 class BlobStore(ABC):
@@ -371,73 +348,45 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
-def _upload_to_arrow_fs(fs: Any, key: str, source_path: Path) -> None:
-    """Stream *source_path* to *key* on a PyArrow object-store filesystem, all or nothing.
+def _endpoint_url(endpoint: str) -> str:
+    """``host:port`` as a URL: the SDKs take a URL where a bare host was once accepted."""
+    return endpoint if "://" in endpoint else f"https://{endpoint}"
 
-    Leaving the stream's ``with`` completes the upload even when the copy raised, so a
-    failure would leave a truncated object at the final key, which ``blob_exists`` then
-    reports as present and an import retry skips rewriting. The object is deleted instead.
 
-    Not atomic for an overwrite: the object store has no rename (``move`` is a copy and
-    a delete, and S3's copy stops at 5 GB), so the final key is written in place. A
-    failed overwrite loses the previous object, and the truncated one is visible to
-    another node between the stream's close and the delete.
+@contextmanager
+def _object_store_call(
+    operation: str, absent: Callable[[BaseException], bool] | None = None
+) -> Generator[None]:
+    """One call to an object store's SDK.
+
+    An error ``absent`` recognises is the answer "not there" and is raised as
+    ``FileNotFoundError``; any other is counted for the consumer's metric and re-raised
+    as the SDK raised it.
     """
     try:
-        with open(source_path, "rb") as src, fs.open_output_stream(key) as dst:
-            while True:
-                chunk = src.read(BLOB_STREAM_CHUNK_BYTES)
-                if not chunk:
-                    break
-                dst.write(chunk)
-    except BaseException:
-        try:
-            fs.delete_file(key)
-        except OSError as exc:
-            logger.warning("Could not remove the partial upload at %s: %s", key, exc)
+        yield
+    except Exception as exc:
+        if absent is not None and absent(exc):
+            raise FileNotFoundError(str(exc)) from exc
+        _object_store_errors.record(operation)
         raise
 
 
-def _arrow_fs_blob_exists(fs: Any, key: str) -> bool:
-    """Whether ``key`` is an object; a backend error propagates rather than reading as absent."""
-    import pyarrow.fs as pafs
+def _s3_absent(exc: BaseException) -> bool:
+    """Whether a botocore error says the object is not there.
 
-    with _object_store_errors.counting("head"):
-        info = fs.get_file_info(key)
-    return info.type == pafs.FileType.File
-
-
-def _arrow_fs_blob_size(fs: Any, key: str) -> int | None:
-    """The object's size, or ``None`` when absent; a backend error propagates."""
-    import pyarrow.fs as pafs
-
-    with _object_store_errors.counting("head"):
-        info = fs.get_file_info(key)
-    if info.type != pafs.FileType.File:
-        return None
-    return int(info.size) if info.size is not None else None
-
-
-def _arrow_fs_delete_blob(fs: Any, key: str) -> bool:
-    """Delete ``key``; False when it was not there, and a backend error propagates.
-
-    The caller removes the metadata row regardless, so a swallowed error would
-    orphan the object with nothing left to retry it.
+    ``NoSuchKey`` on a GET; a HEAD carries no body, so its bare ``404`` is taken too, and a
+    missing bucket reads as a missing object there. ``NoSuchBucket`` on a GET propagates.
     """
-    if not _arrow_fs_blob_exists(fs, key):
-        return False
-    try:
-        with _object_store_errors.counting("delete"):
-            fs.delete_file(key)
-    except FileNotFoundError:
-        return False  # another sweep got there first
-    return True
+    response = getattr(exc, "response", None) or {}
+    return response.get("Error", {}).get("Code") in ("NoSuchKey", "404")
 
 
 class S3BlobStore(BlobStore):
-    """S3 or S3-compatible (MinIO, LocalStack) blob storage via PyArrow's S3FileSystem.
+    """S3 or S3-compatible (MinIO, LocalStack) blob storage through boto3.
 
-    Keys are ``{prefix}/{artifact_id}@v={version}.arrow``.
+    Keys are ``{prefix}/{artifact_id}@v={version}.arrow``. The one client reads, writes
+    and signs, so a role is resolved once and its session token signs the URLs.
     """
 
     def __init__(
@@ -452,195 +401,97 @@ class S3BlobStore(BlobStore):
     ):
         """Initialize the S3 store.
 
-        Without ``access_key``/``secret_key`` credentials come from the environment or
-        IAM; ``endpoint_url`` targets an S3-compatible service.
+        Without ``access_key``/``secret_key`` credentials come from boto3's chain (the
+        environment, a profile, a role); ``endpoint_url`` targets an S3-compatible
+        service, addressed path-style.
 
         Raises:
             ValueError: only one of ``access_key`` and ``secret_key`` was given, which
                 would otherwise fall back to ambient credentials without a word.
         """
-        import pyarrow.fs as pafs
+        try:
+            import boto3
+            from botocore import UNSIGNED
+            from botocore.config import Config
+        except ImportError as exc:
+            raise ImportError("The S3 backend needs boto3: install vestigo[s3]") from exc
 
         if bool(access_key) != bool(secret_key):
             raise ValueError("S3 needs both access_key and secret_key, or neither")
 
         self.bucket = bucket
         self.prefix = prefix.strip("/")
-        # Kept for presigning, which PyArrow's filesystem does not expose.
-        self._region = region
-        self._endpoint_url = endpoint_url
-        self._access_key = access_key
-        self._secret_key = secret_key
         self._anonymous = anonymous
 
-        kwargs = {}
+        session: dict[str, Any] = {}
         if region:
-            kwargs["region"] = region
-        if endpoint_url:
-            kwargs["endpoint_override"] = endpoint_url
+            session["region_name"] = region
         if access_key and secret_key:
-            kwargs["access_key"] = access_key
-            kwargs["secret_key"] = secret_key
-        if anonymous:
-            kwargs["anonymous"] = True
-
-        self._fs = pafs.S3FileSystem(**kwargs)
+            session["aws_access_key_id"] = access_key
+            session["aws_secret_access_key"] = secret_key
+        self._session = boto3.session.Session(**session)
+        config = Config(
+            signature_version=UNSIGNED if anonymous else "s3v4",
+            # A custom endpoint is one host; a bucket subdomain of it rarely resolves.
+            s3={"addressing_style": "path" if endpoint_url else "auto"},
+        )
+        self._client = self._session.client(
+            "s3", config=config, endpoint_url=_endpoint_url(endpoint_url) if endpoint_url else None
+        )
+        # Resolved once here: botocore keeps a hit but walks the whole chain again on a
+        # miss, an instance-metadata probe included, and presigning asks per URL.
+        self._signs = not anonymous and self._session.get_credentials() is not None
 
     def _object_key(self, artifact_id: str, version: int) -> str:
         blob_key = self._blob_key(artifact_id, version)
         return f"{self.prefix}/{blob_key}" if self.prefix else blob_key
 
-    def _signing_credentials(self) -> tuple[str, str, str | None] | None:
-        """Return the keys to sign with: the configured pair, the environment, else a role.
-
-        PyArrow keeps the credentials it resolves to itself, so a role (instance profile,
-        ECS task, web identity) is resolved again here through botocore.
-        """
-        if self._anonymous:
-            return None
-        if self._access_key and self._secret_key:
-            return self._access_key, self._secret_key, None
-        access = os.environ.get("AWS_ACCESS_KEY_ID")
-        secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
-        if access and secret:
-            return access, secret, os.environ.get("AWS_SESSION_TOKEN")
-        credentials = self._role_credentials
-        if credentials is None:
-            return None
-        # Temporary credentials: frozen refreshes them when they near expiry.
-        frozen = credentials.get_frozen_credentials()
-        return frozen.access_key, frozen.secret_key, frozen.token
-
-    @cached_property
-    def _role_credentials(self) -> Any:
-        """botocore's credential chain, resolved once (a miss probes instance metadata)."""
-        try:
-            import botocore.session
-        except ImportError:
-            logger.warning(
-                "S3 presigning with role credentials needs botocore: "
-                "pip install 'vestigo[s3]'; the caller serves the bytes"
-            )
-            return None
-        return botocore.session.get_session().get_credentials()
-
-    def _signing_region(self) -> str:
-        return (
-            self._region
-            or os.environ.get("AWS_REGION")
-            or os.environ.get("AWS_DEFAULT_REGION")
-            or "us-east-1"
-        )
-
-    def _object_location(self, key: str) -> tuple[str, str, str]:
-        """Return ``(scheme, host, path)``: path-style on custom endpoints, else virtual-hosted."""
-        from urllib.parse import quote, urlsplit
-
-        quoted = quote(key, safe="/-_.~")
-        if self._endpoint_url:
-            endpoint = (
-                self._endpoint_url
-                if "://" in self._endpoint_url
-                else f"https://{self._endpoint_url}"
-            )
-            parts = urlsplit(endpoint)
-            return parts.scheme, parts.netloc, f"/{self.bucket}/{quoted}"
-        return "https", f"{self.bucket}.s3.{self._signing_region()}.amazonaws.com", f"/{quoted}"
-
     def presign_get(self, artifact_id: str, version: int, ttl_seconds: int) -> str | None:
-        from urllib.parse import quote
-
-        credentials = self._signing_credentials()
-        if credentials is None:
+        if not self._signs:
             return None
-        access_key, secret_key, token = credentials
-        scheme, host, path = self._object_location(self._object_key(artifact_id, version))
-        amz_date, scope, signing_key = _sigv4_context(secret_key, self._signing_region())
-        params = {
-            "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
-            "X-Amz-Credential": f"{access_key}/{scope}",
-            "X-Amz-Date": amz_date,
-            "X-Amz-Expires": str(int(ttl_seconds)),
-            "X-Amz-SignedHeaders": "host",
-        }
-        if token:
-            params["X-Amz-Security-Token"] = token
-        query = "&".join(
-            f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}" for k, v in sorted(params.items())
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": self._object_key(artifact_id, version)},
+            ExpiresIn=int(ttl_seconds),
         )
-        canonical_request = f"GET\n{path}\n{query}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD"
-        string_to_sign = (
-            f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n"
-            f"{hashlib.sha256(canonical_request.encode()).hexdigest()}"
-        )
-        signature = hmac.new(signing_key, string_to_sign.encode(), hashlib.sha256).hexdigest()
-        return f"{scheme}://{host}{path}?{query}&X-Amz-Signature={signature}"
 
     def presign_post(
         self, artifact_id: str, version: int, max_bytes: int, ttl_seconds: int
     ) -> tuple[str, dict[str, str]] | None:
-        import base64
-        import json
-        from datetime import UTC, datetime, timedelta
-
-        credentials = self._signing_credentials()
-        if credentials is None:
+        if not self._signs:
             return None
-        access_key, secret_key, token = credentials
-        key = self._object_key(artifact_id, version)
-        scheme, host, _ = self._object_location(key)
-        url = f"{scheme}://{host}/{self.bucket}" if self._endpoint_url else f"{scheme}://{host}"
-        amz_date, scope, signing_key = _sigv4_context(secret_key, self._signing_region())
-        fields = {
-            "key": key,
-            "x-amz-algorithm": "AWS4-HMAC-SHA256",
-            "x-amz-credential": f"{access_key}/{scope}",
-            "x-amz-date": amz_date,
-        }
-        if token:
-            fields["x-amz-security-token"] = token
-        expiration = datetime.now(UTC) + timedelta(seconds=int(ttl_seconds))
-        policy = {
-            "expiration": expiration.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "conditions": [
-                {"bucket": self.bucket},
-                *({name: value} for name, value in fields.items()),
-                ["content-length-range", 1, int(max_bytes)],
-            ],
-        }
-        encoded_policy = base64.b64encode(json.dumps(policy).encode()).decode()
-        fields["policy"] = encoded_policy
-        fields["x-amz-signature"] = hmac.new(
-            signing_key, encoded_policy.encode(), hashlib.sha256
-        ).hexdigest()
-        return url, fields
-
-    def _s3_key(self, artifact_id: str, version: int) -> str:
-        """Get full S3 key for a blob."""
-        blob_key = self._blob_key(artifact_id, version)
-        if self.prefix:
-            return f"{self.bucket}/{self.prefix}/{blob_key}"
-        return f"{self.bucket}/{blob_key}"
+        signed = self._client.generate_presigned_post(
+            self.bucket,
+            self._object_key(artifact_id, version),
+            Conditions=[["content-length-range", 1, int(max_bytes)]],
+            ExpiresIn=int(ttl_seconds),
+        )
+        return signed["url"], signed["fields"]
 
     def open_blob_reader(
         self, artifact_id: str, version: int
     ) -> AbstractContextManager[BinaryIO] | None:
         """Open a streaming reader for an S3 blob; a backend error propagates."""
-        key = self._s3_key(artifact_id, version)
+        key = self._object_key(artifact_id, version)
         try:
-            with _object_store_errors.counting("get"):
-                return self._fs.open_input_stream(key)
+            with _object_store_call("get", _s3_absent):
+                response = self._client.get_object(Bucket=self.bucket, Key=key)
         except FileNotFoundError:
             return None
+        return response["Body"]  # a file-like that closes itself on context exit
 
     def _upload_from_path(self, key: str, source_path: Path) -> None:
-        """Stream a local file to ``key`` via the PyArrow S3 filesystem."""
-        with _object_store_errors.counting("put"):
-            _upload_to_arrow_fs(self._fs, key, source_path)
+        """Upload a local file to ``key``, in parts past the SDK's threshold.
+
+        A failure leaves the key as it was: an aborted multipart upload is nothing, and
+        a single PUT lands whole or not at all.
+        """
+        with open(source_path, "rb") as src, _object_store_call("put"):
+            self._client.upload_fileobj(src, self.bucket, key)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
         """Open a streaming writer for an S3 blob, staged locally so failed writes never upload."""
-        key = self._s3_key(artifact_id, version)
+        key = self._object_key(artifact_id, version)
         return self._staged_local_writer(
             lambda staged: self._upload_from_path(key, staged),
             prefix="vestigo_s3_blob_",
@@ -648,20 +499,33 @@ class S3BlobStore(BlobStore):
 
     def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:
         """Stream ``source_path`` straight to S3, skipping the local staging copy."""
-        key = self._s3_key(artifact_id, version)
-        self._upload_from_path(key, source_path)
+        self._upload_from_path(self._object_key(artifact_id, version), source_path)
 
     def blob_exists(self, artifact_id: str, version: int) -> bool:
         """Check if blob exists in S3; a backend error propagates."""
-        return _arrow_fs_blob_exists(self._fs, self._s3_key(artifact_id, version))
+        return self.blob_size(artifact_id, version) is not None
 
     def blob_size(self, artifact_id: str, version: int) -> int | None:
         """Return blob size from S3 object metadata; a backend error propagates."""
-        return _arrow_fs_blob_size(self._fs, self._s3_key(artifact_id, version))
+        key = self._object_key(artifact_id, version)
+        try:
+            with _object_store_call("head", _s3_absent):
+                head = self._client.head_object(Bucket=self.bucket, Key=key)
+        except FileNotFoundError:
+            return None
+        return int(head["ContentLength"])
 
     def delete_blob(self, artifact_id: str, version: int) -> bool:
-        """Delete blob from S3; a backend error propagates."""
-        return _arrow_fs_delete_blob(self._fs, self._s3_key(artifact_id, version))
+        """Delete blob from S3; False when it was not there, and a backend error propagates.
+
+        S3 answers the delete of a missing key as a success, so presence is checked first.
+        """
+        if not self.blob_exists(artifact_id, version):
+            return False
+        key = self._object_key(artifact_id, version)
+        with _object_store_call("delete"):
+            self._client.delete_object(Bucket=self.bucket, Key=key)
+        return True
 
     @classmethod
     def from_settings(
@@ -690,143 +554,135 @@ def azure_account_url(endpoint_url: str, account_name: str) -> str:
     return f"{endpoint}/{account_name}"
 
 
-def _resolve_gcs_credentials(credentials: str) -> str:
-    """Return a filesystem path for *credentials*, writing inline JSON key material to a file.
+def _gcs_absent(exc: BaseException) -> bool:
+    """Whether a google-api-core error is a 404."""
+    from google.api_core.exceptions import NotFound
 
-    ``GOOGLE_APPLICATION_CREDENTIALS`` accepts only a path. A value that parses as
-    a JSON object is spilled to a 0600 file named by the key's digest (so a
-    hard-killed process leaves one file, rewritten by the next start) and removed
-    at normal exit; anything else is passed through as a path. On Windows the 0600
-    does not apply; prefer a mounted credential file there.
+    return isinstance(exc, NotFound)
+
+
+_GCS_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+
+def _gcs_credentials(credentials_json: str | None, anonymous: bool) -> Any:
+    """The credentials a GCS store runs on.
+
+    A credentials file of any kind ``GOOGLE_APPLICATION_CREDENTIALS`` accepts (a
+    service-account key, workload identity federation, an authorized user), given as its
+    JSON or as its path; none, for a public bucket; else Application Default Credentials.
 
     Raises:
-        OSError: the predictable path holds something that is not this user's own
-            regular file (a planted symlink or file, in a shared temp dir).
+        google.auth.exceptions.DefaultCredentialsError: neither credentials nor anonymous,
+            and the environment holds none: a store that could not read or write.
     """
-    import atexit
-    import json
-    import stat
+    import google.auth
+    from google.auth.credentials import AnonymousCredentials
 
-    text = credentials.strip()
-    try:
-        parsed = json.loads(text)
-    except ValueError:
-        return credentials
-    if not isinstance(parsed, dict):
-        return credentials
+    if anonymous:
+        return AnonymousCredentials()
+    if credentials_json:
+        try:
+            info = json.loads(credentials_json)
+        except ValueError:
+            info = None
+        if not isinstance(info, dict):
+            info = json.loads(Path(credentials_json).read_text(encoding="utf-8"))
+        return _gcs_credentials_from_info(info)
+    credentials, _ = google.auth.default(scopes=_GCS_SCOPES)
+    return credentials
 
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-    path = Path(tempfile.gettempdir()) / f"vestigo_gcs_{digest}.json"
-    # Created with mode 0o600 so the key is never world-readable; the chmod
-    # below fixes a file left behind by a previous run. O_NOFOLLOW and the fstat
-    # check keep the key out of another user's file at this name; the truncate
-    # waits for them so the key never lands in one.
-    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(path, flags, 0o600)
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or (hasattr(os, "getuid") and info.st_uid != os.getuid()):
-            raise PermissionError(f"{path} is not a regular file owned by this user")
-        os.ftruncate(fd, 0)
-    except BaseException:
-        os.close(fd)
-        raise
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(text)
-    os.chmod(path, 0o600)
-    atexit.register(lambda: path.unlink(missing_ok=True))
-    return str(path)
+
+def _gcs_credentials_from_info(info: dict[str, Any]) -> Any:
+    """Credentials from a credentials file's contents, by its ``type``.
+
+    The library's generic loaders are deprecated for not validating what they load; the
+    per-type constructors are what they recommend. The types are the ones
+    ``GOOGLE_APPLICATION_CREDENTIALS`` accepts.
+
+    Raises:
+        ValueError: a ``type`` none of them covers.
+    """
+    kind = info.get("type")
+    if kind == "service_account":
+        from google.oauth2.service_account import Credentials
+
+        return Credentials.from_service_account_info(info, scopes=_GCS_SCOPES)
+    if kind == "authorized_user":
+        from google.oauth2.credentials import Credentials as UserCredentials
+
+        return UserCredentials.from_authorized_user_info(info, scopes=_GCS_SCOPES)
+    if kind == "impersonated_service_account":
+        from google.auth.impersonated_credentials import Credentials as Impersonated
+
+        return Impersonated.from_impersonated_service_account_info(info, scopes=_GCS_SCOPES)
+    if kind == "external_account":
+        source = info.get("credential_source") or {}
+        if "executable" in source:
+            from google.auth.pluggable import Credentials as External
+        elif str(source.get("environment_id", "")).startswith("aws"):
+            from google.auth.aws import Credentials as External
+        else:
+            from google.auth.identity_pool import Credentials as External
+        return External.from_info(info, scopes=_GCS_SCOPES)
+    raise ValueError(f"Unsupported GCS credentials type {kind!r}")
 
 
 class GCSBlobStore(BlobStore):
-    """Google Cloud Storage blob storage via PyArrow's GcsFileSystem.
+    """Google Cloud Storage blob storage through google-cloud-storage.
 
-    Keys are ``{prefix}/{artifact_id}@v={version}.arrow``. Supports Application
-    Default Credentials, service-account keys, or anonymous access.
+    Keys are ``{prefix}/{artifact_id}@v={version}.arrow``. The one client reads, writes
+    and signs, on a service-account key, Application Default Credentials, or none.
     """
 
     def __init__(
         self,
         bucket: str,
         prefix: str = "artifacts",
-        default_bucket_location: str | None = None,
         credentials_json: str | None = None,
         anonymous: bool = False,
         endpoint_override: str | None = None,
     ):
         """Initialize the GCS store.
 
-        ``default_bucket_location`` is a location for new buckets (``US``,
-        ``europe-west1``), not a project id. ``credentials_json`` is a key file path
-        or the JSON itself; either way it is handed to the client through the
-        process-wide ``GOOGLE_APPLICATION_CREDENTIALS``, the only credential source
-        PyArrow's client reads, so two stores in one process share the last one set.
+        ``credentials_json`` is a service-account key: a file path, or the key's JSON
+        itself, which is what a container's environment holds. ``endpoint_override``
+        is an emulator's URL.
+
+        Raises:
+            google.auth.exceptions.DefaultCredentialsError: see ``_gcs_credentials``.
         """
-        import pyarrow.fs as pafs
+        try:
+            from google.cloud import storage
+        except ImportError as exc:
+            raise ImportError(
+                "The GCS backend needs google-cloud-storage: install vestigo[gcs]"
+            ) from exc
 
         self.bucket = bucket
         self.prefix = prefix.strip("/")
         self._anonymous = anonymous
-        self._endpoint_override = endpoint_override
 
-        kwargs = {}
-        if default_bucket_location:
-            kwargs["default_bucket_location"] = default_bucket_location
-        if credentials_json:
-            # GOOGLE_APPLICATION_CREDENTIALS must be a file path, but operators
-            # paste key material into ...CREDENTIALS_JSON (an env var in most
-            # containers). Spill it to a private file so both readings work.
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _resolve_gcs_credentials(
-                credentials_json
-            )
-        if anonymous:
-            kwargs["anonymous"] = True
-        if endpoint_override:
-            kwargs["endpoint_override"] = endpoint_override
-
-        self._fs = pafs.GcsFileSystem(**kwargs)
-
-    def _gcs_key(self, artifact_id: str, version: int) -> str:
-        """Get full GCS key for a blob."""
-        blob_key = self._blob_key(artifact_id, version)
-        if self.prefix:
-            return f"{self.bucket}/{self.prefix}/{blob_key}"
-        return f"{self.bucket}/{blob_key}"
+        options = {"api_endpoint": _endpoint_url(endpoint_override)} if endpoint_override else None
+        self._client = storage.Client(
+            project=None,
+            credentials=_gcs_credentials(credentials_json, anonymous),
+            client_options=options,
+        )
 
     def _object_name(self, artifact_id: str, version: int) -> str:
-        return self._gcs_key(artifact_id, version).removeprefix(f"{self.bucket}/")
+        blob_key = self._blob_key(artifact_id, version)
+        return f"{self.prefix}/{blob_key}" if self.prefix else blob_key
 
-    @cached_property
-    def _signing_client(self) -> Any:
-        """A storage client over the ambient credentials, or ``None`` if there are none."""
-        if self._anonymous:
-            return None
-        try:
-            import google.auth
-            from google.auth.exceptions import DefaultCredentialsError
-            from google.cloud import storage
-        except ImportError:
-            logger.warning(
-                "GCS presigning needs google-cloud-storage: "
-                "pip install 'vestigo[gcs]'; the caller serves the bytes"
-            )
-            return None
-        try:
-            credentials, _ = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-        except DefaultCredentialsError:
-            return None
-        options = {"api_endpoint": self._endpoint_override} if self._endpoint_override else None
-        return storage.Client(project="-", credentials=credentials, client_options=options)
+    def _blob(self, name: str) -> Any:
+        return self._client.bucket(self.bucket).blob(name)
 
     def _signing_kwargs(self) -> dict[str, str] | None:
         """How to sign: locally with a key (``{}``), through IAM signBlob, or ``None``."""
         from google.auth.credentials import Signing
 
-        if self._signing_client is None:
+        if self._anonymous:
             return None
-        credentials = self._signing_client._credentials
+        credentials = self._client._credentials
         if isinstance(credentials, Signing):
             return {}
         # Workload identity and the GCE metadata server hold no key; IAM signs as the
@@ -848,10 +704,7 @@ class GCSBlobStore(BlobStore):
         signing = self._signing_kwargs()
         if signing is None:
             return None
-        blob = self._signing_client.bucket(self.bucket).blob(
-            self._object_name(artifact_id, version)
-        )
-        return blob.generate_signed_url(
+        return self._blob(self._object_name(artifact_id, version)).generate_signed_url(
             version="v4", expiration=timedelta(seconds=int(ttl_seconds)), method="GET", **signing
         )
 
@@ -863,7 +716,7 @@ class GCSBlobStore(BlobStore):
         signing = self._signing_kwargs()
         if signing is None:
             return None
-        policy = self._signing_client.generate_signed_post_policy_v4(
+        policy = self._client.generate_signed_post_policy_v4(
             self.bucket,
             self._object_name(artifact_id, version),
             expiration=timedelta(seconds=int(ttl_seconds)),
@@ -875,43 +728,67 @@ class GCSBlobStore(BlobStore):
     def open_blob_reader(
         self, artifact_id: str, version: int
     ) -> AbstractContextManager[BinaryIO] | None:
-        """Open a streaming reader for a GCS blob; a backend error propagates."""
-        key = self._gcs_key(artifact_id, version)
+        """Open a streaming reader for a GCS blob; a backend error propagates.
+
+        The metadata read first answers absence and pins the reader to one generation.
+        The reader fetches ``GCS_READ_CHUNK_BYTES`` at a time, whatever the caller reads.
+        """
+        blob = self._blob(self._object_name(artifact_id, version))
         try:
-            with _object_store_errors.counting("get"):
-                return self._fs.open_input_stream(key)
+            with _object_store_call("get", _gcs_absent):
+                blob.reload()
         except FileNotFoundError:
             return None
+        return blob.open("rb", chunk_size=GCS_READ_CHUNK_BYTES)
 
-    def _upload_from_path(self, key: str, source_path: Path) -> None:
-        """Stream a local file to ``key`` via the PyArrow GCS filesystem."""
-        with _object_store_errors.counting("put"):
-            _upload_to_arrow_fs(self._fs, key, source_path)
+    def _upload_from_path(self, name: str, source_path: Path) -> None:
+        """Upload a local file to ``name``: one request to 8 MiB, resumable past it.
+
+        The size is given, or the SDK opens a resumable session for every blob. A failure
+        leaves the name as it was: an unfinished resumable upload is nothing. Retried on
+        transient errors, since the same bytes land at the same name.
+        """
+        from google.cloud.storage.retry import DEFAULT_RETRY
+
+        size = source_path.stat().st_size
+        with open(source_path, "rb") as src, _object_store_call("put"):
+            self._blob(name).upload_from_file(src, size=size, retry=DEFAULT_RETRY)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
         """Open a streaming writer for a GCS blob, staged locally so failed writes never upload."""
-        key = self._gcs_key(artifact_id, version)
+        name = self._object_name(artifact_id, version)
         return self._staged_local_writer(
-            lambda staged: self._upload_from_path(key, staged),
+            lambda staged: self._upload_from_path(name, staged),
             prefix="vestigo_gcs_blob_",
         )
 
     def publish_blob_from_path(self, artifact_id: str, version: int, source_path: Path) -> None:
         """Stream ``source_path`` straight to GCS, skipping the local staging copy."""
-        key = self._gcs_key(artifact_id, version)
-        self._upload_from_path(key, source_path)
+        self._upload_from_path(self._object_name(artifact_id, version), source_path)
 
     def blob_exists(self, artifact_id: str, version: int) -> bool:
         """Check if blob exists in GCS; a backend error propagates."""
-        return _arrow_fs_blob_exists(self._fs, self._gcs_key(artifact_id, version))
+        with _object_store_call("head"):
+            return bool(self._blob(self._object_name(artifact_id, version)).exists())
 
     def blob_size(self, artifact_id: str, version: int) -> int | None:
         """Return blob size from GCS object metadata; a backend error propagates."""
-        return _arrow_fs_blob_size(self._fs, self._gcs_key(artifact_id, version))
+        blob = self._blob(self._object_name(artifact_id, version))
+        try:
+            with _object_store_call("head", _gcs_absent):
+                blob.reload()
+        except FileNotFoundError:
+            return None
+        return int(blob.size) if blob.size is not None else None
 
     def delete_blob(self, artifact_id: str, version: int) -> bool:
-        """Delete blob from GCS; a backend error propagates."""
-        return _arrow_fs_delete_blob(self._fs, self._gcs_key(artifact_id, version))
+        """Delete blob from GCS; False when it was not there, and a backend error propagates."""
+        try:
+            with _object_store_call("delete", _gcs_absent):
+                self._blob(self._object_name(artifact_id, version)).delete()
+        except FileNotFoundError:
+            return False
+        return True
 
     @classmethod
     def from_settings(
@@ -921,11 +798,16 @@ class GCSBlobStore(BlobStore):
         return cls(
             bucket=bucket,
             prefix=prefix,
-            default_bucket_location=settings.gcs_default_bucket_location,
             credentials_json=settings.gcs_credentials_json,
             anonymous=settings.gcs_anonymous,
             endpoint_override=settings.gcs_endpoint_override,
         )
+
+
+def _azure_absent(exc: BaseException) -> bool:
+    from azure.core.exceptions import ResourceNotFoundError
+
+    return isinstance(exc, ResourceNotFoundError)
 
 
 class _AzureDownloadReader(io.RawIOBase):
@@ -1109,14 +991,12 @@ class AzureBlobStore(BlobStore):
         self, artifact_id: str, version: int
     ) -> AbstractContextManager[BinaryIO] | None:
         """Open a streaming reader for an Azure blob."""
-        from azure.core.exceptions import ResourceNotFoundError
-
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
         try:
-            with _object_store_errors.counting("get", absent=(ResourceNotFoundError,)):
+            with _object_store_call("get", _azure_absent):
                 downloader = blob_client.download_blob()
-        except ResourceNotFoundError:
+        except FileNotFoundError:
             return None
 
         @contextmanager
@@ -1132,7 +1012,7 @@ class AzureBlobStore(BlobStore):
     def _upload_from_path(self, key: str, source_path: Path) -> None:
         """Stream a local file to ``key`` via the Azure SDK."""
         blob_client = self._client.get_blob_client(key)
-        with open(source_path, "rb") as src, _object_store_errors.counting("put"):
+        with open(source_path, "rb") as src, _object_store_call("put"):
             blob_client.upload_blob(src, overwrite=True)
 
     def open_blob_writer(self, artifact_id: str, version: int) -> AbstractContextManager[BinaryIO]:
@@ -1156,35 +1036,31 @@ class AzureBlobStore(BlobStore):
         """Check if blob exists in Azure Blob Storage."""
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
-        with _object_store_errors.counting("head"):
+        with _object_store_call("head"):
             return blob_client.exists()
 
     def blob_size(self, artifact_id: str, version: int) -> int | None:
         """Return blob size from Azure Blob Storage metadata."""
-        from azure.core.exceptions import ResourceNotFoundError
-
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
         try:
-            with _object_store_errors.counting("head", absent=(ResourceNotFoundError,)):
+            with _object_store_call("head", _azure_absent):
                 props = blob_client.get_blob_properties()
-        except ResourceNotFoundError:
+        except FileNotFoundError:
             return None
         size = getattr(props, "size", None)
         return int(size) if size is not None else None
 
     def delete_blob(self, artifact_id: str, version: int) -> bool:
         """Delete blob from Azure Blob Storage."""
-        from azure.core.exceptions import ResourceNotFoundError
-
         key = self._azure_key(artifact_id, version)
         blob_client = self._client.get_blob_client(key)
         try:
-            with _object_store_errors.counting("delete", absent=(ResourceNotFoundError,)):
+            with _object_store_call("delete", _azure_absent):
                 blob_client.delete_blob()
-            return True
-        except ResourceNotFoundError:
+        except FileNotFoundError:
             return False
+        return True
 
     @classmethod
     def from_settings(
