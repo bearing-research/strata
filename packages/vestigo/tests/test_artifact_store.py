@@ -4,6 +4,8 @@ import json
 
 import pytest
 from conftest import race_after_pending_read
+
+from vestigo import uris
 from vestigo.provenance import (
     TransformSpec,
     compute_provenance_hash,
@@ -37,13 +39,13 @@ class TestTransformSpec:
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT * FROM input"},
-            inputs=["strata://table/db.events"],
+            inputs=["vestigo://table/db.events"],
         )
         json_str = spec.canonical_json
         data = json.loads(json_str)
         assert data["executor"] == "local://duckdb_sql@v1"
         assert data["params"] == {"sql": "SELECT * FROM input"}
-        assert data["inputs"] == ["strata://table/db.events"]
+        assert data["inputs"] == ["vestigo://table/db.events"]
 
     def test_parse(self):
         json_str = json.dumps(
@@ -145,6 +147,7 @@ class TestProvenanceHash:
         spec = TransformSpec(
             executor="local://duckdb_sql@v1",
             params={"sql": "SELECT * FROM input0", "b": [1, 2], "a": {"z": 1, "y": None}},
+            # Inputs are opaque bytes to the hash: the scheme is whatever the consumer wrote.
             inputs=["strata://artifact/b@v=2", "file:///wh#db.events"],
         )
         assert spec.canonical_json == (
@@ -1980,7 +1983,7 @@ class TestAnIdIsHeldByOneTenant:
             byte_size=5,
             created_at=1.0,
             transform_spec=None,
-            input_versions=json.dumps({"strata://artifact/up@v=1": "up@v=1"}),
+            input_versions=json.dumps({"vestigo://artifact/up@v=1": "up@v=1"}),
             principal=None,
             tenant="team-a",
             content_sha256=None,
@@ -2125,3 +2128,29 @@ class TestFindReadyAndSetName:
         name = store.get_name("the-name")
         assert (name.artifact_id, name.version) == ("a1", 2)
         assert store.get_artifact("a1", 1).state == "superseded"
+
+
+class TestUriScheme:
+    """The consumer's scheme reaches the rows: what the store writes and what it matches."""
+
+    @pytest.fixture(autouse=True)
+    def _default_scheme_after(self):
+        yield
+        uris.set_uri_scheme(uris.DEFAULT_URI_SCHEME)
+
+    def test_name_reads_and_lineage_follow_the_consumers_scheme(self, store):
+        uris.set_uri_scheme("strata")
+        spec = TransformSpec(executor="cell@v1", params={}, inputs=[])
+        store.create_artifact("scan", "p-scan", spec)
+        store.finalize_artifact("scan", 1, "{}", row_count=0, byte_size=0)
+        edges = {"strata://artifact/scan@v=1": "scan@v=1", "strata://name/taxi/model": "m@v=1"}
+        store.create_artifact("top", "p-top", spec, input_versions=edges)
+        store.finalize_artifact("top", 1, "{}", row_count=0, byte_size=0)
+
+        assert store.list_name_reads() == [(None, "top", "taxi/model")]
+        ancestors = store.ancestor_transform_specs(store.get_artifact("top", 1), max_depth=10)
+        assert ancestors == [spec.canonical_json]
+        # Under the default scheme the same rows are foreign URIs: no name read, no edge.
+        uris.set_uri_scheme(uris.DEFAULT_URI_SCHEME)
+        assert store.list_name_reads() == []
+        assert store.ancestor_transform_specs(store.get_artifact("top", 1), max_depth=10) == []

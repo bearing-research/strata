@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 
 import pytest
+
 from vestigo.build_store import BuildStore
 from vestigo.graph import Edge, NodeSpec
 from vestigo.operations import (
@@ -142,9 +143,9 @@ class Gate2:
     """The gate's steps; a ``ledger`` fixture is the importing module's."""
 
     def test_a_three_node_structure_is_put_and_walked(self, ledger: Ledger):
-        leaf = NodeSpec("strata/table", b"s3://lake/events")
-        features = NodeSpec("strata/cell", b"features", (Edge("events", 0, 0),))
-        train = NodeSpec("strata/cell", b"train", (Edge("features", 0, 1),))
+        leaf = NodeSpec("app/table", b"s3://lake/events")
+        features = NodeSpec("app/cell", b"features", (Edge("events", 0, 0),))
+        train = NodeSpec("app/cell", b"train", (Edge("features", 0, 1),))
         leaf_id, features_id, train_id = ledger.store.graph.put_batch([leaf, features, train])
 
         assert ledger.store.graph.topological_order([train_id]) == [leaf_id, features_id, train_id]
@@ -433,7 +434,7 @@ class Gate2:
     def test_an_alias_move_leaves_a_bound_run_on_its_exact_inputs(self, ledger: Ledger):
         build_id = _build(ledger)
         release = ledger.releases.prepare(build_id, "a1", "checkpoint")
-        bound = {"strata://artifact/features@v=3": "features@v=3"}
+        bound = {"vestigo://artifact/features@v=3": "features@v=3"}
         version = ledger.store.create_artifact(
             "bound-output",
             checkpoint_output_key(PARENT, build_id, 1, "model"),

@@ -4,6 +4,7 @@ registered for its declared content type; the ledger knows no format itself."""
 from __future__ import annotations
 
 import pytest
+
 from vestigo.provenance import TransformSpec
 from vestigo.store import _VALIDATORS, ArtifactStore, register_validator
 

@@ -179,7 +179,9 @@ nodes, `CGN1`/`CGD1` encoders, bounded traversal; `definition_id` on a version),
 lease; references, authorities) with `operations` (the typed operations a
 release runs in its transaction), `uris`, `file_modes`, `tables`; it imports
 nothing of Strata (blob settings, content validators, retention roots and
-required edges, node specs are passed in). Gate 2 (ADR 002 §8) lives in
+required edges, node specs are passed in). Its artifact and name URIs carry a
+per-process scheme; `strata/__init__.py` sets `strata` before any submodule
+parses one (`vestigo.uris.set_uri_scheme`). Gate 2 (ADR 002 §8) lives in
 `packages/vestigo/tests/gate2.py`, run on SQLite and Postgres.
 Strata's side: `artifact/` (`transfer`, `table_export`, `cli`, `retention` for
 what a version requires, `graph` for a cell's node and the reconstruction of

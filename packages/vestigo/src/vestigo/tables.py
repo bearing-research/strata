@@ -1,8 +1,8 @@
 """The tables the ledger owns, for tools that copy or audit a database.
 
 ``LEDGER_TABLES`` is in foreign-key order (``artifact_versions`` first) with
-each table's primary key, so a row-by-row copy is idempotent. Strata adds its
-own tables (API keys, notebook workers) after these when it migrates a store.
+each table's primary key, so a row-by-row copy is idempotent. A consumer adds
+its own tables after these when it migrates a store.
 
 Three tables are deliberately absent: ``schema_version`` is created by the
 target store itself, and ``import_staging`` and ``build_console_chunks`` hold

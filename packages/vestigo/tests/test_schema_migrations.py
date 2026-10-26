@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+
 from vestigo.store import (
     _BASELINE_SCHEMA_VERSION,
     _LATEST_SCHEMA_VERSION,
@@ -111,8 +112,8 @@ class TestExistingDatabase:
         assert artifact is not None
         assert artifact.state == "ready"
 
-    def test_a_store_a_newer_strata_migrated_is_refused(self, tmp_path):
-        """An older Strata on a migrated store would write rows the newer one does not expect."""
+    def test_a_store_a_newer_vestigo_migrated_is_refused(self, tmp_path):
+        """An older vestigo on a migrated store would write rows the newer one does not expect."""
         db_path = ArtifactStore(tmp_path / "s").db_path
         conn = sqlite3.connect(db_path)
         conn.execute(
@@ -122,7 +123,7 @@ class TestExistingDatabase:
         conn.commit()
         conn.close()
 
-        with pytest.raises(RuntimeError, match="newer than this Strata supports"):
+        with pytest.raises(RuntimeError, match="newer than this vestigo supports"):
             ArtifactStore(tmp_path / "s")
 
 
@@ -168,7 +169,7 @@ class TestAReadOnlyOpen:
         conn.commit()
         conn.close()
 
-        with pytest.raises(StoreSchemaMismatch, match="newer than this Strata supports"):
+        with pytest.raises(StoreSchemaMismatch, match="newer than this vestigo supports"):
             ArtifactStore(tmp_path / "s", read_only=True)
 
     def test_a_current_database_opens(self, tmp_path):
@@ -210,15 +211,15 @@ class TestTheMisboundBuildMigration:
     def test_fails_embedded_builds_over_eleven_inputs_and_what_read_them(self, tmp_path):
         """Their bytes bound input10 before input2; anything built over them inherits that."""
         store = ArtifactStore(tmp_path / "s")
-        twelve = [f"strata://artifact/in{i}@v=1" for i in range(12)]
+        twelve = [f"vestigo://artifact/in{i}@v=1" for i in range(12)]
         _ready(store, "wide", "local://duckdb_sql@v1", twelve)
         _ready(store, "wide_bare", "duckdb_sql@v1", twelve[:11])
         _ready(
             store,
             "reader",
             "local://duckdb_sql@v1",
-            ["strata://name/wide"],
-            {"strata://name/wide": "wide@v=1"},
+            ["vestigo://name/wide"],
+            {"vestigo://name/wide": "wide@v=1"},
         )
         _ready(store, "narrow", "local://duckdb_sql@v1", twelve[:10])
         _ready(store, "remote", "pandas_script@v1", twelve)

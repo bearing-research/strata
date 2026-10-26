@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pytest
+
 from vestigo.build_store import reset_build_store
 from vestigo.store import register_validator, reset_artifact_store
 

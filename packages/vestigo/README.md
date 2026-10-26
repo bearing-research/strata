@@ -29,5 +29,31 @@ artifact back to the computation and inputs that made it.
 
 `formal/tla/` holds the TLA+ models of the two lifecycles this package
 implements, `ArtifactLifecycle.tla` and `BuildLease.tla`, with the
-configurations that found and then closed their bugs. See the repository's
-`formal/README.md` for how to run them.
+configurations that found and then closed their bugs. `formal/README.md`
+says how to run them.
+
+Artifact and name URIs are ``{scheme}://artifact/{id}@v={n}`` and
+``{scheme}://name/{name}``; the scheme is ``vestigo`` unless the consumer calls
+``vestigo.uris.set_uri_scheme`` once at import (Strata uses ``strata``). The
+scheme is persisted in ``input_versions`` rows, so a store keeps the scheme it
+was written under.
+
+## Install
+
+```bash
+uv add vestigo            # or: pip install vestigo
+uv add "vestigo[postgres]"  # PostgreSQL metadata; also [s3], [gcs], [azure] for blobs
+```
+
+## Development
+
+```bash
+uv sync --all-extras      # the package, every extra and the dev group
+uv run pytest             # the suite; the Postgres tests start a container through Docker
+uv run pre-commit run --all-files
+```
+
+Strata's `tests/contract/` holds the cross-repository compatibility tests:
+hash vectors for the graph encoders, operation schemas, output keys, and the
+ledger's table inventory. A change to any of those is a contract change and
+needs a matching Strata release.

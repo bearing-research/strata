@@ -104,8 +104,8 @@ Init ==
 
 -----------------------------------------------------------------------------
 (* create_artifact: next version in 'building', requiring R (stored      *)
-(* versions, written as edges in the row's transaction). Strata stores an *)
-(* output folder's files before the manifest that requires them.          *)
+(* versions, written as edges in the row's transaction). A consumer may  *)
+(* store a folder's files before the manifest that requires them.         *)
 Create(i, p, R) ==
     LET v == MaxRowVer(i) + 1 IN
     /\ v \in Versions
