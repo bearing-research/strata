@@ -2840,7 +2840,7 @@ output's size against <code>output.max_bytes</code> before publishing.</p>
 <td>S3</td>
 <td>SigV4 query URLs</td>
 <td>POST policy: <code>fields</code>, bounded by <code>content-length-range</code></td>
-<td>An access key pair (config or <code>AWS_ACCESS_KEY_ID</code>), else a role through botocore (instance profile, ECS task role, web identity; the <code>s3</code> extra). The role's session token goes in the URL, and a URL stops working when that token expires.</td>
+<td>An access key pair (config or <code>AWS_ACCESS_KEY_ID</code>), else a role through boto3 (instance profile, ECS task role, web identity; the <code>s3</code> extra). The role's session token goes in the URL, and a URL stops working when that token expires.</td>
 </tr>
 <tr>
 <td>GCS</td>

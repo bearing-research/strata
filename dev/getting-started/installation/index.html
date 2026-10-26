@@ -2345,11 +2345,11 @@ is not supported; see the uv requirement above.</p>
 </tr>
 <tr>
 <td><code>s3</code></td>
-<td>Notebook <code>s3://</code> mounts (<code>s3fs</code>), and presigned build-manifest URLs (<code>STRATA_ARTIFACT_PRESIGNED_URLS</code>) from an S3 role (instance profile, ECS task role, web identity) rather than an access key pair.</td>
+<td>The S3 artifact backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code>, through boto3, presigned build-manifest URLs included) and notebook <code>s3://</code> mounts (<code>s3fs</code>).</td>
 </tr>
 <tr>
 <td><code>gcs</code></td>
-<td>Notebook <code>gs://</code> mounts (<code>gcsfs</code>), and presigned build-manifest URLs (<code>STRATA_ARTIFACT_PRESIGNED_URLS</code>) for the GCS artifact backend.</td>
+<td>The GCS artifact backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=gcs</code>, through google-cloud-storage, presigned build-manifest URLs included) and notebook <code>gs://</code> mounts (<code>gcsfs</code>).</td>
 </tr>
 <tr>
 <td><code>otel</code></td>

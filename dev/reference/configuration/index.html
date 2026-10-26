@@ -3037,8 +3037,8 @@ is a REST or Hive one (a <code>type</code> other than <code>sql</code>, or a <co
 <code>http</code> or <code>thrift</code>), a table URI cannot name a warehouse at all; the request is
 a 400, and the table is addressed as <code>&lt;namespace&gt;.&lt;table&gt;</code> in that catalog.</p>
 <h2 id="s3-storage">S3 Storage<a class="headerlink" href="#s3-storage" title="Permanent link">&para;</a></h2>
-<p>Credentials for the S3 blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code>). The
-same settings read lake tables on S3: a table named by an <code>s3://</code> warehouse
+<p>Credentials for the S3 blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code>, which
+needs the <code>s3</code> extra). The same settings read lake tables on S3: a table named by an <code>s3://</code> warehouse
 URI has its catalog and data files read with this region, endpoint and key, so
 a MinIO lake needs only <code>STRATA_S3_ENDPOINT_URL</code> and its keys here.</p>
 <table>
@@ -3078,8 +3078,9 @@ a MinIO lake needs only <code>STRATA_S3_ENDPOINT_URL</code> and its keys here.</
 </tbody>
 </table>
 <h2 id="gcs-storage">GCS Storage<a class="headerlink" href="#gcs-storage" title="Permanent link">&para;</a></h2>
-<p>Credentials for the GCS blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=gcs</code>).
-Unset credentials fall back to Application Default Credentials.</p>
+<p>Credentials for the GCS blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=gcs</code>, which
+needs the <code>gcs</code> extra). Unset credentials fall back to Application Default
+Credentials; with none and <code>STRATA_GCS_ANONYMOUS</code> unset the server refuses to start.</p>
 <p>The same settings read lake tables on GCS. A table named by a <code>gs://</code>
 warehouse URI (<code>gs://bucket/wh#ns.table</code>, see <a href="#catalog">Catalog</a>) has its
 metadata read with the bucket location, endpoint and service-account key,
@@ -3099,12 +3100,12 @@ overrides the one Strata derives.</p>
 <tr>
 <td><code>STRATA_GCS_DEFAULT_BUCKET_LOCATION</code></td>
 <td><code>None</code></td>
-<td>GCS location new buckets default to (<code>US</code>, <code>europe-west1</code>). <code>STRATA_GCS_PROJECT_ID</code> is still accepted for it and warns: it never set a project, since <code>GcsFileSystem</code> has no project parameter</td>
+<td>GCS location new buckets default to (<code>US</code>, <code>europe-west1</code>). Reaches PyIceberg's GCS catalog; the artifact store never creates a bucket. <code>STRATA_GCS_PROJECT_ID</code> is still accepted for it and warns: it never set a project</td>
 </tr>
 <tr>
 <td><code>STRATA_GCS_CREDENTIALS_JSON</code></td>
 <td><code>None</code></td>
-<td>Service-account key, as either a path to the JSON file or the JSON itself. Inline key material is written to a private temp file, because <code>GOOGLE_APPLICATION_CREDENTIALS</code> only resolves paths. Falls back to <code>GOOGLE_APPLICATION_CREDENTIALS</code></td>
+<td>A credentials file of any kind <code>GOOGLE_APPLICATION_CREDENTIALS</code> accepts (service-account key, workload identity federation, authorized user), as either a path or the JSON itself. The artifact store takes it directly; for lake reads inline material is written to a private temp file, because <code>GOOGLE_APPLICATION_CREDENTIALS</code> only resolves paths. Falls back to <code>GOOGLE_APPLICATION_CREDENTIALS</code></td>
 </tr>
 <tr>
 <td><code>STRATA_GCS_ANONYMOUS</code></td>
