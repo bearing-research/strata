@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from vestigo.graph import GRAPH_DDL, GraphStore, NodeId, NodeSpec
 from vestigo.provenance import TransformSpec, parse_transform_spec
+from vestigo.releases import RELEASE_DDL
 from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
@@ -743,6 +744,19 @@ def _add_graph(conn: StoreConnection, dialect: SqlDialect) -> None:
     )
 
 
+def _add_releases(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Releases (ADR 002 §7.2) and the two columns that tie a version to its event and key."""
+    for statement in RELEASE_DDL:
+        conn.execute(dialect.adapt_ddl(statement))
+    for column in ("release_id", "computation_key"):
+        if not dialect.column_exists(conn, "artifact_versions", column):
+            conn.execute(f"ALTER TABLE artifact_versions ADD COLUMN {column} TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_versions_release ON artifact_versions(release_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_versions_computation ON artifact_versions(computation_key)"
+    )
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
@@ -757,6 +771,9 @@ _MIGRATIONS: list[_Migration] = [
     _Migration(11, "fail embedded builds that bound inputs out of order", _fail_misbound_builds),
     _Migration(12, "retention_roots + retention_edges; pins become roots", _add_retention),
     _Migration(13, "nodes + node_inputs; artifact_versions.definition_id", _add_graph),
+    _Migration(
+        14, "build_releases + references + authorities; release_id, computation_key", _add_releases
+    ),
 ]
 
 RETENTION_SCHEMA_VERSION = 12
@@ -799,11 +816,16 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     minted INTEGER NOT NULL DEFAULT 0,  -- 1 = the store made up the id (migration 6)
     superseded_by TEXT,  -- id@v=N whose blob this reads, having none of its own (migration 7)
     definition_id TEXT,  -- the structural node this version was produced by (migration 13)
+    release_id TEXT,  -- the release that made this version current (migration 14)
+    computation_key TEXT,  -- the bound computation's parent hash (migration 14)
     PRIMARY KEY (id, version)
 );
 
 -- The producing node, for "every version of this definition" (migration 13)
 CREATE INDEX IF NOT EXISTS idx_versions_definition ON artifact_versions(definition_id);
+-- A release's outputs, and every output of one bound computation (migration 14)
+CREATE INDEX IF NOT EXISTS idx_versions_release ON artifact_versions(release_id);
+CREATE INDEX IF NOT EXISTS idx_versions_computation ON artifact_versions(computation_key);
 
 -- Index for provenance lookup (deduplication)
 CREATE INDEX IF NOT EXISTS idx_provenance ON artifact_versions(provenance_hash);
@@ -844,6 +866,9 @@ CREATE INDEX IF NOT EXISTS idx_names_name ON artifact_names(name);
 # under an identity scope derived from the tenant. Written by the application with
 # a version (definition_id) or on its own; never garbage collected here.
 _SCHEMA_SQL += "\n" + ";\n".join(GRAPH_DDL) + ";\n"
+# Releases (ADR 002 §7.2): a build's publication events, the references that follow
+# them and the slots they win.
+_SCHEMA_SQL += "\n" + ";\n".join(RELEASE_DDL) + ";\n"
 
 # Registry tables (aliases / tags / audit). Run unconditionally at init; CREATE IF NOT EXISTS makes
 # it idempotent for fresh and existing databases.
@@ -1279,6 +1304,8 @@ class ArtifactStore:
         minted: bool = False,
         requires: Collection[tuple[str, int]] = (),
         definition: Sequence[NodeSpec] = (),
+        release_id: str | None = None,
+        computation_key: str | None = None,
     ) -> int:
         """Create a new artifact version in "building" state and return its number.
 
@@ -1289,7 +1316,10 @@ class ArtifactStore:
         one needs beside its inputs (a folder's files): retention keeps them while it is
         kept and evicts them with it. ``definition`` is the structure that produced it
         (ADR 002 §6.3): nodes written to :attr:`graph` on this transaction, the last of
-        them recorded as the version's ``definition_id``.
+        them recorded as the version's ``definition_id``. ``release_id`` names the
+        release that will make it current (:mod:`vestigo.releases`); ``computation_key``
+        the bound computation it belongs to, the parent its provenance hash derives from
+        (§7.1), so every output of one computation can be found whatever its labels.
 
         Raises:
             ArtifactIdTaken: If a version of ``artifact_id`` belongs to another tenant.
@@ -1322,8 +1352,8 @@ class ArtifactStore:
                 INSERT INTO artifact_versions
                     (id, version, state, provenance_hash, created_at,
                      transform_spec, input_versions, tenant, principal, minted,
-                     definition_id)
-                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?, ?, ?)
+                     definition_id, release_id, computation_key)
+                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     artifact_id,
@@ -1338,6 +1368,8 @@ class ArtifactStore:
                     principal,
                     1 if minted or was_minted else 0,
                     definition_id,
+                    release_id,
+                    computation_key,
                 ),
             )
             self._write_requirements(conn, artifact_id, version, tenant, requires)
@@ -2090,44 +2122,7 @@ class ArtifactStore:
             conn = self._get_connection()
             try:
                 self._dialect.begin_write(conn, staged[0].artifact_id)
-                now = time.time()
-                for item in staged:
-                    row = conn.execute(
-                        "SELECT provenance_hash, tenant, state FROM artifact_versions "
-                        "WHERE id = ? AND version = ?",
-                        (item.artifact_id, item.version),
-                    ).fetchone()
-                    if row is None or row["state"] != "building":
-                        conn.rollback()
-                        raise ValueError(
-                            f"Artifact {item.artifact_id}@v={item.version} not in building state"
-                        )
-                    conn.execute(
-                        """
-                        UPDATE artifact_versions SET state = 'superseded'
-                        WHERE provenance_hash = ? AND state = 'ready'
-                          AND COALESCE(tenant, '') = COALESCE(?, '')
-                          AND NOT (id = ? AND version = ?)
-                        """,
-                        (row["provenance_hash"], row["tenant"], item.artifact_id, item.version),
-                    )
-                    conn.execute(
-                        """
-                        UPDATE artifact_versions
-                        SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
-                            content_sha256 = ?, last_used_at = ?
-                        WHERE id = ? AND version = ?
-                        """,
-                        (
-                            item.schema_json,
-                            item.row_count,
-                            item.byte_size,
-                            item.content_sha256,
-                            now,
-                            item.artifact_id,
-                            item.version,
-                        ),
-                    )
+                self._promote_staged(conn, staged, time.time())
                 conn.commit()
                 break
             except self._dialect.integrity_error:
@@ -2137,6 +2132,68 @@ class ArtifactStore:
             finally:
                 conn.close()
         return [self.get_artifact(item.artifact_id, item.version) for item in staged]
+
+    @staticmethod
+    def _promote_staged(conn: StoreConnection, staged: list[StagedVersion], now: float) -> None:
+        """Make staged rows ready on the caller's transaction, each superseding its key's holder.
+
+        Raises:
+            ValueError: a row is missing or not ``building``; the transaction is rolled back.
+        """
+        for item in staged:
+            row = conn.execute(
+                "SELECT provenance_hash, tenant, state FROM artifact_versions "
+                "WHERE id = ? AND version = ?",
+                (item.artifact_id, item.version),
+            ).fetchone()
+            if row is None or row["state"] != "building":
+                conn.rollback()
+                raise ValueError(
+                    f"Artifact {item.artifact_id}@v={item.version} not in building state"
+                )
+            conn.execute(
+                """
+                UPDATE artifact_versions SET state = 'superseded'
+                WHERE provenance_hash = ? AND state = 'ready'
+                  AND COALESCE(tenant, '') = COALESCE(?, '')
+                  AND NOT (id = ? AND version = ?)
+                """,
+                (row["provenance_hash"], row["tenant"], item.artifact_id, item.version),
+            )
+            conn.execute(
+                """
+                UPDATE artifact_versions
+                SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
+                    content_sha256 = ?, last_used_at = ?
+                WHERE id = ? AND version = ?
+                """,
+                (
+                    item.schema_json,
+                    item.row_count,
+                    item.byte_size,
+                    item.content_sha256,
+                    now,
+                    item.artifact_id,
+                    item.version,
+                ),
+            )
+
+    @staticmethod
+    def _versions_where(
+        conn: StoreConnection, where: str, params: tuple[Any, ...]
+    ) -> list[ArtifactVersion]:
+        """The versions matching a condition, on the caller's connection, oldest first."""
+        rows = conn.execute(
+            f"""
+            SELECT id, version, state, provenance_hash, schema_json,
+                   row_count, byte_size, created_at, transform_spec,
+                   input_versions, tenant, principal, content_sha256
+            FROM artifact_versions WHERE {where}
+            ORDER BY created_at, id, version
+            """,
+            params,
+        ).fetchall()
+        return [_version_from_row(row) for row in rows]
 
     def finalize_and_set_name(
         self,

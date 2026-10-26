@@ -42,7 +42,7 @@ run everything, conventions, gotchas and the prioritized next steps.
 | `../packages/vestigo/formal/tla/BuildLease.tla` | Model of one build and its lease: `BuildRunner` claim / reclaim / heartbeat / publish / finalize / complete / fail, and the v2 pull routes (manifest, upload, finalize) |
 | `../packages/vestigo/formal/tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Finds findings 5 and 6 |
 | `../packages/vestigo/formal/tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Finds finding 7 |
-| `../packages/vestigo/formal/tla/Build_Patched.cfg` | Runners and executors with the proposed fix. **All invariants hold** (exhaustive) |
+| `../packages/vestigo/formal/tla/Build_Patched.cfg` | Runners and executors with the proposed fix, and checkpoint releases fenced on the lease (ADR 002 E4a, `OnlyLeaseHolderReleases`). **All invariants hold** (exhaustive) |
 | `tla/Admission.tla` | Model of one tenant's `ResizableLimiter` (acquire with deadline, release, cancel while queued) and the `TenantRegistry` LRU that owns it |
 | `tla/Admission_Py312.cfg` | CPython 3.12 `asyncio.Condition` semantics. Finds finding 8 |
 | `tla/Admission_Eviction.cfg` | LRU eviction of a limiter in use. Finds findings 9 and 10 |

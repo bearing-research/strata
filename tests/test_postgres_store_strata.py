@@ -51,6 +51,7 @@ def store(postgres_dsn, tmp_path):
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
             "notebook_workers, notebook_worker_registry, store_upgrades, nodes, node_inputs, "
+            "build_releases, release_references, release_authorities, "
             "schema_version CASCADE;"
         )
         conn.commit()

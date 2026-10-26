@@ -29,6 +29,13 @@
 (* pause, a blocked event loop, a DB outage longer than the lease), and a  *)
 (* signed URL stays valid for an arbitrary time after it is minted.        *)
 (* Executor lease expiry is not modelled.                                  *)
+(*                                                                         *)
+(* Releases (ADR 002 §7.2): while a build runs, its attempt may accept any *)
+(* number of checkpoint releases (ReleaseStore.accept). Patched, every     *)
+(* acceptance is fenced on the lease exactly as the final one is; a        *)
+(* release by an attempt that no longer holds it is rejected. Unpatched,   *)
+(* nothing fences a checkpoint, and a fenced attempt publishes over the    *)
+(* attempt that took over.                                                 *)
 (***************************************************************************)
 EXTENDS Naturals
 
@@ -61,10 +68,11 @@ VARIABLES
     tok,        \* tok[a] : the epoch actor a was granted
     url,        \* url[e] : executor e still holds a valid signed upload URL
     staleFail,  \* history: a build/artifact was failed by an actor without the lease
-    staleBytes  \* history: finalize published bytes written by a different attempt
+    staleBytes, \* history: finalize published bytes written by a different attempt
+    staleRelease \* history: a checkpoint was accepted from an attempt without the lease
 
 vars == <<build, owner, epoch, expired, art, blobs, chosen, digest,
-          pc, tok, url, staleFail, staleBytes>>
+          pc, tok, url, staleFail, staleBytes, staleRelease>>
 
 TypeOK ==
     /\ build \in {"pending", "building", "ready", "failed"}
@@ -80,6 +88,7 @@ TypeOK ==
     /\ url \in [Executors -> BOOLEAN]
     /\ staleFail \in BOOLEAN
     /\ staleBytes \in BOOLEAN
+    /\ staleRelease \in BOOLEAN
 
 Init ==
     /\ build = "pending"
@@ -95,6 +104,7 @@ Init ==
     /\ url = [e \in Executors |-> FALSE]
     /\ staleFail = FALSE
     /\ staleBytes = FALSE
+    /\ staleRelease = FALSE
 
 HoldsLease(a, o) == owner = o /\ tok[a] = epoch
 
@@ -106,7 +116,7 @@ PromoteArtifact(a) ==
          /\ chosen' = Slot(tok[a])
          /\ digest' = blobs[Slot(tok[a])]
          /\ staleBytes' = (staleBytes \/ blobs[Slot(tok[a])] # a)
-    ELSE UNCHANGED <<art, chosen, digest, staleBytes>>
+    ELSE UNCHANGED <<art, chosen, digest, staleBytes, staleRelease>>
 
 -----------------------------------------------------------------------------
 (* Runners                                                                 *)
@@ -116,20 +126,20 @@ Claim(r) ==                                   \* claim_build
     /\ build' = "building" /\ owner' = r /\ epoch' = epoch + 1 /\ expired' = FALSE
     /\ tok' = [tok EXCEPT ![r] = epoch + 1]
     /\ pc' = [pc EXCEPT ![r] = "exec"]
-    /\ UNCHANGED <<art, blobs, chosen, digest, url, staleFail, staleBytes>>
+    /\ UNCHANGED <<art, blobs, chosen, digest, url, staleFail, staleBytes, staleRelease>>
 
 Expire ==                                     \* heartbeat missed for a whole lease
     /\ build = "building" /\ owner \in Runners /\ ~expired
     /\ expired' = TRUE
     /\ UNCHANGED <<build, owner, epoch, art, blobs, chosen, digest, pc, tok, url,
-                   staleFail, staleBytes>>
+                   staleFail, staleBytes, staleRelease>>
 
 Renew(r) ==                                   \* renew_lease: no expiry check in the WHERE
     /\ pc[r] \in {"exec", "published", "finalized"}
     /\ build = "building" /\ owner = r /\ expired
     /\ expired' = FALSE
     /\ UNCHANGED <<build, owner, epoch, art, blobs, chosen, digest, pc, tok, url,
-                   staleFail, staleBytes>>
+                   staleFail, staleBytes, staleRelease>>
 
 Reclaim(r) ==                                 \* list_expired_leases + reclaim_expired_build
     /\ pc[r] = "idle" /\ build = "building" /\ expired
@@ -137,14 +147,14 @@ Reclaim(r) ==                                 \* list_expired_leases + reclaim_e
     /\ owner' = r /\ epoch' = epoch + 1 /\ expired' = FALSE
     /\ tok' = [tok EXCEPT ![r] = epoch + 1]
     /\ pc' = [pc EXCEPT ![r] = "exec"]
-    /\ UNCHANGED <<build, art, blobs, chosen, digest, url, staleFail, staleBytes>>
+    /\ UNCHANGED <<build, art, blobs, chosen, digest, url, staleFail, staleBytes, staleRelease>>
 
 Publish(r) ==                                 \* publish_blob_from_path: no lease check
     /\ pc[r] = "exec"
     /\ blobs' = [blobs EXCEPT ![Slot(tok[r])] = r]
     /\ pc' = [pc EXCEPT ![r] = "published"]
     /\ UNCHANGED <<build, owner, epoch, expired, art, chosen, digest, tok, url,
-                   staleFail, staleBytes>>
+                   staleFail, staleBytes, staleRelease>>
 
 \* Unpatched: finalize_artifact (unfenced), later complete_build (fenced).
 \* Patched: one transaction, fenced on the lease, that promotes the artifact
@@ -157,27 +167,27 @@ RunnerFinalize(r) ==
                  /\ build' = "ready"
                  /\ pc' = [pc EXCEPT ![r] = "done"]
             ELSE /\ pc' = [pc EXCEPT ![r] = "done"]
-                 /\ UNCHANGED <<build, art, chosen, digest, staleBytes>>
+                 /\ UNCHANGED <<build, art, chosen, digest, staleBytes, staleRelease>>
        ELSE IF art = "failed"                 \* ValueError: not in building state
             THEN /\ pc' = [pc EXCEPT ![r] = "failing"]
-                 /\ UNCHANGED <<build, art, chosen, digest, staleBytes>>
+                 /\ UNCHANGED <<build, art, chosen, digest, staleBytes, staleRelease>>
             ELSE /\ PromoteArtifact(r)
                  /\ pc' = [pc EXCEPT ![r] = "finalized"]
                  /\ UNCHANGED build
-    /\ UNCHANGED <<owner, epoch, expired, blobs, tok, url, staleFail>>
+    /\ UNCHANGED <<owner, epoch, expired, blobs, tok, url, staleFail, staleRelease>>
 
 RunnerComplete(r) ==                          \* complete_build(lease_owner=r)
     /\ pc[r] = "finalized"
     /\ build' = IF build = "building" /\ owner = r THEN "ready" ELSE build
     /\ pc' = [pc EXCEPT ![r] = "done"]
     /\ UNCHANGED <<owner, epoch, expired, art, blobs, chosen, digest, tok, url,
-                   staleFail, staleBytes>>
+                   staleFail, staleBytes, staleRelease>>
 
 RunnerError(r) ==                             \* executor error / timeout / bad output
     /\ pc[r] \in {"exec", "published"}
     /\ pc' = [pc EXCEPT ![r] = "failing"]
     /\ UNCHANGED <<build, owner, epoch, expired, art, blobs, chosen, digest, tok, url,
-                   staleFail, staleBytes>>
+                   staleFail, staleBytes, staleRelease>>
 
 \* fail_build + fail_artifact. Unpatched, neither checks the lease.
 RunnerFail(r) ==
@@ -188,7 +198,7 @@ RunnerFail(r) ==
        /\ staleFail' = (staleFail \/
                         ((build' # build \/ art' # art) /\ ~HoldsLease(r, r)))
     /\ pc' = [pc EXCEPT ![r] = "done"]
-    /\ UNCHANGED <<owner, epoch, expired, blobs, chosen, digest, tok, url, staleBytes>>
+    /\ UNCHANGED <<owner, epoch, expired, blobs, chosen, digest, tok, url, staleBytes, staleRelease>>
 
 -----------------------------------------------------------------------------
 (* Pull-model executors                                                    *)
@@ -199,20 +209,20 @@ Manifest(e) ==                                \* GET /v1/builds/{id}/manifest
     /\ tok' = [tok EXCEPT ![e] = epoch + 1]
     /\ url' = [url EXCEPT ![e] = TRUE]
     /\ pc' = [pc EXCEPT ![e] = "exec"]
-    /\ UNCHANGED <<expired, art, blobs, chosen, digest, staleFail, staleBytes>>
+    /\ UNCHANGED <<expired, art, blobs, chosen, digest, staleFail, staleBytes, staleRelease>>
 
 UrlExpire(e) ==
     /\ url[e]
     /\ url' = [url EXCEPT ![e] = FALSE]
     /\ UNCHANGED <<build, owner, epoch, expired, art, blobs, chosen, digest, pc, tok,
-                   staleFail, staleBytes>>
+                   staleFail, staleBytes, staleRelease>>
 
 Upload(e) ==                                  \* POST /v1/artifacts/upload: no lease check
     /\ pc[e] = "exec" /\ url[e] /\ build \in Active
     /\ blobs' = [blobs EXCEPT ![Slot(tok[e])] = e]
     /\ pc' = [pc EXCEPT ![e] = "published"]
     /\ UNCHANGED <<build, owner, epoch, expired, art, chosen, digest, tok, url,
-                   staleFail, staleBytes>>
+                   staleFail, staleBytes, staleRelease>>
 
 ExecFinalize(e) ==                            \* POST finalize: token check, then finalize_and_set_name
     /\ pc[e] = "published" /\ build \in Active
@@ -220,24 +230,38 @@ ExecFinalize(e) ==                            \* POST finalize: token check, the
        THEN /\ PromoteArtifact(e)
             /\ pc' = [pc EXCEPT ![e] = "finalized"]
        ELSE /\ pc' = [pc EXCEPT ![e] = "done"]    \* 409, nothing published
-            /\ UNCHANGED <<art, chosen, digest, staleBytes>>
-    /\ UNCHANGED <<build, owner, epoch, expired, blobs, tok, url, staleFail>>
+            /\ UNCHANGED <<art, chosen, digest, staleBytes, staleRelease>>
+    /\ UNCHANGED <<build, owner, epoch, expired, blobs, tok, url, staleFail, staleRelease>>
 
 ExecComplete(e) ==                            \* complete_build(lease_owner="ext")
     /\ pc[e] = "finalized"
     /\ build' = IF build = "building" /\ owner = Ext THEN "ready" ELSE build
     /\ pc' = [pc EXCEPT ![e] = "done"]
     /\ UNCHANGED <<owner, epoch, expired, art, blobs, chosen, digest, tok, url,
+                   staleFail, staleBytes, staleRelease>>
+
+-----------------------------------------------------------------------------
+(* Releases                                                                *)
+
+\* ReleaseStore.accept of a checkpoint by attempt a, owner o, while the build
+\* runs. Patched, acceptance requires the lease (lease_held); unpatched, the
+\* checkpoint is accepted whoever holds it. The build stays building either way.
+Checkpoint(a, o) ==
+    /\ pc[a] \in {"exec", "published"} /\ build = "building"
+    /\ LET accepted == ~Patched \/ HoldsLease(a, o) IN
+       staleRelease' = (staleRelease \/ (accepted /\ ~HoldsLease(a, o)))
+    /\ UNCHANGED <<build, owner, epoch, expired, art, blobs, chosen, digest, pc, tok, url,
                    staleFail, staleBytes>>
 
 -----------------------------------------------------------------------------
 Next ==
     \/ Expire
     \/ \E r \in Runners :
-        \/ Claim(r) \/ Renew(r) \/ Reclaim(r) \/ Publish(r)
+        \/ Claim(r) \/ Renew(r) \/ Reclaim(r) \/ Publish(r) \/ Checkpoint(r, r)
         \/ RunnerFinalize(r) \/ RunnerComplete(r) \/ RunnerError(r) \/ RunnerFail(r)
     \/ \E e \in Executors :
         \/ Manifest(e) \/ UrlExpire(e) \/ Upload(e) \/ ExecFinalize(e) \/ ExecComplete(e)
+        \/ Checkpoint(e, Ext)
 
 Spec == Init /\ [][Next]_vars
 
@@ -255,6 +279,9 @@ OnlyLeaseHolderFails == ~staleFail
 
 \* The bytes published are the bytes of the attempt that passed the fence.
 NoStaleBytesPublished == ~staleBytes
+
+\* Only the attempt holding the lease may accept a checkpoint release.
+OnlyLeaseHolderReleases == ~staleRelease
 
 \* Sanity (holds): a completed build has a ready artifact.
 ReadyBuildHasArtifact == build = "ready" => art = "ready"

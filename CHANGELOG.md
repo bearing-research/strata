@@ -9,6 +9,25 @@ exhaustive commit history.
 
 ### Added
 
+- **The ledger has releases (ADR 002 E4a).** A build is an execution, its
+  attempts the tries that may write its bytes, and a release the event that
+  makes a set of staged outputs current together: `vestigo.releases` adds
+  `build_releases`, `release_references` and `release_authorities` (schema
+  migration 14) with `release_id` and `computation_key` on versions and
+  `occurrence` and `attempt` on builds. A `building` build accepts any number
+  of `checkpoint` releases and stays building; its `final` release completes
+  it. Acceptance is fenced on the attempt's lease and write window, ordered by
+  sequence, and refused until every output's bytes are stored at the declared
+  size, which on object storage is the only commit point. A resume opens a new
+  attempt, fences the old one and abandons what it left unsettled; a retried
+  acceptance returns the original release. The typed operations of the E0
+  contract (`vestigo.operations`: `CheckBuildLease`, `AssertReferenceRevision`,
+  `AssignAuthority`, `AdvanceReference`, `InsertAuditEvent`) run inside the
+  acceptance transaction, in order, or not at all; a reference holds its
+  release's outputs as a retention root. `checkpoint_output_key` and
+  `run_output_key` derive the labelled output keys of §7.1. Gate 2 (ADR 002 §8)
+  runs in the package suite on SQLite and PostgreSQL, and `BuildLease.tla`
+  checks that only the lease holder's checkpoints are accepted. (#1298)
 - **The ledger holds a structural graph (ADR 002 E3).** `vestigo.graph` stores
   content-addressed nodes (`nodes`, `node_inputs`, schema migration 13) under an
   identity scope derived from the tenant, with the `CGN1`/`CGD1` encoders the

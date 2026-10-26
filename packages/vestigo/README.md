@@ -15,7 +15,11 @@ what a version holds (`retain`) or requires (`require`, `requires=` on
 `create_artifact`), which garbage collection protects as one closure. A
 structural graph of content-addressed nodes (`graph`) records what produced
 a version (`definition_id`) and is walked with bounded traversals; the
-ledger never parses a node's payload.
+ledger never parses a node's payload. A build's releases (`releases`) make
+its outputs current together, any number of checkpoints and one final, each
+fenced on the attempt's lease and accepted only once every output's bytes
+are stored; the typed operations a release carries (`operations`) move
+references and assign authorities in the same transaction.
 *Vestigo* is Latin for "I track down, I trace": the ledger traces every
 artifact back to the computation and inputs that made it.
 <!-- --8<-- [end:body] -->

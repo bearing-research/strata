@@ -90,3 +90,17 @@ def derive_subkey(parent_hash: str, *labels: str) -> str:
     """
     pieces = [parent_hash, *labels]
     return hashlib.sha256(":".join(pieces).encode()).hexdigest()
+
+
+def checkpoint_output_key(parent_hash: str, build_id: str, sequence: int, output: str) -> str:
+    """The key of one output of a ``checkpoint`` release (ADR 002 §7.1).
+
+    Labelled by build and release so every checkpoint of a bound computation keeps
+    its own identity, and none is ever the cache hit for the computation itself.
+    """
+    return derive_subkey(parent_hash, f"build={build_id}", f"release={sequence}", output)
+
+
+def run_output_key(parent_hash: str, build_id: str, output: str) -> str:
+    """The key of a final output persisted per run (a stochastic computation)."""
+    return derive_subkey(parent_hash, f"build={build_id}", output)
