@@ -1,5 +1,5 @@
 {
-  "source": "ADR 002 §3, §7.4, §9 E0; packages/vestigo/src/vestigo/tables.py and src/strata/notebook/worker_store.py as of E4a",
+  "source": "ADR 002 §3, §7.4, §9 E0; vestigo/tables.py (bearing-research/vestigo) and src/strata/notebook/worker_store.py as of E4a",
   "notes": [
     "ledger lists every table the package creates, in the foreign-key order a copy must follow (artifact_versions first).",
     "migrated=false tables are rebuilt or left behind by `strata migrate`: schema_version is the target's own, import_staging and build_console_chunks hold only live rows.",

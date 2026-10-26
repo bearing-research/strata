@@ -7,7 +7,8 @@ name: Release
 #
 # Trusted publishers must exist on PyPI and TestPyPI (Owner: bearing-research,
 # Repo: strata, Workflow: release.yml, Environment: testpypi / pypi), one per
-# project: strata-notebook, strata-client, strata-pool, vestigo.
+# project: strata-notebook, strata-client, strata-pool. The ledger (vestigo)
+# releases from its own repository; the notebook wheel pins it from PyPI.
 
 on:
   push:
@@ -100,21 +101,6 @@ jobs:
                   f"::error::strata-pool version {pool_version!r} doesn't match the "
                   f"release version {version!r}. Keep packages/strata-pool/pyproject.toml "
                   "in lockstep with the root pyproject.toml.",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
-
-          # vestigo is versioned on its own (its repository tags it); the
-          # root pins the exact version of the copy this tag builds.
-          with open("packages/vestigo/pyproject.toml", "rb") as f:
-              core_version = tomllib.load(f)["project"]["version"]
-          with open("pyproject.toml", "rb") as f:
-              dependencies = tomllib.load(f)["project"]["dependencies"]
-          if f"vestigo=={core_version}" not in dependencies:
-              print(
-                  f"::error::pyproject.toml must depend on 'vestigo=={core_version}', "
-                  f"the version in packages/vestigo/pyproject.toml "
-                  f"(found {[d for d in dependencies if d.startswith('vestigo')]}).",
                   file=sys.stderr,
               )
               sys.exit(1)
@@ -300,48 +286,6 @@ jobs:
           path: dist
           if-no-files-found: error
 
-  # --- vestigo wheel (the ledger strata-notebook depends on) --
-  # Same shape as client-wheel; wheel-test installs it beside the notebook
-  # wheel, since PyPI cannot resolve the pin until this run publishes it.
-  core-wheel:
-    name: wheel · vestigo
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
-        with:
-          python-version: "3.12"
-          version: "latest"
-
-      - name: Build the vestigo wheel + sdist
-        run: uv build --package vestigo --out-dir dist
-
-      - name: Smoke-test the vestigo wheel
-        run: |
-          set -euo pipefail
-          CORE_WHEEL=$(ls dist/vestigo-*-py3-none-any.whl | head -1)
-          echo "::notice::Testing core wheel ${CORE_WHEEL}"
-          uv venv /tmp/core-smoke
-          VIRTUAL_ENV=/tmp/core-smoke uv pip install \
-            --index https://pypi.org/simple/ "${CORE_WHEEL}"
-          /tmp/core-smoke/bin/python -c "
-          from vestigo.build_store import BuildStore
-          from vestigo.sql_backend import SqliteDialect
-          from vestigo.store import ArtifactStore
-          print('vestigo imports ok')
-          "
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
-        with:
-          name: dist-core
-          path: dist
-          if-no-files-found: error
-
   # --- wheel smoke test ----------------------------------------------
   # Installs the wheel in a fresh venv and checks imports, console scripts,
   # /health and the frontend bundle, so a missing dep or broken entry point
@@ -350,7 +294,7 @@ jobs:
     name: Smoke-test the wheel · python ${{ matrix.python }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [wheel, core-wheel]
+    needs: [wheel]
     strategy:
       # One wheel for every 3.12+: checked on each interpreter, not just
       # setup-uv's default.
@@ -361,11 +305,6 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist-notebook
-          path: dist
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          name: dist-core
           path: dist
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
@@ -380,16 +319,14 @@ jobs:
           set -euo pipefail
 
           WHEEL=$(ls dist/strata_notebook-*-py3-none-any.whl | head -1)
-          CORE_WHEEL=$(ls dist/vestigo-*-py3-none-any.whl | head -1)
-          echo "::notice::Testing wheel ${WHEEL} with ${CORE_WHEEL}"
+          echo "::notice::Testing wheel ${WHEEL}"
 
           # Strata's runtime guard requires a uv-managed venv (the `uv =`
-          # marker in pyvenv.cfg). The ledger wheel comes from this run:
-          # the notebook wheel pins the version PyPI gets only after this job.
+          # marker in pyvenv.cfg). The ledger (vestigo) resolves from PyPI,
+          # where its own repository released it.
           uv venv /tmp/strata-smoke
           VIRTUAL_ENV=/tmp/strata-smoke uv pip install \
-            --index https://pypi.org/simple/ \
-            "${WHEEL}" "${CORE_WHEEL}"
+            --index https://pypi.org/simple/ "${WHEEL}"
 
           echo "--- import smoke ---"
           # The HTTP client ships in strata-client; this package exposes only
@@ -449,7 +386,7 @@ jobs:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [wheel, client-wheel, pool-wheel, core-wheel, wheel-test]
+    needs: [wheel, client-wheel, pool-wheel, wheel-test]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/strata-notebook
@@ -463,23 +400,11 @@ jobs:
           pattern: dist-*
           merge-multiple: true
 
-      # vestigo goes first, alone: strata-notebook pins it, so an index must
-      # never hold a notebook whose ledger the publish then failed to upload.
-      - name: Set the ledger apart
-        run: mkdir dist-core && mv dist/vestigo-* dist-core/
-
-      - name: Publish vestigo to TestPyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          packages-dir: dist-core/
-          # Lets a workflow_dispatch re-run finish after a partial failure.
-          skip-existing: true
-
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # Lets a workflow_dispatch re-run finish after a partial failure.
           skip-existing: true
 
   # --- PyPI publish (gated by manual approval) -----------------------
@@ -502,23 +427,13 @@ jobs:
           pattern: dist-*
           merge-multiple: true
 
-      # The ledger first, as on TestPyPI.
-      - name: Set the ledger apart
-        run: mkdir dist-core && mv dist/vestigo-* dist-core/
-
-      - name: Publish vestigo to PyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
         with:
-          packages-dir: dist-core/
           # Uploads are per file, and a failure part-way leaves the earlier
           # ones live; without this a retry 400s on them and never reaches the
           # package that failed. A tag still never republishes: pre-flight
           # fails the run when any package version disagrees with the tag.
-          skip-existing: true
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
-        with:
           skip-existing: true
 
   # --- server image (ghcr.io) ----------------------------------------

@@ -57,7 +57,6 @@ local, S3, GCS, Azure.
 ```bash
 uv sync --all-extras                      # install (matches CI)
 uv run pytest                             # all Strata tests (tests/)
-uv run pytest packages/vestigo/tests      # the ledger's own suite
 uv run pytest tests/test_smoke.py -v      # one file
 uv run pre-commit run --all-files         # format + lint
 uv run ty check                           # type check (Astral); scoped to shipped code (src + strata-client)
@@ -146,7 +145,7 @@ Artifacts deduplicate by provenance hash, chain into DAG pipelines, and carry
 human-readable name pointers. SQLite metadata + pluggable blob backends
 (`LocalBlobStore`, `S3BlobStore`, `GCSBlobStore`, `AzureBlobStore`). Configure
 via `STRATA_ARTIFACT_BLOB_BACKEND` plus backend-specific env vars (see
-`vestigo/blob_store.py` under `packages/vestigo`, `config.py`).
+`vestigo.blob_store` in the installed ledger, `config.py`).
 
 Two executor protocols:
 - **v1 push**: Strata POSTs multipart (`metadata` + `inputN`) to executor;
@@ -171,7 +170,8 @@ Data plane: `types.py`, `planner.py`, `fetcher.py`, `fast_io.py`, `iceberg/` (`c
 `schema` evolution, position `deletes`, `equality` deletes, `lake_files`).
 Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
-Ledger (`packages/vestigo/src/vestigo/`, ADR 002): `store`,
+Ledger (the `vestigo` package from PyPI, its own repository
+`bearing-research/vestigo`, pinned exactly in `pyproject.toml`; ADR 002): `store`,
 `build_store`, `sql_backend`, `blob_store`, `provenance` (transform spec, hash,
 `derive_subkey`, labelled output keys), `graph` (content-addressed structural
 nodes, `CGN1`/`CGD1` encoders, bounded traversal; `definition_id` on a version),
@@ -182,7 +182,7 @@ nothing of Strata (blob settings, content validators, retention roots and
 required edges, node specs are passed in). Its artifact and name URIs carry a
 per-process scheme; `strata/__init__.py` sets `strata` before any submodule
 parses one (`vestigo.uris.set_uri_scheme`). Gate 2 (ADR 002 §8) lives in
-`packages/vestigo/tests/gate2.py`, run on SQLite and Postgres.
+the ledger's own suite (`tests/gate2.py` there), run on SQLite and Postgres.
 Strata's side: `artifact/` (`transfer`, `table_export`, `cli`, `retention` for
 what a version requires, `graph` for a cell's node and the reconstruction of
 old rows, `upgrades` for the per-store steps run wherever a store is opened),
@@ -192,8 +192,8 @@ old rows, `upgrades` for the per-store steps run wherever a store is opened),
 checkpoint and head events become releases) with `notebook/run_channel.py`
 (the cell side of `strata.checkpoint` / `restore` / `head`, over a pipe fd for
 the cold harness or the warm worker's protocol stdout). The ledger's
-tests live in `packages/vestigo/tests/` (no `strata` imports there);
-`tests/` keeps the ones that reach into Strata, Gate 1 (ADR 002 §8) among
+tests live in its repository (no `strata` imports there); `tests/`
+keeps the ones that reach into Strata, Gate 1 (ADR 002 §8) among
 them in `tests/notebook/test_local_runs.py` (SQLite) and
 `test_local_runs_postgres.py` (the same class on Postgres, integration.yml).
 A cell's structural node gets a `strata/table` leaf per table read: the

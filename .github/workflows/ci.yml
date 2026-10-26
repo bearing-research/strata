@@ -164,46 +164,6 @@ jobs:
           STRATA_POOL_POSTGRES_DSN: postgresql://pool:pool@localhost:5432/pool
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
-  # vestigo's own suite lives in packages/vestigo/tests so the package can
-  # leave the repository with its tests. It runs in an isolated venv like the
-  # client's: the ledger imports nothing of Strata (ADR 002 E2).
-  vestigo-tests:
-    name: vestigo tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
-        with:
-          python-version: "3.12"
-          version: "latest"
-          save-cache: false
-
-      - name: Create an isolated venv with ONLY the ledger
-        run: |
-          uv venv .venv-vestigo
-          # Strata is deliberately not installed: the ledger stands on its own (ADR 002 E2).
-          uv pip install --python .venv-vestigo "./packages/vestigo[postgres,s3,gcs,azure]" \
-            --group packages/vestigo/pyproject.toml:dev
-
-      - name: Assert Strata is absent
-        run: |
-          .venv-vestigo/bin/python - <<'PY'
-          import importlib.util
-          for mod in ("strata", "strata_client", "fastapi", "pyiceberg", "duckdb"):
-              assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
-          print("strata absent: the ledger installs alone")
-          PY
-
-      - name: Run vestigo tests
-        run: .venv-vestigo/bin/python -m pytest packages/vestigo/tests -v -p no:cacheprovider
-        env:
-          # The Postgres and object-store emulator suites start containers; a missing
-          # daemon fails here rather than skipping them to green.
-          VESTIGO_REQUIRE_DOCKER: "1"
-
   # ty exits non-zero on errors; the unresolved-import warnings configured for
   # guarded optional deps (torch/jax) do not fail the build.
   type-check:
@@ -310,7 +270,7 @@ jobs:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -321,7 +281,7 @@ jobs:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
           pytest-args: ${{ runner.os == 'Windows' && env.WINDOWS_UNIT_TEST_ARGS || env.UNIT_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()
@@ -391,7 +351,7 @@ jobs:
           key-prefix: diffcone-e2e
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -402,7 +362,7 @@ jobs:
           key-prefix: diffcone-e2e
           command: uv run pytest
           pytest-args: ${{ env.E2E_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()
@@ -496,7 +456,7 @@ jobs:
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
           env-vars: R_VERSION
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
           check: true
           fail-on-test-failure: true
 
@@ -507,7 +467,7 @@ jobs:
           key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
           command: uv run pytest
           pytest-args: ${{ env.R_TEST_ARGS }}
-          source-roots: src packages/strata-client/src packages/strata-pool/src packages/vestigo/src tests=tests evals=evals
+          source-roots: src packages/strata-client/src packages/strata-pool/src tests=tests evals=evals
 
       - name: Upload the diffcone plan and verdict
         if: always()

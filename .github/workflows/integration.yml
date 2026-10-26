@@ -69,7 +69,6 @@ jobs:
       - name: Run Postgres-backed artifact store tests
         run: |
           uv run pytest \
-            packages/vestigo/tests/test_artifact_store_postgres.py \
             tests/test_postgres_store_strata.py \
             tests/test_migrate_to_postgres.py \
             tests/notebook/test_local_runs_postgres.py \
