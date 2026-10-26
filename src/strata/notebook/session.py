@@ -103,6 +103,7 @@ from strata.notebook.ws_payloads import (
 )
 
 if TYPE_CHECKING:
+    from vestigo.sql_backend import SqlDialect
     from vestigo.store import ArtifactVersion
 
     from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -269,8 +270,16 @@ def _directory_identity(path: Path) -> tuple[int, int] | None:
 class NotebookSession:
     """Holds state for one open notebook."""
 
-    def __init__(self, notebook_state: NotebookState, path: Path, *, fetch_secrets: bool = True):
-        """``fetch_secrets=False`` leaves the first fetch to :meth:`refresh_secrets_async`."""
+    def __init__(
+        self,
+        notebook_state: NotebookState,
+        path: Path,
+        *,
+        fetch_secrets: bool = True,
+        ledger_dialect: SqlDialect | None = None,
+    ):
+        """``fetch_secrets=False`` leaves the first fetch to :meth:`refresh_secrets_async`;
+        *ledger_dialect* puts the notebook's ledger on another SQL backend than SQLite."""
         from strata.notebook.env_backend import EnvironmentBackend, get_backend
 
         self.id: str = str(uuid.uuid4())
@@ -297,6 +306,7 @@ class NotebookSession:
         self.artifact_manager = NotebookArtifactManager(
             notebook_id=notebook_state.id,
             artifact_dir=path / ".strata" / "artifacts",
+            dialect=ledger_dialect,
         )
 
         # One staleness computation at a time: it mutates the cells it walks (status,

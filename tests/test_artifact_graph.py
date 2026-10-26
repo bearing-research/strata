@@ -93,6 +93,24 @@ class TestPublishedDefinitions:
         assert (fetch.domain, fetch.payload) == ("strata/fetch", b"https://example.com/data.csv")
         assert (dataset.domain, dataset.payload) == ("strata/dataset", b"strata://name/team/events")
 
+    def test_a_table_read_is_a_leaf_outside_input_versions(self, manager):
+        """A ``@table`` read joins the node under ``table`` without touching the record."""
+        manager.record_table_refs("c1", {"events": "file:///wh#db.events@v=7"})
+        out = _store(manager, "c1", "out")
+        store = manager.artifact_store
+
+        assert json.loads(out.input_versions or "{}") == {}
+        node = store.definition_of(out.id, out.version)
+        ports = {(p.role, p.position): p.target_node_id for p in store.graph.inputs(node)}
+        assert set(ports) == {("table", 0)}
+        leaf = store.graph.get(ports[("table", 0)])
+        assert (leaf.domain, leaf.payload) == ("strata/table", b"file:///wh#db.events")
+        # The same table read again, at another snapshot, is the same leaf.
+        manager.record_table_refs("c2", {"events": "file:///wh#db.events@v=8"})
+        again = _store(manager, "c2", "out")
+        node2 = store.definition_of(again.id, again.version)
+        assert [p.target_node_id for p in store.graph.inputs(node2)] == [ports[("table", 0)]]
+
     def test_an_upstream_without_a_node_is_an_artifact_leaf(self, manager):
         store = manager.artifact_store
         version = store.create_artifact("imported", "p" * 64, TransformSpec("x@v1", {}, []))

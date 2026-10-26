@@ -44,8 +44,14 @@ for epoch in range(start, 4):
     if epoch == 1 and not pathlib.Path("crashed").exists():
         pathlib.Path("crashed").write_text("1")
         raise RuntimeError("killed mid-run")
-model = {"w": 3}
+model = {"w": 3, "snapshot": features["snapshot"]}
 metrics = {"epochs": 4, "best": best}
+"""
+
+# The feature cell reads a lake table: the run's structural node gets a ``strata/table`` leaf.
+FEATURES = """
+# @table events {uri}
+features = {{"snapshot": events_snapshot}}
 """
 
 EVALUATE = """
@@ -53,16 +59,26 @@ score = model["w"] * metrics["epochs"]
 """
 
 
+def _dialect():
+    """The ledger's SQL dialect; the Postgres run of this gate replaces it."""
+    return None
+
+
 def _notebook(tmp_path: Path, train: str = TRAIN) -> tuple[NotebookSession, CellExecutor]:
+    from tests.notebook.test_table_index import _warehouse
+
+    _, table_uri = _warehouse(tmp_path)
     notebook_dir = create_notebook(tmp_path, "Gate 1", initialize_environment=False)
-    add_cell_to_notebook(notebook_dir, "train")
+    add_cell_to_notebook(notebook_dir, "features")
+    write_cell(notebook_dir, "features", FEATURES.format(uri=table_uri))
+    add_cell_to_notebook(notebook_dir, "train", "features")
     write_cell(notebook_dir, "train", train)
     add_cell_to_notebook(notebook_dir, "evaluate", "train")
     write_cell(notebook_dir, "evaluate", EVALUATE)
     # Only a consumed variable is stored, so a reader of ``score`` follows.
     add_cell_to_notebook(notebook_dir, "report", "evaluate")
     write_cell(notebook_dir, "report", "report = score\n")
-    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir, ledger_dialect=_dialect())
     session.refresh_environment_runtime()
     return session, CellExecutor(session)
 
@@ -258,10 +274,23 @@ class TestGate1:
         assert set(read) == {"model", "metrics"}
         assert read["model"].release_id == read["metrics"].release_id is not None
 
-        # ADR 002 §8 condition 6: the structural graph reaches the training definition.
+        # ADR 002 §8 condition 6: from the evaluation cell's node the structure reaches the
+        # training definition, the feature cell and the table leaf; from the leaf, every
+        # lineage. The notebook's DAG is never consulted: the walk is the ledger's.
         evaluate_node = store.definition_of(score.id, score.version)
         train_node = store.definition_of(read["model"].id, read["model"].version)
-        assert train_node in store.graph.ancestors([evaluate_node])
+        features = store.get_latest_version(
+            f"nb_{session.notebook_state.id}_cell_features_var_features"
+        )
+        features_node = store.definition_of(features.id, features.version)
+        ancestors = store.graph.ancestors([evaluate_node])
+        assert train_node in ancestors and features_node in ancestors
+        leaves = [n for n in ancestors if store.graph.get(n).domain == "strata/table"]
+        assert len(leaves) == 1
+        (table_leaf,) = leaves
+        assert store.graph.get(table_leaf).payload.decode().endswith("#db.events")
+        dependents = store.graph.dependents(table_leaf)
+        assert {features_node, train_node, evaluate_node} <= set(dependents)
 
     def test_prune_keeps_the_head_and_the_final_checkpoint_and_collects_the_rest(
         self, tmp_path: Path
@@ -371,7 +400,10 @@ def test_a_stochastic_cell_persists_every_run_and_never_serves_the_cache(tmp_pat
 @pytest.mark.integration
 @pytest.mark.warm_pool
 async def test_a_warm_worker_publishes_checkpoints_on_its_protocol_stream(tmp_path, warm_pool):
-    session, _ = _notebook(tmp_path, TRAIN.replace("epoch == 1", "epoch == 99"))
+    session, cold = _notebook(tmp_path, TRAIN.replace("epoch == 1", "epoch == 99"))
+    # The feature cell takes the pool's one warm process otherwise; run it first.
+    features = session.notebook_state.get_cell("features").source
+    assert (await cold.execute_cell("features", features)).success is True
     pool = await warm_pool(session)
     executor = CellExecutor(session, pool)
     source = session.notebook_state.get_cell("train").source

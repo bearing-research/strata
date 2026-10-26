@@ -192,7 +192,13 @@ checkpoint and head events become releases) with `notebook/run_channel.py`
 the cold harness or the warm worker's protocol stdout). The ledger's
 tests live in `packages/vestigo/tests/` (no `strata` imports there);
 `tests/` keeps the ones that reach into Strata, Gate 1 (ADR 002 §8) among
-them in `tests/notebook/test_local_runs.py`.
+them in `tests/notebook/test_local_runs.py` (SQLite) and
+`test_local_runs_postgres.py` (the same class on Postgres, integration.yml).
+A cell's structural node gets a `strata/table` leaf per table read: the
+executor records a run's `@table` and DuckDB catalog reads on the manager
+(`record_table_refs`) when it computes provenance, and the SQL cell path
+records its lake reads; every output the run stages reads them. Table refs
+stay out of `input_versions`.
 Auth / tenancy: `auth/` (`principal` context, header parsing and ACL, `api_keys`,
 `api_key_cli`, `run_tokens` for a cell run's own token), `tenancy/` (`tenant`
 config and context, `registry`).

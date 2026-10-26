@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from vestigo.build_store import BuildStore
 from vestigo.provenance import TransformSpec
 from vestigo.releases import ReleaseStore
+from vestigo.sql_backend import SqlDialect
 from vestigo.store import ArtifactStore, StagedVersion
 
 from strata.artifact.graph import cell_definition
@@ -59,10 +60,13 @@ class NotebookArtifactManager:
         self,
         notebook_id: str,
         artifact_dir: Path | None = None,
+        *,
+        dialect: SqlDialect | None = None,
     ):
         """Open the notebook's artifact store.
 
-        *artifact_dir* defaults to ``~/.strata/notebook_artifacts``.
+        *artifact_dir* defaults to ``~/.strata/notebook_artifacts``; its metadata is
+        SQLite there unless *dialect* says otherwise (blobs stay under the directory).
         """
         self.notebook_id = notebook_id
 
@@ -73,8 +77,11 @@ class NotebookArtifactManager:
         artifact_dir.mkdir(parents=True, exist_ok=True)
         self.artifact_dir = artifact_dir
 
-        self.artifact_store = ArtifactStore(artifact_dir)
+        self.artifact_store = ArtifactStore(artifact_dir, dialect=dialect)
         complete_upgrade(self.artifact_store)
+        # The tables each cell's current run read (``uri@v=<snapshot>`` by name), recorded
+        # when its provenance is computed; every output the run stages carries them.
+        self._table_refs: dict[str, dict[str, str]] = {}
         # The ledger's builds and releases, on the store's database: a local run's
         # execution and its checkpoints (``local_runs``).
         self.build_store = BuildStore(
@@ -211,6 +218,10 @@ class NotebookArtifactManager:
         results.sort(key=lambda pair: pair[0])
         return results
 
+    def record_table_refs(self, cell_id: str, table_refs: dict[str, str]) -> None:
+        """Note what tables *cell_id*'s next outputs read, for their structural node."""
+        self._table_refs[cell_id] = dict(table_refs)
+
     def store_cell_output(self, **kwargs: Any) -> ArtifactVersion:
         """Store one cell output and make it current; arguments as for :meth:`stage_cell_output`."""
         return self.finalize_cell_outputs([self.stage_cell_output(**kwargs)])[0]
@@ -306,7 +317,12 @@ class NotebookArtifactManager:
             input_versions=input_versions,
             principal=principal,
             requires=requirements(artifact_id, content_type, blob_data),
-            definition=cell_definition(self.artifact_store, transform_spec, input_versions),
+            definition=cell_definition(
+                self.artifact_store,
+                transform_spec,
+                input_versions,
+                tables=self._table_refs.get(cell_id),
+            ),
             computation_key=computation_key,
         )
 

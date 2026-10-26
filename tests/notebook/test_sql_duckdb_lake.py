@@ -869,6 +869,35 @@ class TestARestCatalogThatVendsNothing:
         assert len(located) == 1
 
     @pytest.mark.asyncio
+    async def test_the_table_a_query_reads_is_a_leaf_of_its_output(self, tmp_path, monkeypatch):
+        from strata.notebook.sql import cell_executor
+
+        source = "# @sql connection=lake\n# @cache snapshot\nSELECT id FROM lake.taxi.trips\n"
+        session = self._session(tmp_path, monkeypatch, {"c1": source})
+        self._catalog(monkeypatch)
+        monkeypatch.setattr(
+            cell_executor,
+            "_execute_query",
+            lambda adapter, spec, analysis, params, *, at=None, lake=None: pa.table({"id": [1]}),
+        )
+
+        result = await cell_executor.execute_sql_cell(session, "c1", source)
+        assert result["success"], result["error"]
+
+        store = session.get_artifact_manager().artifact_store
+        (uri,) = session.notebook_state.get_cell("c1").artifact_uris.values()
+        art_id, version = uri.removeprefix("strata://artifact/").rsplit("@v=", 1)
+        node = store.definition_of(art_id, int(version))
+        leaves = [
+            store.graph.get(port.target_node_id)
+            for port in store.graph.inputs(node)
+            if port.role == "table"
+        ]
+        assert [(leaf.domain, leaf.payload) for leaf in leaves] == [
+            ("strata/table", b"lake:taxi.trips")
+        ]
+
+    @pytest.mark.asyncio
     async def test_a_pinned_cache_hit_in_service_mode_needs_no_catalog(self, tmp_path, monkeypatch):
         from strata.notebook.sql import cell_executor
 

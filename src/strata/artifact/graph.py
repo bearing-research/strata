@@ -5,7 +5,7 @@ the params that define the cell (source, environment, pins), never what a run re
 about itself (its duration, machine, download times) or which output of the cell a
 version is. Its edges are the inputs the run read: one per upstream variable, under
 the variable's name, pointing at the node that produced the upstream version; one per
-fetched URL and dataset, as leaf nodes. Derivation is one-way: nothing reads the graph
+fetched URL, dataset and table read, as leaf nodes. Derivation is one-way: nothing reads the graph
 to decide what to run.
 """
 
@@ -130,14 +130,20 @@ def cell_definition(
     spec: TransformSpec,
     input_versions: Mapping[str, str] | None,
     *,
+    tables: Mapping[str, str] | None = None,
     tenant: str | None = None,
 ) -> list[NodeSpec]:
-    """The structure a cell run publishes with its outputs (domain ``strata/cell``)."""
+    """The structure a cell run publishes with its outputs (domain ``strata/cell``).
+
+    *tables* are the run's ``@table`` reads as ``uri@v=<snapshot>`` by name; they are
+    not in ``input_versions`` (nothing resolves through them) but they are inputs of
+    the definition, so each is a ``strata/table`` leaf.
+    """
     return _definition(
         store,
         CELL_DOMAIN,
         definition_payload(spec),
-        list(input_versions or ()),
+        [*(input_versions or ()), *(tables or {}).values()],
         positional=False,
         tenant=tenant,
     )
