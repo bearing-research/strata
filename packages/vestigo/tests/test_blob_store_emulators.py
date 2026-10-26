@@ -203,4 +203,6 @@ def _post_form(url: str, fields: dict[str, str], payload: bytes) -> tuple[int, b
         with urllib.request.urlopen(request) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
-        return error.code, error.read()
+        # The error owns the response body; unclosed it warns at collection.
+        with error:
+            return error.code, error.read()

@@ -18,7 +18,7 @@ import pytest
 
 from vestigo.build_store import reset_build_store
 from vestigo.store import register_validator, reset_artifact_store
-from vestigo.uris import DEFAULT_URI_SCHEME, set_uri_scheme
+from vestigo.uris import DEFAULT_URI_SCHEME, set_uri_scheme, uri_scheme
 
 
 def _arrow_rows(data: bytes) -> int:
@@ -42,10 +42,13 @@ def _reset_singletons():
     """The store singletons are process globals shared by every test on a worker.
 
     The URI scheme is one too: a consumer collected in the same session sets its
-    own at import, and this suite writes the default's.
+    own at import, and this suite writes the default's, then hands the consumer's
+    back so its tests still parse their own URIs afterwards.
     """
+    before = uri_scheme()
     set_uri_scheme(DEFAULT_URI_SCHEME)
     yield
+    set_uri_scheme(before)
     reset_artifact_store()
     reset_build_store()
 
