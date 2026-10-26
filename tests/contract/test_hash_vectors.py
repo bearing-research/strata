@@ -10,12 +10,11 @@ import json
 from pathlib import Path
 
 import pytest
-
-from tests.contract.hashing import (
+from vestigo.graph import (
     DOMAIN_RE,
     canonical_domain,
     cgd1_envelope,
-    definition_id,
+    graph_definition_id,
     identity_scope,
     node_id,
 )
@@ -112,7 +111,7 @@ def test_strata_domains_fit_the_restricted_charset(domain: str) -> None:
     assert canonical_domain(domain) == domain.encode("ascii")
 
 
-def _definition_id(vector: dict) -> bytes:
+def _graph_definition_id(vector: dict) -> bytes:
     inputs = [
         (
             i["name"],
@@ -126,7 +125,7 @@ def _definition_id(vector: dict) -> bytes:
         (o["name"], o["type_contract_utf8"].encode(), bytes.fromhex(o["producer_hex"]))
         for o in vector["outputs"]
     ]
-    return definition_id(
+    return graph_definition_id(
         bytes.fromhex(CGD1["scope"]),
         CGD1["domain"],
         CGD1["interface_version"],
@@ -144,7 +143,7 @@ def _definition_id(vector: dict) -> bytes:
     ids=lambda v: v["name"],
 )
 def test_cgd1_vector_reproduces(vector: dict) -> None:
-    assert _definition_id(vector).hex() == vector["definition_id"]
+    assert _graph_definition_id(vector).hex() == vector["definition_id"]
 
 
 def test_cgd1_g1_is_recorded_as_unverified() -> None:
@@ -170,6 +169,6 @@ def test_cgd1_rejects_invalid_definitions(case: dict) -> None:
 
 
 def test_cgd1_changed_interface_changes_the_hash() -> None:
-    one = definition_id(SCOPE, "test", 1, [("x", b"none:v1", _A, True)], [], [_A])
-    two = definition_id(SCOPE, "test", 1, [("x", b"none:v1", _A, False)], [], [_A])
+    one = graph_definition_id(SCOPE, "test", 1, [("x", b"none:v1", _A, True)], [], [_A])
+    two = graph_definition_id(SCOPE, "test", 1, [("x", b"none:v1", _A, False)], [], [_A])
     assert one != two

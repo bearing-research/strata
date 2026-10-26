@@ -11,6 +11,21 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **The ledger holds a structural graph (ADR 002 E3).** `vestigo.graph` stores
+  content-addressed nodes (`nodes`, `node_inputs`, schema migration 13) under an
+  identity scope derived from the tenant, with the `CGN1`/`CGD1` encoders the
+  contract fixtures pin: `put_batch` writes a structure in one transaction,
+  batch entries may name earlier ones by index, and `ancestors`, `dependents`
+  and `topological_order` walk it with depth and size bounds on both backends.
+  A version names the node that produced it (`definition_id`, `definition=` on
+  `create_artifact`). Every cell output a notebook run stores now carries its
+  cell's definition: one `strata/cell` node per run, its payload the executor and the
+  defining params (what a run recorded about itself, such as its duration, is
+  left out), one edge per upstream variable under the variable's name, fetches
+  and datasets as leaves. Versions from before the graph get a
+  `strata/cell-reconstructed` node with positional `input` roles when the
+  upgraded store is first opened (`artifact/graph.py`; the per-store upgrade
+  steps now live in `artifact/upgrades.py`). (#1296)
 - **The ledger stands alone (ADR 002 E2).** `vestigo` imports nothing of
   Strata: blob credentials arrive as `BlobSettings`, the Arrow validator
   `verify_artifacts` runs is registered by Strata (`register_validator`), and

@@ -68,7 +68,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         # source in place (columns, indexes, WAL), which --dry-run must not do.
         from vestigo.store import ArtifactStore
 
-        from strata.artifact.retention import complete_upgrade
+        from strata.artifact.upgrades import complete_upgrade
 
         # With the configured blob backend: the upgrade reads folder manifests, and
         # a store whose bytes live on S3 names no files from the local directory.

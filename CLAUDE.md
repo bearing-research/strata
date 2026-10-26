@@ -173,10 +173,13 @@ Caches: `cache/` (`disk` row groups, `metadata` + `metadata_store` planning
 metadata, `warmer`, `metrics` evictions, `stats` hit rates).
 Ledger (`packages/vestigo/src/vestigo/`, ADR 002): `store`,
 `build_store`, `sql_backend`, `blob_store`, `provenance` (transform spec, hash,
-`derive_subkey`), `uris`, `file_modes`, `tables`; it imports nothing of Strata
-(blob settings, content validators, retention roots and required edges are
-passed in). Strata's side: `artifact/` (`transfer`, `table_export`, `cli`,
-`retention` for what a version requires and the upgrade that records it),
+`derive_subkey`), `graph` (content-addressed structural nodes, `CGN1`/`CGD1`
+encoders, bounded traversal; `definition_id` on a version), `uris`,
+`file_modes`, `tables`; it imports nothing of Strata (blob settings, content
+validators, retention roots and required edges, node specs are passed in).
+Strata's side: `artifact/` (`transfer`, `table_export`, `cli`, `retention` for
+what a version requires, `graph` for a cell's node and the reconstruction of
+old rows, `upgrades` for the per-store steps run wherever a store is opened),
 `fast_io.register_arrow_validator`, `transforms/`, `migrate.py`,
 `notebook/worker_store.py` (the worker registry's own tables). The ledger's
 tests live in `packages/vestigo/tests/` (no `strata` imports there);

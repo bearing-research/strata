@@ -265,7 +265,7 @@ class TestMigration:
                 "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
                 "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
                 "registry_pending, artifact_publications, retention_roots, retention_edges, "
-                "store_upgrades, "
+                "store_upgrades, nodes, node_inputs, "
                 "notebook_workers, notebook_worker_registry CASCADE;"
             )
             conn.commit()
@@ -293,7 +293,7 @@ class TestMigration:
                 "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
                 "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
                 "registry_pending, artifact_publications, retention_roots, retention_edges, "
-                "store_upgrades, "
+                "store_upgrades, nodes, node_inputs, "
                 "notebook_workers, notebook_worker_registry CASCADE;"
             )
             conn.commit()

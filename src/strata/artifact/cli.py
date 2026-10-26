@@ -87,7 +87,7 @@ def _configured_store(
 
 def _upgraded(store: ArtifactStore) -> ArtifactStore:
     """*store*, with Strata's part of any schema upgrade its open applied."""
-    from strata.artifact.retention import complete_upgrade
+    from strata.artifact.upgrades import complete_upgrade
 
     complete_upgrade(store)
     return store

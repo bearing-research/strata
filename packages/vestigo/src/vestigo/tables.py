@@ -22,6 +22,8 @@ LEDGER_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("retention_roots", ("kind", "holder", "artifact_id", "version")),
     ("retention_edges", ("from_artifact_id", "from_version", "to_artifact_id", "to_version")),
     ("store_upgrades", ("name",)),
+    ("nodes", ("scope", "node_id")),
+    ("node_inputs", ("scope", "node_id", "role", "position")),
     ("artifact_builds", ("build_id",)),
     ("build_attempts", ("build_id", "attempt")),
 )
