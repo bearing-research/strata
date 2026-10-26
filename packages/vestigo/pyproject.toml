@@ -62,6 +62,7 @@ dev = [
     # The same ruff as .pre-commit-config.yaml and ci.yml.
     "ruff==0.17.1",
     "pre-commit>=4.0.0",
+    "ty>=0.0.24",
 ]
 
 [tool.pytest.ini_options]
@@ -73,6 +74,15 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests requiring external services",
 ]
+
+[tool.ty.environment]
+python-version = "3.12"
+python = ".venv"
+
+# Type-check only the shipped code, which must stay clean; the tests rely on
+# fakes and fixture injection ty cannot model.
+[tool.ty.src]
+include = ["src"]
 
 [tool.ruff]
 line-length = 100
