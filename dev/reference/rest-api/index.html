@@ -4642,7 +4642,10 @@ authenticated caller to credit.</p>
 use the cache and materialize stale upstreams), <code>rerun</code> (bypass the target
 cell's cache, still materialize upstreams), or <code>force</code> (run against whatever
 upstream artifacts already exist). An unrecognized mode returns <code>400</code>.
-While another cell in the notebook runs, the request is refused with <code>409</code>.</p>
+While another cell in the notebook runs, the request is refused with <code>409</code>.
+<code>init=&lt;release_id&gt;</code> starts a <code>normal</code> run as a branch from that accepted
+checkpoint (its parts come back from <code>strata.restore()</code>); with any other mode
+it returns <code>400</code>.</p>
 <p>A run whose inputs would move more than the server's
 <a href="../../notebook/lake-aware-cells/#asking-before-a-large-read">threshold</a> goes ahead
 and records that it was not asked. With <code>confirm_reads=true</code> it does not start:

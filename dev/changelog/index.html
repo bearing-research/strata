@@ -3781,6 +3781,24 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A local cell run is an execution with checkpoints (ADR 002 E4b).</strong> Every
+  locally run Python cell now gets a build and an attempt in the notebook's
+  ledger, its lease renewed by the server while the cell runs, and the
+  provenance hash as the build's <code>computation_key</code> so the computation finds
+  its build again. From the cell, <code>strata.checkpoint(**parts)</code> publishes an
+  accepted checkpoint release without blocking the cell, <code>strata.restore()</code>
+  returns the parts of the release the run continues from, and
+  <code>strata.head(name, sequence)</code> points a named head at a checkpoint; the
+  cell's stored outputs are the build's <code>final</code> release. A run that dies
+  after a checkpoint (a crash, a cancel, a server restart) resumes from its
+  latest checkpoint on the next normal run; a rerun starts fresh; <code>--init
+  RELEASE</code> on <code>strata cell run</code> (<code>?init=</code> on the execute route) branches a
+  new run from an accepted release under its own provenance key. The new
+  <code># @stochastic</code> annotation keeps every run's outputs beside the cache and
+  never serves them. Prune collects checkpoint rows unless a head holds them
+  or they are the newest of an open build. Gate 1 (ADR 002 §8) runs in
+  <code>tests/notebook/test_local_runs.py</code> against the real harness and the warm
+  worker. (#1299)</li>
 <li><strong>The ledger has releases (ADR 002 E4a).</strong> A build is an execution, its
   attempts the tries that may write its bytes, and a release the event that
   makes a set of staged outputs current together: <code>vestigo.releases</code> adds

@@ -2652,12 +2652,15 @@ notebook, and the session to drive one somebody is watching.</p>
 <h2 id="running-a-cell-or-its-tests-cell-run-cell-test">Running a cell or its tests (<code>cell run</code>, <code>cell test</code>)<a class="headerlink" href="#running-a-cell-or-its-tests-cell-run-cell-test" title="Permanent link">&para;</a></h2>
 <p>Beyond inspection, an agent can execute one cell at a time (not the whole
 notebook) and run a cell's unit tests, both with structured output:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w">  </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--rerun<span class="w"> </span><span class="p">|</span><span class="w"> </span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w">  </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--rerun<span class="w"> </span><span class="p">|</span><span class="w"> </span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--init<span class="w"> </span>RELEASE<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--file<span class="w"> </span>tests.py<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
 </code></pre></div>
 <p><code>cell run</code> materializes the cell (using the cache and re-running stale upstreams
 by default; <code>--rerun</code> bypasses the target's cache, <code>--force</code> runs against
-whatever upstream artifacts already exist). <code>cell test</code> runs the cell's
+whatever upstream artifacts already exist). <code>--init RELEASE</code> starts a normal
+run from an accepted checkpoint's parts (<code>strata.restore()</code> returns them) as a
+branch under its own provenance key; see
+<a href="../cells/#checkpoints-stratacheckpoint-stratarestore-stratahead">checkpoints</a>. <code>cell test</code> runs the cell's
 <code>cells/{cell_id}.test.py</code> via pytest and reports per-test outcomes; pass
 <code>--file tests.py</code> (or <code>-</code> for stdin) to <strong>set</strong> the cell's test source first and
 then run it - the one cell-test affordance that previously required editing the
