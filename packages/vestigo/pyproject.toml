@@ -59,7 +59,7 @@ dev = [
     "pyarrow>=18.0.0",
     # The S3 backend's unit tests run over moto's in-process S3.
     "moto[s3]>=5.0.0",
-    # The same ruff as .pre-commit-config.yaml and ci.yml.
+    # The same ruff as .pre-commit-config.yaml.
     "ruff==0.17.1",
     "pre-commit>=4.0.0",
     "ty>=0.0.24",
