@@ -1945,6 +1945,7 @@ class CellExecutor:
                             collected=collected,
                             local_run=local_run,
                             stochastic=prov.annotations.stochastic,
+                            table_refs=_table_refs(prov),
                         )
                     except TableWriteError as exc:
                         stored_ok, store_error = False, str(exc)
@@ -2723,6 +2724,7 @@ class CellExecutor:
                             build_env=str(result.get("build_env") or ""),
                             hardware=result.get("hardware") or {},
                             collected=collected,
+                            table_refs=_table_refs(prov),
                         )
                     except TableWriteError as exc:
                         stored_ok, store_error = False, str(exc)
@@ -5463,6 +5465,7 @@ class CellExecutor:
         collected: dict[str, bytes | Exception] | None = None,
         local_run: LocalRun | None = None,
         stochastic: bool = False,
+        table_refs: dict[str, str] | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts; True iff all were stored.
 
@@ -5617,6 +5620,7 @@ class CellExecutor:
                         hardware=hardware,
                         extra_params=self._fetch_params(cell_id),
                         computation_key=provenance_hash,
+                        table_refs=table_refs,
                     )
                 )
                 staged_names.append((var_name, content_type))
@@ -8175,6 +8179,7 @@ class CellExecutor:
                 source_hash=source_hash,
                 source=executed_source,
                 env_hash=env_hash,
+                table_refs=_table_refs(prov),
             )
         except (UnsafeRunFile, TableWriteError) as exc:
             return {"ok": False, "error": str(exc)}
@@ -8276,6 +8281,15 @@ def display_metadata_params(display_output: dict[str, Any], count: int) -> dict[
 
 # The variable a cell output's id names, before any ``@ckpt=`` / ``@variant=`` label.
 _OUTPUT_VARIABLE = re.compile(r"_var_([^@]+)")
+
+
+def _table_refs(prov: _CellProvenance) -> dict[str, str]:
+    """A run's ``@table`` reads as ``uri@v=<snapshot>`` by name, for its structural node."""
+    refs: dict[str, str] = {}
+    for spec in prov.annotations.tables:
+        snapshot = prov.table_snapshots.get(spec.name)
+        refs[spec.name] = f"{spec.uri}@v={snapshot}" if snapshot is not None else spec.uri
+    return refs
 
 
 def _fenced_result(exc: RunFenced) -> dict[str, Any]:

@@ -600,6 +600,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         collected=None,
         local_run=None,
         stochastic=False,
+        table_refs=None,
     ):
         return True
 
