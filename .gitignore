@@ -249,3 +249,6 @@ src/strata/_frontend/
 
 # A Fly deployment's own config, copied from fly.example.toml.
 /fly.toml
+
+# CodeGraph index (local tooling)
+.codegraph/
