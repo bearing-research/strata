@@ -9,6 +9,25 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
+### Fixed
+
+- **The ledger's audit fixes, and Strata's side of them.** The `vestigo`
+  package is mirrored at its commit `3c19164`, which fixes every finding of
+  the 2026-10-26 package audit: a deleted dedup canonical hands its bytes to
+  every version reading through it and a rooted version is refused;
+  `promote_version` carries retention edges, `minted`, `computation_key` and
+  `release_id`; a sweep recomputes reachability under the write lock; two
+  fresh SQLite first boots both succeed; a reference assertion guards the
+  advance of the same name on Postgres as on SQLite; a reclaimed build's old
+  attempt releases nothing and a lapsed lease fences its attempt; input
+  ports come in byte order on every collation; only a missing object is
+  absent on S3 and GCS, other errors propagate; a Postgres connection
+  wrapper releases itself when dropped and refuses a nested acquisition over
+  uncommitted writes. Strata passes the run's attempt to `attach` and
+  `abandon`, records reconstructed definitions per tenant, and takes over
+  the repair of embedded builds that bound inputs out of order from the
+  ledger's migration 11 as a per-store upgrade step (#1302)
+
 ### Added
 
 - **The ledger's URI scheme is a setting.** `vestigo` artifact and name
