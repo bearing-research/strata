@@ -104,23 +104,16 @@ jobs:
               )
               sys.exit(1)
 
-          # vestigo is a runtime dependency of strata-notebook, pinned
-          # exactly, so the pin, the package and the tag must all agree.
+          # vestigo is versioned on its own (its repository tags it); the
+          # root pins the exact version of the copy this tag builds.
           with open("packages/vestigo/pyproject.toml", "rb") as f:
               core_version = tomllib.load(f)["project"]["version"]
-          if core_version != version:
-              print(
-                  f"::error::vestigo version {core_version!r} doesn't match the "
-                  f"release version {version!r}. Keep packages/vestigo/pyproject.toml "
-                  "in lockstep with the root pyproject.toml.",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
           with open("pyproject.toml", "rb") as f:
               dependencies = tomllib.load(f)["project"]["dependencies"]
-          if f"vestigo=={version}" not in dependencies:
+          if f"vestigo=={core_version}" not in dependencies:
               print(
-                  f"::error::pyproject.toml must depend on 'vestigo=={version}' "
+                  f"::error::pyproject.toml must depend on 'vestigo=={core_version}', "
+                  f"the version in packages/vestigo/pyproject.toml "
                   f"(found {[d for d in dependencies if d.startswith('vestigo')]}).",
                   file=sys.stderr,
               )
