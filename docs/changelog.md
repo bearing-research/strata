@@ -10,7 +10,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ## Unreleased
 
 ### Changed
-
+- **The ledger installs from PyPI.** `vestigo` 0.1.0 is released from its
+  own repository, [bearing-research/vestigo](https://github.com/bearing-research/vestigo),
+  and Strata pins it exactly from there; `packages/vestigo` leaves the tree
+  with its CI job, its Postgres suite in the integration run and the release
+  workflow's vestigo wheel. (#1319)
 - **The ledger's S3 and GCS backends run on their clouds' SDKs.** The
   `vestigo` package is mirrored at its commit `2ba75df`: the S3 backend runs
   on boto3 and the GCS backend on google-cloud-storage in place of PyArrow's
