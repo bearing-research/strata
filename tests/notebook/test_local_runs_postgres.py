@@ -44,6 +44,8 @@ def postgres_dsn():
 @pytest.fixture(autouse=True)
 def ledger_on_postgres(postgres_dsn, monkeypatch):
     """Each test opens its notebook's ledger on a clean Postgres schema, one pool per test."""
+    # The integration job's Iceberg catalog must not claim the test warehouse's tables.
+    monkeypatch.delenv("STRATA_CATALOG_URI", raising=False)
     dialect = PostgresDialect(postgres_dsn)
     conn = dialect.connect()
     try:
