@@ -60,7 +60,7 @@ dev = [
     # The S3 backend's unit tests run over moto's in-process S3.
     "moto[s3]>=5.0.0",
     # The same ruff as .pre-commit-config.yaml and ci.yml.
-    "ruff==0.17.1",
+    "ruff==0.17.2",
     "pre-commit>=4.0.0",
 ]
 
