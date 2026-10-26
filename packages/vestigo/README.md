@@ -93,8 +93,8 @@ uv add "vestigo[postgres]"  # PostgreSQL metadata; [s3], [gcs], [azure] bring ea
 ```bash
 uv sync --all-extras      # the package, every extra and the dev group
 uv run pytest             # the suite; Postgres and the object-store emulators run in Docker
-uv run pre-commit run --all-files
-uv run ty check           # type-check the shipped code
+uv run pre-commit run --all-files   # ruff, ty, the lockfile check: what CI runs
+uv run pre-commit run --hook-stage manual --all-files   # the above plus pytest
 ```
 
 Strata's `tests/contract/` holds the cross-repository compatibility tests:
