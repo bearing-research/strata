@@ -69,6 +69,7 @@ from strata.notebook.immutability import MutationWarning
 from strata.notebook.layout import WORK_DIR
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.local_runs import (
+    EVENTS_DRAIN_SECONDS,
     RESTORE_DIR,
     LocalRun,
     LocalRuns,
@@ -6419,8 +6420,18 @@ class CellExecutor:
                 relay.cancel()
             await terminate_subprocess_tree(proc)
             raise TimeoutError()
-        # Drained to EOF: the harness has exited, so every line it wrote is in.
-        fenced = await relay if relay is not None else None
+        # The harness has exited, so every line it wrote is in the pipe; EOF follows
+        # unless a child of the cell still holds the write end, which the harness kept
+        # from them, so a short wait is the guard, not the mechanism.
+        fenced = None
+        if relay is not None:
+            try:
+                fenced = await asyncio.wait_for(relay, timeout=EVENTS_DRAIN_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "Event pipe of cell run pid=%s still open after exit; stopped reading",
+                    proc.pid,
+                )
         if fenced is not None:
             return _fenced_result(fenced)
 

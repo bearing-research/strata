@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 LOCAL_CELL_EXECUTOR_REF = "notebook/cell@v1"
 LEASE_SECONDS = 60.0
 RENEW_EVERY_SECONDS = 20.0
+# How long after the harness exits the executor waits for EOF on its event pipe.
+EVENTS_DRAIN_SECONDS = 5.0
 # Past the cell's timeout: the final release is accepted after the harness returns.
 WRITE_WINDOW_MARGIN_SECONDS = 300.0
 RESTORE_DIR = "restore"

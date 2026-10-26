@@ -203,7 +203,9 @@ class TestATokenLivesAsLongAsItsHarness:
             now[0] += 30.0 + 61.0  # it ran past the timeout and the margin, then died
             return None
 
-        async def cold(self, manifest_path, venv_python, timeout_seconds, *, run_token=None):
+        async def cold(
+            self, manifest_path, venv_python, timeout_seconds, *, run_token=None, on_event=None
+        ):
             live.append(run_token is not None and grant_for(run_token) is not None)
             return {"success": True, "variables": {}}
 

@@ -352,7 +352,7 @@ def test_cli_cell_run_routes_to_remote(monkeypatch, capsys):
         def __init__(self, base_url, session_id, **_):
             assert base_url == "http://srv" and session_id == "s1"
 
-        async def run_cell(self, cell_id, *, mode="normal"):
+        async def run_cell(self, cell_id, *, mode="normal", init=None):
             assert cell_id == "c1" and mode == "rerun"  # --rerun → mode=rerun
             return RunResult(
                 cell_id="c1",

@@ -813,6 +813,7 @@ class _Tee(io.StringIO):
 
 def main():
     _lifeline.watch_lifeline()
+    _channel.claim_pipe()
     if len(sys.argv) > 1 and sys.argv[1] == "--batch":
         batch_main()
         return

@@ -96,6 +96,21 @@ class RunChannel:
         self._write(json.dumps(payload, sort_keys=False) + "\n")
 
 
+def claim_pipe() -> int | None:
+    """Keep the event pipe named in the environment from the cell's children.
+
+    Called first thing in the harness, whether or not a client is injected: a child
+    that inherited the write end would hold the executor's read open after the
+    harness exits.
+    """
+    raw = os.environ.get(EVENTS_FD_ENV)
+    if not raw:
+        return None
+    fd = int(raw)
+    os.set_inheritable(fd, False)
+    return fd
+
+
 def from_pipe(
     manifest: dict[str, Any],
     *,
@@ -103,13 +118,9 @@ def from_pipe(
     deserialize: Callable[[str, Path], Any],
 ) -> RunChannel | None:
     """A cold harness's channel over the pipe named in the environment, or None without one."""
-    raw = os.environ.get(EVENTS_FD_ENV)
-    if not raw:
+    fd = claim_pipe()
+    if fd is None:
         return None
-    fd = int(raw)
-    # Inherited from the executor; not by the cell's children, whose copies would keep
-    # the executor reading after the harness exits.
-    os.set_inheritable(fd, False)
     stream = os.fdopen(fd, "w", encoding="utf-8")
 
     def write(line: str) -> None:

@@ -393,7 +393,7 @@ def test_cli_cell_add_run_includes_post_run_outputs(chain_nb, monkeypatch, capsy
         def add_cell(self, source, after=None, language="python"):
             return pre
 
-        async def run_cell(self, cid, mode="normal"):
+        async def run_cell(self, cid, mode="normal", init=None):
             return RunResult(
                 cell_id=cid,
                 status="ok",
@@ -641,7 +641,7 @@ def test_cli_cell_runs_hold_back_info_logs(chain_nb, monkeypatch, argv):
         add_cell = real.add_cell
         get_cell = real.get_cell
 
-        async def run_cell(self, cid, mode="normal"):
+        async def run_cell(self, cid, mode="normal", init=None):
             executor_logger.info("execute_cell %s", cid)
             executor_logger.warning("a warning about %s", cid)
             return RunResult(

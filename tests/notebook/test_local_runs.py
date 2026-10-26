@@ -7,7 +7,10 @@ training loop is a toy so the gate is about the lifecycle, not the model.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
+import signal
 import sys
 from pathlib import Path
 
@@ -312,6 +315,28 @@ STOCHASTIC = """
 import random
 sample = random.random()
 """
+
+
+def test_a_child_the_cell_leaves_behind_does_not_hold_the_run_open(tmp_path: Path):
+    """The harness keeps the event pipe from the cell's children, and the executor stops
+    reading soon after the harness exits either way, so a lingering child cannot stall the
+    run (CI lost xdist workers to this: pytest-timeout exits the process)."""
+    session, executor = _notebook(tmp_path)
+    pid_file = tmp_path / "child.pid"
+    source = (
+        "import subprocess\n"
+        "child = subprocess.Popen(['sleep', '60'], close_fds=False, stdin=subprocess.DEVNULL, "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
+        "model, metrics = {'w': 1}, {'epochs': 1}\n"
+    )
+    try:
+        outcome = asyncio.run(asyncio.wait_for(executor.execute_cell("train", source), timeout=45))
+    finally:
+        if pid_file.exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+    assert outcome.success is True, outcome.error
 
 
 def test_a_stochastic_cell_persists_every_run_and_never_serves_the_cache(tmp_path: Path):
