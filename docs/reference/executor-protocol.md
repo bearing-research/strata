@@ -344,7 +344,7 @@ output's size against `output.max_bytes` before publishing.
 
 | Store | Inputs | Output | Signs with |
 | --- | --- | --- | --- |
-| S3 | SigV4 query URLs | POST policy: `fields`, bounded by `content-length-range` | An access key pair (config or `AWS_ACCESS_KEY_ID`), else a role through botocore (instance profile, ECS task role, web identity; the `s3` extra). The role's session token goes in the URL, and a URL stops working when that token expires. |
+| S3 | SigV4 query URLs | POST policy: `fields`, bounded by `content-length-range` | An access key pair (config or `AWS_ACCESS_KEY_ID`), else a role through boto3 (instance profile, ECS task role, web identity; the `s3` extra). The role's session token goes in the URL, and a URL stops working when that token expires. |
 | GCS | V4 signed URLs | V4 POST policy: `fields`, bounded by `content-length-range` | A service-account key (`STRATA_GCS_CREDENTIALS_JSON` or `GOOGLE_APPLICATION_CREDENTIALS`), else, on GCE or GKE workload identity, the IAM `signBlob` API as the attached service account, which needs `roles/iam.serviceAccountTokenCreator` on itself. Needs the `gcs` extra. |
 | Azure | Read-only blob SAS | Create/write blob SAS: `method` `PUT` with `headers` | The account key (`STRATA_AZURE_ACCOUNT_KEY` or a connection string that holds it), else a user delegation key for `STRATA_AZURE_USE_DEFAULT_CREDENTIAL`, which needs the Storage Blob Delegator role. A PUT cannot bound its body, so only finalize enforces `max_bytes`. |
 

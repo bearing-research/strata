@@ -15,11 +15,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-# Metadata is stdlib sqlite3, or PostgreSQL via the extra below. Blobs read and
-# write through pyarrow's filesystems; each cloud's SDK is an extra of its backend.
-dependencies = [
-    "pyarrow>=18.0.0",
-]
+# Metadata is stdlib sqlite3, or PostgreSQL via the extra below. Blobs are local
+# files, or an object store through its own SDK, each the extra of its backend.
+dependencies = []
 
 [project.optional-dependencies]
 postgres = [
@@ -27,7 +25,7 @@ postgres = [
     "psycopg-pool>=3.2",
 ]
 s3 = [
-    "botocore>=1.35.0",
+    "boto3>=1.35.0",
 ]
 gcs = [
     "google-cloud-storage>=3.0.0",
@@ -55,8 +53,12 @@ dev = [
     "testcontainers>=4.15.0",
     "docker>=7.0.0",
     "anyio>=4.0.0",
-    # The presigned-signing tests mint an RSA key; the cloud backends run over fakes.
+    # The presigned-signing tests mint an RSA key.
     "cryptography>=42.0.0",
+    # The suite's payloads are Arrow IPC streams; the package itself never reads them.
+    "pyarrow>=18.0.0",
+    # The S3 backend's unit tests run over moto's in-process S3.
+    "moto[s3]>=5.0.0",
     # The same ruff as .pre-commit-config.yaml and ci.yml.
     "ruff==0.17.1",
     "pre-commit>=4.0.0",

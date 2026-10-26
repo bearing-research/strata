@@ -84,15 +84,15 @@ The package exports nothing at its top level; a consumer imports each module.
 ## Install
 
 ```bash
-uv add vestigo            # or: pip install vestigo
-uv add "vestigo[postgres]"  # PostgreSQL metadata; also [s3], [gcs], [azure] for blobs
+uv add vestigo            # or: pip install vestigo; no dependencies beyond the stdlib
+uv add "vestigo[postgres]"  # PostgreSQL metadata; [s3], [gcs], [azure] bring each blob backend's SDK
 ```
 
 ## Development
 
 ```bash
 uv sync --all-extras      # the package, every extra and the dev group
-uv run pytest             # the suite; the Postgres tests start a container through Docker
+uv run pytest             # the suite; Postgres and the object-store emulators run in Docker
 uv run pre-commit run --all-files
 ```
 

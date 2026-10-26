@@ -523,9 +523,10 @@ class StrataConfig(BaseSettings):
 
     # GCS configuration
     #
-    # PyArrow's GcsFileSystem has no project parameter: the legacy STRATA_GCS_PROJECT_ID always fed
-    # ``default_bucket_location`` (a location like ``US``), so it stays accepted with that
-    # behaviour; ``validate_gcs_settings`` says what it controls.
+    # A location (``US``, ``europe-west1``) for PyIceberg's GCS catalog property. The legacy
+    # STRATA_GCS_PROJECT_ID always fed it, so it stays accepted with that behaviour;
+    # ``warn_on_gcs_project_id`` says what it controls. The ledger's GCS backend never
+    # creates a bucket and does not take it.
     #
     # Both aliases carry the STRATA_ prefix: validation_alias replaces env_prefix, so a bare
     # "gcs_project_id" would make the ambient GCP variable GCS_PROJECT_ID live config.
@@ -925,8 +926,7 @@ class StrataConfig(BaseSettings):
     def warn_on_gcs_project_id(self) -> StrataConfig:
         """Warn that ``STRATA_GCS_PROJECT_ID`` sets the default bucket location, not a project.
 
-        PyArrow's GcsFileSystem takes no project, so a project id there is a bogus
-        location.
+        Nothing here takes a project, so a project id there is a bogus location.
         """
         import os
 
@@ -937,9 +937,9 @@ class StrataConfig(BaseSettings):
             "STRATA_GCS_DEFAULT_BUCKET_LOCATION"
         ):
             logger.warning(
-                "STRATA_GCS_PROJECT_ID does not set a GCP project: GcsFileSystem "
-                "has no project parameter. Its value is used as the default bucket "
-                "location (a GCS location such as 'US' or 'europe-west1'). Rename "
+                "STRATA_GCS_PROJECT_ID does not set a GCP project: nothing takes "
+                "one. Its value is used as the default bucket location "
+                "(a GCS location such as 'US' or 'europe-west1'). Rename "
                 "it to STRATA_GCS_DEFAULT_BUCKET_LOCATION, and check the value is "
                 "a location rather than a project id."
             )
@@ -1212,7 +1212,6 @@ class StrataConfig(BaseSettings):
             s3_access_key=self.s3_access_key,
             s3_secret_key=self.s3_secret_key,
             s3_anonymous=self.s3_anonymous,
-            gcs_default_bucket_location=self.gcs_default_bucket_location,
             gcs_credentials_json=self.gcs_credentials_json,
             gcs_anonymous=self.gcs_anonymous,
             gcs_endpoint_override=self.gcs_endpoint_override,

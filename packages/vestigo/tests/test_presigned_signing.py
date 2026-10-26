@@ -58,15 +58,14 @@ def _verify_v4_url(rsa_key, url: str) -> None:
 # GCS
 
 
-@pytest.fixture
-def gcs_key_store(rsa_key, monkeypatch):
-    """A GCS store holding a service-account key, as a consumer's credentials setting gives it."""
+def _service_account_key(rsa_key) -> dict[str, str]:
+    """A service-account key file's contents, holding ``rsa_key``."""
     pem = rsa_key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     ).decode()
-    key = {
+    return {
         "type": "service_account",
         "project_id": "proj",
         "private_key_id": "k1",
@@ -75,36 +74,14 @@ def gcs_key_store(rsa_key, monkeypatch):
         "client_id": "1",
         "token_uri": "https://oauth2.googleapis.com/token",
     }
-    # The store points this at the key it was given; monkeypatch puts it back.
-    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-    return GCSBlobStore(bucket="bkt", prefix="artifacts", credentials_json=json.dumps(key))
 
 
-def test_a_gcs_key_signs_a_get_url_its_public_key_verifies(gcs_key_store, rsa_key):
-    url = gcs_key_store.presign_get("fig@1", 1, ttl_seconds=60)
-
-    assert url is not None
-    parts = urlsplit(url)
-    assert (parts.scheme, parts.netloc) == ("https", "storage.googleapis.com")
-    assert unquote(parts.path) == "/bkt/artifacts/fig@1@v=1.arrow"
-    params = parse_qs(parts.query)
-    assert params["X-Goog-Expires"] == ["60"]
-    assert params["X-Goog-Credential"][0].startswith(f"{SERVICE_ACCOUNT}/")
-    _verify_v4_url(rsa_key, url)
-
-
-def test_a_gcs_post_policy_bounds_the_size_and_is_signed(gcs_key_store, rsa_key):
-    signed = gcs_key_store.presign_post("out", 7, max_bytes=16, ttl_seconds=60)
-
-    assert signed is not None
-    url, fields = signed
-    assert url == "https://storage.googleapis.com/bkt/"
-    assert fields["key"] == "artifacts/out@v=7.arrow"
-    policy = json.loads(base64.b64decode(fields["policy"]))
-    assert ["content-length-range", 1, 16] in policy["conditions"]
-    assert {"bucket": "bkt"} in policy["conditions"]
-    assert {"key": "artifacts/out@v=7.arrow"} in policy["conditions"]
-    _verify(rsa_key, fields["x-goog-signature"], fields["policy"].encode())
+@pytest.fixture
+def gcs_key_store(rsa_key):
+    """A GCS store holding a service-account key, as a consumer's credentials setting gives it."""
+    return GCSBlobStore(
+        bucket="bkt", prefix="artifacts", credentials_json=json.dumps(_service_account_key(rsa_key))
+    )
 
 
 def _keyless_credentials(**attributes):
@@ -173,27 +150,31 @@ def test_gcs_credentials_with_no_service_account_do_not_presign(monkeypatch):
     assert store.presign_post("fig", 1, 16, 60) is None
 
 
-def test_gcs_without_credentials_or_anonymous_does_not_presign(monkeypatch):
-    import google.auth
-    from google.auth.exceptions import DefaultCredentialsError
+def test_an_anonymous_gcs_store_does_not_presign():
+    store = GCSBlobStore(bucket="bkt", anonymous=True)
 
-    def no_credentials(scopes=None):
-        raise DefaultCredentialsError("none")
+    assert store.presign_get("fig", 1, 60) is None
+    assert store.presign_post("fig", 1, 16, 60) is None
 
-    monkeypatch.setattr(google.auth, "default", no_credentials)
 
-    for store in (GCSBlobStore(bucket="bkt"), GCSBlobStore(bucket="bkt", anonymous=True)):
-        assert store.presign_get("fig", 1, 60) is None
-        assert store.presign_post("fig", 1, 16, 60) is None
+def test_a_key_file_path_signs_like_the_key_itself(rsa_key, tmp_path):
+    """The credentials setting is a path or the key's JSON; both reach the same signer."""
+    key_file = tmp_path / "key.json"
+    key_file.write_text(json.dumps(_service_account_key(rsa_key)))
+    store = GCSBlobStore(bucket="bkt", prefix="artifacts", credentials_json=str(key_file))
+
+    url = store.presign_get("fig", 1, ttl_seconds=60)
+
+    assert url is not None
+    _verify_v4_url(rsa_key, url)
 
 
 # S3 role
 
 
-def test_s3_role_credentials_sign_with_their_session_token(monkeypatch, tmp_path):
-    with role_credentials(monkeypatch, tmp_path, "ASIAROLE", "role-secret", "role-token") as seen:
+def test_s3_role_credentials_sign_with_their_session_token(monkeypatch):
+    with role_credentials(monkeypatch, "ASIAROLE", "role-secret", "role-token") as seen:
         store = S3BlobStore(bucket="bkt", prefix="artifacts", region="us-east-1")
-        pyarrow_resolutions = len(seen)  # PyArrow's own AWS SDK reads the role too
         url = store.presign_get("fig", 1, ttl_seconds=60)
         signed = store.presign_post("out", 1, max_bytes=16, ttl_seconds=60)
 
@@ -203,7 +184,7 @@ def test_s3_role_credentials_sign_with_their_session_token(monkeypatch, tmp_path
     assert params["X-Amz-Security-Token"] == ["role-token"]
     assert signed[1]["x-amz-credential"].startswith("ASIAROLE/")
     assert signed[1]["x-amz-security-token"] == "role-token"
-    assert len(seen) == pyarrow_resolutions + 1, "the role is resolved once, not per URL"
+    assert len(seen) == 1, "the role is resolved once, by the client, not per URL"
 
 
 # Azure

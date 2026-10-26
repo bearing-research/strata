@@ -199,6 +199,10 @@ jobs:
 
       - name: Run vestigo tests
         run: .venv-vestigo/bin/python -m pytest packages/vestigo/tests -v -p no:cacheprovider
+        env:
+          # The Postgres and object-store emulator suites start containers; a missing
+          # daemon fails here rather than skipping them to green.
+          VESTIGO_REQUIRE_DOCKER: "1"
 
   # ty exits non-zero on errors; the unresolved-import warnings configured for
   # guarded optional deps (torch/jax) do not fail the build.

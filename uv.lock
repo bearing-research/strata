@@ -4053,7 +4053,7 @@ postgres = [
     { name = "psycopg-pool" },
 ]
 s3 = [
-    { name = "botocore" },
+    { name = "boto3" },
     { name = "s3fs" },
 ]
 sql = [
@@ -4130,7 +4130,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.1" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
-    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.35.0" },
     { name = "cloudpickle", marker = "extra == 'notebook'", specifier = ">=3.0.0" },
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },
@@ -4430,9 +4430,6 @@ wheels = [
 name = "vestigo"
 version = "0.11.0"
 source = { editable = "packages/vestigo" }
-dependencies = [
-    { name = "pyarrow" },
-]
 
 [package.optional-dependencies]
 azure = [
@@ -4447,7 +4444,7 @@ postgres = [
     { name = "psycopg-pool" },
 ]
 s3 = [
-    { name = "botocore" },
+    { name = "boto3" },
 ]
 
 [package.dev-dependencies]
@@ -4455,7 +4452,9 @@ dev = [
     { name = "anyio" },
     { name = "cryptography" },
     { name = "docker" },
+    { name = "moto", extra = ["s3"] },
     { name = "pre-commit" },
+    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-timeout" },
@@ -4467,11 +4466,10 @@ dev = [
 requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
-    { name = "botocore", marker = "extra == 's3'", specifier = ">=1.35.0" },
+    { name = "boto3", marker = "extra == 's3'", specifier = ">=1.35.0" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'", specifier = ">=3.0.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "psycopg-pool", marker = "extra == 'postgres'", specifier = ">=3.2" },
-    { name = "pyarrow", specifier = ">=18.0.0" },
 ]
 provides-extras = ["postgres", "s3", "gcs", "azure"]
 
@@ -4480,7 +4478,9 @@ dev = [
     { name = "anyio", specifier = ">=4.0.0" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "docker", specifier = ">=7.0.0" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
     { name = "pre-commit", specifier = ">=4.0.0" },
+    { name = "pyarrow", specifier = ">=18.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-timeout", specifier = ">=2.3.0" },

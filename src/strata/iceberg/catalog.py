@@ -18,9 +18,10 @@ from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError, 
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
 from pyiceberg.table.snapshots import Operation, Snapshot
-from vestigo.blob_store import _resolve_gcs_credentials, azure_account_url
+from vestigo.blob_store import azure_account_url
 
 from strata.config import StrataConfig
+from strata.iceberg.gcs_credentials import resolve_gcs_credentials
 from strata.iceberg.lake_files import _AZURE_SCHEMES
 from strata.types import ACL_STORE_NAMES, TableIdentity
 
@@ -267,7 +268,7 @@ class PyIcebergCatalog:
         if endpoint := self.config.gcs_endpoint_override:
             props["gcs.service.host"] = endpoint if "://" in endpoint else f"https://{endpoint}"
         if self.config.gcs_credentials_json:
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _resolve_gcs_credentials(
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = resolve_gcs_credentials(
                 self.config.gcs_credentials_json
             )
         return props

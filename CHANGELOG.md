@@ -7,6 +7,21 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Changed
+
+- **The ledger's S3 and GCS backends run on their clouds' SDKs.** The
+  `vestigo` package is mirrored at its commit `2ba75df`: the S3 backend runs
+  on boto3 and the GCS backend on google-cloud-storage in place of PyArrow's
+  filesystems, so the package has no required dependency and each extra
+  brings its backend's SDK. One client per backend reads, writes and signs;
+  GCS credentials of any kind `GOOGLE_APPLICATION_CREDENTIALS` accepts reach
+  the client directly; a failed upload keeps the previous object; a missing
+  object is still absent and any other error is the SDK's. Strata's `s3`
+  extra brings boto3, which the S3 artifact backend now needs for plain
+  reads and writes; `STRATA_GCS_DEFAULT_BUCKET_LOCATION` reaches only
+  PyIceberg's catalog, as it always did; the package's suite runs every
+  object-store backend against its emulator through Docker. (#1314)
+
 ### Fixed
 
 - **The ledger's audit fixes, and Strata's side of them.** The `vestigo`
