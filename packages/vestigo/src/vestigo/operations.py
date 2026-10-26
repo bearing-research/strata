@@ -25,7 +25,11 @@ class CheckBuildLease:
 
 @dataclass(frozen=True)
 class AssertReferenceRevision:
-    """Fail unless the reference is at *expected_revision* (0 when it does not exist)."""
+    """Fail unless the reference is at *expected_revision* (0 when it does not exist).
+
+    An :class:`AdvanceReference` of the same name later in the transaction is guarded
+    on it: it moves the reference from that revision only, whatever lands meanwhile.
+    """
 
     name: str
     expected_revision: int
@@ -61,8 +65,13 @@ class InsertAuditEvent:
     event: AuditEvent
 
 
-Operation = CheckBuildLease | AssertReferenceRevision | AssignAuthority | AdvanceReference
-Operation = Operation | InsertAuditEvent
+Operation = (
+    CheckBuildLease
+    | AssertReferenceRevision
+    | AssignAuthority
+    | AdvanceReference
+    | InsertAuditEvent
+)
 
 _BY_NAME: dict[str, type] = {
     "CheckBuildLease": CheckBuildLease,

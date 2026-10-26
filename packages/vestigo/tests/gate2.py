@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import pytest
@@ -27,11 +29,14 @@ from vestigo.provenance import TransformSpec, checkpoint_output_key, derive_subk
 from vestigo.releases import (
     OperationFailed,
     Release,
+    ReleaseBundle,
+    ReleaseError,
     ReleaseIncomplete,
     ReleaseOutOfOrder,
     ReleaseRejected,
     ReleaseStore,
 )
+from vestigo.sql_backend import SqlDialect, SqliteDialect
 from vestigo.store import ArtifactStore, StagedVersion
 
 PARENT = hashlib.sha256(b"train").hexdigest()
@@ -69,14 +74,16 @@ def _build(
     *,
     occurrence: str | None = None,
     computation_key: str = PARENT,
+    tenant: str | None = None,
 ) -> str:
-    """A building build under *attempt*, whose target row is the final output."""
+    """A building build under *attempt* (runner-1's 60 s lease), targeting its final output."""
     build_id = uuid.uuid4().hex
     target = f"final-{build_id}"
     version = ledger.store.create_artifact(
         target,
         run_output_key(computation_key, build_id, "model"),
         SPEC,
+        tenant=tenant,
         computation_key=computation_key,
         minted=True,
     )
@@ -85,6 +92,7 @@ def _build(
         target,
         version,
         executor_ref="train@v1",
+        tenant_id=tenant,
         occurrence=occurrence,
         computation_key=computation_key,
     )
@@ -92,6 +100,100 @@ def _build(
         build_id, attempt, writable_until=ledger.clock() + 3600, lease_owner="runner-1"
     )
     return build_id
+
+
+def _resume(ledger: Ledger, build_id: str, attempt: str, **kwargs) -> int:
+    """Resume the build in *attempt* once its lease has lapsed, as a crashed run's successor."""
+    ledger.clock.now += 120
+    return ledger.releases.resume(build_id, attempt, writable_until=ledger.clock() + 3600, **kwargs)
+
+
+@contextmanager
+def _another_process(ledger: Ledger) -> Iterator[Ledger]:
+    """A second ledger on the same database, opened as another process would, that never waits.
+
+    One of its connections finding a lock held fails at once with the dialect's
+    operational error instead of queueing behind the holder.
+    """
+    dialect = ledger.store.dialect
+    if dialect.name == "sqlite":
+        other: SqlDialect = SqliteDialect(ledger.store.db_path)
+        no_wait = "PRAGMA busy_timeout = 0"
+    else:
+        other = type(dialect)(dialect.dsn)  # type: ignore[attr-defined]
+        no_wait = "SET LOCAL lock_timeout = 200"
+    connect = other.connect
+
+    def connect_without_waiting():
+        conn = connect()
+        conn.execute(no_wait)
+        return conn
+
+    other.connect = connect_without_waiting  # type: ignore[method-assign]
+    store = ArtifactStore(ledger.store.artifact_dir, dialect=other)
+    builds = BuildStore(store.db_path, dialect=other, clock=ledger.clock)
+    try:
+        yield Ledger(store, builds, ReleaseStore(store, builds, clock=ledger.clock), ledger.clock)
+    finally:
+        other.close()
+
+
+def _interleave(
+    ledger: Ledger,
+    first: Callable[[Ledger], object],
+    second: Callable[[Ledger], object],
+    *,
+    after: str,
+) -> tuple[object, object, bool]:
+    """Run ``first(ledger)``; right after its statement containing *after*, ``second(other)``.
+
+    ``other`` is another process's ledger (:func:`_another_process`). A ``second``
+    that finds a lock held runs again once ``first`` is done, as a process queued on
+    the lock would. Returns both outcomes (a :class:`ReleaseError` in place of a
+    result) and whether ``second`` was locked out.
+    """
+    outcomes: dict[str, object] = {}
+    state = {"fired": False, "locked": False}
+
+    def call(key: str, fn: Callable[[Ledger], object], target: Ledger) -> None:
+        try:
+            outcomes[key] = fn(target)
+        except ReleaseError as exc:
+            outcomes[key] = exc
+
+    with _another_process(ledger) as other:
+
+        class Interleaved:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __getattr__(self, attr):
+                return getattr(self._inner, attr)
+
+            def execute(self, sql, params=()):
+                cursor = self._inner.execute(sql, params)
+                if after in sql and not state["fired"]:
+                    state["fired"] = True
+                    try:
+                        call("second", second, other)
+                    except other.store.dialect.operational_error:
+                        state["locked"] = True
+                return cursor
+
+        connect = ledger.releases._connect
+        ledger.releases._connect = lambda: Interleaved(connect())
+        try:
+            call("first", first, ledger)
+        finally:
+            ledger.releases._connect = connect
+        if state["locked"]:
+            call("second", second, other)
+    assert state["fired"], f"no statement of first matched {after!r}"
+    return outcomes["first"], outcomes["second"], state["locked"]
+
+
+AFTER_FENCE = "FROM artifact_builds b"
+"""The statement ``lease_held`` runs: the first read of an acceptance under the build's key."""
 
 
 def _staged_row(artifact_id: str, version: int, data: bytes) -> StagedVersion:
@@ -187,17 +289,18 @@ class Gate2:
             ],
         )
         assert ledger.releases.reference("train/latest") == (second.release_id, 2)
+        # Outputs read oldest first: the model was staged before its metrics.
         assert [v.provenance_hash for v in bundle.outputs] == [
-            checkpoint_output_key(PARENT, build_id, 2, "metrics"),
             checkpoint_output_key(PARENT, build_id, 2, "model"),
-        ] or {v.provenance_hash for v in bundle.outputs} == {
             checkpoint_output_key(PARENT, build_id, 2, "metrics"),
-            checkpoint_output_key(PARENT, build_id, 2, "model"),
-        }
+        ]
 
         final = ledger.releases.prepare(build_id, "a1", "final")
         build = ledger.builds.get_build(build_id)
-        assert ledger.releases.attach(final.release_id, [(build.artifact_id, build.version)]) == 1
+        assert (
+            ledger.releases.attach(final.release_id, "a1", [(build.artifact_id, build.version)])
+            == 1
+        )
         ledger.store.write_blob(build.artifact_id, build.version, b"final-weights")
         staged = [_staged_row(build.artifact_id, build.version, b"final-weights")]
         done = ledger.releases.accept(
@@ -227,12 +330,7 @@ class Gate2:
         crashed = ledger.releases.prepare(build_id, "a1", "checkpoint")
         _stage(ledger, crashed, "model", b"w3")
         # The process dies here. A new attempt resumes the same execution.
-        assert (
-            ledger.releases.resume(
-                build_id, "a2", writable_until=ledger.clock() + 3600, lease_owner="runner-2"
-            )
-            == 1
-        )
+        assert _resume(ledger, build_id, "a2", lease_owner="runner-2") == 1
         assert ledger.releases.get(crashed.release_id).state == "abandoned"
         assert ledger.builds.get_build(build_id).attempt == "a2"
 
@@ -252,7 +350,7 @@ class Gate2:
         build_id = _build(ledger)
         stale = ledger.releases.prepare(build_id, "a1", "checkpoint")
         staged = [_stage(ledger, stale, "model", b"w1")]
-        ledger.releases.resume(build_id, "a2", writable_until=ledger.clock() + 3600)
+        _resume(ledger, build_id, "a2")
         # resume abandoned it; an attempt whose window merely closed is rejected at accept.
         assert ledger.releases.get(stale.release_id).state == "abandoned"
 
@@ -291,7 +389,7 @@ class Gate2:
         assert ledger.releases.authority(f"slot:{build_id}") is None
         assert ledger.releases.get(release.release_id).state == "preparing"
         assert ledger.builds.get_build(build_id).state == "building"
-        assert ledger.releases.abandon(release.release_id)
+        assert ledger.releases.abandon(release.release_id, "a1")
 
     def test_overlapping_releases_are_accepted_in_sequence_order(self, ledger: Ledger):
         build_id = _build(ledger)
@@ -393,20 +491,28 @@ class Gate2:
         assert ledger.builds.get_build(build_id).state == "building"
 
     def test_two_attempts_racing_for_a_slot_have_one_winner(self, ledger: Ledger):
-        winners = []
+        """Two processes accept finals claiming one slot at once; the slot has one winner."""
+        releases, staged = [], []
         for _ in range(2):
-            build_id = _build(ledger)
-            release = ledger.releases.prepare(build_id, "a1", "final")
-            staged = [_stage(ledger, release, "model", b"w")]
-            try:
-                ledger.releases.accept(
-                    release.release_id, staged, [AssignAuthority("slot:race", release.release_id)]
-                )
-                winners.append(release.release_id)
-            except OperationFailed:
-                pass
-        assert len(winners) == 1
-        assert ledger.releases.authority("slot:race") == winners[0]
+            release = ledger.releases.prepare(_build(ledger), "a1", "final")
+            releases.append(release)
+            staged.append([_stage(ledger, release, "model", b"w")])
+
+        def accepting(index):
+            return lambda ledger_: ledger_.releases.accept(
+                releases[index].release_id,
+                staged[index],
+                [AssignAuthority("slot:race", releases[index].release_id)],
+            )
+
+        first, second, _ = _interleave(ledger, accepting(0), accepting(1), after=AFTER_FENCE)
+
+        (loser,) = [r for r in (first, second) if isinstance(r, OperationFailed)]
+        (winner,) = [r for r in (first, second) if isinstance(r, ReleaseBundle)]
+        assert "already belongs" in str(loser)
+        assert ledger.releases.authority("slot:race") == winner.release.release_id
+        states = {ledger.releases.get(r.release_id).state for r in releases}
+        assert states == {"accepted", "preparing"}
 
     def test_a_retry_after_a_lost_response_returns_the_original_release(self, ledger: Ledger):
         build_id = _build(ledger)
@@ -463,18 +569,8 @@ class Gate2:
         unsettled = ledger.releases.prepare(build_id, "a1", "checkpoint")
 
         with pytest.raises(ValueError, match="not an accepted release"):
-            ledger.releases.resume(
-                build_id,
-                "a2",
-                writable_until=ledger.clock() + 3600,
-                from_release=unsettled.release_id,
-            )
-        ledger.releases.resume(
-            build_id,
-            "a2",
-            writable_until=ledger.clock() + 3600,
-            from_release=first.release.release_id,
-        )
+            _resume(ledger, build_id, "a2", from_release=unsettled.release_id)
+        _resume(ledger, build_id, "a2", from_release=first.release.release_id)
 
         attempt = ledger.builds.get_attempt(build_id, "a2")
         assert attempt is not None and attempt.resumed_from == first.release.release_id
@@ -543,7 +639,7 @@ class Gate2:
         assert ledger.releases.reference("train/best") == (best.release.release_id, 1)
 
         # The new attempt may point a head at the old attempt's checkpoint; the old one may not.
-        ledger.releases.resume(build_id, "a2", writable_until=ledger.clock() + 3600)
+        _resume(ledger, build_id, "a2")
         with pytest.raises(ReleaseRejected):
             ledger.releases.apply(
                 build_id, "a1", [AdvanceReference("train/best", best.release.release_id)]
@@ -578,3 +674,206 @@ class Gate2:
         assert result["deleted_count"] == len(second.outputs)
         assert all(_state(ledger, v) == "ready" for v in first.outputs)
         assert all(ledger.store.get_artifact(v.id, v.version) is None for v in second.outputs)
+
+    # --- Fences and operations under two processes ---
+
+    def test_two_builds_asserting_one_revision_have_one_winner(self, ledger: Ledger):
+        """Two processes assert a head's revision and advance it; the loser's advance fails.
+
+        On Postgres the two acceptances run under different build keys, so the
+        assertion's read alone proves nothing: the advance is guarded on it.
+        """
+        b1, b2 = _build(ledger), _build(ledger)
+        _checkpoint(ledger, b1, operations=[AdvanceReference("shared/head", "seed")])
+        assert ledger.releases.reference("shared/head") == ("seed", 1)
+        r1 = ledger.releases.prepare(b1, "a1", "checkpoint")
+        r2 = ledger.releases.prepare(b2, "a1", "checkpoint")
+        s1, s2 = [_stage(ledger, r1, "model", b"1")], [_stage(ledger, r2, "model", b"2")]
+
+        def accepting(release, staged):
+            return lambda ledger_: ledger_.releases.accept(
+                release.release_id,
+                staged,
+                [
+                    AssertReferenceRevision("shared/head", 1),
+                    AdvanceReference("shared/head", release.release_id),
+                ],
+            )
+
+        first, second, _ = _interleave(
+            ledger, accepting(r1, s1), accepting(r2, s2), after="SELECT revision FROM"
+        )
+
+        (loser,) = [r for r in (first, second) if isinstance(r, OperationFailed)]
+        (winner,) = [r for r in (first, second) if isinstance(r, ReleaseBundle)]
+        assert "shared/head" in str(loser)
+        assert ledger.releases.reference("shared/head") == (winner.release.release_id, 2)
+        lost = r2 if winner.release.release_id == r1.release_id else r1
+        assert ledger.releases.get(lost.release_id).state == "preparing"
+        assert _state(ledger, (s1 if lost is r1 else s2)[0]) == "building"
+
+    def test_a_build_writer_waits_for_an_acceptance_in_flight(self, ledger: Ledger):
+        """A fail landing between a final's fence check and its commit is held off and loses."""
+        build_id = _build(ledger)
+        final = ledger.releases.prepare(build_id, "a1", "final")
+        staged = [_stage(ledger, final, "model", b"done")]
+
+        bundle, failed, locked = _interleave(
+            ledger,
+            lambda ledger_: ledger_.releases.accept(final.release_id, staged),
+            lambda other: other.builds.fail_build(build_id, "boom"),
+            after=AFTER_FENCE,
+        )
+
+        assert locked, "fail_build ran inside the acceptance's transaction"
+        assert isinstance(bundle, ReleaseBundle) and bundle.release.state == "accepted"
+        assert failed is False
+        assert ledger.builds.get_build(build_id).state == "ready"
+
+    def test_a_final_on_a_build_that_stopped_building_is_rejected(self, ledger: Ledger):
+        """What acceptance does when a writer that took no key ended the build anyway."""
+        build_id = _build(ledger)
+        final = ledger.releases.prepare(build_id, "a1", "final")
+        staged = [_stage(ledger, final, "model", b"done")]
+        real_check = ReleaseStore._check_outputs
+
+        def failing_underneath(self, conn, release, staged_):
+            real_check(self, conn, release, staged_)
+            conn.execute(
+                "UPDATE artifact_builds SET state = 'failed' WHERE build_id = ?", (build_id,)
+            )
+
+        ReleaseStore._check_outputs = failing_underneath
+        try:
+            with pytest.raises(ReleaseRejected, match="no longer building"):
+                ledger.releases.accept(final.release_id, staged)
+        finally:
+            ReleaseStore._check_outputs = real_check
+        assert ledger.releases.get(final.release_id).state == "rejected"
+        assert _state(ledger, staged[0]) == "building"
+        assert ledger.builds.get_build(build_id).state == "building"
+
+    def test_a_lapsed_lease_fences_its_attempt_until_renewed_or_reclaimed(self, ledger: Ledger):
+        build_id = _build(ledger)
+        pending = ledger.releases.prepare(build_id, "a1", "checkpoint")
+        staged = [_stage(ledger, pending, "model", b"w")]
+        ledger.clock.now += 120
+        with pytest.raises(ReleaseRejected):
+            ledger.releases.prepare(build_id, "a1", "checkpoint")
+        # A runner that merely stalled renews its lease and goes on.
+        assert ledger.builds.renew_lease(build_id, "runner-1", 60.0)
+        assert ledger.releases.accept(pending.release_id, staged).release.state == "accepted"
+
+        # One whose build was reclaimed is fenced for good: the build has no attempt.
+        late = ledger.releases.prepare(build_id, "a1", "checkpoint")
+        staged = [_stage(ledger, late, "model", b"w2")]
+        ledger.clock.now += 120
+        assert ledger.builds.reclaim_expired_build(build_id, "runner-2", 60.0)
+        assert ledger.builds.get_build(build_id).attempt is None
+        with pytest.raises(ReleaseRejected):
+            ledger.releases.accept(late.release_id, staged)
+        assert ledger.releases.get(late.release_id).state == "rejected"
+        assert not ledger.builds.renew_lease(build_id, "runner-1", 60.0)
+        with pytest.raises(ReleaseRejected):
+            ledger.releases.prepare(build_id, "a1", "checkpoint")
+
+    def test_a_live_lease_is_taken_over_by_no_other_attempt(self, ledger: Ledger):
+        build_id = _build(ledger)
+        with pytest.raises(ValueError, match="lease"):
+            ledger.releases.resume(build_id, "a2", writable_until=ledger.clock() + 3600)
+        assert not ledger.builds.open_attempt(build_id, "a2", writable_until=ledger.clock() + 3600)
+        assert ledger.builds.get_build(build_id).attempt == "a1"
+        # Its own attempt re-opens (a longer write window); once lapsed, any attempt may.
+        assert ledger.builds.open_attempt(build_id, "a1", writable_until=ledger.clock() + 7200)
+        assert ledger.builds.get_attempt(build_id, "a1").writable_until == ledger.clock() + 7200
+        assert _resume(ledger, build_id, "a2") == 0
+        assert ledger.builds.get_build(build_id).attempt == "a2"
+
+    def test_an_output_staged_under_the_release_but_not_declared_blocks_it(self, ledger: Ledger):
+        build_id = _build(ledger)
+        release = ledger.releases.prepare(build_id, "a1", "checkpoint")
+        model = _stage(ledger, release, "model", b"w")
+        metrics = _stage(ledger, release, "metrics", b"{}")
+        with pytest.raises(ReleaseIncomplete, match=f"{metrics.artifact_id}@v={metrics.version}"):
+            ledger.releases.accept(
+                release.release_id, [model], [AdvanceReference("train/latest", release.release_id)]
+            )
+        assert ledger.releases.get(release.release_id).state == "preparing"
+        assert ledger.releases.reference("train/latest") is None
+        bundle = ledger.releases.accept(release.release_id, [model, metrics])
+        assert {v.state for v in bundle.outputs} == {"ready"}
+
+    def test_a_release_belongs_to_its_builds_tenant(self, ledger: Ledger):
+        build_id = _build(ledger, tenant="acme")
+        with pytest.raises(ValueError, match="belongs to tenant 'acme'"):
+            ledger.releases.prepare(build_id, "a1", "checkpoint", tenant="other")
+        with pytest.raises(ValueError, match="belongs to tenant 'acme'"):
+            ledger.releases.apply(build_id, "a1", [], tenant="other")
+        release = ledger.releases.prepare(build_id, "a1", "checkpoint")
+        assert release.tenant == "acme"
+        ledger.releases.accept(
+            release.release_id,
+            [_stage(ledger, release, "model", b"w")],
+            [AdvanceReference("train/head", release.release_id)],
+        )
+        assert ledger.releases.reference("train/head", tenant="acme") == (release.release_id, 1)
+        assert ledger.releases.reference("train/head") is None
+        # The default tenant's build likewise refuses another's release.
+        with pytest.raises(ValueError, match="belongs to tenant ''"):
+            ledger.releases.prepare(_build(ledger), "a1", "checkpoint", tenant="acme")
+
+    def test_only_its_own_attempt_abandons_attaches_or_marks_a_release(self, ledger: Ledger):
+        build_id = _build(ledger)
+        _resume(ledger, build_id, "a2")
+        live = ledger.releases.prepare(build_id, "a2", "checkpoint")
+        target = ledger.builds.get_build(build_id)
+        rows = [(target.artifact_id, target.version)]
+        for touch in (
+            lambda: ledger.releases.abandon(live.release_id, "a1"),
+            lambda: ledger.releases.attach(live.release_id, "a1", rows),
+            lambda: ledger.releases.mark_prepared(live.release_id, "a1"),
+        ):
+            with pytest.raises(ValueError, match="attempt a2's, not a1's"):
+                touch()
+        assert ledger.releases.get(live.release_id).state == "preparing"
+        assert ledger.store.get_artifact(*rows[0]).release_id is None
+
+        assert ledger.releases.attach(live.release_id, "a2", rows) == 1
+        assert ledger.releases.mark_prepared(live.release_id, "a2")
+        assert ledger.releases.abandon(live.release_id, "a2")
+        assert ledger.releases.get(live.release_id).state == "abandoned"
+        with pytest.raises(ValueError, match="does not exist"):
+            ledger.releases.abandon("no-such-release", "a2")
+
+    def test_a_taken_sequence_or_release_id_is_a_release_error(self, ledger: Ledger):
+        build_id = _build(ledger)
+        taken = ledger.releases.prepare(build_id, "a1", "checkpoint", sequence=1)
+        with pytest.raises(ReleaseError, match="checkpoint sequence 1"):
+            ledger.releases.prepare(build_id, "a1", "checkpoint", sequence=1)
+        with pytest.raises(ReleaseError, match=taken.release_id):
+            ledger.releases.prepare(build_id, "a1", "final", release_id=taken.release_id)
+        assert [r.release_id for r in ledger.releases.releases_of(build_id)] == [taken.release_id]
+        assert ledger.releases.prepare(build_id, "a1", "checkpoint").sequence == 2
+
+    def test_an_audit_event_holds_the_audit_lock_until_the_release_commits(self, ledger: Ledger):
+        """Audit rows commit in ``seq`` order: another writer's event waits for the release's."""
+        build_id = _build(ledger)
+        named = _checkpoint(ledger, build_id).outputs[0]
+        release = ledger.releases.prepare(build_id, "a1", "checkpoint")
+        staged = [_stage(ledger, release, "model", b"w")]
+
+        bundle, _, locked = _interleave(
+            ledger,
+            lambda ledger_: ledger_.releases.accept(
+                release.release_id,
+                staged,
+                [InsertAuditEvent(AuditEvent("release.accept", "alice"))],
+            ),
+            lambda other: other.store.set_name("audited", named.id, named.version, actor="bob"),
+            after="INSERT INTO registry_audit",
+        )
+
+        assert locked, "set_name's audit row was written inside the release's transaction"
+        assert isinstance(bundle, ReleaseBundle) and bundle.release.state == "accepted"
+        actions = [(e["action"], e["actor"]) for e in ledger.store.read_events()]
+        assert actions[-2:] == [("release.accept", "alice"), ("name_set", "bob")]

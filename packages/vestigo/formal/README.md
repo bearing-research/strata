@@ -1,28 +1,35 @@
 # Formal models
 
-TLA+ models of the two lifecycles this package implements, with the
-configurations that found their bugs (in Strata, before the extraction) and
-the patched configurations that now pass. They moved here with the code they
+TLA+ models of the two lifecycles this package implements. The lifecycle
+model describes the code as it is: a finalize that finds its provenance held
+under another id supersedes its own row with a pointer at the holder, and a
+sweep takes a canonical only once nothing points at it. The lease model keeps
+a `Patched` constant: `FALSE` is the behaviour the model found wrong in the
+first consumer, `TRUE` the code as it is. They moved here with the code they
 model (ADR 002).
 
 | File | What it checks |
 | --- | --- |
-| `tla/ArtifactLifecycle.tla` | `artifact_versions`: create, write blob, fail, finalize, force-finalize, garbage collect |
-| `tla/Artifact_GCRebuild.cfg` | One id with GC on. Violation: GC collected a version being rebuilt |
-| `tla/Artifact_CrossIdDedup.cfg` | Two ids sharing a provenance, GC off. Violation: cross-id dedup served a failed row |
-| `tla/Artifact_Patched.cfg` | Both ids, GC on, with the fix. All invariants hold (5,997,420 states, about 2 min) |
-| `tla/Artifact_Retention.cfg` | Patched, with retention roots and required edges (`MaxVer = 2`). All invariants and `HeldIsKept` hold (3,597,345 states, about 4 min) |
-| `tla/BuildLease.tla` | One build and its lease: claim, reclaim, heartbeat, publish, finalize, complete, fail, and the pull-path routes |
-| `tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build. Violation: a lapsed runner finalizes |
-| `tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest. Violation: both upload |
-| `tla/Build_Patched.cfg` | Runners and executors with the fix, and checkpoint releases fenced on the lease (`OnlyLeaseHolderReleases`). All invariants hold |
+| `tla/ArtifactLifecycle.tla` | `artifact_versions`: create, write blob, fail, finalize (own id, refresh, foreign id through a pointer), finalize together, retain, release, one row of a sweep |
+| `tla/Artifact_GCRebuild.cfg` | One id with GC on: a sweep during a rebuild leaves the current value in place (1,868 states) |
+| `tla/Artifact_CrossIdDedup.cfg` | Two ids sharing a provenance, GC off: the loser reads the winner's bytes through its pointer (1,495 states) |
+| `tla/Artifact_Patched.cfg` | Both ids, GC on, pointers and sweeps together. All invariants, `PointersResolve` among them |
+| `tla/Artifact_Retention.cfg` | With retention roots and required edges (`MaxVer = 2`). All invariants and `HeldIsKept` |
+| `tla/BuildLease.tla` | One build and its lease: claim, reclaim, open an attempt, heartbeat, checkpoint, publish, finalize, complete, fail, and the pull-path routes |
+| `tla/Build_RunnerPath.cfg` | Two runners, lease can expire mid-build, unpatched. Violation: a lapsed runner finalizes |
+| `tla/Build_PullPath.cfg` | Two executors fetch the same build's manifest, unpatched. Violation: both upload |
+| `tla/Build_Patched.cfg` | Runners and executors as the code is: attempts rotate the fence, a claim or reclaim clears it, a lapsed lease fences its attempt (`OnlyLeaseHolderReleases`). All invariants hold |
+
+The state counts above are from the last TLC run of that configuration; the
+other configurations have not been re-run since the models were rewritten to
+match the code (2026-10-26) and should be before the next release.
 
 ```bash
 curl -sSLO https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
 TLC="java -cp $PWD/tla2tools.jar tlc2.TLC -deadlock -workers auto"
 cd formal/tla
-$TLC -config Artifact_GCRebuild.cfg    ArtifactLifecycle.tla   # violation
-$TLC -config Artifact_CrossIdDedup.cfg ArtifactLifecycle.tla   # violation
+$TLC -config Artifact_GCRebuild.cfg    ArtifactLifecycle.tla   # passes
+$TLC -config Artifact_CrossIdDedup.cfg ArtifactLifecycle.tla   # passes
 $TLC -config Artifact_Patched.cfg      ArtifactLifecycle.tla   # passes
 $TLC -config Artifact_Retention.cfg    ArtifactLifecycle.tla   # passes
 $TLC -config Build_RunnerPath.cfg      BuildLease.tla          # violation

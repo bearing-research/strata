@@ -1,6 +1,10 @@
 """Build state store for server-orchestrated transforms, in the artifact store's database.
 
 States: ``pending`` -> ``building`` (under a runner's lease) -> ``ready`` or ``failed``.
+
+Every writer of a build's state, owner or attempt runs under the build's write key
+(``begin_write``), so none lands between a release's fence check and its commit;
+``renew_lease``, which only moves the deadline, does not.
 """
 
 from __future__ import annotations
@@ -10,13 +14,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from vestigo.sql_backend import SqlDialect, SqliteDialect, StoreConnection
-
-if TYPE_CHECKING:
-    pass
-
 
 _BUILD_SCHEMA_SQL = """
 -- Build state: tracks async build lifecycle
@@ -161,34 +161,6 @@ class AttemptState:
 
 def _row_to_build_state(row: Any) -> BuildState:
     """Convert a database row to a BuildState."""
-    # Columns may be absent on older rows or null.
-    input_uris = None
-    params = None
-    name = None
-
-    try:
-        if row["input_uris"]:
-            input_uris = json.loads(row["input_uris"])
-    except (KeyError, IndexError):
-        pass
-
-    try:
-        if row["params"]:
-            params = json.loads(row["params"])
-    except (KeyError, IndexError):
-        pass
-
-    try:
-        name = row["name"]
-    except (KeyError, IndexError):
-        pass
-
-    logs = None
-    try:
-        logs = row["logs"]
-    except (KeyError, IndexError):
-        pass
-
     return BuildState(
         build_id=row["build_id"],
         artifact_id=row["artifact_id"],
@@ -207,10 +179,10 @@ def _row_to_build_state(row: Any) -> BuildState:
         output_byte_count=row["output_byte_count"],
         lease_owner=row["lease_owner"],
         lease_expires_at=row["lease_expires_at"],
-        input_uris=input_uris,
-        params=params,
-        name=name,
-        logs=logs,
+        input_uris=json.loads(row["input_uris"]) if row["input_uris"] else None,
+        params=json.loads(row["params"]) if row["params"] else None,
+        name=row["name"],
+        logs=row["logs"],
         occurrence=row["occurrence"],
         attempt=row["attempt"],
         computation_key=row["computation_key"],
@@ -317,16 +289,19 @@ class BuildStore:
 
     def _add_release_columns(self, conn: StoreConnection) -> None:
         """The columns ADR 002 §7.2 added, on a database from before them (either dialect)."""
-        for table, column in (
+        columns = (
             ("artifact_builds", "occurrence"),
             ("artifact_builds", "attempt"),
             ("artifact_builds", "computation_key"),
             ("build_attempts", "resumed_from"),
-        ):
+        )
+        if all(self._dialect.column_exists(conn, table, column) for table, column in columns):
+            return
+        self._dialect.begin_write(conn, "__build_schema__")
+        # Re-checked under the lock: another node starting at once may have added them.
+        for table, column in columns:
             if not self._dialect.column_exists(conn, table, column):
-                self._dialect.begin_write(conn, "__build_schema__")
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
-                conn.commit()
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_build_computation ON artifact_builds(computation_key)"
         )
@@ -421,7 +396,8 @@ class BuildStore:
         A pending build starts; a building one continues (a resume, whose attempt
         names the accepted release it starts from in ``resumed_from``). The attempt's
         write window is recorded as ``record_attempt`` does. Returns False when the
-        build is not active.
+        build is not active, or its lease is live under another attempt (or none:
+        a runner's claim), which only its own attempt may take over.
         """
         conn = self._get_connection()
         try:
@@ -456,10 +432,17 @@ class BuildStore:
     ) -> bool:
         """As :meth:`open_attempt`, on the caller's transaction."""
         row = conn.execute(
-            "SELECT artifact_id, version, state FROM artifact_builds WHERE build_id = ?",
+            "SELECT artifact_id, version, state, attempt, lease_expires_at "
+            "FROM artifact_builds WHERE build_id = ?",
             (build_id,),
         ).fetchone()
         if row is None or row["state"] not in ("pending", "building"):
+            return False
+        if (
+            row["attempt"] != attempt
+            and row["lease_expires_at"] is not None
+            and row["lease_expires_at"] >= now
+        ):
             return False
         conn.execute(
             """
@@ -602,6 +585,7 @@ class BuildStore:
         """Repoint a build at the existing artifact finalization deduplicated it to."""
         conn = self._get_connection()
         try:
+            self._dialect.begin_write(conn, build_id)
             cursor = conn.execute(
                 """
                 UPDATE artifact_builds
@@ -616,12 +600,16 @@ class BuildStore:
             conn.close()
 
     def start_build(self, build_id: str) -> bool:
-        """Move a build from pending to building, without a lease; prefer ``claim_build()``.
+        """Move a build from pending to building with neither a lease nor an attempt.
 
-        Returns False if not found or not pending.
+        For a build its creator runs itself: no fence applies to it, so only
+        ``complete_build`` and ``fail_build`` without an owner end it, and it has no
+        releases. A runner claims with ``claim_build``; a release's attempt opens
+        with ``open_attempt``. Returns False if not found or not pending.
         """
         conn = self._get_connection()
         try:
+            self._dialect.begin_write(conn, build_id)
             cursor = conn.execute(
                 """
                 UPDATE artifact_builds
@@ -643,10 +631,12 @@ class BuildStore:
     ) -> bool:
         """Claim a pending build under a lease, atomically; False if another runner won.
 
-        Renew with ``renew_lease()`` or another runner may reclaim the build.
+        Renew with ``renew_lease()`` or another runner may reclaim the build. A claimed
+        build has no attempt until ``open_attempt``: no release of it is accepted.
         """
         conn = self._get_connection()
         try:
+            self._dialect.begin_write(conn, build_id)
             now = self._clock()
             lease_expires_at = now + lease_duration_seconds
             cursor = conn.execute(
@@ -655,7 +645,8 @@ class BuildStore:
                 SET state = 'building',
                     started_at = ?,
                     lease_owner = ?,
-                    lease_expires_at = ?
+                    lease_expires_at = ?,
+                    attempt = NULL
                 WHERE build_id = ? AND state = 'pending'
                 """,
                 (now, lease_owner, lease_expires_at, build_id),
@@ -702,10 +693,13 @@ class BuildStore:
     ) -> bool:
         """Take over a building build whose lease has expired (a dead runner's orphan).
 
-        Returns False if the lease has not expired or the build is not building.
+        The lapsed attempt is fenced: the build has none until ``open_attempt``, so a
+        release the old runner still sends is rejected. Returns False if the lease
+        has not expired or the build is not building.
         """
         conn = self._get_connection()
         try:
+            self._dialect.begin_write(conn, build_id)
             now = self._clock()
             lease_expires_at = now + lease_duration_seconds
             cursor = conn.execute(
@@ -713,7 +707,8 @@ class BuildStore:
                 UPDATE artifact_builds
                 SET lease_owner = ?,
                     lease_expires_at = ?,
-                    started_at = ?
+                    started_at = ?,
+                    attempt = NULL
                 WHERE build_id = ?
                   AND state = 'building'
                   AND lease_expires_at < ?
@@ -771,6 +766,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
+            self._dialect.begin_write(conn, build_id)
             sql = """
                 UPDATE artifact_builds
                 SET state = 'ready', completed_at = ?, output_byte_count = ?, logs = ?
@@ -981,6 +977,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
+            self._dialect.begin_write(conn, build_id)
             sql = """
                 UPDATE artifact_builds
                 SET state = 'failed', completed_at = ?, error_message = ?, error_code = ?, logs = ?

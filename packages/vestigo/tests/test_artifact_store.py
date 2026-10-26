@@ -289,6 +289,41 @@ class TestProvenanceLookup:
         found = store.find_by_provenance("hash123")
         assert found is None
 
+    def test_a_lookup_does_not_wait_for_a_writer_to_note_its_use(self, store):
+        """The use note is advisory: a hit returns while a sweep holds the write lock,
+        rather than waiting the busy timeout behind it. The lock is held throughout,
+        so the lookup can only come back by giving the note up."""
+        import sqlite3
+        import threading
+
+        version = store.create_artifact("test-id", "unique-hash")
+        store.finalize_artifact("test-id", version, "{}", 100, 1000)
+        conn = store._get_connection()
+        try:
+            conn.execute("UPDATE artifact_versions SET last_used_at = 0")
+            conn.commit()
+        finally:
+            conn.close()
+        writer = sqlite3.connect(str(store.db_path), check_same_thread=False)
+        writer.execute("BEGIN IMMEDIATE")
+        found = []
+
+        def look_up():
+            found.append(store.find_by_provenance("unique-hash"))
+
+        lookup = threading.Thread(target=look_up)
+        try:
+            lookup.start()
+            lookup.join(timeout=10)
+            assert not lookup.is_alive(), "the lookup is waiting on the writer's lock"
+        finally:
+            writer.rollback()
+            writer.close()
+            lookup.join()
+
+        assert found[0] is not None and found[0].id == "test-id"
+        assert store.get_artifact("test-id", version) is not None
+
 
 class TestBlobIO:
     def test_write_and_read_blob(self, store):
@@ -348,7 +383,18 @@ class TestNamePointers:
 
         with pytest.raises(ValueError) as exc_info:
             store.set_name("my-artifact", "test-id", version)
-        assert "not ready" in str(exc_info.value)
+        assert "not readable" in str(exc_info.value)
+
+    def test_set_name_accepts_a_superseded_current_value(self, store):
+        """An id overtaken by another id's run keeps a current value, which can be named."""
+        _make_ready_artifact(store, "theirs", "prov-x")
+        _make_ready_artifact(store, "mine", "prov-x")
+        assert store.get_artifact("mine", 1).state == "superseded"
+
+        store.set_name("my-artifact", "mine", 1)
+
+        resolved = store.resolve_name("my-artifact")
+        assert (resolved.id, resolved.version) == ("mine", 1)
 
     def test_set_name_requires_exists(self, store):
         with pytest.raises(ValueError) as exc_info:
@@ -431,6 +477,23 @@ class TestCleanup:
         assert store.cleanup_failed(max_age_seconds=-10) == 1
         assert store.get_artifact("built", version) is None
         assert builds.get_build("build-1") is None
+
+    def test_cleanup_failed_leaves_the_top_version_while_a_lower_one_stays(self, store):
+        """Otherwise the next create reuses the number, as the sweep's gap rule prevents."""
+        store.create_artifact("model", "prov-1")
+        store.finalize_artifact("model", 1, "{}", 1, 10)
+        failed = store.create_artifact("model", "prov-2")
+        store.fail_artifact("model", failed)
+        assert failed == 2
+
+        assert store.cleanup_failed(max_age_seconds=-10) == 0
+        assert store.get_artifact("model", 2).state == "failed"
+        assert store.create_artifact("model", "prov-3") == 3
+
+        store.fail_artifact("model", 3)
+        assert store.cleanup_failed(max_age_seconds=-10) == 1
+        assert store.get_artifact("model", 2) is None
+        assert store.get_artifact("model", 3).state == "failed"
 
     def test_cleanup_preserves_ready(self, store):
         version = store.create_artifact("test-id", "hash123")
@@ -704,6 +767,69 @@ class TestVersionPromotion:
         assert store.read_blob("art-1", promoted.version) == payload
         assert promoted.byte_size == len(payload)
 
+    def test_promotion_carries_requirements_minted_and_keys(self, store):
+        """A promoted folder manifest requires its files, or a sweep takes them from
+        under the current value; the copy stays minted and keeps its computation."""
+        store.create_artifact("file-1", "prov-f", minted=True)
+        store.blob_store.write_blob("file-1", 1, b"file")
+        store.finalize_artifact("file-1", 1, "{}", 1, 4)
+        manifest = store.create_artifact(
+            "manifest",
+            "prov-m",
+            requires=[("file-1", 1)],
+            release_id="rel-1",
+            computation_key="comp-1",
+        )
+        store.blob_store.write_blob("manifest", manifest, b"m")
+        store.finalize_artifact("manifest", manifest, "{}", 1, 1)
+        self._ready(store, "manifest", "prov-m2", b"m2")
+
+        promoted = store.promote_version("manifest", manifest)
+
+        assert (promoted.version, promoted.release_id, promoted.computation_key) == (
+            3,
+            "rel-1",
+            "comp-1",
+        )
+        conn = store._get_connection()
+        try:
+            edges = conn.execute(
+                "SELECT from_version, to_artifact_id, to_version FROM retention_edges "
+                "WHERE from_artifact_id = 'manifest' ORDER BY from_version"
+            ).fetchall()
+        finally:
+            conn.close()
+        assert [tuple(e) for e in edges] == [(1, "file-1", 1), (3, "file-1", 1)]
+        assert store.requirements_met(promoted)
+        # A minted id stays minted through a promotion, as through a create.
+        assert store.promote_version("file-1", 1).version == 2
+        conn = store._get_connection()
+        try:
+            minted = conn.execute(
+                "SELECT minted FROM artifact_versions WHERE id = 'file-1' AND version = 2"
+            ).fetchone()["minted"]
+        finally:
+            conn.close()
+        assert minted == 1
+        _idle_everything(store)
+        store.garbage_collect(max_idle_days=0, keep_superseded=0)
+        assert store.get_latest_version("manifest").version == 3
+        assert store.get_artifact("file-1", 1) is not None
+
+    def test_promotion_refuses_an_id_another_tenant_holds(self, store):
+        from vestigo.store import ArtifactIdTaken
+
+        version = store.create_artifact("art-1", "prov-a", tenant="acme")
+        store.blob_store.write_blob("art-1", version, b"theirs")
+        store.finalize_artifact("art-1", version, "{}", 1, 6)
+
+        with pytest.raises(ArtifactIdTaken, match="another tenant"):
+            store.promote_version("art-1", version, tenant="globex")
+        with pytest.raises(ArtifactIdTaken, match="another tenant"):
+            store.promote_version("art-1", version)
+        assert store.get_artifact("art-1", 2) is None
+        assert store.promote_version("art-1", version, tenant="acme").version == 2
+
     def test_promotion_keeps_the_canonical_id_when_dedup_diverts(self, store):
         # Another artifact already holds this provenance in ready state, so
         # finalize_artifact would hand back *its* id and fail ours. Callers
@@ -800,9 +926,32 @@ class TestRefreshSupersede:
         assert store.read_blob("art-1", 1) == _ipc_bytes(10)
         assert store.verify_artifacts() == []
 
-    def test_an_overtaken_version_whose_canonical_went_is_reported(self, store):
-        """A deleted canonical leaves the pointer dangling; verify names it rather than
-        reporting an orphan blob."""
+    @pytest.mark.parametrize("hold", ["none", "alias", "current"])
+    def test_deleting_a_canonical_hands_its_bytes_to_every_version_reading_them(self, store, hold):
+        """An aliased pointer, or a cell's current value, keeps resolving after the delete,
+        so it needs bytes of its own; a sweep never parts a pointer from its bytes either."""
+        reader = "nb_x_cell_c_var_df" if hold == "current" else "art-2"
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact(reader, "prov-x", minted=hold != "current")
+        store.write_blob(reader, 1, _ipc_bytes(10))
+        store.finalize_artifact(reader, 1, "{}", 10, 100)
+        if hold == "alias":
+            store.set_alias("model", "champion", reader, 1)
+
+        assert store.delete_artifact("art-1", 1)
+
+        assert store.read_blob(reader, 1) == _ipc_bytes(10)
+        assert store.blob_store.blob_exists(reader, 1)
+        assert store.verify_artifacts() == []
+        if hold == "alias":
+            assert store.resolve_alias("model", "champion").version == 1
+        if hold == "current":
+            assert store.get_latest_version(reader).version == 1
+
+    def test_an_overtaken_version_whose_canonical_lost_its_blob_is_reported(self, store):
+        """verify names the pointer's canonical rather than reporting an orphan blob."""
         store.create_artifact("art-1", "prov-x")
         store.write_blob("art-1", 1, _ipc_bytes(10))
         store.finalize_artifact("art-1", 1, "{}", 10, 100)
@@ -810,12 +959,66 @@ class TestRefreshSupersede:
         store.write_blob("art-2", 1, _ipc_bytes(10))
         store.finalize_artifact("art-2", 1, "{}", 10, 100)
 
-        assert store.delete_artifact("art-1", 1)
+        store.blob_store.delete_blob("art-1", 1)
 
         assert store.read_blob("art-2", 1) is None
-        [finding] = store.verify_artifacts()
-        assert (finding["artifact_id"], finding["problem"]) == ("art-2", "missing_blob")
-        assert "art-1@v=1" in finding["detail"]
+        findings = {f["artifact_id"]: f for f in store.verify_artifacts()}
+        assert {k: f["problem"] for k, f in findings.items()} == {
+            "art-1": "missing_blob",
+            "art-2": "missing_blob",
+        }
+        assert "art-1@v=1" in findings["art-2"]["detail"]
+
+    def test_a_retry_of_an_overtaken_finalize_returns_the_canonical(self, store):
+        """A caller that lost the first call's response gets what it returned, not an error."""
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
+        first = store.finalize_artifact("art-2", 1, "{}", 10, 100)
+        assert (first.id, first.version) == ("art-1", 1)
+
+        again = store.finalize_and_set_name("art-2", 1, "{}", 10, 100, name="model")
+
+        assert (again.id, again.version, again.state) == ("art-1", 1, "ready")
+        assert store.get_artifact("art-2", 1).state == "superseded"
+        resolved = store.resolve_name("model")
+        assert (resolved.id, resolved.version) == ("art-1", 1)
+        # A version superseded by a refresh of its own id was never diverted: still refused.
+        store.create_artifact("art-3", "prov-y")
+        store.write_blob("art-3", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-3", 1, "{}", 10, 100)
+        store.create_artifact("art-3", "prov-y")
+        store.write_blob("art-3", 2, _ipc_bytes(10))
+        store.finalize_artifact("art-3", 2, "{}", 10, 100)
+        with pytest.raises(ValueError, match="not in building state"):
+            store.finalize_artifact("art-3", 1, "{}", 10, 100)
+
+    def test_the_integrity_branch_returns_the_winner(self, store, monkeypatch):
+        """The unique index rejects a second ready row the lookup missed: the loser is
+        superseded, reads the winner's bytes, and its own blob goes."""
+        store.create_artifact("art-1", "prov-x")
+        store.write_blob("art-1", 1, _ipc_bytes(10))
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        find = store.find_by_provenance
+        calls = []
+
+        def missing_once(*args, **kwargs):
+            calls.append(True)
+            return None if len(calls) == 1 else find(*args, **kwargs)
+
+        monkeypatch.setattr(store, "find_by_provenance", missing_once)
+        store.create_artifact("art-2", "prov-x")
+        store.write_blob("art-2", 1, _ipc_bytes(10))
+
+        result = store.finalize_artifact("art-2", 1, "{}", 10, 100)
+
+        assert len(calls) == 2
+        assert (result.id, result.version) == ("art-1", 1)
+        assert store.get_artifact("art-2", 1).state == "superseded"
+        assert store.read_blob("art-2", 1) == _ipc_bytes(10)
+        assert not store.blob_store.blob_exists("art-2", 1)
 
     @pytest.mark.parametrize("hold", ["publish", "pin"])
     def test_deleting_a_canonical_hands_its_bytes_to_a_held_version_reading_them(self, store, hold):
@@ -964,6 +1167,16 @@ class TestLegacyDefaultTenantNames:
         with pytest.raises(ArtifactNotFoundError, match="not found") as excinfo:
             store.set_name("steal", "owned", 1, tenant="globex")
         assert "acme" not in str(excinfo.value)
+
+
+def _idle_everything(store) -> None:
+    """Every version last used long ago, so a sweep by age may take it."""
+    conn = store._get_connection()
+    try:
+        conn.execute("UPDATE artifact_versions SET created_at = 0, last_used_at = 0")
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _make_ready_artifact(store, artifact_id: str, provenance: str) -> None:
@@ -1879,8 +2092,12 @@ class TestTenantlessArtifactsAreVisibleToScopedQueries:
 
     def test_verify_sees_legacy_rows(self, store):
         self._seed(store)
+        store.blob_store.write_blob("legacy", 1, b"not an arrow stream")
+
         # verify walks the same filter; it must not skip legacy rows.
-        store.verify_artifacts(tenant="team-a")
+        [finding] = store.verify_artifacts(tenant="team-a")
+
+        assert (finding["artifact_id"], finding["problem"]) == ("legacy", "invalid_stream")
 
     def test_gc_can_finally_reach_legacy_rows(self, store):
         """Asserts reachability rather than an exact count, so the GC policy is not encoded here."""
@@ -2128,6 +2345,104 @@ class TestFindReadyAndSetName:
         name = store.get_name("the-name")
         assert (name.artifact_id, name.version) == ("a1", 2)
         assert store.get_artifact("a1", 1).state == "superseded"
+
+
+class TestWholeStoreReads:
+    """``tenant`` means the default tenant when ``None``; every tenant only when left out."""
+
+    def _seed(self, store):
+        _make_ready_artifact(store, "up", "prov-up")
+        for tenant, artifact_id in ((None, "mine"), ("acme", "theirs")):
+            version = store.create_artifact(
+                artifact_id,
+                f"prov-{artifact_id}",
+                input_versions={"vestigo://name/model@champion": "up@v=1"},
+                tenant=tenant,
+            )
+            store.write_blob(artifact_id, version, _ipc_bytes(1))
+            store.finalize_artifact(artifact_id, version, "{}", 1, 10)
+
+    def test_find_dependents(self, store):
+        self._seed(store)
+
+        assert {d.id for d, _ in store.find_dependents("up", 1)} == {"mine", "theirs"}
+        assert [d.id for d, _ in store.find_dependents("up", 1, tenant=None)] == ["mine"]
+        assert [d.id for d, _ in store.find_dependents("up", 1, tenant="acme")] == ["theirs"]
+
+    def test_list_name_reads(self, store):
+        self._seed(store)
+
+        assert {r[1] for r in store.list_name_reads()} == {"mine", "theirs"}
+        assert store.list_name_reads(tenant=None) == [(None, "mine", "model@champion")]
+        assert store.list_name_reads(tenant="acme") == [("acme", "theirs", "model@champion")]
+
+
+class TestVersionsOfComputation:
+    """Every output of one bound computation can be found by its ``computation_key``."""
+
+    def test_the_outputs_of_a_computation_are_found_per_tenant(self, store):
+        for artifact_id, tenant in (("model", None), ("metrics", None), ("theirs", "acme")):
+            version = store.create_artifact(
+                artifact_id, f"prov-{artifact_id}", tenant=tenant, computation_key="comp-1"
+            )
+            store.write_blob(artifact_id, version, _ipc_bytes(1))
+            store.finalize_artifact(artifact_id, version, "{}", 1, 10)
+        from vestigo.store import StagedVersion
+
+        _make_ready_artifact(store, "other", "prov-other")
+        store.create_artifact("building", "prov-b", computation_key="comp-1")
+        store.create_artifact("twin", "prov-model")
+        store.write_blob("twin", 1, _ipc_bytes(1))
+        store.finalize_canonical_together([StagedVersion("twin", 1, "{}", 1, 10, "d")])
+
+        found = store.versions_of_computation("comp-1")
+
+        assert [(v.id, v.state) for v in found] == [("model", "superseded"), ("metrics", "ready")]
+        assert [v.id for v in store.versions_of_computation("comp-1", tenant="acme")] == ["theirs"]
+        assert store.versions_of_computation("comp-2") == []
+
+
+class TestSetDefinitions:
+    """A version is attributed only to a node stored in its tenant's scope."""
+
+    def _node(self, store, tenant=None):
+        from vestigo.graph import NodeSpec
+
+        return store.graph.put_batch([NodeSpec("test/cell", b"x")], tenant=tenant)[0]
+
+    def test_a_definition_is_recorded_in_the_versions_tenant(self, store):
+        node = self._node(store, tenant="t1")
+        store.create_artifact("out", "prov-1", tenant="t1")
+        store.create_artifact("out2", "prov-2")
+
+        store.set_definitions({("out", 1): node, ("out2", 1): node}, tenant="t1")
+
+        assert store.definition_of("out", 1, tenant="t1") == node
+        assert store.definition_of("out2", 1) is None
+
+    def test_a_node_from_another_scope_or_none_at_all_is_refused(self, store):
+        theirs = self._node(store, tenant="t2")
+        store.create_artifact("out", "prov-1", tenant="t1")
+        store.create_artifact("out2", "prov-2", tenant="t1")
+        mine = self._node(store, tenant="t1")
+
+        with pytest.raises(ValueError, match="not in the store"):
+            store.set_definitions({("out", 1): mine, ("out2", 1): theirs}, tenant="t1")
+        with pytest.raises(ValueError, match="not in the store"):
+            store.set_definitions({("out", 1): "f" * 64}, tenant="t1")
+        with pytest.raises(ValueError, match="not a node id"):
+            store.set_definitions({("out", 1): "zz"}, tenant="t1")
+        assert store.definition_of("out", 1, tenant="t1") is None
+
+
+class TestIdPrefixListing:
+    def test_a_prefix_with_like_wildcards_matches_itself_only(self, store):
+        _make_ready_artifact(store, "a_b", "prov-1")
+        _make_ready_artifact(store, "axb", "prov-2")
+        _make_ready_artifact(store, "a%b", "prov-3")
+
+        assert [v.id for v in store.list_latest_by_id_prefix("a_")] == ["a_b"]
+        assert [v.id for v in store.list_versions_by_id_prefix("a%")] == ["a%b"]
 
 
 class TestUriScheme:

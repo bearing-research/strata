@@ -1,7 +1,8 @@
 """Presigning with each cloud's own signing, against fixed fake credentials and no network.
 
-The emulator tests (MinIO, Azurite) check that a store accepts the URLs; GCS has no emulator
-that checks signatures, so here a V4 signature is verified against the key's public half.
+A GCS V4 signature is verified against the key's public half, and the IAM signBlob path is
+faked at the HTTP boundary; the S3 and Azure URLs are checked for the credential, token and
+permissions they carry. No test here or in the suite submits a URL to a store or emulator.
 """
 
 from __future__ import annotations

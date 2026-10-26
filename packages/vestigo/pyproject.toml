@@ -10,7 +10,6 @@ authors = [{ name = "Fangchen Li", email = "fangchen.li@outlook.com" }]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -56,9 +55,11 @@ dev = [
     "testcontainers>=4.15.0",
     "docker>=7.0.0",
     "anyio>=4.0.0",
-    # The presigned-signing tests mint an RSA key; the S3 tests mock the service.
+    # The presigned-signing tests mint an RSA key; the cloud backends run over fakes.
     "cryptography>=42.0.0",
-    "moto[s3]>=5.0.0",
+    # The same ruff as .pre-commit-config.yaml and ci.yml.
+    "ruff==0.17.1",
+    "pre-commit>=4.0.0",
 ]
 
 [tool.pytest.ini_options]

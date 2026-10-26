@@ -7,6 +7,11 @@ consumer set its own with :func:`set_uri_scheme`):
     {scheme}://artifact/{id}@v={version}   -> pinned version
     {scheme}://artifact/{id}               -> latest (version reported as -1)
     {scheme}://name/{name}                 -> named pointer
+
+A URI under any other scheme is not an artifact or name URI: the parsers return
+``None`` for it, and nothing records which scheme a parse ran under. A consumer
+with its own scheme sets it before anything parses, in the package's
+``__init__`` ahead of the modules that parse at import time.
 """
 
 from __future__ import annotations
@@ -39,9 +44,11 @@ _ARTIFACT_PINNED, _ARTIFACT_LATEST, _NAME = _patterns(_scheme)
 def set_uri_scheme(scheme: str) -> None:
     """Use *scheme* in every URI this process parses or writes.
 
-    A consumer sets it once, before any URI is parsed. The scheme is persisted
-    in ``input_versions`` rows and in whatever the consumer keeps, so a store
-    written under one scheme is read under the same one.
+    A consumer sets it once, before any URI is parsed: a parse before that ran
+    under the previous scheme and answered ``None`` for the consumer's URIs,
+    silently. The scheme is persisted in ``input_versions`` rows and in whatever
+    the consumer keeps, so a store written under one scheme is read under the
+    same one.
     """
     global _scheme, _ARTIFACT_PINNED, _ARTIFACT_LATEST, _NAME
     if not _SCHEME.match(scheme):
@@ -56,7 +63,14 @@ def uri_scheme() -> str:
 
 
 def artifact_uri(artifact_id: str, version: int) -> str:
-    """The pinned URI of one version."""
+    """The pinned URI of one version.
+
+    Raises:
+        ValueError: *version* is negative; ``LATEST_VERSION`` is a parse result,
+            not a version, and the unpinned form has no ``@v=``.
+    """
+    if version < 0:
+        raise ValueError(f"version {version} is not a pinned version")
     return f"{_scheme}://artifact/{artifact_id}@v={version}"
 
 

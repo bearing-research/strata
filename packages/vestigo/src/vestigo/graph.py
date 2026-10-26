@@ -48,10 +48,17 @@ def identity_scope(tenant: str | None) -> bytes:
 
 
 def canonical_role(role: str) -> bytes:
-    """A role is the identifier's NFKC form, the normalization Python applies to identifiers."""
+    """A role is the identifier's NFKC form, the normalization Python applies to identifiers.
+
+    Raises:
+        ValueError: *role* is not an identifier (ADR 002 §6.3) once normalized.
+    """
     if not role:
         raise ValueError("role must be nonempty")
-    encoded = unicodedata.normalize("NFKC", role).encode("utf-8")
+    normalized = unicodedata.normalize("NFKC", role)
+    if not normalized.isidentifier():
+        raise ValueError(f"role {role!r} is not an identifier")
+    encoded = normalized.encode("utf-8")
     _check_range(len(encoded), _U16, "role length")
     return encoded
 
@@ -156,8 +163,8 @@ def cgd1_envelope(
     _check_scope(scope)
     _check_range(interface_version, _U32, "interface version")
     d = canonical_domain(domain)
-    ins = sorted(inputs, key=lambda i: i[0].encode("ascii"))
-    outs = sorted(outputs, key=lambda o: o[0].encode("ascii"))
+    ins = sorted(inputs, key=lambda i: _canonical_port_name(i[0]))
+    outs = sorted(outputs, key=lambda o: _canonical_port_name(o[0]))
     _check_unique([i[0] for i in ins] + [o[0] for o in outs], "port name")
     root_list = sorted(roots)
     _check_unique(root_list, "root")
@@ -260,10 +267,20 @@ class InputEdge:
 
 @dataclass(frozen=True)
 class Traversal:
-    """How far a walk may go; both bounds are the caller's statement of cost."""
+    """How far a walk may go; both bounds are the caller's statement of cost.
+
+    ``max_depth`` (at least 1) is the deepest level returned and the bound on the
+    work: the recursive query expands every path to that depth before the result
+    is counted. ``max_nodes`` caps the answer, not the walk: a walk that reaches
+    more distinct nodes than that raises ``ValueError`` after running to its depth.
+    """
 
     max_depth: int = MAX_DEPTH
     max_nodes: int = MAX_NODES
+
+    def __post_init__(self) -> None:
+        if self.max_depth < 1:
+            raise ValueError(f"max_depth {self.max_depth} is below 1")
 
 
 DEFAULT_TRAVERSAL = Traversal()
@@ -341,7 +358,9 @@ class GraphStore:
         scope_hex = scope.hex()
         resolved = self._resolve(conn, scope, scope_hex, specs)
         now = time.time()
-        for entry in resolved:
+        # Sorted by id: two batches that share nodes then lock them in the same order,
+        # which is what keeps ON CONFLICT DO NOTHING from deadlocking on Postgres.
+        for entry in sorted(resolved, key=lambda e: e.node_id):
             conn.execute(
                 "INSERT INTO nodes (scope, node_id, domain, payload_version, payload, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (scope, node_id) DO NOTHING",
@@ -438,20 +457,24 @@ class GraphStore:
         )
 
     def inputs(self, node_id: NodeId, *, tenant: str | None = None) -> list[InputEdge]:
-        """A node's input ports in canonical order (role, then position)."""
+        """A node's input ports in canonical order: the encoder's (role bytes, position)."""
         conn = self._connect()
         try:
             rows = conn.execute(
                 "SELECT role, position, target_node_id FROM node_inputs "
-                "WHERE scope = ? AND node_id = ? ORDER BY role, position",
+                "WHERE scope = ? AND node_id = ?",
                 (identity_scope(tenant).hex(), _checked_id(node_id)),
             ).fetchall()
         finally:
             conn.close()
-        return [
+        # Sorted here, not by the database: a collated TEXT column orders roles
+        # differently per backend and locale, and the encoder's order is byte order.
+        ports = [
             InputEdge(role=r["role"], position=r["position"], target_node_id=r["target_node_id"])
             for r in rows
         ]
+        ports.sort(key=lambda p: (canonical_role(p.role), p.position))
+        return ports
 
     def ancestors(
         self,
@@ -486,6 +509,10 @@ class GraphStore:
         """The roots and their ancestors, inputs before the nodes that read them.
 
         Among nodes nothing orders, by id, so the order is the same on every call.
+
+        Raises:
+            ValueError: A root is not in the store, or the traversal bound cut the
+                graph before its inputs.
         """
         scope_hex = identity_scope(tenant).hex()
         members = set(roots) | set(self.ancestors(roots, tenant=tenant, traversal=traversal))
@@ -494,6 +521,9 @@ class GraphStore:
         placeholders = ", ".join("?" for _ in members)
         conn = self._connect()
         try:
+            missing = set(roots) - self._held(conn, scope_hex, sorted(set(roots)))
+            if missing:
+                raise ValueError(f"node {min(missing)} is not in the store")
             rows = conn.execute(
                 "SELECT node_id, target_node_id FROM node_inputs "
                 f"WHERE scope = ? AND node_id IN ({placeholders})",

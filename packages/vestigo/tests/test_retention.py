@@ -138,13 +138,96 @@ class TestRoots:
         assert not store.release(*theirs, kind="pin", holder="x", tenant="a")
         assert store.retention_roots(tenant="a") == []
 
-    def test_a_deleted_version_takes_its_roots_with_it(self, store):
+    def test_a_held_version_is_not_deleted_until_released(self, store):
+        """A hold is a promise to restore the version: an explicit delete is refused,
+        as it is for a publication, until the holder lets go."""
         key = _ready(store)
         store.retain(*key, kind="pin", holder="review")
 
-        assert store.delete_artifact(*key)
+        with pytest.raises(ValueError, match="held \\(pin review\\)"):
+            store.delete_artifact(*key)
 
+        assert store.get_artifact(*key) is not None
+        assert store.retention_roots(*key) != []
+        store.release(*key, kind="pin", holder="review")
+        assert store.delete_artifact(*key)
         assert store.retention_roots(*key) == []
+
+    def test_a_root_held_without_a_tenant_is_the_versions_tenants(self, store):
+        """So the tenant that owns the version can release and list it."""
+        key = _ready(store, tenant="a")
+
+        root = store.retain(*key, kind="pin", holder="r")
+
+        assert root["tenant"] == "a"
+        assert store.retention_roots(*key, tenant="a") == [root]
+        assert store.release(*key, kind="pin", holder="r", tenant="a")
+        assert store.retention_roots(*key) == []
+
+
+class TestHoldLandingMidSweep:
+    """A hold landing on a reader after the selection keeps the reader's inputs: the
+    sweep reads reachability again under the write lock before each batch."""
+
+    def _reader_of(self, store, upstream):
+        ref = f"{upstream[0]}@v={upstream[1]}"
+        version = store.create_artifact(
+            "reader", "prov-r", input_versions={f"vestigo://artifact/{ref}": ref}, minted=True
+        )
+        store.write_blob("reader", version, b"r")
+        store.finalize_artifact("reader", version, "", None, 1)
+        _idle(store, "reader", version)
+        return "reader", version
+
+    def _sweep_with(self, store, monkeypatch, action):
+        """A full sweep, with *action* run after the candidates are chosen."""
+        chosen_then = ArtifactStore._without_version_gaps
+
+        def land(conn, chosen):
+            action()
+            return chosen_then(conn, chosen)
+
+        monkeypatch.setattr(ArtifactStore, "_without_version_gaps", staticmethod(land))
+        return _sweep(store)
+
+    @pytest.mark.parametrize("hold", ["name", "pin"])
+    def test_a_hold_on_a_reader_keeps_its_input(self, store, monkeypatch, hold):
+        upstream = _ready(store)
+        reader = self._reader_of(store, upstream)
+        land = {
+            "name": lambda: store.set_name("published-model", *reader),
+            "pin": lambda: store.retain(*reader, kind="pin", holder="review"),
+        }[hold]
+
+        assert self._sweep_with(store, monkeypatch, land) == 0
+
+        assert store.get_artifact(*reader) is not None
+        assert store.get_artifact(*upstream) is not None
+
+    def test_a_requirer_created_mid_sweep_keeps_its_file(self, store, monkeypatch):
+        """A manifest reusing a file the sweep chose: the claim sees the new edge."""
+        file = _ready(store)
+        created = {}
+
+        def reuse():
+            created["manifest"] = store.create_artifact("manifest", "prov-m", requires=[file])
+
+        assert self._sweep_with(store, monkeypatch, reuse) == 0
+
+        assert store.get_artifact(*file) is not None
+        store.write_blob("manifest", created["manifest"], b"m")
+        store.finalize_artifact("manifest", created["manifest"], "", None, 1)
+        assert store.requirements_met(store.get_artifact("manifest", created["manifest"]))
+
+    def test_an_id_another_sweep_emptied_is_dropped_from_the_choice(self, store):
+        key = _ready(store)
+        row = {"id": key[0], "version": key[1]}
+        store.delete_artifact(*key)
+        conn = store._get_connection()
+        try:
+            assert ArtifactStore._without_version_gaps(conn, {key: row}) == {}
+        finally:
+            conn.close()
 
 
 class TestRequirements:

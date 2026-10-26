@@ -197,10 +197,11 @@ def test_a_put_to_a_refusing_bucket_counts_one_put_error(client, refusing_s3):
     assert _value(after, _store_errors("put")) - _value(before, _store_errors("put")) == 1
 
 
-def test_a_swallowed_head_error_still_counts(client, refusing_s3):
-    """blob_exists reports a refusal as absent; the scrape must still see it."""
+def test_a_refused_head_propagates_and_counts(client, refusing_s3):
+    """Only a missing object is absent; a refusal reaches the caller and the scrape."""
     before = _scrape(client)
-    assert refusing_s3.blob_exists("art", 1) is False
+    with pytest.raises(OSError, match="ACCESS_DENIED"):
+        refusing_s3.blob_exists("art", 1)
     after = _scrape(client)
 
     assert _value(after, _store_errors("head")) - _value(before, _store_errors("head")) == 1

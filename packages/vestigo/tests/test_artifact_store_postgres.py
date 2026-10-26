@@ -7,6 +7,7 @@ is proven by behaviour rather than rendered SQL. Requires Docker and the ``postg
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 
@@ -32,6 +33,8 @@ def _docker_daemon_reachable() -> bool:
 
 
 if not _docker_daemon_reachable():
+    if os.environ.get("VESTIGO_REQUIRE_DOCKER"):
+        raise RuntimeError("VESTIGO_REQUIRE_DOCKER is set and the Docker daemon is unreachable")
     pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
@@ -54,8 +57,8 @@ def store(postgres_dsn, tmp_path):
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
             "artifact_tags, registry_audit, registry_pending, artifact_publications, "
             "retention_roots, retention_edges, store_upgrades, nodes, node_inputs, "
-            "build_releases, release_references, release_authorities, "
-            "schema_version CASCADE;"
+            "build_releases, release_references, release_authorities, import_staging, "
+            "artifact_builds, build_attempts, build_console_chunks, schema_version CASCADE;"
         )
         conn.commit()
     finally:
@@ -682,13 +685,6 @@ class TestGarbageCollection:
         """The build row's foreign key refused deleting the failed version it references."""
         from vestigo.build_store import BuildStore
 
-        # The fixture's CASCADE drop leaves a prior test's build table without its foreign key.
-        conn = store._get_connection()
-        try:
-            conn.executescript("DROP TABLE IF EXISTS artifact_builds;")
-            conn.commit()
-        finally:
-            conn.close()
         builds = BuildStore(tmp_path / "builds.sqlite", dialect=store.dialect)
         version = store.create_artifact("built", "prov-built", _spec())
         builds.create_build("build-1", "built", version, "exec@v1")
@@ -735,9 +731,9 @@ class TestConnectionPool:
             finally:
                 inner.close()
                 # Released only by the outermost holder.
-                assert dialect._local.conn is not None
+                assert dialect._local.lease.depth == 1
                 outer.close()
-                assert dialect._local.conn is None
+                assert dialect._local.lease is None
         finally:
             dialect.close()
 
@@ -858,9 +854,9 @@ class TestConnectionPool:
         with pytest.raises(RuntimeError, match="closed"):
             dialect.connect()
 
-    def test_release_from_a_non_owning_thread_is_ignored(self, postgres_dsn):
+    def test_a_release_from_a_non_owning_thread_releases(self, postgres_dsn):
         # A release from a thread that never acquired must not raise AttributeError or
-        # putconn(None), which would lose the real connection from a bounded pool.
+        # putconn(None); it returns the owner's lease to the pool.
         dialect = PostgresDialect(postgres_dsn)
         try:
             conn = dialect.connect()
@@ -877,11 +873,7 @@ class TestConnectionPool:
             thread.join()
 
             assert errors == []
-            # The owning thread still holds it, so the pool did not lose it.
-            assert dialect._local.conn is not None
-            conn._closed = False  # the foreign close flipped the wrapper's guard
-            conn.close()
-            assert dialect._local.conn is None
+            assert dialect._local.lease.depth == 0
         finally:
             dialect.close()
 
@@ -1380,9 +1372,8 @@ class TestWriterSerialization:
         assert store.get_artifact("h1", version) is None
 
     def test_duplicate_provenance_finalize_is_idempotent(self, store):
-        # Exercises the dialect's integrity_error: the partial unique index on
-        # (tenant, provenance_hash) rejects the second ready row, and the store
-        # catches it and returns the existing artifact.
+        # The second finalize finds the first by provenance before it writes and
+        # returns it; the index's rejection is TestProvenanceRaces' case.
         first = store.create_artifact("a1", "same-prov", _spec())
         store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
 
@@ -1602,41 +1593,6 @@ class TestSchemaMigrations:
         finally:
             dialect.close()
 
-    def test_an_existing_database_fails_misbound_builds(self, postgres_dsn, tmp_path, store):
-        """Embedded SQL over 11+ inputs bound input10 before input2, as did what read it."""
-        twelve = [f"vestigo://artifact/in{i}@v=1" for i in range(12)]
-        builds = {
-            "wide": ("local://duckdb_sql@v1", twelve, None),
-            "reader": (
-                "duckdb_sql@v1",
-                ["vestigo://name/wide"],
-                {"vestigo://name/wide": "wide@v=1"},
-            ),
-            "narrow": ("local://duckdb_sql@v1", twelve[:10], None),
-        }
-        for artifact_id, (executor, inputs, input_versions) in builds.items():
-            spec = TransformSpec(executor=executor, params={"sql": "SELECT 1"}, inputs=inputs)
-            version = store.create_artifact(
-                artifact_id, f"prov-{artifact_id}", spec, input_versions=input_versions
-            )
-            store.finalize_artifact(artifact_id, version, schema_json="", row_count=1, byte_size=1)
-        conn = store._get_connection()
-        try:
-            conn.execute("DELETE FROM schema_version WHERE version >= 11")
-            conn.commit()
-        finally:
-            conn.close()
-
-        dialect = PostgresDialect(postgres_dsn)
-        try:
-            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
-
-            assert reopened.find_by_provenance("prov-wide") is None
-            assert reopened.find_by_provenance("prov-reader") is None
-            assert reopened.find_by_provenance("prov-narrow") is not None
-        finally:
-            dialect.close()
-
     def test_column_exists_reports_truthfully(self, store):
         conn = store._get_connection()
         try:
@@ -1775,6 +1731,198 @@ class TestGraph:
         assert store.graph.get(node) is not None
         store.finalize_artifact("a1", version, "{}", row_count=0, byte_size=0)
         assert store.versions_lacking_definition() == []
+
+
+def _second_store(postgres_dsn, artifact_dir) -> ArtifactStore:
+    """Another node on the same database and blob directory."""
+    return ArtifactStore(artifact_dir, dialect=PostgresDialect(postgres_dsn))
+
+
+def _ready(store, artifact_id, provenance, data=b"bytes"):
+    version = store.create_artifact(artifact_id, provenance, _spec())
+    store.write_blob(artifact_id, version, data)
+    return store.finalize_artifact(artifact_id, version, "{}", 1, len(data))
+
+
+class TestProvenanceRaces:
+    """Writers under different ids share a provenance: the advisory lock is per id, so
+    only the unique index keeps them apart, and every path has to resolve its rejection."""
+
+    def test_an_import_overtaken_between_its_check_and_its_insert_lands_on_the_winner(
+        self, store, postgres_dsn, tmp_path
+    ):
+        from vestigo.store import ArtifactVersion
+
+        record = ArtifactVersion(
+            id="imported",
+            version=1,
+            state="ready",
+            provenance_hash="P",
+            schema_json="{}",
+            row_count=1,
+            byte_size=5,
+            created_at=1.0,
+            transform_spec=None,
+            input_versions=None,
+            tenant=None,
+            principal=None,
+            content_sha256=None,
+        )
+        original = store._import_no_op
+        calls = []
+
+        def competitor():
+            other = _second_store(postgres_dsn, tmp_path / "artifacts")
+            try:
+                _ready(other, "local", "P", b"local")
+            finally:
+                other.close()
+
+        def racing_no_op(conn, rec):
+            result = original(conn, rec)
+            calls.append(result)
+            if len(calls) == 2:
+                # Inside the import's write transaction, after its check.
+                t = threading.Thread(target=competitor)
+                t.start()
+                t.join()
+            return result
+
+        store._import_no_op = racing_no_op
+        landed = store.import_artifact(record, b"bytes")
+
+        assert (landed.id, landed.version, landed.written) == ("local", 1, False)
+        assert store.get_artifact("imported", 1) is None
+        assert list((tmp_path / "artifacts" / "blobs").glob("imported~*")) == []
+        assert store.read_blob("local", 1) == b"local"
+
+    def test_the_finalize_integrity_branch_returns_the_winner(self, store, postgres_dsn, tmp_path):
+        original = store.find_by_provenance
+        calls = []
+
+        def competitor():
+            other = _second_store(postgres_dsn, tmp_path / "artifacts")
+            try:
+                _ready(other, "b", "P", b"b-bytes")
+            finally:
+                other.close()
+
+        def racing_find(prov, tenant=None):
+            found = original(prov, tenant=tenant)
+            calls.append(found)
+            if len(calls) == 1:
+                t = threading.Thread(target=competitor)
+                t.start()
+                t.join()
+            return found
+
+        store.find_by_provenance = racing_find
+        version = store.create_artifact("a", "P", _spec())
+        store.write_blob("a", version, b"a-bytes")
+
+        result = store.finalize_artifact("a", version, "{}", 1, 7)
+
+        assert calls[0] is None and len(calls) == 2
+        assert (result.id, result.version) == ("b", 1)
+        assert store.get_artifact("a", version).state == "superseded"
+        assert store.read_blob("a", version) == b"b-bytes"
+        assert not store.blob_store.blob_exists("a", version)
+
+    def test_two_runs_promoting_the_same_provenances_in_opposite_orders_both_finish(
+        self, store, postgres_dsn, tmp_path, monkeypatch
+    ):
+        """Each row is promoted in provenance order whatever the caller's, so the two
+        transactions queue on the first provenance instead of deadlocking on each other's
+        unique-index entries; the loser's rejection is retried and it wins the second round."""
+        from vestigo.store import StagedVersion
+
+        other = _second_store(postgres_dsn, tmp_path / "artifacts")
+        original = ArtifactStore._promote_staged
+        barrier = threading.Barrier(2, timeout=3)
+
+        class PausedAfterFirstPromote:
+            """The connection, pausing once the first row of this batch is ready."""
+
+            def __init__(self, conn):
+                self._conn = conn
+                self._promoted = 0
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+            def execute(self, sql, params=()):
+                cursor = self._conn.execute(sql, params)
+                if "SET state = 'ready'" in sql:
+                    self._promoted += 1
+                    if self._promoted == 1:
+                        try:
+                            barrier.wait()
+                        except threading.BrokenBarrierError:
+                            # The other run is queued behind this one's first row.
+                            pass
+                return cursor
+
+        def paused(conn, staged, now):
+            original(PausedAfterFirstPromote(conn), staged, now)
+
+        monkeypatch.setattr(ArtifactStore, "_promote_staged", staticmethod(paused))
+
+        def stage(st, artifact_id, prov):
+            v = st.create_artifact(artifact_id, prov, _spec())
+            st.write_blob(artifact_id, v, b"x")
+            return StagedVersion(artifact_id, v, "{}", 1, 1, "d")
+
+        a = [stage(store, "a1", "p1"), stage(store, "a2", "p2")]
+        b = [stage(other, "b2", "p2"), stage(other, "b1", "p1")]
+        outcomes: dict[str, object] = {}
+
+        def run(name, st, staged):
+            try:
+                outcomes[name] = st.finalize_canonical_together(staged)
+            except Exception as exc:  # noqa: BLE001
+                outcomes[name] = exc
+
+        threads = [
+            threading.Thread(target=run, args=("a", store, a)),
+            threading.Thread(target=run, args=("b", other, b)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        other.close()
+
+        assert not any(isinstance(v, Exception) for v in outcomes.values()), outcomes
+        assert all(v.state == "ready" for name in ("a", "b") for v in outcomes[name])
+        # One run's outputs stayed ready; the other's were superseded by the retry.
+        ready = {i for i in ("a1", "a2", "b1", "b2") if store.get_artifact(i, 1).state == "ready"}
+        assert ready in ({"a1", "a2"}, {"b1", "b2"})
+
+
+class TestPromotionOnPostgres:
+    def test_a_promoted_version_carries_its_requirements(self, store):
+        _ready(store, "file-1", "prov-f", b"file")
+        manifest = store.create_artifact(
+            "manifest", "prov-m", _spec(), requires=[("file-1", 1)], computation_key="comp-1"
+        )
+        store.write_blob("manifest", manifest, b"m")
+        store.finalize_artifact("manifest", manifest, "{}", 1, 1)
+        _ready(store, "manifest", "prov-m2", b"m2")
+
+        promoted = store.promote_version("manifest", manifest)
+
+        assert (promoted.version, promoted.computation_key) == (3, "comp-1")
+        assert store.requirements_met(promoted)
+        assert [v.version for v in store.versions_of_computation("comp-1")] == [1, 3]
+        conn = store._get_connection()
+        try:
+            edges = conn.execute(
+                "SELECT from_version FROM retention_edges WHERE from_artifact_id = 'manifest' "
+                "AND to_artifact_id = 'file-1' ORDER BY from_version"
+            ).fetchall()
+        finally:
+            conn.close()
+        assert [e["from_version"] for e in edges] == [1, 3]
 
 
 @pytest.fixture

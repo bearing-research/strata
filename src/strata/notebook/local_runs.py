@@ -225,7 +225,9 @@ class LocalRuns:
         case the rows stay ``building`` for the caller to discard.
         """
         release = self.releases.prepare(run.build_id, run.attempt, "final")
-        self.releases.attach(release.release_id, [(s.artifact_id, s.version) for s in staged])
+        self.releases.attach(
+            release.release_id, run.attempt, [(s.artifact_id, s.version) for s in staged]
+        )
         bundle = self.releases.accept(release.release_id, staged)
         run.finalized = True
         by_key = {(v.id, v.version): v for v in bundle.outputs}
@@ -328,7 +330,7 @@ class LocalRuns:
         except Exception:
             # A checkpoint is a convenience the outputs do not depend on: the cell goes on.
             logger.exception("Checkpoint %d of cell %s was not released", sequence, run.cell_id)
-            self.releases.abandon(release.release_id)
+            self.releases.abandon(release.release_id, run.attempt)
             self._manager.discard_cell_outputs(staged)
             return
         logger.info(
