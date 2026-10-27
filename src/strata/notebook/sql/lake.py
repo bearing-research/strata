@@ -55,6 +55,8 @@ class Lake:
     snapshots: dict[tuple[str, str], int] = field(default_factory=dict)
     # Each catalog table read, as a table-index entry (see notebook/table_index.py).
     reads: list[dict[str, Any]] = field(default_factory=list)
+    # Where each read that was loaded found its table, by URI (for the output's leaf).
+    table_locations: dict[str, str] = field(default_factory=dict)
     # Service mode only (see duckdb._confine): each mount's root and each catalog
     # table's location, readable once confined.
     locations: list[str] = field(default_factory=list)
@@ -237,6 +239,8 @@ def resolve_lake(
                 # otherwise).
                 lake.fingerprints.append(f"{table_spec.name}:table:{table_spec.uri}:{snapshot}")
             found = loaded.get(table_spec.name)
+            if found is not None:
+                lake.table_locations[table_spec.uri] = found
             location = _directory(found) if found is not None else None
             if location is None and confined and (namespace, name) not in pinned:
                 # An unpinned cell may probe its confined connection before the cache check.

@@ -53,8 +53,13 @@ def is_cell_output(spec: TransformSpec | None) -> bool:
     return spec is not None and spec.executor == CELL_EXECUTOR and "variable_name" in spec.params
 
 
-def _leaf(uri: str) -> NodeSpec:
-    """An external input as a node: its URI without the version, under its kind's domain."""
+def _leaf(uri: str, location: str | None = None) -> NodeSpec:
+    """An external input as a node: its URI without the version, under its kind's domain.
+
+    A table read that resolved carries the table's location on a second line: a bare
+    ``ns.table`` names a different table under each default catalog, and the URI
+    alone would make them one leaf. A pinned read is not loaded, so it has none.
+    """
     bare = uri.partition("@v=")[0]
     if uri.startswith("strata://name/"):
         domain = "strata/dataset"
@@ -64,6 +69,8 @@ def _leaf(uri: str) -> NodeSpec:
         domain = "strata/artifact"
     else:
         domain = "strata/table"
+        if location:
+            bare = f"{bare}\n{location}"
     return NodeSpec(domain=domain, payload=bare.encode("utf-8"))
 
 
@@ -104,8 +111,12 @@ def _definition(
     positional: bool,
     tenant: str | None = None,
     known: Mapping[tuple[str, int], NodeId] | None = None,
+    locations: Mapping[str, str] | None = None,
 ) -> list[NodeSpec]:
-    """Leaves first, then the cell's node, as one batch for ``put_batch``."""
+    """Leaves first, then the cell's node, as one batch for ``put_batch``.
+
+    *locations* is each resolved table's location by its ref (the ``uri@v=`` form).
+    """
     specs: list[NodeSpec] = []
     edges: list[Edge] = []
     positions: dict[str, int] = {}
@@ -118,7 +129,7 @@ def _definition(
             positions[role] = position + 1
         target: NodeId | int | None = _target(store, uri, known or {}, tenant)
         if target is None:
-            specs.append(_leaf(uri))
+            specs.append(_leaf(uri, (locations or {}).get(uri)))
             target = len(specs) - 1
         edges.append(Edge(role=role, position=position, target=target))
     specs.append(NodeSpec(domain=domain, payload=payload, edges=tuple(edges)))
@@ -131,21 +142,25 @@ def cell_definition(
     input_versions: Mapping[str, str] | None,
     *,
     tables: Mapping[str, str] | None = None,
+    locations: Mapping[str, str] | None = None,
     tenant: str | None = None,
 ) -> list[NodeSpec]:
     """The structure a cell run publishes with its outputs (domain ``strata/cell``).
 
     *tables* are the run's ``@table`` reads as ``uri@v=<snapshot>`` by name; they are
     not in ``input_versions`` (nothing resolves through them) but they are inputs of
-    the definition, so each is a ``strata/table`` leaf.
+    the definition, so each is a ``strata/table`` leaf. *locations*, by the same
+    names, is where each read that resolved found its table; the leaf carries it.
     """
+    refs = dict(tables or {})
     return _definition(
         store,
         CELL_DOMAIN,
         definition_payload(spec),
-        [*(input_versions or ()), *(tables or {}).values()],
+        [*(input_versions or ()), *refs.values()],
         positional=False,
         tenant=tenant,
+        locations={refs[name]: where for name, where in (locations or {}).items() if name in refs},
     )
 
 

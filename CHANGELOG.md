@@ -8,6 +8,13 @@ exhaustive commit history.
 ## Unreleased
 
 ### Changed
+- **A table leaf names where the read found its table.** A cell's
+  `strata/table` node carried the table URI alone, so a bare `db.events`
+  read under two notebooks' default catalogs was one leaf; the leaf now
+  adds the table's location, as the catalog loaded it, on a second line
+  (a pinned read, never loaded, keeps the URI alone). Both the `@table`
+  and the SQL lake paths record it; the next rerun of such a cell gets a
+  new leaf, old nodes stay. (#1320)
 - **The ledger installs from PyPI.** `vestigo` 0.1.0 is released from its
   own repository, [bearing-research/vestigo](https://github.com/bearing-research/vestigo),
   and Strata pins it exactly from there; `packages/vestigo` leaves the tree

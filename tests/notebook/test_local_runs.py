@@ -288,7 +288,9 @@ class TestGate1:
         leaves = [n for n in ancestors if store.graph.get(n).domain == "strata/table"]
         assert len(leaves) == 1
         (table_leaf,) = leaves
-        assert store.graph.get(table_leaf).payload.decode().endswith("#db.events")
+        uri, location = store.graph.get(table_leaf).payload.decode().split("\n")
+        assert uri.endswith("#db.events")
+        assert location.endswith("/warehouse/db/events"), "where the catalog found the table"
         dependents = store.graph.dependents(table_leaf)
         assert {features_node, train_node, evaluate_node} <= set(dependents)
 
