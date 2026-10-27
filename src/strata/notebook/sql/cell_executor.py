@@ -230,6 +230,7 @@ async def execute_sql_cell(
             else read["uri"]
             for read in (lake.reads if lake is not None else [])
         },
+        lake.table_locations if lake is not None else None,
     )
     try:
         # Lacks only pinned tables' locations, and a pinned cell opens no connection

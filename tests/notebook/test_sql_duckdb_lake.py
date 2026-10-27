@@ -893,8 +893,10 @@ class TestARestCatalogThatVendsNothing:
             for port in store.graph.inputs(node)
             if port.role == "table"
         ]
+        # The leaf names the table and where the catalog found it: one leaf per table,
+        # not one per bare name across catalogs.
         assert [(leaf.domain, leaf.payload) for leaf in leaves] == [
-            ("strata/table", b"lake:taxi.trips")
+            ("strata/table", b"lake:taxi.trips\ns3://lake/taxi.trips")
         ]
 
     @pytest.mark.asyncio

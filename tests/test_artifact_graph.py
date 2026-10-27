@@ -111,6 +111,28 @@ class TestPublishedDefinitions:
         node2 = store.definition_of(again.id, again.version)
         assert [p.target_node_id for p in store.graph.inputs(node2)] == [ports[("table", 0)]]
 
+    def test_a_table_leaf_carries_where_the_read_found_it(self, manager):
+        """A bare ``db.events`` is one table per default catalog, so the leaf names
+        the location the read resolved; a pinned read, never loaded, has none."""
+        store = manager.artifact_store
+        manager.record_table_refs(
+            "c1", {"events": "db.events@v=7"}, {"events": "s3://lake-a/wh/db/events"}
+        )
+        manager.record_table_refs(
+            "c2", {"events": "db.events@v=3"}, {"events": "s3://lake-b/wh/db/events"}
+        )
+        manager.record_table_refs("c3", {"events": "db.events@v=3"})
+        leaves = {}
+        for cell in ("c1", "c2", "c3"):
+            out = _store(manager, cell, "out")
+            (port,) = store.graph.inputs(store.definition_of(out.id, out.version))
+            leaves[cell] = store.graph.get(port.target_node_id)
+
+        assert leaves["c1"].payload == b"db.events\ns3://lake-a/wh/db/events"
+        assert leaves["c2"].payload == b"db.events\ns3://lake-b/wh/db/events"
+        assert leaves["c3"].payload == b"db.events"
+        assert len({leaf.node_id for leaf in leaves.values()}) == 3
+
     def test_an_upstream_without_a_node_is_an_artifact_leaf(self, manager):
         store = manager.artifact_store
         version = store.create_artifact("imported", "p" * 64, TransformSpec("x@v1", {}, []))

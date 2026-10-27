@@ -21,7 +21,7 @@
     {
       "domain": "strata/table",
       "class": "leaf",
-      "payload": "table URI without version"
+      "payload": "table URI without version, then the table's location on a second line when the read loaded it"
     },
     {
       "domain": "strata/fetch",

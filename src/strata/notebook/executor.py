@@ -1352,6 +1352,7 @@ class CellExecutor:
             table_snapshots,
             table_weights,
             table_refs,
+            table_locations,
         ) = await self._weigh_tables(annotations, source)
         weights += table_weights
         table_reads = []
@@ -1373,7 +1374,7 @@ class CellExecutor:
         ) = await self._resolve_fetches(annotations.fetches, weights=weights)
         self._fetch_refs[cell_id] = fetch_refs
         # Every output this run stages, whatever stages it, carries the tables it read.
-        self.session.get_artifact_manager().record_table_refs(cell_id, table_refs)
+        self.session.get_artifact_manager().record_table_refs(cell_id, table_refs, table_locations)
         self._fetch_times[cell_id] = fetch_times
         dataset_fingerprints, datasets, dataset_error = await self._resolve_datasets(
             annotations.datasets
@@ -4481,8 +4482,11 @@ class CellExecutor:
 
     async def _weigh_tables(
         self, annotations: CellAnnotations, source: str
-    ) -> tuple[Any, list[str], dict[str, int | None], list[InputWeight], dict[str, str]]:
-        """A cell's tables: the config they resolve in, fingerprints, snapshots, weights, refs.
+    ) -> tuple[
+        Any, list[str], dict[str, int | None], list[InputWeight], dict[str, str], dict[str, str]
+    ]:
+        """A cell's tables: the config they resolve in, fingerprints, snapshots, weights,
+        refs, and the location each resolved read found its table at.
 
         A DuckDB cell's catalog tables are inputs like its @table ones, though only the
         @table ones are weighed.
@@ -4498,7 +4502,10 @@ class CellExecutor:
         from strata.notebook.tables import table_credential
 
         sizes: dict[str, int | None] = {}
-        fingerprints, snapshots = await self._fingerprint_tables(tables, config, sizes=sizes)
+        locations: dict[str, str] = {}
+        fingerprints, snapshots = await self._fingerprint_tables(
+            tables, config, sizes=sizes, locations=locations
+        )
         weights = [
             InputWeight(
                 kind="table",
@@ -4518,7 +4525,7 @@ class CellExecutor:
             else spec.uri
             for spec in tables
         }
-        return config, fingerprints, snapshots, weights, refs
+        return config, fingerprints, snapshots, weights, refs, locations
 
     async def estimate_reads(self, cell_id: str, source: str) -> ReadEstimate:
         """What *cell_id*'s inputs would move onto its machine, weighed before it runs.
@@ -4538,7 +4545,9 @@ class CellExecutor:
         )
         if cache is None and listings:
             weights = await self._ask_worker_cache(machine, mount_specs, weights, listings)
-        _, table_fingerprints, _, table_weights, _ = await self._weigh_tables(annotations, source)
+        _, table_fingerprints, _, table_weights, _, _ = await self._weigh_tables(
+            annotations, source
+        )
         weights += table_weights
         if annotations.fetches:
             from strata.notebook.fetch import FetchCache, guard_settings
@@ -4582,6 +4591,7 @@ class CellExecutor:
         config: Any = None,
         *,
         sizes: dict[str, int | None] | None = None,
+        locations: dict[str, str] | None = None,
     ) -> tuple[list[str], dict[str, int | None]]:
         """Resolve table snapshots for provenance hashing (see tables.py).
 
@@ -4605,6 +4615,7 @@ class CellExecutor:
                 env,
                 notebook=self.session.path,
                 sizes=sizes,
+                locations=locations,
             ),
         )
 

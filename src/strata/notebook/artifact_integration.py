@@ -82,6 +82,7 @@ class NotebookArtifactManager:
         # The tables each cell's current run read (``uri@v=<snapshot>`` by name), recorded
         # when its provenance is computed; every output the run stages carries them.
         self._table_refs: dict[str, dict[str, str]] = {}
+        self._table_locations: dict[str, dict[str, str]] = {}
         # The ledger's builds and releases, on the store's database: a local run's
         # execution and its checkpoints (``local_runs``).
         self.build_store = BuildStore(
@@ -218,9 +219,19 @@ class NotebookArtifactManager:
         results.sort(key=lambda pair: pair[0])
         return results
 
-    def record_table_refs(self, cell_id: str, table_refs: dict[str, str]) -> None:
-        """Note what tables *cell_id*'s next outputs read, for their structural node."""
+    def record_table_refs(
+        self,
+        cell_id: str,
+        table_refs: dict[str, str],
+        locations: dict[str, str] | None = None,
+    ) -> None:
+        """Note what tables *cell_id*'s next outputs read, for their structural node.
+
+        *locations*, by the same keys, is where each read that resolved found its
+        table; a leaf carries it so one bare name is not one leaf for every catalog.
+        """
         self._table_refs[cell_id] = dict(table_refs)
+        self._table_locations[cell_id] = dict(locations or {})
 
     def store_cell_output(self, **kwargs: Any) -> ArtifactVersion:
         """Store one cell output and make it current; arguments as for :meth:`stage_cell_output`."""
@@ -322,6 +333,7 @@ class NotebookArtifactManager:
                 transform_spec,
                 input_versions,
                 tables=self._table_refs.get(cell_id),
+                locations=self._table_locations.get(cell_id),
             ),
             computation_key=computation_key,
         )
