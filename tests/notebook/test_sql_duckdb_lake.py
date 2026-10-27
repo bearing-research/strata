@@ -7,6 +7,7 @@ table read is pinned at the snapshot its provenance folds. Real catalogs:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -898,6 +899,9 @@ class TestARestCatalogThatVendsNothing:
         assert [(leaf.domain, leaf.payload) for leaf in leaves] == [
             ("strata/table", b"lake:taxi.trips\ns3://lake/taxi.trips")
         ]
+        # And the read is an input the record names, at its snapshot.
+        recorded = json.loads(store.get_artifact(art_id, int(version)).input_versions)
+        assert recorded["lake:taxi.trips"].isdigit(), recorded
 
     @pytest.mark.asyncio
     async def test_a_pinned_cache_hit_in_service_mode_needs_no_catalog(self, tmp_path, monkeypatch):

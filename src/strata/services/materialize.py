@@ -40,6 +40,18 @@ def table_input_version(plan: ReadPlan) -> str:
     return f"{plan.snapshot_id}:{plan.schema_id}:{plan.reading}"
 
 
+def input_version_changed(recorded: str, current: str) -> bool:
+    """Whether an input's recorded version is not the current one.
+
+    A notebook records a table read as its snapshot id alone; the server's version
+    of the same table adds the schema id and reading fingerprint. The snapshot is the
+    comparison then.
+    """
+    if recorded == current:
+        return False
+    return ":" in recorded or current.partition(":")[0] != recorded
+
+
 class InputResolutionError(Exception):
     """An input URI could not be resolved to a version.
 
@@ -249,7 +261,7 @@ class MaterializeService:
                 existing_artifact_uri = name_status.artifact_uri
                 for input_uri, old_version in name_status.input_versions.items():
                     current_version = resolved_versions.get(input_uri)
-                    if current_version and current_version != old_version:
+                    if current_version and input_version_changed(old_version, current_version):
                         changed_inputs.append(
                             InputChangeInfo(
                                 input_uri=input_uri,

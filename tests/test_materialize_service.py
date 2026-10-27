@@ -380,3 +380,26 @@ class TestArtifactInputLookup:
             planner=_FakePlanner(),
         )
         assert resolved.artifact is named
+
+
+class TestInputVersionChanged:
+    """A notebook records a table read as its snapshot; the server adds schema and reading."""
+
+    def test_the_same_version_is_unchanged(self):
+        from strata.services.materialize import input_version_changed
+
+        assert input_version_changed("7:3:abc", "7:3:abc") is False
+        assert input_version_changed("art@v=2", "art@v=2") is False
+
+    def test_a_bare_snapshot_matches_the_servers_version_of_that_snapshot(self):
+        from strata.services.materialize import input_version_changed
+
+        assert input_version_changed("7", "7:3:abc") is False
+        assert input_version_changed("7", "8:3:abc") is True
+        assert input_version_changed("7", "empty:x:3") is True
+
+    def test_a_full_version_must_match_whole(self):
+        from strata.services.materialize import input_version_changed
+
+        assert input_version_changed("7:3:abc", "7:4:abc") is True
+        assert input_version_changed("art@v=2", "art@v=3") is True

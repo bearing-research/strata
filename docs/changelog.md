@@ -10,6 +10,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ## Unreleased
 
 ### Changed
+- **A table read is an input the record names.** A cell output's
+  `input_versions` now carries each table it read, by URI, at the snapshot
+  it resolved (a table with no snapshot yet is not recorded), for both the
+  `@table` and the SQL lake paths; the graph's table leaves are built from
+  those keys. Lineage, the publication page and the CLI's `lineage` show the
+  tables; a name's status compares a recorded snapshot with the server's
+  version of the same table by its snapshot. (#1321)
 - **A table leaf names where the read found its table.** A cell's
   `strata/table` node carried the table URI alone, so a bare `db.events`
   read under two notebooks' default catalogs was one leaf; the leaf now
