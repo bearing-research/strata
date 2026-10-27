@@ -3825,6 +3825,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A table read is an input the record names.</strong> A cell output's
+  <code>input_versions</code> now carries each table it read, by URI, at the snapshot
+  it resolved (a table with no snapshot yet is not recorded), for both the
+  <code>@table</code> and the SQL lake paths; the graph's table leaves are built from
+  those keys. Lineage, the publication page and the CLI's <code>lineage</code> show the
+  tables; a name's status compares a recorded snapshot with the server's
+  version of the same table by its snapshot. (#1321)</li>
 <li><strong>A table leaf names where the read found its table.</strong> A cell's
   <code>strata/table</code> node carried the table URI alone, so a bare <code>db.events</code>
   read under two notebooks' default catalogs was one leaf; the leaf now
