@@ -3825,6 +3825,22 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger is vestigo 0.2.1.</strong> A build's dispatch is a column of the
+  ledger (<code>create_build(dispatch="external")</code> for the notebook's worker
+  builds and local cell runs, which nothing in the transform runner picks
+  up) instead of the <code>_dispatch_mode</code> mark in the build's params; an
+  existing store backfills the column from the mark on open. Gate 1 reads
+  a build's checkpoints with <code>bundles_of</code>. A local run's attempt records
+  the caller as its principal; a rerun of a cell whose earlier version had
+  a reconstructed node links its complete node to it (<code>reconstructed_from</code>,
+  ADR 002 §6.3); the contract fixture lists the ledger's <code>node_links</code>
+  table. The ledger's audit fixes reach Strata too: a tenant's failed
+  build, stream or upload names the tenant when it fails or retires the
+  artifact, as does the note that an input was used, since the ledger
+  refuses a tenantless write to a tenant's row. The import route answers 409
+  without remap advice for a version still building there, and 400 for a
+  byteless retry onto a computation whose bytes are gone. Retention roots
+  are keyed by tenant. (#1323)</li>
 <li><strong>A table read is an input the record names.</strong> A cell output's
   <code>input_versions</code> now carries each table it read, by URI, at the snapshot
   it resolved (a table with no snapshot yet is not recorded), for both the
