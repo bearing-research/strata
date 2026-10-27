@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 CELL_DOMAIN = "strata/cell"
 RECONSTRUCTED_DOMAIN = "strata/cell-reconstructed"
+RECONSTRUCTED_FROM = "reconstructed_from"
 CELL_EXECUTOR = "notebook/cell@v1"
 CELL_DEFINITIONS_UPGRADE = "cell_definitions_reconstructed"
 
@@ -160,6 +161,26 @@ def cell_definition(
         tenant=tenant,
         locations=locations,
     )
+
+
+def link_reconstructed(
+    store: ArtifactStore, artifact_id: str, version: int, *, tenant: str | None = None
+) -> None:
+    """A complete node names the reconstructed node of the version before it (ADR 002 §6.3).
+
+    Neither identity changes; the link is what lets a lineage query cross from the
+    rows stored before the graph to the reruns after it. Only the version just before:
+    a later rerun's node either is this one or follows a complete one.
+    """
+    if version < 2:
+        return
+    node = store.definition_of(artifact_id, version, tenant=tenant)
+    previous = store.definition_of(artifact_id, version - 1, tenant=tenant)
+    if node is None or previous is None or previous == node:
+        return
+    record = store.graph.get(previous, tenant=tenant)
+    if record is not None and record.domain == RECONSTRUCTED_DOMAIN:
+        store.graph.link(node, RECONSTRUCTED_FROM, previous, tenant=tenant)
 
 
 def reconstruct_definitions(store: ArtifactStore) -> None:

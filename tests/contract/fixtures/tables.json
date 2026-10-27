@@ -68,6 +68,11 @@
       "primary_key": ["scope", "node_id", "role", "position"]
     },
     {
+      "name": "node_links",
+      "migrated": true,
+      "primary_key": ["scope", "node_id", "relation", "target_node_id"]
+    },
+    {
       "name": "build_releases",
       "migrated": true,
       "primary_key": ["release_id"]

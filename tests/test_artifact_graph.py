@@ -18,6 +18,7 @@ from strata.artifact.graph import (
     CELL_DEFINITIONS_UPGRADE,
     CELL_DOMAIN,
     RECONSTRUCTED_DOMAIN,
+    RECONSTRUCTED_FROM,
     cell_definition,
     definition_payload,
     reconstruct_definitions,
@@ -309,3 +310,27 @@ class TestReconstruction:
         after = manager.artifact_store.graph.get(store.definition_of(new.id, new.version))
         assert (before.domain, after.domain) == (RECONSTRUCTED_DOMAIN, CELL_DOMAIN)
         assert before.node_id != after.node_id
+        # The complete node names the historical one; a second rerun adds nothing.
+        (link,) = store.graph.links(after.node_id, RECONSTRUCTED_FROM)
+        assert link.target_node_id == before.node_id
+        again = _store(manager, "c1", "a")
+        assert store.definition_of(again.id, again.version) == after.node_id
+        assert store.graph.linked_from(before.node_id) == [link]
+
+    def test_a_rerun_of_a_complete_node_links_nothing(self, manager):
+        first = _store(manager, "c1", "a")
+        second = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="a",
+            blob_data=b"[2]",
+            content_type="json/object",
+            provenance_hash="q" * 64,
+            input_versions={},
+            source_hash="t" * 64,
+        )
+        store = manager.artifact_store
+
+        assert store.graph.links(store.definition_of(second.id, second.version)) == []
+        assert store.definition_of(first.id, first.version) != store.definition_of(
+            second.id, second.version
+        )

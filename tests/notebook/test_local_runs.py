@@ -174,6 +174,7 @@ class TestGate1:
             r for r in releases.releases_of(build.build_id, "checkpoint") if r.sequence == 2
         )
         assert attempt.resumed_from == second.release_id, "bound to an explicit release"
+        assert attempt.principal == same_build.principal_id, "the resume is this caller's"
         assert [r.sequence for r in releases.releases_of(build.build_id, "checkpoint")] == [
             1,
             2,

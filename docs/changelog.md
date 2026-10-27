@@ -15,7 +15,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   builds and local cell runs, which nothing in the transform runner picks
   up) instead of the `_dispatch_mode` mark in the build's params; an
   existing store backfills the column from the mark on open. Gate 1 reads
-  a build's checkpoints with `bundles_of`. (#PR)
+  a build's checkpoints with `bundles_of`. A local run's attempt records
+  the caller as its principal; a rerun of a cell whose earlier version had
+  a reconstructed node links its complete node to it (`reconstructed_from`,
+  ADR 002 §6.3); the contract fixture lists the ledger's `node_links`
+  table. (#PR)
 - **A table read is an input the record names.** A cell output's
   `input_versions` now carries each table it read, by URI, at the snapshot
   it resolved (a table with no snapshot yet is not recorded), for both the
