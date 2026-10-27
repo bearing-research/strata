@@ -3825,6 +3825,11 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger installs from PyPI.</strong> <code>vestigo</code> 0.1.0 is released from its
+  own repository, <a href="https://github.com/bearing-research/vestigo">bearing-research/vestigo</a>,
+  and Strata pins it exactly from there; <code>packages/vestigo</code> leaves the tree
+  with its CI job, its Postgres suite in the integration run and the release
+  workflow's vestigo wheel. (#1319)</li>
 <li><strong>The ledger's S3 and GCS backends run on their clouds' SDKs.</strong> The
   <code>vestigo</code> package is mirrored at its commit <code>2ba75df</code>: the S3 backend runs
   on boto3 and the GCS backend on google-cloud-storage in place of PyArrow's
