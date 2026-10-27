@@ -23,7 +23,7 @@ exhaustive commit history.
   refuses a tenantless write to a tenant's row. The import route answers 409
   without remap advice for a version still building there, and 400 for a
   byteless retry onto a computation whose bytes are gone. Retention roots
-  are keyed by tenant. (#PR)
+  are keyed by tenant. (#1323)
 - **A table read is an input the record names.** A cell output's
   `input_versions` now carries each table it read, by URI, at the snapshot
   it resolved (a table with no snapshot yet is not recorded), for both the
