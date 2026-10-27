@@ -590,7 +590,9 @@ class BuildRunner:
                         lease_owner=self._runner_id,
                     )
                     if failed:
-                        self.artifact_store.fail_artifact(build.artifact_id, build.version)
+                        self.artifact_store.fail_artifact(
+                            build.artifact_id, build.version, tenant=build.tenant_id
+                        )
                     return failed
 
                 if not await anyio.to_thread.run_sync(_fail):

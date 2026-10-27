@@ -3446,7 +3446,7 @@ class CellExecutor:
                 )
             if artifact_version is not None:
                 try:
-                    artifact_store.fail_artifact(artifact_id, artifact_version)
+                    artifact_store.fail_artifact(artifact_id, artifact_version, tenant=tenant_id)
                 except Exception:
                     logger.exception(
                         "Failed to mark notebook artifact %s@v=%s as failed",

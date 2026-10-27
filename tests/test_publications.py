@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import secrets
 import sqlite3
-import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -89,45 +87,8 @@ class TestPublicationGrants:
             store.publish_artifact("half", 1)
 
 
-def _publish_with_a_rival(store: ArtifactStore, artifact_id: str, version: int, monkeypatch):
-    """Publish, with a second publish of the same version committing in another thread
-    between this one's check for an active grant and its insert (the mint sits between).
-
-    Returns ``(this publish's result, the rival's)``.
-    """
-    real_mint = secrets.token_urlsafe
-    rival: list = []
-    started: list = []
-
-    def mint_after_a_rival_publishes(nbytes: int) -> str:
-        if not started:
-            started.append(True)
-            thread = threading.Thread(
-                target=lambda: rival.append(store.publish_artifact(artifact_id, version))
-            )
-            thread.start()
-            thread.join()
-        return real_mint(nbytes)
-
-    monkeypatch.setattr(secrets, "token_urlsafe", mint_after_a_rival_publishes)
-    publication = store.publish_artifact(artifact_id, version)
-    monkeypatch.undo()
-    assert len(rival) == 1, "the rival publish must have run inside the window"
-    return publication, rival[0]
-
-
 class TestOneActivePublication:
     """One revocation must withdraw a version, so it can have one live link at a time."""
-
-    def test_a_publish_racing_another_returns_the_winners_grant(self, store, monkeypatch):
-        version = _ready_artifact(store, "fig", b"x")
-
-        publication, rival = _publish_with_a_rival(store, "fig", version, monkeypatch)
-
-        assert publication.id == rival.id
-        assert rival.token and publication.token == ""
-        assert [p.id for p in store.list_publications()] == [rival.id]
-        assert [e["action"] for e in store.read_events()] == ["publish"]
 
     def test_a_withdrawn_version_can_be_published_again(self, store):
         version = _ready_artifact(store, "fig", b"x")

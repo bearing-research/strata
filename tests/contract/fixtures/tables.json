@@ -40,7 +40,7 @@
     {
       "name": "retention_roots",
       "migrated": true,
-      "primary_key": ["kind", "holder", "artifact_id", "version"]
+      "primary_key": ["tenant", "kind", "holder", "artifact_id", "version"]
     },
     {
       "name": "retention_edges",

@@ -152,6 +152,7 @@ def create_test_artifact(artifact_store, build_store, executor_ref="test_sql@v1"
         provenance_hash=provenance_hash,
         transform_spec=transform_spec,
         input_versions={},
+        tenant=tenant_id,
     )
 
     build_id = str(uuid.uuid4())
@@ -660,8 +661,13 @@ class TestBuildExecution:
         assert artifact.state == "failed"
 
     @pytest.mark.asyncio
-    async def test_build_executor_non_200(self, build_runner, artifact_store, build_store):
-        artifact_id, version, build_id = create_test_artifact(artifact_store, build_store)
+    @pytest.mark.parametrize("tenant_id", [None, "team-a"])
+    async def test_build_executor_non_200(
+        self, build_runner, artifact_store, build_store, tenant_id
+    ):
+        artifact_id, version, build_id = create_test_artifact(
+            artifact_store, build_store, tenant_id=tenant_id
+        )
 
         mock_response = MagicMock()
         mock_response.status_code = 500

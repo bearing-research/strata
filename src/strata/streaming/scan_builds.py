@@ -255,7 +255,9 @@ class ScanBuildManager:
             return
 
         try:
-            store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
+            store.fail_artifact(
+                stream_state.artifact_id, stream_state.artifact_version, tenant=stream_state.tenant
+            )
         except Exception as e:
             # Best-effort on an already-failed build; raising would mask the original error.
             logger.debug(
