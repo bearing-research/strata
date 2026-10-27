@@ -726,6 +726,8 @@ class CellExecutor:
         # re-read at store time: a staleness check in between can record newer bytes than the
         # run used.
         self._fetch_refs: dict[str, dict[str, str]] = {}
+        # Each table a cell's last preparation read, by URI, to the snapshot it resolved.
+        self._table_refs: dict[str, dict[str, str]] = {}
         # When each of those bytes was downloaded, ``{url: unix time}``, for the record.
         self._fetch_times: dict[str, dict[str, float]] = {}
         # Same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``.
@@ -1374,7 +1376,8 @@ class CellExecutor:
         ) = await self._resolve_fetches(annotations.fetches, weights=weights)
         self._fetch_refs[cell_id] = fetch_refs
         # Every output this run stages, whatever stages it, carries the tables it read.
-        self.session.get_artifact_manager().record_table_refs(cell_id, table_refs, table_locations)
+        self._table_refs[cell_id] = table_refs
+        self.session.get_artifact_manager().record_table_locations(cell_id, table_locations)
         self._fetch_times[cell_id] = fetch_times
         dataset_fingerprints, datasets, dataset_error = await self._resolve_datasets(
             annotations.datasets
@@ -4469,7 +4472,8 @@ class CellExecutor:
             }
 
     def _input_refs(self, cell_id: str, variant: str | None = None) -> dict[str, str]:
-        """Inputs an artifact of *cell_id* records: upstreams, fetch digests, dataset versions.
+        """Inputs an artifact of *cell_id* records: upstreams, fetch digests, dataset
+        versions, and each table read with the snapshot it resolved.
 
         With ``variant`` set, a chained ``# @per_variant`` cell records only the
         upstream instance it zipped to.
@@ -4478,6 +4482,7 @@ class CellExecutor:
             **self.session._collect_input_refs(cell_id, variant=variant),
             **self._fetch_refs.get(cell_id, {}),
             **self._dataset_refs.get(cell_id, {}),
+            **self._table_refs.get(cell_id, {}),
         }
 
     async def _weigh_tables(
@@ -4486,7 +4491,8 @@ class CellExecutor:
         Any, list[str], dict[str, int | None], list[InputWeight], dict[str, str], dict[str, str]
     ]:
         """A cell's tables: the config they resolve in, fingerprints, snapshots, weights,
-        refs, and the location each resolved read found its table at.
+        the snapshot each read resolved by URI (what its outputs record), and the
+        location each loaded read found its table at, by URI.
 
         A DuckDB cell's catalog tables are inputs like its @table ones, though only the
         @table ones are weighed.
@@ -4518,14 +4524,14 @@ class CellExecutor:
             for spec in annotations.tables
             if spec.name in sizes
         ]
-        # The run's reads for its structural node: ``uri@v=<snapshot>`` by name.
+        # A table with no snapshot yet is not an input the record can name.
         refs = {
-            spec.name: f"{spec.uri}@v={snapshots[spec.name]}"
-            if snapshots.get(spec.name) is not None
-            else spec.uri
+            spec.uri: str(snapshots[spec.name])
             for spec in tables
+            if snapshots.get(spec.name) is not None
         }
-        return config, fingerprints, snapshots, weights, refs, locations
+        found = {spec.uri: locations[spec.name] for spec in tables if spec.name in locations}
+        return config, fingerprints, snapshots, weights, refs, found
 
     async def estimate_reads(self, cell_id: str, source: str) -> ReadEstimate:
         """What *cell_id*'s inputs would move onto its machine, weighed before it runs.

@@ -26,6 +26,7 @@ from strata.api.dependencies import (
     WriteStore,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
+from strata.services.materialize import input_version_changed
 from strata.types import (
     InputChangeInfo,
     NameResolveResponse,
@@ -433,7 +434,7 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
     for input_uri, old_version in status.input_versions.items():
         try:
             current_version = await resolve_input_version_async(input_uri, tenant_id)
-            if current_version != old_version:
+            if input_version_changed(old_version, current_version):
                 changed_inputs.append(
                     InputChangeInfo(
                         input_uri=input_uri,

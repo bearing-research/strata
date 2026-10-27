@@ -93,21 +93,20 @@ class TestPublishedDefinitions:
         assert (fetch.domain, fetch.payload) == ("strata/fetch", b"https://example.com/data.csv")
         assert (dataset.domain, dataset.payload) == ("strata/dataset", b"strata://name/team/events")
 
-    def test_a_table_read_is_a_leaf_outside_input_versions(self, manager):
-        """A ``@table`` read joins the node under ``table`` without touching the record."""
-        manager.record_table_refs("c1", {"events": "file:///wh#db.events@v=7"})
-        out = _store(manager, "c1", "out")
+    def test_a_table_read_is_an_input_the_record_names_and_a_leaf(self, manager):
+        """A ``@table`` read is in ``input_versions`` at its snapshot and joins the node
+        under ``table``; the leaf is the table, whatever snapshot was read."""
+        out = _store(manager, "c1", "out", inputs={"file:///wh#db.events": "7"})
         store = manager.artifact_store
 
-        assert json.loads(out.input_versions or "{}") == {}
+        assert json.loads(out.input_versions or "{}") == {"file:///wh#db.events": "7"}
         node = store.definition_of(out.id, out.version)
         ports = {(p.role, p.position): p.target_node_id for p in store.graph.inputs(node)}
         assert set(ports) == {("table", 0)}
         leaf = store.graph.get(ports[("table", 0)])
         assert (leaf.domain, leaf.payload) == ("strata/table", b"file:///wh#db.events")
         # The same table read again, at another snapshot, is the same leaf.
-        manager.record_table_refs("c2", {"events": "file:///wh#db.events@v=8"})
-        again = _store(manager, "c2", "out")
+        again = _store(manager, "c2", "out", inputs={"file:///wh#db.events": "8"})
         node2 = store.definition_of(again.id, again.version)
         assert [p.target_node_id for p in store.graph.inputs(node2)] == [ports[("table", 0)]]
 
@@ -115,16 +114,11 @@ class TestPublishedDefinitions:
         """A bare ``db.events`` is one table per default catalog, so the leaf names
         the location the read resolved; a pinned read, never loaded, has none."""
         store = manager.artifact_store
-        manager.record_table_refs(
-            "c1", {"events": "db.events@v=7"}, {"events": "s3://lake-a/wh/db/events"}
-        )
-        manager.record_table_refs(
-            "c2", {"events": "db.events@v=3"}, {"events": "s3://lake-b/wh/db/events"}
-        )
-        manager.record_table_refs("c3", {"events": "db.events@v=3"})
+        manager.record_table_locations("c1", {"db.events": "s3://lake-a/wh/db/events"})
+        manager.record_table_locations("c2", {"db.events": "s3://lake-b/wh/db/events"})
         leaves = {}
-        for cell in ("c1", "c2", "c3"):
-            out = _store(manager, cell, "out")
+        for cell, snapshot in (("c1", "7"), ("c2", "3"), ("c3", "3")):
+            out = _store(manager, cell, "out", inputs={"db.events": snapshot})
             (port,) = store.graph.inputs(store.definition_of(out.id, out.version))
             leaves[cell] = store.graph.get(port.target_node_id)
 

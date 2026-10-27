@@ -291,6 +291,9 @@ class TestGate1:
         uri, location = store.graph.get(table_leaf).payload.decode().split("\n")
         assert uri.endswith("#db.events")
         assert location.endswith("/warehouse/db/events"), "where the catalog found the table"
+        # The read is an input the record names, at the snapshot it resolved.
+        recorded = json.loads(features.input_versions or "{}")
+        assert recorded[uri].isdigit(), recorded
         dependents = store.graph.dependents(table_leaf)
         assert {features_node, train_node, evaluate_node} <= set(dependents)
 

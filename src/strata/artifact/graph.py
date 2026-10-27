@@ -115,7 +115,7 @@ def _definition(
 ) -> list[NodeSpec]:
     """Leaves first, then the cell's node, as one batch for ``put_batch``.
 
-    *locations* is each resolved table's location by its ref (the ``uri@v=`` form).
+    *locations* is each resolved table's location by its URI.
     """
     specs: list[NodeSpec] = []
     edges: list[Edge] = []
@@ -141,26 +141,24 @@ def cell_definition(
     spec: TransformSpec,
     input_versions: Mapping[str, str] | None,
     *,
-    tables: Mapping[str, str] | None = None,
     locations: Mapping[str, str] | None = None,
     tenant: str | None = None,
 ) -> list[NodeSpec]:
     """The structure a cell run publishes with its outputs (domain ``strata/cell``).
 
-    *tables* are the run's ``@table`` reads as ``uri@v=<snapshot>`` by name; they are
-    not in ``input_versions`` (nothing resolves through them) but they are inputs of
-    the definition, so each is a ``strata/table`` leaf. *locations*, by the same
-    names, is where each read that resolved found its table; the leaf carries it.
+    Every key of ``input_versions`` is an input: an upstream variable's version, a
+    fetch, a dataset, or a table read (its URI, the snapshot as the value), which
+    becomes a ``strata/table`` leaf. *locations*, by table URI, is where each read
+    that resolved found its table; the leaf carries it.
     """
-    refs = dict(tables or {})
     return _definition(
         store,
         CELL_DOMAIN,
         definition_payload(spec),
-        [*(input_versions or ()), *refs.values()],
+        list(input_versions or ()),
         positional=False,
         tenant=tenant,
-        locations={refs[name]: where for name, where in (locations or {}).items() if name in refs},
+        locations=locations,
     )
 
 
