@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           python-version: "3.12"
           version: "latest"
@@ -118,7 +118,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           python-version: "3.12"
           version: "latest"
@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           python-version: "3.12"
           version: "latest"
@@ -243,7 +243,7 @@ jobs:
           fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           python-version: ${{ matrix.python-version }}
           version: "latest"
@@ -265,7 +265,7 @@ jobs:
       - name: Run unit tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
-        uses: bearing-research/diffcone/actions/record@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
+        uses: bearing-research/diffcone/actions/record@3256a0406905ab9e099d6eef71765e77399b6748  # v0.5.0
         with:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
@@ -276,7 +276,7 @@ jobs:
 
       - name: Run the affected unit tests (diffcone, pull request)
         if: github.event_name == 'pull_request'
-        uses: bearing-research/diffcone/actions/run@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
+        uses: bearing-research/diffcone/actions/run@3256a0406905ab9e099d6eef71765e77399b6748  # v0.5.0
         with:
           key-prefix: diffcone-unit-${{ matrix.os }}-py${{ matrix.python-version }}
           command: uv run pytest
@@ -332,7 +332,7 @@ jobs:
           fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           python-version: "3.12"
           version: "latest"
@@ -346,7 +346,7 @@ jobs:
       - name: Run E2E tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
-        uses: bearing-research/diffcone/actions/record@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
+        uses: bearing-research/diffcone/actions/record@3256a0406905ab9e099d6eef71765e77399b6748  # v0.5.0
         with:
           key-prefix: diffcone-e2e
           command: uv run pytest
@@ -357,7 +357,7 @@ jobs:
 
       - name: Run the affected E2E tests (diffcone, pull request)
         if: github.event_name == 'pull_request'
-        uses: bearing-research/diffcone/actions/run@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
+        uses: bearing-research/diffcone/actions/run@3256a0406905ab9e099d6eef71765e77399b6748  # v0.5.0
         with:
           key-prefix: diffcone-e2e
           command: uv run pytest
@@ -408,7 +408,7 @@ jobs:
           fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           python-version: "3.12"
           version: "latest"
@@ -450,7 +450,7 @@ jobs:
       - name: Run R tests and record (diffcone, main)
         id: record
         if: github.event_name == 'push'
-        uses: bearing-research/diffcone/actions/record@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
+        uses: bearing-research/diffcone/actions/record@3256a0406905ab9e099d6eef71765e77399b6748  # v0.5.0
         with:
           key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
           command: uv run pytest
@@ -462,7 +462,7 @@ jobs:
 
       - name: Run the affected R tests (diffcone, pull request)
         if: github.event_name == 'pull_request'
-        uses: bearing-research/diffcone/actions/run@5a19079e6529e254fe9a17f1cb2f071df98e1cec  # v0.4.0
+        uses: bearing-research/diffcone/actions/run@3256a0406905ab9e099d6eef71765e77399b6748  # v0.5.0
         with:
           key-prefix: diffcone-r-${{ matrix.os }}-${{ matrix.r }}
           command: uv run pytest
@@ -486,7 +486,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           python-version: "3.12"
           version: "latest"
