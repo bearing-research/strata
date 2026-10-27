@@ -40,7 +40,7 @@
     {
       "name": "retention_roots",
       "migrated": true,
-      "primary_key": ["kind", "holder", "artifact_id", "version"]
+      "primary_key": ["tenant", "kind", "holder", "artifact_id", "version"]
     },
     {
       "name": "retention_edges",
@@ -66,6 +66,11 @@
       "name": "node_inputs",
       "migrated": true,
       "primary_key": ["scope", "node_id", "role", "position"]
+    },
+    {
+      "name": "node_links",
+      "migrated": true,
+      "primary_key": ["scope", "node_id", "relation", "target_node_id"]
     },
     {
       "name": "build_releases",

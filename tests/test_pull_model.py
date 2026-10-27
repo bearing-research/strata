@@ -640,16 +640,20 @@ class TestFinalizeEndpoint:
         artifact = artifact_store.get_artifact("fin-output", version)
         assert artifact.state == "ready"
 
+    @pytest.mark.parametrize("tenant_id", [None, "team-a"])
     def test_finalize_refuses_an_output_over_the_limit(
-        self, client, config, build_store, artifact_store
+        self, client, config, build_store, artifact_store, tenant_id
     ):
         """A presigned upload bypasses the upload route's byte count, so finalize checks size."""
-        version = create_test_artifact(artifact_store, "big-output", finalize=False)
+        version = artifact_store.create_artifact(
+            artifact_id="big-output", provenance_hash="test-hash-big-output", tenant=tenant_id
+        )
         build_store.create_build(
             build_id="big-build-001",
             artifact_id="big-output",
             version=version,
             executor_ref="test@v1",
+            tenant_id=tenant_id,
         )
         blob = create_test_arrow_blob()
         artifact_store.write_blob("big-output", version, blob)

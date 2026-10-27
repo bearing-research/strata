@@ -3446,7 +3446,7 @@ class CellExecutor:
                 )
             if artifact_version is not None:
                 try:
-                    artifact_store.fail_artifact(artifact_id, artifact_version)
+                    artifact_store.fail_artifact(artifact_id, artifact_version, tenant=tenant_id)
                 except Exception:
                     logger.exception(
                         "Failed to mark notebook artifact %s@v=%s as failed",
@@ -3485,7 +3485,6 @@ class CellExecutor:
             "env": runtime_env,
             "input_specs": staged_input_specs,
             "output_format": "notebook-output-bundle@v1",
-            "_dispatch_mode": "external",
         }
         if language != "python":
             build_params["language"] = language
@@ -3550,6 +3549,7 @@ class CellExecutor:
                 principal_id=principal_id,
                 input_uris=input_uris,
                 params=recorded_params,
+                dispatch="external",
             )
             build_store.start_build(build_id)
 

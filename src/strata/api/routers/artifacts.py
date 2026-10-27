@@ -31,6 +31,7 @@ from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 from vestigo.store import (
     ArtifactIdTaken,
     ArtifactImportConflict,
+    ArtifactImportInProgress,
     ArtifactStore,
     ArtifactVersion,
     reject_unsafe_artifact_id,
@@ -695,10 +696,16 @@ def _land_import(
         landed = store.import_artifact(
             record, blob, requires=requirements(record.id, record.params.get("content_type"), blob)
         )
+    except ArtifactImportInProgress as exc:
+        # Settles on its own; remap would land a second copy of the same computation.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ArtifactImportConflict as exc:
         # Another import of this id@v=N with a different computation committed
         # after the check above.
         raise HTTPException(status_code=409, detail=f"{exc} Retry with remap=true.") from exc
+    except ValueError as exc:
+        # The same computation here has lost its bytes and this import brings none.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if staged and blob is not None:
         store.release_staged_import(tenant_id, declared_digest)
     return {
@@ -820,7 +827,7 @@ def _store_put_by_provenance(
                 byte_size=existing.byte_size or 0,
             )
         # A folder whose files are gone answers nobody; this upload takes the key over.
-        store.retire_ready(existing.id, existing.version)
+        store.retire_ready(existing.id, existing.version, tenant=tenant_id)
 
     params: dict[str, str] = {"content_type": str(content_type)}
     variable_name = metadata.get("variable_name")

@@ -624,7 +624,7 @@ async def finalize_build(
             build_id, message, code, lease_owner=claim[0], lease_expires_at=claim[1]
         ):
             raise HTTPException(status_code=409, detail=_LEASE_LOST_UNPUBLISHED)
-        store.fail_artifact(build.artifact_id, build.version)
+        store.fail_artifact(build.artifact_id, build.version, tenant=build.tenant_id)
 
     # On S3, GCS or Azure each blob probe is a network round trip.
     if not await anyio.to_thread.run_sync(

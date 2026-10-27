@@ -894,7 +894,7 @@ class TestTransformValidation:
         assert data["build_spec"] is None
 
     def test_a_reserved_param_is_refused(self, server_mode_app):
-        """`_dispatch_mode: external` from a client would park its build where nothing runs it."""
+        """Keys starting with `_` are the server's; a client's could mark a build it must not."""
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={

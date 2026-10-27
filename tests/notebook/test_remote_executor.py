@@ -249,7 +249,6 @@ def test_remote_executor_executes_signed_manifest_build(
             }
         },
         "output_format": "notebook-output-bundle@v1",
-        "_dispatch_mode": "external",
     }
     build_store.create_build(
         build_id=build_id,
@@ -355,7 +354,6 @@ def test_remote_executor_manifest_reports_finalize_failure(
             }
         },
         "output_format": "notebook-output-bundle@v1",
-        "_dispatch_mode": "external",
     }
     build_store.create_build(
         build_id=build_id,

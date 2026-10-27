@@ -24,7 +24,7 @@ from vestigo.releases import ReleaseStore
 from vestigo.sql_backend import SqlDialect
 from vestigo.store import ArtifactStore, StagedVersion
 
-from strata.artifact.graph import cell_definition
+from strata.artifact.graph import cell_definition, link_reconstructed
 from strata.artifact.retention import requirements
 from strata.artifact.upgrades import complete_upgrade
 from strata.auth.principal import get_principal
@@ -331,6 +331,7 @@ class NotebookArtifactManager:
             ),
             computation_key=computation_key,
         )
+        link_reconstructed(self.artifact_store, artifact_id, version)
 
         self.artifact_store.blob_store.write_blob(artifact_id, version, blob_data)
 

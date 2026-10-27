@@ -154,3 +154,27 @@ async def test_prefetch_resumes_once_held_bytes_are_streamed():
 
     assert plan.prefetched_first == b"first row group"
     assert fetched == [1]
+
+
+def test_a_tenants_failed_stream_fails_its_artifact(tmp_path):
+    """The ledger refuses a tenantless write to a tenant's row, so the failure names the tenant."""
+    from vestigo.store import get_artifact_store
+
+    from strata.streaming.registry import StreamState
+
+    store = get_artifact_store(tmp_path)
+    version = store.create_artifact("scanned", "f" * 64, tenant="team-a")
+    stream_state = StreamState(
+        stream_id="scanned",
+        plan=SimpleNamespace(),
+        artifact_id="scanned",
+        artifact_version=version,
+        created_at=0.0,
+        mode="artifact",
+        tenant="team-a",
+    )
+    state = SimpleNamespace(config=SimpleNamespace(artifact_dir=tmp_path))
+
+    ScanBuildManager().mark_stream_artifact_failed(state, stream_state)
+
+    assert store.get_artifact("scanned", version).state == "failed"

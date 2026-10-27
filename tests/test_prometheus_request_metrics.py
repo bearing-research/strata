@@ -219,5 +219,5 @@ def test_an_absent_object_is_not_an_error(client, refusing_s3):
 
 def test_every_operation_has_a_series_from_the_start(client):
     body = _scrape(client)
-    for operation in ("put", "get", "head", "list", "delete"):
+    for operation in ("put", "get", "head", "delete"):
         assert _store_errors(operation) in body

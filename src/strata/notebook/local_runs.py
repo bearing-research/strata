@@ -186,6 +186,7 @@ class LocalRuns:
             params={"init": init} if init else None,
             occurrence=occurrence,
             computation_key=computation_key,
+            dispatch="external",
         )
         self.builds.open_attempt(
             build_id,
@@ -193,6 +194,7 @@ class LocalRuns:
             writable_until=writable_until,
             lease_owner=LEASE_OWNER,
             lease_duration_seconds=LEASE_SECONDS,
+            principal=caller_principal_id(),
         )
         return LocalRun(
             build_id=build_id,

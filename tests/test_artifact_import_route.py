@@ -124,6 +124,37 @@ class TestIdempotencyByCompleteness:
         assert store.get_artifact("rows", 1).input_versions == original
 
 
+class TestWhatTheLedgerRefuses:
+    """Refusals the ledger raises reach the client as answers, never a 500."""
+
+    def test_a_version_still_building_here_says_retry_later(self, client, served_dir):
+        """Remap would land a second copy of a computation that is about to finish."""
+        from vestigo.store import ArtifactStore
+
+        store = ArtifactStore(served_dir)
+        version = store.create_artifact("fig", "a" * 64)
+
+        response = _post(client, _metadata("fig", version, "a" * 64))
+
+        assert response.status_code == 409, response.text
+        assert "settles" in response.json()["detail"]
+        assert "remap" not in response.json()["detail"]
+        assert store.get_artifact("fig", version).state == "building"
+
+    def test_a_byteless_retry_onto_a_computation_whose_bytes_are_gone(self, client, served_dir):
+        """The same computation here lost its bytes, and the retry brings none."""
+        from vestigo.store import ArtifactStore
+
+        _post(client, _metadata("first", 1, "a" * 64), blob=b"payload")
+        store = ArtifactStore(served_dir)
+        assert store.blob_store.delete_blob(*store._blob_key("first", 1))
+
+        response = _post(client, _metadata("second", 1, "a" * 64), blob=None)
+
+        assert response.status_code == 400, response.text
+        assert store.get_artifact("second", 1) is None
+
+
 class TestAnIdTwoComputationsClaim:
     """Notebook ids derive from notebook and cell ids, so two people from one repo send the same id
     for differently edited cells.

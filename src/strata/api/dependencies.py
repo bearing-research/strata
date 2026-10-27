@@ -320,7 +320,7 @@ def _checked_input_version(resolved, input_uri: str, tenant: str | None, store) 
         # its downstream's cache hits never read it, and retention would
         # otherwise collect it while every request for the downstream needs it.
         if store is not None:
-            store.record_use(resolved.artifact.id, resolved.artifact.version)
+            store.record_use(resolved.artifact.id, resolved.artifact.version, tenant=tenant)
     return resolved.version
 
 
