@@ -478,3 +478,52 @@ revert to `resp.read()`). **Candidate server-side follow-up (not done):** the
 `is_disconnected()` is fragile — any slow-reading client could poison an
 artifact; consider not persisting `failed` on disconnect, or hardening the
 disconnect check.
+
+# PyTorch pass: checkpoint, resume, branch (2026-10-27)
+
+The train cell is now a PyTorch MLP (8 → 64 → 64 → 1, AdamW, 12 epochs over
+the 240k-row training split) instead of `HistGradientBoostingRegressor`;
+evaluate and promote read it as a `torch.nn.Sequential`, and promote stores
+its `state_dict` through `torch.save`. Each epoch is a
+`strata.checkpoint(model=…, optimizer=…, shuffle=…, metrics=…)` of the two
+state dicts, the shuffle generator's state and the metrics; the best epoch
+so far is the `model` head. This is Strata's half of the computation-core
+friction item 2.4 (the dogfood trained no PyTorch model, and Gate 1's
+optimizer state was a list).
+
+Run on an isolated server against month 1 (snapshot S1, 300k feature rows):
+
+- **Uninterrupted:** 12 checkpoints accepted, ~18 s; final weights
+  sha256 `541b898452e6ae21`.
+- **Interrupted and resumed:** cancelled through the cancel route once four
+  checkpoints were accepted. The build stayed `building` with its lease
+  dropped, and the next normal run resumed it in a new attempt
+  (`resumed_from` set), printed "resumed after epoch 4" and ended on
+  `541b898452e6ae21`: bit-identical to the uninterrupted run, because the
+  optimizer moments and the generator state came back with the weights.
+- **Branched:** `execute?init=<release>` from the first run's checkpoints 2
+  and 4 opened new builds (`params.init` recorded), continued from those
+  epochs and ended on the same weights. A branch's checkpoints number from 1
+  again (it is a new build), so its head names its own sequence, not the
+  epoch.
+- **Evaluate and promote:** holdout r2 0.6059 (the last epoch's), mae 1.26;
+  `taxi/tip-model` promoted to champion.
+
+What the parts are stored as: the state dicts are `pickle/object` (21 KB
+model, 44 KB optimizer), the generator state `arrow/ipc` (a uint8 tensor),
+the metrics `json/object`. Pickle round-trips a state dict exactly, so the
+channel's `serialize` hook needs no torch path for this. It would for a
+model too large to hold twice in memory, or for checkpoints another tool
+must read, which is what the `vestigo.torch` adapter (Investigation 09) is
+for.
+
+**Found and fixed:** restoring the generator state printed PyTorch's
+"The given NumPy array is not writable" `UserWarning` in the cell's stderr.
+Every torch tensor rebuilt from Arrow wrapped Arrow's read-only buffer, and
+torch cannot mark a tensor read-only, so an in-place op on any tensor a cell
+read wrote memory it did not own. `_tensor_from_table` now copies a
+read-only buffer; the branch run after the fix restored without the warning.
+
+**Not a bug, noted:** a comment-only edit to the cell is a cache hit (the
+provenance hash ignores comments), so forcing a second computation to
+interrupt needed a statement change.

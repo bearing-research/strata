@@ -1,15 +1,18 @@
 # @name train_model
 # @timeout 900
-"""Train a tip-amount regressor on the materialized features, one checkpoint per stage.
+"""Train a tip-amount MLP on the materialized features, one checkpoint per epoch.
 
-Each stage adds trees to the same model and publishes a checkpoint, so a run
-that dies (crash, cancel, server restart) continues from its last checkpoint on
-the next run instead of starting over, and the best stage so far is the `model`
-head of the run.
+Each epoch publishes the model's and the optimizer's state dicts and the shuffle
+generator's state as a checkpoint, so a run that dies (crash, cancel, server
+restart) continues from its last epoch on the next run and ends with the weights
+an uninterrupted run would have. The best epoch so far is the `model` head.
 """
 
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.model_selection import train_test_split
+import hashlib
+
+import numpy as np
+import torch
+from torch import nn
 
 FEATURES = [
     "pickup_hour",
@@ -22,45 +25,76 @@ FEATURES = [
     "fare_amount",
 ]
 TARGET = "tip_amount"
-STAGES, TREES_PER_STAGE = 8, 25
+EPOCHS, BATCH = 12, 512
 
-params = {
-    "learning_rate": 0.1,
-    "max_leaf_nodes": 63,
-    "random_state": 42,
-    "warm_start": True,
-}
+params = {"hidden": 64, "lr": 1e-3, "weight_decay": 1e-5, "seed": 42}
 
-X_train, X_test, y_train, y_test = train_test_split(
-    features_df[FEATURES],
-    features_df[TARGET],
-    test_size=0.2,
-    random_state=42,
+rows = np.random.default_rng(params["seed"]).permutation(len(features_df))
+n_test = len(rows) // 5
+test_rows, train_rows = rows[:n_test], rows[n_test:]
+X = features_df[FEATURES].to_numpy(np.float32)
+y = features_df[TARGET].to_numpy(np.float32)
+feature_mean = X[train_rows].mean(axis=0)
+feature_std = X[train_rows].std(axis=0) + 1e-6
+X_test, y_test = X[test_rows], y[test_rows]
+x_train = torch.from_numpy((X[train_rows] - feature_mean) / feature_std)
+t_train = torch.from_numpy(y[train_rows])
+x_test = torch.from_numpy((X_test - feature_mean) / feature_std)
+
+torch.manual_seed(params["seed"])
+model = nn.Sequential(
+    nn.Linear(len(FEATURES), params["hidden"]),
+    nn.ReLU(),
+    nn.Linear(params["hidden"], params["hidden"]),
+    nn.ReLU(),
+    nn.Linear(params["hidden"], 1),
 )
+optimizer = torch.optim.AdamW(
+    model.parameters(), lr=params["lr"], weight_decay=params["weight_decay"]
+)
+shuffle = torch.Generator().manual_seed(params["seed"])
 
 resumed = strata.restore()
 if resumed is None:
-    model = HistGradientBoostingRegressor(max_iter=TREES_PER_STAGE, **params)
-    metrics = {"stage": 0, "trees": 0, "r2": None, "best_r2": None}
+    metrics = {"epoch": 0, "r2": None, "best_r2": None}
 else:
-    model, metrics = resumed["model"], resumed["metrics"]
-    print(f"resumed after stage {metrics['stage']} ({metrics['trees']} trees)")
+    model.load_state_dict(resumed["model"])
+    optimizer.load_state_dict(resumed["optimizer"])
+    shuffle.set_state(resumed["shuffle"])
+    metrics = resumed["metrics"]
+    print(f"resumed after epoch {metrics['epoch']}")
 
-for stage in range(metrics["stage"] + 1, STAGES + 1):
-    model.max_iter = stage * TREES_PER_STAGE
-    model.fit(X_train, y_train)
-    r2 = float(model.score(X_test, y_test))
+
+def holdout_r2() -> float:
+    with torch.no_grad():
+        pred = model(x_test).squeeze(1).numpy()
+    return float(1 - ((pred - y_test) ** 2).sum() / ((y_test - y_test.mean()) ** 2).sum())
+
+
+loss_fn = nn.MSELoss()
+for epoch in range(metrics["epoch"] + 1, EPOCHS + 1):
+    model.train()
+    for batch in torch.randperm(len(x_train), generator=shuffle).split(BATCH):
+        optimizer.zero_grad()
+        loss = loss_fn(model(x_train[batch]).squeeze(1), t_train[batch])
+        loss.backward()
+        optimizer.step()
+    model.eval()
+    r2 = holdout_r2()
     best = metrics["best_r2"] is None or r2 > metrics["best_r2"]
-    metrics = {
-        "stage": stage,
-        "trees": int(model.n_iter_),
-        "r2": r2,
-        "best_r2": r2 if best else metrics["best_r2"],
-    }
-    sequence = strata.checkpoint(model=model, metrics=metrics)
+    metrics = {"epoch": epoch, "r2": r2, "best_r2": r2 if best else metrics["best_r2"]}
+    sequence = strata.checkpoint(
+        model=model.state_dict(),
+        optimizer=optimizer.state_dict(),
+        shuffle=shuffle.get_state(),
+        metrics=metrics,
+    )
     if best:
         strata.head("model", sequence)
-    print(f"stage {stage}: {metrics['trees']} trees, holdout r2 {r2:.4f}")
+    print(f"epoch {epoch}: holdout r2 {r2:.4f}")
 
-print(f"trained on {len(X_train):,} rows, holdout {len(X_test):,} rows")
+# Equal across an uninterrupted run and one resumed from any checkpoint.
+weights = b"".join(p.detach().numpy().tobytes() for p in model.parameters())
+print(f"weights sha256 {hashlib.sha256(weights).hexdigest()[:16]}")
+print(f"trained on {len(x_train):,} rows, holdout {len(x_test):,} rows")
 print(f"params: {params}")

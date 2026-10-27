@@ -1675,7 +1675,9 @@ def _tensor_from_table(table: Any) -> Any:
             import torch  # ty: ignore[unresolved-import]  # optional; not in the dev env
         except ImportError:
             return arr
-        return torch.from_numpy(arr)
+        # Arrow's buffer is read-only and a tensor cannot say so: in-place ops would
+        # write memory the tensor does not own.
+        return torch.from_numpy(arr if arr.flags.writeable else arr.copy())
     if source == _SOURCE_JAX:
         try:
             import jax.numpy as jnp  # ty: ignore[unresolved-import]  # optional

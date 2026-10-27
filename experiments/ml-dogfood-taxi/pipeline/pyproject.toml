@@ -9,7 +9,7 @@ dependencies = [
     "cloudpickle>=3.0.0",
     "strata-notebook",
     "pandas>=2.0",
-    "scikit-learn>=1.5",
+    "torch>=2.9",
 ]
 
 [tool.uv.sources]
