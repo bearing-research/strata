@@ -223,9 +223,9 @@ async def materialize_artifact(request: MaterializeRequest):
 
     transform = request.transform
     executor_ref = transform.executor
-    # The server's own marks, such as the notebook's `_dispatch_mode`, which takes a build
-    # away from the runner: from a client it would park the build forever. At any depth,
-    # since the runner finds the mark by matching the params' JSON text.
+    # The server's own marks. The notebook's `_dispatch_mode` was one (now the build's
+    # `dispatch` column); from a client it would have parked the build forever. At any
+    # depth, so a mark cannot hide inside another value.
     reserved = sorted(_reserved_keys(transform.params))
     if reserved:
         raise HTTPException(

@@ -114,11 +114,11 @@ class TestGate1:
 
         store, builds, releases = _ledger(session)
         (build,) = _only_build(session, "train")
-        checkpoints = [r for r in releases.releases_of(build.build_id, "checkpoint")]
-        assert [r.sequence for r in checkpoints] == [1, 2, 3, 4]
-        assert all(r.state == "accepted" for r in checkpoints)
-        for release in checkpoints:
-            bundle = releases.bundle(release.release_id)
+        bundles = releases.bundles_of(build.build_id, "checkpoint")
+        assert [b.release.sequence for b in bundles] == [1, 2, 3, 4]
+        assert all(b.release.state == "accepted" for b in bundles)
+        for bundle in bundles:
+            release = bundle.release
             names = sorted(v.id.split("_var_")[1].split("@")[0] for v in bundle.outputs)
             assert names == ["metrics", "model", "optimizer_state"]
             assert {v.release_id for v in bundle.outputs} == {release.release_id}
@@ -139,7 +139,7 @@ class TestGate1:
             derive_subkey(parent, "model"),
             derive_subkey(parent, "metrics"),
         }
-        first = releases.bundle(checkpoints[0].release_id).outputs
+        first = bundles[0].outputs
         assert all(v.computation_key == parent for v in first)
         assert checkpoint_output_key(parent, build.build_id, 1, "model") in {
             v.provenance_hash for v in first

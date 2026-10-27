@@ -398,11 +398,7 @@ class TestBuildRunnerBasics:
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
             provenance_hash=f"prov-{artifact_id}",
-            transform_spec=TransformSpec(
-                executor="notebook_cell@v1",
-                params={"_dispatch_mode": "external"},
-                inputs=[],
-            ),
+            transform_spec=TransformSpec(executor="notebook_cell@v1", params={}, inputs=[]),
         )
         build_id = str(uuid.uuid4())
         build_store.create_build(
@@ -411,7 +407,7 @@ class TestBuildRunnerBasics:
             version=version,
             executor_ref="notebook_cell@v1",
             executor_url="http://notebook-executor:8080",
-            params={"_dispatch_mode": "external"},
+            dispatch="external",
         )
 
         await build_runner.start()
