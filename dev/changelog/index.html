@@ -3825,6 +3825,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A table leaf names where the read found its table.</strong> A cell's
+  <code>strata/table</code> node carried the table URI alone, so a bare <code>db.events</code>
+  read under two notebooks' default catalogs was one leaf; the leaf now
+  adds the table's location, as the catalog loaded it, on a second line
+  (a pinned read, never loaded, keeps the URI alone). Both the <code>@table</code>
+  and the SQL lake paths record it; the next rerun of such a cell gets a
+  new leaf, old nodes stay. (#1320)</li>
 <li><strong>The ledger installs from PyPI.</strong> <code>vestigo</code> 0.1.0 is released from its
   own repository, <a href="https://github.com/bearing-research/vestigo">bearing-research/vestigo</a>,
   and Strata pins it exactly from there; <code>packages/vestigo</code> leaves the tree
