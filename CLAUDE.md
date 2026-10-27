@@ -182,7 +182,7 @@ nothing of Strata (blob settings, content validators, retention roots and
 required edges, node specs are passed in). Its artifact and name URIs carry a
 per-process scheme; `strata/__init__.py` sets `strata` before any submodule
 parses one (`vestigo.uris.set_uri_scheme`). Gate 2 (ADR 002 §8) lives in
-the ledger's own suite (`tests/gate2.py` there), run on SQLite and Postgres.
+the ledger's own suite (`tests/test_releases.py` there), run on SQLite and Postgres.
 Strata's side: `artifact/` (`transfer`, `table_export`, `cli`, `retention` for
 what a version requires, `graph` for a cell's node and the reconstruction of
 old rows, `upgrades` for the per-store steps run wherever a store is opened),
