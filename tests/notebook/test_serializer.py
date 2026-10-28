@@ -1294,6 +1294,20 @@ class TestTensorLibrarySerialization:
         assert isinstance(loaded, fake_torch.Tensor)
         np.testing.assert_array_equal(loaded.numpy(), orig.numpy())
 
+    def test_a_loaded_torch_tensor_owns_writable_memory(self, fake_torch):
+        """torch cannot mark a tensor read-only, so one over Arrow's buffer would let an
+        in-place op write memory the tensor does not own (and torch warns in the cell)."""
+        import numpy as np
+
+        orig = fake_torch.Tensor(np.arange(6, dtype=np.float32).reshape(2, 3))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(orig, tmpdir, "t")
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert loaded.numpy().flags.writeable
+
     def test_torch_tensor_degrades_to_ndarray_when_torch_absent(self, fake_torch):
         import sys
 

@@ -60,6 +60,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A torch tensor a cell reads owns its memory.** A tensor rebuilt from Arrow
+  wrapped the buffer read-only, which torch cannot enforce: an in-place op
+  wrote memory the tensor did not own, and torch warned in the cell's stderr
+  (seen restoring a generator's state from a checkpoint). It is copied when
+  the buffer is read-only. (#1324)
 - **The ledger's audit fixes, and Strata's side of them.** The `vestigo`
   package is mirrored at its commit `3c19164`, which fixes every finding of
   the 2026-10-26 package audit: a deleted dedup canonical hands its bytes to

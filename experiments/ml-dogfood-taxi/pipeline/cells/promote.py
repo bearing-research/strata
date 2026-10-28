@@ -7,21 +7,24 @@ champion via an alias move — which the server may gate behind approval
 when `champion` is protected (STRATA_REGISTRY_PROTECTED_ALIASES).
 """
 
-import pickle
+import io
 
 import pyarrow as pa
+import torch
 
 
+state = io.BytesIO()
+torch.save(model.state_dict(), state)
 model_table = pa.table(
     {
-        "model_pickle": pa.array([pickle.dumps(model)], type=pa.binary()),
-        "framework": ["sklearn.HistGradientBoostingRegressor"],
+        "state_dict": pa.array([state.getvalue()], type=pa.binary()),
+        "framework": ["torch.nn.Sequential"],
     }
 )
 
 model_art = strata.put(
     inputs=[features_uri],
-    transform={"executor": "train_hgbr@v1", "params": dict(params)},
+    transform={"executor": "train_mlp@v1", "params": dict(params)},
     data=model_table,
     name="taxi/tip-model",
 )
