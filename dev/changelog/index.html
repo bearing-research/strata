@@ -3825,6 +3825,10 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger is vestigo 0.3.0.</strong> It adds the <code>vestigo.torch</code> adapter
+  (behind vestigo's <code>torch</code> extra, which Strata does not install) and a
+  migration every store gets on open: <code>build_attempts.opened_at</code> and two
+  indexes. Nothing in Strata calls the new APIs yet. (#1325)</li>
 <li><strong>The ledger is vestigo 0.2.1.</strong> A build's dispatch is a column of the
   ledger (<code>create_build(dispatch="external")</code> for the notebook's worker
   builds and local cell runs, which nothing in the transform runner picks
