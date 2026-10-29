@@ -10,6 +10,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ## Unreleased
 
 ### Changed
+- **The ledger is vestigo 0.3.0.** It adds the `vestigo.torch` adapter
+  (behind vestigo's `torch` extra, which Strata does not install) and a
+  migration every store gets on open: `build_attempts.opened_at` and two
+  indexes. Nothing in Strata calls the new APIs yet. (#1325)
 - **The ledger is vestigo 0.2.1.** A build's dispatch is a column of the
   ledger (`create_build(dispatch="external")` for the notebook's worker
   builds and local cell runs, which nothing in the transform runner picks
