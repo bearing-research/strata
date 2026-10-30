@@ -537,6 +537,51 @@ class TestPerVariantInstanceKeys:
         # A fan-out collapse binds even with no instance, as it always has.
         assert specs["out"] == {"kind": "sweep_dict", "variants": {}}
 
+    def test_a_fanout_resolves_the_cells_provenance_once(self, tmp_path):
+        import asyncio
+
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.session import NotebookSession
+
+        src = "# @per_variant\nout = val * 2\n"
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("vc", "# @variant g c\nval = 30\n"),
+                ("ev", src),
+                # A reader, so the instances' ``out`` is stored.
+                ("report", "total = sum(out.values())\n"),
+            ],
+            ["g"],
+        )
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        executor = CellExecutor(session)
+        resolved: list[str] = []
+        compute = executor._compute_cell_provenance
+
+        async def counting(cell_id, source, **kwargs):
+            resolved.append(cell_id)
+            return await compute(cell_id, source, **kwargs)
+
+        executor._compute_cell_provenance = counting
+        result = asyncio.run(executor.execute_cell("ev", src))
+
+        assert result.success, result.error
+        # Mounts, tables, fetches and the env once for the cell, not once per variant.
+        assert resolved.count("ev") == 1
+        keys = {
+            session.get_artifact_manager()
+            .artifact_store.get_latest_version(
+                session.get_artifact_manager().cell_artifact_id("ev", "out", variant=name)
+            )
+            .provenance_hash
+            for name in ("a", "b", "c")
+        }
+        assert len(keys) == 3
+
     def test_the_binding_rule(self, tmp_path):
         """The loader, the input hashes and the recorded inputs all follow ``_variant_read``."""
         from strata.notebook.session import NotebookSession, VariantRead
@@ -601,6 +646,7 @@ class TestPerVariantProgressFrames:
             materialize_upstreams,
             use_cache,
             fanout_variant=None,
+            cell_provenance=None,
         ):
             return CellExecutionResult(cell_id=cell_id, success=True)
 
@@ -1083,6 +1129,7 @@ class TestFanoutBaseProvenance:
             materialize_upstreams,
             use_cache,
             fanout_variant=None,
+            cell_provenance=None,
         ):
             return CellExecutionResult(cell_id=cell_id, success=True)
 

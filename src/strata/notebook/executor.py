@@ -27,7 +27,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable
 from contextlib import ExitStack, contextmanager, nullcontext
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
@@ -368,6 +368,27 @@ def _pack_folder_inputs(
     return packed
 
 
+def _provenance_hash(
+    input_hashes: list[str],
+    mount_fingerprints: list[str],
+    table_fingerprints: list[str],
+    fetch_fingerprints: list[str],
+    dataset_fingerprints: list[str],
+    source_hash: str,
+    env_hash: str,
+) -> str:
+    """A cell's provenance hash from its ingredients, in the one order every path uses."""
+    return compute_provenance_hash(
+        input_hashes
+        + mount_fingerprints
+        + table_fingerprints
+        + fetch_fingerprints
+        + dataset_fingerprints,
+        source_hash,
+        env_hash,
+    )
+
+
 @dataclass(kw_only=True, frozen=True)
 class _CellProvenance:
     """Inputs and result of the standard cell-provenance computation.
@@ -406,6 +427,22 @@ class _CellProvenance:
     input_weights: list[InputWeight] = field(default_factory=list)
     # Whether a large read was confirmed (Amber item 90); ``None`` with no threshold set.
     read_confirmation: ReadConfirmation | None = None
+
+    def over_inputs(self, input_hashes: list[str]) -> _CellProvenance:
+        """The same provenance over other input hashes: a fan-out instance's."""
+        return replace(
+            self,
+            input_hashes=input_hashes,
+            provenance_hash=_provenance_hash(
+                input_hashes,
+                self.mount_fingerprints,
+                self.table_fingerprints,
+                self.fetch_fingerprints,
+                self.dataset_fingerprints,
+                self.source_hash,
+                self.env_hash,
+            ),
+        )
 
     def reads(
         self, mounts_moved: dict[str, int | None], tables_moved: dict[str, int]
@@ -1298,16 +1335,14 @@ class CellExecutor:
         mount_specs: list[MountSpec] | None = None,
         mount_fingerprints: list[str] | None = None,
         has_rw_mount: bool | None = None,
-        fanout_variant: str | None = None,
     ) -> _CellProvenance:
         """Compute the standard provenance triplet for a cell.
 
         Every cell kind must feed the store the same hash ``compute_staleness``
         recomputes; drifting any ingredient (runtime env, worker identity, mount
         fingerprints, env-key narrowing) leaves the cell stale forever. Optional
-        precomputed arguments let callers skip resolving mounts again. With
-        ``fanout_variant`` set, it is one fan-out instance's provenance, over the
-        inputs that instance reads.
+        precomputed arguments let callers skip resolving mounts again. A fan-out
+        instance's is this, ``over_inputs`` the inputs that instance reads.
         """
         if annotations is None:
             annotations = parse_annotations(source)
@@ -1351,7 +1386,7 @@ class CellExecutor:
             provenance_env,
             runtime_identity=runtime_identity,
         )
-        input_hashes = self._collect_input_hashes(cell_id, fanout_variant=fanout_variant)
+        input_hashes = self._collect_input_hashes(cell_id)
         (
             config,
             table_fingerprints,
@@ -1405,12 +1440,12 @@ class CellExecutor:
                 config=self._lake_config(),
             ),
         )
-        provenance_hash = compute_provenance_hash(
-            input_hashes
-            + mount_fingerprints
-            + table_fingerprints
-            + fetch_fingerprints
-            + dataset_fingerprints,
+        provenance_hash = _provenance_hash(
+            input_hashes,
+            mount_fingerprints,
+            table_fingerprints,
+            fetch_fingerprints,
+            dataset_fingerprints,
             source_hash,
             env_hash,
         )
@@ -1487,6 +1522,7 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
         fanout_variant: str | None = None,
+        cell_provenance: _CellProvenance | None = None,
     ) -> CellExecutionResult:
         """Python cell pipeline: provenance, upstreams, cache check, harness, persist.
 
@@ -1526,9 +1562,13 @@ class CellExecutor:
 
             # ② Provenance. Every cell-kind path uses the same helper so the hash agrees with
             # ``compute_staleness`` on re-open.
-            prov = await self._compute_cell_provenance(
-                cell_id, source, fanout_variant=fanout_variant
-            )
+            # A fan-out computes the cell's provenance once (``cell_provenance``); each
+            # instance keys on the inputs it reads.
+            prov = cell_provenance or await self._compute_cell_provenance(cell_id, source)
+            if fanout_variant is not None:
+                prov = prov.over_inputs(
+                    self._collect_input_hashes(cell_id, fanout_variant=fanout_variant)
+                )
             source_hash = prov.source_hash
             runtime_env = prov.runtime_env
             effective_worker = prov.effective_worker
@@ -2317,6 +2357,9 @@ class CellExecutor:
             )
         if materialize_upstreams:
             await self._materialize_upstreams(cell_id)
+        # Mounts, tables, fetches and the env are the cell's, not a variant's: resolved once,
+        # so every instance sees the same snapshot and a mount is listed once.
+        base = await self._compute_cell_provenance(cell_id, source)
 
         results: list[tuple[str, CellExecutionResult]] = []
         self._variant_writes[cell_id] = []
@@ -2331,6 +2374,7 @@ class CellExecutor:
                 materialize_upstreams=False,
                 use_cache=use_cache,
                 fanout_variant=name,
+                cell_provenance=base,
             )
             results.append((name, res))
             if self.on_variant_complete is not None:
@@ -2383,14 +2427,13 @@ class CellExecutor:
             # Record the BASE provenance: compute_staleness recomputes the base hash, so a
             # variant-scoped value would leave the fan-out cell perpetually stale on re-open.
             try:
-                prov = await self._compute_cell_provenance(cell_id, source)
                 self.session.record_successful_execution_provenance(
                     cell_id,
-                    prov.provenance_hash,
-                    compute_source_hash(source),
-                    prov.env_hash,
-                    table_reads=prov.table_reads,
-                    reads=prov.reads(*self._moved(cell_id)),
+                    base.provenance_hash,
+                    base.source_hash,
+                    base.env_hash,
+                    table_reads=base.table_reads,
+                    reads=base.reads(*self._moved(cell_id)),
                     writes=_writes_entry(writes),
                 )
             except Exception:
