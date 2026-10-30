@@ -3825,6 +3825,8 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The ledger is vestigo 0.3.1</strong>, which adds <code>vestigo.torch.HostedRun</code> and
+  <code>vestigo.checkpoint_files</code>. No migration. (#1327)</li>
 <li><strong>The ledger is vestigo 0.3.0.</strong> It adds the <code>vestigo.torch</code> adapter
   (behind vestigo's <code>torch</code> extra, which Strata does not install) and a
   migration every store gets on open: <code>build_attempts.opened_at</code> and two
@@ -3903,12 +3905,26 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>The ledger's URI scheme is a setting.</strong> <code>vestigo</code> artifact and name
+<li>
+<p><strong>A PyTorch cell saves through vestigo.torch.</strong> <code>strata.checkpoint_files(step,
+  write)</code> publishes what <code>write</code> leaves in an empty folder as one checkpoint of
+  the run, each file its own version in vestigo's checkpoint layout, and
+  <code>strata.restore_files()</code> returns the folder the checkpoint a run continues
+  from (a resume or a branch) was written out to. <code>vestigo.torch.HostedRun(strata)</code>
+  saves and restores the model and optimizer through them, so
+  <code>vestigo.torch.Ledger.load</code> reads a cell's checkpoint outside Strata and a
+  cell restores one <code>Ledger.run</code> wrote. The taxi dogfood's train cell uses it;
+  run live, resume and branch end on the uninterrupted weights. Investigation
+  09's T3. (#1327)</p>
+</li>
+<li>
+<p><strong>The ledger's URI scheme is a setting.</strong> <code>vestigo</code> artifact and name
   URIs carry a per-process scheme (<code>vestigo.uris.set_uri_scheme</code>, default
   <code>vestigo</code>); Strata sets <code>strata</code> in its package init, so every persisted
   URI is unchanged. The package copy is mirrored from its own repository,
   where it names nothing of Strata in messages, temp-file prefixes or test
-  gates. (#1301)</li>
+  gates. (#1301)</p>
+</li>
 <li><strong>Gate 1 on both backends, with the table leaf (ADR 002 E5).</strong> Gate 1
   runs on PostgreSQL too (<code>tests/notebook/test_local_runs_postgres.py</code>, the
   integration workflow's Postgres step), and <code>NotebookSession</code> takes the
