@@ -1486,7 +1486,6 @@ class CellExecutor:
         *,
         materialize_upstreams: bool,
         use_cache: bool,
-        fanout_group: str | None = None,
         fanout_variant: str | None = None,
     ) -> CellExecutionResult:
         """Python cell pipeline: provenance, upstreams, cache check, harness, persist.
@@ -1508,8 +1507,8 @@ class CellExecutor:
             # A @per_variant cell fans out: the orchestrator re-enters this pipeline once per
             # variant with fanout_variant set.
             if fanout_variant is None:
-                fanout = self._fanout_info(cell_id)
-                if fanout is not None:
+                variant_names = self._fanout_variants(cell_id)
+                if variant_names is not None:
                     return await self._execute_fanout_cell(
                         cell_id,
                         source,
@@ -1517,8 +1516,7 @@ class CellExecutor:
                         start_time,
                         materialize_upstreams=materialize_upstreams,
                         use_cache=use_cache,
-                        group=fanout[0],
-                        variant_names=fanout[1],
+                        variant_names=variant_names,
                     )
 
             # ① Materialize every upstream whose artifact is missing (recursive; each upstream
@@ -1827,7 +1825,6 @@ class CellExecutor:
                         self._load_input_blobs,
                         cell_id,
                         output_dir,
-                        fanout_group=fanout_group,
                         fanout_variant=fanout_variant,
                     )
                 )
@@ -2276,18 +2273,11 @@ class CellExecutor:
             )
         return bool(to_promote)
 
-    def _fanout_info(self, cell_id: str) -> tuple[str, tuple[str, ...]] | None:
-        """``(group, variant_names)`` if ``cell_id`` is a ``@per_variant`` fan-out cell, else None.
-
-        That is, its outputs resolve to a ``SweepProducer`` with ``fanout_cell == cell_id``.
-        """
+    def _fanout_variants(self, cell_id: str) -> tuple[str, ...] | None:
+        """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None."""
         dag = self.session.dag
-        if dag is None:
-            return None
-        for producer in dag.variable_producer.values():
-            if isinstance(producer, SweepProducer) and producer.fanout_cell == cell_id:
-                return producer.group, tuple(name for name, _ in producer.variants)
-        return None
+        fanout = dag.fanout_cells.get(cell_id) if dag else None
+        return tuple(name for name, _ in fanout.variants) if fanout is not None else None
 
     async def _execute_fanout_cell(
         self,
@@ -2298,7 +2288,6 @@ class CellExecutor:
         *,
         materialize_upstreams: bool,
         use_cache: bool,
-        group: str,
         variant_names: tuple[str, ...],
     ) -> CellExecutionResult:
         """Run a ``# @per_variant`` cell once per variant of its fan-out group.
@@ -2341,7 +2330,6 @@ class CellExecutor:
                 start_time,
                 materialize_upstreams=False,
                 use_cache=use_cache,
-                fanout_group=group,
                 fanout_variant=name,
             )
             results.append((name, res))
@@ -5274,14 +5262,13 @@ class CellExecutor:
         cell_id: str,
         output_dir: Path,
         *,
-        fanout_group: str | None = None,
         fanout_variant: str | None = None,
     ) -> dict[str, Any]:
         """Write upstream variable blobs from the artifact store into *output_dir*.
 
-        Upstreams must already be materialized. With ``fanout_variant`` set, a
-        reference from the cell's own ``fanout_group`` binds only that variant's
-        scalar; other sweep groups, and upstream fan-out cells, collapse to a
+        Upstreams must already be materialized. A sweep read binds what
+        ``session._variant_read`` says: with ``fanout_variant`` set, the cell's own
+        group as that variant's scalar; every other sweep read as a
         ``{variant: value}`` dict.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
@@ -5293,7 +5280,6 @@ class CellExecutor:
         # A value is a single-artifact spec (``{content_type, file, uri}``) or a sweep bundle
         # (``{kind: "sweep_dict", variants: {name: spec}}``).
         input_specs: dict[str, Any] = {}
-        dag = self.session.dag
 
         def _load_artifact_spec(artifact_id: str, file_stem: str) -> dict[str, str] | None:
             """Write one artifact's blob to *file_stem*; return its spec, or None if absent."""
@@ -5370,69 +5356,40 @@ class CellExecutor:
             ]
 
             for var_name in referenced_vars:
-                producer = dag.variable_producer.get(var_name) if dag else None
                 artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"
                 try:
-                    if isinstance(producer, SweepProducer):
-                        if producer.fanout_cell is not None:
-                            # Upstream is a @per_variant fan-out cell: its outputs
-                            # live under ``@variant=`` subkeys of one cell.
-                            if fanout_variant is not None and producer.group == fanout_group:
-                                # Chained fan-out: this instance zips to the upstream
-                                # instance of the same variant (scalar bind).
-                                vid = artifact_mgr.cell_artifact_id(
-                                    producer.fanout_cell, var_name, variant=fanout_variant
-                                )
-                                spec = _load_artifact_spec(vid, var_name)
-                                if spec is not None:
-                                    input_specs[var_name] = spec
-                                continue
-                            # Collapse consumer: gather all variants into a dict
-                            # (partial set on any missing variant).
-                            bundle = input_specs.setdefault(
-                                var_name, {"kind": "sweep_dict", "variants": {}}
+                    read = self.session._variant_read(
+                        cell_id, upstream_id, var_name, fanout_variant
+                    )
+                    if read is not None:
+                        # Partial on a missing variant. A failed one never gets here:
+                        # _materialize_upstreams raises first. A collapse of a fan-out binds
+                        # even with no instance; a group with no member left stays unbound.
+                        if read.fanout and not read.scalar:
+                            input_specs.setdefault(var_name, {"kind": "sweep_dict", "variants": {}})
+                        for name in read.variants:
+                            # A fan-out's instances live under ``@variant=`` subkeys of one cell.
+                            vid = (
+                                artifact_mgr.cell_artifact_id(upstream_id, var_name, variant=name)
+                                if read.fanout
+                                else artifact_id
                             )
-                            for vname, _cid in producer.variants:
-                                vid = artifact_mgr.cell_artifact_id(
-                                    producer.fanout_cell, var_name, variant=vname
-                                )
-                                vspec = _load_artifact_spec(vid, f"{var_name}__{vname}")
-                                if vspec is not None:
-                                    bundle["variants"][vname] = vspec
-                            continue
-
-                        variant_name = next(
-                            (name for name, cid in producer.variants if cid == upstream_id),
-                            None,
-                        )
-                        if variant_name is None:
-                            continue
-
-                        if fanout_variant is not None and producer.group == fanout_group:
-                            # This cell fans out over this group: bind only its own variant as a
-                            # SCALAR. Chained fan-out zips by variant name.
-                            if variant_name != fanout_variant:
+                            stem = var_name if read.scalar else f"{var_name}__{name}"
+                            spec = _load_artifact_spec(vid, stem)
+                            if spec is None:
+                                if not read.fanout:
+                                    logger.error(
+                                        "Sweep variant '%s' of '%s' has no artifact; dropping it.",
+                                        name,
+                                        var_name,
+                                    )
                                 continue
-                            spec = _load_artifact_spec(artifact_id, var_name)
-                            if spec is not None:
+                            if read.scalar:
                                 input_specs[var_name] = spec
-                            continue
-
-                        spec = _load_artifact_spec(artifact_id, f"{var_name}__{variant_name}")
-                        if spec is None:
-                            # A variant with no artifact is dropped. A failed one never gets here:
-                            # _materialize_upstreams raises first.
-                            logger.error(
-                                "Sweep variant '%s' of '%s' has no artifact; "
-                                "dropping it from the dict.",
-                                variant_name,
-                                var_name,
-                            )
-                            continue
-                        bundle = input_specs.setdefault(
-                            var_name, {"kind": "sweep_dict", "variants": {}}
-                        )
-                        bundle["variants"][variant_name] = spec
+                            else:
+                                input_specs.setdefault(
+                                    var_name, {"kind": "sweep_dict", "variants": {}}
+                                )["variants"][name] = spec
                         continue
 
                     spec = _load_artifact_spec(artifact_id, var_name)
@@ -8396,7 +8353,6 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     sibling variants overwrite each other and the ``{variant: value}`` dict
     never forms.
     """
-    from strata.notebook.dag import SweepProducer
     from strata.notebook.languages import get_language_executor
 
     # A batch never sees a fetch's bytes; a fetching cell runs single-cell, where the

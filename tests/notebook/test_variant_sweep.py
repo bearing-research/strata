@@ -498,6 +498,78 @@ class TestPerVariantInstanceKeys:
         write_cell(nb, "wx", "# @variant h x\nw = 3\n")
         assert self._run(nb, log, capsys) == ["ev:100", "ev:50"]
 
+    def test_a_fanout_whose_output_a_later_cell_redefines_still_fans_out(self, tmp_path, capsys):
+        log = tmp_path / "ran.log"
+        ev = "# @per_variant\nout = val * 2\n" + self._logged(log, "ev", "val")
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", ev),
+                # Every output, ``f`` from the log line too, now has a later definer.
+                ("later", "out = 1\nf = None\n"),
+            ],
+            ["g"],
+        )
+        assert self._run(nb, log, capsys) == ["ev:10", "ev:20"]
+
+    def test_a_group_with_no_member_loaded_stays_unbound(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.session import NotebookSession
+
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", "# @per_variant\nout = val * 2\n"),
+                ("report", "total = sum(val.values()) + sum(out.values())\n"),
+            ],
+            ["g"],
+        )
+        session = NotebookSession(parse_notebook(nb), nb)
+        out_dir = tmp_path / "inputs"
+        out_dir.mkdir()
+        # Nothing has run: an empty group dict would sum to 0 and cache as a success.
+        specs = CellExecutor(session)._load_input_blobs("report", out_dir)
+        assert "val" not in specs
+        # A fan-out collapse binds even with no instance, as it always has.
+        assert specs["out"] == {"kind": "sweep_dict", "variants": {}}
+
+    def test_the_binding_rule(self, tmp_path):
+        """The loader, the input hashes and the recorded inputs all follow ``_variant_read``."""
+        from strata.notebook.session import NotebookSession, VariantRead
+
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("k", "k = 1\n"),
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("wx", "# @variant h x\nw = 1\n"),
+                ("wy", "# @variant h y\nw = 2\n"),
+                ("ev", "# @per_variant g\nout = val * k * sum(w.values())\n"),
+                ("ev2", "# @per_variant\nout2 = out + 1\n"),
+                ("report", "total = sum(out.values())\n"),
+            ],
+            ["g", "h"],
+        )
+        session = NotebookSession(parse_notebook(nb), nb)
+        read = session._variant_read
+
+        assert read("ev", "k", "k", "a") is None
+        # Its own group: a scalar of its own variant, and nothing of another's cell.
+        assert read("ev", "va", "val", "a") == VariantRead(("a",), scalar=True, fanout=False)
+        assert read("ev", "vb", "val", "a") == VariantRead((), scalar=True, fanout=False)
+        # Another group: the whole dict, one member per cell.
+        assert read("ev", "wx", "w", "a") == VariantRead(("x",), scalar=False, fanout=False)
+        # Without a variant (the cell-level key, staleness) a group is the whole dict.
+        assert read("ev", "va", "val") == VariantRead(("a",), scalar=False, fanout=False)
+        # A chained instance zips to the same instance; a plain consumer reads them all.
+        assert read("ev2", "ev", "out", "b") == VariantRead(("b",), scalar=True, fanout=True)
+        assert read("report", "ev", "out") == VariantRead(("a", "b"), scalar=False, fanout=True)
+
 
 class TestPerVariantProgressFrames:
     """The fan-out orchestrator fires on_variant_complete per variant; WS forwards it as
@@ -528,7 +600,6 @@ class TestPerVariantProgressFrames:
             *,
             materialize_upstreams,
             use_cache,
-            fanout_group=None,
             fanout_variant=None,
         ):
             return CellExecutionResult(cell_id=cell_id, success=True)
@@ -550,7 +621,6 @@ class TestPerVariantProgressFrames:
                 0.0,
                 materialize_upstreams=False,
                 use_cache=False,
-                group="model",
                 variant_names=("logreg", "rf"),
             )
         )
@@ -1012,7 +1082,6 @@ class TestFanoutBaseProvenance:
             *,
             materialize_upstreams,
             use_cache,
-            fanout_group=None,
             fanout_variant=None,
         ):
             return CellExecutionResult(cell_id=cell_id, success=True)
@@ -1027,7 +1096,6 @@ class TestFanoutBaseProvenance:
                 0.0,
                 materialize_upstreams=False,
                 use_cache=False,
-                group="model",
                 variant_names=("logreg", "rf"),
             )
         )
@@ -1060,7 +1128,6 @@ class TestFanoutBaseProvenance:
                 0.0,
                 materialize_upstreams=False,
                 use_cache=True,
-                group="model",
                 variant_names=("logreg", "rf"),
             )
         )

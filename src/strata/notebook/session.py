@@ -177,6 +177,20 @@ def cell_test_input_fingerprint(inputs: list[str], env_hash: str) -> str:
 
 
 @dataclass(frozen=True)
+class VariantRead:
+    """The variants of a sweep-produced variable that a cell reads from one upstream.
+
+    ``fanout`` names instances of a ``# @per_variant`` upstream (``@variant=``
+    artifacts) rather than member cells; ``scalar`` binds the value itself
+    rather than a ``{variant: value}`` dict.
+    """
+
+    variants: tuple[str, ...]
+    scalar: bool
+    fanout: bool
+
+
+@dataclass(frozen=True)
 class _OutsideWorld:
     """What one cell's staleness depends on beyond this process.
 
@@ -2045,14 +2059,10 @@ class NotebookSession:
         ``variant:<var>:<name>=<hash>``, so another variant's change leaves the
         instance cached.
         """
-        from strata.notebook.dag import SweepProducer
-
         cell = self.notebook_state.get_cell(cell_id)
         if cell is None or not cell.upstream_ids:
             return []
 
-        dag = self.dag
-        own_group = self._fanout_group_of(cell_id) if variant is not None else None
         hashes: list[str] = []
         sweep_buckets: dict[str, list[tuple[str, str]]] = {}
 
@@ -2096,21 +2106,19 @@ class NotebookSession:
                 uri_items = [(None, upstream_cell.artifact_uri)]
 
             for var_name, uri in uri_items:
-                if by_content and var_name is not None and var_name not in reads:
+                if var_name is None:
+                    provenance_hash = _hash_from_uri(uri, by_content=by_content)
+                    if provenance_hash is not None:
+                        hashes.append(provenance_hash)
                     continue
-                fanout = dag.variable_producer.get(var_name) if dag and var_name else None
-                if (
-                    var_name is not None
-                    and isinstance(fanout, SweepProducer)
-                    and fanout.fanout_cell == upstream_id
-                ):
-                    # A @per_variant cell keeps one URI per variable (last variant stored), but a
-                    # consumer reads every instance, so key on all of them; a chained instance
-                    # zips to its own.
-                    own = variant is not None and fanout.group == own_group
-                    wanted = [variant] if own else [name for name, _ in fanout.variants]
+                if by_content and var_name not in reads:
+                    continue
+                read = self._variant_read(cell_id, upstream_id, var_name, variant)
+                if read is not None and read.fanout:
+                    # A @per_variant cell keeps one URI per variable (last variant stored), so
+                    # key on the instances the cell reads.
                     instances = []
-                    for variant_name in wanted:
+                    for variant_name in read.variants:
                         instance = store.get_latest_version(
                             self.artifact_manager.cell_artifact_id(
                                 upstream_id, var_name, variant=variant_name
@@ -2123,31 +2131,23 @@ class NotebookSession:
                             by_content=by_content,
                         )
                         instances.append(f"{variant_name}={instance_hash}")
-                    prefix = "variant" if own else "fanout"
+                    prefix = "variant" if read.scalar else "fanout"
                     hashes.append(f"{prefix}:{var_name}:{';'.join(sorted(instances))}")
                     continue
+                if read is not None and not read.variants:
+                    continue  # another variant's cell: not worth a lookup, let alone a digest
                 provenance_hash = _hash_from_uri(uri, by_content=by_content)
                 if provenance_hash is None:
                     continue
-                if var_name is None:
-                    hashes.append(provenance_hash)
-                    continue
-                producer = dag.variable_producer.get(var_name) if dag else None
-                if isinstance(producer, SweepProducer):
-                    variant_name = next(
-                        (name for name, cid in producer.variants if cid == upstream_id),
-                        None,
-                    )
-                    if variant_name is not None and producer.group == own_group:
-                        # The instance binds only its own variant's scalar.
-                        if variant_name == variant:
+                if read is not None:
+                    for variant_name in read.variants:
+                        if read.scalar:
                             hashes.append(f"variant:{var_name}:{variant_name}={provenance_hash}")
-                        continue
-                    if variant_name is not None:
-                        sweep_buckets.setdefault(var_name, []).append(
-                            (variant_name, provenance_hash)
-                        )
-                        continue
+                        else:
+                            sweep_buckets.setdefault(var_name, []).append(
+                                (variant_name, provenance_hash)
+                            )
+                    continue
                 hashes.append(provenance_hash)
                 if var_name in shadowed and var_name in wired:
                     hashes.append(f"wired:{var_name}={provenance_hash}")
@@ -2160,14 +2160,39 @@ class NotebookSession:
 
     def _fanout_group_of(self, cell_id: str) -> str | None:
         """The sweep group ``cell_id`` fans out over, if it is a fan-out cell."""
+        fanout = self.dag.fanout_cells.get(cell_id) if self.dag else None
+        return fanout.group if fanout is not None else None
+
+    def _variant_read(
+        self, cell_id: str, upstream_id: str, var_name: str, variant: str | None = None
+    ) -> VariantRead | None:
+        """What ``cell_id`` (instance ``variant`` of a fan-out) reads of ``var_name`` from
+        ``upstream_id``, or None when no sweep produces it there.
+
+        The one place the binding rule lives: the loader, the input hashes and the
+        recorded inputs all follow it, so a cell's key, its inputs and its lineage agree.
+        An instance binds its own group as a scalar of its own variant (a chained fan-out
+        zips by name); every other sweep read is the whole ``{variant: value}`` dict.
+        """
         from strata.notebook.dag import SweepProducer
 
-        if self.dag is None:
+        producer = self.dag.variable_producer.get(var_name) if self.dag else None
+        if not isinstance(producer, SweepProducer):
             return None
-        for producer in self.dag.variable_producer.values():
-            if isinstance(producer, SweepProducer) and producer.fanout_cell == cell_id:
-                return producer.group
-        return None
+        own = variant is not None and producer.group == self._fanout_group_of(cell_id)
+        if producer.fanout_cell is not None:
+            if producer.fanout_cell != upstream_id:
+                return None
+            names = (variant,) if own else tuple(name for name, _ in producer.variants)
+            return VariantRead(variants=names, scalar=own, fanout=True)
+        member = next((name for name, cid in producer.variants if cid == upstream_id), None)
+        if member is None:
+            return None
+        if own:
+            return VariantRead(
+                variants=(member,) if member == variant else (), scalar=True, fanout=False
+            )
+        return VariantRead(variants=(member,), scalar=False, fanout=False)
 
     def _collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]:
         """Upstream artifact refs in the form the lineage walk resolves.
@@ -2186,11 +2211,6 @@ class NotebookSession:
         if cell is None or not cell.upstream_ids:
             return {}
 
-        from strata.notebook.dag import SweepProducer
-
-        # A fan-out instance over the same group binds only its own variant as a
-        # scalar, so recording the whole set would name variants it never read.
-        own_group = self._fanout_group_of(cell_id) if variant is not None else None
         shadowed = self._shadowed_reads(cell)
 
         refs: dict[str, str] = {}
@@ -2205,16 +2225,11 @@ class NotebookSession:
             for var_name, uri in upstream_cell.artifact_uris.items():
                 if var_name in unread:
                     continue
-                producer = self.dag.variable_producer.get(var_name) if self.dag else None
-                if isinstance(producer, SweepProducer) and producer.fanout_cell == upstream_id:
-                    # A fan-out keeps one URI per variable (last variant stored), while a collapse
-                    # consumer read every instance; a chained instance read only its own variant.
-                    wanted = (
-                        [variant]
-                        if own_group == producer.group and variant is not None
-                        else [name for name, _ in producer.variants]
-                    )
-                    for variant_name in wanted:
+                read = self._variant_read(cell_id, upstream_id, var_name, variant)
+                if read is not None and read.fanout:
+                    # A fan-out keeps one URI per variable (last variant stored); record the
+                    # instances the cell read.
+                    for variant_name in read.variants:
                         instance = self.artifact_manager.artifact_store.get_latest_version(
                             self.artifact_manager.cell_artifact_id(
                                 upstream_id, var_name, variant=variant_name
@@ -2223,11 +2238,7 @@ class NotebookSession:
                         if instance is not None:
                             uris.append(f"strata://artifact/{instance.id}@v={instance.version}")
                     continue
-                if (
-                    isinstance(producer, SweepProducer)
-                    and own_group == producer.group
-                    and (variant, upstream_id) not in producer.variants
-                ):
+                if read is not None and not read.variants:
                     continue  # another variant's cell: the instance never read it
                 uris.append(uri)
             # Only with no per-variable URIs at all: a fan-out upstream whose instances are

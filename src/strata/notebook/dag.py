@@ -112,6 +112,8 @@ class NotebookDag:
     inactive_cells: set[str] = field(default_factory=set)
     # consumer -> producer -> the variables wired along that edge.
     wired_inputs: dict[str, dict[str, set[str]]] = field(default_factory=dict)
+    # A @per_variant cell's own producer; a later definer of its outputs does not replace it.
+    fanout_cells: dict[str, SweepProducer] = field(default_factory=dict)
 
     def wired_variables(self, consumer_id: str, producer_id: str) -> set[str]:
         """The variables ``consumer_id`` reads from ``producer_id``.
@@ -280,6 +282,7 @@ class NotebookDag:
                         ),
                         fanout_cell=cell.id,
                     )
+                    dag.fanout_cells[cell.id] = new_producer
                     var_to_sweep_group[var] = fanout_group
                 else:
                     new_producer = cell.id
