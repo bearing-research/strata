@@ -72,7 +72,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   An instance now keys on the variant it binds; a group it reads as a dict
   still covers every variant. Existing fan-out instances miss the cache once
   after upgrading, and an open run of one from before the upgrade is not
-  resumed.
+  resumed. (#1328)
 - **A torch tensor a cell reads owns its memory.** A tensor rebuilt from Arrow
   wrapped the buffer read-only, which torch cannot enforce: an in-place op
   wrote memory the tensor did not own, and torch warned in the cell's stderr
