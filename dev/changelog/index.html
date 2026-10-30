@@ -3881,6 +3881,12 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code># @per_variant</code> cell resolves its inputs once per run.</strong> Its mounts,
+  tables, fetches, datasets and env were resolved again for every variant
+  (and once more after), so a table snapshot could move between variants.
+  Every variant of one run now reads the same snapshot; a mount is listed
+  and a large read weighed once. Cancelling a fan-out after a worker
+  uploaded files no longer fails with <code>UnboundLocalError</code>. (#1330)</li>
 <li><strong>A <code># @per_variant</code> cell fans out when later cells redefine its
   outputs.</strong> Whether a cell fans out was read from the notebook-wide
   producer of its outputs, so once a later cell redefined all of them the
