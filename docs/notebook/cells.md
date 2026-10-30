@@ -135,6 +135,11 @@ while epoch < 20:
   died after a checkpoint (a crash, a cancel, a server restart) continues from
   its latest checkpoint on the next ordinary run; the sequence numbers carry
   on from there. A rerun (`↻`, `--rerun`) starts fresh and never restores.
+  Only a run of the same computation continues it: after an edit to the cell
+  or an upstream, the cell starts fresh, and the interrupted run continues
+  only if the edit is undone. It stays resumable for a week after it was
+  interrupted; then prune ends it, and its checkpoints are collected unless a
+  head points at one.
 - `strata.head(name, sequence)` points the run's named head (`model`,
   `best`, ...) at one of its checkpoints. Prune keeps every checkpoint a head
   points at and the latest checkpoint of a run still open; the rest are

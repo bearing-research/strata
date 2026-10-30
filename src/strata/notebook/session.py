@@ -3751,6 +3751,12 @@ def _prune_artifacts_in_background(session: NotebookSession) -> threading.Thread
                 result["deleted_bytes"],
                 session.path,
             )
+        if result["abandoned_runs"]:
+            logger.info(
+                "Ended %d interrupted run(s) of %s not resumed within a week",
+                result["abandoned_runs"],
+                session.path,
+            )
 
     thread = threading.Thread(target=prune, name="notebook-artifact-prune", daemon=True)
     thread.start()

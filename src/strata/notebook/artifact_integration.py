@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
@@ -38,6 +39,10 @@ if TYPE_CHECKING:
 # A cell run creates and finalizes its outputs in one pass, and no build runner writes
 # here, so a ``building`` row this old was left by a crash.
 _ABANDONED_BUILD_SECONDS = 3600.0
+# An interrupted run stays resumable this long after its lease lapsed. Only a run of the
+# same computation resumes it, so after an edit it is resumed only if the edit is undone;
+# past this its newest checkpoint is no longer kept for it.
+_ABANDONED_RUN_SECONDS = 7 * 24 * 3600.0
 
 
 class _Default(Enum):
@@ -98,7 +103,8 @@ class NotebookArtifactManager:
         a failed run left, until a later run stores a good one and the good one it
         follows is pruned (it goes in the sweep after that one's). Then drops each
         ``# @output_dir`` file no manifest version still names. Values a crash left
-        half-written are failed first, so they no longer hold their inputs.
+        half-written are failed first, so they no longer hold their inputs, and so is
+        each interrupted run not resumed within a week, so its checkpoints go.
 
         Raises:
             NotebookQuiesced: the notebook is held still for a copy, which
@@ -114,6 +120,7 @@ class NotebookArtifactManager:
         )
 
         self.artifact_store.sweep_zombie_builds(_ABANDONED_BUILD_SECONDS)
+        abandoned = self.fail_abandoned_runs()
         # A folder file is not a value with versions: a manifest may name any of them.
         # A checkpoint is nobody's current value: it goes unless a head holds it or a
         # resume would start from it.
@@ -132,7 +139,33 @@ class NotebookArtifactManager:
             )
             result["deleted_count"] += swept["deleted_count"]
             result["deleted_bytes"] += swept["deleted_bytes"]
+        result["abandoned_runs"] = abandoned
         return result
+
+    def fail_abandoned_runs(self) -> int:
+        """Fail each run whose lease lapsed over a week ago; return how many.
+
+        Pinned to the lease each was listed with, so a run resumed meanwhile is left alone.
+        """
+        cutoff = time.time() - _ABANDONED_RUN_SECONDS
+        failed = 0
+        while True:
+            # Oldest lapse first: a page holding a younger one is the last.
+            page = self.build_store.list_expired_leases(limit=100, dispatch="external")
+            stale = [b for b in page if (b.lease_expires_at or 0.0) < cutoff]
+            done = sum(
+                self.build_store.fail_build(
+                    build.build_id,
+                    "abandoned: not resumed within a week of its interruption",
+                    lease_owner=build.lease_owner,
+                    lease_expires_at=build.lease_expires_at,
+                )
+                for build in stale
+            )
+            failed += done
+            # A page none of which failed would come back unchanged.
+            if not done or len(stale) < len(page) or len(page) < 100:
+                return failed
 
     def find_cached(self, provenance_hash: str) -> ArtifactVersion | None:
         """Find a cached artifact by provenance hash, or None."""
