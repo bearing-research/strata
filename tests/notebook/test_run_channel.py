@@ -78,16 +78,89 @@ def test_a_head_names_a_checkpoint_by_sequence(tmp_path: Path):
         channel.head("best", True)
 
 
+def _write(epoch: int):
+    def write(folder: Path) -> None:
+        (folder / "model").mkdir()
+        (folder / "model" / "0.pt").write_bytes(bytes([epoch]))
+        (folder / "epoch").write_text(str(epoch))
+
+    return write
+
+
+def test_a_checkpoint_of_files_emits_the_regular_files_its_writer_left(tmp_path: Path):
+    lines: list[str] = []
+    channel = _channel(tmp_path, lines)
+
+    def write(folder: Path) -> None:
+        _write(3)(folder)
+        (folder / "link").symlink_to(folder / "epoch")
+        (folder / "linked").symlink_to(folder / "model", target_is_directory=True)
+
+    assert channel.checkpoint_files(3, write) == 1
+    assert json.loads(lines[0]) == {
+        "event": "checkpoint",
+        "sequence": 1,
+        "step": 3,
+        "files": ["epoch", "model/0.pt"],
+    }
+    assert (tmp_path / "checkpoints" / "1" / "model" / "0.pt").read_bytes() == bytes([3])
+    # One sequence with checkpoint(): the build's releases are numbered once.
+    assert channel.checkpoint(metrics={"r2": 0.5}) == 2
+
+
+def test_a_failed_write_leaves_nothing_the_next_checkpoint_of_files_sends(tmp_path: Path):
+    lines: list[str] = []
+    channel = _channel(tmp_path, lines)
+
+    def fails(folder: Path) -> None:
+        (folder / "half.pt").write_bytes(b"x")
+        raise OSError("disk full")
+
+    with pytest.raises(OSError, match="disk full"):
+        channel.checkpoint_files(1, fails)
+    assert lines == []
+    assert channel.checkpoint_files(1, _write(1)) == 1
+    assert json.loads(lines[0])["files"] == ["epoch", "model/0.pt"]
+
+    with pytest.raises(ValueError, match="wrote no files"):
+        channel.checkpoint_files(2, lambda folder: None)
+    with pytest.raises(ValueError, match="step must be an int"):
+        channel.checkpoint_files(True, _write(2))
+    with pytest.raises(ValueError, match="not a part name"):
+        channel.checkpoint(__files__=1)
+
+
+def test_restore_files_is_the_folder_a_checkpoint_of_files_was_written_out_to(tmp_path: Path):
+    assert _channel(tmp_path, []).restore_files() is None
+    restore = {"release_id": "r1", "sequence": 2, "folder": "restore/checkpoints", "parts": {}}
+    lines: list[str] = []
+    channel = _channel(tmp_path, lines, restore)
+    assert channel.restore_files() == tmp_path / "restore" / "checkpoints"
+    assert channel.checkpoint_files(4, _write(4)) == 3
+
+    parts_only = {"release_id": "r2", "sequence": 0, "parts": {}}
+    with pytest.raises(RuntimeError, match="r2 holds no checkpoint files"):
+        _channel(tmp_path, [], parts_only).restore_files()
+
+
 def test_the_client_delegates_to_the_channel_or_says_there_is_none(tmp_path: Path):
     lines: list[str] = []
     with_channel = StrataClient("http://localhost:1", channel=_channel(tmp_path, lines))
     assert with_channel.checkpoint(x=1) == 1
     assert with_channel.restore() is None
     with_channel.head("best", 1)
-    assert [json.loads(line)["event"] for line in lines] == ["checkpoint", "head"]
+    assert with_channel.checkpoint_files(1, _write(1)) == 2
+    assert with_channel.restore_files() is None
+    assert [json.loads(line)["event"] for line in lines] == ["checkpoint", "head", "checkpoint"]
 
     without = StrataClient("http://localhost:1")
-    for call in (lambda: without.checkpoint(x=1), without.restore, lambda: without.head("b", 1)):
+    for call in (
+        lambda: without.checkpoint(x=1),
+        without.restore,
+        lambda: without.head("b", 1),
+        lambda: without.checkpoint_files(1, _write(1)),
+        without.restore_files,
+    ):
         with pytest.raises(RuntimeError, match="no checkpoint channel"):
             call()
 

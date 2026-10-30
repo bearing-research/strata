@@ -10,6 +10,7 @@ dependencies = [
     "strata-notebook",
     "pandas>=2.0",
     "torch>=2.9",
+    "vestigo[torch]",
 ]
 
 [tool.uv.sources]

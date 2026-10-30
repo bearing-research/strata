@@ -12,6 +12,8 @@ import json
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
@@ -380,6 +382,20 @@ class StrataClient:
         the server accepts the release in the background.
         """
         return self._channel_for("checkpoint").checkpoint(**parts)
+
+    def checkpoint_files(self, step: int, write: Callable[[Path], object]) -> int:
+        """Publish as checkpoint *step* the files *write* puts in the empty folder it is
+        given; returns its sequence.
+
+        The files are kept as they are, each its own version, in the layout
+        ``vestigo.torch`` reads: pass ``strata`` to ``vestigo.torch.HostedRun``.
+        """
+        return self._channel_for("checkpoint_files").checkpoint_files(step, write)
+
+    def restore_files(self) -> Path | None:
+        """The folder holding the files of the checkpoint this run starts from, or ``None``
+        on a fresh start."""
+        return self._channel_for("restore_files").restore_files()
 
     def restore(self) -> dict[str, Any] | None:
         """The parts this run starts from, or ``None`` on a fresh start.

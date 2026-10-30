@@ -35,6 +35,7 @@ from urllib.parse import urljoin, urlparse, urlsplit, urlunparse
 import anyio.to_thread
 import httpx
 from pydantic import ValidationError
+from vestigo import checkpoint_files
 from vestigo.blob_store import BLOB_STREAM_CHUNK_BYTES
 from vestigo.build_store import get_build_store
 from vestigo.provenance import TransformSpec as ArtifactTransformSpec
@@ -134,7 +135,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
-from strata.notebook.run_channel import EVENTS_FD_ENV
+from strata.notebook.run_channel import CHECKPOINTS_DIR, EVENTS_FD_ENV
 from strata.notebook.serializer import ContentType
 from strata.notebook.table_writes import (
     StagedOutput,
@@ -5819,7 +5820,9 @@ class CellExecutor:
     def _restore_manifest(self, run: LocalRun, output_dir: Path) -> dict[str, Any] | None:
         """The manifest's ``restore`` entry: the release's parts, written as input files.
 
-        A resumed run continues its build's checkpoint sequence; a branch starts its own.
+        A checkpoint of files (``vestigo.checkpoint_files``, whoever wrote it) is written
+        out as a folder under its own paths. A resumed run continues its build's
+        checkpoint sequence; a branch starts its own.
         """
         release_id = run.restores_from
         if release_id is None:
@@ -5829,8 +5832,24 @@ class CellExecutor:
         if bundle is None or bundle.release.state != "accepted":
             raise RuntimeError(f"Release {release_id} is not an accepted release of this notebook")
         (output_dir / RESTORE_DIR).mkdir(exist_ok=True)
+        restore: dict[str, Any] = {
+            "release_id": release_id,
+            "sequence": bundle.release.sequence if run.resumed_from else 0,
+        }
+        files = checkpoint_files.files_of(bundle.outputs)
+        if files:
+            folder = f"{RESTORE_DIR}/{CHECKPOINTS_DIR}"
+            for rel, version in files.items():
+                target = output_dir / folder / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(artifact_mgr.load_artifact_data(version.id, version.version))
+            restore["folder"] = folder
         parts: dict[str, dict[str, str]] = {}
         for version in bundle.outputs:
+            if checkpoint_files.FILE in version.params or version.params.get(
+                checkpoint_files.MANIFEST
+            ):
+                continue
             match = _OUTPUT_VARIABLE.search(version.id)
             if match is None:
                 continue
@@ -5845,11 +5864,7 @@ class CellExecutor:
                 "file": file_name,
                 "uri": f"strata://artifact/{version.id}@v={version.version}",
             }
-        return {
-            "release_id": release_id,
-            "sequence": bundle.release.sequence if run.resumed_from else 0,
-            "parts": parts,
-        }
+        return {**restore, "parts": parts}
 
     def _keep_failed_output_dirs(
         self,

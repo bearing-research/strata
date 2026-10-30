@@ -2,10 +2,12 @@
 # @timeout 900
 """Train a tip-amount MLP on the materialized features, one checkpoint per epoch.
 
-Each epoch publishes the model's and the optimizer's state dicts and the shuffle
-generator's state as a checkpoint, so a run that dies (crash, cancel, server
-restart) continues from its last epoch on the next run and ends with the weights
-an uninterrupted run would have. The best epoch so far is the `model` head.
+Each epoch saves the model, the optimizer, the shuffle generator's state and the
+metrics through vestigo.torch's HostedRun: torch_checkpointing writes the files and
+the server publishes them as the epoch's checkpoint, which vestigo.torch's
+`Ledger.load` reads outside Strata too. A run that dies (crash, cancel, server
+restart) continues from its last epoch on the next run and ends with the weights an
+uninterrupted run would have. The best epoch so far is the `model` head.
 """
 
 import hashlib
@@ -13,6 +15,7 @@ import hashlib
 import numpy as np
 import torch
 from torch import nn
+from vestigo.torch import HostedRun
 
 FEATURES = [
     "pickup_hour",
@@ -54,14 +57,18 @@ optimizer = torch.optim.AdamW(
 )
 shuffle = torch.Generator().manual_seed(params["seed"])
 
-resumed = strata.restore()
-if resumed is None:
-    metrics = {"epoch": 0, "r2": None, "best_r2": None}
-else:
-    model.load_state_dict(resumed["model"])
-    optimizer.load_state_dict(resumed["optimizer"])
-    shuffle.set_state(resumed["shuffle"])
-    metrics = resumed["metrics"]
+run = HostedRun(strata)
+state = run.restore(
+    {
+        "model": model,
+        "optimizer": optimizer,
+        "shuffle": shuffle.get_state(),
+        "metrics": {"epoch": 0, "r2": None, "best_r2": None},
+    }
+)
+shuffle.set_state(state["shuffle"])
+metrics = state["metrics"]
+if metrics["epoch"]:
     print(f"resumed after epoch {metrics['epoch']}")
 
 
@@ -83,15 +90,15 @@ for epoch in range(metrics["epoch"] + 1, EPOCHS + 1):
     r2 = holdout_r2()
     best = metrics["best_r2"] is None or r2 > metrics["best_r2"]
     metrics = {"epoch": epoch, "r2": r2, "best_r2": r2 if best else metrics["best_r2"]}
-    sequence = strata.checkpoint(
-        model=model.state_dict(),
-        optimizer=optimizer.state_dict(),
-        shuffle=shuffle.get_state(),
-        metrics=metrics,
+    sequence = run.save(
+        epoch,
+        {"model": model, "optimizer": optimizer, "shuffle": shuffle.get_state(), "metrics": metrics},
     )
     if best:
         strata.head("model", sequence)
     print(f"epoch {epoch}: holdout r2 {r2:.4f}")
+
+run.close()
 
 # Equal across an uninterrupted run and one resumed from any checkpoint.
 weights = b"".join(p.detach().numpy().tobytes() for p in model.parameters())
