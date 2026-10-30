@@ -2183,7 +2183,7 @@ class NotebookSession:
         """
         from strata.notebook.dag import SweepProducer
 
-        producer = self.dag.variable_producer.get(var_name) if self.dag else None
+        producer = self.dag.read_producer(cell_id, var_name) if self.dag else None
         if not isinstance(producer, SweepProducer):
             return None
         own = variant is not None and producer.group == self._fanout_group_of(cell_id)

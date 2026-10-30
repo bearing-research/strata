@@ -8398,7 +8398,7 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
         if cell.variant_group and modes.get(cell.variant_group) == "sweep":
             return False
         if any(
-            isinstance(dag.variable_producer.get(ref), SweepProducer)
+            isinstance(dag.read_producer(cell.id, ref), SweepProducer)
             for ref in (*cell.references, *cell.builtin_references)
         ):
             return False

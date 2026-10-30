@@ -639,6 +639,49 @@ class TestFanoutCancellation:
             )
 
 
+class TestSweepReadBeforeARedefinition:
+    """A cell reads what is defined before it: a later plain ``val`` is not its sweep's."""
+
+    def test_an_earlier_reader_still_gets_the_variant_dict(self, tmp_path, capsys):
+        import json as _json
+
+        from strata.notebook.cli import run_main
+        from strata.notebook.executor import CellExecutor, is_cell_batchable
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "Redefined", initialize_environment=False)
+        prepared_venv(nb)
+        cells = [
+            ("va", "# @variant g a\nval = 10\n"),
+            ("vb", "# @variant g b\nval = 20\n"),
+            ("report", "total = sum(val.values())\nprint('TOTAL', total)\n"),
+            ("later", "val = 0\n"),
+            ("after", "print('AFTER', val)\n"),
+        ]
+        previous = None
+        for cid, src in cells:
+            add_cell_to_notebook(nb, cid, previous, language="python")
+            write_cell(nb, cid, src)
+            previous = cid
+        set_variant_mode(nb, "g", "sweep")
+
+        code = run_main([str(nb), "--no-sync", "--format", "json"])
+        payload = _json.loads(capsys.readouterr().out)
+        by_id = {c["id"]: c for c in payload["cells"]}
+        assert code == 0, by_id
+        assert "TOTAL 30" in by_id["report"]["stdout"]
+        assert "AFTER 0" in by_id["after"]["stdout"]
+
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.compute_staleness()
+        assert session.notebook_state.get_cell("report").status == "ready"
+        # Keyed on the group, and never batched, where the dict would not form.
+        assert any(h.startswith("sweep:val:") for h in session._collect_input_hashes("report"))
+        report = session.notebook_state.get_cell("report")
+        assert is_cell_batchable(CellExecutor(session), report) is False
+
+
 class TestPerVariantProgressFrames:
     """The fan-out orchestrator fires on_variant_complete per variant; WS forwards it as
     cell_variant_progress.

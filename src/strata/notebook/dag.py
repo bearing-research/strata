@@ -114,6 +114,8 @@ class NotebookDag:
     wired_inputs: dict[str, dict[str, set[str]]] = field(default_factory=dict)
     # A @per_variant cell's own producer; a later definer of its outputs does not replace it.
     fanout_cells: dict[str, SweepProducer] = field(default_factory=dict)
+    # consumer -> variable -> the producer its read resolved to, before any later definer.
+    read_producers: dict[str, dict[str, str | SweepProducer]] = field(default_factory=dict)
 
     def wired_variables(self, consumer_id: str, producer_id: str) -> set[str]:
         """The variables ``consumer_id`` reads from ``producer_id``.
@@ -122,6 +124,15 @@ class NotebookDag:
         consumer, so every input loader filters on this, never on the upstream's defines.
         """
         return self.wired_inputs.get(consumer_id, {}).get(producer_id, set())
+
+    def read_producer(self, consumer_id: str, var: str) -> str | SweepProducer | None:
+        """What ``consumer_id`` reads ``var`` from: the producer before it, not the last one.
+
+        A variable the consumer never reads falls back to its last producer, as an input
+        hash over an upstream's every variable has always keyed on.
+        """
+        reads = self.read_producers.get(consumer_id, {})
+        return reads[var] if var in reads else self.variable_producer.get(var)
 
     @classmethod
     def from_cells(
@@ -217,6 +228,8 @@ class NotebookDag:
                         # A member refining its own group's var (``preds = f(preds)``) must
                         # not depend on its siblings.
                         continue
+                dag.read_producers.setdefault(cell.id, {})[var] = producer
+                if isinstance(producer, SweepProducer):
                     # One edge per member; each member's output is stored so the harness can
                     # assemble the {variant: value} dict.
                     for _name, member_id in producer.variants:
