@@ -9,7 +9,7 @@ exhaustive commit history.
 
 ### Changed
 - **The ledger is vestigo 0.3.1**, which adds `vestigo.torch.HostedRun` and
-  `vestigo.checkpoint_files`. No migration. (#PR)
+  `vestigo.checkpoint_files`. No migration. (#1327)
 - **The ledger is vestigo 0.3.0.** It adds the `vestigo.torch` adapter
   (behind vestigo's `torch` extra, which Strata does not install) and a
   migration every store gets on open: `build_attempts.opened_at` and two
@@ -96,7 +96,7 @@ exhaustive commit history.
   `vestigo.torch.Ledger.load` reads a cell's checkpoint outside Strata and a
   cell restores one `Ledger.run` wrote. The taxi dogfood's train cell uses it;
   run live, resume and branch end on the uninterrupted weights. Investigation
-  09's T3. (#PR)
+  09's T3. (#1327)
 
 - **The ledger's URI scheme is a setting.** `vestigo` artifact and name
   URIs carry a per-process scheme (`vestigo.uris.set_uri_scheme`, default
