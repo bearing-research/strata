@@ -64,6 +64,10 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A `# @per_variant` cell fans out when later cells redefine its
+  outputs.** Whether a cell fans out was read from the notebook-wide
+  producer of its outputs, so once a later cell redefined all of them the
+  cell ran once with its group bound as a `{variant: value}` dict. (#1329)
 - **A `# @per_variant` instance keys on its own variant.** Each instance's
   cache key covered every variant of its group (and every instance of an
   upstream fan-out), so adding or editing one variant reran every instance.
