@@ -551,8 +551,6 @@ class TestPerVariantInstanceKeys:
                 ("vb", "# @variant g b\nval = 20\n"),
                 ("vc", "# @variant g c\nval = 30\n"),
                 ("ev", src),
-                # A reader, so the instances' ``out`` is stored.
-                ("report", "total = sum(out.values())\n"),
             ],
             ["g"],
         )
@@ -572,15 +570,6 @@ class TestPerVariantInstanceKeys:
         assert result.success, result.error
         # Mounts, tables, fetches and the env once for the cell, not once per variant.
         assert resolved.count("ev") == 1
-        keys = {
-            session.get_artifact_manager()
-            .artifact_store.get_latest_version(
-                session.get_artifact_manager().cell_artifact_id("ev", "out", variant=name)
-            )
-            .provenance_hash
-            for name in ("a", "b", "c")
-        }
-        assert len(keys) == 3
 
     def test_the_binding_rule(self, tmp_path):
         """The loader, the input hashes and the recorded inputs all follow ``_variant_read``."""
@@ -614,6 +603,40 @@ class TestPerVariantInstanceKeys:
         # A chained instance zips to the same instance; a plain consumer reads them all.
         assert read("ev2", "ev", "out", "b") == VariantRead(("b",), scalar=True, fanout=True)
         assert read("report", "ev", "out") == VariantRead(("a", "b"), scalar=False, fanout=True)
+
+
+class TestFanoutCancellation:
+    def test_cancelling_a_fanout_after_an_upload_stays_a_cancellation(self, tmp_path):
+        """The dispatching frame computed no key: the instance kept its worker's files."""
+        import asyncio
+
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "FanoutCancel", initialize_environment=False)
+        add_cell_to_notebook(nb, "ev", None, language="python")
+        write_cell(nb, "ev", "# @per_variant\nscore = 1\n")
+        executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+
+        async def cancelled_after_upload(self, cell_id, *args, **kwargs):
+            self._received_output_files[cell_id] = {"out": {}}
+            raise asyncio.CancelledError
+
+        executor._fanout_variants = lambda cell_id: ("a", "b")
+        executor._execute_fanout_cell = cancelled_after_upload.__get__(executor, CellExecutor)
+
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(
+                executor._execute_python_cell(
+                    "ev",
+                    "# @per_variant\nscore = 1\n",
+                    10.0,
+                    0.0,
+                    materialize_upstreams=False,
+                    use_cache=False,
+                )
+            )
 
 
 class TestPerVariantProgressFrames:

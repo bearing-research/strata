@@ -78,6 +78,27 @@ def safe_filename_stem(variable_name: str) -> str:
     return variable_name
 
 
+def cell_provenance_inputs(
+    input_hashes: list[str],
+    mount_fingerprints: list[str],
+    table_fingerprints: list[str],
+    fetch_fingerprints: list[str],
+    dataset_fingerprints: list[str],
+) -> list[str]:
+    """Every input of a cell's provenance hash besides its source and env.
+
+    The executor keys a run on these and ``compute_staleness`` rechecks it on them: one
+    missing from either leaves the cell stale forever.
+    """
+    return (
+        input_hashes
+        + mount_fingerprints
+        + table_fingerprints
+        + fetch_fingerprints
+        + dataset_fingerprints
+    )
+
+
 def compute_provenance_hash(
     input_hashes: list[str],
     source_hash: str,

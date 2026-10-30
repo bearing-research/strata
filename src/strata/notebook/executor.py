@@ -113,6 +113,7 @@ from strata.notebook.process_tree import (
     terminate_subprocess_tree,
 )
 from strata.notebook.provenance import (
+    cell_provenance_inputs,
     compute_provenance_hash,
     compute_source_hash,
     safe_filename_stem,
@@ -368,27 +369,6 @@ def _pack_folder_inputs(
     return packed
 
 
-def _provenance_hash(
-    input_hashes: list[str],
-    mount_fingerprints: list[str],
-    table_fingerprints: list[str],
-    fetch_fingerprints: list[str],
-    dataset_fingerprints: list[str],
-    source_hash: str,
-    env_hash: str,
-) -> str:
-    """A cell's provenance hash from its ingredients, in the one order every path uses."""
-    return compute_provenance_hash(
-        input_hashes
-        + mount_fingerprints
-        + table_fingerprints
-        + fetch_fingerprints
-        + dataset_fingerprints,
-        source_hash,
-        env_hash,
-    )
-
-
 @dataclass(kw_only=True, frozen=True)
 class _CellProvenance:
     """Inputs and result of the standard cell-provenance computation.
@@ -433,12 +413,14 @@ class _CellProvenance:
         return replace(
             self,
             input_hashes=input_hashes,
-            provenance_hash=_provenance_hash(
-                input_hashes,
-                self.mount_fingerprints,
-                self.table_fingerprints,
-                self.fetch_fingerprints,
-                self.dataset_fingerprints,
+            provenance_hash=compute_provenance_hash(
+                cell_provenance_inputs(
+                    input_hashes,
+                    self.mount_fingerprints,
+                    self.table_fingerprints,
+                    self.fetch_fingerprints,
+                    self.dataset_fingerprints,
+                ),
                 self.source_hash,
                 self.env_hash,
             ),
@@ -1440,12 +1422,14 @@ class CellExecutor:
                 config=self._lake_config(),
             ),
         )
-        provenance_hash = _provenance_hash(
-            input_hashes,
-            mount_fingerprints,
-            table_fingerprints,
-            fetch_fingerprints,
-            dataset_fingerprints,
+        provenance_hash = compute_provenance_hash(
+            cell_provenance_inputs(
+                input_hashes,
+                mount_fingerprints,
+                table_fingerprints,
+                fetch_fingerprints,
+                dataset_fingerprints,
+            ),
             source_hash,
             env_hash,
         )
@@ -1532,6 +1516,10 @@ class CellExecutor:
         scoped to that variant.
         """
         remote_metadata: dict[str, str] = {}
+        # Unset in the frame that dispatches a fan-out: each instance keeps what its worker
+        # uploaded under its own key, so that frame has nothing to keep.
+        provenance_hash: str | None = None
+        env_hash = ""
         # Nothing a worker uploaded for an earlier run belongs to this one.
         self._received_output_files.pop(cell_id, None)
         self._folder_listings.pop(cell_id, None)
@@ -2105,7 +2093,7 @@ class CellExecutor:
                 return exec_result
 
         except asyncio.CancelledError:
-            if self._received_output_files.get(cell_id):
+            if provenance_hash is not None and self._received_output_files.get(cell_id):
                 # Cancelled mid-run: keep what the worker already uploaded, as on a loss.
                 self._keep_failed_output_dirs(
                     cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
@@ -2113,7 +2101,7 @@ class CellExecutor:
             raise
         except RemoteExecutionError as e:
             duration_ms = (time.time() - start_time) * 1000
-            if self._received_output_files.get(cell_id):
+            if provenance_hash is not None and self._received_output_files.get(cell_id):
                 # No result came back, so what the worker uploaded is all there is.
                 self._keep_failed_output_dirs(
                     cell_id, source, None, provenance_hash, env_hash, variant=fanout_variant
