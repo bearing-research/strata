@@ -498,6 +498,45 @@ class TestPerVariantInstanceKeys:
         write_cell(nb, "wx", "# @variant h x\nw = 3\n")
         assert self._run(nb, log, capsys) == ["ev:100", "ev:50"]
 
+    def test_a_fanout_whose_output_a_later_cell_redefines_still_fans_out(self, tmp_path, capsys):
+        log = tmp_path / "ran.log"
+        ev = "# @per_variant\nout = val * 2\n" + self._logged(log, "ev", "val")
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", ev),
+                # Every output, ``f`` from the log line too, now has a later definer.
+                ("later", "out = 1\nf = None\n"),
+            ],
+            ["g"],
+        )
+        assert self._run(nb, log, capsys) == ["ev:10", "ev:20"]
+
+    def test_a_group_with_no_member_loaded_stays_unbound(self, tmp_path):
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.session import NotebookSession
+
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", "# @per_variant\nout = val * 2\n"),
+                ("report", "total = sum(val.values()) + sum(out.values())\n"),
+            ],
+            ["g"],
+        )
+        session = NotebookSession(parse_notebook(nb), nb)
+        out_dir = tmp_path / "inputs"
+        out_dir.mkdir()
+        # Nothing has run: an empty group dict would sum to 0 and cache as a success.
+        specs = CellExecutor(session)._load_input_blobs("report", out_dir)
+        assert "val" not in specs
+        # A fan-out collapse binds even with no instance, as it always has.
+        assert specs["out"] == {"kind": "sweep_dict", "variants": {}}
+
     def test_the_binding_rule(self, tmp_path):
         """The loader, the input hashes and the recorded inputs all follow ``_variant_read``."""
         from strata.notebook.session import NotebookSession, VariantRead

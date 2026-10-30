@@ -2274,17 +2274,10 @@ class CellExecutor:
         return bool(to_promote)
 
     def _fanout_variants(self, cell_id: str) -> tuple[str, ...] | None:
-        """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None.
-
-        That is, its outputs resolve to a ``SweepProducer`` with ``fanout_cell == cell_id``.
-        """
+        """The variant names if ``cell_id`` is a ``@per_variant`` fan-out cell, else None."""
         dag = self.session.dag
-        if dag is None:
-            return None
-        for producer in dag.variable_producer.values():
-            if isinstance(producer, SweepProducer) and producer.fanout_cell == cell_id:
-                return tuple(name for name, _ in producer.variants)
-        return None
+        fanout = dag.fanout_cells.get(cell_id) if dag else None
+        return tuple(name for name, _ in fanout.variants) if fanout is not None else None
 
     async def _execute_fanout_cell(
         self,
@@ -5370,8 +5363,9 @@ class CellExecutor:
                     )
                     if read is not None:
                         # Partial on a missing variant. A failed one never gets here:
-                        # _materialize_upstreams raises first.
-                        if not read.scalar:
+                        # _materialize_upstreams raises first. A collapse of a fan-out binds
+                        # even with no instance; a group with no member left stays unbound.
+                        if read.fanout and not read.scalar:
                             input_specs.setdefault(var_name, {"kind": "sweep_dict", "variants": {}})
                         for name in read.variants:
                             # A fan-out's instances live under ``@variant=`` subkeys of one cell.
@@ -5393,7 +5387,9 @@ class CellExecutor:
                             if read.scalar:
                                 input_specs[var_name] = spec
                             else:
-                                input_specs[var_name]["variants"][name] = spec
+                                input_specs.setdefault(
+                                    var_name, {"kind": "sweep_dict", "variants": {}}
+                                )["variants"][name] = spec
                         continue
 
                     spec = _load_artifact_spec(artifact_id, var_name)
@@ -8357,7 +8353,6 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     sibling variants overwrite each other and the ``{variant: value}`` dict
     never forms.
     """
-    from strata.notebook.dag import SweepProducer
     from strata.notebook.languages import get_language_executor
 
     # A batch never sees a fetch's bytes; a fetching cell runs single-cell, where the

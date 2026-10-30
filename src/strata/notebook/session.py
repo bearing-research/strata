@@ -2134,6 +2134,8 @@ class NotebookSession:
                     prefix = "variant" if read.scalar else "fanout"
                     hashes.append(f"{prefix}:{var_name}:{';'.join(sorted(instances))}")
                     continue
+                if read is not None and not read.variants:
+                    continue  # another variant's cell: not worth a lookup, let alone a digest
                 provenance_hash = _hash_from_uri(uri, by_content=by_content)
                 if provenance_hash is None:
                     continue
@@ -2158,14 +2160,8 @@ class NotebookSession:
 
     def _fanout_group_of(self, cell_id: str) -> str | None:
         """The sweep group ``cell_id`` fans out over, if it is a fan-out cell."""
-        from strata.notebook.dag import SweepProducer
-
-        if self.dag is None:
-            return None
-        for producer in self.dag.variable_producer.values():
-            if isinstance(producer, SweepProducer) and producer.fanout_cell == cell_id:
-                return producer.group
-        return None
+        fanout = self.dag.fanout_cells.get(cell_id) if self.dag else None
+        return fanout.group if fanout is not None else None
 
     def _variant_read(
         self, cell_id: str, upstream_id: str, var_name: str, variant: str | None = None
