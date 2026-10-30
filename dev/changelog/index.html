@@ -3881,6 +3881,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code># @per_variant</code> cell fans out when later cells redefine its
+  outputs.</strong> Whether a cell fans out was read from the notebook-wide
+  producer of its outputs, so once a later cell redefined all of them the
+  cell ran once with its group bound as a <code>{variant: value}</code> dict. (#1329)</li>
 <li><strong>A <code># @per_variant</code> instance keys on its own variant.</strong> Each instance's
   cache key covered every variant of its group (and every instance of an
   upstream fan-out), so adding or editing one variant reran every instance.
