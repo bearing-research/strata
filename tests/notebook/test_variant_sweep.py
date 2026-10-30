@@ -351,6 +351,154 @@ class TestPerVariantGroupIsProvenance:
         )
 
 
+class TestPerVariantInstanceKeys:
+    """A fan-out instance keys on the inputs it reads: its own variant's scalar, not the group.
+
+    Each cell appends to a log when it runs, so the log names the instances a run recomputed.
+    """
+
+    def _notebook(self, tmp_path, cells, groups):
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "Instances", initialize_environment=False)
+        prepared_venv(nb)
+        previous = None
+        for cid, src in cells:
+            add_cell_to_notebook(nb, cid, previous, language="python")
+            write_cell(nb, cid, src)
+            previous = cid
+        for group in groups:
+            set_variant_mode(nb, group, "sweep")
+        return nb
+
+    def _run(self, nb, log, capsys):
+        """Run every cell (cache on); return what the run appended to the log."""
+        from strata.notebook.cli import run_main
+
+        before = log.read_text().splitlines() if log.exists() else []
+        code = run_main([str(nb), "--no-sync", "--format", "json"])
+        capsys.readouterr()
+        assert code == 0
+        return sorted(log.read_text().splitlines()[len(before) :])
+
+    def _logged(self, log, tag, expr):
+        return f"with open({str(log)!r}, 'a') as f:\n    f.write(f'{tag}:{{{expr}}}\\n')\n"
+
+    def test_adding_a_variant_runs_only_the_new_instance(self, tmp_path, capsys):
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        log = tmp_path / "ran.log"
+        ev = "# @per_variant\nout = val * 2\n" + self._logged(log, "ev", "val")
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", ev),
+            ],
+            ["g"],
+        )
+        assert self._run(nb, log, capsys) == ["ev:10", "ev:20"]
+        assert self._run(nb, log, capsys) == []
+
+        add_cell_to_notebook(nb, "vc", "vb", language="python")
+        write_cell(nb, "vc", "# @variant g c\nval = 30\n")
+        assert self._run(nb, log, capsys) == ["ev:30"]
+
+    def test_editing_a_variant_reruns_only_its_instance(self, tmp_path, capsys):
+        from strata.notebook.writer import write_cell
+
+        log = tmp_path / "ran.log"
+        ev = "# @per_variant\nout = val * 2\n" + self._logged(log, "ev", "val")
+        report = "total = sum(out.values())\n" + self._logged(log, "report", "total")
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", ev),
+                ("report", report),
+            ],
+            ["g"],
+        )
+        assert self._run(nb, log, capsys) == ["ev:10", "ev:20", "report:60"]
+
+        write_cell(nb, "va", "# @variant g a\nval = 11\n")
+        # The collapse consumer reads every instance, so it reruns on any of them.
+        assert self._run(nb, log, capsys) == ["ev:11", "report:62"]
+
+    def test_an_instance_records_only_its_own_variant_as_input(self, tmp_path, capsys):
+        import json as _json
+
+        from strata.notebook.session import NotebookSession
+
+        log = tmp_path / "ran.log"
+        ev = "# @per_variant\nout = val * 2\n" + self._logged(log, "ev", "val")
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", ev),
+            ],
+            ["g"],
+        )
+        self._run(nb, log, capsys)
+
+        session = NotebookSession(parse_notebook(nb), nb)
+        manager = session.get_artifact_manager()
+        for variant, own, other in [("a", "va", "vb"), ("b", "vb", "va")]:
+            instance = manager.artifact_store.get_latest_version(
+                manager.cell_artifact_id("ev", "out", variant=variant)
+            )
+            recorded = _json.loads(instance.input_versions or "{}")
+            # The key covers only the instance's own variant; so does the lineage.
+            assert any(f"_cell_{own}_" in uri for uri in recorded)
+            assert not any(f"_cell_{other}_" in uri for uri in recorded)
+
+    def test_chained_fanout_reruns_only_the_edited_variant(self, tmp_path, capsys):
+        from strata.notebook.writer import write_cell
+
+        log = tmp_path / "ran.log"
+        ev = "# @per_variant\nout = val * 2\n" + self._logged(log, "ev", "val")
+        ev2 = "# @per_variant\nout2 = out + 1\n" + self._logged(log, "ev2", "out")
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("ev", ev),
+                ("ev2", ev2),
+            ],
+            ["g"],
+        )
+        assert self._run(nb, log, capsys) == ["ev2:20", "ev2:40", "ev:10", "ev:20"]
+
+        write_cell(nb, "va", "# @variant g a\nval = 11\n")
+        assert self._run(nb, log, capsys) == ["ev2:22", "ev:11"]
+
+    def test_a_group_read_as_a_dict_reruns_every_instance(self, tmp_path, capsys):
+        from strata.notebook.writer import write_cell
+
+        log = tmp_path / "ran.log"
+        ev = "# @per_variant g\nout = val * sum(w.values())\n" + self._logged(log, "ev", "out")
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("wx", "# @variant h x\nw = 1\n"),
+                ("wy", "# @variant h y\nw = 2\n"),
+                ("ev", ev),
+            ],
+            ["g", "h"],
+        )
+        assert self._run(nb, log, capsys) == ["ev:30", "ev:60"]
+
+        write_cell(nb, "wx", "# @variant h x\nw = 3\n")
+        assert self._run(nb, log, capsys) == ["ev:100", "ev:50"]
+
+
 class TestPerVariantProgressFrames:
     """The fan-out orchestrator fires on_variant_complete per variant; WS forwards it as
     cell_variant_progress.

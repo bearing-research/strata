@@ -2032,13 +2032,18 @@ class NotebookSession:
                 )
         return shadowed
 
-    def _collect_input_hashes(self, cell_id: str) -> list[str]:
+    def _collect_input_hashes(self, cell_id: str, *, variant: str | None = None) -> list[str]:
         """Provenance hashes from upstream artifacts, with sweep refs grouped.
 
         The executor's provenance and the causality explanations both use this, so a
         sweep downstream's stored hash and its staleness recheck agree. A sweep-group
         reference collapses to one deterministic ``sweep:<var>:<name>=<hash>;...``
         string; otherwise the cell would be perpetually stale.
+
+        With ``variant`` set, a fan-out instance's scalar binds from its own group
+        (what ``_load_input_blobs`` binds) key on that variant alone, as
+        ``variant:<var>:<name>=<hash>``, so another variant's change leaves the
+        instance cached.
         """
         from strata.notebook.dag import SweepProducer
 
@@ -2047,6 +2052,7 @@ class NotebookSession:
             return []
 
         dag = self.dag
+        own_group = self._fanout_group_of(cell_id) if variant is not None else None
         hashes: list[str] = []
         sweep_buckets: dict[str, list[tuple[str, str]]] = {}
 
@@ -2099,9 +2105,12 @@ class NotebookSession:
                     and fanout.fanout_cell == upstream_id
                 ):
                     # A @per_variant cell keeps one URI per variable (last variant stored), but a
-                    # consumer reads every instance, so key on all of them.
+                    # consumer reads every instance, so key on all of them; a chained instance
+                    # zips to its own.
+                    own = variant is not None and fanout.group == own_group
+                    wanted = [variant] if own else [name for name, _ in fanout.variants]
                     instances = []
-                    for variant_name, _ in fanout.variants:
+                    for variant_name in wanted:
                         instance = store.get_latest_version(
                             self.artifact_manager.cell_artifact_id(
                                 upstream_id, var_name, variant=variant_name
@@ -2114,7 +2123,8 @@ class NotebookSession:
                             by_content=by_content,
                         )
                         instances.append(f"{variant_name}={instance_hash}")
-                    hashes.append(f"fanout:{var_name}:{';'.join(sorted(instances))}")
+                    prefix = "variant" if own else "fanout"
+                    hashes.append(f"{prefix}:{var_name}:{';'.join(sorted(instances))}")
                     continue
                 provenance_hash = _hash_from_uri(uri, by_content=by_content)
                 if provenance_hash is None:
@@ -2128,6 +2138,11 @@ class NotebookSession:
                         (name for name, cid in producer.variants if cid == upstream_id),
                         None,
                     )
+                    if variant_name is not None and producer.group == own_group:
+                        # The instance binds only its own variant's scalar.
+                        if variant_name == variant:
+                            hashes.append(f"variant:{var_name}:{variant_name}={provenance_hash}")
+                        continue
                     if variant_name is not None:
                         sweep_buckets.setdefault(var_name, []).append(
                             (variant_name, provenance_hash)
@@ -2195,11 +2210,11 @@ class NotebookSession:
                     # A fan-out keeps one URI per variable (last variant stored), while a collapse
                     # consumer read every instance; a chained instance read only its own variant.
                     wanted = (
-                        [(variant, None)]
+                        [variant]
                         if own_group == producer.group and variant is not None
-                        else producer.variants
+                        else [name for name, _ in producer.variants]
                     )
-                    for variant_name, _ in wanted:
+                    for variant_name in wanted:
                         instance = self.artifact_manager.artifact_store.get_latest_version(
                             self.artifact_manager.cell_artifact_id(
                                 upstream_id, var_name, variant=variant_name
@@ -2208,6 +2223,12 @@ class NotebookSession:
                         if instance is not None:
                             uris.append(f"strata://artifact/{instance.id}@v={instance.version}")
                     continue
+                if (
+                    isinstance(producer, SweepProducer)
+                    and own_group == producer.group
+                    and (variant, upstream_id) not in producer.variants
+                ):
+                    continue  # another variant's cell: the instance never read it
                 uris.append(uri)
             # Only with no per-variable URIs at all: a fan-out upstream whose instances are
             # all missing must not fall back to the cell-level URI (an unrelated variant).

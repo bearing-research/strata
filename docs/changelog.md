@@ -66,6 +66,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A `# @per_variant` instance keys on its own variant.** Each instance's
+  cache key covered every variant of its group (and every instance of an
+  upstream fan-out), so adding or editing one variant reran every instance.
+  An instance now keys on the variant it binds; a group it reads as a dict
+  still covers every variant. Existing fan-out instances miss the cache once
+  after upgrading, and an open run of one from before the upgrade is not
+  resumed.
 - **A torch tensor a cell reads owns its memory.** A tensor rebuilt from Arrow
   wrapped the buffer read-only, which torch cannot enforce: an in-place op
   wrote memory the tensor did not own, and torch warned in the cell's stderr

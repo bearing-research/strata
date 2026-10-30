@@ -1070,7 +1070,10 @@ best = max(accuracy, key=accuracy.get)
 
 Each instance is an independent `materialize`: its own provenance, its own
 cache entry, its own worker dispatch - so `# @per_variant` + `# @worker gpu`
-fans out to N independent jobs, and adding a variant only runs the new instance.
+fans out to N independent jobs. An instance's provenance covers only its own
+variant's value, so adding a variant only runs the new instance and editing one
+reruns only that variant's instance. A group the cell reads as a dict is an input
+of every instance, so changing any of its variants reruns them all.
 
 **Choosing the group.** Bare `# @per_variant` infers the group when the cell
 reads from exactly one sweep group. If it reads from two or more, name the one
