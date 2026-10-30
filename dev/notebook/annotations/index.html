@@ -3876,7 +3876,10 @@ per-variant too, so a <strong>downstream cell decides how to consume it</strong>
 </code></pre></div>
 <p>Each instance is an independent <code>materialize</code>: its own provenance, its own
 cache entry, its own worker dispatch - so <code># @per_variant</code> + <code># @worker gpu</code>
-fans out to N independent jobs, and adding a variant only runs the new instance.</p>
+fans out to N independent jobs. An instance's provenance covers only its own
+variant's value, so adding a variant only runs the new instance and editing one
+reruns only that variant's instance. A group the cell reads as a dict is an input
+of every instance, so changing any of its variants reruns them all.</p>
 <p><strong>Choosing the group.</strong> Bare <code># @per_variant</code> infers the group when the cell
 reads from exactly one sweep group. If it reads from two or more, name the one
 to fan out over - <code># @per_variant model</code> - and the others collapse to dicts. A
