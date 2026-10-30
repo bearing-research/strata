@@ -64,6 +64,12 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A `# @per_variant` cell resolves its inputs once per run.** Its mounts,
+  tables, fetches, datasets and env were resolved again for every variant
+  (and once more after), so a table snapshot could move between variants.
+  Every variant of one run now reads the same snapshot; a mount is listed
+  and a large read weighed once. Cancelling a fan-out after a worker
+  uploaded files no longer fails with `UnboundLocalError`. (#1330)
 - **A `# @per_variant` cell fans out when later cells redefine its
   outputs.** Whether a cell fans out was read from the notebook-wide
   producer of its outputs, so once a later cell redefined all of them the

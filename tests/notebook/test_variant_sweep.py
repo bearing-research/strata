@@ -537,6 +537,40 @@ class TestPerVariantInstanceKeys:
         # A fan-out collapse binds even with no instance, as it always has.
         assert specs["out"] == {"kind": "sweep_dict", "variants": {}}
 
+    def test_a_fanout_resolves_the_cells_provenance_once(self, tmp_path):
+        import asyncio
+
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.session import NotebookSession
+
+        src = "# @per_variant\nout = val * 2\n"
+        nb = self._notebook(
+            tmp_path,
+            [
+                ("va", "# @variant g a\nval = 10\n"),
+                ("vb", "# @variant g b\nval = 20\n"),
+                ("vc", "# @variant g c\nval = 30\n"),
+                ("ev", src),
+            ],
+            ["g"],
+        )
+        session = NotebookSession(parse_notebook(nb), nb)
+        session.refresh_environment_runtime()
+        executor = CellExecutor(session)
+        resolved: list[str] = []
+        compute = executor._compute_cell_provenance
+
+        async def counting(cell_id, source, **kwargs):
+            resolved.append(cell_id)
+            return await compute(cell_id, source, **kwargs)
+
+        executor._compute_cell_provenance = counting
+        result = asyncio.run(executor.execute_cell("ev", src))
+
+        assert result.success, result.error
+        # Mounts, tables, fetches and the env once for the cell, not once per variant.
+        assert resolved.count("ev") == 1
+
     def test_the_binding_rule(self, tmp_path):
         """The loader, the input hashes and the recorded inputs all follow ``_variant_read``."""
         from strata.notebook.session import NotebookSession, VariantRead
@@ -571,6 +605,40 @@ class TestPerVariantInstanceKeys:
         assert read("report", "ev", "out") == VariantRead(("a", "b"), scalar=False, fanout=True)
 
 
+class TestFanoutCancellation:
+    def test_cancelling_a_fanout_after_an_upload_stays_a_cancellation(self, tmp_path):
+        """The dispatching frame computed no key: the instance kept its worker's files."""
+        import asyncio
+
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "FanoutCancel", initialize_environment=False)
+        add_cell_to_notebook(nb, "ev", None, language="python")
+        write_cell(nb, "ev", "# @per_variant\nscore = 1\n")
+        executor = CellExecutor(NotebookSession(parse_notebook(nb), nb))
+
+        async def cancelled_after_upload(self, cell_id, *args, **kwargs):
+            self._received_output_files[cell_id] = {"out": {}}
+            raise asyncio.CancelledError
+
+        executor._fanout_variants = lambda cell_id: ("a", "b")
+        executor._execute_fanout_cell = cancelled_after_upload.__get__(executor, CellExecutor)
+
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(
+                executor._execute_python_cell(
+                    "ev",
+                    "# @per_variant\nscore = 1\n",
+                    10.0,
+                    0.0,
+                    materialize_upstreams=False,
+                    use_cache=False,
+                )
+            )
+
+
 class TestPerVariantProgressFrames:
     """The fan-out orchestrator fires on_variant_complete per variant; WS forwards it as
     cell_variant_progress.
@@ -601,6 +669,7 @@ class TestPerVariantProgressFrames:
             materialize_upstreams,
             use_cache,
             fanout_variant=None,
+            cell_provenance=None,
         ):
             return CellExecutionResult(cell_id=cell_id, success=True)
 
@@ -1083,6 +1152,7 @@ class TestFanoutBaseProvenance:
             materialize_upstreams,
             use_cache,
             fanout_variant=None,
+            cell_provenance=None,
         ):
             return CellExecutionResult(cell_id=cell_id, success=True)
 

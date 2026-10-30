@@ -64,6 +64,7 @@ from strata.notebook.parser import parse_notebook
 from strata.notebook.presence import SessionPresence
 from strata.notebook.protocol import MessageType
 from strata.notebook.provenance import (
+    cell_provenance_inputs,
     compute_provenance_hash,
     compute_source_hash,
 )
@@ -995,12 +996,12 @@ class NotebookSession:
             if outside is None:
                 outside = self._outside_world_for(cell)
 
-            inputs = (
-                input_hashes
-                + outside.mount_fingerprints
-                + outside.table_fingerprints
-                + outside.fetch_fingerprints
-                + outside.dataset_fingerprints
+            inputs = cell_provenance_inputs(
+                input_hashes,
+                outside.mount_fingerprints,
+                outside.table_fingerprints,
+                outside.fetch_fingerprints,
+                outside.dataset_fingerprints,
             )
             test_inputs[cell_id] = cell_test_input_fingerprint(inputs, env_hash)
 
