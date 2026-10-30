@@ -3898,6 +3898,12 @@ exhaustive commit history.</p>
   still covers every variant. Existing fan-out instances miss the cache once
   after upgrading, and an open run of one from before the upgrade is not
   resumed. (#1328)</li>
+<li><strong>An interrupted run is resumable for a week.</strong> A run that died after a
+  checkpoint is resumed only by a run of the same computation, so after an
+  edit to the cell or an upstream it stayed open forever and its newest
+  checkpoint was never collected. Prune now ends a run not resumed within a
+  week of its interruption, and its checkpoints go unless a head points at
+  one. (#1331)</li>
 <li><strong>A torch tensor a cell reads owns its memory.</strong> A tensor rebuilt from Arrow
   wrapped the buffer read-only, which torch cannot enforce: an in-place op
   wrote memory the tensor did not own, and torch warned in the cell's stderr

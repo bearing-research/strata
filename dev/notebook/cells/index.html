@@ -3553,7 +3553,12 @@ to it from inside the cell:</p>
   from as <code>{name: value}</code>, or <code>None</code> when it starts from nothing. A run that
   died after a checkpoint (a crash, a cancel, a server restart) continues from
   its latest checkpoint on the next ordinary run; the sequence numbers carry
-  on from there. A rerun (<code>↻</code>, <code>--rerun</code>) starts fresh and never restores.</li>
+  on from there. A rerun (<code>↻</code>, <code>--rerun</code>) starts fresh and never restores.
+  Only a run of the same computation continues it: after an edit to the cell
+  or an upstream, the cell starts fresh, and the interrupted run continues
+  only if the edit is undone. It stays resumable for a week after it was
+  interrupted; then prune ends it, and its checkpoints are collected unless a
+  head points at one.</li>
 <li><code>strata.head(name, sequence)</code> points the run's named head (<code>model</code>,
   <code>best</code>, ...) at one of its checkpoints. Prune keeps every checkpoint a head
   points at and the latest checkpoint of a run still open; the rest are
