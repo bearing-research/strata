@@ -1298,13 +1298,16 @@ class CellExecutor:
         mount_specs: list[MountSpec] | None = None,
         mount_fingerprints: list[str] | None = None,
         has_rw_mount: bool | None = None,
+        fanout_variant: str | None = None,
     ) -> _CellProvenance:
         """Compute the standard provenance triplet for a cell.
 
         Every cell kind must feed the store the same hash ``compute_staleness``
         recomputes; drifting any ingredient (runtime env, worker identity, mount
         fingerprints, env-key narrowing) leaves the cell stale forever. Optional
-        precomputed arguments let callers skip resolving mounts again.
+        precomputed arguments let callers skip resolving mounts again. With
+        ``fanout_variant`` set, it is one fan-out instance's provenance, over the
+        inputs that instance reads.
         """
         if annotations is None:
             annotations = parse_annotations(source)
@@ -1348,7 +1351,7 @@ class CellExecutor:
             provenance_env,
             runtime_identity=runtime_identity,
         )
-        input_hashes = self._collect_input_hashes(cell_id)
+        input_hashes = self._collect_input_hashes(cell_id, fanout_variant=fanout_variant)
         (
             config,
             table_fingerprints,
@@ -1525,7 +1528,9 @@ class CellExecutor:
 
             # ② Provenance. Every cell-kind path uses the same helper so the hash agrees with
             # ``compute_staleness`` on re-open.
-            prov = await self._compute_cell_provenance(cell_id, source)
+            prov = await self._compute_cell_provenance(
+                cell_id, source, fanout_variant=fanout_variant
+            )
             source_hash = prov.source_hash
             runtime_env = prov.runtime_env
             effective_worker = prov.effective_worker
@@ -5250,13 +5255,15 @@ class CellExecutor:
     # ② Collect input hashes (upstream artifacts are guaranteed to exist)
     # ------------------------------------------------------------------
 
-    def _collect_input_hashes(self, cell_id: str) -> list[str]:
+    def _collect_input_hashes(
+        self, cell_id: str, *, fanout_variant: str | None = None
+    ) -> list[str]:
         """Provenance hashes from upstream artifacts, after ``_materialize_upstreams``.
 
         Delegates to ``session._collect_input_hashes`` so the hash matches what
         ``compute_staleness`` recomputes.
         """
-        return self.session._collect_input_hashes(cell_id)
+        return self.session._collect_input_hashes(cell_id, variant=fanout_variant)
 
     # ------------------------------------------------------------------
     # ④-a Load input blobs (guaranteed to exist after step ①)
