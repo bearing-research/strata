@@ -12,10 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from strata.notebook.causality import (
-    _get_stored_hash,
-    compute_causality_on_staleness,
-)
+from strata.notebook.causality import _get_stored_hash
 from strata.notebook.dependencies import add_dependency
 from strata.notebook.env import compute_execution_env_hash
 from strata.notebook.provenance import compute_source_hash
@@ -114,14 +111,12 @@ class TestCausalityEnvChanged:
         assert add_result.lockfile_changed
 
         session.ensure_venv_synced()
-
-        causality_map = compute_causality_on_staleness(session)
+        session.compute_staleness()
 
         # c1 has a cached artifact with old env_hash, current env_hash is different
-        if "c1" in causality_map:
-            chain = causality_map["c1"]
-            env_details = [d for d in chain.details if d.type == "env_changed"]
-            assert len(env_details) > 0, f"Expected env_changed, got {chain.details}"
+        chain = session.causality_map["c1"]
+        env_details = [d for d in chain.details if d.type == "env_changed"]
+        assert len(env_details) > 0, f"Expected env_changed, got {chain.details}"
 
     @pytest.mark.asyncio
     async def test_source_change_not_env(self, tmp_path):
@@ -144,15 +139,14 @@ class TestCausalityEnvChanged:
         cell = next(c for c in session.notebook_state.cells if c.id == "c1")
         cell.source = "x = 999"
         session.re_analyze_cell("c1")
+        session.compute_staleness()
 
-        causality_map = compute_causality_on_staleness(session)
-        if "c1" in causality_map:
-            chain = causality_map["c1"]
-            source_details = [d for d in chain.details if d.type == "source_changed"]
-            env_details = [d for d in chain.details if d.type == "env_changed"]
-            assert len(source_details) > 0
-            # env should NOT be in there since lockfile didn't change
-            assert len(env_details) == 0
+        chain = session.causality_map["c1"]
+        source_details = [d for d in chain.details if d.type == "source_changed"]
+        env_details = [d for d in chain.details if d.type == "env_changed"]
+        assert len(source_details) > 0
+        # env should NOT be in there since lockfile didn't change
+        assert len(env_details) == 0
 
 
 class TestStoredHashLookup:
@@ -226,13 +220,13 @@ class TestNeverRun:
         write_cell(nb_dir, "c2", "y = x + 1")
         session = SessionManager().open_notebook(nb_dir)
 
-        assert compute_causality_on_staleness(session) == {}
+        session.compute_staleness()
+        assert session.causality_map == {}
 
         # Once it has a result to compare against, a change is explained.
         session.notebook_state.get_cell("c1").last_provenance_hash = "an-earlier-run"
-        assert [d.type for d in compute_causality_on_staleness(session)["c1"].details] == [
-            "source_changed"
-        ]
+        session.compute_staleness()
+        assert [d.type for d in session.causality_map["c1"].details] == ["source_changed"]
 
 
 class TestEnvironmentMetadata:

@@ -11,11 +11,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from strata.notebook.annotations import parse_annotations
-from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
-from strata.notebook.provenance import compute_provenance_hash, compute_source_hash
-from strata.notebook.workers import worker_runtime_identity
-from strata.notebook.writer import drop_blanked_secrets
+from strata.notebook.provenance import compute_source_hash
 
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
@@ -71,11 +67,14 @@ class CausalityChain:
 
 def compute_causality_on_staleness(
     session: NotebookSession,
+    stale: dict[str, str | None],
 ) -> dict[str, CausalityChain]:
     """Return ``{cell_id: CausalityChain}`` for the stale cells of *session*.
 
-    Mirrors ``compute_staleness()``'s topological walk but reports which provenance
-    component changed.
+    *stale* maps each cell ``compute_staleness()`` did not find ready to the provenance
+    hash it computed, or None when a stale upstream settled the cell first. Staleness
+    alone sees every input (tables, fetches, datasets), so it decides which cells need
+    explaining; this reports which provenance component changed.
     """
     if session.dag is None:
         return {}
@@ -83,6 +82,8 @@ def compute_causality_on_staleness(
     causality_map: dict[str, CausalityChain] = {}
 
     for cell_id in session.dag.topological_order:
+        if cell_id not in stale:
+            continue
         cell = session.notebook_state.get_cell(cell_id)
         if cell is None:
             continue
@@ -91,39 +92,9 @@ def compute_causality_on_staleness(
             continue
 
         details: list[CausalityDetail] = []
-        annotations = parse_annotations(cell.source)
         source_hash = compute_source_hash(cell.source)
-        runtime_env = drop_blanked_secrets(cell.env)
-        runtime_env.update(annotations.env)
-        declared_env_keys = set(annotations.env) | set(cell.env_overrides or {})
-        provenance_env = narrow_env_for_provenance(
-            cell.source, runtime_env, declared_env_keys, language=cell.language
-        )
-        effective_worker = annotations.worker or cell.worker or session.notebook_state.worker
-        env_hash = compute_execution_env_hash(
-            session.path,
-            provenance_env,
-            runtime_identity=worker_runtime_identity(
-                session.notebook_state,
-                effective_worker,
-            ),
-        )
-        mount_fingerprints, has_rw_mount = session._collect_mount_fingerprints(cell)
-
-        if has_rw_mount:
-            # RW mounts are deliberately non-cacheable; there is no cached provenance to explain.
-            continue
-
-        # Group sweep refs the way the executor stored them, else a sweep downstream always
-        # looks stale here.
-        input_hashes = session._collect_input_hashes(cell_id)
-
-        provenance_hash = compute_provenance_hash(
-            input_hashes + mount_fingerprints, source_hash, env_hash
-        )
-
-        if session._resolve_cached_outputs(cell_id, provenance_hash) is not None:
-            continue
+        env_hash = session.cell_env_hash(cell)
+        provenance_hash = stale[cell_id]
 
         for upstream_id in cell.upstream_ids:
             upstream = session.notebook_state.get_cell(upstream_id)
@@ -173,7 +144,7 @@ def compute_causality_on_staleness(
             if (
                 not source_changed
                 and not env_changed_flag
-                and cell.last_provenance_hash is not None
+                and provenance_hash is not None
                 and cell.last_provenance_hash != provenance_hash
                 and cell.upstream_ids
             ):
