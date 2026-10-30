@@ -368,6 +368,73 @@ class TestGate1:
         assert runs.builds.get_build(first.build_id).state == "building"
 
 
+class TestAbandonedRuns:
+    """An interrupted run stays resumable for a week; then prune ends it and its checkpoints go."""
+
+    def _crashed(self, tmp_path: Path):
+        session, executor = _notebook(tmp_path, TRAIN_FILES)
+        crashed = _run(executor, "train", session.notebook_state.get_cell("train").source)
+        assert crashed.success is False and "killed mid-run" in (crashed.error or "")
+        (build,) = _only_build(session, "train")
+        assert build.state == "building"
+        return session, executor, build
+
+    def test_a_run_not_resumed_within_the_window_is_ended(self, tmp_path: Path, monkeypatch):
+        from strata.notebook import artifact_integration
+
+        session, _, build = self._crashed(tmp_path)
+        _, builds, releases = _ledger(session)
+        monkeypatch.setattr(artifact_integration, "_ABANDONED_RUN_SECONDS", 0.0)
+
+        result = session.get_artifact_manager().prune(keep_superseded=0, min_idle_seconds=0)
+
+        assert result["abandoned_runs"] == 1
+        assert builds.get_build(build.build_id).state == "failed"
+        # Its newest checkpoint was kept for a resume; now nothing is.
+        bundles = releases.bundles_of(build.build_id, "checkpoint")
+        assert [b.release.sequence for b in bundles] == [1, 2]
+        assert not any(releases.bundle(b.release.release_id).outputs for b in bundles)
+
+    def test_a_run_within_the_window_still_resumes(self, tmp_path: Path):
+        session, executor, build = self._crashed(tmp_path)
+        _, builds, releases = _ledger(session)
+
+        result = session.get_artifact_manager().prune(keep_superseded=0, min_idle_seconds=0)
+        assert result["abandoned_runs"] == 0
+        assert builds.get_build(build.build_id).state == "building"
+
+        resumed = _run(executor, "train", session.notebook_state.get_cell("train").source)
+        assert resumed.success is True, resumed.error
+        (same,) = _only_build(session, "train")
+        attempt = builds.get_attempt(same.build_id, same.attempt)
+        assert (
+            attempt.resumed_from
+            == releases.bundles_of(build.build_id, "checkpoint")[1].release.release_id
+        )
+
+    def test_a_run_resumed_after_it_was_listed_is_left_alone(self, tmp_path: Path, monkeypatch):
+        from strata.notebook import artifact_integration
+
+        session, _, build = self._crashed(tmp_path)
+        manager = session.get_artifact_manager()
+        monkeypatch.setattr(artifact_integration, "_ABANDONED_RUN_SECONDS", 0.0)
+        listed = manager.build_store.list_expired_leases(dispatch="external")
+        assert [b.build_id for b in listed] == [build.build_id]
+
+        LocalRuns(manager).open(
+            cell_id="train",
+            computation_key=build.computation_key,
+            variant=None,
+            input_versions={},
+            timeout_seconds=30,
+            resume=True,
+        )
+        monkeypatch.setattr(manager.build_store, "list_expired_leases", lambda **_: listed)
+
+        assert manager.fail_abandoned_runs() == 0
+        assert manager.build_store.get_build(build.build_id).state == "building"
+
+
 STOCHASTIC = """
 # @stochastic
 import random
