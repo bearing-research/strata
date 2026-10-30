@@ -2,10 +2,11 @@
 
 Before the harness starts, the run gets a build and an attempt whose lease this process
 renews for the cell's whole duration. The cell's checkpoint events (``run_channel``)
-become ``checkpoint`` releases while it runs; its outputs become the ``final`` release
-when it returns. A run interrupted after a checkpoint leaves its build ``building`` with
-a lapsed lease, and the next normal run of the same computation resumes it in a new
-attempt, starting from the newest accepted checkpoint.
+become ``checkpoint`` releases while it runs (a checkpoint of files in the layout of
+``vestigo.checkpoint_files``, so ``vestigo.torch`` reads it); its outputs become the
+``final`` release when it returns. A run interrupted after a checkpoint leaves its
+build ``building`` with a lapsed lease, and the next normal run of the same computation
+resumes it in a new attempt, starting from the newest accepted checkpoint.
 """
 
 from __future__ import annotations
@@ -23,8 +24,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import anyio.to_thread
+from vestigo import checkpoint_files
 from vestigo.operations import AdvanceReference
 from vestigo.provenance import TransformSpec, checkpoint_output_key, run_output_key
 from vestigo.releases import ReleaseRejected
@@ -34,6 +37,7 @@ from strata.artifact.retention import requirements
 from strata.notebook.artifact_integration import caller_principal_id
 from strata.notebook.harness_user import open_tree_file
 from strata.notebook.process_tree import terminate_subprocess_tree
+from strata.notebook.run_channel import CHECKPOINTS_DIR, FILES_PART
 
 if TYPE_CHECKING:
     from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -288,43 +292,18 @@ class LocalRuns:
         release = self.releases.prepare(run.build_id, run.attempt, "checkpoint", sequence=sequence)
         staged: list[StagedVersion] = []
         try:
-            for name, spec in payload["parts"].items():
+            if "files" in payload:
+                self._stage_files(run, release.release_id, payload, run_dir, staged)
+            for name, spec in payload.get("parts", {}).items():
                 with open_tree_file(run_dir, str(spec["file"])) as f:
                     blob = f.read()
-                content_type = str(spec["content_type"])
                 artifact_id = (
                     self._manager.cell_artifact_id(run.cell_id, name, variant=run.variant)
                     + f"@ckpt={sequence}"
                 )
-                version = self.store.create_artifact(
-                    artifact_id,
-                    checkpoint_output_key(run.computation_key, run.build_id, sequence, name),
-                    TransformSpec(
-                        executor=LOCAL_CELL_EXECUTOR_REF,
-                        params={
-                            "cell_id": run.cell_id,
-                            "variable_name": name,
-                            "content_type": content_type,
-                            "checkpoint": str(sequence),
-                        },
-                        inputs=[],
-                    ),
-                    input_versions=run.input_versions,
-                    principal=caller_principal_id(),
-                    requires=requirements(artifact_id, content_type, blob),
-                    release_id=release.release_id,
-                    computation_key=run.computation_key,
-                )
-                self.store.blob_store.write_blob(artifact_id, version, blob)
+                params = {"variable_name": name, "content_type": str(spec["content_type"])}
                 staged.append(
-                    StagedVersion(
-                        artifact_id=artifact_id,
-                        version=version,
-                        schema_json="",
-                        row_count=None,
-                        byte_size=len(blob),
-                        content_sha256=hashlib.sha256(blob).hexdigest(),
-                    )
+                    self._stage(run, release.release_id, sequence, artifact_id, name, params, blob)
                 )
             self.releases.accept(release.release_id, staged)
         except ReleaseRejected:
@@ -337,6 +316,81 @@ class LocalRuns:
             return
         logger.info(
             "Cell %s released checkpoint %d of build %s", run.cell_id, sequence, run.build_id
+        )
+
+    def _stage_files(
+        self,
+        run: LocalRun,
+        release_id: str,
+        payload: dict[str, Any],
+        run_dir: Path,
+        staged: list[StagedVersion],
+    ) -> None:
+        """Stage the files a checkpoint's writer left in its folder, then their manifest."""
+        sequence, step = int(payload["sequence"]), int(payload["step"])
+        prefix = (
+            self._manager.cell_artifact_id(run.cell_id, FILES_PART, variant=run.variant)
+            + f"@ckpt={sequence}"
+        )
+        listed: dict[str, tuple[int, str]] = {}
+        for path in payload["files"]:
+            rel = str(path)
+            with open_tree_file(run_dir, f"{CHECKPOINTS_DIR}/{sequence}/{rel}") as f:
+                blob = f.read()
+            label = f"file={quote(rel, safe='')}"
+            params = {
+                "content_type": "application/octet-stream",
+                **checkpoint_files.file_params(rel, step),
+            }
+            version = self._stage(
+                run,
+                release_id,
+                sequence,
+                f"{prefix}@{label}",
+                f"{FILES_PART}@{label}",
+                params,
+                blob,
+            )
+            staged.append(version)
+            assert version.content_sha256 is not None
+            listed[rel] = (len(blob), version.content_sha256)
+        params = {"content_type": "application/json", **checkpoint_files.manifest_params(step)}
+        manifest = checkpoint_files.manifest(step, listed)
+        staged.append(self._stage(run, release_id, sequence, prefix, FILES_PART, params, manifest))
+
+    def _stage(
+        self,
+        run: LocalRun,
+        release_id: str,
+        sequence: int,
+        artifact_id: str,
+        output: str,
+        params: dict[str, Any],
+        blob: bytes,
+    ) -> StagedVersion:
+        """One output of the run's checkpoint *sequence*, written and staged in its release."""
+        version = self.store.create_artifact(
+            artifact_id,
+            checkpoint_output_key(run.computation_key, run.build_id, sequence, output),
+            TransformSpec(
+                executor=LOCAL_CELL_EXECUTOR_REF,
+                params={"cell_id": run.cell_id, **params, "checkpoint": str(sequence)},
+                inputs=[],
+            ),
+            input_versions=run.input_versions,
+            principal=caller_principal_id(),
+            requires=requirements(artifact_id, params["content_type"], blob),
+            release_id=release_id,
+            computation_key=run.computation_key,
+        )
+        self.store.blob_store.write_blob(artifact_id, version, blob)
+        return StagedVersion(
+            artifact_id=artifact_id,
+            version=version,
+            schema_json="",
+            row_count=None,
+            byte_size=len(blob),
+            content_sha256=hashlib.sha256(blob).hexdigest(),
         )
 
     def _head(self, run: LocalRun, payload: dict[str, Any]) -> None:

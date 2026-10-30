@@ -149,6 +149,35 @@ run under its own provenance key, so it never serves or overwrites the plain
 run's cache. The calls exist only on a local Python run; on a remote worker, an
 R cell or a prompt cell they raise a `RuntimeError` saying so.
 
+A PyTorch cell can save through
+[vestigo.torch](https://github.com/bearing-research/vestigo/blob/main/docs/torch.md)
+instead (`vestigo[torch]` in the notebook's dependencies). Hand it the ambient
+client, and torch-checkpointing writes each checkpoint to disk, one file per
+key of the state:
+
+```python
+from vestigo.torch import HostedRun
+
+run = HostedRun(strata)
+state = run.restore({"model": model, "optimizer": optimizer, "epoch": 0})
+for epoch in range(state["epoch"] + 1, 21):
+    train_one_epoch(model, optimizer)
+    sequence = run.save(epoch, {"model": model, "optimizer": optimizer, "epoch": epoch})
+run.close()
+```
+
+It loads the model and optimizer in place, and resume, branch, heads and prune
+work as above. Each file of a checkpoint is its own version, in the layout
+vestigo.torch reads, so `vestigo.torch.Ledger(".strata/artifacts").load(release_id,
+state)` loads a cell's checkpoint outside Strata. Underneath are two more calls,
+which any writer can use:
+
+- `strata.checkpoint_files(step, write)` calls `write(folder)` with an empty
+  folder, publishes what it leaves there as one checkpoint, and returns the
+  checkpoint's sequence number.
+- `strata.restore_files()` returns the folder the checkpoint this run continues
+  from was written out to, or `None` on a fresh run.
+
 ### Library cells (cross-cell defs and classes)
 
 Top-level `def` and `class` definitions are shared across cells via a synthetic Python module: write a helper once, call it anywhere.

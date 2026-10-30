@@ -527,3 +527,40 @@ read-only buffer; the branch run after the fix restored without the warning.
 **Not a bug, noted:** a comment-only edit to the cell is a cache hit (the
 provenance hash ignores comments), so forcing a second computation to
 interrupt needed a statement change.
+
+# vestigo.torch pass: the cell saves through HostedRun (2026-10-29)
+
+The train cell now saves through `vestigo.torch.HostedRun(strata)` instead of
+`strata.checkpoint(**parts)`: torch-checkpointing writes each epoch's model,
+optimizer, generator state and metrics as one file per key into the folder
+`strata.checkpoint_files` hands it, and the server publishes the folder as the
+epoch's checkpoint, each file its own version in vestigo's checkpoint layout.
+The notebook's venv adds `vestigo[torch]`. This is Investigation 09's T3.
+
+Run on an isolated server against month 1 (snapshot S1):
+
+- **Uninterrupted:** 12 checkpoints accepted, ~16 s; final weights
+  sha256 `cab7ee30164abbca`. (Not #1324's hash: another torch build since.)
+- **Interrupted and resumed:** a statement edit made a new computation;
+  cancelled once four checkpoints were accepted, the build stayed
+  `building` with no live lease, and the next normal run resumed it in a
+  new attempt (`resumed_from` set), restored the model and optimizer in
+  place from the folder, printed "resumed after epoch 4" and ended on
+  `cab7ee30164abbca`.
+- **Branched:** `execute?init=<release>` from the first run's epoch 2
+  continued from epoch 3 and ended on the same weights.
+- **Read outside Strata:** `vestigo.torch.Ledger(<notebook>/.strata/artifacts)
+  .load(<epoch 12 release>, state)`, in a process with no Strata, loaded
+  the cell's checkpoint: the same weights and metrics.
+- **Evaluate and promote:** holdout r2 0.6063, mae 1.259;
+  `taxi/tip-model` promoted.
+
+A checkpoint is five versions: `model_0.pt` 21.9 KB, `optimizer_0.pt`
+44.0 KB, `shuffle_0.pt` 6.6 KB, `metrics_0.pt` 1.3 KB and a 516-byte
+manifest.
+
+**Noted, not fixed:** the cell's `run` variable shows as an error output
+("Cannot pickle files that are not opened for reading: w"): it holds the
+ambient client, whose event pipe is open for writing. The scan cell's
+`feat_art` shows the same error for the same reason. Nothing downstream
+reads either, so neither is stored; the error is only in the variable list.

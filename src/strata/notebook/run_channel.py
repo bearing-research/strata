@@ -2,7 +2,9 @@
 
 The cell calls ``strata.checkpoint(**parts)``: the parts are written under the run
 directory and one JSON line tells the executor, which holds the build and the ledger, to
-release them. A cold harness writes the line on a pipe the executor passed
+release them. A checkpoint of files (``strata.checkpoint_files``, what
+``vestigo.torch.HostedRun`` saves through) is whatever a writer leaves in the
+sequence's folder. A cold harness writes the line on a pipe the executor passed
 (``STRATA_EVENTS_FD``, the lifeline's pattern in the other direction); a warm worker
 writes it on its protocol stream ahead of its result line. The cell never waits for
 acceptance. Stdlib only: loaded by path into the notebook venv, like the client.
@@ -12,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import stat
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +24,8 @@ EVENTS_FD_ENV = "STRATA_EVENTS_FD"
 EVENT_KEY = "event"
 CHECKPOINTS_DIR = "checkpoints"
 """Under the run directory: one folder per checkpoint sequence."""
+FILES_PART = "__files__"
+"""The part name a checkpoint of files is stored under; no ``checkpoint()`` part may take it."""
 
 _UNSET = object()
 
@@ -55,6 +61,8 @@ class RunChannel:
     def checkpoint(self, **parts: Any) -> int:
         if not parts:
             raise ValueError("checkpoint() needs at least one named part")
+        if FILES_PART in parts:
+            raise ValueError(f"{FILES_PART} is not a part name a checkpoint can take")
         sequence = self._sequence + 1
         folder = self._run_dir / CHECKPOINTS_DIR / str(sequence)
         folder.mkdir(parents=True, exist_ok=True)
@@ -69,6 +77,32 @@ class RunChannel:
         self._emit({EVENT_KEY: "checkpoint", "sequence": sequence, "parts": specs})
         self._sequence = sequence
         return sequence
+
+    def checkpoint_files(self, step: int, write: Callable[[Path], object]) -> int:
+        if not isinstance(step, int) or isinstance(step, bool):
+            raise ValueError(f"step must be an int, not {step!r}")
+        sequence = self._sequence + 1
+        folder = self._run_dir / CHECKPOINTS_DIR / str(sequence)
+        # A write that failed under this sequence left files no release names.
+        shutil.rmtree(folder, ignore_errors=True)
+        folder.mkdir(parents=True)
+        write(folder)
+        files = _regular_files(folder)
+        if not files:
+            raise ValueError("checkpoint_files() wrote no files")
+        self._emit({EVENT_KEY: "checkpoint", "sequence": sequence, "step": step, "files": files})
+        self._sequence = sequence
+        return sequence
+
+    def restore_files(self) -> Path | None:
+        if self._restore is None:
+            return None
+        if "folder" not in self._restore:
+            raise RuntimeError(
+                f"release {self._restore['release_id']} holds no checkpoint files; "
+                "strata.restore() returns its parts"
+            )
+        return self._run_dir / self._restore["folder"]
 
     def restore(self) -> dict[str, Any] | None:
         if self._restore is None:
@@ -94,6 +128,17 @@ class RunChannel:
 
     def _emit(self, payload: dict[str, Any]) -> None:
         self._write(json.dumps(payload, sort_keys=False) + "\n")
+
+
+def _regular_files(root: Path) -> list[str]:
+    """Each regular file under *root* as a POSIX path relative to it; links are skipped."""
+    found: list[str] = []
+    for dirpath, _, names in os.walk(root):
+        for name in names:
+            path = Path(dirpath, name)
+            if stat.S_ISREG(path.lstat().st_mode):
+                found.append(path.relative_to(root).as_posix())
+    return sorted(found)
 
 
 def claim_pipe() -> int | None:

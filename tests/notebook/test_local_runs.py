@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from vestigo import checkpoint_files
 from vestigo.provenance import checkpoint_output_key, derive_subkey, run_output_key
 from vestigo.releases import ReleaseRejected
 
@@ -52,6 +53,28 @@ metrics = {"epochs": 4, "best": best}
 FEATURES = """
 # @table events {uri}
 features = {{"snapshot": events_snapshot}}
+"""
+
+# TRAIN as a checkpoint of files, what vestigo.torch.HostedRun saves through.
+TRAIN_FILES = """
+import pathlib
+folder = strata.restore_files()
+# A checkpoint of files has no parts.
+assert strata.restore() == ({} if folder else None)
+start = int((folder / "epoch").read_text()) + 1 if folder else 0
+for epoch in range(start, 4):
+    def write(into, epoch=epoch):
+        (into / "model").mkdir()
+        (into / "model" / "w.bin").write_bytes(bytes([epoch]) * 4)
+        (into / "epoch").write_text(str(epoch))
+    seq = strata.checkpoint_files(epoch, write)
+    if epoch == 3:
+        strata.head("best-validation", seq)
+    if epoch == 1 and not pathlib.Path("crashed").exists():
+        pathlib.Path("crashed").write_text("1")
+        raise RuntimeError("killed mid-run")
+model = {"w": 3, "snapshot": features["snapshot"]}
+metrics = {"epochs": 4, "best": 0.2}
 """
 
 EVALUATE = """
@@ -350,6 +373,99 @@ STOCHASTIC = """
 import random
 sample = random.random()
 """
+
+
+def _files(store, bundle) -> dict[str, bytes]:
+    return {
+        path: store.read_blob(v.id, v.version)
+        for path, v in checkpoint_files.files_of(bundle.outputs).items()
+    }
+
+
+class TestCheckpointFiles:
+    def test_a_checkpoint_of_files_is_one_release_in_the_layout_vestigo_reads(self, tmp_path: Path):
+        session, executor = _notebook(tmp_path, TRAIN_FILES.replace("epoch == 1", "epoch == 99"))
+        result = _run(executor, "train", session.notebook_state.get_cell("train").source)
+        assert result.success is True, result.error
+
+        store, builds, releases = _ledger(session)
+        (build,) = _only_build(session, "train")
+        bundles = releases.bundles_of(build.build_id, "checkpoint")
+        assert [b.release.sequence for b in bundles] == [1, 2, 3, 4]
+        for epoch, bundle in enumerate(bundles):
+            assert bundle.release.state == "accepted"
+            assert checkpoint_files.step_of(bundle.outputs) == epoch
+            assert _files(store, bundle) == {
+                "epoch": str(epoch).encode(),
+                "model/w.bin": bytes([epoch]) * 4,
+            }
+            assert {v.release_id for v in bundle.outputs} == {bundle.release.release_id}
+            assert all(v.computation_key == build.computation_key for v in bundle.outputs)
+            (manifest,) = [v for v in bundle.outputs if v.params.get("manifest")]
+            listed = json.loads(store.read_blob(manifest.id, manifest.version))["files"]
+            assert [(e["file"], e["byte_size"]) for e in listed] == [
+                ("epoch", 1),
+                ("model/w.bin", 4),
+            ]
+        assert build.state == "ready"
+
+        # Retention keeps the head's checkpoint whole and takes the rest.
+        session.get_artifact_manager().prune(keep_superseded=0, min_idle_seconds=0)
+        kept = [
+            b.release.sequence for b in bundles if releases.bundle(b.release.release_id).outputs
+        ]
+        assert kept == [4]
+
+    def test_a_run_resumes_and_branches_from_a_checkpoint_of_files(self, tmp_path: Path):
+        session, executor = _notebook(tmp_path, TRAIN_FILES)
+        source = session.notebook_state.get_cell("train").source
+        crashed = _run(executor, "train", source)
+        assert crashed.success is False and "killed mid-run" in (crashed.error or "")
+
+        resumed = _run(executor, "train", source)
+        assert resumed.success is True, resumed.error
+        store, builds, releases = _ledger(session)
+        (build,) = _only_build(session, "train")
+        bundles = releases.bundles_of(build.build_id, "checkpoint")
+        # The resumed attempt read epoch 1 back from the folder and went on from 2.
+        assert [checkpoint_files.step_of(b.outputs) for b in bundles] == [0, 1, 2, 3]
+        attempt = builds.get_attempt(build.build_id, build.attempt)
+        assert attempt.resumed_from == bundles[1].release.release_id
+
+        branched = _run(executor, "train", source, init=bundles[0].release.release_id)
+        assert branched.success is True, branched.error
+        _, branch = _only_build(session, "train")
+        steps = [
+            checkpoint_files.step_of(b.outputs)
+            for b in releases.bundles_of(branch.build_id, "checkpoint")
+        ]
+        assert steps == [1, 2, 3]
+
+    def test_a_file_outside_its_checkpoint_folder_is_not_released(self, tmp_path: Path):
+        session, _ = _notebook(tmp_path)
+        runs = LocalRuns(session.get_artifact_manager())
+        run = runs.open(
+            cell_id="train",
+            computation_key="parent",
+            variant=None,
+            input_versions={},
+            timeout_seconds=60,
+            resume=True,
+        )
+        run_dir = tmp_path / "run"
+        for sequence in (1, 2, 3, 4):
+            (run_dir / "checkpoints" / str(sequence)).mkdir(parents=True)
+        (run_dir / "secret").write_text("server file")
+        (run_dir / "checkpoints" / "2" / "link").symlink_to(run_dir / "secret")
+        (run_dir / "checkpoints" / "4" / "ok").write_text("1")
+        # The last opens, but a restore could not write it out under that path.
+        cases = ((1, "../../secret"), (2, "link"), (3, "/etc/hosts"), (4, "./ok"))
+        for sequence, path in cases:
+            event = {"event": "checkpoint", "sequence": sequence, "step": 1, "files": [path]}
+            runs.handle(run, event, run_dir)
+        store, builds, releases = _ledger(session)
+        assert {r.state for r in releases.releases_of(run.build_id, "checkpoint")} == {"abandoned"}
+        assert releases.latest_accepted(run.build_id) is None
 
 
 def test_a_child_the_cell_leaves_behind_does_not_hold_the_run_open(tmp_path: Path):

@@ -33,7 +33,7 @@ dependencies = [
     # The ledger: artifact store, build store, SQL dialects, blob backends (ADR 002).
     # Its own repository (bearing-research/vestigo) releases it; the pin is exact
     # because the notebook's store schema and migrations track one version.
-    "vestigo==0.3.0",
+    "vestigo==0.3.1",
     "pyiceberg[sql-sqlite,sql-postgres]>=0.12.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",
