@@ -76,7 +76,8 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   defining the same name. The run binds the annotation's value over it, so
   nothing flowed over the edge, yet editing that unrelated cell reran this
   one. Those names are now left out of the cell's references, as
-  `@output_dir` names already were. (#1339)
+  `@output_dir` names already were, including a name that shadows a
+  builtin such as `input`. (#1339, #1342)
 - **A `# @per_variant` cell that defines nothing fans out.** Fan-out was
   detected through the variables the cell defines, so a cell that only
   printed, plotted or wrote ran once with its group bound as the

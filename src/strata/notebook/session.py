@@ -683,21 +683,6 @@ class NotebookSession:
             for name in annotations.output_dirs:
                 if name not in defines:
                     defines.append(name)
-            references = [name for name in references if name not in annotations.output_dirs]
-            if cell.language in (CellLanguage.PYTHON, CellLanguage.R):
-                # The run binds these over any upstream value, so an edge carries nothing
-                # and would rerun the cell whenever the unrelated producer changed.
-                bound = {
-                    *(
-                        mount.name
-                        for mount in resolve_cell_mounts([], cell.mounts, annotations.mounts)
-                    ),
-                    *(table.name for table in annotations.tables),
-                    *(f"{table.name}_snapshot" for table in annotations.tables),
-                    *(fetch.name for fetch in annotations.fetches),
-                    *(dataset.name for dataset in annotations.datasets),
-                }
-                references = [name for name in references if name not in bound]
 
             loop = annotations.loop
             seed_from = (
@@ -716,9 +701,26 @@ class NotebookSession:
                     if name not in defines and name not in references
                 ]
 
+            bound = set(annotations.output_dirs)
+            if cell.language in (CellLanguage.PYTHON, CellLanguage.R):
+                # The run binds these over any upstream value, so an edge carries nothing
+                # and would rerun the cell whenever the unrelated producer changed.
+                bound |= {
+                    *(
+                        mount.name
+                        for mount in resolve_cell_mounts([], cell.mounts, annotations.mounts)
+                    ),
+                    *(table.name for table in annotations.tables),
+                    *(f"{table.name}_snapshot" for table in annotations.tables),
+                    *(fetch.name for fetch in annotations.fetches),
+                    *(dataset.name for dataset in annotations.datasets),
+                }
+            # Both lists wire edges: a name shadowing a builtin (``input``) is in the second.
+            references = [name for name in references if name not in bound]
+            builtin_references = [name for name in analyzed.builtin_references if name not in bound]
+
             variant_group = annotations.variant.group if annotations.variant is not None else None
             variant_name = annotations.variant.name if annotations.variant is not None else None
-            builtin_references = list(analyzed.builtin_references)
             cell_analyses.append(
                 CellAnalysisWithId(
                     id=cell.id,
