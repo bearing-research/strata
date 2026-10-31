@@ -3881,6 +3881,13 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A run is keyed on the mount listing it read.</strong> A cell's key came from
+  one listing of each mount and its view from a second, taken later as the run
+  prepared it, so a prefix that changed in between filed the result under a
+  listing it never read; a loop listed again for every iteration. A run whose
+  mounts this server prepares, as a cell, a loop, an R cell, a Run All batch
+  or a cell's tests, is now keyed on the listing it read, and a loop prepares
+  once. A <code>file://</code> folder is still read live, as it always was. (#1337)</li>
 <li><strong>A <code># @per_variant</code> cell's tests run once per variant.</strong> They ran once
   with the cell's own group bound as a <code>{variant: value}</code> dict, which no
   instance of the cell ever reads. Each variant now gets its own session with
