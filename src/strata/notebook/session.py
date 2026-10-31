@@ -47,6 +47,7 @@ from strata.notebook.env import (
 )
 from strata.notebook.models import (
     AnnotationDiagnostic,
+    CellLanguage,
     CellOutput,
     CellStaleness,
     CellState,
@@ -683,6 +684,20 @@ class NotebookSession:
                 if name not in defines:
                     defines.append(name)
             references = [name for name in references if name not in annotations.output_dirs]
+            if cell.language in (CellLanguage.PYTHON, CellLanguage.R):
+                # The run binds these over any upstream value, so an edge carries nothing
+                # and would rerun the cell whenever the unrelated producer changed.
+                bound = {
+                    *(
+                        mount.name
+                        for mount in resolve_cell_mounts([], cell.mounts, annotations.mounts)
+                    ),
+                    *(table.name for table in annotations.tables),
+                    *(f"{table.name}_snapshot" for table in annotations.tables),
+                    *(fetch.name for fetch in annotations.fetches),
+                    *(dataset.name for dataset in annotations.datasets),
+                }
+                references = [name for name in references if name not in bound]
 
             loop = annotations.loop
             seed_from = (
