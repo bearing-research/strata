@@ -3825,6 +3825,22 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An annotation that cannot be read stops its cell.</strong> A known directive
+  whose value does not parse (<code># @timeout soon</code>, <code># @mount data</code> with no URI,
+  an empty <code># @worker</code> or <code># @after</code>, <code># @nocache maybe</code>, <code># @per_variant a b</code>,
+  <code># @temperature hot</code>, an unknown <code># @loop</code> or <code># @sql</code> parameter, ...) is an
+  error diagnostic, and a cell with any error diagnostic no longer runs: it
+  fails with the first one's code and message before anything is staged, on
+  every path (single run, cascade, Run All, <code>strata run</code>, the API and MCP),
+  and the cells that depend on it are skipped. Before, the directive was
+  dropped and the cell ran, and was cached, as a computation other than the
+  one its source declares. The <code>*_unreadable</code>, <code>timeout_not_numeric</code>,
+  <code>env_malformed</code>, <code>variant_malformed</code>, <code>cache_policy_unknown</code>,
+  <code>cache_ttl_invalid</code> and <code>prompt_output_schema_invalid</code> warnings are now
+  errors. <code>@mount</code> and <code>@table</code> refuse an unknown extra token instead of
+  skipping it. Run All also skips a failed cell's dependents that would have
+  run together in one batch, which before ran on the failed cell's last
+  artifacts. No cache keys change. (#1343)</li>
 <li><strong>The ledger is vestigo 0.3.1</strong>, which adds <code>vestigo.torch.HostedRun</code> and
   <code>vestigo.checkpoint_files</code>. No migration. (#1327)</li>
 <li><strong>The ledger is vestigo 0.3.0.</strong> It adds the <code>vestigo.torch</code> adapter
