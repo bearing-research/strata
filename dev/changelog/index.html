@@ -3825,6 +3825,14 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code>start_from</code> seed is the only input for a loop's carry.</strong> A loop cell
+  with <code># @loop start_from=&lt;cell&gt;@iter=&lt;k&gt;</code> whose body also reads the carry
+  was wired to the carry's latest ordinary producer as well as the seed, so
+  editing that unrelated cell reran the fork and its hash was in the fork's
+  key. The seed is now the carry's only edge, with no fallback when the seed
+  is invalid: a seed that is not an active cell defining the carry is
+  <code>loop_start_from_unknown</code>, which stops the cell. Such forks lose an input,
+  so their keys change once and they rerun once. (#1345)</li>
 <li><strong>An <code>@after</code> that names no cell stops its cell.</strong> <code># @after &lt;id&gt;</code> where
   the id names no cell (<code>after_unknown_cell</code>) or a variant that is not
   active (<code>after_inactive_variant</code>) is an error, so the cell does not run;

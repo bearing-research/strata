@@ -3649,7 +3649,11 @@ iteration.</p>
   stored iteration <code>k</code>. Useful for forking a converged run to explore a
   variant. <code>&lt;cell-id&gt;</code> is the upstream loop cell's <code>id</code> in
   <code>notebook.toml</code> (not its <code>@name</code>) - see <a href="#cell-ids">Cell IDs</a>. The fork
-  depends on that cell: when its result changes, the fork runs again.
+  depends on that cell: when its result changes, the fork runs again. It reads
+  the carry from there only, so another cell that defines the carry is not an
+  input of the fork. A <code>start_from</code> that names no cell, a variant that is not
+  active, or a cell that does not define the carry is an error
+  (<code>loop_start_from_unknown</code>), and the fork does not run.
   Iteration <code>k</code> must come from that cell's latest run: if the latest run
   stopped before <code>k</code> (a lower <code>max_iter</code>, an earlier <code>@loop_until</code> exit, a
   failure), the fork fails rather than seed from a step an older run left behind.</li>
