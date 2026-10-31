@@ -103,6 +103,7 @@ from strata.notebook.mounts import (
     ResolvedMount,
     ensure_writable,
     listing_entries,
+    mount_component,
     parse_mount_uri,
     resolve_cell_mounts,
     weigh_mount_sync,
@@ -436,19 +437,36 @@ class _CellProvenance:
 
     def over_inputs(self, input_hashes: list[str]) -> _CellProvenance:
         """The same provenance over other input hashes: a fan-out instance's."""
+        return self._rehashed(input_hashes=input_hashes)
+
+    def over_mounts(self, prepared: Mapping[str, ResolvedMount]) -> _CellProvenance:
+        """The same provenance over the mounts as a run prepared them, the listing it reads.
+
+        The cell was keyed on an earlier listing, which the mount may have moved past.
+        """
+        fingerprints = [
+            mount_component(spec, fingerprint)
+            for spec in sorted(self.mount_specs, key=lambda item: item.name)
+            if (fingerprint := prepared[spec.name].fingerprint) is not None
+        ]
+        if fingerprints == self.mount_fingerprints:
+            return self
+        return self._rehashed(mount_fingerprints=fingerprints)
+
+    def _rehashed(self, **changes: Any) -> _CellProvenance:
+        changed = replace(self, **changes)
         return replace(
-            self,
-            input_hashes=input_hashes,
+            changed,
             provenance_hash=compute_provenance_hash(
                 cell_provenance_inputs(
-                    input_hashes,
-                    self.mount_fingerprints,
-                    self.table_fingerprints,
-                    self.fetch_fingerprints,
-                    self.dataset_fingerprints,
+                    changed.input_hashes,
+                    changed.mount_fingerprints,
+                    changed.table_fingerprints,
+                    changed.fetch_fingerprints,
+                    changed.dataset_fingerprints,
                 ),
-                self.source_hash,
-                self.env_hash,
+                changed.source_hash,
+                changed.env_hash,
             ),
         )
 
@@ -925,6 +943,8 @@ class CellExecutor:
             ),
         ]
         resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
+        # The tests read this listing, which the provenance's may predate.
+        prov = prov.over_mounts(resolved_mounts)
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
 
         # Tests run the cell's source, so they are refused or dropped to the harness user
@@ -1604,15 +1624,19 @@ class CellExecutor:
             input_hashes = prov.input_hashes
             mount_specs = prov.mount_specs
             mount_fingerprints = prov.mount_fingerprints
-            provenance_hash = prov.provenance_hash
-
-            # Scope provenance to this variant so each instance caches independently.
-            if fanout_variant is not None:
-                provenance_hash = derive_subkey(provenance_hash, f"variant={fanout_variant}")
-            # A branch is a new computation: its initial state is bound, never defined.
             init = self._branch_inits.get(cell_id)
-            if init is not None:
-                provenance_hash = derive_subkey(provenance_hash, f"init={init}")
+
+            def run_key(prov: _CellProvenance) -> str:
+                key = prov.provenance_hash
+                # Scope provenance to this variant so each instance caches independently.
+                if fanout_variant is not None:
+                    key = derive_subkey(key, f"variant={fanout_variant}")
+                # A branch is a new computation: its initial state is bound, never defined.
+                if init is not None:
+                    key = derive_subkey(key, f"init={init}")
+                return key
+
+            provenance_hash = run_key(prov)
 
             # RW mounts have side effects: not cacheable. A rerun bypasses the cache but still
             # records a cacheable leaf's console, or the next plain run replays an older one.
@@ -1904,6 +1928,17 @@ class CellExecutor:
 
                 venv_path = self.session.venv_python
 
+                # Mounts this server prepares are prepared before the run is keyed: it reads
+                # this listing, which the one its key came from may have moved past.
+                prepared_mounts: dict[str, ResolvedMount] | None = None
+                if worker_spec is not None and (
+                    worker_spec.backend == WorkerBackendType.LOCAL
+                    or is_embedded_executor_worker(worker_spec)
+                ):
+                    prepared_mounts = await self._prepare_mounts(mount_specs, cell_id)
+                    prov = prov.over_mounts(prepared_mounts)
+                    provenance_hash = run_key(prov)
+
                 # A local run is an execution of the ledger: a build with an attempt whose
                 # lease this process renews, open until its outputs are stored.
                 local_run: LocalRun | None = None
@@ -1957,6 +1992,7 @@ class CellExecutor:
                     cell_provenance_hash=provenance_hash,
                     local_run=local_run,
                     restore=restore,
+                    resolved_mounts=prepared_mounts,
                 )
                 if remote_build_id and remote_metadata.get("remote_transport") == "signed":
                     remote_metadata["remote_build_state"] = "ready"
@@ -2743,6 +2779,9 @@ class CellExecutor:
                         remote_metadata["remote_build_state"] = "ready"
                 else:
                     resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
+                    # Keyed on the listing it reads, which the cache check's may predate.
+                    prov = prov.over_mounts(resolved_mounts)
+                    provenance_hash = prov.provenance_hash
                     manifest_path = self._write_manifest(
                         source,
                         input_specs,
@@ -2947,13 +2986,15 @@ class CellExecutor:
         cell_provenance_hash: str | None = None,
         local_run: LocalRun | None = None,
         restore: dict[str, Any] | None = None,
+        resolved_mounts: dict[str, ResolvedMount] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Dispatch one cell execution through the selected worker backend.
 
         *result_dir* is an empty server-only directory an embedded worker's result is
         unpacked into. *local_run* is the local path's execution, whose checkpoint
         events it releases; *restore* is the manifest entry naming what the cell
-        starts from.
+        starts from. *resolved_mounts* are the mounts a local or embedded run was keyed
+        on, already prepared.
         """
         if worker_spec.backend == WorkerBackendType.LOCAL:
             return await self._dispatch_local(
@@ -2969,6 +3010,7 @@ class CellExecutor:
                 cell_id=cell_id,
                 local_run=local_run,
                 restore=restore,
+                resolved_mounts=resolved_mounts,
             )
 
         if is_embedded_executor_worker(worker_spec):
@@ -2984,6 +3026,7 @@ class CellExecutor:
                 mutation_defines=mutation_defines,
                 tables=tables,
                 cell_id=cell_id,
+                resolved_mounts=resolved_mounts,
             )
 
         if is_http_executor_worker(worker_spec):
@@ -3027,11 +3070,13 @@ class CellExecutor:
         cell_id: str | None = None,
         local_run: LocalRun | None = None,
         restore: dict[str, Any] | None = None,
+        resolved_mounts: dict[str, ResolvedMount] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
-        """Run the direct local execution path."""
+        """Run the direct local execution path, on *resolved_mounts* if already prepared."""
         result = None
         execution_method = "cold"
-        resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
+        if resolved_mounts is None:
+            resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
         on_event = (
             self._local_runs().event_handler(local_run, output_dir)
             if local_run is not None
@@ -3102,13 +3147,16 @@ class CellExecutor:
         mutation_defines: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
+        resolved_mounts: dict[str, ResolvedMount] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run the bundle-based executor path locally for supported executor workers.
 
         The result is unpacked into *result_dir*, a server-only directory: output_dir
         still holds the folders' files, and the cell can redirect anything under it.
+        *resolved_mounts* are prepared here when the caller has not.
         """
-        resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
+        if resolved_mounts is None:
+            resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
         with self._run_token(timeout_seconds) as run_token:
             manifest_path = self._write_manifest(
                 source,
@@ -6835,6 +6883,13 @@ class CellExecutor:
                 cell_id=cell_id, success=False, error=refusal, execution_method="loop"
             )
 
+        # Prepared once, and the run keyed on it: every iteration reads this listing, which
+        # the one the cache check used may have moved past.
+        resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
+        prov = prov.over_mounts(resolved_mounts)
+        cell_provenance = prov.provenance_hash
+        carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
+
         try:
             carry_blob, carry_content_type = self._resolve_loop_seed(cell_id, loop)
             if folders is not None:
@@ -6912,7 +6967,6 @@ class CellExecutor:
                     "file": carry_file,
                 }
 
-                resolved_mounts = await self._prepare_mounts(mount_specs, cell_id)
                 loop_config: dict[str, Any] | None = (
                     {"until_expr": loop.until_expr, "iteration": k}
                     if loop.until_expr is not None
