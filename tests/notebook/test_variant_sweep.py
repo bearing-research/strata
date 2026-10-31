@@ -325,6 +325,38 @@ class TestPerVariantEndToEnd:
         assert "'double': 12.0" in report["stdout"]
         assert "'triple': 18.0" in report["stdout"]
 
+    def test_a_fanout_that_defines_nothing_runs_once_per_variant(self, tmp_path, capsys):
+        import json as _json
+
+        from strata.notebook.cli import run_main
+        from strata.notebook.writer import (
+            add_cell_to_notebook,
+            create_notebook,
+            set_variant_mode,
+            write_cell,
+        )
+
+        nb = create_notebook(tmp_path, "Fanout", initialize_environment=False)
+        prepared_venv(nb)
+        cells = [
+            ("vdouble", "# @variant model double\npreds = [2, 4]\n", None),
+            ("vtriple", "# @variant model triple\npreds = [3, 6]\n", "vdouble"),
+            # `sum` over the {variant: value} dict would raise.
+            ("show", '# @per_variant\nprint("SUM", sum(preds))\n', "vtriple"),
+        ]
+        for cid, src, after in cells:
+            add_cell_to_notebook(nb, cid, after, language="python")
+            write_cell(nb, cid, src)
+        set_variant_mode(nb, "model", "sweep")
+
+        code = run_main([str(nb), "--no-sync", "--force", "--format", "json"])
+        assert code == 0
+        payload = _json.loads(capsys.readouterr().out)
+        show = next(c for c in payload["cells"] if c["id"] == "show")
+        assert show["status"] == "ok"
+        assert "[variant=double]\nSUM 6" in show["stdout"]
+        assert "[variant=triple]\nSUM 9" in show["stdout"]
+
 
 class TestPerVariantGroupIsProvenance:
     """``@per_variant <group>`` is a comment, but it decides which group binds a scalar."""
@@ -1152,6 +1184,16 @@ class TestPerVariantDag:
         assert dag.variable_producer["score"] == "eval"
         assert "eval" not in dag.fanout_cells
         assert dag.cell_upstream["eval"] == ["reset"]
+
+    def test_a_cell_that_defines_nothing_still_fans_out(self):
+        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
+
+        cells = self._cells()
+        cells[-1] = CellAnalysisWithId(
+            id="eval", defines=[], references=["preds"], per_variant=True
+        )
+        dag = NotebookDag.from_cells(cells, variant_modes={"model": "sweep"})
+        assert dag.fanout_cells["eval"].variants == (("logreg", "eval"), ("rf", "eval"))
 
     def test_no_sweep_ref_stays_plain_producer(self):
         # @per_variant but reads no sweep var → ordinary producer (validation warns).

@@ -66,6 +66,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A `# @per_variant` cell that defines nothing fans out.** Fan-out was
+  detected through the variables the cell defines, so a cell that only
+  printed, plotted or wrote ran once with its group bound as the
+  `{variant: value}` dict. It now runs once per variant like any other.
+  (#1338)
 - **A run is keyed on the mount listing it read.** A cell's key came from
   one listing of each mount and its view from a second, taken later as the run
   prepared it, so a prefix that changed in between filed the result under a

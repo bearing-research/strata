@@ -281,21 +281,21 @@ class NotebookDag:
                     fanout_group = named if named in read_groups else None
                 else:
                     fanout_group = next(iter(read_groups)) if len(read_groups) == 1 else None
+            if fanout_group is not None and not is_sweep_member:
+                # Independent of defines: a cell that only prints or writes still fans out.
+                dag.fanout_cells[cell.id] = SweepProducer(
+                    group=fanout_group,
+                    variants=tuple(
+                        sorted((name, cell.id) for name in sweep_group_variant_names[fanout_group])
+                    ),
+                    fanout_cell=cell.id,
+                )
             for var in cell.defines:
                 if is_sweep_member and var in sweep_producer_for_var:
                     new_producer: str | SweepProducer = sweep_producer_for_var[var]
-                elif fanout_group is not None:
+                elif cell.id in dag.fanout_cells:
                     # Register the output as sweep-sourced so a chained @per_variant resolves.
-                    new_producer = SweepProducer(
-                        group=fanout_group,
-                        variants=tuple(
-                            sorted(
-                                (name, cell.id) for name in sweep_group_variant_names[fanout_group]
-                            )
-                        ),
-                        fanout_cell=cell.id,
-                    )
-                    dag.fanout_cells[cell.id] = new_producer
+                    new_producer = dag.fanout_cells[cell.id]
                 else:
                     new_producer = cell.id
                 previous_producer = dag.variable_producer.get(var)

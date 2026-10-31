@@ -1057,7 +1057,8 @@ accuracy = sum(p == t for p, t in zip(preds, y_true)) / len(y_true)
 ```
 
 The cell runs N times (once per variant of its upstream sweep group), each
-instance with the variant's scalar value bound. Its own output becomes
+instance with the variant's scalar value bound. A cell that defines nothing,
+one that only prints, plots or writes, fans out the same way. Its own output becomes
 per-variant too, so a **downstream cell decides how to consume it**:
 
 - Another `# @per_variant` cell continues the fan-out, zipping by variant name
