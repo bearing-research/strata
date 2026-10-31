@@ -206,7 +206,7 @@ def validate_cell_annotations(
             )
         )
 
-    diagnostics.extend(_validate_loop_annotation(cell, annotations, notebook_state))
+    diagnostics.extend(_validate_loop_annotation(cell, annotations, notebook_state, dag))
 
     return diagnostics
 
@@ -694,6 +694,7 @@ def _validate_loop_annotation(
     cell: CellState,
     annotations,
     notebook_state: NotebookState,
+    dag: NotebookDag | None = None,
 ) -> list[AnnotationDiagnostic]:
     """Validate ``@loop`` / ``@loop_until`` directives."""
     diagnostics: list[AnnotationDiagnostic] = []
@@ -759,7 +760,7 @@ def _validate_loop_annotation(
             )
 
     if loop.start_from_cell is not None:
-        known_cells = {c.id for c in notebook_state.cells}
+        known_cells = {c.id: c for c in notebook_state.cells}
         if loop.start_from_cell not in known_cells:
             diagnostics.append(
                 AnnotationDiagnostic(
@@ -781,6 +782,32 @@ def _validate_loop_annotation(
                     message=(
                         "`@loop start_from` must reference a different cell: "
                         "a loop cell cannot seed itself from its own iterations."
+                    ),
+                    line=loop_line,
+                )
+            )
+        elif dag is not None and loop.start_from_cell in dag.inactive_cells:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.ERROR,
+                    code="loop_start_from_unknown",
+                    message=(
+                        f"`@loop start_from={loop.start_from_cell}@iter="
+                        f"{loop.start_from_iter}` references a variant that is not "
+                        "active, which does not run."
+                    ),
+                    line=loop_line,
+                )
+            )
+        elif loop.carry and loop.carry not in known_cells[loop.start_from_cell].defines:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.ERROR,
+                    code="loop_start_from_unknown",
+                    message=(
+                        f"`@loop start_from={loop.start_from_cell}@iter="
+                        f"{loop.start_from_iter}` references a cell that does not "
+                        f"define the carry `{loop.carry}`."
                     ),
                     line=loop_line,
                 )
