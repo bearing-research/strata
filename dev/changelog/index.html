@@ -3881,6 +3881,11 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code># @per_variant</code> cell that defines nothing fans out.</strong> Fan-out was
+  detected through the variables the cell defines, so a cell that only
+  printed, plotted or wrote ran once with its group bound as the
+  <code>{variant: value}</code> dict. It now runs once per variant like any other.
+  (#1338)</li>
 <li><strong>A run is keyed on the mount listing it read.</strong> A cell's key came from
   one listing of each mount and its view from a second, taken later as the run
   prepared it, so a prefix that changed in between filed the result under a

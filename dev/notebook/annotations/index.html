@@ -3865,7 +3865,8 @@ That's <code># @per_variant</code>:</p>
 <a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
 </code></pre></div>
 <p>The cell runs N times (once per variant of its upstream sweep group), each
-instance with the variant's scalar value bound. Its own output becomes
+instance with the variant's scalar value bound. A cell that defines nothing,
+one that only prints, plots or writes, fans out the same way. Its own output becomes
 per-variant too, so a <strong>downstream cell decides how to consume it</strong>:</p>
 <ul>
 <li>Another <code># @per_variant</code> cell continues the fan-out, zipping by variant name
