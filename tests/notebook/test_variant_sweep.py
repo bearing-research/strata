@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from strata.notebook.annotation_validation import validate_cell_annotations
+from strata.notebook.annotations import parse_annotations
+from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 from strata.notebook.models import CellState, NotebookState, VariantGroupConfig
 from strata.notebook.parser import parse_notebook
 from strata.notebook.writer import create_notebook, set_variant_mode
@@ -110,8 +112,34 @@ def _variant_cell(name: str, cell_id: str) -> CellState:
     return cell
 
 
+def _dag_of(nb: NotebookState) -> NotebookDag | None:
+    """The DAG the session would build over *nb*'s analysed cells, None if it fails."""
+    analyses = []
+    for c in nb.cells:
+        ann = parse_annotations(c.source)
+        analyses.append(
+            CellAnalysisWithId(
+                id=c.id,
+                defines=list(c.defines),
+                references=list(c.references),
+                variant_group=c.variant_group,
+                variant_name=c.variant_name,
+                per_variant=ann.per_variant,
+                per_variant_group=ann.per_variant_group,
+            )
+        )
+    try:
+        return NotebookDag.from_cells(
+            analyses,
+            variant_active_selections=nb.variant_active_selections,
+            variant_modes=nb.variant_modes,
+        )
+    except ValueError:
+        return None
+
+
 def _codes(cell: CellState, nb: NotebookState) -> list[str]:
-    return [d.code for d in validate_cell_annotations(cell, nb)]
+    return [d.code for d in validate_cell_annotations(cell, nb, _dag_of(nb))]
 
 
 class TestSweepValidation:
@@ -1019,6 +1047,24 @@ class TestPerVariantValidation:
         nb.variant_modes = {"model": "sweep"}
         assert "per_variant_on_variant_member" in _codes(cell, nb)
 
+    def test_a_chained_fanout_reads_the_group_through_its_upstream(self):
+        members = [_sweep_member("model", "logreg"), _sweep_member("model", "rf")]
+        first = _consumer("# @per_variant\nscore = ev(preds)\n", ["preds"])
+        chained = _consumer("# @per_variant\ntotal = sum(score)\n", ["score"], cell_id="agg")
+        chained.defines = ["total"]
+        nb = NotebookState(id="nb", name="t", cells=[*members, first, chained])
+        nb.variant_modes = {"model": "sweep"}
+        assert not any(c.startswith("per_variant_") for c in _codes(chained, nb))
+
+    def test_a_plain_redefinition_before_the_cell_ends_the_sweep(self):
+        members = [_sweep_member("model", "logreg"), _sweep_member("model", "rf")]
+        reset = CellState(id="reset", source="preds = 0\n")
+        reset.defines = ["preds"]
+        consumer = _consumer("# @per_variant\nscore = ev(preds)\n", ["preds"])
+        nb = NotebookState(id="nb", name="t", cells=[*members, reset, consumer])
+        nb.variant_modes = {"model": "sweep"}
+        assert "per_variant_no_sweep_source" in _codes(consumer, nb)
+
     def test_group_of_one_info(self):
         members = [_sweep_member("model", "only")]
         consumer = _consumer("# @per_variant\nscore = ev(preds)\n", ["preds"])
@@ -1095,6 +1141,17 @@ class TestPerVariantDag:
         prod = self._dag(per_variant_group="model").variable_producer["score"]
         assert isinstance(prod, SweepProducer)
         assert prod.fanout_cell == "eval"
+
+    def test_a_plain_redefinition_before_the_cell_ends_the_fanout(self):
+        """Each instance would read the plain value, so there is nothing to fan out over."""
+        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
+
+        cells = self._cells()
+        cells.insert(3, CellAnalysisWithId(id="reset", defines=["preds"], references=[]))
+        dag = NotebookDag.from_cells(cells, variant_modes={"model": "sweep"})
+        assert dag.variable_producer["score"] == "eval"
+        assert "eval" not in dag.fanout_cells
+        assert dag.cell_upstream["eval"] == ["reset"]
 
     def test_no_sweep_ref_stays_plain_producer(self):
         # @per_variant but reads no sweep var → ordinary producer (validation warns).

@@ -66,6 +66,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A `# @per_variant` cell fans out over the sweep it reads.** Whether a
+  cell fans out, and over which group, counted every sweep variable in the
+  notebook, so a cell below a plain redefinition (`preds = 0`) still ran once
+  per variant, each reading the plain value. The validator had its own copy of
+  that rule, which also flagged a chained `# @per_variant` cell as reading no
+  sweep. Both now read the producers the cell is wired to. (#1334)
 - **A cell reads a sweep defined before it.** A cell that read a sweep-mode
   variable before a later cell redefined it got the variable as plain, the
   last variant's value under the one name, instead of its `{variant:

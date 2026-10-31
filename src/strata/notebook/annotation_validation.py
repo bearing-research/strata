@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import logging
+from typing import TYPE_CHECKING
 
 from strata.notebook.annotations import (
     iter_annotation_block,
@@ -23,6 +24,9 @@ from strata.notebook.models import (
     NotebookState,
 )
 from strata.notebook.workers import notebook_worker_definitions_editable, resolve_worker_spec
+
+if TYPE_CHECKING:
+    from strata.notebook.dag import NotebookDag
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +50,19 @@ def _table_uri_malformed(uri: str) -> bool:
 def validate_cell_annotations(
     cell: CellState,
     notebook_state: NotebookState,
+    dag: NotebookDag | None = None,
 ) -> list[AnnotationDiagnostic]:
-    """Validate a cell's annotations against notebook-wide context."""
+    """Validate a cell's annotations against notebook-wide context.
+
+    *dag* is the notebook's; without one (its build failed, which is reported on its
+    own) the ``@per_variant`` group checks are skipped.
+    """
     # Language-agnostic: any language can be a variant member, so these run before
     # language dispatch.
     _cell_annotations = parse_annotations(cell.source)
     variant_diagnostics = _validate_variant_annotation(cell, _cell_annotations, notebook_state)
     variant_diagnostics = variant_diagnostics + _validate_per_variant_annotation(
-        cell, _cell_annotations, notebook_state
+        cell, _cell_annotations, dag
     )
     if cell.language == CellLanguage.MARKDOWN:
         # Pure prose: ``# @worker`` would be a markdown heading, not an annotation.
@@ -903,34 +912,16 @@ def _validate_variant_annotation(
     return diagnostics
 
 
-def _sweep_groups_read_by(
-    cell: CellState,
-    notebook_state: NotebookState,
-) -> dict[str, int]:
-    """Return ``{group: member_count}`` for the sweep groups this cell reads from.
-
-    Resolves producers from ``notebook_state`` alone, so validation does not need a
-    rebuilt DAG.
-    """
-    refs = set(cell.references) | set(cell.builtin_references)
-    groups: dict[str, int] = {}
-    for group_id, mode in notebook_state.variant_modes.items():
-        if mode != "sweep":
-            continue
-        members = [
-            c
-            for c in notebook_state.cells
-            if c.variant_group == group_id and c.variant_name is not None
-        ]
-        if any(refs & set(member.defines) for member in members):
-            groups[group_id] = len(members)
-    return groups
+def _sweep_groups_read_by(cell_id: str, dag: NotebookDag) -> dict[str, int]:
+    """Return ``{group: member_count}`` for the sweep groups the DAG wired this cell to."""
+    sizes = {res.group: len(res.members) for res in dag.variant_groups if res.mode == "sweep"}
+    return {group: sizes[group] for group in dag.sweep_groups_read(cell_id)}
 
 
 def _validate_per_variant_annotation(
     cell: CellState,
     annotations,
-    notebook_state: NotebookState,
+    dag: NotebookDag | None,
 ) -> list[AnnotationDiagnostic]:
     """Validate ``# @per_variant [group]`` fan-out membership.
 
@@ -976,8 +967,10 @@ def _validate_per_variant_annotation(
             )
         )
         return diagnostics
+    if dag is None:
+        return diagnostics
 
-    sweep_groups = _sweep_groups_read_by(cell, notebook_state)
+    sweep_groups = _sweep_groups_read_by(cell.id, dag)
     named = annotations.per_variant_group
 
     if named is not None:

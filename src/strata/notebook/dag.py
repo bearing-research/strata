@@ -134,6 +134,14 @@ class NotebookDag:
         reads = self.read_producers.get(consumer_id, {})
         return reads[var] if var in reads else self.variable_producer.get(var)
 
+    def sweep_groups_read(self, consumer_id: str) -> set[str]:
+        """The groups whose sweep (or fan-out over it) ``consumer_id`` reads, before it."""
+        return {
+            producer.group
+            for producer in self.read_producers.get(consumer_id, {}).values()
+            if isinstance(producer, SweepProducer)
+        }
+
     @classmethod
     def from_cells(
         cls,
@@ -188,11 +196,6 @@ class NotebookDag:
                     group=res.group, variants=tuple(sorted(members))
                 )
 
-        # ``var_to_sweep_group`` is seeded from sweep members and extended in the main
-        # loop with fan-out outputs, so a chained ``@per_variant`` resolves. Group choice
-        # mirrors annotation validation: named group, else the single sweep group read;
-        # zero or ambiguous keeps ordinary producer semantics.
-        var_to_sweep_group = {var: sp.group for var, sp in sweep_producer_for_var.items()}
         sweep_group_variant_names: dict[str, tuple[str, ...]] = {
             res.group: tuple(sorted(name for _, name in res.members))
             for res in dag.variant_groups
@@ -268,14 +271,11 @@ class NotebookDag:
             # A sweep member registers, for each var it defines, that var's SweepProducer;
             # every sibling sets the same value, so downstream sees the whole group.
             is_sweep_member = cell.id in sweep_member_group
-            # Includes upstream fan-out outputs, so chained @per_variant works.
+            # Named group, else the single sweep group read; zero or ambiguous keeps
+            # ordinary producer semantics (annotation validation reports which).
             fanout_group: str | None = None
             if cell.per_variant:
-                read_groups = {
-                    var_to_sweep_group[ref]
-                    for ref in (*cell.references, *cell.builtin_references)
-                    if ref in var_to_sweep_group
-                }
+                read_groups = dag.sweep_groups_read(cell.id)
                 named = cell.per_variant_group
                 if named is not None:
                     fanout_group = named if named in read_groups else None
@@ -296,7 +296,6 @@ class NotebookDag:
                         fanout_cell=cell.id,
                     )
                     dag.fanout_cells[cell.id] = new_producer
-                    var_to_sweep_group[var] = fanout_group
                 else:
                     new_producer = cell.id
                 previous_producer = dag.variable_producer.get(var)

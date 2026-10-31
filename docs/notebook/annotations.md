@@ -1076,7 +1076,9 @@ reruns only that variant's instance. A group the cell reads as a dict is an inpu
 of every instance, so changing any of its variants reruns them all.
 
 **Choosing the group.** Bare `# @per_variant` infers the group when the cell
-reads from exactly one sweep group. If it reads from two or more, name the one
+reads from exactly one sweep group. It reads what the cells above it last
+defined, so after a plain cell redefines `preds` there is no sweep left to fan
+out over. If it reads from two or more, name the one
 to fan out over - `# @per_variant model` - and the others collapse to dicts. A
 cell fans out over **one** group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: `per_variant_no_sweep_source`
