@@ -2574,6 +2574,15 @@ async def _execute_run_all(
             for kind, cells_in_run in partition:
                 if had_failure and not continue_on_error:
                     break
+                # A batch never checks for a failed producer, so take those cells out first.
+                kept = []
+                for cell in cells_in_run:
+                    if _upstream_that_failed(session, cell.id, failed) is not None:
+                        await _mark_blocked_by_failure(session, notebook_id, cell.id)
+                        failed.add(cell.id)
+                    else:
+                        kept.append(cell)
+                cells_in_run = kept
 
                 # Single-cell for size-1 batches (nothing to amortize) and for a
                 # host that refuses cell code (each cell then shows the refusal;

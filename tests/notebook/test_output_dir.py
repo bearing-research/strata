@@ -44,9 +44,9 @@ def _session(tmp_path: Path, writer: str = WRITER, reader: str | None = READER):
     return session
 
 
-def _manifest(session, version: int | None = None) -> tuple[dict, str]:
+def _manifest(session, version: int | None = None, cell_id: str = "w") -> tuple[dict, str]:
     manager = session.get_artifact_manager()
-    artifact_id = manager.cell_artifact_id("w", "ckpt")
+    artifact_id = manager.cell_artifact_id(cell_id, "ckpt")
     store = manager.artifact_store
     artifact = (
         store.get_latest_version(artifact_id)
@@ -590,7 +590,7 @@ LOOP = (
 )
 
 
-def _loop_session(tmp_path: Path, loop: str = LOOP):
+def _loop_session(tmp_path: Path, loop: str = LOOP, fork: str | None = None):
     nb = create_notebook(tmp_path, "Loop folders")
     add_cell_to_notebook(nb, "s", None)
     write_cell(nb, "s", "n = 0\n")
@@ -598,6 +598,9 @@ def _loop_session(tmp_path: Path, loop: str = LOOP):
     write_cell(nb, "w", loop)
     add_cell_to_notebook(nb, "r", "w")
     write_cell(nb, "r", READER)
+    if fork is not None:
+        add_cell_to_notebook(nb, "f", "r")
+        write_cell(nb, "f", fork)
     session = NotebookSession(parse_notebook(nb), nb)
     session.refresh_environment_runtime()
     return session
@@ -683,33 +686,33 @@ class TestALoopCell:
         assert second.cache_hit
         assert _listings(second.display_outputs) == _listings(first.display_outputs)
 
-    async def test_a_resumed_loop_starts_from_that_iterations_folder(self, tmp_path):
-        session = _loop_session(tmp_path)
+    async def test_a_fork_starts_from_that_iterations_folder(self, tmp_path):
+        fork = LOOP.replace("max_iter=3 carry=n", "max_iter=1 carry=n start_from=w@iter=0")
+        session = _loop_session(tmp_path, fork=fork)
         executor = CellExecutor(session)
         assert (await executor.execute_cell("s", "n = 0\n")).success
         assert (await executor.execute_cell("w", LOOP)).success
-        resumed = LOOP.replace("max_iter=3 carry=n", "max_iter=1 carry=n start_from=w@iter=0")
 
-        result = await executor.execute_cell("w", resumed)
+        result = await executor.execute_cell("f", fork)
 
         assert result.success, result.error
-        manifest, _ = _manifest(session)
+        manifest, _ = _manifest(session, cell_id="f")
         # Iteration 0 left e0 and n == 1, so the resumed iteration adds e1.
         assert sorted(manifest["files"]) == ["e0.bin", "e1.bin", "latest.txt"]
 
     async def test_a_folder_from_an_older_run_is_not_the_seed(self, tmp_path):
         """The seed carry comes from the latest run, which kept no folder."""
-        session = _loop_session(tmp_path)
+        fork = LOOP.replace("max_iter=3 carry=n", "max_iter=1 carry=n start_from=w@iter=0")
+        session = _loop_session(tmp_path, fork=fork)
         executor = CellExecutor(session)
         assert (await executor.execute_cell("s", "n = 0\n")).success
         assert (await executor.execute_cell("w", LOOP)).success
         assert (await executor.execute_cell("w", "# @loop max_iter=3 carry=n\nn = n + 1\n")).success
-        resumed = LOOP.replace("max_iter=3 carry=n", "max_iter=1 carry=n start_from=w@iter=0")
 
-        result = await executor.execute_cell("w", resumed)
+        result = await executor.execute_cell("f", fork)
 
         assert result.success, result.error
-        manifest, _ = _manifest(session)
+        manifest, _ = _manifest(session, cell_id="f")
         assert sorted(manifest["files"]) == ["e1.bin", "latest.txt"]
 
 

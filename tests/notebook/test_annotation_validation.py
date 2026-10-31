@@ -297,7 +297,7 @@ class TestRecordedInputsUnreadable:
         ]
 
         assert diagnostic.line == 2
-        assert "will not exist when the cell runs" in diagnostic.message
+        assert "so the cell does not run" in diagnostic.message
 
     def test_markdown_is_prose_not_annotations(self):
         """`# @fetch ...` in a markdown cell is a heading."""
@@ -582,14 +582,14 @@ class TestPromptOutputSchemaDiagnostics:
         diags = validate_cell_annotations(cell, _nb())
         assert [d.code for d in diags] == []
 
-    def test_invalid_json_surfaces_warning(self):
+    def test_invalid_json_is_an_error(self):
         cell = self._prompt_cell("# @output_schema {nope}\nHi")
         diags = validate_cell_annotations(cell, _nb())
         codes = [d.code for d in diags]
         assert codes == ["prompt_output_schema_invalid"]
-        assert diags[0].severity == "warn"
+        assert diags[0].severity == "error"
 
-    def test_non_object_schema_surfaces_warning(self):
+    def test_non_object_schema_is_an_error(self):
         cell = self._prompt_cell("# @output_schema [1,2]\nHi")
         diags = validate_cell_annotations(cell, _nb())
         assert [d.code for d in diags] == ["prompt_output_schema_invalid"]

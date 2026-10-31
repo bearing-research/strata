@@ -3435,7 +3435,7 @@ class TestLoopCellExecution:
             ),
         )
         assert not result.success
-        assert "seed" in (result.error or "").lower()
+        assert result.error_code == "loop_start_from_unknown"
 
     @pytest.mark.asyncio
     async def test_running_the_loop_again_does_not_rerun_the_body(self, loop_notebook, tmp_path):

@@ -881,9 +881,9 @@ def test_sweep_cells_are_not_batchable(tmp_path):
     dag.variable_producer = {"preds": SweepProducer("model", (("a", "va"),))}
     executor.session.dag = dag
 
-    member = MagicMock(variant_group="model", references=[], language="python")
-    consumer = MagicMock(variant_group=None, references=["preds"], language="python")
-    plain = MagicMock(variant_group=None, references=["other"], language="python")
+    member = MagicMock(variant_group="model", references=[], language="python", source="")
+    consumer = MagicMock(variant_group=None, references=["preds"], language="python", source="")
+    plain = MagicMock(variant_group=None, references=["other"], language="python", source="")
 
     assert is_cell_batchable(executor, member) is False
     assert is_cell_batchable(executor, consumer) is False

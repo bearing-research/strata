@@ -48,6 +48,7 @@ from vestigo.store import ArtifactVersion, StagedVersion, get_artifact_store
 
 from strata.notebook import console_relay, output_dirs, output_file_relay
 from strata.notebook.analyzer import imported_names
+from strata.notebook.annotation_validation import blocking_diagnostic
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
@@ -1168,6 +1169,9 @@ class CellExecutor:
         earlier = scope.get(cell_id)
         if earlier is not None and (use_cache or not earlier.cache_hit):
             return earlier
+        refused = self._annotation_refusal(cell_id, source)
+        if refused is not None:
+            return refused
         # The worker registry lives in the server's store: one read per run, off the loop,
         # serves every worker lookup in it.
         notebook_state = self.session.notebook_state
@@ -1191,6 +1195,30 @@ class CellExecutor:
             await self._close_open_run(cell_id)
         if result.success:
             scope[cell_id] = result
+        return result
+
+    def _annotation_refusal(self, cell_id: str, source: str) -> CellExecutionResult | None:
+        """A failed result when an annotation cannot be read, before anything is staged.
+
+        Otherwise the dropped directive makes the run, and its cache entry, a
+        computation other than the one the source declares.
+        """
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            return None
+        if cell.source != source:
+            cell = cell.model_copy(update={"source": source})
+        diagnostic = blocking_diagnostic(cell, self.session.notebook_state, self.session.dag)
+        if diagnostic is None:
+            return None
+        line = f"line {diagnostic.line}: " if diagnostic.line else ""
+        result = CellExecutionResult(
+            cell_id=cell_id,
+            success=False,
+            error=f"{line}{diagnostic.message} [{diagnostic.code}]",
+            error_code=diagnostic.code,
+        )
+        self.session.apply_execution_result_metadata(cell_id, result)
         return result
 
     async def _dispatch_cell(
@@ -8503,6 +8531,9 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
         return False
 
     dag = executor.session.dag
+    # Run single-cell, where the gate refuses it and Run All blocks its dependents.
+    if blocking_diagnostic(cell, executor.session.notebook_state, dag) is not None:
+        return False
     if dag is not None:
         modes = executor.session.notebook_state.variant_modes
         if cell.variant_group and modes.get(cell.variant_group) == "sweep":

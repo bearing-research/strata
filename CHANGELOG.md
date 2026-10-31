@@ -8,6 +8,22 @@ exhaustive commit history.
 ## Unreleased
 
 ### Changed
+- **An annotation that cannot be read stops its cell.** A known directive
+  whose value does not parse (`# @timeout soon`, `# @mount data` with no URI,
+  an empty `# @worker` or `# @after`, `# @nocache maybe`, `# @per_variant a b`,
+  `# @temperature hot`, an unknown `# @loop` or `# @sql` parameter, ...) is an
+  error diagnostic, and a cell with any error diagnostic no longer runs: it
+  fails with the first one's code and message before anything is staged, on
+  every path (single run, cascade, Run All, `strata run`, the API and MCP),
+  and the cells that depend on it are skipped. Before, the directive was
+  dropped and the cell ran, and was cached, as a computation other than the
+  one its source declares. The `*_unreadable`, `timeout_not_numeric`,
+  `env_malformed`, `variant_malformed`, `cache_policy_unknown`,
+  `cache_ttl_invalid` and `prompt_output_schema_invalid` warnings are now
+  errors. `@mount` and `@table` refuse an unknown extra token instead of
+  skipping it. Run All also skips a failed cell's dependents that would have
+  run together in one batch, which before ran on the failed cell's last
+  artifacts. No cache keys change. (#1343)
 - **The ledger is vestigo 0.3.1**, which adds `vestigo.torch.HostedRun` and
   `vestigo.checkpoint_files`. No migration. (#1327)
 - **The ledger is vestigo 0.3.0.** It adds the `vestigo.torch` adapter

@@ -438,7 +438,7 @@ class TestAPerVariantCell:
         warehouse, result = await self._fanout(tmp_path, "overwrite")
 
         assert not result.success
-        assert "not supported on a @per_variant cell" in result.error
+        assert result.error_code == "per_variant_write_table_overwrite"
         assert not (warehouse / "catalog.db").exists()
 
     async def test_an_append_keeps_every_variants_rows(self, tmp_path):
