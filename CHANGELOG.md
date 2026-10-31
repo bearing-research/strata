@@ -8,6 +8,14 @@ exhaustive commit history.
 ## Unreleased
 
 ### Changed
+- **A `start_from` seed is the only input for a loop's carry.** A loop cell
+  with `# @loop start_from=<cell>@iter=<k>` whose body also reads the carry
+  was wired to the carry's latest ordinary producer as well as the seed, so
+  editing that unrelated cell reran the fork and its hash was in the fork's
+  key. The seed is now the carry's only edge, with no fallback when the seed
+  is invalid: a seed that is not an active cell defining the carry is
+  `loop_start_from_unknown`, which stops the cell. Such forks lose an input,
+  so their keys change once and they rerun once. (#1345)
 - **An `@after` that names no cell stops its cell.** `# @after <id>` where
   the id names no cell (`after_unknown_cell`) or a variant that is not
   active (`after_inactive_variant`) is an error, so the cell does not run;

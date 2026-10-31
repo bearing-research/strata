@@ -801,7 +801,11 @@ Key/value parameters:
   stored iteration `k`. Useful for forking a converged run to explore a
   variant. `<cell-id>` is the upstream loop cell's `id` in
   `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids). The fork
-  depends on that cell: when its result changes, the fork runs again.
+  depends on that cell: when its result changes, the fork runs again. It reads
+  the carry from there only, so another cell that defines the carry is not an
+  input of the fork. A `start_from` that names no cell, a variant that is not
+  active, or a cell that does not define the carry is an error
+  (`loop_start_from_unknown`), and the fork does not run.
   Iteration `k` must come from that cell's latest run: if the latest run
   stopped before `k` (a lower `max_iter`, an earlier `@loop_until` exit, a
   failure), the fork fails rather than seed from a step an older run left behind.

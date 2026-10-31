@@ -401,6 +401,7 @@ class TestLoopAnnotationDiagnostics:
         cell = _cell(source, cell_id="c1")
         cell.defines = ["state"]
         donor = _cell("# @loop max_iter=20 carry=state\nstate = tick(state)", cell_id="donor")
+        donor.defines = ["state"]
         nb = NotebookState(id="test-nb", name="test", cells=[donor, cell])
         codes = _codes(cell, nb)
         assert "loop_start_from_unknown" not in codes

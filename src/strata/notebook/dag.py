@@ -217,9 +217,13 @@ class NotebookDag:
         for cell in cells:
             if cell.id in inactive:
                 continue
+            # ``start_from`` supplies the carry, so the seed below is its only producer.
+            seeded_carry = cell.seed_from[1] if cell.seed_from is not None else None
             # Builtin-shadowing names ride along: ``input = load_data()`` upstream is a real
             # producer for a consumer's ``builtin_references``.
             for var in (*cell.references, *cell.builtin_references):
+                if var == seeded_carry:
+                    continue
                 producer = dag.variable_producer.get(var)
                 if producer is None or producer == cell.id:
                     # External variable or no prior producer: no edge. A mutating cell with no
@@ -243,13 +247,15 @@ class NotebookDag:
             if cell.seed_from is not None:
                 seed_id, carry = cell.seed_from
                 seed_cell = cell_by_id.get(seed_id)
+                # An invalid seed gets no edge and no fallback to the ordinary producer:
+                # validation refuses the cell (loop_start_from_unknown).
                 if (
                     seed_cell is not None
                     and seed_id != cell.id
                     and seed_id not in inactive
                     and carry in seed_cell.defines
-                    and carry not in dag.wired_variables(cell.id, seed_id)
                 ):
+                    dag.read_producers.setdefault(cell.id, {})[carry] = seed_id
                     _wire_variable_edge(dag, seed_id, cell.id, carry)
 
             dag.consumed_variables[cell.id].update(v for v in cell.kept if v in cell.defines)
