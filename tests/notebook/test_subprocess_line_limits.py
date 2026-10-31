@@ -92,6 +92,7 @@ async def test_batch_service_loop_survives_oversized_frame(tmp_path):
         {},
         tmp_path,
         executed_sources={},
+        provenance={},
         use_cache=True,
     )
     assert end_reason == "subprocess_died"

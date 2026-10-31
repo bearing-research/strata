@@ -25,7 +25,7 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Generator, Iterable
+from collections.abc import Awaitable, Callable, Generator, Iterable, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -1037,6 +1037,7 @@ class CellExecutor:
         cell_timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
         on_cell_start: Callable[[str], Awaitable[None]] | None = None,
+        provenance: Mapping[str, _CellProvenance] | None = None,
     ) -> BatchExecutionResult:
         """Execute a sequence of cells in one harness subprocess.
 
@@ -1045,6 +1046,8 @@ class CellExecutor:
         notebook. ``use_cache=False`` is rerun-all. ``on_cell_event`` is awaited
         as each ``BatchCellResult`` is recorded, so frames stream in real time;
         ``on_cell_start`` is awaited with a cell's id as the harness starts it.
+        ``provenance`` is each cell's, as the caller resolved it to pin the spec's
+        inputs; a cell without one is resolved at its cache check.
         """
         return await self._run_batch(
             cell_specs,
@@ -1053,6 +1056,7 @@ class CellExecutor:
             cell_timeout_seconds=cell_timeout_seconds,
             on_cell_event=on_cell_event,
             on_cell_start=on_cell_start,
+            provenance=provenance,
         )
 
     @contextmanager
@@ -7470,6 +7474,7 @@ class CellExecutor:
         cell_timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
         on_cell_start: Callable[[str], Awaitable[None]] | None = None,
+        provenance: Mapping[str, _CellProvenance] | None = None,
     ) -> BatchExecutionResult:
         """Run a sequence of cells in one harness subprocess (see ``execute_batch``).
 
@@ -7618,6 +7623,7 @@ class CellExecutor:
                                 str(spec.get("cell_id", "")): str(spec.get("source", ""))
                                 for spec in cell_specs
                             },
+                            provenance=dict(provenance or {}),
                             use_cache=use_cache,
                             on_cell_event=on_cell_event,
                             on_cell_start=on_cell_start,
@@ -7690,6 +7696,7 @@ class CellExecutor:
         batch_tmpdir: Path,
         *,
         executed_sources: dict[str, str],
+        provenance: dict[str, _CellProvenance],
         use_cache: bool,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
         on_cell_start: Callable[[str], Awaitable[None]] | None = None,
@@ -7800,6 +7807,7 @@ class CellExecutor:
                         payload.get("cell_id", ""),
                         batch_tmpdir,
                         executed_sources=executed_sources,
+                        provenance=provenance,
                         use_cache=use_cache,
                     )
                 )
@@ -7813,6 +7821,7 @@ class CellExecutor:
                         payload,
                         batch_tmpdir,
                         executed_sources=executed_sources,
+                        provenance=provenance,
                     )
                 )
                 cell_id_pl = payload["cell_id"]
@@ -8026,12 +8035,14 @@ class CellExecutor:
         batch_tmpdir: Path,
         *,
         executed_sources: dict[str, str],
+        provenance: dict[str, _CellProvenance],
         use_cache: bool,
     ) -> dict[str, Any]:
         """Service a ``cache_check`` request from the batch harness.
 
         On a hit, writes cached blobs to ``batch_tmpdir/<cell_id>/{var}{ext}`` and
-        sets ``cell.artifact_uris`` and ``display_outputs`` as single-cell does.
+        sets ``cell.artifact_uris`` and ``display_outputs`` as single-cell does. The
+        provenance checked replaces the cell's entry in *provenance*, for its persist.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
@@ -8040,11 +8051,18 @@ class CellExecutor:
         # The partition's source, not the session's: a mid-batch edit must not decide whether
         # this run is a hit.
         source = executed_sources.get(cell_id, cell.source)
+        base = provenance.get(cell_id)
         try:
-            prov = await self._compute_cell_provenance(cell_id, source)
+            # Over the inputs as they are now: the cells before it in the batch persisted.
+            prov = (
+                base.over_inputs(self._collect_input_hashes(cell_id))
+                if base is not None
+                else await self._compute_cell_provenance(cell_id, source)
+            )
         except Exception as exc:
             logger.warning("Batch cache_check provenance failed for %s: %s", cell_id, exc)
             return {"cache_hit": False, "provenance_hash": ""}
+        provenance[cell_id] = prov
 
         provenance_hash = prov.provenance_hash
         # ``# @nocache`` marks an effect the artifact doesn't capture (a write, a POST, a
@@ -8161,6 +8179,7 @@ class CellExecutor:
         batch_tmpdir: Path,
         *,
         executed_sources: dict[str, str],
+        provenance: dict[str, _CellProvenance],
     ) -> dict[str, Any]:
         """Service a ``persist`` request from the batch harness.
 
@@ -8179,15 +8198,16 @@ class CellExecutor:
         # Everything recorded describes the run, so read the source that ran: hashing an edit
         # made mid-batch would file outputs under the wrong key (green on reopen, wrong bytes).
         executed_source = executed_sources.get(cell_id, cell.source)
-        try:
-            prov = await self._compute_cell_provenance(cell_id, executed_source)
-        except Exception as exc:
-            return {"ok": False, "error": f"provenance compute failed: {exc}"}
+        # The key the cache check looked up: resolving again could see a table that moved
+        # since the run's snapshot was pinned.
+        prov = provenance.get(cell_id)
+        if prov is None:
+            return {"ok": False, "error": f"no cache check for {cell_id}"}
 
         provenance_hash = prov.provenance_hash
         source_hash = prov.source_hash
         env_hash = prov.env_hash
-        input_hashes = self._collect_input_hashes(cell_id)
+        input_hashes = prov.input_hashes
 
         # Module export writes synthetic .cell_module.json / .cell_instance.pickle for
         # top-level defs/classes; _store_outputs picks them up. An error string means a

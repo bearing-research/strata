@@ -186,6 +186,44 @@ class TestATableCell:
         assert _index(session) == recorded
 
     @pytest.mark.asyncio
+    async def test_a_run_all_batch_keys_on_the_snapshot_it_pinned(self, tmp_path, monkeypatch):
+        """A table that moves while the batch runs does not rekey what the pinned one made."""
+        from strata.notebook import ws
+
+        table, uri = _warehouse(tmp_path)
+        source = f"# @table events {uri}\nsnap = events_snapshot\n"
+        session = _session(tmp_path, {"c1": source, "c2": "n = snap\n"})
+        pinned = table.current_snapshot().snapshot_id
+        executor = CellExecutor(session)
+        check = executor._batch_service_cache_check
+
+        async def moved_first(cell_id, *args, **kwargs):
+            table.append(pa.table({"id": pa.array([3], type=pa.int64())}))
+            return await check(cell_id, *args, **kwargs)
+
+        monkeypatch.setattr(executor, "_batch_service_cache_check", moved_first)
+        notebook_id = session.notebook_state.id
+        batch = await ws._run_partition_batch(
+            session=session,
+            executor=executor,
+            cells_in_run=[session.notebook_state.get_cell("c1")],
+            notebook_id=notebook_id,
+            force=False,
+            execution_state=ws._ensure_execution_state(notebook_id),
+        )
+
+        assert [r.status for r in batch.cell_results] == ["ok"]
+        assert table.current_snapshot().snapshot_id != pinned
+        assert _index(session)["c1"][0]["snapshot_id"] == pinned
+        stored = session.get_artifact_manager().artifact_store.get_latest_version(
+            f"nb_{notebook_id}_cell_c1_var_snap"
+        )
+        assert stored is not None
+        assert str(pinned) in json.loads(stored.input_versions).values()
+        # Keyed on what it read, so the moved table leaves it out of date.
+        assert session.compute_staleness()["c1"].status.value != "ready"
+
+    @pytest.mark.asyncio
     async def test_a_loop_cache_hit_records_its_reads(self, tmp_path):
         _, uri = _warehouse(tmp_path)
         loop = f"# @loop max_iter=1 carry=state\n# @table events {uri}\nstate = state + 1\n"
