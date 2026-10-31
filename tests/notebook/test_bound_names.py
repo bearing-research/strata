@@ -88,3 +88,25 @@ def test_a_plain_reference_still_wires_its_edge(tmp_path):
 
     assert session.dag.cell_upstream["c2"] == ["c1"]
     assert session.notebook_state.get_cell("c2").references == ["x"]
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    ["# @mount input {uri} ro", "# @output_dir input"],
+)
+def test_a_bound_name_that_shadows_a_builtin_wires_no_edge(tmp_path, annotation):
+    reader = f"{annotation.format(uri=_data(tmp_path).as_uri())}\nprint(input)\n"
+    session = _session(tmp_path, {"c1": "input = 1\n", "c2": reader})
+
+    assert session.dag.cell_upstream["c2"] == []
+    assert session.notebook_state.get_cell("c2").builtin_references == ["print"]
+
+
+def test_a_loop_until_on_a_mount_name_wires_no_edge(tmp_path):
+    loop = (
+        f"# @loop max_iter=2 carry=state\n# @loop_until len(list(data.iterdir())) > state\n"
+        f"# @mount data {_data(tmp_path).as_uri()} ro\nstate = state + 1\n"
+    )
+    session = _session(tmp_path, {"seed": "state = 0\ndata = 1\n", "loop": loop})
+
+    assert session.dag.wired_variables("loop", "seed") == {"state"}
