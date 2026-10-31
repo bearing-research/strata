@@ -887,10 +887,18 @@ def weigh_mount_sync(
         unlisted = listing is None
     if fingerprint is None:
         return None, weight, None
+    component = mount_component(mount, fingerprint)
+    return component, weight, f"{_component_prefix(mount)}:unlisted" if unlisted else component
+
+
+def mount_component(mount: MountSpec, fingerprint: str) -> str:
+    """A mount's part of a cell's provenance, for the fingerprint of what it lists."""
+    return f"{_component_prefix(mount)}:{fingerprint}"
+
+
+def _component_prefix(mount: MountSpec) -> str:
     identity = credential_identity(mount.credential)
-    prefix = f"{mount.name}:{mount.uri}:{identity}" if identity else f"{mount.name}:{mount.uri}"
-    component = f"{prefix}:{fingerprint}"
-    return component, weight, f"{prefix}:unlisted" if unlisted else component
+    return f"{mount.name}:{mount.uri}:{identity}" if identity else f"{mount.name}:{mount.uri}"
 
 
 def _weigh_listing(

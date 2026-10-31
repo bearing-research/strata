@@ -64,6 +64,13 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A run is keyed on the mount listing it read.** A cell's key came from
+  one listing of each mount and its view from a second, taken later as the run
+  prepared it, so a prefix that changed in between filed the result under a
+  listing it never read; a loop listed again for every iteration. A run whose
+  mounts this server prepares, as a cell, a loop, an R cell, a Run All batch
+  or a cell's tests, is now keyed on the listing it read, and a loop prepares
+  once. A `file://` folder is still read live, as it always was. (#1337)
 - **A `# @per_variant` cell's tests run once per variant.** They ran once
   with the cell's own group bound as a `{variant: value}` dict, which no
   instance of the cell ever reads. Each variant now gets its own session with

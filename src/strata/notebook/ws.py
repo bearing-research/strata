@@ -87,6 +87,7 @@ from strata.notebook.ws_payloads import (
 
 if TYPE_CHECKING:
     from strata.notebook.cascade import CascadePlan
+    from strata.notebook.mounts import ResolvedMount
     from strata.notebook.session import NotebookSession
     from strata.notebook.ws_payloads import SessionClosedReason
 
@@ -2670,6 +2671,7 @@ async def _run_partition_batch(
         # Batched cells may have RO mounts (never RW); materialize them.
         mount_specs = executor._resolve_cell_mount_specs(cell.id, cell.source)
         mount_manifest: dict[str, dict[str, str]] = {}
+        resolved_mounts: dict[str, ResolvedMount] = {}
         executor.forget_moved(cell.id)
         if mount_specs:
             try:
@@ -2693,6 +2695,8 @@ async def _run_partition_batch(
         prov = await executor._compute_cell_provenance(
             cell.id, cell.source, annotations=annotations, mount_specs=mount_specs
         )
+        # On the mounts as prepared above, the listing the run reads.
+        prov = prov.over_mounts(resolved_mounts)
         provenance[cell.id] = prov
 
         # Pin declared lake tables to snapshots, as single-cell does.
