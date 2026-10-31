@@ -3161,7 +3161,9 @@ or <code>OMP_NUM_THREADS</code>.</p>
 <code>/mnt/&lt;name&gt;</code> directory convention - the variable directly references the
 resolved local path (a local copy for remote URIs, the URI's local
 filesystem path for <code>file://</code> URIs). Use standard <code>Path</code> operations: <code>/</code> for
-joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
+joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc. The mount wins over an earlier
+cell that defines the same name, so the cell does not depend on that cell. The
+same holds for the names <code>@table</code>, <code>@fetch</code> and <code>@dataset</code> bind.</p>
 <p><strong>A read-only remote mount is copied once per machine.</strong> Each remote file is
 kept once, by URI and version (etag, size and modification time), in the
 machine's mount cache, and the cell's path is a view of the prefix made of hard
