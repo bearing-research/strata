@@ -12,7 +12,10 @@ y = labels
 classifier.fit(x, y)
 ```
 
-Annotations are parsed from the **first contiguous block** of `#`-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`.
+Annotations are parsed from the **first contiguous block** of `#`-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`. A key that is not an
+annotation, such as a misspelled `# @wroker gpu`, does nothing; validation
+warns about it (`annotation_unknown`, in the cell header and `strata validate`)
+and suggests the annotation it is closest to.
 
 In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to `strata cell add/edit`, or splice a single directive without touching the body: `strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout` (see the [CLI](cli.md#authoring-cells-and-dependencies-cell-addeditrmmv-dep)).
 

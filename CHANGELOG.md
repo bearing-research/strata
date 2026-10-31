@@ -64,6 +64,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A misspelled annotation is flagged.** A `# @key` no parser reads, such
+  as `# @wroker gpu` or `# @timout 30`, was dropped without a word, so the
+  cell ran on the default worker with the default timeout and `strata
+  validate` passed it. Validation now warns `annotation_unknown` on the
+  line and names the annotation it is closest to. (#1340)
 - **A name an annotation binds is not an input.** A cell's `@mount`,
   `@table`, `@fetch` or `@dataset` name wired an edge to any earlier cell
   defining the same name. The run binds the annotation's value over it, so
