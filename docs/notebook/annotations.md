@@ -17,6 +17,14 @@ annotation, such as a misspelled `# @wroker gpu`, does nothing; validation
 warns about it (`annotation_unknown`, in the cell header and `strata validate`)
 and suggests the annotation it is closest to.
 
+A known annotation whose value cannot be read, such as `# @timeout soon`,
+`# @mount data` with no URI or `# @nocache maybe`, stops the cell: it does not
+run, on any path (the editor, Run All, `strata run`, the API), and fails with an
+error that names the line and why, such as `timeout_not_numeric` or
+`mount_unreadable`. The cells that depend on it are skipped too. Running it
+anyway would compute, and cache, something other than what the source declares.
+`strata validate` reports the same errors before you run.
+
 In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to `strata cell add/edit`, or splice a single directive without touching the body: `strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout` (see the [CLI](cli.md#authoring-cells-and-dependencies-cell-addeditrmmv-dep)).
 
 ---

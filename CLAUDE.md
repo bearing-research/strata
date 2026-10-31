@@ -401,8 +401,9 @@ Mounts inject `pathlib.Path` variables (schemes: `file|s3|gs|az`); options
 carry fsspec storage settings. See `mounts.py::MountResolver`.
 
 Validation (`annotation_validation.py`) runs on open / worker-catalog reload /
-WS source flush, **never on keystrokes**. Diagnostics surface as a header
-pill but never block execution.
+WS source flush, **never on keystrokes**, and again before every run.
+Diagnostics surface as a header pill; an ERROR one (an annotation that cannot
+be read) keeps the cell from running (`blocking_diagnostic`).
 
 ### Cascade execution
 

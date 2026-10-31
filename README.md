@@ -244,7 +244,9 @@ embeddings = model.encode(dataset / "abstracts.jsonl")
 Diagnostics fire on open, reload, and after an edit settles, for example
 `worker_unknown`, `mount_uri_unsupported`, `mount_shadows_notebook`,
 `timeout_not_numeric`, `env_malformed`. They surface as a pill in the
-cell header and log structured warnings for headless runs.
+cell header and log structured warnings for headless runs. An annotation
+that cannot be read, such as `# @timeout soon`, is an error: the cell does
+not run until it is fixed, and neither do the cells that depend on it.
 
 ## Mounts
 

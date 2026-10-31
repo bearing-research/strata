@@ -369,9 +369,9 @@ class CellAnnotations:
 def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
     """Return ``(lineno, directive, value)`` for each unparseable input or output directive.
 
-    ``@fetch``, ``@dataset``, ``@write_table`` and ``@output_dir`` are dropped when
-    malformed rather than guessed at, so the cell would fail on an unexplained
-    ``NameError``, or write no table. The validator turns these into diagnostics.
+    ``@mount``, ``@table``, ``@fetch``, ``@dataset``, ``@write_table`` and ``@output_dir``
+    are dropped when malformed rather than guessed at; the validator turns these into
+    errors that keep the cell from running.
     """
     unreadable: list[tuple[int, str, str]] = []
     for lineno, line in iter_annotation_block(source):
@@ -379,7 +379,11 @@ def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
         if parsed is None:
             continue
         key, value = parsed
-        if key == "fetch" and _parse_fetch_annotation(value) is None:
+        if key == "mount" and _parse_mount_annotation(value) is None:
+            unreadable.append((lineno, key, value))
+        elif key == "table" and _parse_table_annotation(value) is None:
+            unreadable.append((lineno, key, value))
+        elif key == "fetch" and _parse_fetch_annotation(value) is None:
             unreadable.append((lineno, key, value))
         elif key == "dataset" and _parse_dataset_annotation(value) is None:
             unreadable.append((lineno, key, value))
@@ -679,11 +683,12 @@ def _parse_table_annotation(value: str) -> TableSpec | None:
     snapshot_pin: int | None = None
 
     for extra in parts[2:]:
-        if extra.startswith("snapshot="):
-            try:
-                snapshot_pin = int(extra[len("snapshot=") :])
-            except ValueError:
-                return None
+        if not extra.startswith("snapshot="):
+            return None
+        try:
+            snapshot_pin = int(extra[len("snapshot=") :])
+        except ValueError:
+            return None
 
     if not name.isidentifier():
         return None
@@ -729,6 +734,8 @@ def _parse_mount_annotation(value: str) -> MountSpec | None:
             mode = MountMode(extra)
         elif extra.startswith("credential="):
             credential = extra[len("credential=") :] or None
+        else:
+            return None
 
     if not name.isidentifier():
         return None

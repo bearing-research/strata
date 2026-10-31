@@ -1,7 +1,7 @@
 """Cross-reference validation for cell source annotations.
 
-Runs on notebook open, reload and after a WS source flush, never while typing.
-Diagnostics are advisory and never block execution.
+Runs on notebook open, reload and after a WS source flush, never while typing, and
+again before each run: an ERROR keeps the cell from running (``blocking_diagnostic``).
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from strata.notebook.annotations import (
+    _LOOP_START_FROM_RE,
     ANNOTATION_KEYS,
     iter_annotation_block,
     parse_annotation_directive,
@@ -49,6 +50,22 @@ def _table_uri_malformed(uri: str) -> bool:
     return len(parts) < 2 or not all(parts)
 
 
+def blocking_diagnostic(
+    cell: CellState,
+    notebook_state: NotebookState,
+    dag: NotebookDag | None = None,
+) -> AnnotationDiagnostic | None:
+    """The first ERROR diagnostic, which keeps the cell from running, or ``None``."""
+    return next(
+        (
+            d
+            for d in validate_cell_annotations(cell, notebook_state, dag)
+            if d.severity == DiagnosticSeverity.ERROR
+        ),
+        None,
+    )
+
+
 def validate_cell_annotations(
     cell: CellState,
     notebook_state: NotebookState,
@@ -69,8 +86,8 @@ def validate_cell_annotations(
     if cell.language == CellLanguage.MARKDOWN:
         # Pure prose: ``# @worker`` would be a markdown heading, not an annotation.
         return variant_diagnostics
-    # A dropped ``@fetch`` or ``@dataset`` is a variable the cell will reach for and miss.
     variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
+    variant_diagnostics = variant_diagnostics + _validate_unreadable_values(cell)
     variant_diagnostics = variant_diagnostics + _validate_unknown_annotations(cell)
     if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
@@ -188,72 +205,16 @@ def validate_cell_annotations(
             )
         )
 
-    # --- timeout_not_numeric / env_malformed ---
-    # The parser silently swallows these, so re-scan raw lines.
-    for lineno, line_text in iter_annotation_block(cell.source):
-        parsed = parse_annotation_directive(line_text)
-        if parsed is None:
-            continue
-        key, value = parsed
-
-        if key == "timeout":
-            if not value:
-                diagnostics.append(
-                    AnnotationDiagnostic(
-                        severity=DiagnosticSeverity.WARN,
-                        code="timeout_not_numeric",
-                        message="`@timeout` requires a numeric value (seconds).",
-                        line=lineno,
-                    )
-                )
-            else:
-                try:
-                    t = float(value)
-                    if t <= 0:
-                        diagnostics.append(
-                            AnnotationDiagnostic(
-                                severity=DiagnosticSeverity.WARN,
-                                code="timeout_not_numeric",
-                                message=f"`@timeout {value}` must be a positive number.",
-                                line=lineno,
-                            )
-                        )
-                except ValueError:
-                    diagnostics.append(
-                        AnnotationDiagnostic(
-                            severity=DiagnosticSeverity.WARN,
-                            code="timeout_not_numeric",
-                            message=f"`@timeout {value}` is not a valid number.",
-                            line=lineno,
-                        )
-                    )
-
-        elif key == "env":
-            eq_idx = value.find("=")
-            if eq_idx <= 0:
-                diagnostics.append(
-                    AnnotationDiagnostic(
-                        severity=DiagnosticSeverity.WARN,
-                        code="env_malformed",
-                        message=(
-                            f"`@env {value}` is malformed. Expected format: `@env KEY=value`."
-                        ),
-                        line=lineno,
-                    )
-                )
-
     diagnostics.extend(_validate_loop_annotation(cell, annotations, notebook_state))
 
     return diagnostics
 
 
 def _validate_recorded_inputs(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Report a ``@fetch``, ``@dataset`` or ``@write_table`` line that did not parse.
-
-    Each is dropped when unparseable, so the cell would otherwise die on a
-    ``NameError``, or write no table, with nothing pointing at the ignored line.
-    """
+    """Report an input or output directive (``@mount``, ``@fetch``, ...) that did not parse."""
     hints = {
+        "mount": "expected `@mount <name> <uri> [ro|rw] [credential=<name>]`",
+        "table": "expected `@table <name> <uri> [snapshot=<id>]`",
         "fetch": "expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`",
         "dataset": "expected `@dataset <var> <name>[@<alias>|@v=<n>]`",
         "write_table": (
@@ -262,24 +223,112 @@ def _validate_recorded_inputs(cell: CellState) -> list[AnnotationDiagnostic]:
         ),
         "output_dir": "expected `@output_dir <name>`, a Python identifier",
     }
-    effects = {
-        "fetch": "the variable it declares will not exist when the cell runs",
-        "dataset": "the variable it declares will not exist when the cell runs",
-        "write_table": "no table is written",
-        "output_dir": "the variable it declares will not exist when the cell runs",
-    }
     return [
-        AnnotationDiagnostic(
-            severity=DiagnosticSeverity.WARN,
-            code=f"{directive}_unreadable",
-            message=(
-                f"`@{directive} {value}` could not be read and was ignored, so "
-                f"{effects[directive]}. {hints[directive]}."
-            ),
-            line=lineno,
-        )
+        _unreadable(f"{directive}_unreadable", directive, value, hints[directive], lineno)
         for lineno, directive, value in unreadable_input_directives(cell.source)
     ]
+
+
+def _unreadable(code: str, key: str, value: str, why: str, line: int) -> AnnotationDiagnostic:
+    shown = f"@{key} {value}" if value else f"@{key}"
+    return AnnotationDiagnostic(
+        severity=DiagnosticSeverity.ERROR,
+        code=code,
+        message=f"`{shown}` could not be read ({why}), so the cell does not run.",
+        line=line,
+    )
+
+
+_FLAG_VALUES = frozenset({"", "on", "off", "true", "false", "yes", "no", "1", "0"})
+# What ``@sql write=`` tells apart; ``on`` would read as off.
+_SQL_WRITE_VALUES = frozenset({"true", "false", "yes", "no", "1", "0"})
+_NEEDS_VALUE = frozenset(
+    {"worker", "after", "name", "model", "system", "loop_until", "output_schema"}
+)
+
+
+def _value_problem(key: str, value: str, language: CellLanguage) -> tuple[str, str] | None:
+    """``(code, why)`` when ``# @key value`` cannot be read as written, else ``None``.
+
+    The parsers drop or default such a value, so the cell would run as a computation
+    other than the one its source declares.
+    """
+    code = f"{key}_unreadable"
+    if key in _NEEDS_VALUE and not value:
+        return code, "it needs a value"
+    if key == "name" and language == CellLanguage.PROMPT and not value.isidentifier():
+        return code, "a prompt cell's name is its output variable, so a Python identifier"
+    if key in ("nocache", "stochastic", "live") and value.lower() not in _FLAG_VALUES:
+        return code, "expected nothing, or one of on, off, true, false, yes, no, 1, 0"
+    if key == "per_variant":
+        tokens = value.split()
+        if len(tokens) > 1 or (tokens and not tokens[0].isidentifier()):
+            return code, "expected at most one group name, a Python identifier"
+    if key == "timeout" and not _positive(value, float):
+        return "timeout_not_numeric", "expected a positive number of seconds"
+    if key == "env" and value.find("=") <= 0:
+        return "env_malformed", "expected `@env KEY=value`"
+    if key == "temperature" and not _positive(value, float, allow_zero=True):
+        return code, "expected a number, 0 or more"
+    if key in ("max_tokens", "validate_retries") and not _positive(value, int):
+        return code, "expected a positive integer"
+    if key == "output" and value not in ("json", "text"):
+        return code, "expected json or text"
+    if key == "app" and value != "hide":
+        return code, "expected `@app hide`"
+    if key == "sql":
+        for token in value.split():
+            k, _, v = token.partition("=")
+            if not (k == "connection" and v) and not (
+                k == "write" and v.lower() in _SQL_WRITE_VALUES
+            ):
+                return code, "expected `@sql connection=<name> [write=true|false]`"
+    if key == "loop":
+        for token in value.split():
+            k, _, v = token.partition("=")
+            readable = bool(v) and (
+                k in ("carry", "until")
+                or (k == "max_iter" and _positive(v, int))
+                or (k == "start_from" and _LOOP_START_FROM_RE.match(v) is not None)
+            )
+            if not readable:
+                return code, (
+                    "expected `@loop max_iter=<N> carry=<var> [until=<expr>] "
+                    "[start_from=<cell>@iter=<k>]`, without spaces in a value"
+                )
+    if key == "cache":
+        head, *rest = value.split() or [""]
+        if head.startswith("ttl="):
+            if rest or not _positive(head.removeprefix("ttl="), int):
+                return "cache_ttl_invalid", "`ttl=` takes a positive integer (seconds)"
+        elif rest or head not in ("fingerprint", "forever", "session", "snapshot"):
+            return "cache_policy_unknown", (
+                "expected fingerprint, forever, session, snapshot or ttl=<seconds>"
+            )
+    return None
+
+
+def _positive(value: str, kind: type, *, allow_zero: bool = False) -> bool:
+    try:
+        number = kind(value)
+    except ValueError:
+        return False
+    # ``not number > 0`` also refuses a NaN.
+    return number >= 0 if allow_zero else number > 0
+
+
+def _validate_unreadable_values(cell: CellState) -> list[AnnotationDiagnostic]:
+    """Report each directive whose value cannot be read (``_value_problem``)."""
+    diagnostics: list[AnnotationDiagnostic] = []
+    for lineno, line_text in iter_annotation_block(cell.source):
+        parsed = parse_annotation_directive(line_text)
+        if parsed is None:
+            continue
+        key, value = parsed
+        problem = _value_problem(key, value, cell.language)
+        if problem is not None:
+            diagnostics.append(_unreadable(problem[0], key, value, problem[1], lineno))
+    return diagnostics
 
 
 def _validate_module_export(
@@ -352,7 +401,7 @@ def _validate_prompt_cell_annotations(cell: CellState) -> list[AnnotationDiagnos
     if analysis.output_schema_error:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
+                severity=DiagnosticSeverity.ERROR,
                 code="prompt_output_schema_invalid",
                 message=analysis.output_schema_error,
                 line=_find_annotation_line(cell.source, "output_schema"),
@@ -637,56 +686,6 @@ def _validate_sql_cell_annotations(
                 )
             )
 
-    # Re-scan raw lines for malformed @cache values the permissive parser dropped.
-    for lineno, line_text in iter_annotation_block(cell.source):
-        parsed = parse_annotation_directive(line_text)
-        if parsed is None or parsed[0] != "cache":
-            continue
-        _, value = parsed
-        if not value:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="cache_policy_unknown",
-                    message=(
-                        "`@cache` requires a policy: fingerprint | forever | "
-                        "session | snapshot | ttl=<seconds>."
-                    ),
-                    line=lineno,
-                )
-            )
-            continue
-        head = value.split()[0]
-        if head in {"fingerprint", "forever", "session", "snapshot"}:
-            continue
-        if head.startswith("ttl="):
-            raw = head.removeprefix("ttl=")
-            try:
-                if int(raw) > 0:
-                    continue
-            except ValueError:
-                pass
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="cache_ttl_invalid",
-                    message=(f"`@cache ttl={raw}` requires a positive integer (seconds)."),
-                    line=lineno,
-                )
-            )
-            continue
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
-                code="cache_policy_unknown",
-                message=(
-                    f"`@cache {head}` is not a recognized policy. Use "
-                    "fingerprint | forever | session | snapshot | ttl=<seconds>."
-                ),
-                line=lineno,
-            )
-        )
-
     return diagnostics
 
 
@@ -808,7 +807,7 @@ def _validate_variant_annotation(
     if variant_line is not None and annotations.variant is None:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
+                severity=DiagnosticSeverity.ERROR,
                 code="variant_malformed",
                 message=(
                     "`@variant` requires `group` and `name`, both Python "
