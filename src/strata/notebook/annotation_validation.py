@@ -7,10 +7,12 @@ Diagnostics are advisory and never block execution.
 from __future__ import annotations
 
 import ast
+import difflib
 import logging
 from typing import TYPE_CHECKING
 
 from strata.notebook.annotations import (
+    ANNOTATION_KEYS,
     iter_annotation_block,
     parse_annotation_directive,
     parse_annotations,
@@ -69,6 +71,7 @@ def validate_cell_annotations(
         return variant_diagnostics
     # A dropped ``@fetch`` or ``@dataset`` is a variable the cell will reach for and miss.
     variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
+    variant_diagnostics = variant_diagnostics + _validate_unknown_annotations(cell)
     if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
     if cell.language == CellLanguage.SQL:
@@ -916,6 +919,27 @@ def _sweep_groups_read_by(cell_id: str, dag: NotebookDag) -> dict[str, int]:
     """Return ``{group: member_count}`` for the sweep groups the DAG wired this cell to."""
     sizes = {res.group: len(res.members) for res in dag.variant_groups if res.mode == "sweep"}
     return {group: sizes[group] for group in dag.sweep_groups_read(cell_id)}
+
+
+def _validate_unknown_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
+    """Warn on a ``# @key`` no parser reads: a typo like ``@wroker`` is otherwise ignored."""
+    diagnostics: list[AnnotationDiagnostic] = []
+    for lineno, line_text in iter_annotation_block(cell.source):
+        parsed = parse_annotation_directive(line_text)
+        if parsed is None or parsed[0] in ANNOTATION_KEYS:
+            continue
+        key = parsed[0]
+        close = difflib.get_close_matches(key, ANNOTATION_KEYS, n=1, cutoff=0.75)
+        hint = f" Did you mean `@{close[0]}`?" if close else ""
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="annotation_unknown",
+                message=f"`@{key}` is not an annotation, so it is ignored.{hint}",
+                line=lineno,
+            )
+        )
+    return diagnostics
 
 
 def _validate_per_variant_annotation(

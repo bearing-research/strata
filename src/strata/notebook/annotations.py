@@ -111,6 +111,41 @@ class LoopAnnotation:
 _ANNOTATION_RE = re.compile(r"^#\s*@(\w+)\s*(.*?)\s*$")
 
 
+# Every directive a cell's parsers read (``parse_annotations``, ``analyze_prompt_cell``):
+# validation warns on any other ``# @key``, which no parser would act on.
+ANNOTATION_KEYS = frozenset(
+    {
+        "after",
+        "cache",
+        "dataset",
+        "env",
+        "fetch",
+        "live",
+        "loop",
+        "loop_until",
+        "max_tokens",
+        "model",
+        "mount",
+        "name",
+        "nocache",
+        "output",
+        "output_dir",
+        "output_schema",
+        "per_variant",
+        "sql",
+        "stochastic",
+        "system",
+        "table",
+        "temperature",
+        "timeout",
+        "validate_retries",
+        "variant",
+        "worker",
+        "write_table",
+    }
+)
+
+
 def iter_annotation_block(source: str) -> Iterator[tuple[int, str]]:
     """Yield ``(1-based lineno, raw_line)`` for the leading comment block.
 

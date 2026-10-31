@@ -751,3 +751,40 @@ class TestSqlTablesTheCacheCannotTrack:
     def test_a_table_function_is_flagged(self):
         messages = self._messages("# @sql connection=db\nSELECT * FROM TABLE($tbl)")
         assert "TABLE($tbl)" in messages["sql_dynamic_table"]
+
+
+class TestUnknownAnnotation:
+    def test_a_misspelled_annotation_is_flagged_with_the_one_meant(self):
+        cell = _cell("# @wroker gpu\n# @timout 30\nx = 1\n")
+        diagnostics = [
+            d for d in validate_cell_annotations(cell, _nb()) if d.code == "annotation_unknown"
+        ]
+        assert [(d.line, d.severity.value) for d in diagnostics] == [(1, "warn"), (2, "warn")]
+        assert "Did you mean `@worker`?" in diagnostics[0].message
+        assert "Did you mean `@timeout`?" in diagnostics[1].message
+
+    def test_an_unrelated_key_is_flagged_without_a_guess(self):
+        (diagnostic,) = [
+            d
+            for d in validate_cell_annotations(_cell("#@title Load data\nx = 1\n"), _nb())
+            if d.code == "annotation_unknown"
+        ]
+        assert diagnostic.message == "`@title` is not an annotation, so it is ignored."
+
+    def test_a_markdown_heading_is_not_an_annotation(self):
+        cell = _cell("# @wroker notes\n", language="markdown")
+        assert "annotation_unknown" not in _codes(cell, _nb())
+
+    def test_the_vocabulary_is_every_key_the_parsers_read(self):
+        import inspect
+        import re
+
+        from strata.notebook.annotations import ANNOTATION_KEYS, parse_annotations
+        from strata.notebook.prompt_analyzer import analyze_prompt_cell
+
+        read = {
+            key
+            for parser in (parse_annotations, analyze_prompt_cell)
+            for key in re.findall(r'key == "(\w+)"', inspect.getsource(parser))
+        }
+        assert read == ANNOTATION_KEYS
