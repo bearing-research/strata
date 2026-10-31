@@ -66,6 +66,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A cell reads a sweep defined before it.** A cell that read a sweep-mode
+  variable before a later cell redefined it got the variable as plain, the
+  last variant's value under the one name, instead of its `{variant:
+  value}` dict, and run-all could batch it where the dict never forms.
+  (#1332)
 - **A staleness pass lists each cell's mounts once.** The "why stale"
   explanation recomputed every cell's key from its upstream outputs and
   mounts alone: it listed each mount a second time, and a ready cell reading
