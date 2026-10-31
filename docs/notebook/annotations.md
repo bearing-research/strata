@@ -191,7 +191,9 @@ scratch / "summary.txt"  # → Path("/tmp/work/summary.txt")
 `/mnt/<name>` directory convention - the variable directly references the
 resolved local path (a local copy for remote URIs, the URI's local
 filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
-joining, `.read_text()`, `.iterdir()`, etc.
+joining, `.read_text()`, `.iterdir()`, etc. The mount wins over an earlier
+cell that defines the same name, so the cell does not depend on that cell. The
+same holds for the names `@table`, `@fetch` and `@dataset` bind.
 
 **A read-only remote mount is copied once per machine.** Each remote file is
 kept once, by URI and version (etag, size and modification time), in the
