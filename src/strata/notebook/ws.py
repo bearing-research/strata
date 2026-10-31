@@ -32,6 +32,7 @@ from strata.notebook.executor import (
     BatchCellResult,
     CellExecutionResult,
     CellExecutor,
+    _CellProvenance,
     effective_worker_name,
     partition_batchable_runs,
 )
@@ -2657,6 +2658,7 @@ async def _run_partition_batch(
     cells through single-cell continuation.
     """
     cell_specs: list[dict[str, Any]] = []
+    provenance: dict[str, _CellProvenance] = {}
     # A failed mount becomes a per-cell error (as in single-cell), not an
     # abort of the whole batch.
     mount_failed_cells: list[tuple[str, Exception]] = []
@@ -2685,12 +2687,19 @@ async def _run_partition_batch(
                 for name, rm in resolved_mounts.items()
             }
 
+        # Resolved once, so the snapshots pinned for the run are the ones its outputs are
+        # keyed and recorded on. Its input hashes are taken at its cache check, once the
+        # cells before it have persisted.
+        prov = await executor._compute_cell_provenance(
+            cell.id, cell.source, annotations=annotations, mount_specs=mount_specs
+        )
+        provenance[cell.id] = prov
+
         # Pin declared lake tables to snapshots, as single-cell does.
         table_manifest: dict[str, dict[str, Any]] = {}
         if annotations.tables:
-            _, table_snapshots = await executor._fingerprint_tables(annotations.tables)
             try:
-                table_manifest = executor._manifest_tables(annotations.tables, table_snapshots)
+                table_manifest = executor._manifest_tables(annotations.tables, prov.table_snapshots)
             except RuntimeError as exc:
                 mount_failed_cells.append((cell.id, exc))
                 continue
@@ -2801,6 +2810,7 @@ async def _run_partition_batch(
                 use_cache=not force,
                 on_cell_event=_emit,
                 on_cell_start=_start,
+                provenance=provenance,
             )
         except asyncio.CancelledError:
             if in_flight is not None:

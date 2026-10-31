@@ -64,6 +64,12 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Run All keys a `@table` cell on the snapshot it read.** A batched cell
+  was pinned to one snapshot, then had its key and recorded reads resolved
+  again at its cache check and again at its persist. A table that moved during
+  the batch filed outputs computed from the old snapshot as the new one's, so
+  the cell read ready with stale rows. A batch now resolves each cell's inputs
+  once, and its persist files under the key its cache check looked up. (#1335)
 - **A `# @per_variant` cell fans out over the sweep it reads.** Whether a
   cell fans out, and over which group, counted every sweep variable in the
   notebook, so a cell below a plain redefinition (`preds = 0`) still ran once
