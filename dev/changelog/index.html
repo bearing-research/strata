@@ -3825,6 +3825,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>An <code>@after</code> that names no cell stops its cell.</strong> <code># @after &lt;id&gt;</code> where
+  the id names no cell (<code>after_unknown_cell</code>) or a variant that is not
+  active (<code>after_inactive_variant</code>) is an error, so the cell does not run;
+  before, the id was dropped and the cell ran without the ordering it asked
+  for. An inactive variant no longer gets the edge. An id that names the
+  cell itself is a warning (<code>after_self</code>) and still adds no edge. No cache
+  keys change. (#1344)</li>
 <li><strong>An annotation that cannot be read stops its cell.</strong> A known directive
   whose value does not parse (<code># @timeout soon</code>, <code># @mount data</code> with no URI,
   an empty <code># @worker</code> or <code># @after</code>, <code># @nocache maybe</code>, <code># @per_variant a b</code>,

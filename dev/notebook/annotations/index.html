@@ -3961,10 +3961,11 @@ between them.</p>
 <a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
 <p>Multiple <code>@after</code> lines stack; each cell ID adds one edge. Whitespace-
-separated IDs on a single line work too: <code># @after seed migrate</code>. Self-
-references and unknown cell IDs are silently dropped at the DAG layer, and
-no diagnostic reports them, so a misspelled ID leaves the cell without the
-edge.</p>
+separated IDs on a single line work too: <code># @after seed migrate</code>. An ID
+that names no cell (<code>after_unknown_cell</code>), or a variant that is not active
+and so never runs (<code>after_inactive_variant</code>), is an error: the ordering it
+asks for would be lost, so the cell does not run until it is fixed. An ID
+that names the cell itself adds no edge and is a warning (<code>after_self</code>).</p>
 <p><code>&lt;cell-id&gt;</code> is the <code>id</code> field in <code>notebook.toml</code>, <strong>not</strong> the cell's
 <code>@name</code>. See <a href="#cell-ids">Cell IDs</a> for how to set friendly IDs like
 <code>seed</code> or <code>migrate</code>.</p>
