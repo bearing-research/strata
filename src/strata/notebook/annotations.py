@@ -111,11 +111,13 @@ class LoopAnnotation:
 _ANNOTATION_RE = re.compile(r"^#\s*@(\w+)\s*(.*?)\s*$")
 
 
-# Every directive a cell's parsers read (``parse_annotations``, ``analyze_prompt_cell``):
-# validation warns on any other ``# @key``, which no parser would act on.
+# Every directive a cell's parsers read (``parse_annotations``, ``analyze_prompt_cell``, and
+# the readers with their own regex, such as ``@app hide`` in the app view and export):
+# validation warns on any other ``# @key``, which nothing would act on.
 ANNOTATION_KEYS = frozenset(
     {
         "after",
+        "app",
         "cache",
         "dataset",
         "env",

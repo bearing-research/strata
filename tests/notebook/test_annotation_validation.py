@@ -6,6 +6,8 @@ WS source flush (never while typing); parsing is in ``test_annotations.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from strata.notebook.annotation_validation import validate_cell_annotations
@@ -787,4 +789,19 @@ class TestUnknownAnnotation:
             for parser in (parse_annotations, analyze_prompt_cell)
             for key in re.findall(r'key == "(\w+)"', inspect.getsource(parser))
         }
-        assert read == ANNOTATION_KEYS
+        # Readers that match their own directive, like ``@app hide`` in export.py and
+        # AppView.vue, or ``@live`` in WidgetCell.vue.
+        root = Path(__file__).resolve().parents[2]
+        sources = [
+            *(root / "src/strata/notebook").rglob("*.py"),
+            *(root / "frontend/src").rglob("*.ts"),
+            *(root / "frontend/src").rglob("*.vue"),
+        ]
+        own_regex = {
+            key for source in sources for key in re.findall(r"#\\s\*@(\w+)", source.read_text())
+        }
+        assert {"app", "live"} <= own_regex
+        assert read | own_regex == ANNOTATION_KEYS
+
+    def test_app_hide_is_not_flagged(self):
+        assert "annotation_unknown" not in _codes(_cell("# @app hide\nx = 1\n"), _nb())
