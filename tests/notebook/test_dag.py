@@ -494,9 +494,9 @@ class TestAfterEdges:
         assert dag.consumed_variables["setup"] == set()
         assert all(e.variable == "" for e in dag.edges if e.from_cell_id == "setup")
 
-    def test_after_dangling_id_silently_dropped(self):
-        """A reference to a missing cell adds no edge and does not crash; ``annotation_validation``
-        flags it for the user.
+    def test_after_dangling_id_adds_no_edge(self):
+        """A reference to a missing cell adds no edge and does not crash; validation refuses
+        the cell (``after_unknown_cell``).
         """
         cells = [
             CellAnalysisWithId(id="query", defines=[], references=[], after=["does-not-exist"]),
@@ -505,7 +505,7 @@ class TestAfterEdges:
         assert dag.cell_upstream["query"] == []
         assert dag.edges == []
 
-    def test_after_self_reference_silently_dropped(self):
+    def test_after_self_reference_adds_no_edge(self):
         cells = [
             CellAnalysisWithId(id="c", defines=[], references=[], after=["c"]),
         ]
@@ -527,6 +527,20 @@ class TestAfterEdges:
         ]
         dag = NotebookDag.from_cells(cells)
         assert sorted(dag.cell_upstream["query"]) == ["config", "setup"]
+
+    def test_after_an_inactive_variant_adds_no_edge(self):
+        cells = [
+            CellAnalysisWithId(
+                id="a", defines=["m"], references=[], variant_group="g", variant_name="a"
+            ),
+            CellAnalysisWithId(
+                id="b", defines=["m"], references=[], variant_group="g", variant_name="b"
+            ),
+            CellAnalysisWithId(id="query", defines=[], references=[], after=["b"]),
+        ]
+        dag = NotebookDag.from_cells(cells, variant_active_selections={"g": "a"})
+        assert dag.cell_upstream["query"] == []
+        assert dag.cell_downstream["b"] == []
 
     def test_after_cycle_still_detected(self):
         """Ordering edges feed cycle detection same as variable edges."""

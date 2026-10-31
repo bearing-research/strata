@@ -1180,10 +1180,11 @@ SELECT category, COUNT(*) FROM products GROUP BY category
 ```
 
 Multiple `@after` lines stack; each cell ID adds one edge. Whitespace-
-separated IDs on a single line work too: `# @after seed migrate`. Self-
-references and unknown cell IDs are silently dropped at the DAG layer, and
-no diagnostic reports them, so a misspelled ID leaves the cell without the
-edge.
+separated IDs on a single line work too: `# @after seed migrate`. An ID
+that names no cell (`after_unknown_cell`), or a variant that is not active
+and so never runs (`after_inactive_variant`), is an error: the ordering it
+asks for would be lost, so the cell does not run until it is fixed. An ID
+that names the cell itself adds no edge and is a warning (`after_self`).
 
 `<cell-id>` is the `id` field in `notebook.toml`, **not** the cell's
 `@name`. See [Cell IDs](#cell-ids) for how to set friendly IDs like

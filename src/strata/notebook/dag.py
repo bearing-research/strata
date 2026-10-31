@@ -213,7 +213,7 @@ class NotebookDag:
         # reads the prior ``sales`` and produces the new one without a self-cycle.
         # Inactive variants neither resolve nor update the map; the frontend still
         # sees them via ``variant_groups``.
-        cell_id_set = set(cell_ids)
+        active_ids = set(cell_ids) - inactive
         for cell in cells:
             if cell.id in inactive:
                 continue
@@ -258,9 +258,9 @@ class NotebookDag:
             # file). It affects wiring and topological order but not consumed_variables, so
             # per-variable provenance is unaffected.
             for upstream_id in cell.after:
-                if upstream_id == cell.id or upstream_id not in cell_id_set:
-                    # Self-references and dangling ids are dropped so a typo can't crash the build.
-                    # No diagnostic reports them yet.
+                if upstream_id == cell.id or upstream_id not in active_ids:
+                    # No edge, so a typo can't fail the build: validation reports these
+                    # (after_self, after_unknown_cell, after_inactive_variant).
                     continue
                 dag.edges.append(DagEdge(from_cell_id=upstream_id, to_cell_id=cell.id, variable=""))
                 if upstream_id not in dag.cell_upstream[cell.id]:
