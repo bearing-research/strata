@@ -458,7 +458,7 @@ class NotebookSession:
             seen = (
                 previous.get(cell.id, []) if previous is not None else cell.annotation_diagnostics
             )
-            diagnostics = validate_cell_annotations(cell, self.notebook_state)
+            diagnostics = validate_cell_annotations(cell, self.notebook_state, self.dag)
             cell.annotation_diagnostics = diagnostics
             for d in diagnostics:
                 if d in seen:
