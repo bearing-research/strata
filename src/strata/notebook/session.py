@@ -938,6 +938,9 @@ class NotebookSession:
     ) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
         stale_cells: set[str] = set()  # for propagation
+        # Cells causality explains, with the provenance hash this walk computed (None
+        # when a stale upstream settled the cell first).
+        to_explain: dict[str, str | None] = {}
         test_inputs: dict[str, str] = {}
         if self.dag is None:
             for cell in self.notebook_state.cells:
@@ -973,6 +976,7 @@ class NotebookSession:
                 else:
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
+                to_explain[cell_id] = None
                 continue
 
             effective_worker = self._effective_worker_name(cell)
@@ -1080,6 +1084,8 @@ class NotebookSession:
                         # successful uncached run.
                         staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                         stale_cells.add(cell_id)
+                if cell_id in stale_cells:
+                    to_explain[cell_id] = provenance_hash
             else:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 for var_name, (artifact_id, version) in cached_outputs.items():
@@ -1092,7 +1098,7 @@ class NotebookSession:
         self._apply_staleness_map(staleness_map, executing)
         self._cell_test_inputs = test_inputs
 
-        self.causality_map = compute_causality_on_staleness(self)
+        self.causality_map = compute_causality_on_staleness(self, to_explain)
 
         return staleness_map
 

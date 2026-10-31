@@ -686,6 +686,17 @@ class TestInACell:
         assert moved.success, moved.error
         assert moved.cache_hit is False
 
+    async def test_a_ready_cell_has_nothing_to_explain(self, tmp_path, origin, monkeypatch):
+        """Causality agrees with staleness, which keys the fetched bytes too."""
+        from strata.notebook.executor import CellExecutor
+
+        source = f"# @fetch zones {origin.url()}\nrows = len(zones.read_text().splitlines())"
+        session = self._session(tmp_path, source, monkeypatch)
+        assert (await CellExecutor(session).execute_cell("c1", source)).success
+
+        assert session.compute_staleness()["c1"].status.value == "ready"
+        assert "c1" not in session.causality_map
+
     @pytest.mark.parametrize("dirname", ["My Notebooks", "café"])
     async def test_a_notebook_path_with_a_space_or_non_ascii_reads_the_bytes(
         self, tmp_path, origin, monkeypatch, dirname

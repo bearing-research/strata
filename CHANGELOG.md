@@ -64,6 +64,12 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A staleness pass lists each cell's mounts once.** The "why stale"
+  explanation recomputed every cell's key from its upstream outputs and
+  mounts alone: it listed each mount a second time, and a ready cell reading
+  a table, `@fetch` or `@dataset` never matched its cached result, so a
+  reason was sent for a cell that needed none. It now explains exactly the
+  cells staleness found out of date, with the key staleness computed. (#1333)
 - **A `# @per_variant` cell resolves its inputs once per run.** Its mounts,
   tables, fetches, datasets and env were resolved again for every variant
   (and once more after), so a table snapshot could move between variants.
