@@ -574,3 +574,32 @@ async def test_handle_cell_run_tests_rejects_non_python_cell():
     assert errors
     assert "Python" in errors[-1]["payload"]["error"]
     assert not fake.frames_of("cell_test_results")
+
+
+@pytest.mark.asyncio
+async def test_a_per_variant_cell_is_tested_once_per_variant():
+    """Each run binds one variant's value, as each instance of the cell does."""
+    from strata.notebook.writer import set_variant_mode
+
+    tmp = Path(tempfile.mkdtemp())
+    nb = create_notebook(tmp, "test_notebook")
+    cells = [
+        ("m_logreg", "# @variant model logreg\nk = 1\n", None),
+        ("m_rf", "# @variant model rf\nk = 2\n", "m_logreg"),
+        ("score", "# @per_variant\nscore = k * 10\n", "m_rf"),
+    ]
+    for cell_id, source, after in cells:
+        add_cell_to_notebook(nb, cell_id, after)
+        write_cell(nb, cell_id, source)
+    set_variant_mode(nb, "model", "sweep")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.venv_python = Path(sys.executable)
+
+    result = await CellExecutor(session).run_cell_tests(
+        "score", "def test_score(cell):\n    assert cell.score == 10\n"
+    )
+
+    assert (result.passed, result.failed, result.errored) == (1, 1, 0)
+    outcomes = {case.name: case.outcome for case in result.tests}
+    assert outcomes == {"test_score[logreg]": "passed", "test_score[rf]": "failed"}
+    assert all(case.nodeid.endswith(case.name[len("test_score") :]) for case in result.tests)

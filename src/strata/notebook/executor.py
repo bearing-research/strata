@@ -335,6 +335,32 @@ def _add_harness_params(
         params["tables"] = tables
 
 
+def _variant_test_run(raw: dict[str, Any], variant: str) -> dict[str, Any]:
+    """*raw* with each case named as pytest names a parametrized one: ``test_x[variant]``."""
+    return {
+        **raw,
+        "tests": [
+            {
+                **case,
+                "name": f"{case['name']}[{variant}]",
+                "nodeid": f"{case['nodeid']}[{variant}]" if case.get("nodeid") else "",
+            }
+            for case in raw["tests"]
+        ],
+    }
+
+
+def _merged_test_runs(raws: list[dict[str, Any]]) -> dict[str, Any]:
+    """One result over a cell's test runs: totals summed, cases in run order."""
+    if len(raws) == 1:
+        return raws[0]
+    totals = {
+        key: sum(raw.get(key, 0) for raw in raws)
+        for key in ("passed", "failed", "errored", "skipped")
+    }
+    return {**totals, "tests": [case for raw in raws for case in raw["tests"]]}
+
+
 def _add_fetch_inputs(
     input_specs: dict[str, dict[str, Any]], fetched: dict[str, Path], output_dir: Path
 ) -> None:
@@ -925,21 +951,27 @@ class CellExecutor:
         pytest_unavailable = False
         auto_installed: list[str] = []
         with tempfile.TemporaryDirectory(prefix="strata_celltest_") as tmp:
-            blob_dir = Path(tmp) / "inputs"
-            blob_dir.mkdir()
-            input_specs = self._load_input_blobs(cell_id, blob_dir)
-            self._add_dataset_inputs(input_specs, prov.datasets, blob_dir)
+            # A fan-out cell is tested once per variant, binding what that instance reads.
+            runs: list[tuple[str | None, Path, dict[str, dict[str, Any]]]] = []
+            for index, variant in enumerate(self._fanout_variants(cell_id) or (None,)):
+                blob_dir = Path(tmp) / f"inputs-{index}"
+                blob_dir.mkdir()
+                input_specs = self._load_input_blobs(cell_id, blob_dir, fanout_variant=variant)
+                self._add_dataset_inputs(input_specs, prov.datasets, blob_dir)
+                runs.append((variant, blob_dir, input_specs))
 
             # The harness user gets the inputs and, once staged, the run directory, never tmp
             # itself: a process an earlier cell left running could plant links in it.
             let_through(Path(tmp), harness_user)
-            hand_over(blob_dir, harness_user)
+            for _, blob_dir, _ in runs:
+                hand_over(blob_dir, harness_user)
 
-            def _run(rundir_name: str) -> dict[str, Any]:
-                rundir = Path(tmp) / rundir_name
+            def _run(index: int) -> dict[str, Any]:
+                variant, blob_dir, input_specs = runs[index]
+                rundir = Path(tmp) / f"run-{index}"
                 # Each ``# @output_dir`` is a fresh folder; nothing a test writes is stored.
                 folders = output_dirs.mount_entries(source, rundir)
-                return run_cell_tests_in_dir(
+                raw = run_cell_tests_in_dir(
                     rundir=rundir,
                     venv_python=venv_python,
                     cell_source=source,
@@ -956,6 +988,10 @@ class CellExecutor:
                     env=identity_env(self._harness_env(runtime_env), harness_user),
                     run_as=harness_user,
                 )
+                return raw if variant is None else _variant_test_run(raw, variant)
+
+            def _run_all() -> dict[str, Any]:
+                return _merged_test_runs([_run(index) for index in range(len(runs))])
 
             empty_raw: dict[str, Any] = {
                 "passed": 0,
@@ -966,7 +1002,7 @@ class CellExecutor:
             }
             raw: dict[str, Any]
             try:
-                raw = refused if refused is not None else await asyncio.to_thread(_run, "run")
+                raw = refused if refused is not None else await asyncio.to_thread(_run_all)
             except PytestUnavailableError:
                 # Auto-provision pytest into the dev group and retry once. Dev tools are excluded
                 # from the env hash, so cell caches survive. On failure, fall back to the actionable
@@ -977,7 +1013,7 @@ class CellExecutor:
                 if install.success:
                     auto_installed = ["pytest"]
                     try:
-                        raw = await asyncio.to_thread(_run, "run")
+                        raw = await asyncio.to_thread(_run_all)
                     except PytestUnavailableError:
                         pytest_unavailable = True
                         raw = empty_raw

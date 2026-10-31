@@ -47,6 +47,11 @@ your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests `cell` reports a clear *setup* error rather than an opaque
 collection failure.
 
+A [`# @per_variant`](annotations.md#fan-out-run-a-downstream-cell-once-per-variant)
+cell is tested once per variant, each session binding the value that variant's
+instance reads, and each case is named for its variant the way pytest names a
+parametrized one: `test_score[logreg]`, `test_score[rf]`.
+
 ## Writing and running tests
 
 Open the **Tests** panel on any Python cell (the flask toggle next to Inspect)

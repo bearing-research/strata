@@ -66,6 +66,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A `# @per_variant` cell's tests run once per variant.** They ran once
+  with the cell's own group bound as a `{variant: value}` dict, which no
+  instance of the cell ever reads. Each variant now gets its own session with
+  that variant's value, and its cases are named `test_x[<variant>]`. (#1336)
 - **Run All keys a `@table` cell on the snapshot it read.** A batched cell
   was pinned to one snapshot, then had its key and recorded reads resolved
   again at its cache check and again at its persist. A table that moved during
