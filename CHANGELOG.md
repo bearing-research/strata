@@ -8,6 +8,13 @@ exhaustive commit history.
 ## Unreleased
 
 ### Changed
+- **An `@after` that names no cell stops its cell.** `# @after <id>` where
+  the id names no cell (`after_unknown_cell`) or a variant that is not
+  active (`after_inactive_variant`) is an error, so the cell does not run;
+  before, the id was dropped and the cell ran without the ordering it asked
+  for. An inactive variant no longer gets the edge. An id that names the
+  cell itself is a warning (`after_self`) and still adds no edge. No cache
+  keys change. (#1344)
 - **An annotation that cannot be read stops its cell.** A known directive
   whose value does not parse (`# @timeout soon`, `# @mount data` with no URI,
   an empty `# @worker` or `# @after`, `# @nocache maybe`, `# @per_variant a b`,

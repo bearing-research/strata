@@ -89,6 +89,7 @@ def validate_cell_annotations(
     variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
     variant_diagnostics = variant_diagnostics + _validate_unreadable_values(cell)
     variant_diagnostics = variant_diagnostics + _validate_unknown_annotations(cell)
+    variant_diagnostics = variant_diagnostics + _validate_after(cell, notebook_state, dag)
     if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
     if cell.language == CellLanguage.SQL:
@@ -918,6 +919,57 @@ def _sweep_groups_read_by(cell_id: str, dag: NotebookDag) -> dict[str, int]:
     """Return ``{group: member_count}`` for the sweep groups the DAG wired this cell to."""
     sizes = {res.group: len(res.members) for res in dag.variant_groups if res.mode == "sweep"}
     return {group: sizes[group] for group in dag.sweep_groups_read(cell_id)}
+
+
+def _validate_after(
+    cell: CellState, notebook_state: NotebookState, dag: NotebookDag | None
+) -> list[AnnotationDiagnostic]:
+    """Report an ``@after`` id that adds no edge, so the ordering it asks for is lost.
+
+    - ``after_unknown_cell``: the id names no cell (``@after`` takes ids, not ``@name``).
+    - ``after_inactive_variant``: it names a variant that is not active, which never runs.
+    - ``after_self``: it names this cell (a warning: it would order nothing).
+    """
+    known = {c.id for c in notebook_state.cells}
+    inactive = dag.inactive_cells if dag is not None else set()
+    diagnostics: list[AnnotationDiagnostic] = []
+    for upstream_id in parse_annotations(cell.source).after:
+        line = _find_annotation_line(cell.source, "after", upstream_id)
+        if upstream_id == cell.id:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="after_self",
+                    message=f"`@after {upstream_id}` names this cell, so it orders nothing.",
+                    line=line,
+                )
+            )
+        elif upstream_id not in known:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.ERROR,
+                    code="after_unknown_cell",
+                    message=(
+                        f"`@after {upstream_id}` names no cell in this notebook (it takes a "
+                        "cell id, not an `@name`), so the cell does not run."
+                    ),
+                    line=line,
+                )
+            )
+        elif upstream_id in inactive:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.ERROR,
+                    code="after_inactive_variant",
+                    message=(
+                        f"`@after {upstream_id}` names a variant that is not active, which "
+                        "does not run, so the cell does not run. Order it after a cell that "
+                        "runs, or select that variant."
+                    ),
+                    line=line,
+                )
+            )
+    return diagnostics
 
 
 def _validate_unknown_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
