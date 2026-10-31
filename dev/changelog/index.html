@@ -3891,7 +3891,8 @@ exhaustive commit history.</p>
   defining the same name. The run binds the annotation's value over it, so
   nothing flowed over the edge, yet editing that unrelated cell reran this
   one. Those names are now left out of the cell's references, as
-  <code>@output_dir</code> names already were. (#1339)</li>
+  <code>@output_dir</code> names already were, including a name that shadows a
+  builtin such as <code>input</code>. (#1339, #1342)</li>
 <li><strong>A <code># @per_variant</code> cell that defines nothing fans out.</strong> Fan-out was
   detected through the variables the cell defines, so a cell that only
   printed, plotted or wrote ran once with its group bound as the
