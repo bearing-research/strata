@@ -3885,7 +3885,7 @@ exhaustive commit history.</p>
   as <code># @wroker gpu</code> or <code># @timout 30</code>, was dropped without a word, so the
   cell ran on the default worker with the default timeout and <code>strata
   validate</code> passed it. Validation now warns <code>annotation_unknown</code> on the
-  line and names the annotation it is closest to. (#1340)</li>
+  line and names the annotation it is closest to. (#1340, #1341)</li>
 <li><strong>A name an annotation binds is not an input.</strong> A cell's <code>@mount</code>,
   <code>@table</code>, <code>@fetch</code> or <code>@dataset</code> name wired an edge to any earlier cell
   defining the same name. The run binds the annotation's value over it, so
