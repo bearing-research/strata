@@ -3881,6 +3881,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code># @per_variant</code> cell's tests run once per variant.</strong> They ran once
+  with the cell's own group bound as a <code>{variant: value}</code> dict, which no
+  instance of the cell ever reads. Each variant now gets its own session with
+  that variant's value, and its cases are named <code>test_x[&lt;variant&gt;]</code>. (#1336)</li>
 <li><strong>Run All keys a <code>@table</code> cell on the snapshot it read.</strong> A batched cell
   was pinned to one snapshot, then had its key and recorded reads resolved
   again at its cache check and again at its persist. A table that moved during

@@ -2237,6 +2237,10 @@ artifacts deserialized in the test process and injected - so <code>cell.sales</c
 your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests <code>cell</code> reports a clear <em>setup</em> error rather than an opaque
 collection failure.</p>
+<p>A <a href="../annotations/#fan-out-run-a-downstream-cell-once-per-variant"><code># @per_variant</code></a>
+cell is tested once per variant, each session binding the value that variant's
+instance reads, and each case is named for its variant the way pytest names a
+parametrized one: <code>test_score[logreg]</code>, <code>test_score[rf]</code>.</p>
 <h2 id="writing-and-running-tests">Writing and running tests<a class="headerlink" href="#writing-and-running-tests" title="Permanent link">&para;</a></h2>
 <p>Open the <strong>Tests</strong> panel on any Python cell (the flask toggle next to Inspect)
 and write your tests. They're saved as a committed sibling file,
