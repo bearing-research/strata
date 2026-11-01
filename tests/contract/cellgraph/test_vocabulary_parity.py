@@ -75,7 +75,7 @@ CASES = {
 }
 
 
-def _write(notebook_dir, cells, notebook_mounts=None):
+def _write(notebook_dir, cells, notebook_mounts=None, extra_toml=""):
     (notebook_dir / "cells").mkdir(parents=True)
     rows = []
     for order, (cell_id, language, source, cell_toml) in enumerate(cells):
@@ -92,6 +92,7 @@ def _write(notebook_dir, cells, notebook_mounts=None):
         + "cells = [\n"
         + "\n".join(rows)
         + "\n]\n"
+        + extra_toml
     )
     (notebook_dir / "pyproject.toml").write_text(
         '[project]\nname = "parity"\nversion = "0.1.0"\nrequires-python = ">=3.12"\n'
@@ -99,13 +100,41 @@ def _write(notebook_dir, cells, notebook_mounts=None):
     )
 
 
-@pytest.mark.parametrize("name", sorted(CASES))
-def test_cellgraph_reports_what_strata_reports(name, tmp_path):
-    notebook_dir = tmp_path / name
-    _write(notebook_dir, CASES[name])
+_CONNECTIONS = """
+[connections.good]
+driver = "sqlite"
+path = "db.sqlite"
+
+[connections.broken]
+path = "db.sqlite"
+
+[connections.odd]
+driver = "nosuch"
+"""
+
+# A SQL cell named ``t``, read by a Python cell, and what Strata reports on it.
+SQL_CASES = {
+    "no_sql_line": ("select 1 as v", [("sql_connection_missing", "error", None)]),
+    "unknown_connection": (
+        "# @sql connection=elsewhere\nselect 1 as v",
+        [("sql_connection_unknown", "warn", 2)],
+    ),
+    "malformed_connection": (
+        "# @sql connection=broken\nselect 1 as v",
+        [("connection_malformed", "error", 2)],
+    ),
+    "unknown_driver": (
+        "# @sql connection=odd\nselect 1 as v",
+        [("connection_driver_unknown", "error", 2)],
+    ),
+    "valid_connection": ("# @sql connection=good\nselect 1 as v", []),
+}
+
+
+def _assert_parity(notebook_dir):
+    """Every cell's diagnostics (code, severity, line) and whether it runs agree."""
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
     analysis = replay.analyze(parse_notebook(notebook_dir))
-
     cells = {cell.id: cell for cell in session.notebook_state.cells}
 
     def runs(cell_id):
@@ -122,6 +151,29 @@ def test_cellgraph_reports_what_strata_reports(name, tmp_path):
         )
         assert ours == strata, cell.id
         assert analysis.cells[cell.id].plannable == runs(cell.id), cell.id
+    return session
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_cellgraph_reports_what_strata_reports(name, tmp_path):
+    notebook_dir = tmp_path / name
+    _write(notebook_dir, CASES[name])
+    _assert_parity(notebook_dir)
+
+
+@pytest.mark.parametrize("name", sorted(SQL_CASES))
+def test_cellgraph_reports_the_sql_connection_as_strata_does(name, tmp_path):
+    source, expected = SQL_CASES[name]
+    notebook_dir = tmp_path / name
+    cells = [("q", "sql", "# @name t\n" + source, None), ("d", "python", "print(t)", None)]
+    _write(notebook_dir, cells, extra_toml=_CONNECTIONS)
+    session = _assert_parity(notebook_dir)
+
+    sql, reader = session.notebook_state.cells
+    assert [(d.code, d.severity.value, d.line) for d in sql.annotation_diagnostics] == expected
+    assert reader.upstream_ids == ["q"]
+    ours = replay.analyze(parse_notebook(notebook_dir)).cells["q"].diagnostics
+    assert sorted(d.message for d in ours) == sorted(d.message for d in sql.annotation_diagnostics)
 
 
 def test_a_notebook_mount_shadowed_by_an_annotation(tmp_path):

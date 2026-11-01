@@ -82,6 +82,7 @@ def analyze(state: Any) -> cg.Analysis:
                 "mounts": list(cell.mounts),
                 "notebook_mounts": list(state.mounts),
                 "connections": list(state.connections),
+                "malformed_connections": list(state.malformed_connections),
             },
         )
         for cell in state.cells
