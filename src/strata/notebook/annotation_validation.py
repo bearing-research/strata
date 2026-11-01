@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import difflib
+import functools
 import logging
 from typing import TYPE_CHECKING
 
@@ -365,6 +366,27 @@ def _validate_stochastic_nocache(cell: CellState) -> list[AnnotationDiagnostic]:
     ]
 
 
+@functools.lru_cache(maxsize=4096)
+def _export_blockers(source: str, cross_cell: frozenset[str]) -> tuple[tuple[str, ...], str]:
+    """The defs, classes and names that keep *source* from exporting, and why.
+
+    Memoized: validation runs on every source flush, mostly over unchanged cells.
+    """
+    from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
+
+    injectable = cross_cell | runtime_binding_names(source)
+    plan = build_module_export_plan(source, injectable=injectable)
+    if plan.is_exportable:
+        return (), ""
+    exported_code = [
+        name
+        for name, symbol in plan.exported_symbols.items()
+        if symbol.kind in ("function", "async function", "class")
+    ]
+    blocked = tuple(sorted(set(exported_code) | plan.blocking_symbols))
+    return blocked, plan.format_error() if blocked else ""
+
+
 def _validate_module_export(
     cell: CellState,
     notebook_state: NotebookState,
@@ -377,37 +399,21 @@ def _validate_module_export(
     downstream-consumed name. Silent unless another cell references the affected
     names: private single-cell helpers are a common, safe pattern.
     """
-    from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
-
     # Upstream defines and this cell's runtime values can be hydrated into the synthetic
     # module, so a def closing over them isn't blocked. Mirrors
     # _write_module_export_outputs.
+    others = [other for other in notebook_state.cells if other.id != cell.id]
+    defined_elsewhere = {name for other in others for name in other.defines}
     cross_cell = frozenset(
-        v
-        for v in (*cell.references, *cell.builtin_references)
-        for other in notebook_state.cells
-        if other.id != cell.id and v in other.defines
+        v for v in (*cell.references, *cell.builtin_references) if v in defined_elsewhere
     )
-    injectable = cross_cell | runtime_binding_names(cell.source)
-    plan = build_module_export_plan(cell.source, injectable=injectable)
-    if plan.is_exportable:
-        return []
-
-    exported_code = [
-        name
-        for name, symbol in plan.exported_symbols.items()
-        if symbol.kind in ("function", "async function", "class")
-    ]
-    blocked = sorted(set(exported_code) | plan.blocking_symbols)
+    blocked, error = _export_blockers(cell.source, cross_cell)
     if not blocked:
         return []
 
-    referenced_elsewhere: set[str] = set()
-    for other in notebook_state.cells:
-        if other.id == cell.id:
-            continue
-        referenced_elsewhere.update(other.references)
-        referenced_elsewhere.update(other.builtin_references)
+    referenced_elsewhere = {
+        name for other in others for name in (*other.references, *other.builtin_references)
+    }
     if not referenced_elsewhere.intersection(blocked):
         return []
 
@@ -419,7 +425,7 @@ def _validate_module_export(
             message=(
                 f"This cell defines reusable code ({names}) that downstream cells "
                 f"reference, but it can't be shared across cells: "
-                f"{plan.format_error()}."
+                f"{error}."
             ),
             line=None,
         )

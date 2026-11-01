@@ -14,6 +14,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   server read the config from disk, and a staleness pass read it twice for
   every cell. It is now read only for a cell with a mount, a table or SQL, so
   a pass over a 300-cell notebook takes milliseconds instead of seconds. (#1356)
+- **Annotation validation is faster on large notebooks.** The module-export
+  check scanned every other cell for each name a cell reads and rebuilt every
+  cell's export plan on each pass. It now reads each unchanged cell once, so a
+  pass over a 300-cell notebook takes about a quarter of the time. The
+  diagnostics do not change. (#1355)
 - **`@stochastic` with `@nocache off` stops its cell.** `# @stochastic`
   implies `# @nocache`, and an explicit `# @nocache off` in the same cell, in
   either order, is now the error `stochastic_nocache_conflict` on the
