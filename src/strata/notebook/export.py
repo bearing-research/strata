@@ -235,7 +235,7 @@ def _render_cell(
 
     from strata.notebook.annotations import parse_annotations
 
-    annotations = parse_annotations(cell.source)
+    annotations = parse_annotations(cell.source, cell.language)
 
     if cell.language == CellLanguage.MARKDOWN:
         # Markdown cells usually open with their own heading, so no banner or chips:
@@ -710,7 +710,7 @@ def _resolve_variant_flags(state: NotebookState) -> None:
     group_order: list[str] = []
 
     for cell in state.cells:
-        annotations = parse_annotations(cell.source)
+        annotations = parse_annotations(cell.source, cell.language)
         if annotations.variant is None:
             cell.variant_group = None
             cell.variant_name = None

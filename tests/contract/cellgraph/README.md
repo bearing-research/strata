@@ -126,6 +126,7 @@ snapshot holds:
 | `structural` | A cycle and a variant collision: `dag = None` with `dag_error` |
 | `sql` | A SQLite cell reading an upstream variable through `:n`; edit the query; edit the upstream |
 | `prompt` | A prompt cell with a stubbed model; change the notebook-level `[ai]` model |
+| `markdown` | Markdown cells with `# @after`, `# @variant` and `# @app hide` before a Python cell; only `@app` is read there, so the first two add no edge and no group; move the `@after` |
 | `r_directives` | An R cell whose source does not parse as Python; edit `@timeout`, add `@name`, add a plain comment (each rekeys it today) |
 
 ## Left out or reduced

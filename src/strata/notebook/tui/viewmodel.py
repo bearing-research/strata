@@ -99,7 +99,8 @@ class NotebookViewModel:
             cell = new_cells[cid] = CellView(
                 id=cid,
                 # ``# @name`` wins over the persisted notebook.toml name, as in the web UI.
-                name=parse_annotations(source).name or str(raw.get("name") or ""),
+                name=parse_annotations(source, raw.get("language")).name
+                or str(raw.get("name") or ""),
                 language=str(raw.get("language") or "python"),
                 source=source,
                 test_source=str(raw.get("test_source") or ""),

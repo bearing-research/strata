@@ -877,7 +877,7 @@ class CellState(BaseModel):
             if self.staleness and self.staleness.reasons
             else []
         )
-        data["annotations"] = parse_annotations(self.source).to_wire_payload()
+        data["annotations"] = parse_annotations(self.source, self.language).to_wire_payload()
 
         # A widget's value is runtime state that every reader of the cell needs, and
         # needs nothing from the session, so it lives here rather than on the overlay.

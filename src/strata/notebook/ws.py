@@ -1755,9 +1755,9 @@ async def cancel_cell_run(session: NotebookSession, cell_id: str, notebook_id: s
     return False
 
 
-def _weighed_inputs(source: str) -> tuple[Any, ...]:
+def _weighed_inputs(source: str, language: CellLanguage) -> tuple[Any, ...]:
     """The annotations a cell's input weights come from."""
-    annotations = parse_annotations(source)
+    annotations = parse_annotations(source, language)
     return annotations.worker, annotations.mounts, annotations.tables, annotations.fetches
 
 
@@ -1868,7 +1868,9 @@ async def _handle_cell_source_update(
         cell_in_session = session.notebook_state.get_cell(cell_id)
         reads_changed = False
         if cell_in_session:
-            reads_changed = _weighed_inputs(cell_in_session.source) != _weighed_inputs(source)
+            reads_changed = _weighed_inputs(
+                cell_in_session.source, cell_in_session.language
+            ) != _weighed_inputs(source, cell_in_session.language)
             cell_in_session.source = source
             # Else broadcasts name the previous author until the next reload.
             cell_in_session.updated_by = author

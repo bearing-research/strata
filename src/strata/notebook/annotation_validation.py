@@ -76,16 +76,16 @@ def validate_cell_annotations(
     *dag* is the notebook's; without one (its build failed, which is reported on its
     own) the ``@per_variant`` group checks are skipped.
     """
-    # Language-agnostic: any language can be a variant member, so these run before
-    # language dispatch.
+    if cell.language == CellLanguage.MARKDOWN:
+        # Pure prose: ``# @worker`` is a heading, and only ``@app`` is read (unchecked).
+        return []
+    # Language-agnostic: any other language can be a variant member, so these run
+    # before language dispatch.
     _cell_annotations = parse_annotations(cell.source)
     variant_diagnostics = _validate_variant_annotation(cell, _cell_annotations, notebook_state)
     variant_diagnostics = variant_diagnostics + _validate_per_variant_annotation(
         cell, _cell_annotations, dag
     )
-    if cell.language == CellLanguage.MARKDOWN:
-        # Pure prose: ``# @worker`` would be a markdown heading, not an annotation.
-        return variant_diagnostics
     variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
     variant_diagnostics = variant_diagnostics + _validate_unreadable_values(cell)
     variant_diagnostics = variant_diagnostics + _validate_unknown_annotations(cell)

@@ -670,7 +670,7 @@ class NotebookSession:
 
             # Loop cells read the carry from upstream on iter 0 even though Python scoping
             # sees it as local, so record it as a reference to wire the seeding upstream.
-            annotations = parse_annotations(cell.source)
+            annotations = parse_annotations(cell.source, cell.language)
             if (
                 annotations.loop is not None
                 and annotations.loop.carry

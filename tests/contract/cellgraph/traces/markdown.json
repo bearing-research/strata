@@ -1,0 +1,745 @@
+{
+ "scenario": "markdown",
+ "steps": [
+  {
+   "causality": {},
+   "cells": {
+    "d1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d3": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "p0": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "x"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "634c7308d39859509ecfbb58b1c95180107c6ef7f65ebe5da755db55f9c8b1ab",
+      "input_hashes": [],
+      "source_hash": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "p4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "y"
+      ],
+      "diagnostics": [],
+      "references": [
+       "x"
+      ],
+      "upstream_ids": [
+       "p0"
+      ]
+     },
+     "keys": {
+      "definition_key": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "bb1e1eec94c2504062e011e2597b482f1be188cef8b6306be5611955ef33e928",
+      "input_hashes": [],
+      "source_hash": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d1": [],
+     "d2": [],
+     "d3": [],
+     "p0": [
+      "x"
+     ],
+     "p4": []
+    },
+    "edges": [
+     [
+      "p0",
+      "p4",
+      "x"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "p0",
+     "d1",
+     "d2",
+     "d3",
+     "p4"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "validate"
+   }
+  },
+  {
+   "causality": {},
+   "cells": {
+    "d1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "run": {
+      "cache_hit": true,
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "run": {
+      "cache_hit": true,
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d3": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "run": {
+      "cache_hit": true,
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "p0": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "x"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "634c7308d39859509ecfbb58b1c95180107c6ef7f65ebe5da755db55f9c8b1ab",
+      "input_hashes": [],
+      "source_hash": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-markdown_cell_p0_var_x@v=1",
+      "artifact_uris": {
+       "x": {
+        "artifact": "nb_cellgraph-markdown_cell_p0_var_x@v=1",
+        "content_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        "provenance_hash": "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "634c7308d39859509ecfbb58b1c95180107c6ef7f65ebe5da755db55f9c8b1ab",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "p4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "y"
+      ],
+      "diagnostics": [],
+      "references": [
+       "x"
+      ],
+      "upstream_ids": [
+       "p0"
+      ]
+     },
+     "keys": {
+      "definition_key": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "924b36de9dfd75b3c5de623984c6425a9adfa6883315650d98fb22fe2d0bb5b2",
+      "input_hashes": [
+       "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+      ],
+      "source_hash": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "upstream_hashes": [
+       "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "924b36de9dfd75b3c5de623984c6425a9adfa6883315650d98fb22fe2d0bb5b2",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d1": [],
+     "d2": [],
+     "d3": [],
+     "p0": [
+      "x"
+     ],
+     "p4": []
+    },
+    "edges": [
+     [
+      "p0",
+      "p4",
+      "x"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "p0",
+     "d1",
+     "d2",
+     "d3",
+     "p4"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "run_all"
+   }
+  },
+  {
+   "causality": {},
+   "cells": {
+    "d1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d3": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "p0": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "x"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "634c7308d39859509ecfbb58b1c95180107c6ef7f65ebe5da755db55f9c8b1ab",
+      "input_hashes": [],
+      "source_hash": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-markdown_cell_p0_var_x@v=1",
+      "artifact_uris": {
+       "x": {
+        "artifact": "nb_cellgraph-markdown_cell_p0_var_x@v=1",
+        "content_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        "provenance_hash": "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "p4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "y"
+      ],
+      "diagnostics": [],
+      "references": [
+       "x"
+      ],
+      "upstream_ids": [
+       "p0"
+      ]
+     },
+     "keys": {
+      "definition_key": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "924b36de9dfd75b3c5de623984c6425a9adfa6883315650d98fb22fe2d0bb5b2",
+      "input_hashes": [
+       "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+      ],
+      "source_hash": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "upstream_hashes": [
+       "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d1": [],
+     "d2": [],
+     "d3": [],
+     "p0": [
+      "x"
+     ],
+     "p4": []
+    },
+    "edges": [
+     [
+      "p0",
+      "p4",
+      "x"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "p0",
+     "d1",
+     "d2",
+     "d3",
+     "p4"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "cell": "d1",
+    "op": "edit_cell",
+    "source": "# @after p4\n\nNotes on what p4 computes.\n"
+   }
+  },
+  {
+   "causality": {},
+   "cells": {
+    "d1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "d3": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "language": "markdown",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "p0": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "x"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "634c7308d39859509ecfbb58b1c95180107c6ef7f65ebe5da755db55f9c8b1ab",
+      "input_hashes": [],
+      "source_hash": "8ff436def1451285599a1b1ad70800493b8dcafde2912e1a38345633054e4c26",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-markdown_cell_p0_var_x@v=1",
+      "artifact_uris": {
+       "x": {
+        "artifact": "nb_cellgraph-markdown_cell_p0_var_x@v=1",
+        "content_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+        "provenance_hash": "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "p4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "y"
+      ],
+      "diagnostics": [],
+      "references": [
+       "x"
+      ],
+      "upstream_ids": [
+       "p0"
+      ]
+     },
+     "keys": {
+      "definition_key": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "924b36de9dfd75b3c5de623984c6425a9adfa6883315650d98fb22fe2d0bb5b2",
+      "input_hashes": [
+       "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+      ],
+      "source_hash": "77e6d1fe89716d8c2a6d740b512092589bbc791ce32b02be23bc6c02654cea60",
+      "upstream_hashes": [
+       "bae2eae840da28305d0f37cd7690eb23d673e2fdab7bc69190fdb3d50901a84a"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d1": [],
+     "d2": [],
+     "d3": [],
+     "p0": [
+      "x"
+     ],
+     "p4": []
+    },
+    "edges": [
+     [
+      "p0",
+      "p4",
+      "x"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "p0",
+     "d1",
+     "d2",
+     "d3",
+     "p4"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "cell": "p4",
+    "op": "run_cell"
+   }
+  }
+ ],
+ "trace_format": 1
+}
