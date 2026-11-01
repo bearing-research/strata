@@ -3825,6 +3825,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A markdown cell reads only <code>@app</code>.</strong> A markdown heading is a <code>#</code> line,
+  so <code># @after &lt;id&gt;</code>, <code># @variant &lt;group&gt; &lt;name&gt;</code> or <code># @per_variant</code> at the
+  top of a markdown cell was applied: it added an ordering edge or put the
+  cell in a variant group. Every <code># @</code> line there other than <code># @app</code> is now
+  prose, with no effect and no diagnostic. <code># @app hide</code> still keeps the cell
+  out of the app view. No annotation keys change. (#1349)</li>
 <li><strong>A <code>start_from</code> seed is the only input for a loop's carry.</strong> A loop cell
   with <code># @loop start_from=&lt;cell&gt;@iter=&lt;k&gt;</code> whose body also reads the carry
   was wired to the carry's latest ordinary producer as well as the seed, so

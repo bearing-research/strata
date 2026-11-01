@@ -3952,7 +3952,9 @@ auto-run the cheap downstream cells instead of only marking them stale.
 <code># @live off</code> turns it back off. See <a href="../cells/#live-mode">Live mode</a>.</p>
 <h3 id="app-hide"><code>@app hide</code><a class="headerlink" href="#app-hide" title="Permanent link">&para;</a></h3>
 <p><code># @app hide</code> keeps a cell out of the read-only <a href="../cells/#app-view">app view</a>,
-for a setup cell whose output is noise. It applies to any cell.</p>
+for a setup cell whose output is noise. It applies to any cell.
+In a markdown cell it is the only annotation read: a heading such as
+<code># @after</code> there is prose.</p>
 <hr />
 <h2 id="cross-cell-ordering">Cross-Cell Ordering<a class="headerlink" href="#cross-cell-ordering" title="Permanent link">&para;</a></h2>
 <h3 id="after"><code>@after</code><a class="headerlink" href="#after" title="Permanent link">&para;</a></h3>
