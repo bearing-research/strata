@@ -110,6 +110,13 @@ path = "db.sqlite"
 
 [connections.odd]
 driver = "nosuch"
+
+[connections.secret]
+driver = "sqlite"
+path = "db.sqlite"
+
+[connections.secret.auth]
+password = "hunter2"
 """
 
 # A SQL cell named ``t``, read by a Python cell, and what Strata reports on it.
@@ -128,6 +135,15 @@ SQL_CASES = {
         [("connection_driver_unknown", "error", 2)],
     ),
     "valid_connection": ("# @sql connection=good\nselect 1 as v", []),
+    "auth_literal": (
+        "# @sql connection=secret\nselect 1 as v",
+        [("connection_auth_literal_secret", "warn", 2)],
+    ),
+    # The later line wins, so its line is the one reported.
+    "later_sql_line_wins": (
+        "# @sql connection=good\n# @sql connection=elsewhere\nselect 1 as v",
+        [("sql_connection_unknown", "warn", 3)],
+    ),
 }
 
 
@@ -151,7 +167,7 @@ def _assert_parity(notebook_dir):
         )
         assert ours == strata, cell.id
         assert analysis.cells[cell.id].plannable == runs(cell.id), cell.id
-    return session
+    return session, analysis
 
 
 @pytest.mark.parametrize("name", sorted(CASES))
@@ -167,12 +183,12 @@ def test_cellgraph_reports_the_sql_connection_as_strata_does(name, tmp_path):
     notebook_dir = tmp_path / name
     cells = [("q", "sql", "# @name t\n" + source, None), ("d", "python", "print(t)", None)]
     _write(notebook_dir, cells, extra_toml=_CONNECTIONS)
-    session = _assert_parity(notebook_dir)
+    session, analysis = _assert_parity(notebook_dir)
 
     sql, reader = session.notebook_state.cells
     assert [(d.code, d.severity.value, d.line) for d in sql.annotation_diagnostics] == expected
     assert reader.upstream_ids == ["q"]
-    ours = replay.analyze(parse_notebook(notebook_dir)).cells["q"].diagnostics
+    ours = analysis.cells["q"].diagnostics
     assert sorted(d.message for d in ours) == sorted(d.message for d in sql.annotation_diagnostics)
 
 
