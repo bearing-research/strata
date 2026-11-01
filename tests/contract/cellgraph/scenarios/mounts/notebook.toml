@@ -1,0 +1,11 @@
+notebook_id = "cellgraph-mounts"
+name = "mounts"
+workers = []
+mounts = [{ name = "src", uri = "file://@NB@/data/n", mode = "ro" }]
+cells = [
+    { id = "m1", file = "m1.py", language = "python", order = 0 },
+    { id = "m2", file = "m2.py", language = "python", order = 1, mounts = [{ name = "src", uri = "file://@NB@/data/c", mode = "ro" }] },
+    { id = "m3", file = "m3.py", language = "python", order = 2, mounts = [{ name = "src", uri = "file://@NB@/data/c", mode = "ro" }] },
+    { id = "w4", file = "w4.py", language = "python", order = 3 },
+    { id = "r5", file = "r5.py", language = "python", order = 4 },
+]

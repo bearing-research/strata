@@ -1,0 +1,9 @@
+notebook_id = "cellgraph-structural"
+name = "structural"
+cells = [
+    { id = "a1", file = "a1.py", language = "python", order = 0 },
+    { id = "b2", file = "b2.py", language = "python", order = 1.0 },
+    { id = "c3", file = "c3.py", language = "python", order = 2.0 },
+]
+workers = []
+mounts = []

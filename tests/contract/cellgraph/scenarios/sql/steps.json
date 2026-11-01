@@ -1,0 +1,24 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "s2",
+    "source": "# @sql connection=mem\n# @name doubled\nSELECT :n * 3 AS value\n"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "u1",
+    "source": "n = 6\n"
+  },
+  {
+    "op": "run_all"
+  }
+]

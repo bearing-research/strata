@@ -1,0 +1,1043 @@
+{
+ "scenario": "prompt",
+ "steps": [
+  {
+   "causality": {},
+   "cells": {
+    "d3": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "answer"
+      ],
+      "upstream_ids": [
+       "p2"
+      ]
+     },
+     "keys": {
+      "definition_key": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "input_hashes": [],
+      "source_hash": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "p2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "answer"
+      ],
+      "diagnostics": [],
+      "references": [
+       "topic"
+      ],
+      "upstream_ids": [
+       "u1"
+      ]
+     },
+     "keys": {
+      "definition_key": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "7ad43292e760dd0c9db43ed881dc43e951121f2a69790f2ac17841eaa575abf7",
+      "host_keyed": null,
+      "input_hashes": [],
+      "source_hash": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "upstream_hashes": []
+     },
+     "language": "prompt",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "u1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "topic"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "input_hashes": [],
+      "source_hash": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d3": [],
+     "p2": [
+      "answer"
+     ],
+     "u1": [
+      "topic"
+     ]
+    },
+    "edges": [
+     [
+      "u1",
+      "p2",
+      "topic"
+     ],
+     [
+      "p2",
+      "d3",
+      "answer"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "u1",
+     "p2",
+     "d3"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "validate"
+   }
+  },
+  {
+   "causality": {
+    "d3": {
+     "details": [
+      {
+       "cell_id": "p2",
+       "cell_name": "answer",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "d3": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "answer"
+      ],
+      "upstream_ids": [
+       "p2"
+      ]
+     },
+     "keys": {
+      "definition_key": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "dd25ac7d35929d10da7951a6c4571a0d2f2c7e72dd35ad391434e5ccd43e6dc5",
+      "input_hashes": [
+       "3814959bc1ba0d1ec60e39b8024671f57fe438fcfd141e5ac545965e1c8fe7ce"
+      ],
+      "source_hash": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "upstream_hashes": [
+       "3814959bc1ba0d1ec60e39b8024671f57fe438fcfd141e5ac545965e1c8fe7ce"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "status": "ok",
+      "stdout": "[m-one] Tell me about graphs.\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "p2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "answer"
+      ],
+      "diagnostics": [],
+      "references": [
+       "topic"
+      ],
+      "upstream_ids": [
+       "u1"
+      ]
+     },
+     "keys": {
+      "definition_key": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "7caf46b73110a69c839b41b6b03cfc0932e9530974ca315e5f3b631554769ab0",
+      "host_keyed": [
+       {
+        "function": "compute_prompt_provenance_hash",
+        "inputs": {
+         "input_hashes": {
+          "topic": "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+         },
+         "max_tokens": 4096,
+         "model": "m-one",
+         "output_schema": null,
+         "output_type": "text",
+         "rendered": "Tell me about graphs.",
+         "system_prompt": null,
+         "temperature": 0.0
+        },
+        "key": "b9be46aa15b15b3ac96e968427e4c699bec346f1feaabf5d57a07302acad1f51"
+       }
+      ],
+      "input_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ],
+      "source_hash": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "upstream_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ]
+     },
+     "language": "prompt",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_p2_var_answer@v=1",
+      "artifact_uris": {
+       "answer": {
+        "artifact": "nb_cellgraph-prompt_cell_p2_var_answer@v=1",
+        "content_sha256": "0db32a8426b9263483bde2d4ad9242db60466b25ae0f617a6781b256110a56ab",
+        "provenance_hash": "3814959bc1ba0d1ec60e39b8024671f57fe438fcfd141e5ac545965e1c8fe7ce"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "7caf46b73110a69c839b41b6b03cfc0932e9530974ca315e5f3b631554769ab0",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "u1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "topic"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "input_hashes": [],
+      "source_hash": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+      "artifact_uris": {
+       "topic": {
+        "artifact": "nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+        "content_sha256": "7e6ec3ba9380e874fc703d3cf0b55c3a20ff835869c5644754d7d40ef8284964",
+        "provenance_hash": "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d3": [],
+     "p2": [
+      "answer"
+     ],
+     "u1": [
+      "topic"
+     ]
+    },
+    "edges": [
+     [
+      "u1",
+      "p2",
+      "topic"
+     ],
+     [
+      "p2",
+      "d3",
+      "answer"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "u1",
+     "p2",
+     "d3"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "run_all"
+   }
+  },
+  {
+   "causality": {
+    "d3": {
+     "details": [
+      {
+       "cell_id": "p2",
+       "cell_name": "answer",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    },
+    "p2": {
+     "details": [
+      {
+       "cell_id": "p2",
+       "cell_name": "answer",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "source_changed"
+      }
+     ],
+     "reason": "self"
+    }
+   },
+   "cells": {
+    "d3": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "answer"
+      ],
+      "upstream_ids": [
+       "p2"
+      ]
+     },
+     "keys": {
+      "definition_key": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "input_hashes": [],
+      "source_hash": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
+     }
+    },
+    "p2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "answer"
+      ],
+      "diagnostics": [],
+      "references": [
+       "topic"
+      ],
+      "upstream_ids": [
+       "u1"
+      ]
+     },
+     "keys": {
+      "definition_key": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "7caf46b73110a69c839b41b6b03cfc0932e9530974ca315e5f3b631554769ab0",
+      "host_keyed": null,
+      "input_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ],
+      "source_hash": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "upstream_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ]
+     },
+     "language": "prompt",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "u1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "topic"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "input_hashes": [],
+      "source_hash": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+      "artifact_uris": {
+       "topic": {
+        "artifact": "nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+        "content_sha256": "7e6ec3ba9380e874fc703d3cf0b55c3a20ff835869c5644754d7d40ef8284964",
+        "provenance_hash": "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d3": [],
+     "p2": [
+      "answer"
+     ],
+     "u1": [
+      "topic"
+     ]
+    },
+    "edges": [
+     [
+      "u1",
+      "p2",
+      "topic"
+     ],
+     [
+      "p2",
+      "d3",
+      "answer"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "u1",
+     "p2",
+     "d3"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "key": "ai.model",
+    "op": "toml_set",
+    "value": "m-two"
+   }
+  },
+  {
+   "causality": {
+    "d3": {
+     "details": [
+      {
+       "cell_id": "p2",
+       "cell_name": "answer",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "d3": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "answer"
+      ],
+      "upstream_ids": [
+       "p2"
+      ]
+     },
+     "keys": {
+      "definition_key": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "1c9bb2ba2afcd568c3c30e3cd2a87a4fef80b6d35614a27ba845de21ac92022f",
+      "input_hashes": [
+       "85c9f3387746ac8404279598280b5b53714904ecb269c4bc21a7f2a8f91d3d77"
+      ],
+      "source_hash": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "upstream_hashes": [
+       "85c9f3387746ac8404279598280b5b53714904ecb269c4bc21a7f2a8f91d3d77"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "status": "ok",
+      "stdout": "[m-one] Tell me about graphs.\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "p2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "answer"
+      ],
+      "diagnostics": [],
+      "references": [
+       "topic"
+      ],
+      "upstream_ids": [
+       "u1"
+      ]
+     },
+     "keys": {
+      "definition_key": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "7caf46b73110a69c839b41b6b03cfc0932e9530974ca315e5f3b631554769ab0",
+      "host_keyed": [
+       {
+        "function": "compute_prompt_provenance_hash",
+        "inputs": {
+         "input_hashes": {
+          "topic": "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+         },
+         "max_tokens": 4096,
+         "model": "m-two",
+         "output_schema": null,
+         "output_type": "text",
+         "rendered": "Tell me about graphs.",
+         "system_prompt": null,
+         "temperature": 0.0
+        },
+        "key": "ed982a9748b92fce994c9e9319a66c0fdcfb96f78bbbf628fc96561d1293a80b"
+       }
+      ],
+      "input_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ],
+      "source_hash": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "upstream_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ]
+     },
+     "language": "prompt",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_p2_var_answer@v=2",
+      "artifact_uris": {
+       "answer": {
+        "artifact": "nb_cellgraph-prompt_cell_p2_var_answer@v=2",
+        "content_sha256": "9d1273ec031ab0be2a2b5d182a86493d9815cd629f9bfcdf2a622511a3f89c33",
+        "provenance_hash": "85c9f3387746ac8404279598280b5b53714904ecb269c4bc21a7f2a8f91d3d77"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "7caf46b73110a69c839b41b6b03cfc0932e9530974ca315e5f3b631554769ab0",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "u1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "topic"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "input_hashes": [],
+      "source_hash": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+      "artifact_uris": {
+       "topic": {
+        "artifact": "nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+        "content_sha256": "7e6ec3ba9380e874fc703d3cf0b55c3a20ff835869c5644754d7d40ef8284964",
+        "provenance_hash": "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d3": [],
+     "p2": [
+      "answer"
+     ],
+     "u1": [
+      "topic"
+     ]
+    },
+    "edges": [
+     [
+      "u1",
+      "p2",
+      "topic"
+     ],
+     [
+      "p2",
+      "d3",
+      "answer"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "u1",
+     "p2",
+     "d3"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "run_all"
+   }
+  },
+  {
+   "causality": {
+    "d3": {
+     "details": [
+      {
+       "cell_id": "p2",
+       "cell_name": "answer",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "d3": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "answer"
+      ],
+      "upstream_ids": [
+       "p2"
+      ]
+     },
+     "keys": {
+      "definition_key": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "1c9bb2ba2afcd568c3c30e3cd2a87a4fef80b6d35614a27ba845de21ac92022f",
+      "input_hashes": [
+       "85c9f3387746ac8404279598280b5b53714904ecb269c4bc21a7f2a8f91d3d77"
+      ],
+      "source_hash": "47b95ccc735c7aa7cdd21052e5e9e58a22f034ff3b8ac14a940ce5961b9f5815",
+      "upstream_hashes": [
+       "85c9f3387746ac8404279598280b5b53714904ecb269c4bc21a7f2a8f91d3d77"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "status": "ok",
+      "stdout": "[m-one] Tell me about graphs.\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "p2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "answer"
+      ],
+      "diagnostics": [],
+      "references": [
+       "topic"
+      ],
+      "upstream_ids": [
+       "u1"
+      ]
+     },
+     "keys": {
+      "definition_key": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "7caf46b73110a69c839b41b6b03cfc0932e9530974ca315e5f3b631554769ab0",
+      "host_keyed": [
+       {
+        "function": "compute_prompt_provenance_hash",
+        "inputs": {
+         "input_hashes": {
+          "topic": "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+         },
+         "max_tokens": 4096,
+         "model": "m-two",
+         "output_schema": null,
+         "output_type": "text",
+         "rendered": "Tell me about graphs.",
+         "system_prompt": null,
+         "temperature": 0.0
+        },
+        "key": "ed982a9748b92fce994c9e9319a66c0fdcfb96f78bbbf628fc96561d1293a80b"
+       }
+      ],
+      "input_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ],
+      "source_hash": "de479b480355bbce50703cd9466546fb9bb2d50a2d73080b81e1a83603e06f7f",
+      "upstream_hashes": [
+       "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+      ]
+     },
+     "language": "prompt",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_p2_var_answer@v=2",
+      "artifact_uris": {
+       "answer": {
+        "artifact": "nb_cellgraph-prompt_cell_p2_var_answer@v=2",
+        "content_sha256": "9d1273ec031ab0be2a2b5d182a86493d9815cd629f9bfcdf2a622511a3f89c33",
+        "provenance_hash": "85c9f3387746ac8404279598280b5b53714904ecb269c4bc21a7f2a8f91d3d77"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "7caf46b73110a69c839b41b6b03cfc0932e9530974ca315e5f3b631554769ab0",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "u1": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "topic"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "input_hashes": [],
+      "source_hash": "d700e29e00f4f96f60c41f4543e36bd137322ac18c98fcb022c1d3970aad3884",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+      "artifact_uris": {
+       "topic": {
+        "artifact": "nb_cellgraph-prompt_cell_u1_var_topic@v=1",
+        "content_sha256": "7e6ec3ba9380e874fc703d3cf0b55c3a20ff835869c5644754d7d40ef8284964",
+        "provenance_hash": "75fd7f9edab579b03c897340506c718c5a870b0c68099974acf8968cafb6dc07"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "199958784cf2ecb7e5f01887bf0f863bf8b940232191d9c72cb468eaece02787",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d3": [],
+     "p2": [
+      "answer"
+     ],
+     "u1": [
+      "topic"
+     ]
+    },
+    "edges": [
+     [
+      "u1",
+      "p2",
+      "topic"
+     ],
+     [
+      "p2",
+      "d3",
+      "answer"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "u1",
+     "p2",
+     "d3"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "run_all"
+   }
+  }
+ ],
+ "trace_format": 1
+}

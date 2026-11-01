@@ -18,13 +18,12 @@ as zero rows) and is never cached, so its first write is seen.
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from strata.notebook import nonce
 from strata.notebook.models import TableSpec
 
 if TYPE_CHECKING:
@@ -159,7 +158,7 @@ def without_table_nonce(fingerprint: str) -> str:
 
 def random_fingerprint() -> str:
     """A fingerprint no other run shares, for a table whose state cannot be keyed."""
-    return hashlib.sha256(os.urandom(32)).hexdigest()
+    return nonce.unresolved_nonce()
 
 
 def table_credential(table_uri: str, config: Any) -> str | None:

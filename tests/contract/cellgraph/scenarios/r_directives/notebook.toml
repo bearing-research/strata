@@ -1,0 +1,8 @@
+notebook_id = "cellgraph-r_directives"
+name = "r_directives"
+cells = [
+    { id = "r1", file = "r1.r", language = "r", order = 0 },
+    { id = "r2", file = "r2.r", language = "r", order = 1.0 },
+]
+workers = []
+mounts = []

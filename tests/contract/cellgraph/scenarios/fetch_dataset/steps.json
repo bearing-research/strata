@@ -1,0 +1,25 @@
+[
+  {
+    "op": "seed_dataset",
+    "name": "team/model",
+    "value": {
+      "w": 1
+    }
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "seed_dataset",
+    "name": "team/model",
+    "value": {
+      "w": 2
+    }
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "run_all"
+  }
+]

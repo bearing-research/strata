@@ -1,0 +1,11 @@
+notebook_id = "cellgraph-shadowing"
+name = "shadowing"
+cells = [
+    { id = "p1", file = "p1.py", language = "python", order = 0 },
+    { id = "p2", file = "p2.py", language = "python", order = 1.0 },
+    { id = "c3", file = "c3.py", language = "python", order = 2.0 },
+    { id = "b4", file = "b4.py", language = "python", order = 3.0 },
+    { id = "m5", file = "m5.py", language = "python", order = 4.0 },
+]
+workers = []
+mounts = []

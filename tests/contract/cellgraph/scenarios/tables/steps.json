@@ -1,0 +1,29 @@
+[
+  {
+    "op": "iceberg_create",
+    "catalog": "lake",
+    "table": "db.events",
+    "rows": [1, 2, 3]
+  },
+  {
+    "op": "iceberg_create",
+    "catalog": "lake",
+    "table": "db.out",
+    "rows": []
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "iceberg_append",
+    "catalog": "lake",
+    "table": "db.events",
+    "rows": [4]
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "run_all"
+  }
+]

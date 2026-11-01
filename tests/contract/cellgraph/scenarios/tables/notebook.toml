@@ -1,0 +1,10 @@
+notebook_id = "cellgraph-tables"
+name = "tables"
+cells = [
+    { id = "t1", file = "t1.py", language = "python", order = 0 },
+    { id = "t2", file = "t2.py", language = "python", order = 1.0 },
+    { id = "w3", file = "w3.py", language = "python", order = 2.0 },
+    { id = "d4", file = "d4.py", language = "python", order = 3.0 },
+]
+workers = []
+mounts = []

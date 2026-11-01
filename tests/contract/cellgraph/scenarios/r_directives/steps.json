@@ -1,0 +1,32 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "r1",
+    "source": "# @timeout 20\nf <- function(v) { v + 1 }\nx <- f(0)\n"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "r1",
+    "source": "# @name base\n# @timeout 20\nf <- function(v) { v + 1 }\nx <- f(0)\n"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "r1",
+    "source": "# @name base\n# @timeout 20\n# a plain comment\nf <- function(v) { v + 1 }\nx <- f(0)\n"
+  },
+  {
+    "op": "run_all"
+  }
+]

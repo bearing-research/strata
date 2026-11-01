@@ -1,0 +1,19 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "write_file",
+    "path": "plain.txt",
+    "text": "two\n"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "run_all"
+  }
+]

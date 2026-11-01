@@ -1,0 +1,16 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "lp",
+    "source": "# @loop max_iter=2 carry=state\nstate = state + 2\n"
+  },
+  {
+    "op": "run_all"
+  }
+]

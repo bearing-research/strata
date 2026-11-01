@@ -40,6 +40,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from strata.notebook import nonce
 from strata.notebook.models import FetchSpec
 from strata.url_safety import guarded_transport, url_safety_problem
 
@@ -278,7 +279,7 @@ class FetchCache:
         """
         if spec.sha256:
             return f"{spec.name}:fetch:{spec.url}:{spec.sha256}"
-        unresolved = f"{spec.name}:fetch:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
+        unresolved = f"{spec.name}:fetch:unresolved:{nonce.unresolved_nonce()}"
         if self.recorded(spec.url) is None:
             return unresolved
         try:

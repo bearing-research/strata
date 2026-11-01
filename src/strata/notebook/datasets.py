@@ -28,7 +28,7 @@ from vestigo.store import ArtifactImportConflict, ArtifactStore, ArtifactVersion
 
 from strata.artifact.retention import requirements
 from strata.artifact.transfer import remap_input_versions
-from strata.notebook import output_dirs
+from strata.notebook import nonce, output_dirs
 from strata.notebook.models import DatasetSpec
 
 STALE_CHECK_SECONDS = 60.0
@@ -83,7 +83,8 @@ class DatasetInput:
 
 def unresolved_fingerprint(spec: DatasetSpec) -> str:
     """A fingerprint no artifact can match, so an unresolvable name is stale."""
-    return f"{spec.name}:dataset:{spec.reference}:unresolved:{uuid.uuid4().hex}"
+    # 32 digits, the width of the uuid4 hex this was.
+    return f"{spec.name}:dataset:{spec.reference}:unresolved:{nonce.unresolved_nonce()[:32]}"
 
 
 def content_type_of(record: ArtifactVersion) -> str:

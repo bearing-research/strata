@@ -1,0 +1,29 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "a1",
+    "source": "x = 1\n"
+  },
+  {
+    "op": "validate"
+  },
+  {
+    "op": "add_cell",
+    "cell": "v4",
+    "after": "c3",
+    "source": "# @variant g same\nm = 1\n"
+  },
+  {
+    "op": "add_cell",
+    "cell": "v5",
+    "after": "v4",
+    "source": "# @variant g same\nm = 2\n"
+  },
+  {
+    "op": "remove_cell",
+    "cell": "v5"
+  }
+]

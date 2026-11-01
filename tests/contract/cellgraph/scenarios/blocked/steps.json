@@ -1,0 +1,20 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "run_cell",
+    "cell": "b2"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "a1",
+    "source": "# @timeout 30\nx = 1\n"
+  },
+  {
+    "op": "run_all"
+  }
+]

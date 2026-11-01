@@ -1,0 +1,8 @@
+notebook_id = "cellgraph-nocache"
+name = "nocache"
+cells = [
+    { id = "n1", file = "n1.py", language = "python", order = 0 },
+    { id = "d2", file = "d2.py", language = "python", order = 1.0 },
+]
+workers = []
+mounts = []

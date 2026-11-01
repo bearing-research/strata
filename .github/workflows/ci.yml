@@ -400,6 +400,7 @@ jobs:
         tests/notebook/test_language_r_analyzer.py
         tests/notebook/test_shared_renv.py
         tests/notebook/test_r_workers.py
+        tests/contract/cellgraph/test_cellgraph_traces.py::test_the_trace_is_reproduced[r_directives]
         -v --tb=short
 
     steps:

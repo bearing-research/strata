@@ -1,0 +1,10 @@
+[project]
+name = "tables"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.strata.catalogs.lake]
+type = "sql"
+uri = "sqlite:///@NB@/warehouse/catalog.db"
+warehouse = "file://@NB@/warehouse"

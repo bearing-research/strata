@@ -2,3 +2,7 @@
 # test fixtures alike) so renv can recognise / restore them; our formatters
 # must not rewrite them.
 **/renv/
+
+# cellgraph traces are written by their recorder (`record.py --update`); a
+# reformat would make every re-record a diff.
+tests/contract/cellgraph/traces/
