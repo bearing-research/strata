@@ -759,6 +759,10 @@ _VALUE_CODES = frozenset(
 )
 
 
+# The rank of the checks that depend on the cell's language: those come last.
+_LANGUAGE = 7
+
+
 def _strata_order(d: cg.Diagnostic) -> tuple[int, int]:
     """Where ``validate_cell_annotations`` puts the finding: its check, then the line for
     the checks that scan line by line. Within a check cellgraph's order already agrees."""
@@ -777,25 +781,33 @@ def _strata_order(d: cg.Diagnostic) -> tuple[int, int]:
         return 5, line
     if d.code.startswith("after_"):
         return 6, 0
-    return 7, 0
+    return _LANGUAGE, 0
 
 
-def strata_diagnostics(cell: cg.CellAnalysis) -> list[AnnotationDiagnostic]:
+def strata_diagnostics(
+    cell: cg.CellAnalysis, language_checks: list[AnnotationDiagnostic] | None = None
+) -> list[AnnotationDiagnostic]:
     """The cell's diagnostics as Strata reports them: its codes, wording and order.
 
-    Structural ones are not here: a cycle or a variant collision is the notebook's
-    ``dag_error``, not a cell's.
+    *language_checks*, the host's own, go where the language's checks begin. Structural
+    ones are not here: a cycle or a variant collision is the notebook's ``dag_error``,
+    not a cell's.
     """
-    return [
+    found = sorted(
+        (d for d in cell.diagnostics if d.code not in cg.analysis.STRUCTURAL_CODES),
+        key=_strata_order,
+    )
+    split = next((i for i, d in enumerate(found) if _strata_order(d)[0] == _LANGUAGE), len(found))
+    converted = [
         AnnotationDiagnostic(
             severity=DiagnosticSeverity(d.severity.value),
             code=STRATA_CODES.get(d.code, d.code),
             message=_strata_message(d, cell),
             line=d.line,
         )
-        for d in sorted(cell.diagnostics, key=_strata_order)
-        if d.code not in cg.analysis.STRUCTURAL_CODES
+        for d in found
     ]
+    return converted[:split] + list(language_checks or []) + converted[split:]
 
 
 def _strata_message(d: cg.Diagnostic, cell: cg.CellAnalysis) -> str:

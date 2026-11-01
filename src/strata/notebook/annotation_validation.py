@@ -6,19 +6,14 @@ again before each run: an ERROR keeps the cell from running (``blocking_diagnost
 
 from __future__ import annotations
 
-import ast
-import difflib
 import functools
 import logging
 from typing import TYPE_CHECKING
 
 from strata.notebook.annotations import (
     _LOOP_START_FROM_RE,
-    ANNOTATION_KEYS,
     iter_annotation_block,
-    parse_annotation_directive,
     parse_annotations,
-    unreadable_input_directives,
 )
 from strata.notebook.models import (
     AnnotationDiagnostic,
@@ -32,7 +27,8 @@ from strata.notebook.models import (
 from strata.notebook.workers import notebook_worker_definitions_editable, resolve_worker_spec
 
 if TYPE_CHECKING:
-    from strata.notebook.dag import NotebookDag
+    import cellgraph as cg
+
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +52,13 @@ def _table_uri_malformed(uri: str) -> bool:
 def blocking_diagnostic(
     cell: CellState,
     notebook_state: NotebookState,
-    dag: NotebookDag | None = None,
+    analysis: cg.Analysis | None = None,
 ) -> AnnotationDiagnostic | None:
     """The first ERROR diagnostic, which keeps the cell from running, or ``None``."""
     return next(
         (
             d
-            for d in validate_cell_annotations(cell, notebook_state, dag)
+            for d in validate_cell_annotations(cell, notebook_state, analysis)
             if d.severity == DiagnosticSeverity.ERROR
         ),
         None,
@@ -72,39 +68,39 @@ def blocking_diagnostic(
 def validate_cell_annotations(
     cell: CellState,
     notebook_state: NotebookState,
-    dag: NotebookDag | None = None,
+    analysis: cg.Analysis | None = None,
 ) -> list[AnnotationDiagnostic]:
     """Validate a cell's annotations against notebook-wide context.
 
-    *dag* is the notebook's; without one (its build failed, which is reported on its
-    own) the ``@per_variant`` group checks are skipped.
+    cellgraph's checks (``strata.notebook.vocabulary``), with Strata's own that read
+    the server or the other cells' code. *analysis* is the notebook's, used when it
+    read *cell* as it is.
     """
+    from strata.notebook.graph import analysis_with
+    from strata.notebook.vocabulary import strata_diagnostics
+
     if cell.language == CellLanguage.MARKDOWN:
         # Pure prose: ``# @worker`` is a heading, and only ``@app`` is read (unchecked).
         return []
-    # Language-agnostic: any other language can be a variant member, so these run
-    # before language dispatch.
-    _cell_annotations = parse_annotations(cell.source)
-    variant_diagnostics = _validate_variant_annotation(cell, _cell_annotations, notebook_state)
-    variant_diagnostics = variant_diagnostics + _validate_per_variant_annotation(
-        cell, _cell_annotations, dag
-    )
-    variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
-    variant_diagnostics = variant_diagnostics + _validate_unreadable_values(cell)
-    variant_diagnostics = variant_diagnostics + _validate_stochastic_nocache(cell)
-    variant_diagnostics = variant_diagnostics + _validate_unknown_annotations(cell)
-    variant_diagnostics = variant_diagnostics + _validate_after(cell, notebook_state, dag)
-    if cell.language == CellLanguage.PROMPT:
-        return variant_diagnostics + _validate_prompt_cell_annotations(cell)
-    if cell.language == CellLanguage.SQL:
-        return variant_diagnostics + _validate_sql_cell_annotations(cell, notebook_state)
+    language_checks: list[AnnotationDiagnostic] = []
     if cell.language == CellLanguage.WIDGET:
-        return variant_diagnostics + _validate_widget_cell_annotations(cell)
-    diagnostics: list[AnnotationDiagnostic] = list(variant_diagnostics)
-    diagnostics.extend(_validate_module_export(cell, notebook_state))
-    annotations = parse_annotations(cell.source)
+        language_checks = _validate_widget_cell_annotations(cell)
+    elif cell.language not in (CellLanguage.PROMPT, CellLanguage.SQL):
+        language_checks = _validate_module_export(cell, notebook_state) + _validate_worker(
+            cell, notebook_state
+        )
+    ca = analysis_with(cell, notebook_state, analysis).cells[cell.id]
+    diagnostics = strata_diagnostics(ca, language_checks)
+    if cell.language == CellLanguage.SQL:
+        # After the connection's, which the SQL analyzer reports.
+        diagnostics += _validate_sql_tables(cell, notebook_state)
+    return diagnostics
 
-    # --- worker_unknown ---
+
+def _validate_worker(cell: CellState, notebook_state: NotebookState) -> list[AnnotationDiagnostic]:
+    """``worker_unknown``: a worker execution cannot resolve."""
+    annotations = parse_annotations(cell.source)
+    diagnostics: list[AnnotationDiagnostic] = []
     # The catalog execution resolves against: in service mode the server's registry,
     # where members cannot declare workers at all.
     if annotations.worker and resolve_worker_spec(notebook_state, annotations.worker) is None:
@@ -127,111 +123,7 @@ def validate_cell_annotations(
             )
         )
 
-    # --- mount checks ---
-    notebook_mount_names = {m.name for m in notebook_state.mounts}
-    for mount in annotations.mounts:
-        line = _find_annotation_line(cell.source, "mount", mount.name)
-
-        scheme = mount.uri.split("://")[0].lower() if "://" in mount.uri else ""
-        if not scheme or scheme not in _SUPPORTED_MOUNT_SCHEMES:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="mount_uri_unsupported",
-                    message=(
-                        f"`@mount {mount.name}` uses unsupported URI scheme "
-                        f"'{scheme or mount.uri}'. "
-                        f"Supported: {', '.join(sorted(_SUPPORTED_MOUNT_SCHEMES))}."
-                    ),
-                    line=line,
-                )
-            )
-
-        if mount.name in notebook_mount_names:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.INFO,
-                    code="mount_shadows_notebook",
-                    message=(
-                        f"`@mount {mount.name}` overrides the notebook-level "
-                        f"mount with the same name."
-                    ),
-                    line=line,
-                )
-            )
-
-    # --- table checks ---
-    for table in annotations.tables:
-        line = _find_annotation_line(cell.source, "table", table.name)
-
-        if _table_uri_malformed(table.uri):
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="table_uri_malformed",
-                    message=(
-                        f"`@table {table.name}` URI should be "
-                        "`<warehouse>#<namespace>.<table>`, "
-                        "`<catalog>:<namespace>.<table>` or `<namespace>.<table>` "
-                        "(e.g. file:///data/warehouse#nyc.trips)."
-                    ),
-                    line=line,
-                )
-            )
-
-        # table_shadows_define: the injected variable hides a real definition
-        if table.name in (cell.defines or []):
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="table_shadows_define",
-                    message=(
-                        f"`@table {table.name}` injects a variable that this "
-                        "cell also defines; the definition wins and the "
-                        "table URI is shadowed."
-                    ),
-                    line=line,
-                )
-            )
-
-    # table_duplicate_name: snapshots are keyed by table name, so a duplicate makes one
-    # @table win injection while both feed provenance. Execution rejects it; flag early.
-    table_names = [t.name for t in annotations.tables]
-    for dup in sorted({n for n in table_names if table_names.count(n) > 1}):
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.ERROR,
-                code="table_duplicate_name",
-                message=(
-                    f"`@table {dup}` is declared more than once; each @table must "
-                    "have a unique name; the cell will fail to run."
-                ),
-                line=_find_annotation_line(cell.source, "table", dup),
-            )
-        )
-
-    diagnostics.extend(_validate_loop_annotation(cell, annotations, notebook_state, dag))
-
     return diagnostics
-
-
-def _validate_recorded_inputs(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Report an input or output directive (``@mount``, ``@fetch``, ...) that did not parse."""
-    hints = {
-        "mount": "expected `@mount <name> <uri> [ro|rw] [credential=<name>]`",
-        "table": "expected `@table <name> <uri> [snapshot=<id>]`",
-        "fetch": "expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`",
-        "dataset": "expected `@dataset <var> <name>[@<alias>|@v=<n>]`",
-        "write_table": (
-            "expected `@write_table <var> <catalog>:<namespace>.<table> "
-            "append|overwrite|merge`, with `on=<col>,...` after merge"
-        ),
-        "output_dir": "expected `@output_dir <name>`, a Python identifier",
-    }
-    return [
-        _unreadable(f"{directive}_unreadable", directive, value, hints[directive], lineno)
-        for lineno, directive, value in unreadable_input_directives(cell.source)
-    ]
 
 
 def _unreadable(code: str, key: str, value: str, why: str, line: int) -> AnnotationDiagnostic:
@@ -245,7 +137,6 @@ def _unreadable(code: str, key: str, value: str, why: str, line: int) -> Annotat
 
 
 _FLAG_VALUES = frozenset({"", "on", "off", "true", "false", "yes", "no", "1", "0"})
-_OFF_VALUES = frozenset({"off", "false", "no", "0"})
 # What ``@sql write=`` tells apart; ``on`` would read as off.
 _SQL_WRITE_VALUES = frozenset({"true", "false", "yes", "no", "1", "0"})
 _NEEDS_VALUE = frozenset(
@@ -323,49 +214,6 @@ def _positive(value: str, kind: type, *, allow_zero: bool = False) -> bool:
     return number >= 0 if allow_zero else number > 0
 
 
-def _validate_unreadable_values(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Report each directive whose value cannot be read (``_value_problem``)."""
-    diagnostics: list[AnnotationDiagnostic] = []
-    for lineno, line_text in iter_annotation_block(cell.source):
-        parsed = parse_annotation_directive(line_text)
-        if parsed is None:
-            continue
-        key, value = parsed
-        problem = _value_problem(key, value, cell.language)
-        if problem is not None:
-            diagnostics.append(_unreadable(problem[0], key, value, problem[1], lineno))
-    return diagnostics
-
-
-def _validate_stochastic_nocache(cell: CellState) -> list[AnnotationDiagnostic]:
-    """``@stochastic`` with an explicit ``@nocache off``, in either order, is an error.
-
-    Each key's last readable line decides, as in ``parse_annotations``.
-    """
-    last: dict[str, tuple[bool, int]] = {}
-    for lineno, line_text in iter_annotation_block(cell.source):
-        parsed = parse_annotation_directive(line_text)
-        if parsed is None:
-            continue
-        key, value = parsed
-        if key in ("stochastic", "nocache") and _value_problem(key, value, cell.language) is None:
-            last[key] = (value.lower() not in _OFF_VALUES, lineno)
-    stochastic, nocache = last.get("stochastic"), last.get("nocache")
-    if stochastic is None or not stochastic[0] or nocache is None or nocache[0]:
-        return []
-    return [
-        AnnotationDiagnostic(
-            severity=DiagnosticSeverity.ERROR,
-            code="stochastic_nocache_conflict",
-            message=(
-                "`@stochastic` runs the cell every time, so `@nocache off` cannot "
-                "turn its cache back on; remove one of them."
-            ),
-            line=nocache[1],
-        )
-    ]
-
-
 @functools.lru_cache(maxsize=4096)
 def _export_blockers(source: str, cross_cell: frozenset[str]) -> tuple[tuple[str, ...], str]:
     """The defs, classes and names that keep *source* from exporting, and why.
@@ -430,24 +278,6 @@ def _validate_module_export(
             line=None,
         )
     ]
-
-
-def _validate_prompt_cell_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Surface prompt-cell annotation errors (e.g. malformed ``@output_schema``)."""
-    from strata.notebook.prompt_analyzer import analyze_prompt_cell
-
-    analysis = analyze_prompt_cell(cell.source)
-    diagnostics: list[AnnotationDiagnostic] = []
-    if analysis.output_schema_error:
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.ERROR,
-                code="prompt_output_schema_invalid",
-                message=analysis.output_schema_error,
-                line=_find_annotation_line(cell.source, "output_schema"),
-            )
-        )
-    return diagnostics
 
 
 def _validate_widget_cell_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
@@ -660,14 +490,12 @@ def sql_connection_diagnostics(
     return diagnostics
 
 
-def _validate_sql_cell_annotations(
+def _validate_sql_tables(
     cell: CellState,
     notebook_state: NotebookState,
 ) -> list[AnnotationDiagnostic]:
-    """Surface SQL-cell directive issues and problems with its referenced connection."""
-    diagnostics = sql_connection_diagnostics(
-        cell.source, notebook_state.connections, notebook_state.malformed_connections
-    )
+    """SQL that does not parse, or names a table only when it runs."""
+    diagnostics: list[AnnotationDiagnostic] = []
     sql = parse_annotations(cell.source).sql
     valid_by_name = {c.name: c for c in notebook_state.connections}
 
@@ -740,472 +568,6 @@ def _validate_sql_cell_annotations(
             )
 
     return diagnostics
-
-
-def _validate_loop_annotation(
-    cell: CellState,
-    annotations,
-    notebook_state: NotebookState,
-    dag: NotebookDag | None = None,
-) -> list[AnnotationDiagnostic]:
-    """Validate ``@loop`` / ``@loop_until`` directives."""
-    diagnostics: list[AnnotationDiagnostic] = []
-    loop = annotations.loop
-    if loop is None:
-        return diagnostics
-
-    loop_line = _find_annotation_line(cell.source, "loop")
-    until_line = _find_annotation_line(cell.source, "loop_until") or loop_line
-
-    if loop.max_iter <= 0:
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.ERROR,
-                code="loop_missing_max_iter",
-                message=(
-                    "`@loop` requires a positive `max_iter=<N>`. "
-                    "The loop cell must declare a safety bound on the iteration count."
-                ),
-                line=loop_line,
-            )
-        )
-
-    if not loop.carry:
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.ERROR,
-                code="loop_missing_carry",
-                message=(
-                    "`@loop` requires `carry=<variable>`. "
-                    "The carry variable is threaded between iterations."
-                ),
-                line=loop_line,
-            )
-        )
-    elif cell.defines and loop.carry not in cell.defines:
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
-                code="loop_carry_unknown",
-                message=(
-                    f"`@loop carry={loop.carry}` does not match any top-level "
-                    f"assignment in the cell. The cell must rebind "
-                    f"`{loop.carry}` each iteration for the loop to make progress."
-                ),
-                line=loop_line,
-            )
-        )
-
-    if loop.until_expr:
-        try:
-            ast.parse(loop.until_expr, mode="eval")
-        except SyntaxError as exc:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.ERROR,
-                    code="loop_until_syntax_error",
-                    message=(
-                        f"`@loop_until` expression is not a valid Python expression: {exc.msg}."
-                    ),
-                    line=until_line,
-                )
-            )
-
-    if loop.start_from_cell is not None:
-        known_cells = {c.id: c for c in notebook_state.cells}
-        if loop.start_from_cell not in known_cells:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.ERROR,
-                    code="loop_start_from_unknown",
-                    message=(
-                        f"`@loop start_from={loop.start_from_cell}@iter="
-                        f"{loop.start_from_iter}` references a cell that does "
-                        f"not exist in this notebook."
-                    ),
-                    line=loop_line,
-                )
-            )
-        elif loop.start_from_cell == cell.id:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.ERROR,
-                    code="loop_start_from_unknown",
-                    message=(
-                        "`@loop start_from` must reference a different cell: "
-                        "a loop cell cannot seed itself from its own iterations."
-                    ),
-                    line=loop_line,
-                )
-            )
-        elif dag is not None and loop.start_from_cell in dag.inactive_cells:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.ERROR,
-                    code="loop_start_from_unknown",
-                    message=(
-                        f"`@loop start_from={loop.start_from_cell}@iter="
-                        f"{loop.start_from_iter}` references a variant that is not "
-                        "active, which does not run."
-                    ),
-                    line=loop_line,
-                )
-            )
-        elif loop.carry and loop.carry not in known_cells[loop.start_from_cell].defines:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.ERROR,
-                    code="loop_start_from_unknown",
-                    message=(
-                        f"`@loop start_from={loop.start_from_cell}@iter="
-                        f"{loop.start_from_iter}` references a cell that does not "
-                        f"define the carry `{loop.carry}`."
-                    ),
-                    line=loop_line,
-                )
-            )
-
-    return diagnostics
-
-
-def _validate_variant_annotation(
-    cell: CellState,
-    annotations,
-    notebook_state: NotebookState,
-) -> list[AnnotationDiagnostic]:
-    """Validate ``# @variant`` membership against siblings and notebook.toml.
-
-    - ``variant_contract_mismatch``: defines diverge from the union of the active
-      siblings, so the diagnostic lands on the outlier.
-    - ``variant_active_unknown``: notebook.toml selects a variant no cell provides.
-    - ``variant_malformed``: the line did not parse into a (group, name) pair.
-    """
-    diagnostics: list[AnnotationDiagnostic] = []
-    variant_line = _find_annotation_line(cell.source, "variant")
-
-    # Malformed: a ``@variant`` line is present but parse_annotations rejected it.
-    if variant_line is not None and annotations.variant is None:
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.ERROR,
-                code="variant_malformed",
-                message=(
-                    "`@variant` requires `group` and `name`, both Python "
-                    "identifiers: `# @variant <group> <name>`."
-                ),
-                line=variant_line,
-            )
-        )
-        return diagnostics
-
-    if annotations.variant is None:
-        return diagnostics
-
-    group_id = annotations.variant.group
-    siblings = [
-        c
-        for c in notebook_state.cells
-        if c.id != cell.id and c.variant_group == group_id and c.variant_name is not None
-    ]
-
-    # variant_contract_mismatch: siblings disagree on defines. Compare value defines only;
-    # imports are a means, not an interface, and downstream never references them.
-    if siblings:
-        own_imports = _collect_top_level_imports(cell.source)
-        own_defines = set(cell.defines) - own_imports
-        for sibling in siblings:
-            sibling_imports = _collect_top_level_imports(sibling.source)
-            sibling_defines = set(sibling.defines) - sibling_imports
-            missing = sibling_defines - own_defines
-            extra = own_defines - sibling_defines
-            if missing or extra:
-                diff_parts = []
-                if missing:
-                    diff_parts.append(f"missing {sorted(missing)}")
-                if extra:
-                    diff_parts.append(f"extra {sorted(extra)}")
-                diagnostics.append(
-                    AnnotationDiagnostic(
-                        severity=DiagnosticSeverity.WARN,
-                        code="variant_contract_mismatch",
-                        message=(
-                            f"Variant `{annotations.variant.name}` defines a different "
-                            f"set of names than sibling `{sibling.variant_name}` in "
-                            f"group `{group_id}` ({', '.join(diff_parts)}). All variants "
-                            "in a group must share the same defines contract."
-                        ),
-                        line=variant_line,
-                    )
-                )
-                break
-
-    # variant_mode_invalid: execution treats an unknown mode as switch; flag the surprise.
-    mode = notebook_state.variant_modes.get(group_id, "switch")
-    if mode not in ("switch", "sweep"):
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
-                code="variant_mode_invalid",
-                message=(
-                    f"notebook.toml sets mode `{mode}` for variant group `{group_id}`, "
-                    "but only `switch` and `sweep` are valid. Treating it as `switch`."
-                ),
-                line=variant_line,
-            )
-        )
-
-    # variant_active_redundant: `active` is ignored in sweep mode. Harmless, confusing.
-    if mode == "sweep":
-        active = notebook_state.variant_active_selections.get(group_id)
-        if active:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.INFO,
-                    code="variant_active_redundant",
-                    message=(
-                        f'Group `{group_id}` is in sweep mode, so `active = "{active}"` '
-                        "is ignored: every variant runs and downstream consumes a "
-                        "{variant: value} dict."
-                    ),
-                    line=variant_line,
-                )
-            )
-
-    # variant_active_unknown: toml selects a missing variant. Surfaced on every member;
-    # skipped in sweep mode, where the active pointer is ignored.
-    selected = notebook_state.variant_active_selections.get(group_id) if mode != "sweep" else None
-    # Truthy check: an empty ``active = ""`` means "first in source order", not unknown.
-    if selected:
-        all_members = [annotations.variant.name] + [s.variant_name for s in siblings]
-        if selected not in all_members:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="variant_active_unknown",
-                    message=(
-                        f"notebook.toml selects variant `{selected}` for group "
-                        f"`{group_id}`, but no cell in the group has that name. "
-                        f"Falling back to the first variant in source order."
-                    ),
-                    line=variant_line,
-                )
-            )
-
-    return diagnostics
-
-
-def _sweep_groups_read_by(cell_id: str, dag: NotebookDag) -> dict[str, int]:
-    """Return ``{group: member_count}`` for the sweep groups the DAG wired this cell to."""
-    sizes = {res.group: len(res.members) for res in dag.variant_groups if res.mode == "sweep"}
-    return {group: sizes[group] for group in dag.sweep_groups_read(cell_id)}
-
-
-def _validate_after(
-    cell: CellState, notebook_state: NotebookState, dag: NotebookDag | None
-) -> list[AnnotationDiagnostic]:
-    """Report an ``@after`` id that adds no edge, so the ordering it asks for is lost.
-
-    - ``after_unknown_cell``: the id names no cell (``@after`` takes ids, not ``@name``).
-    - ``after_inactive_variant``: it names a variant that is not active, which never runs.
-    - ``after_self``: it names this cell (a warning: it would order nothing).
-    """
-    known = {c.id for c in notebook_state.cells}
-    inactive = dag.inactive_cells if dag is not None else set()
-    diagnostics: list[AnnotationDiagnostic] = []
-    for upstream_id in parse_annotations(cell.source).after:
-        line = _find_annotation_line(cell.source, "after", upstream_id)
-        if upstream_id == cell.id:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="after_self",
-                    message=f"`@after {upstream_id}` names this cell, so it orders nothing.",
-                    line=line,
-                )
-            )
-        elif upstream_id not in known:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.ERROR,
-                    code="after_unknown_cell",
-                    message=(
-                        f"`@after {upstream_id}` names no cell in this notebook (it takes a "
-                        "cell id, not an `@name`), so the cell does not run."
-                    ),
-                    line=line,
-                )
-            )
-        elif upstream_id in inactive:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.ERROR,
-                    code="after_inactive_variant",
-                    message=(
-                        f"`@after {upstream_id}` names a variant that is not active, which "
-                        "does not run, so the cell does not run. Order it after a cell that "
-                        "runs, or select that variant."
-                    ),
-                    line=line,
-                )
-            )
-    return diagnostics
-
-
-def _validate_unknown_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
-    """Warn on a ``# @key`` no parser reads: a typo like ``@wroker`` is otherwise ignored."""
-    diagnostics: list[AnnotationDiagnostic] = []
-    for lineno, line_text in iter_annotation_block(cell.source):
-        parsed = parse_annotation_directive(line_text)
-        if parsed is None or parsed[0] in ANNOTATION_KEYS:
-            continue
-        key = parsed[0]
-        close = difflib.get_close_matches(key, ANNOTATION_KEYS, n=1, cutoff=0.75)
-        hint = f" Did you mean `@{close[0]}`?" if close else ""
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
-                code="annotation_unknown",
-                message=f"`@{key}` is not an annotation, so it is ignored.{hint}",
-                line=lineno,
-            )
-        )
-    return diagnostics
-
-
-def _validate_per_variant_annotation(
-    cell: CellState,
-    annotations,
-    dag: NotebookDag | None,
-) -> list[AnnotationDiagnostic]:
-    """Validate ``# @per_variant [group]`` fan-out membership.
-
-    - ``per_variant_on_variant_member``: the cell is itself a variant.
-    - ``per_variant_no_sweep_source``: it reads no sweep-sourced variable.
-    - ``per_variant_ambiguous_group``: bare ``@per_variant`` but 2+ sweep groups.
-    - ``per_variant_unknown_group``: the named group is not a sweep source it reads.
-    - ``per_variant_group_of_one``: the group has one variant (info only).
-    """
-    if not annotations.per_variant:
-        return []
-
-    diagnostics: list[AnnotationDiagnostic] = []
-    line = _find_annotation_line(cell.source, "per_variant")
-
-    # Every variant writes the same table, so an overwrite keeps only the last one's rows.
-    if any(spec.mode == "overwrite" for spec in annotations.table_writes):
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.ERROR,
-                code="per_variant_write_table_overwrite",
-                message=(
-                    "`@write_table ... overwrite` can't be combined with `@per_variant`: "
-                    "each variant would replace the one before it. Append, merge on a "
-                    "column that tells the variants apart, or overwrite from a cell that "
-                    "reads the {variant: value} dict."
-                ),
-                line=_find_annotation_line(cell.source, "write_table", "overwrite"),
-            )
-        )
-
-    # Mutually exclusive with @variant membership.
-    if annotations.variant is not None:
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.WARN,
-                code="per_variant_on_variant_member",
-                message=(
-                    "`@per_variant` can't be combined with `@variant`: a cell "
-                    "can't both be a variant and fan out over a sweep group."
-                ),
-                line=line,
-            )
-        )
-        return diagnostics
-    if dag is None:
-        return diagnostics
-
-    sweep_groups = _sweep_groups_read_by(cell.id, dag)
-    named = annotations.per_variant_group
-
-    if named is not None:
-        if named not in sweep_groups:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="per_variant_unknown_group",
-                    message=(
-                        f"`@per_variant {named}` names a group this cell doesn't "
-                        "read from in sweep mode. Reference a variable produced "
-                        "by a sweep-mode variant group."
-                    ),
-                    line=line,
-                )
-            )
-            return diagnostics
-        effective_group = named
-    else:
-        if not sweep_groups:
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="per_variant_no_sweep_source",
-                    message=(
-                        "`@per_variant` requires the cell to reference a variable "
-                        "from a sweep-mode variant group; none were found."
-                    ),
-                    line=line,
-                )
-            )
-            return diagnostics
-        if len(sweep_groups) > 1:
-            names = ", ".join(sorted(sweep_groups))
-            diagnostics.append(
-                AnnotationDiagnostic(
-                    severity=DiagnosticSeverity.WARN,
-                    code="per_variant_ambiguous_group",
-                    message=(
-                        f"`@per_variant` is ambiguous: this cell reads from "
-                        f"multiple sweep groups ({names}). Name one explicitly: "
-                        "`# @per_variant <group>`."
-                    ),
-                    line=line,
-                )
-            )
-            return diagnostics
-        effective_group = next(iter(sweep_groups))
-
-    if sweep_groups.get(effective_group) == 1:
-        diagnostics.append(
-            AnnotationDiagnostic(
-                severity=DiagnosticSeverity.INFO,
-                code="per_variant_group_of_one",
-                message=(
-                    f"Group `{effective_group}` has a single variant, so "
-                    "`@per_variant` runs this cell once. The annotation is "
-                    "harmless but unnecessary here."
-                ),
-                line=line,
-            )
-        )
-
-    return diagnostics
-
-
-def _collect_top_level_imports(source: str) -> set[str]:
-    """Return module-scope names bound by ``import`` / ``from import`` statements."""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
-    names: set[str] = set()
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                names.add(alias.asname or alias.name.split(".", 1)[0])
-        elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                names.add(alias.asname or alias.name)
-    return names
 
 
 def _sql_connection_line(source: str, target: str) -> int | None:

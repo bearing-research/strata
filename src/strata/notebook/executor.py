@@ -1208,7 +1208,7 @@ class CellExecutor:
             return None
         if cell.source != source:
             cell = cell.model_copy(update={"source": source})
-        diagnostic = blocking_diagnostic(cell, self.session.notebook_state, self.session.dag)
+        diagnostic = blocking_diagnostic(cell, self.session.notebook_state, self.session.analysis)
         if diagnostic is None:
             return None
         line = f"line {diagnostic.line}: " if diagnostic.line else ""
@@ -8532,7 +8532,10 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
 
     dag = executor.session.dag
     # Run single-cell, where the gate refuses it and Run All blocks its dependents.
-    if blocking_diagnostic(cell, executor.session.notebook_state, dag) is not None:
+    if (
+        blocking_diagnostic(cell, executor.session.notebook_state, executor.session.analysis)
+        is not None
+    ):
         return False
     if dag is not None:
         modes = executor.session.notebook_state.variant_modes

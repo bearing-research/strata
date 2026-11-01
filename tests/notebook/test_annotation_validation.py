@@ -782,14 +782,13 @@ class TestUnknownAnnotation:
         import inspect
         import re
 
-        from strata.notebook.annotations import ANNOTATION_KEYS, parse_annotations
+        from strata.notebook.annotations import ANNOTATION_KEYS
         from strata.notebook.prompt_analyzer import analyze_prompt_cell
+        from strata.notebook.vocabulary import strata_vocabulary
 
-        read = {
-            key
-            for parser in (parse_annotations, analyze_prompt_cell)
-            for key in re.findall(r'key == "(\w+)"', inspect.getsource(parser))
-        }
+        read = set(strata_vocabulary().keys) | set(
+            re.findall(r'key == "(\w+)"', inspect.getsource(analyze_prompt_cell))
+        )
         # Readers that match their own directive, like ``@app hide`` in export.py and
         # AppView.vue, or ``@live`` in WidgetCell.vue.
         root = Path(__file__).resolve().parents[2]
