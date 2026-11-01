@@ -23,7 +23,9 @@ from strata.notebook.models import (
     AnnotationDiagnostic,
     CellLanguage,
     CellState,
+    ConnectionSpec,
     DiagnosticSeverity,
+    MalformedConnection,
     NotebookState,
 )
 from strata.notebook.workers import notebook_worker_definitions_editable, resolve_worker_spec
@@ -594,15 +596,14 @@ def _validate_referenced_connection(
     return diagnostics
 
 
-def _validate_sql_cell_annotations(
-    cell: CellState,
-    notebook_state: NotebookState,
+def sql_connection_diagnostics(
+    source: str,
+    connections: list[ConnectionSpec],
+    malformed_connections: list[MalformedConnection],
 ) -> list[AnnotationDiagnostic]:
-    """Surface SQL-cell directive issues and problems with its referenced connection."""
+    """A SQL cell's ``@sql`` connection: missing, malformed, unknown, or its own problems."""
     diagnostics: list[AnnotationDiagnostic] = []
-    annotations = parse_annotations(cell.source)
-
-    sql = annotations.sql
+    sql = parse_annotations(source).sql
     if sql is None or not sql.connection:
         diagnostics.append(
             AnnotationDiagnostic(
@@ -612,13 +613,13 @@ def _validate_sql_cell_annotations(
                     "SQL cells require `# @sql connection=<name>`. The connection "
                     "must match a `[connections.<name>]` block in notebook.toml."
                 ),
-                line=_find_annotation_line(cell.source, "sql"),
+                line=_find_annotation_line(source, "sql"),
             )
         )
     else:
-        valid_by_name = {c.name: c for c in notebook_state.connections}
-        malformed_by_name = {m.name: m for m in notebook_state.malformed_connections}
-        sql_line = _find_annotation_line(cell.source, "sql")
+        valid_by_name = {c.name: c for c in connections}
+        malformed_by_name = {m.name: m for m in malformed_connections}
+        sql_line = _find_annotation_line(source, "sql")
         target = sql.connection
         if target in valid_by_name:
             diagnostics.extend(_validate_referenced_connection(valid_by_name[target], sql_line))
@@ -649,6 +650,20 @@ def _validate_sql_cell_annotations(
                     line=sql_line,
                 )
             )
+
+    return diagnostics
+
+
+def _validate_sql_cell_annotations(
+    cell: CellState,
+    notebook_state: NotebookState,
+) -> list[AnnotationDiagnostic]:
+    """Surface SQL-cell directive issues and problems with its referenced connection."""
+    diagnostics = sql_connection_diagnostics(
+        cell.source, notebook_state.connections, notebook_state.malformed_connections
+    )
+    sql = parse_annotations(cell.source).sql
+    valid_by_name = {c.name: c for c in notebook_state.connections}
 
     # Surface the analyzer's sqlglot ``parse_error`` as a diagnostic so it survives the
     # session boundary; otherwise parse failures never reach the UI.

@@ -10,9 +10,10 @@ Mounts, tables, fetches and datasets bind names only in Python and R cells, and 
 mount is set in three layers, so their effects come from ``cell_effects`` rather
 than from the annotations: the hook merges the layers by name as
 ``resolve_cell_mounts`` does. The host passes, per cell, ``meta = {"language": ...,
-"mounts": [...], "notebook_mounts": [...], "connections": [...]}``: ``mounts`` with
-the notebook-level ones folded in, as ``parse_notebook`` does, and
-``notebook_mounts`` the notebook-level ones alone.
+"mounts": [...], "notebook_mounts": [...], "connections": [...],
+"malformed_connections": [...]}``: ``mounts`` with the notebook-level ones folded
+in, as ``parse_notebook`` does, and ``notebook_mounts`` the notebook-level ones
+alone. The SQL analyzer reads both connection lists for its diagnostics.
 
 Strata reports every directive line it cannot read and keeps the lines it can, so
 the parsers here return ``cg.Partial`` for a mix of the two.
@@ -34,6 +35,7 @@ from strata.notebook.annotation_validation import (
     _find_annotation_line,
     _table_uri_malformed,
     _value_problem,
+    sql_connection_diagnostics,
 )
 from strata.notebook.annotations import (
     MARKDOWN_DIRECTIVE_KEYS,
@@ -593,20 +595,32 @@ class RAnalyzer:
 
 
 class SqlAnalyzer:
-    """Strata's SQL analyzer: the output name and the ``:name`` placeholders. Host-keyed."""
+    """Strata's SQL analyzer: the output name, the ``:name`` placeholders, and the
+    ``@sql`` connection's diagnostics. Host-keyed."""
 
     owns_key = False
 
     def analyze(self, cell: cg.Cell) -> cg.Analyzed:
         from strata.notebook.languages.analyzer import _SqlAnalyzer
 
+        connections = list(cell.meta.get("connections", []))
         state = CellState(id=cell.id, source=cell.source, language=CellLanguage.SQL)
         # It reads only the session's connections, for the dialect.
-        session = SimpleNamespace(
-            notebook_state=SimpleNamespace(connections=list(cell.meta.get("connections", [])))
-        )
+        session = SimpleNamespace(notebook_state=SimpleNamespace(connections=connections))
         result = _SqlAnalyzer().analyze(state, session)  # ty: ignore[invalid-argument-type]
-        return cg.Analyzed(defines=list(result.defines), references=list(result.references))
+        found = sql_connection_diagnostics(
+            cell.source, connections, list(cell.meta.get("malformed_connections", []))
+        )
+        return cg.Analyzed(
+            defines=list(result.defines),
+            references=list(result.references),
+            diagnostics=[
+                cg.Diagnostic(
+                    d.code, cg.Severity(d.severity.value), d.message, annotation="sql", line=d.line
+                )
+                for d in found
+            ],
+        )
 
     def normalize(self, body: str) -> str:
         return cg.strip_lines(body)
