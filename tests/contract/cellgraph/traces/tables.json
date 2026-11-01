@@ -17,9 +17,9 @@
      "keys": {
       "definition_key": "607b207e3bc00461821f3c3bbb34b11b273da2196356a5fe0f33dce7aa599f21",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "6bea22fa581f2e116c2f9e5fe0f3df256c52b3fc509ce6e36c9c55283360d684",
+      "execution_key": "6d6bc3a7f0d54ccbc5193e58030419e3c88f2f5cd81ccaf73241f3f74e131ea7",
       "input_hashes": [
-       "out:table:unresolved:94c72b1a065ec2776a1de58c8543a5741d1f336e8610d0fba0270e84847fc0d4"
+       "out:table:unresolved:0942789373f0be6ff2dc1a61d6ce51dbc6cb2f29cb43436b3cddde4ee8829e68"
       ],
       "source_hash": "607b207e3bc00461821f3c3bbb34b11b273da2196356a5fe0f33dce7aa599f21",
       "upstream_hashes": []
@@ -36,7 +36,214 @@
       "has_rw_mount": false,
       "mounts": [],
       "tables": [
-       "out:table:unresolved:94c72b1a065ec2776a1de58c8543a5741d1f336e8610d0fba0270e84847fc0d4"
+       "out:table:unresolved:0942789373f0be6ff2dc1a61d6ce51dbc6cb2f29cb43436b3cddde4ee8829e68"
+      ]
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "t1": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [
+       "snap"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "40199d3f7ed1cdea939714409f96fb52bfa956cb1881247977c007c1f4f3b69c",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "8281db1ced19751ccc37c8762df174a74faf0ff04b13fc6240b43b6acd36be03",
+      "input_hashes": [
+       "events:table:lake:db.events:1001"
+      ],
+      "source_hash": "40199d3f7ed1cdea939714409f96fb52bfa956cb1881247977c007c1f4f3b69c",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": [
+       "events:table:lake:db.events:1001"
+      ]
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "t2": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "n"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "9d03691f69b6ec3e675dad4cd01c4b9f5b70f6edfe3c15baddb67994ded5d670",
+      "input_hashes": [
+       "missing:table:unresolved:3780933b747a5e680319f8a2f794b33fe615e243e51dffd80f78ab25aac667b1"
+      ],
+      "source_hash": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": [
+       "missing:table:unresolved:3780933b747a5e680319f8a2f794b33fe615e243e51dffd80f78ab25aac667b1"
+      ]
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "w3": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "pa",
+       "rows"
+      ],
+      "diagnostics": [],
+      "references": [
+       "snap"
+      ],
+      "upstream_ids": [
+       "t1"
+      ]
+     },
+     "keys": {
+      "definition_key": "4b3e25bbd2ee6b49bfe6c7badd7edd79231d77be496d6ca9de7a9c79a736903d",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "b029687966acd15d7f19cc4fa21e0b8353bc93bb7f44474e6fb1522c225f9ed8",
+      "input_hashes": [],
+      "source_hash": "4b3e25bbd2ee6b49bfe6c7badd7edd79231d77be496d6ca9de7a9c79a736903d",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "d4": [],
+     "t1": [
+      "snap"
+     ],
+     "t2": [],
+     "w3": [
+      "rows"
+     ]
+    },
+    "edges": [
+     [
+      "t1",
+      "w3",
+      "snap"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "t1",
+     "t2",
+     "d4",
+     "w3"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "catalog": "lake",
+    "op": "iceberg_create",
+    "rows": [
+     1,
+     2,
+     3
+    ],
+    "table": "db.events"
+   }
+  },
+  {
+   "causality": {},
+   "cells": {
+    "d4": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "607b207e3bc00461821f3c3bbb34b11b273da2196356a5fe0f33dce7aa599f21",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "93141c17ad3d23d73ebfd0692aa39522e944836520d31898b21fff3f39a70dd6",
+      "input_hashes": [
+       "out:table:empty:94c72b1a065ec2776a1de58c8543a5741d1f336e8610d0fba0270e84847fc0d4"
+      ],
+      "source_hash": "607b207e3bc00461821f3c3bbb34b11b273da2196356a5fe0f33dce7aa599f21",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [],
+      "tables": [
+       "out:table:empty:94c72b1a065ec2776a1de58c8543a5741d1f336e8610d0fba0270e84847fc0d4"
       ]
      },
      "staleness": {
@@ -200,213 +407,6 @@
    "step": {
     "catalog": "lake",
     "op": "iceberg_create",
-    "rows": [
-     1,
-     2,
-     3
-    ],
-    "table": "db.events"
-   }
-  },
-  {
-   "causality": {},
-   "cells": {
-    "d4": {
-     "analysis": {
-      "builtin_references": [
-       "print"
-      ],
-      "defines": [],
-      "diagnostics": [],
-      "references": [],
-      "upstream_ids": []
-     },
-     "keys": {
-      "definition_key": "607b207e3bc00461821f3c3bbb34b11b273da2196356a5fe0f33dce7aa599f21",
-      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "a6c9c3c7b93ceb792c359845902deb2fe73c53acea93662afe7c481b08868fbe",
-      "input_hashes": [
-       "out:table:empty:3e820c8997dfeb87493e8c84b74c92efce9edc00bc8d088fd21f515a27a675db"
-      ],
-      "source_hash": "607b207e3bc00461821f3c3bbb34b11b273da2196356a5fe0f33dce7aa599f21",
-      "upstream_hashes": []
-     },
-     "language": "python",
-     "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
-      "instances": {}
-     },
-     "resolved": {
-      "datasets": [],
-      "fetches": [],
-      "has_rw_mount": false,
-      "mounts": [],
-      "tables": [
-       "out:table:empty:3e820c8997dfeb87493e8c84b74c92efce9edc00bc8d088fd21f515a27a675db"
-      ]
-     },
-     "staleness": {
-      "reasons": [],
-      "status": "idle"
-     }
-    },
-    "t1": {
-     "analysis": {
-      "builtin_references": [
-       "print"
-      ],
-      "defines": [
-       "snap"
-      ],
-      "diagnostics": [],
-      "references": [],
-      "upstream_ids": []
-     },
-     "keys": {
-      "definition_key": "40199d3f7ed1cdea939714409f96fb52bfa956cb1881247977c007c1f4f3b69c",
-      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "8281db1ced19751ccc37c8762df174a74faf0ff04b13fc6240b43b6acd36be03",
-      "input_hashes": [
-       "events:table:lake:db.events:1001"
-      ],
-      "source_hash": "40199d3f7ed1cdea939714409f96fb52bfa956cb1881247977c007c1f4f3b69c",
-      "upstream_hashes": []
-     },
-     "language": "python",
-     "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
-      "instances": {}
-     },
-     "resolved": {
-      "datasets": [],
-      "fetches": [],
-      "has_rw_mount": false,
-      "mounts": [],
-      "tables": [
-       "events:table:lake:db.events:1001"
-      ]
-     },
-     "staleness": {
-      "reasons": [],
-      "status": "idle"
-     }
-    },
-    "t2": {
-     "analysis": {
-      "builtin_references": [],
-      "defines": [
-       "n"
-      ],
-      "diagnostics": [],
-      "references": [],
-      "upstream_ids": []
-     },
-     "keys": {
-      "definition_key": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
-      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "98ef90d85f550c9a62e32b61f720997c30a282e3fba7e31c9fd7f75a35e67d35",
-      "input_hashes": [
-       "missing:table:unresolved:4909466c4441999af8396ae8ec3c0e4c45deed19df3a0ac665a69f4108a9c39a"
-      ],
-      "source_hash": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
-      "upstream_hashes": []
-     },
-     "language": "python",
-     "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
-      "instances": {}
-     },
-     "resolved": {
-      "datasets": [],
-      "fetches": [],
-      "has_rw_mount": false,
-      "mounts": [],
-      "tables": [
-       "missing:table:unresolved:4909466c4441999af8396ae8ec3c0e4c45deed19df3a0ac665a69f4108a9c39a"
-      ]
-     },
-     "staleness": {
-      "reasons": [],
-      "status": "idle"
-     }
-    },
-    "w3": {
-     "analysis": {
-      "builtin_references": [],
-      "defines": [
-       "pa",
-       "rows"
-      ],
-      "diagnostics": [],
-      "references": [
-       "snap"
-      ],
-      "upstream_ids": [
-       "t1"
-      ]
-     },
-     "keys": {
-      "definition_key": "4b3e25bbd2ee6b49bfe6c7badd7edd79231d77be496d6ca9de7a9c79a736903d",
-      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "b029687966acd15d7f19cc4fa21e0b8353bc93bb7f44474e6fb1522c225f9ed8",
-      "input_hashes": [],
-      "source_hash": "4b3e25bbd2ee6b49bfe6c7badd7edd79231d77be496d6ca9de7a9c79a736903d",
-      "upstream_hashes": []
-     },
-     "language": "python",
-     "published": {
-      "artifact_uri": null,
-      "artifact_uris": {},
-      "instances": {}
-     },
-     "resolved": {
-      "datasets": [],
-      "fetches": [],
-      "has_rw_mount": false,
-      "mounts": [],
-      "tables": []
-     },
-     "staleness": {
-      "reasons": [],
-      "status": "idle"
-     }
-    }
-   },
-   "dag": {
-    "consumed_variables": {
-     "d4": [],
-     "t1": [
-      "snap"
-     ],
-     "t2": [],
-     "w3": [
-      "rows"
-     ]
-    },
-    "edges": [
-     [
-      "t1",
-      "w3",
-      "snap"
-     ]
-    ],
-    "fanout_cells": {},
-    "inactive_cells": [],
-    "topological_order": [
-     "t1",
-     "t2",
-     "d4",
-     "w3"
-    ],
-    "variant_groups": []
-   },
-   "dag_error": null,
-   "step": {
-    "catalog": "lake",
-    "op": "iceberg_create",
     "rows": [],
     "table": "db.out"
    }
@@ -467,7 +467,7 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "84224b2f740f1c686c85c099f3b41fa84d628adf5a124bec209347834c386f85",
+      "provenance_hash": "4a0143d48e6a9d48391873cefb41d6ed1d8f5c371c61a2037fa13928646e93f7",
       "status": "ok",
       "stdout": "None\n"
      },
@@ -543,9 +543,9 @@
      "keys": {
       "definition_key": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "7e68a23cd86b420accb32e18b0511055fbd6581b9127b21539f98cdbc0ba4d10",
+      "execution_key": "98ef90d85f550c9a62e32b61f720997c30a282e3fba7e31c9fd7f75a35e67d35",
       "input_hashes": [
-       "missing:table:unresolved:0f04414e2766a2981d24a668f8e44cd45d405a490ae8c052905a4c8955d798d7"
+       "missing:table:unresolved:4909466c4441999af8396ae8ec3c0e4c45deed19df3a0ac665a69f4108a9c39a"
       ],
       "source_hash": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "upstream_hashes": []
@@ -562,7 +562,7 @@
       "has_rw_mount": false,
       "mounts": [],
       "tables": [
-       "missing:table:unresolved:0f04414e2766a2981d24a668f8e44cd45d405a490ae8c052905a4c8955d798d7"
+       "missing:table:unresolved:4909466c4441999af8396ae8ec3c0e4c45deed19df3a0ac665a69f4108a9c39a"
       ]
      },
      "run": {
@@ -808,9 +808,9 @@
      "keys": {
       "definition_key": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "86a29914371ab1475e2cfbabbf5ae7170289d877904f7fb1897088ffe38fbdf9",
+      "execution_key": "519e638be6f1a78b2aa7218aefee758233d5fef49110840ec5534a33d63cdf42",
       "input_hashes": [
-       "missing:table:unresolved:0d1c34f1471e8fb6014e34c25375f1a3af32d22b8fabdd3e66dbb23ebea9194b"
+       "missing:table:unresolved:3e820c8997dfeb87493e8c84b74c92efce9edc00bc8d088fd21f515a27a675db"
       ],
       "source_hash": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "upstream_hashes": []
@@ -827,7 +827,7 @@
       "has_rw_mount": false,
       "mounts": [],
       "tables": [
-       "missing:table:unresolved:0d1c34f1471e8fb6014e34c25375f1a3af32d22b8fabdd3e66dbb23ebea9194b"
+       "missing:table:unresolved:3e820c8997dfeb87493e8c84b74c92efce9edc00bc8d088fd21f515a27a675db"
       ]
      },
      "staleness": {
@@ -1049,9 +1049,9 @@
      "keys": {
       "definition_key": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "42ce876fcb33ce297bc40618d4f78ac43e9f4e51f98306e92488893811a05303",
+      "execution_key": "fdcb4083fabc668c8b0ebe4c378765b4fc666bcc988d8becedfb6c09dbca14ae",
       "input_hashes": [
-       "missing:table:unresolved:d2a29a00594949deab1e31934d466506cc1ce5e280279990e48f2646ab3a77e9"
+       "missing:table:unresolved:8903860b693635cfca2c99fd6c05de7945d97f1049313844a54e25f23fb90437"
       ],
       "source_hash": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "upstream_hashes": []
@@ -1068,7 +1068,7 @@
       "has_rw_mount": false,
       "mounts": [],
       "tables": [
-       "missing:table:unresolved:d2a29a00594949deab1e31934d466506cc1ce5e280279990e48f2646ab3a77e9"
+       "missing:table:unresolved:8903860b693635cfca2c99fd6c05de7945d97f1049313844a54e25f23fb90437"
       ]
      },
      "run": {
@@ -1285,9 +1285,9 @@
      "keys": {
       "definition_key": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
-      "execution_key": "6019683ffb64d9a06de05d5667e14162fa1ec81fe9a410ea6ab7bd7a6539de61",
+      "execution_key": "7e68a23cd86b420accb32e18b0511055fbd6581b9127b21539f98cdbc0ba4d10",
       "input_hashes": [
-       "missing:table:unresolved:92fcfed7835ee90411920bd6fda446b74260a6e63c9b00e3d3d906968925e658"
+       "missing:table:unresolved:0f04414e2766a2981d24a668f8e44cd45d405a490ae8c052905a4c8955d798d7"
       ],
       "source_hash": "f96630922dfc449add106b955193b99b451fc40c546e13eb210782427899ba63",
       "upstream_hashes": []
@@ -1304,7 +1304,7 @@
       "has_rw_mount": false,
       "mounts": [],
       "tables": [
-       "missing:table:unresolved:92fcfed7835ee90411920bd6fda446b74260a6e63c9b00e3d3d906968925e658"
+       "missing:table:unresolved:0f04414e2766a2981d24a668f8e44cd45d405a490ae8c052905a4c8955d798d7"
       ]
      },
      "run": {
