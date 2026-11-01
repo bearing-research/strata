@@ -3825,6 +3825,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>@stochastic</code> with <code>@nocache off</code> stops its cell.</strong> <code># @stochastic</code>
+  implies <code># @nocache</code>, and an explicit <code># @nocache off</code> in the same cell, in
+  either order, is now the error <code>stochastic_nocache_conflict</code> on the
+  <code>@nocache off</code> line, so the cell does not run and its dependents are
+  skipped. Before, a later <code>@nocache off</code> turned caching back on for a cell
+  whose runs are samples. No annotation keys change. (#1350)</li>
 <li><strong>A markdown cell reads only <code>@app</code>.</strong> A markdown heading is a <code>#</code> line,
   so <code># @after &lt;id&gt;</code>, <code># @variant &lt;group&gt; &lt;name&gt;</code> or <code># @per_variant</code> at the
   top of a markdown cell was applied: it added an ordering edge or put the

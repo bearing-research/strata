@@ -3581,6 +3581,11 @@ so the ledger holds every sample side by side, each tracing back to the same
 inputs and source, and none of them is ever served as a cache hit. Use it for a
 seedless simulation, a random search, anything where the point is the spread
 of runs rather than the one answer.</p>
+<p><code>@stochastic</code> implies <code>@nocache</code>, so an explicit <code># @nocache off</code> beside it, in
+either order, contradicts it: the cell does not run, and fails with
+<code>stochastic_nocache_conflict</code> on the <code>@nocache off</code> line. As with every
+annotation, the last line of each key is the one read, so <code># @stochastic off</code>
+or a later <code># @nocache</code> settles it.</p>
 <hr />
 <h2 id="prompt-cell-annotations">Prompt Cell Annotations<a class="headerlink" href="#prompt-cell-annotations" title="Permanent link">&para;</a></h2>
 <p>Prompt cells (language <code>prompt</code>) accept an additional set of annotations that
