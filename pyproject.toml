@@ -148,6 +148,9 @@ dev = [
     "strata-client",
     # Dev-only too (for `ty` and the suite); the notebook must run without a pool.
     "strata-pool",
+    # Dev-only until Strata adopts it behind a facade: the vocabulary and the
+    # replay of the cellgraph traces need it, no runtime path does.
+    "cellgraph",
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -215,6 +218,7 @@ members = ["packages/strata-client", "packages/strata-pool"]
 [tool.uv.sources]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
+cellgraph = { git = "https://github.com/bearing-research/cellgraph", rev = "8ece49da08b80fc1afbbd4d84606351624c3484e" }
 
 [tool.uv.build-backend]
 # The distribution is strata-notebook; the import package is strata, under src/.

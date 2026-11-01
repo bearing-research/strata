@@ -2,16 +2,28 @@
 
 What today's Strata does, step by step, on small scenario notebooks, recorded as
 JSON. `cellgraph` must reproduce these traces with its legacy formats
-(`docs/internal/cell-graph-package.md`, section 10). Until then
-`test_cellgraph_traces.py` re-records every scenario and requires an exact match,
-so the baseline stays true.
+(`docs/internal/cell-graph-package.md`, section 10). `test_cellgraph_traces.py`
+re-records every scenario and requires an exact match, so the baseline stays
+true. `test_replay.py` replays every step through `cellgraph` and Strata's
+vocabulary (`src/strata/notebook/vocabulary.py`) and compares:
+
+- the DAG and `dag_error`;
+- names and diagnostics;
+- plannability and plans;
+- definition, execution and instance keys;
+- cache decisions.
+
+`KNOWN_RECORDED_BUGS` there lists what a trace records that is a Strata bug.
 
 ```
 scenarios/<name>/          notebook directory (cells/, notebook.toml, data) + steps.json
 traces/<name>.json         recorded output
 record.py                  recorder
 test_cellgraph_traces.py   guard
-test_cellgraph_r_directives_trace.py   the R scenario's guard, apart for CI's R job
+test_cellgraph_r_directives_trace.py   the R scenario's guard and replay, apart for CI's R job
+replay.py                  replays a trace through cellgraph
+test_replay.py             the replay of every other scenario
+test_vocabulary_parity.py  cellgraph's diagnostics against Strata's, on cells no scenario has
 ```
 
 ```bash

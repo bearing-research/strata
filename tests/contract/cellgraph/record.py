@@ -381,15 +381,11 @@ async def _run_cell(notebook_dir: Path, cell_id: str) -> tuple[dict[str, Any], A
     return {cell_id: entry}, ops._session
 
 
-def _apply(
-    step: dict[str, Any], notebook_dir: Path, registry: Path
-) -> tuple[dict[str, Any], Any] | None:
-    """Apply one step; a run step returns its results and the session it ran in."""
+def apply_file_op(step: dict[str, Any], notebook_dir: Path) -> bool:
+    """Apply a step that edits the notebook's files; False for any other step."""
     from strata.notebook import writer
 
     op = step["op"]
-    if op == "validate":
-        return None
     if op == "edit_cell":
         writer.write_cell(notebook_dir, step["cell"], step["source"])
     elif op == "add_cell":
@@ -413,7 +409,22 @@ def _apply(
         writer.set_variant_active(notebook_dir, step["group"], step["name"])
     elif op == "set_variant_mode":
         writer.set_variant_mode(notebook_dir, step["group"], step["mode"])
-    elif op == "set_env":
+    else:
+        return False
+    return True
+
+
+def _apply(
+    step: dict[str, Any], notebook_dir: Path, registry: Path
+) -> tuple[dict[str, Any], Any] | None:
+    """Apply one step; a run step returns its results and the session it ran in."""
+
+    op = step["op"]
+    if op == "validate":
+        return None
+    if apply_file_op(step, notebook_dir):
+        return None
+    if op == "set_env":
         if step.get("value") is None:
             os.environ.pop(step["name"], None)
         else:
