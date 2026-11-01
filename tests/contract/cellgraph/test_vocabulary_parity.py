@@ -66,6 +66,28 @@ CASES = {
         ("x", "python", "y = 1", None),
     ],
     "app_unreadable_lines": [("a", "python", "# @app show\n# @app hide\nx = 1", None)],
+    # Strata's checks run in turn, and some scan line by line.
+    "checks_in_strata_order": [
+        (
+            "o",
+            "python",
+            "# @wroker gpu\n# @timeout x\n# @mount bad\n# @nocache maybe\n# @fetch f\n"
+            "# @after ghost\n# @per_variant a b\n# @write_table y cat:ns.t overwrite\n"
+            "# @variant onlyone\ny = 1",
+            None,
+        )
+    ],
+    # One readable ``@variant`` line makes the cell a member: no ``variant_malformed``.
+    "variant_one_good_line": [("v", "python", "# @variant g a\n# @variant onlyone\nx = 1", None)],
+    # An unreadable ``@per_variant`` still fans out, so the overwrite check still applies.
+    "per_variant_unreadable_overwrite": [
+        (
+            "w",
+            "python",
+            "# @per_variant a b\n# @write_table y cat:ns.t overwrite\ny = 1",
+            None,
+        )
+    ],
     "table_checks": [
         (
             "t",
