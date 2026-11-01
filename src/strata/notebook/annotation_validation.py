@@ -619,8 +619,8 @@ def sql_connection_diagnostics(
     else:
         valid_by_name = {c.name: c for c in connections}
         malformed_by_name = {m.name: m for m in malformed_connections}
-        sql_line = _find_annotation_line(source, "sql")
         target = sql.connection
+        sql_line = _sql_connection_line(source, target)
         if target in valid_by_name:
             diagnostics.extend(_validate_referenced_connection(valid_by_name[target], sql_line))
         elif target in malformed_by_name:
@@ -1200,6 +1200,16 @@ def _collect_top_level_imports(source: str) -> set[str]:
             for alias in node.names:
                 names.add(alias.asname or alias.name)
     return names
+
+
+def _sql_connection_line(source: str, target: str) -> int | None:
+    """The last ``@sql`` line naming ``target``: later lines win, so it is the one in force."""
+    found = None
+    for lineno, line_text in iter_annotation_block(source):
+        tokens = line_text.strip().lstrip("#").split()
+        if tokens and tokens[0].lower() == "@sql" and f"connection={target}" in tokens:
+            found = lineno
+    return found
 
 
 def _find_annotation_line(source: str, directive: str, needle: str | None = None) -> int | None:

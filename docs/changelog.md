@@ -109,6 +109,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A SQL cell's connection problem points at the line in force.** With
+  more than one `# @sql` line, the later connection wins, but its
+  diagnostics pointed at the first `@sql` line. They now point at the last
+  line naming the connection. (#1352)
 - **A misspelled annotation is flagged.** A `# @key` no parser reads, such
   as `# @wroker gpu` or `# @timout 30`, was dropped without a word, so the
   cell ran on the default worker with the default timeout and `strata
