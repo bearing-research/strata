@@ -2285,6 +2285,9 @@ class NotebookSession:
         """
         annotations = parse_annotations(cell.source)
         merged_mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
+        if not merged_mounts:
+            # Outside the server the config is loaded from disk, too slow for every cell.
+            return [], False
 
         # Same storage options the executor fingerprints with, or a mount reached through
         # a credential lists differently and the cell never matches its own artifacts.
@@ -2318,6 +2321,8 @@ class NotebookSession:
         """
         annotations = parse_annotations(cell.source)
         tables = list(annotations.tables)
+        if not tables and annotations.sql is None:
+            return []
         config = self._lake_config()
         if annotations.sql is not None:
             # Only a SQL cell: the SQL package needs the [sql] extra.

@@ -275,3 +275,21 @@ def test_a_staleness_pass_reads_the_worker_registry_once(tmp_path, monkeypatch):
     # Nothing is held over between passes: the next one reads again.
     session.compute_staleness()
     assert len(reads) == 2
+
+
+def test_a_cell_with_no_mount_or_table_does_not_load_the_config(three_cell_notebook, monkeypatch):
+    """Outside the server the config is read from disk; doing so per cell made a
+    300-cell notebook's staleness pass take seconds."""
+    from strata.config import StrataConfig
+
+    notebook_dir, notebook_state = three_cell_notebook
+    session = NotebookSession(notebook_state, notebook_dir)
+    loads = []
+    real_load = StrataConfig.load
+    monkeypatch.setattr(
+        StrataConfig,
+        "load",
+        classmethod(lambda cls, *a, **k: loads.append(1) or real_load(*a, **k)),
+    )
+    session.compute_staleness()
+    assert loads == []
