@@ -88,6 +88,7 @@ def validate_cell_annotations(
     )
     variant_diagnostics = variant_diagnostics + _validate_recorded_inputs(cell)
     variant_diagnostics = variant_diagnostics + _validate_unreadable_values(cell)
+    variant_diagnostics = variant_diagnostics + _validate_stochastic_nocache(cell)
     variant_diagnostics = variant_diagnostics + _validate_unknown_annotations(cell)
     variant_diagnostics = variant_diagnostics + _validate_after(cell, notebook_state, dag)
     if cell.language == CellLanguage.PROMPT:
@@ -241,6 +242,7 @@ def _unreadable(code: str, key: str, value: str, why: str, line: int) -> Annotat
 
 
 _FLAG_VALUES = frozenset({"", "on", "off", "true", "false", "yes", "no", "1", "0"})
+_OFF_VALUES = frozenset({"off", "false", "no", "0"})
 # What ``@sql write=`` tells apart; ``on`` would read as off.
 _SQL_WRITE_VALUES = frozenset({"true", "false", "yes", "no", "1", "0"})
 _NEEDS_VALUE = frozenset(
@@ -330,6 +332,35 @@ def _validate_unreadable_values(cell: CellState) -> list[AnnotationDiagnostic]:
         if problem is not None:
             diagnostics.append(_unreadable(problem[0], key, value, problem[1], lineno))
     return diagnostics
+
+
+def _validate_stochastic_nocache(cell: CellState) -> list[AnnotationDiagnostic]:
+    """``@stochastic`` with an explicit ``@nocache off``, in either order, is an error.
+
+    Each key's last readable line decides, as in ``parse_annotations``.
+    """
+    last: dict[str, tuple[bool, int]] = {}
+    for lineno, line_text in iter_annotation_block(cell.source):
+        parsed = parse_annotation_directive(line_text)
+        if parsed is None:
+            continue
+        key, value = parsed
+        if key in ("stochastic", "nocache") and _value_problem(key, value, cell.language) is None:
+            last[key] = (value.lower() not in _OFF_VALUES, lineno)
+    stochastic, nocache = last.get("stochastic"), last.get("nocache")
+    if stochastic is None or not stochastic[0] or nocache is None or nocache[0]:
+        return []
+    return [
+        AnnotationDiagnostic(
+            severity=DiagnosticSeverity.ERROR,
+            code="stochastic_nocache_conflict",
+            message=(
+                "`@stochastic` runs the cell every time, so `@nocache off` cannot "
+                "turn its cache back on; remove one of them."
+            ),
+            line=nocache[1],
+        )
+    ]
 
 
 def _validate_module_export(

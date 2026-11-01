@@ -692,6 +692,12 @@ inputs and source, and none of them is ever served as a cache hit. Use it for a
 seedless simulation, a random search, anything where the point is the spread
 of runs rather than the one answer.
 
+`@stochastic` implies `@nocache`, so an explicit `# @nocache off` beside it, in
+either order, contradicts it: the cell does not run, and fails with
+`stochastic_nocache_conflict` on the `@nocache off` line. As with every
+annotation, the last line of each key is the one read, so `# @stochastic off`
+or a later `# @nocache` settles it.
+
 ---
 
 ## Prompt Cell Annotations

@@ -10,6 +10,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ## Unreleased
 
 ### Changed
+- **`@stochastic` with `@nocache off` stops its cell.** `# @stochastic`
+  implies `# @nocache`, and an explicit `# @nocache off` in the same cell, in
+  either order, is now the error `stochastic_nocache_conflict` on the
+  `@nocache off` line, so the cell does not run and its dependents are
+  skipped. Before, a later `@nocache off` turned caching back on for a cell
+  whose runs are samples. No annotation keys change. (#1350)
 - **A markdown cell reads only `@app`.** A markdown heading is a `#` line,
   so `# @after <id>`, `# @variant <group> <name>` or `# @per_variant` at the
   top of a markdown cell was applied: it added an ordering edge or put the

@@ -15,5 +15,10 @@
   },
   {
     "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "n1",
+    "source": "# @stochastic\n# @nocache off\nvalue = open(\"@NB@/plain.txt\").read().strip()\n"
   }
 ]

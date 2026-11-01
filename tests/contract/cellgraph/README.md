@@ -116,7 +116,7 @@ snapshot holds:
 | `variants_sweep` | Sweep group; add a variant; edit one variant; a collapse consumer |
 | `fanout` | `@per_variant`; chained fan-out; a consumer of the fan-out; per-instance keys |
 | `shadowing` | Two producers of `state` with a wired consumer; `input` defined upstream and bound by a mount downstream (#1342) |
-| `nocache` | A `@nocache` producer whose source stays the same while the file it reads changes; a downstream reader keyed by content |
+| `nocache` | A `@nocache` producer whose source stays the same while the file it reads changes; a downstream reader keyed by content; `@stochastic` with `@nocache off` (an error, so the reader is blocked) |
 | `tables` | A local Iceberg catalog; append a snapshot; `@write_table`; a table in a warehouse that does not exist (unresolved) |
 | `fetch_dataset` | `@fetch` resolved (pinned, local server) and unresolved; `@dataset` resolved, moved to a new version, and unresolved |
 | `credentials` | A mount whose credential is not configured, then configured, then removed |

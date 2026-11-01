@@ -393,6 +393,27 @@ def _validate_app(value: str, context: cg.ValidationContext) -> list[cg.Diagnost
     ]
 
 
+def _validate_stochastic(on: bool, context: cg.ValidationContext) -> list[cg.Diagnostic]:
+    """``@stochastic`` with an explicit ``@nocache off``: the last readable line of each."""
+    cell = context.cell
+    nocache = [
+        d for d in cg.GRAMMAR.directives(cell.source) if d.key == "nocache" and _problem(d) is None
+    ]
+    if not on or not nocache or _flag(nocache):
+        return []
+    return [
+        cg.Diagnostic(
+            "stochastic_nocache_conflict",
+            cg.Severity.ERROR,
+            "`@stochastic` runs the cell every time, so `@nocache off` cannot "
+            "turn its cache back on; remove one of them.",
+            cell.id,
+            "stochastic",
+            nocache[-1].line,
+        )
+    ]
+
+
 def _validate_per_variant(group: Any, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     source = context.cell.source
     if not any(write.mode == "overwrite" for write in parse_annotations(source).table_writes):
@@ -507,6 +528,7 @@ def _strata_annotations() -> list[cg.Annotation]:
             parse=_read(_flag),
             effects=lambda on: [cg.NoCache()] if on else [],
             in_key=False,
+            validate=_validate_stochastic,
         ),
         cg.Annotation("model", parse=_last(str), in_key=False),
         cg.Annotation("temperature", parse=_last(float), in_key=False),
