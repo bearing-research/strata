@@ -190,6 +190,8 @@ def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_S
             "STRATA_DEPLOYMENT_MODE": "personal",
             "STRATA_NOTEBOOK_WARM_POOL_SIZE": "0",
             "STRATA_LOG_LEVEL": "ERROR",
+            # Caches under ~/.strata (planning metadata, mounts, worker envs) start empty.
+            "HOME": str(_home(scenario)),
         }
     )
 
@@ -227,9 +229,12 @@ def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_S
         ),
         mock.patch.object(cli, "_quiet_notebook_logs", contextlib.nullcontext),
     ]
-    server = _FetchServer(notebook_dir / "serve") if (notebook_dir / "serve").is_dir() else None
-    os.chdir(notebook_dir)
+    server = None
     try:
+        # Inside the try: a busy port must still restore the environment.
+        if (notebook_dir / "serve").is_dir():
+            server = _FetchServer(notebook_dir / "serve")
+        os.chdir(notebook_dir)
         with contextlib.ExitStack() as stack:
             for patch in patches:
                 stack.enter_context(patch)
@@ -466,10 +471,14 @@ def _published(session: Any, cell: Any, variants: list[str]) -> dict[str, Any]:
     return {"artifact_uris": outputs, "artifact_uri": cell.artifact_uri, "instances": instances}
 
 
-def _keys(session: Any, cell: Any, variants: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _keys(
+    session: Any, cell: Any, variants: list[str], outside: Any
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """The cell's keys and their parts, and what its external inputs resolved to.
 
-    Each part comes from the call ``compute_staleness`` makes for it.
+    *outside* is what ``compute_staleness`` gathered for the cell, so an unresolved
+    component is the one staleness drew. When it gathered nothing (no DAG), the cell's
+    is read here, as staleness itself does for a cell it missed.
     """
     from vestigo.provenance import derive_subkey
 
@@ -481,7 +490,8 @@ def _keys(session: Any, cell: Any, variants: list[str]) -> tuple[dict[str, Any],
 
     source_hash = compute_source_hash(cell.source)
     env_hash = session.cell_env_hash(cell)
-    outside = session._outside_world_for(cell)
+    if outside is None:
+        outside = session._outside_world_for(cell)
     external = [
         outside.mount_fingerprints,
         outside.table_fingerprints,
@@ -558,7 +568,15 @@ def _snapshot(
 
     if session is None:
         session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
-    session.compute_staleness()
+    gathered: dict[str, Any] = {}
+    real_gather = session._outside_world_fingerprints
+
+    def gather() -> dict[str, Any]:
+        gathered.update(real_gather())
+        return gathered
+
+    with mock.patch.object(session, "_outside_world_fingerprints", gather):
+        session.compute_staleness()
     fanout = session.dag.fanout_cells if session.dag is not None else {}
     cells: dict[str, Any] = {}
     for cell in session.notebook_state.cells:
@@ -581,7 +599,7 @@ def _snapshot(
             "published": _published(session, cell, variants),
         }
         if not get_language_executor(cell.language).skips_execution_provenance:
-            entry["keys"], entry["resolved"] = _keys(session, cell, variants)
+            entry["keys"], entry["resolved"] = _keys(session, cell, variants, gathered.get(cell.id))
             if get_language_executor(cell.language).has_alternate_cache_scheme:
                 entry["keys"]["host_keyed"] = spy.calls.get(cell.id) if run is not None else None
         if run is not None and cell.id in run:
@@ -600,13 +618,46 @@ def _snapshot(
 # --- recording ---------------------------------------------------------------------
 
 
+def _home(name: str) -> Path:
+    return ROOT / f"{name}-home"
+
+
+@contextlib.contextmanager
+def _locked(name: str) -> Iterator[None]:
+    """Hold scenario *name*'s directories against another run on this machine.
+
+    :data:`ROOT` is fixed, so two checkouts (or two users) recording the same scenario
+    would delete each other's notebook. A lock per scenario keeps xdist parallel.
+    """
+    import fcntl  # POSIX only; the guard does not run on Windows.
+
+    ROOT.mkdir(parents=True, exist_ok=True)
+    # Shared like /tmp, so any user can record; only the creator may change the mode.
+    with contextlib.suppress(PermissionError):
+        ROOT.chmod(0o1777)
+    fd = os.open(ROOT / f"{name}.lock", os.O_RDWR | os.O_CREAT, 0o666)
+    try:
+        with contextlib.suppress(PermissionError):
+            os.fchmod(fd, 0o666)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def record(name: str) -> dict[str, Any]:
     """Record scenario *name* in a fresh copy under :data:`ROOT`; return its trace."""
+    with _locked(name):
+        return _record(name)
+
+
+def _record(name: str) -> dict[str, Any]:
     source = SCENARIOS / name
     notebook_dir = ROOT / name
     registry = ROOT / f"{name}-registry"
-    shutil.rmtree(notebook_dir, ignore_errors=True)
-    shutil.rmtree(registry, ignore_errors=True)
+    scratch = [notebook_dir, registry, _home(name)]
+    for path in scratch:
+        shutil.rmtree(path, ignore_errors=True)
     shutil.copytree(source, notebook_dir, ignore=shutil.ignore_patterns("steps.json"))
     for path in notebook_dir.rglob("*"):
         if path.suffix in _TEXT_SUFFIXES and path.is_file():
@@ -614,6 +665,7 @@ def record(name: str) -> dict[str, Any]:
     steps = json.loads((source / "steps.json").read_text().replace(PLACEHOLDER, str(notebook_dir)))
     _prepared_venv(notebook_dir)
     registry.mkdir(parents=True)
+    _home(name).mkdir()
 
     recorded = []
     with _recording(name, notebook_dir, registry) as spy:
@@ -625,16 +677,21 @@ def record(name: str) -> dict[str, Any]:
             recorded.append({"step": step, **_snapshot(notebook_dir, spy, run, session)})
     trace = {"trace_format": TRACE_FORMAT, "scenario": name, "steps": recorded}
     _check_no_machine_paths(trace)
-    shutil.rmtree(notebook_dir, ignore_errors=True)
-    shutil.rmtree(registry, ignore_errors=True)
+    for path in scratch:
+        shutil.rmtree(path, ignore_errors=True)
     return trace
 
 
 def _check_no_machine_paths(trace: dict[str, Any]) -> None:
     """A path of this machine in a trace would make it differ on the next one."""
     text = json.dumps(trace)
-    for path in {HERE.parents[2], Path.home(), Path(sys.executable).parent, ROOT.resolve()}:
-        if str(path) != str(ROOT) and str(path) in text:
+    # A directory above ROOT (a home of / or /tmp) is in every path; skip it.
+    named = {HERE.parents[2], Path.home(), Path(sys.executable).parent}
+    named = {path for path in named if not ROOT.is_relative_to(path)}
+    if ROOT.resolve() != ROOT:
+        named.add(ROOT.resolve())
+    for path in named:
+        if str(path) in text:
             raise AssertionError(f"the trace names {path}, a path of this machine")
 
 
@@ -669,7 +726,8 @@ def first_difference(expected: Any, actual: Any, path: str = "") -> str | None:
         if len(expected) != len(actual):
             return f"{path}[{min(len(expected), len(actual))}]"
         return None
-    return None if expected == actual else path
+    # ``True == 1 == 1.0`` in Python; the JSON says otherwise.
+    return None if type(expected) is type(actual) and expected == actual else path
 
 
 def _lookup(trace: Any, path: str) -> Any:
@@ -687,6 +745,8 @@ def _lookup(trace: Any, path: str) -> Any:
 
 def describe_difference(expected: dict[str, Any], actual: dict[str, Any]) -> str | None:
     """The first gated difference, with both values; None when the traces match."""
+    # Compared as written: a tuple is the list ``--update`` would write.
+    actual = json.loads(dumps(actual))
     path = first_difference(without_ungated(expected), without_ungated(actual))
     if path is None:
         return None
@@ -695,6 +755,12 @@ def describe_difference(expected: dict[str, Any], actual: dict[str, Any]) -> str
         f"  recorded: {json.dumps(_lookup(expected, path))[:400]}\n"
         f"  now:      {json.dumps(_lookup(actual, path))[:400]}"
     )
+
+
+def difference_from_trace(name: str) -> str | None:
+    """Re-record *name* and describe how it differs from ``traces/<name>.json``."""
+    expected = json.loads((TRACES / f"{name}.json").read_text())
+    return describe_difference(expected, record(name))
 
 
 def main(argv: list[str] | None = None) -> int:

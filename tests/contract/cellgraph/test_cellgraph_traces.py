@@ -15,20 +15,17 @@ import re
 
 import pytest
 
-from tests.contract.cellgraph import record
-
 if os.name == "nt":
     pytest.skip("the notebook subsystem is not run on Windows", allow_module_level=True)
 
+from tests.contract.cellgraph import record  # noqa: E402
 
-@pytest.mark.parametrize("name", record.scenario_names())
+
+# A scenario that needs more than the dev environment has its own test file, so the
+# CI job that has the tool runs only that one.
+@pytest.mark.parametrize("name", [n for n in record.scenario_names() if n not in record.REQUIRES])
 def test_the_trace_is_reproduced(name):
-    reason = record.missing_requirement(name)
-    if reason is not None:
-        pytest.skip(reason)
-    expected = json.loads((record.TRACES / f"{name}.json").read_text())
-
-    difference = record.describe_difference(expected, record.record(name))
+    difference = record.difference_from_trace(name)
 
     assert difference is None, (
         f"{difference}\nIf this change is intended, re-record with "
@@ -54,6 +51,26 @@ def test_the_difference_names_its_path():
     changed = json.loads(json.dumps(trace))
     changed["steps"][0]["cells"]["c1"]["keys"]["input_hashes"][2] = "d"
     assert record.first_difference(trace, changed) == "steps[0].cells.c1.keys.input_hashes[2]"
+
+
+def test_a_bool_is_not_an_int():
+    trace = {"steps": [{"cells": {"c1": {"run": {"cache_hit": True}}}}]}
+    changed = {"steps": [{"cells": {"c1": {"run": {"cache_hit": 1}}}}]}
+    assert record.first_difference(trace, changed) == "steps[0].cells.c1.run.cache_hit"
+
+
+def test_values_are_compared_as_written():
+    trace = {"steps": [{"cells": {"c1": {"keys": {"input_hashes": ["a", "b"]}}}}]}
+    as_tuple = {"steps": [{"cells": {"c1": {"keys": {"input_hashes": ("a", "b")}}}}]}
+    assert record.describe_difference(trace, as_tuple) is None
+
+
+def test_every_scenario_with_a_requirement_has_its_own_test():
+    for name in record.REQUIRES:
+        assert (
+            f'record.difference_from_trace("{name}")'
+            in (record.HERE / f"test_cellgraph_{name}_trace.py").read_text()
+        )
 
 
 def test_the_causality_map_is_outside_the_gate():

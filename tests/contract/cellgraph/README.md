@@ -11,6 +11,7 @@ scenarios/<name>/          notebook directory (cells/, notebook.toml, data) + st
 traces/<name>.json         recorded output
 record.py                  recorder
 test_cellgraph_traces.py   guard
+test_cellgraph_r_directives_trace.py   the R scenario's guard, apart for CI's R job
 ```
 
 ```bash
@@ -68,7 +69,7 @@ snapshot holds:
 
 ## Determinism
 
-- **Nonces.** The five places an unresolved input draws a random component take it
+- **Nonces.** The six places an unresolved input draws a random component take it
   from `strata.notebook.nonce.unresolved_nonce`. The recorder replaces that one
   function with a counter seeded per scenario. pyiceberg's snapshot id generator is
   replaced the same way, since a table's snapshot id is in the keys of the cells
@@ -76,13 +77,15 @@ snapshot holds:
 - **Paths.** A `file://` mount's URI is in its key as written, so every scenario is
   recorded at `/tmp/strata-cellgraph/<name>` on every machine. Scenario files write
   it as `@NB@`. The recorder refuses a trace that names the repository, the home
-  directory or the interpreter.
+  directory or the interpreter. Since the path is fixed, a lock per scenario keeps
+  two runs on one machine (two checkouts, two users) from deleting each other's copy.
 - **Mtimes.** A local mount's listing hashes each file's mtime, so the recorder
   gives every file one mtime after each step.
 - **Environment.** No scenario has a `uv.lock`. Cells run with the dev interpreter
   and `--no-sync`, as the harness tests do. The recorder clears `STRATA_*` and proxy
-  variables, sets `STRATA_ARTIFACT_DIR` to a per-scenario registry, and turns warm
-  pools off.
+  variables, sets `STRATA_ARTIFACT_DIR` to a per-scenario registry and `HOME` to an
+  empty per-scenario directory (so no `~/.strata` cache is read or written), and
+  turns warm pools off.
 - **Content digests.** Values are ints, strings, lists and dicts (`json/object`),
   except where a feature needs Arrow: `@write_table` (`tables`) and the SQL result
   (`sql`). Those digests follow the locked pyarrow.
@@ -130,5 +133,5 @@ snapshot holds:
   listing nonces) needs a remote URI; offline it would also need a stub of the
   filesystem library. The nonce routing of both sites is pinned by
   `tests/notebook/test_unresolved_nonce.py`.
-- **`r_directives` needs `Rscript`.** It is skipped where R is not installed, and
-  runs in CI's "R Tests" job.
+- **`r_directives` needs `Rscript`.** Its guard is its own file, skipped where R is
+  not installed and run in CI's "R Tests" job.
