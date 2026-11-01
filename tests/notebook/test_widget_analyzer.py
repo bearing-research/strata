@@ -7,14 +7,12 @@ participation as a producer.
 
 from __future__ import annotations
 
+import cellgraph as cg
 import pytest
 
 from strata.notebook.dag import CellAnalysisWithId, NotebookDag
-from strata.notebook.languages.analyzer import (
-    analyze_cell_by_language,
-    get_language_analyzer,
-)
-from strata.notebook.models import CellLanguage, CellState
+from strata.notebook.models import CellLanguage
+from strata.notebook.vocabulary import WidgetAnalyzer
 from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
 
 
@@ -108,15 +106,15 @@ class TestAnalyzeWidgetCell:
 
 class TestRegistryDispatch:
     def test_widget_language_dispatches_to_widget_analyzer(self):
-        assert get_language_analyzer(CellLanguage.WIDGET).__class__.__name__ == "_WidgetAnalyzer"
+        assert isinstance(cg.get_language_analyzer(CellLanguage.WIDGET.value), WidgetAnalyzer)
 
-    def test_analyze_cell_by_language_returns_defines_no_references(self):
-        cell = CellState(
+    def test_the_analyzer_returns_defines_no_references(self):
+        cell = cg.Cell(
             id="w1",
             source="alpha = slider(0, 1, default=0.5)\nbeta = number(default=3)",
-            language=CellLanguage.WIDGET,
+            language=CellLanguage.WIDGET.value,
         )
-        analyzed = analyze_cell_by_language(cell, session=None)
+        analyzed = cg.get_language_analyzer(CellLanguage.WIDGET.value).analyze(cell)
         assert analyzed.defines == ["alpha", "beta"]
         assert analyzed.references == []
         assert analyzed.mutation_defines == []

@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-import cellgraph as cg
-
 from strata.notebook.models import CellStatus
 
 if TYPE_CHECKING:
@@ -87,17 +85,14 @@ class CascadePlanner:
 
     def _build_plan(self, target_cell_id: str) -> CascadePlan | None:
         """Build a cascade plan for *target_cell_id*, or None if none is needed."""
-        dag, analysis = self.session.dag, self.session.analysis
-        if dag is None or analysis is None:
+        dag = self.session.dag
+        if dag is None:
             return None
 
-        try:
-            # Ready cells stay in the plan, as skipped steps.
-            step_cells = analysis.plan(target_cell_id, ready=lambda _cell_id: False)
-        except cg.NotPlannableError:
-            # Its upstreams still run, so the refusal shows on the step that has it.
-            reachable = dag.upstream_reachable(target_cell_id)
-            step_cells = [cid for cid in dag.topological_order if cid in reachable]
+        # Not ``analysis.plan``: it drops ready cells, which stay here as skipped steps,
+        # and refuses a blocked target, whose upstreams still run.
+        reachable = dag.upstream_reachable(target_cell_id)
+        step_cells = [cid for cid in dag.topological_order if cid in reachable]
 
         steps: list[CascadeStep] = []
         for step_cell_id in step_cells:

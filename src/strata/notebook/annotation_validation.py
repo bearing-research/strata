@@ -89,8 +89,10 @@ def validate_cell_annotations(
         language_checks = _validate_module_export(cell, notebook_state) + _validate_worker(
             cell, notebook_state
         )
-    ca = analysis_with(cell, notebook_state, analysis).cells[cell.id]
-    diagnostics = strata_diagnostics(ca, language_checks)
+    analysis = analysis_with(cell, notebook_state, analysis)
+    diagnostics = strata_diagnostics(
+        analysis.cells[cell.id], language_checks, without_dag=bool(analysis.structural_errors)
+    )
     if cell.language == CellLanguage.SQL:
         # After the connection's, which the SQL analyzer reports.
         diagnostics += _validate_sql_tables(cell, notebook_state)

@@ -244,10 +244,10 @@ def _with_result(apply: Callable[[CellAnnotations, str], None], field: str) -> c
 
 
 def _parse_loop(directives: list[cg.Directive]) -> Any:
-    """``@loop`` and ``@loop_until`` in source order, then the checks that block a loop.
+    """``@loop`` and ``@loop_until`` in source order.
 
     Every line is folded, readable or not, as ``parse_annotations`` does, so a bad
-    token does not hide a good ``carry=``; each problem is reported.
+    token does not hide a good ``carry=``; each unreadable one is reported.
     """
     errors = [e for e in map(_problem, directives) if e is not None]
     result = CellAnnotations()
@@ -258,41 +258,8 @@ def _parse_loop(directives: list[cg.Directive]) -> Any:
             result.loop = LoopAnnotation(max_iter=0, carry="", until_expr=directive.value)
         else:
             result.loop.until_expr = directive.value
-    loop = result.loop
-    assert loop is not None
-    # ``_find_annotation_line(source, "loop")``: the first line whose key starts with it.
-    line = directives[0].line
-    until_line = next((d.line for d in directives if d.key == "loop_until"), line)
-    if loop.max_iter <= 0:
-        errors.append(
-            cg.AnnotationError(
-                "`@loop` requires a positive `max_iter=<N>`. "
-                "The loop cell must declare a safety bound on the iteration count.",
-                code="loop_missing_max_iter",
-                line=line,
-            )
-        )
-    if not loop.carry:
-        errors.append(
-            cg.AnnotationError(
-                "`@loop` requires `carry=<variable>`. "
-                "The carry variable is threaded between iterations.",
-                code="loop_missing_carry",
-                line=line,
-            )
-        )
-    if loop.until_expr:
-        try:
-            ast.parse(loop.until_expr, mode="eval")
-        except SyntaxError as exc:
-            errors.append(
-                cg.AnnotationError(
-                    f"`@loop_until` expression is not a valid Python expression: {exc.msg}.",
-                    code="loop_until_syntax_error",
-                    line=until_line,
-                )
-            )
-    return _partial(loop, errors)
+    assert result.loop is not None
+    return _partial(result.loop, errors)
 
 
 def _loop_effects(loop: Any) -> list[cg.Effect]:
@@ -311,23 +278,68 @@ def _loop_effects(loop: Any) -> list[cg.Effect]:
 
 
 def _validate_loop(loop: Any, context: cg.ValidationContext) -> list[cg.Diagnostic]:
+    """The checks that block a loop, after the mount and table checks."""
+    cell = context.cell
+    if cell.language in _NO_INPUT_CHECKS:
+        return []
+    # ``_find_annotation_line(source, "loop")``: the first line whose key starts with it.
+    line = _find_annotation_line(cell.source, "loop")
+    diagnostics: list[cg.Diagnostic] = []
+    if loop.max_iter <= 0:
+        diagnostics.append(
+            cg.Diagnostic(
+                "loop_missing_max_iter",
+                cg.Severity.ERROR,
+                "`@loop` requires a positive `max_iter=<N>`. "
+                "The loop cell must declare a safety bound on the iteration count.",
+                cell.id,
+                "loop",
+                line,
+            )
+        )
+    if not loop.carry:
+        diagnostics.append(
+            cg.Diagnostic(
+                "loop_missing_carry",
+                cg.Severity.ERROR,
+                "`@loop` requires `carry=<variable>`. "
+                "The carry variable is threaded between iterations.",
+                cell.id,
+                "loop",
+                line,
+            )
+        )
     if loop.carry and context.defines and loop.carry not in context.defines:
-        return [
+        diagnostics.append(
             cg.Diagnostic(
                 "loop_carry_unknown",
                 cg.Severity.WARN,
                 f"`@loop carry={loop.carry}` does not match any top-level assignment in the "
                 f"cell. The cell must rebind `{loop.carry}` each iteration for the loop to "
                 "make progress.",
-                context.cell.id,
+                cell.id,
                 "loop",
-                _find_annotation_line(context.cell.source, "loop"),
+                line,
             )
-        ]
-    return []
+        )
+    if loop.until_expr:
+        try:
+            ast.parse(loop.until_expr, mode="eval")
+        except SyntaxError as exc:
+            diagnostics.append(
+                cg.Diagnostic(
+                    "loop_until_syntax_error",
+                    cg.Severity.ERROR,
+                    f"`@loop_until` expression is not a valid Python expression: {exc.msg}.",
+                    cell.id,
+                    "loop",
+                    _find_annotation_line(cell.source, "loop_until") or line,
+                )
+            )
+    return diagnostics
 
 
-# The cells ``validate_cell_annotations`` runs no mount or table checks on.
+# The cells ``validate_cell_annotations`` ran no mount, table or loop checks on.
 _NO_INPUT_CHECKS = {
     CellLanguage.MARKDOWN.value,
     CellLanguage.PROMPT.value,
@@ -666,8 +678,17 @@ def parse_values(source: str, language: str) -> tuple[dict[str, Any], list[cg.Di
     """Each present annotation's parsed value, and the directives the language reads.
 
     The vocabulary's parsers alone, as cellgraph's parse phase runs them: no names,
-    no effects, no validators.
+    no effects, no validators. The values are the caller's own.
     """
+    values, directives = _parsed_values(source, language)
+    if not directives:
+        # Most cells: nothing to copy.
+        return {}, []
+    return copy.deepcopy(values), list(directives)
+
+
+@functools.lru_cache(maxsize=4096)
+def _parsed_values(source: str, language: str) -> tuple[dict[str, Any], tuple[cg.Directive, ...]]:
     vocabulary = strata_vocabulary()
     keys = cg.directive_keys(cg.get_language_analyzer(language))
     directives = vocabulary.grammar.directives(source, keys=keys)
@@ -686,12 +707,11 @@ def parse_values(source: str, language: str) -> tuple[dict[str, Any], list[cg.Di
         except (cg.AnnotationError, ExceptionGroup):
             continue
         values[annotation.key] = value.value if isinstance(value, cg.Partial) else value
-    return values, directives
+    return values, tuple(directives)
 
 
 def annotations_from(values: dict[str, Any], directives: list[cg.Directive]) -> CellAnnotations:
     """``parse_annotations``'s result, built from the vocabulary's parsed values."""
-    values = copy.deepcopy(values)
     variant = values.get("variant")
     # Each line sets ``nocache`` as it is read, and an ``@stochastic`` that is on turns it on.
     nocache = False
@@ -784,19 +804,29 @@ def _strata_order(d: cg.Diagnostic) -> tuple[int, int]:
     return _LANGUAGE, 0
 
 
+# The group checks Strata skipped when the notebook had no DAG.
+_GROUP_CODES = frozenset(_PER_VARIANT_CODES[2:])
+
+
 def strata_diagnostics(
-    cell: cg.CellAnalysis, language_checks: list[AnnotationDiagnostic] | None = None
+    cell: cg.CellAnalysis,
+    language_checks: list[AnnotationDiagnostic] | None = None,
+    *,
+    without_dag: bool = False,
 ) -> list[AnnotationDiagnostic]:
     """The cell's diagnostics as Strata reports them: its codes, wording and order.
 
     *language_checks*, the host's own, go where the language's checks begin. Structural
     ones are not here: a cycle or a variant collision is the notebook's ``dag_error``,
-    not a cell's.
+    not a cell's. *without_dag*, when there is one, drops the group checks.
     """
-    found = sorted(
-        (d for d in cell.diagnostics if d.code not in cg.analysis.STRUCTURAL_CODES),
-        key=_strata_order,
-    )
+    skipped = set(cg.analysis.STRUCTURAL_CODES)
+    if without_dag:
+        skipped |= _GROUP_CODES
+    if cell.language in _NO_INPUT_CHECKS:
+        # A seed is one of the loop checks.
+        skipped.add("seed_unknown_cell")
+    found = sorted((d for d in cell.diagnostics if d.code not in skipped), key=_strata_order)
     split = next((i for i, d in enumerate(found) if _strata_order(d)[0] == _LANGUAGE), len(found))
     converted = [
         AnnotationDiagnostic(

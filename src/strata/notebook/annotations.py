@@ -367,34 +367,6 @@ class CellAnnotations:
         }
 
 
-def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
-    """Return ``(lineno, directive, value)`` for each unparseable input or output directive.
-
-    ``@mount``, ``@table``, ``@fetch``, ``@dataset``, ``@write_table`` and ``@output_dir``
-    are dropped when malformed rather than guessed at; the validator turns these into
-    errors that keep the cell from running.
-    """
-    unreadable: list[tuple[int, str, str]] = []
-    for lineno, line in iter_annotation_block(source):
-        parsed = parse_annotation_directive(line)
-        if parsed is None:
-            continue
-        key, value = parsed
-        if key == "mount" and _parse_mount_annotation(value) is None:
-            unreadable.append((lineno, key, value))
-        elif key == "table" and _parse_table_annotation(value) is None:
-            unreadable.append((lineno, key, value))
-        elif key == "fetch" and _parse_fetch_annotation(value) is None:
-            unreadable.append((lineno, key, value))
-        elif key == "dataset" and _parse_dataset_annotation(value) is None:
-            unreadable.append((lineno, key, value))
-        elif key == "write_table" and _parse_write_table_annotation(value) is None:
-            unreadable.append((lineno, key, value))
-        elif key == "output_dir" and not value.isidentifier():
-            unreadable.append((lineno, key, value))
-    return unreadable
-
-
 # A markdown heading is a ``#`` line, so markdown reads only ``@app`` (the app view
 # and export match it themselves); every other ``# @`` line there is prose.
 MARKDOWN_DIRECTIVE_KEYS = frozenset({"app"})
@@ -409,7 +381,8 @@ def parse_annotations(source: str, language: CellLanguage | str | None = None) -
         return CellAnnotations()
     from strata.notebook.vocabulary import annotations_from, parse_values
 
-    return annotations_from(*parse_values(source, str(language or CellLanguage.PYTHON)))
+    values, directives = parse_values(source, str(language or CellLanguage.PYTHON))
+    return annotations_from(values, directives) if directives else CellAnnotations()
 
 
 _VALID_CACHE_KINDS = frozenset({"fingerprint", "forever", "session", "snapshot", "ttl"})

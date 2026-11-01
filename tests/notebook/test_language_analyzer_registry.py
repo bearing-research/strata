@@ -1,93 +1,43 @@
-"""Tests for the per-language analyzer registry surface.
-
-Covers registration, lookup and the error for an unregistered language; per-language
-analysis is covered end to end by the DAG and analyzer suites.
-"""
+"""Each language's analyzer is cellgraph's: the one registered there is the one the
+session's DAG reads."""
 
 from __future__ import annotations
 
+import cellgraph as cg
 import pytest
 
-from strata.notebook.languages import (
-    AnalyzedCell,
-    UnknownLanguageError,
-    analyze_cell_by_language,
-    get_language_analyzer,
-    register_language_analyzer,
-)
-from strata.notebook.models import CellLanguage, CellState
+from strata.notebook.models import CellLanguage
+from strata.notebook.parser import parse_notebook
+from strata.notebook.session import NotebookSession
+from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
 
-def _make_cell(language: CellLanguage, source: str = "") -> CellState:
-    return CellState(id="c1", source=source, language=language, order=0)
+@pytest.mark.parametrize("language", list(CellLanguage))
+def test_every_language_has_an_analyzer(language):
+    assert cg.get_language_analyzer(language.value) is not None
 
 
-class TestBuiltInRegistrations:
-    """The four shipped languages must resolve at import time."""
+def test_the_session_reads_the_registered_analyzer(tmp_path):
+    class FakeAnalyzer:
+        owns_key = True
 
-    @pytest.mark.parametrize(
-        "language",
-        [
-            CellLanguage.PYTHON,
-            CellLanguage.PROMPT,
-            CellLanguage.SQL,
-            CellLanguage.MARKDOWN,
-        ],
-    )
-    def test_shipped_language_registered(self, language):
-        assert get_language_analyzer(language) is not None
+        def analyze(self, cell):
+            return cg.Analyzed(defines=["fake"])
 
+        def normalize(self, body):
+            return body
 
-class TestDispatch:
-    """The dispatch helper returns the language-specific analysis."""
-
-    def test_python_extracts_defines_and_references(self, monkeypatch):
-        # The Python adapter ignores the session, so no NotebookSession is needed.
-        cell = _make_cell(CellLanguage.PYTHON, "y = x + 1")
-        analyzed = analyze_cell_by_language(cell, session=object())
-        assert "y" in analyzed.defines
-        assert "x" in analyzed.references
-
-    def test_markdown_returns_empty(self):
-        cell = _make_cell(CellLanguage.MARKDOWN, "# Heading\n\nProse.")
-        analyzed = analyze_cell_by_language(cell, session=object())
-        assert analyzed.defines == []
-        assert analyzed.references == []
-        assert analyzed.mutation_defines == []
-
-
-class TestErrors:
-    """Missing-language path must fail loudly, not silently empty out."""
-
-    def test_unregistered_language_raises_unknownlanguageerror(self):
-        fake_lang = "totally-not-a-real-language"
-        with pytest.raises(UnknownLanguageError):
-            get_language_analyzer(fake_lang)  # type: ignore[arg-type]
-
-
-class TestRegisterIsExtensible:
-    """A new language can register without touching existing dispatch sites."""
-
-    def test_register_overrides_existing(self):
-        """Re-registering a language replaces the prior adapter.
-
-        Same as the SQL ``DriverAdapter`` registry; tests rely on it to swap in fakes.
-        """
-
-        captured: list[str] = []
-
-        class FakeAnalyzer:
-            def analyze(self, cell, session):  # noqa: ANN001
-                captured.append(cell.source)
-                return AnalyzedCell(defines=["fake"], references=[])
-
-        original = get_language_analyzer(CellLanguage.MARKDOWN)
-        try:
-            register_language_analyzer(CellLanguage.MARKDOWN, FakeAnalyzer())
-            cell = _make_cell(CellLanguage.MARKDOWN, "x")
-            analyzed = analyze_cell_by_language(cell, session=object())
-            assert analyzed.defines == ["fake"]
-            assert captured == ["x"]
-        finally:
-            # Restore so unrelated tests don't see the fake.
-            register_language_analyzer(CellLanguage.MARKDOWN, original)
+    nb = create_notebook(tmp_path, "Registry", initialize_environment=False)
+    add_cell_to_notebook(nb, "m", None, language="markdown")
+    write_cell(nb, "m", "Prose.")
+    add_cell_to_notebook(nb, "c", "m")
+    write_cell(nb, "c", "print(fake)\n")
+    original = cg.get_language_analyzer("markdown")
+    cg.register_language_analyzer("markdown", FakeAnalyzer())
+    try:
+        session = NotebookSession(parse_notebook(nb), nb)
+    finally:
+        cg.register_language_analyzer("markdown", original)
+    markdown, reader = session.notebook_state.cells
+    assert markdown.defines == ["fake"]
+    assert reader.upstream_ids == ["m"]

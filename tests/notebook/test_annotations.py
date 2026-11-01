@@ -396,3 +396,16 @@ class TestNocacheAnnotation:
     def test_nocache_default_false(self):
         result = parse_annotations("print('x')\n")
         assert result.nocache is False
+
+
+def test_each_parse_hands_out_its_own_values():
+    """The parse is remembered by source; a caller's changes stay its own."""
+    source = "# @mount d file:///tmp/x\n# @env K=v\n# @after a\nx = 1\n"
+    first = parse_annotations(source)
+    first.mounts[0].uri = "file:///elsewhere"
+    first.env["K"] = "changed"
+    first.after.append("b")
+    second = parse_annotations(source)
+    assert second.mounts[0].uri == "file:///tmp/x"
+    assert second.env == {"K": "v"}
+    assert second.after == ["a"]
