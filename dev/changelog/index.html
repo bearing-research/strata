@@ -3924,6 +3924,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A SQL cell's connection problem points at the line in force.</strong> With
+  more than one <code># @sql</code> line, the later connection wins, but its
+  diagnostics pointed at the first <code>@sql</code> line. They now point at the last
+  line naming the connection. (#1352)</li>
 <li><strong>A misspelled annotation is flagged.</strong> A <code># @key</code> no parser reads, such
   as <code># @wroker gpu</code> or <code># @timout 30</code>, was dropped without a word, so the
   cell ran on the default worker with the default timeout and <code>strata
