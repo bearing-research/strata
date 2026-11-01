@@ -1,0 +1,1780 @@
+{
+ "scenario": "mounts",
+ "steps": [
+  {
+   "causality": {},
+   "cells": {
+    "m1": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_notebook"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "2a3d94cf4890e0833835d4c08c5c589050cc541ab723cc2fcee853fbb4c55886",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "m2": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_cell"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "m3": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_annotation"
+      ],
+      "diagnostics": [
+       [
+        "mount_shadows_notebook",
+        "info",
+        1
+       ]
+      ],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "r5": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "note"
+      ],
+      "upstream_ids": [
+       "w4"
+      ]
+     },
+     "keys": {
+      "definition_key": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "2660f68bc50ba7327e8d240b79fce2fc4f75ecdaaed1c7889ab1d1da62edbade",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "w4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "note"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "67ddbff80212c1cd76bb5d6ace5aff52d8b592fede96e0ef8e6a151477836e3f",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": true,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "m1": [],
+     "m2": [],
+     "m3": [],
+     "r5": [],
+     "w4": [
+      "note"
+     ]
+    },
+    "edges": [
+     [
+      "w4",
+      "r5",
+      "note"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "m1",
+     "m2",
+     "m3",
+     "w4",
+     "r5"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "validate"
+   }
+  },
+  {
+   "causality": {
+    "r5": {
+     "details": [
+      {
+       "cell_id": "w4",
+       "cell_name": "note",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "m1": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_notebook"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "2a3d94cf4890e0833835d4c08c5c589050cc541ab723cc2fcee853fbb4c55886",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "2a3d94cf4890e0833835d4c08c5c589050cc541ab723cc2fcee853fbb4c55886",
+      "status": "ok",
+      "stdout": "['one.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m2": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_cell"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "status": "ok",
+      "stdout": "['one.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m3": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_annotation"
+      ],
+      "diagnostics": [
+       [
+        "mount_shadows_notebook",
+        "info",
+        1
+       ]
+      ],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "status": "ok",
+      "stdout": "['one.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "r5": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "note"
+      ],
+      "upstream_ids": [
+       "w4"
+      ]
+     },
+     "keys": {
+      "definition_key": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f5dfd9a4a4e1fd02ebf6ba8f6353af3d2296876f9039232959fa6df64e679467",
+      "input_hashes": [
+       "644756c1657ed7f8f205c202953d301998ed5f645cb21a64cbe8853d309ed17b",
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "upstream_hashes": [
+       "644756c1657ed7f8f205c202953d301998ed5f645cb21a64cbe8853d309ed17b"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "f5dfd9a4a4e1fd02ebf6ba8f6353af3d2296876f9039232959fa6df64e679467",
+      "status": "ok",
+      "stdout": "n\n"
+     },
+     "staleness": {
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
+     }
+    },
+    "w4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "note"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "67ddbff80212c1cd76bb5d6ace5aff52d8b592fede96e0ef8e6a151477836e3f",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-mounts_cell_w4_var_note@v=1",
+      "artifact_uris": {
+       "note": {
+        "artifact": "nb_cellgraph-mounts_cell_w4_var_note@v=1",
+        "content_sha256": "a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333",
+        "provenance_hash": "ec980f060e0091742d5bea8c39af32205ffc3e010e95027fda0ebb5c318c09e0"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": true,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "67ddbff80212c1cd76bb5d6ace5aff52d8b592fede96e0ef8e6a151477836e3f",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "m1": [],
+     "m2": [],
+     "m3": [],
+     "r5": [],
+     "w4": [
+      "note"
+     ]
+    },
+    "edges": [
+     [
+      "w4",
+      "r5",
+      "note"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "m1",
+     "m2",
+     "m3",
+     "w4",
+     "r5"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "run_all"
+   }
+  },
+  {
+   "causality": {
+    "m1": {
+     "details": [
+      {
+       "cell_id": "m1",
+       "cell_name": "from_notebook",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "source_changed"
+      }
+     ],
+     "reason": "self"
+    },
+    "r5": {
+     "details": [
+      {
+       "cell_id": "w4",
+       "cell_name": "note",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "m1": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_notebook"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "e5bb70ab3451841a59b6aa75d627c5396f47b35b046286c4727938474d1fa09a",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "source_hash": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "m2": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_cell"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m3": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_annotation"
+      ],
+      "diagnostics": [
+       [
+        "mount_shadows_notebook",
+        "info",
+        1
+       ]
+      ],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "r5": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "note"
+      ],
+      "upstream_ids": [
+       "w4"
+      ]
+     },
+     "keys": {
+      "definition_key": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "c541e62d8e5de0aefc0b5d015598fd77f4ea70b54a18001b53097992afa433fc",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "source_hash": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
+     }
+    },
+    "w4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "note"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "6dff43238b966bdc531ad0774804adfeefce794f3424082c2409535798ba4820",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "source_hash": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": true,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "m1": [],
+     "m2": [],
+     "m3": [],
+     "r5": [],
+     "w4": [
+      "note"
+     ]
+    },
+    "edges": [
+     [
+      "w4",
+      "r5",
+      "note"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "m1",
+     "m2",
+     "m3",
+     "w4",
+     "r5"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "write_file",
+    "path": "data/n/two.txt",
+    "text": "n2\n"
+   }
+  },
+  {
+   "causality": {
+    "r5": {
+     "details": [
+      {
+       "cell_id": "w4",
+       "cell_name": "note",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "m1": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_notebook"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "e5bb70ab3451841a59b6aa75d627c5396f47b35b046286c4727938474d1fa09a",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "source_hash": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "e5bb70ab3451841a59b6aa75d627c5396f47b35b046286c4727938474d1fa09a",
+      "status": "ok",
+      "stdout": "['one.txt', 'two.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m2": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_cell"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "status": "ok",
+      "stdout": "['one.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m3": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_annotation"
+      ],
+      "diagnostics": [
+       [
+        "mount_shadows_notebook",
+        "info",
+        1
+       ]
+      ],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "status": "ok",
+      "stdout": "['one.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "r5": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "note"
+      ],
+      "upstream_ids": [
+       "w4"
+      ]
+     },
+     "keys": {
+      "definition_key": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "aa2b80759873b92030d57c08a3253046de368bc763de2ba93caadfbeba1e81b7",
+      "input_hashes": [
+       "7d3af921edc34800a734b8041d247403bd8285ee6190f5f62eddc7c7f210dbba",
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "source_hash": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "upstream_hashes": [
+       "7d3af921edc34800a734b8041d247403bd8285ee6190f5f62eddc7c7f210dbba"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "aa2b80759873b92030d57c08a3253046de368bc763de2ba93caadfbeba1e81b7",
+      "status": "ok",
+      "stdout": "n\n"
+     },
+     "staleness": {
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
+     }
+    },
+    "w4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "note"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "6dff43238b966bdc531ad0774804adfeefce794f3424082c2409535798ba4820",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "source_hash": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-mounts_cell_w4_var_note@v=2",
+      "artifact_uris": {
+       "note": {
+        "artifact": "nb_cellgraph-mounts_cell_w4_var_note@v=2",
+        "content_sha256": "a133f329f1ede2f25398a0e89e976e787502a2777f7fe8ed6a98f447d1cb0333",
+        "provenance_hash": "e9dffb3d42906b95ce2207b2ae3f970f6cd0a09f5ce374a2195cc07a00fd1c32"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": true,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:5386a1421430ebfd14f69cf72cdc21b6de1f8e737ffd1e136a3f9a866f36f32c"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "6dff43238b966bdc531ad0774804adfeefce794f3424082c2409535798ba4820",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "m1": [],
+     "m2": [],
+     "m3": [],
+     "r5": [],
+     "w4": [
+      "note"
+     ]
+    },
+    "edges": [
+     [
+      "w4",
+      "r5",
+      "note"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "m1",
+     "m2",
+     "m3",
+     "w4",
+     "r5"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "run_all"
+   }
+  },
+  {
+   "causality": {
+    "m1": {
+     "details": [
+      {
+       "cell_id": "m1",
+       "cell_name": "from_notebook",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "source_changed"
+      }
+     ],
+     "reason": "self"
+    },
+    "r5": {
+     "details": [
+      {
+       "cell_id": "w4",
+       "cell_name": "note",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "m1": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_notebook"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "26db96f7ac7be845157bb9201887f1d9265b5ed8c171d775181d085024d238e2",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "source_hash": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    },
+    "m2": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_cell"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m3": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_annotation"
+      ],
+      "diagnostics": [
+       [
+        "mount_shadows_notebook",
+        "info",
+        1
+       ]
+      ],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "r5": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "note"
+      ],
+      "upstream_ids": [
+       "w4"
+      ]
+     },
+     "keys": {
+      "definition_key": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "b5b30eb225cf69c56cd8f3daaacd2ff88481b7581061646a5591d76ac0a2ec42",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "source_hash": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
+     }
+    },
+    "w4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "note"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f99a5a21974612ff8dd87330fdb8dc630cd33f13f462b3e49c6325d891d34767",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "source_hash": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": true,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "tables": []
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "m1": [],
+     "m2": [],
+     "m3": [],
+     "r5": [],
+     "w4": [
+      "note"
+     ]
+    },
+    "edges": [
+     [
+      "w4",
+      "r5",
+      "note"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "m1",
+     "m2",
+     "m3",
+     "w4",
+     "r5"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "write_file",
+    "path": "data/n/one.txt",
+    "text": "changed\n"
+   }
+  },
+  {
+   "causality": {
+    "r5": {
+     "details": [
+      {
+       "cell_id": "w4",
+       "cell_name": "note",
+       "from_package_version": null,
+       "from_version": null,
+       "package": null,
+       "to_package_version": null,
+       "to_version": null,
+       "type": "input_changed"
+      }
+     ],
+     "reason": "upstream"
+    }
+   },
+   "cells": {
+    "m1": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_notebook"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "26db96f7ac7be845157bb9201887f1d9265b5ed8c171d775181d085024d238e2",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "source_hash": "ffd0a1bfff52af3efd81b86c82bec93e05e2b9d2e3299dafc5f2eaf6b9b59b2c",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "26db96f7ac7be845157bb9201887f1d9265b5ed8c171d775181d085024d238e2",
+      "status": "ok",
+      "stdout": "['one.txt', 'two.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m2": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_cell"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "0b778e7fb58120c979fdae5538f9a56e69350965089a64623afaf0b076be7f64",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/c:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "f78a65a1b5465dc08e35d8a2e284c94716f66fe9d49a1e2176da997abed4afba",
+      "status": "ok",
+      "stdout": "['one.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "m3": {
+     "analysis": {
+      "builtin_references": [
+       "print",
+       "sorted"
+      ],
+      "defines": [
+       "from_annotation"
+      ],
+      "diagnostics": [
+       [
+        "mount_shadows_notebook",
+        "info",
+        1
+       ]
+      ],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "source_hash": "1ae1c8acbf4855e1088299f5c8a598cfe6518ae50613bff51542f5edebdae696",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/a:582d46f6074b58cb67433240eb48bfc905173c196037924b9298bcb2d4399155"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": true,
+      "provenance_hash": "f4205c82ae557f2dcbcaf28d43d1144188f6efd9e47203827dd7dea94810a9fd",
+      "status": "ok",
+      "stdout": "['one.txt']\n"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "ready"
+     }
+    },
+    "r5": {
+     "analysis": {
+      "builtin_references": [
+       "print"
+      ],
+      "defines": [],
+      "diagnostics": [],
+      "references": [
+       "note"
+      ],
+      "upstream_ids": [
+       "w4"
+      ]
+     },
+     "keys": {
+      "definition_key": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "b36ab516e293e2d6a6f8552aeb92ab176d3be26db98f5e4d6eb3516c5d4131a1",
+      "input_hashes": [
+       "43fdf2ee53b853b6214748775fa486f42cba49f54a9149713e00f2453c653f22",
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "source_hash": "c8c5cb8def31f94ae55fa026366a003eabf255ad94f6d0fdd7e338e132f77944",
+      "upstream_hashes": [
+       "43fdf2ee53b853b6214748775fa486f42cba49f54a9149713e00f2453c653f22"
+      ]
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": null,
+      "artifact_uris": {},
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": false,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "b36ab516e293e2d6a6f8552aeb92ab176d3be26db98f5e4d6eb3516c5d4131a1",
+      "status": "ok",
+      "stdout": "changed\n"
+     },
+     "staleness": {
+      "reasons": [
+       "upstream"
+      ],
+      "status": "stale"
+     }
+    },
+    "w4": {
+     "analysis": {
+      "builtin_references": [],
+      "defines": [
+       "note"
+      ],
+      "diagnostics": [],
+      "references": [],
+      "upstream_ids": []
+     },
+     "keys": {
+      "definition_key": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "env_hash": "9164ef08fb49041d1128f09558365fdf529e1fa197cd3bc707c938d50465c8de",
+      "execution_key": "f99a5a21974612ff8dd87330fdb8dc630cd33f13f462b3e49c6325d891d34767",
+      "input_hashes": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "source_hash": "16b678a02076730d04b72ece3ca87f2d3ed12c598abe17c324af1a44ce7b1f89",
+      "upstream_hashes": []
+     },
+     "language": "python",
+     "published": {
+      "artifact_uri": "strata://artifact/nb_cellgraph-mounts_cell_w4_var_note@v=3",
+      "artifact_uris": {
+       "note": {
+        "artifact": "nb_cellgraph-mounts_cell_w4_var_note@v=3",
+        "content_sha256": "015b18965e6c53e9d72d78f46301a6d82747369ea4f344e1f47b1d3fbe018422",
+        "provenance_hash": "709755992e146e8274b1ba74f2312a766de1e368cda0f506d8b86c72b513dd56"
+       }
+      },
+      "instances": {}
+     },
+     "resolved": {
+      "datasets": [],
+      "fetches": [],
+      "has_rw_mount": true,
+      "mounts": [
+       "src:file:///tmp/strata-cellgraph/mounts/data/n:4a60325358f002eeac81d9bff5e4b44798ad9955a5c9e9e00db4e0d79a7e2318"
+      ],
+      "tables": []
+     },
+     "run": {
+      "cache_hit": false,
+      "provenance_hash": "f99a5a21974612ff8dd87330fdb8dc630cd33f13f462b3e49c6325d891d34767",
+      "status": "ok"
+     },
+     "staleness": {
+      "reasons": [],
+      "status": "idle"
+     }
+    }
+   },
+   "dag": {
+    "consumed_variables": {
+     "m1": [],
+     "m2": [],
+     "m3": [],
+     "r5": [],
+     "w4": [
+      "note"
+     ]
+    },
+    "edges": [
+     [
+      "w4",
+      "r5",
+      "note"
+     ]
+    ],
+    "fanout_cells": {},
+    "inactive_cells": [],
+    "topological_order": [
+     "m1",
+     "m2",
+     "m3",
+     "w4",
+     "r5"
+    ],
+    "variant_groups": []
+   },
+   "dag_error": null,
+   "step": {
+    "op": "run_all"
+   }
+  }
+ ],
+ "trace_format": 1
+}

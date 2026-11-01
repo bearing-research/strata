@@ -1,0 +1,9 @@
+notebook_id = "cellgraph-cell_level_ref"
+name = "cell_level_ref"
+cells = [
+    { id = "init", file = "init.py", language = "python", order = 0 },
+    { id = "lp", file = "lp.py", language = "python", order = 1.0 },
+    { id = "af", file = "af.py", language = "python", order = 2.0 },
+]
+workers = []
+mounts = []

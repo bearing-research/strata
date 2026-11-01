@@ -1,0 +1,24 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "p1",
+    "source": "state = 5\nother = 10\n"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "b4",
+    "source": "input = \"changed\"\n"
+  },
+  {
+    "op": "run_all"
+  }
+]

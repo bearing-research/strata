@@ -1,0 +1,24 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "set_variant_active",
+    "group": "model",
+    "name": "large"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "set_variant_active",
+    "group": "model",
+    "name": "small"
+  },
+  {
+    "op": "run_all"
+  }
+]

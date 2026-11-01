@@ -1,0 +1,10 @@
+notebook_id = "cellgraph-fetch_dataset"
+name = "fetch_dataset"
+cells = [
+    { id = "f1", file = "f1.py", language = "python", order = 0 },
+    { id = "f2", file = "f2.py", language = "python", order = 1.0 },
+    { id = "d3", file = "d3.py", language = "python", order = 2.0 },
+    { id = "d4", file = "d4.py", language = "python", order = 3.0 },
+]
+workers = []
+mounts = []

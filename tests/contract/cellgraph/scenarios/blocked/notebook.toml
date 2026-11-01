@@ -1,0 +1,11 @@
+notebook_id = "cellgraph-blocked"
+name = "blocked"
+cells = [
+    { id = "a1", file = "a1.py", language = "python", order = 0 },
+    { id = "b2", file = "b2.py", language = "python", order = 1.0 },
+    { id = "c3", file = "c3.py", language = "python", order = 2.0 },
+    { id = "d4", file = "d4.py", language = "python", order = 3.0 },
+    { id = "e5", file = "e5.py", language = "python", order = 4.0 },
+]
+workers = []
+mounts = []

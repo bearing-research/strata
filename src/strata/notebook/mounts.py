@@ -26,6 +26,7 @@ from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel
 
+from strata.notebook import nonce
 from strata.notebook.credentials import (
     CredentialError,
     CredentialResolver,
@@ -523,7 +524,7 @@ class MountFingerprinter:
                 remote_path,
                 exc,
             )
-            return hashlib.sha256(os.urandom(32)).hexdigest(), None
+            return nonce.unresolved_nonce(), None
         except Exception as e:
             logger.warning(
                 "Failed to fingerprint remote mount %s://%s: %s",
@@ -532,7 +533,7 @@ class MountFingerprinter:
                 e,
             )
             # Unique per call: forces re-execution.
-            return hashlib.sha256(os.urandom(32)).hexdigest(), None
+            return nonce.unresolved_nonce(), None
 
     @staticmethod
     async def fingerprint_remote(
@@ -868,7 +869,7 @@ def weigh_mount_sync(
         storage_options = resolver.storage_options(mount)
     except CredentialError as exc:
         logger.warning("mount %s: %s", mount.name, exc)
-        unresolved = f"{mount.name}:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
+        unresolved = f"{mount.name}:unresolved:{nonce.unresolved_nonce()}"
         return unresolved, None, f"{mount.name}:{mount.uri}:unresolved"
     scheme, path = parse_mount_uri(mount.uri)
     weight: MountWeight | None = None

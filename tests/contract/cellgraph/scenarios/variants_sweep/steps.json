@@ -1,0 +1,25 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "add_cell",
+    "cell": "v4",
+    "after": "v2",
+    "source": "# @variant model huge\nm = data + 1000\n"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "edit_cell",
+    "cell": "v1",
+    "source": "# @variant model small\nm = data + 2\n"
+  },
+  {
+    "op": "run_all"
+  }
+]

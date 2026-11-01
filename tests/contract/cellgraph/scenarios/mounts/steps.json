@@ -1,0 +1,8 @@
+[
+  { "op": "validate" },
+  { "op": "run_all" },
+  { "op": "write_file", "path": "data/n/two.txt", "text": "n2\n" },
+  { "op": "run_all" },
+  { "op": "write_file", "path": "data/n/one.txt", "text": "changed\n" },
+  { "op": "run_all" }
+]

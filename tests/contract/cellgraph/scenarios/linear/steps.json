@@ -1,0 +1,7 @@
+[
+  { "op": "validate" },
+  { "op": "run_all" },
+  { "op": "edit_cell", "cell": "b2", "source": "y = x + 2\n" },
+  { "op": "run_all" },
+  { "op": "run_cell", "cell": "c3" }
+]

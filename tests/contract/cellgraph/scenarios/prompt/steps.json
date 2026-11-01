@@ -1,0 +1,19 @@
+[
+  {
+    "op": "validate"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "toml_set",
+    "key": "ai.model",
+    "value": "m-two"
+  },
+  {
+    "op": "run_all"
+  },
+  {
+    "op": "run_all"
+  }
+]

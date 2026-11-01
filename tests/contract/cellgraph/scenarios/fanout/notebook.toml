@@ -1,0 +1,16 @@
+notebook_id = "cellgraph-fanout"
+name = "fanout"
+cells = [
+    { id = "c0", file = "c0.py", language = "python", order = 0 },
+    { id = "v1", file = "v1.py", language = "python", order = 1.0 },
+    { id = "v2", file = "v2.py", language = "python", order = 2.0 },
+    { id = "f3", file = "f3.py", language = "python", order = 3.0 },
+    { id = "f4", file = "f4.py", language = "python", order = 4.0 },
+    { id = "d5", file = "d5.py", language = "python", order = 5.0 },
+]
+workers = []
+mounts = []
+
+[[variant_group]]
+group = "model"
+mode = "sweep"

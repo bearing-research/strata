@@ -1,0 +1,14 @@
+notebook_id = "cellgraph-variants_sweep"
+name = "variants_sweep"
+cells = [
+    { id = "c0", file = "c0.py", language = "python", order = 0 },
+    { id = "v1", file = "v1.py", language = "python", order = 1.0 },
+    { id = "v2", file = "v2.py", language = "python", order = 2.0 },
+    { id = "d3", file = "d3.py", language = "python", order = 3.0 },
+]
+workers = []
+mounts = []
+
+[[variant_group]]
+group = "model"
+mode = "sweep"

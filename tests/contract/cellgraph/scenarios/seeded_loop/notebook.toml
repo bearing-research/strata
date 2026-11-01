@@ -1,0 +1,11 @@
+notebook_id = "cellgraph-seeded_loop"
+name = "seeded_loop"
+cells = [
+    { id = "init", file = "init.py", language = "python", order = 0 },
+    { id = "L", file = "L.py", language = "python", order = 1.0 },
+    { id = "P", file = "P.py", language = "python", order = 2.0 },
+    { id = "F", file = "F.py", language = "python", order = 3.0 },
+    { id = "O", file = "O.py", language = "python", order = 4.0 },
+]
+workers = []
+mounts = []
