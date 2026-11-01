@@ -48,6 +48,11 @@ CASES = {
         ("d", "markdown", "# @mentions are cool\n# @worker\n# @mount foo\nText.", None),
         ("x", "python", "y = 1", None),
     ],
+    "markdown_reads_only_app": [
+        ("d", "markdown", "# @app show\n# @after x\n# @variant g m\nText.", None),
+        ("x", "python", "y = 1", None),
+    ],
+    "app_unreadable_lines": [("a", "python", "# @app show\n# @app hide\nx = 1", None)],
     "table_checks": [
         (
             "t",
