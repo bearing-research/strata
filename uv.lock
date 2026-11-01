@@ -501,7 +501,7 @@ wheels = [
 [[package]]
 name = "cellgraph"
 version = "0.1.0"
-source = { git = "https://github.com/bearing-research/cellgraph?rev=da34c665f569065621a6ba7207fb1500f0c9fbca#da34c665f569065621a6ba7207fb1500f0c9fbca" }
+source = { git = "https://github.com/bearing-research/cellgraph?rev=4f498b18df62f11d1286704414d8e68fb4f99908#4f498b18df62f11d1286704414d8e68fb4f99908" }
 
 [[package]]
 name = "certifi"
@@ -4186,7 +4186,7 @@ dev = [
     { name = "adbc-driver-sqlite", specifier = ">=1.0.0" },
     { name = "adlfs", specifier = ">=2026.0.0" },
     { name = "boto3", specifier = ">=1.35.0" },
-    { name = "cellgraph", git = "https://github.com/bearing-research/cellgraph?rev=da34c665f569065621a6ba7207fb1500f0c9fbca" },
+    { name = "cellgraph", git = "https://github.com/bearing-research/cellgraph?rev=4f498b18df62f11d1286704414d8e68fb4f99908" },
     { name = "datafusion", specifier = ">=50.1.0" },
     { name = "gcsfs", specifier = ">=2026.0.0" },
     { name = "grandalf", specifier = ">=0.8" },

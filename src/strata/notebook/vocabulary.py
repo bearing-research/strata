@@ -16,7 +16,10 @@ in, as ``parse_notebook`` does, and ``notebook_mounts`` the notebook-level ones
 alone. The SQL analyzer reads both connection lists for its diagnostics.
 
 Strata reports every directive line it cannot read and keeps the lines it can, so
-the parsers here return ``cg.Partial`` for a mix of the two.
+the parsers here return ``cg.Partial`` for a mix of the two. Messages are Strata's
+own: the vocabulary's checks word them as ``annotation_validation`` does, and
+``strata_diagnostics`` words cellgraph's core checks (``@after``, seeds, variants,
+fan-out, unknown keys) from their ``args``.
 """
 
 from __future__ import annotations
@@ -32,8 +35,11 @@ from cellgraph.python import analyze_cell
 
 from strata.notebook.annotation_validation import (
     _SUPPORTED_MOUNT_SCHEMES,
+    AnnotationDiagnostic,
+    DiagnosticSeverity,
     _find_annotation_line,
     _table_uri_malformed,
+    _unreadable,
     _value_problem,
     sql_connection_diagnostics,
 )
@@ -66,11 +72,13 @@ def _problem(directive: cg.Directive) -> cg.AnnotationError | None:
     if problem is None:
         return None
     code, why = problem
-    return cg.AnnotationError(
-        f"`@{directive.key} {directive.value}` could not be read ({why})",
-        code=code,
-        line=directive.line,
-    )
+    return _unreadable_error(code, directive, why)
+
+
+def _unreadable_error(code: str, directive: cg.Directive, why: str) -> cg.AnnotationError:
+    """Strata's unreadable-value error, worded as ``annotation_validation`` words it."""
+    message = _unreadable(code, directive.key, directive.value, why, directive.line).message
+    return cg.AnnotationError(message, code=code, line=directive.line)
 
 
 def _partial(value: Any, errors: list[cg.AnnotationError]) -> Any:
@@ -124,13 +132,7 @@ def _lines(parse_one: Callable[[str], Any | None], code: str, hint: str) -> cg.P
         for directive in directives:
             value = parse_one(directive.value)
             if value is None:
-                errors.append(
-                    cg.AnnotationError(
-                        f"`@{directive.key} {directive.value}` could not be read ({hint})",
-                        code=code,
-                        line=directive.line,
-                    )
-                )
+                errors.append(_unreadable_error(code, directive, hint))
             else:
                 values.append(value)
         return _partial(values, errors)
@@ -152,11 +154,10 @@ def _parse_output_dirs(directives: list[cg.Directive]) -> Any:
     for directive in directives:
         if not directive.value.isidentifier():
             errors.append(
-                cg.AnnotationError(
-                    f"`@output_dir {directive.value}` could not be read "
-                    "(expected `@output_dir <name>`, a Python identifier)",
-                    code="output_dir_unreadable",
-                    line=directive.line,
+                _unreadable_error(
+                    "output_dir_unreadable",
+                    directive,
+                    "expected `@output_dir <name>`, a Python identifier",
                 )
             )
         elif directive.value not in names:
@@ -199,12 +200,20 @@ def _parse_loop(directives: list[cg.Directive]) -> Any:
     if loop.max_iter <= 0:
         errors.append(
             cg.AnnotationError(
-                "`@loop` needs max_iter=<N>", code="loop_missing_max_iter", line=line
+                "`@loop` requires a positive `max_iter=<N>`. "
+                "The loop cell must declare a safety bound on the iteration count.",
+                code="loop_missing_max_iter",
+                line=line,
             )
         )
     if not loop.carry:
         errors.append(
-            cg.AnnotationError("`@loop` needs carry=<var>", code="loop_missing_carry", line=line)
+            cg.AnnotationError(
+                "`@loop` requires `carry=<variable>`. "
+                "The carry variable is threaded between iterations.",
+                code="loop_missing_carry",
+                line=line,
+            )
         )
     if loop.until_expr:
         try:
@@ -212,7 +221,7 @@ def _parse_loop(directives: list[cg.Directive]) -> Any:
         except SyntaxError as exc:
             errors.append(
                 cg.AnnotationError(
-                    f"the loop condition does not parse: {exc.msg}",
+                    f"`@loop_until` expression is not a valid Python expression: {exc.msg}.",
                     code="loop_until_syntax_error",
                     line=until_line,
                 )
@@ -241,7 +250,9 @@ def _validate_loop(loop: Any, context: cg.ValidationContext) -> list[cg.Diagnost
             cg.Diagnostic(
                 "loop_carry_unknown",
                 cg.Severity.WARN,
-                f"the carry `{loop.carry}` is not defined by the cell",
+                f"`@loop carry={loop.carry}` does not match any top-level assignment in the "
+                f"cell. The cell must rebind `{loop.carry}` each iteration for the loop to "
+                "make progress.",
                 context.cell.id,
                 "loop",
                 _find_annotation_line(context.cell.source, "loop"),
@@ -274,7 +285,9 @@ def _validate_mounts(mounts: Any, context: cg.ValidationContext) -> list[cg.Diag
                 cg.Diagnostic(
                     "mount_uri_unsupported",
                     cg.Severity.WARN,
-                    f"`@mount {mount.name}` uses unsupported URI scheme '{scheme or mount.uri}'",
+                    f"`@mount {mount.name}` uses unsupported URI scheme "
+                    f"'{scheme or mount.uri}'. "
+                    f"Supported: {', '.join(sorted(_SUPPORTED_MOUNT_SCHEMES))}.",
                     cell.id,
                     "mount",
                     line,
@@ -285,7 +298,7 @@ def _validate_mounts(mounts: Any, context: cg.ValidationContext) -> list[cg.Diag
                 cg.Diagnostic(
                     "mount_shadows_notebook",
                     cg.Severity.INFO,
-                    f"`@mount {mount.name}` overrides the notebook-level mount with the same name",
+                    f"`@mount {mount.name}` overrides the notebook-level mount with the same name.",
                     cell.id,
                     "mount",
                     line,
@@ -308,7 +321,8 @@ def _validate_tables(tables: Any, context: cg.ValidationContext) -> list[cg.Diag
                     "table_uri_malformed",
                     cg.Severity.WARN,
                     f"`@table {table.name}` URI should be `<warehouse>#<namespace>.<table>`, "
-                    "`<catalog>:<namespace>.<table>` or `<namespace>.<table>`",
+                    "`<catalog>:<namespace>.<table>` or `<namespace>.<table>` "
+                    "(e.g. file:///data/warehouse#nyc.trips).",
                     cell.id,
                     "table",
                     line,
@@ -319,7 +333,8 @@ def _validate_tables(tables: Any, context: cg.ValidationContext) -> list[cg.Diag
                 cg.Diagnostic(
                     "table_shadows_define",
                     cg.Severity.WARN,
-                    f"`@table {table.name}` injects a variable that this cell also defines",
+                    f"`@table {table.name}` injects a variable that this cell also defines; "
+                    "the definition wins and the table URI is shadowed.",
                     cell.id,
                     "table",
                     line,
@@ -331,7 +346,8 @@ def _validate_tables(tables: Any, context: cg.ValidationContext) -> list[cg.Diag
             cg.Diagnostic(
                 "table_duplicate_name",
                 cg.Severity.ERROR,
-                f"`@table {dup}` is declared more than once",
+                f"`@table {dup}` is declared more than once; each @table must have a unique "
+                "name; the cell will fail to run.",
                 cell.id,
                 "table",
                 _find_annotation_line(cell.source, "table", dup),
@@ -361,12 +377,12 @@ def _validate_name(name: str, context: cg.ValidationContext) -> list[cg.Diagnost
     cell = context.cell
     if cell.language != CellLanguage.PROMPT.value:
         return []
+    why = "a prompt cell's name is its output variable, so a Python identifier"
     return [
         cg.Diagnostic(
             "name_unreadable",
             cg.Severity.ERROR,
-            f"`@name {d.value}`: a prompt cell's name is its output variable, "
-            "so a Python identifier",
+            _unreadable("name_unreadable", "name", d.value, why, d.line).message,
             cell.id,
             "name",
             d.line,
@@ -424,7 +440,9 @@ def _validate_per_variant(group: Any, context: cg.ValidationContext) -> list[cg.
         cg.Diagnostic(
             "per_variant_write_table_overwrite",
             cg.Severity.ERROR,
-            "every variant writes the same table, so `overwrite` keeps only the last one's rows",
+            "`@write_table ... overwrite` can't be combined with `@per_variant`: each variant "
+            "would replace the one before it. Append, merge on a column that tells the "
+            "variants apart, or overwrite from a cell that reads the {variant: value} dict.",
             context.cell.id,
             "per_variant",
             _find_annotation_line(source, "write_table", "overwrite"),
@@ -567,6 +585,124 @@ def strata_vocabulary() -> cg.Vocabulary:
         "per_variant", validate=_validate_per_variant
     )
     return core | cg.Vocabulary(_strata_annotations(), cell_effects=cell_effects)
+
+
+# --- cellgraph's own checks, worded as Strata words them -------------------------
+
+# cellgraph's codes for a check Strata names after its own annotation.
+STRATA_CODES = {"seed_unknown_cell": "loop_start_from_unknown"}
+
+
+def strata_diagnostics(cell: cg.CellAnalysis) -> list[AnnotationDiagnostic]:
+    """The cell's diagnostics with Strata's codes and wording; structural ones are not here.
+
+    A cycle or a variant collision is the notebook's ``dag_error``, not a cell's.
+    """
+    return [
+        AnnotationDiagnostic(
+            severity=DiagnosticSeverity(d.severity.value),
+            code=STRATA_CODES.get(d.code, d.code),
+            message=_strata_message(d, cell),
+            line=d.line,
+        )
+        for d in cell.diagnostics
+        if d.code not in cg.analysis.STRUCTURAL_CODES
+    ]
+
+
+def _strata_message(d: cg.Diagnostic, cell: cg.CellAnalysis) -> str:
+    """Today's message for one of cellgraph's core codes, from its ``args``."""
+    args = d.args
+    match d.code:
+        case "annotation_unknown":
+            hint = f" Did you mean `@{args['suggestion']}`?" if args["suggestion"] else ""
+            return f"`@{args['key']}` is not an annotation, so it is ignored.{hint}"
+        case "after_self":
+            return f"`@after {args['cell_id']}` names this cell, so it orders nothing."
+        case "after_unknown_cell":
+            return (
+                f"`@after {args['cell_id']}` names no cell in this notebook (it takes a "
+                "cell id, not an `@name`), so the cell does not run."
+            )
+        case "after_inactive_variant":
+            return (
+                f"`@after {args['cell_id']}` names a variant that is not active, which "
+                "does not run, so the cell does not run. Order it after a cell that "
+                "runs, or select that variant."
+            )
+        case "seed_unknown_cell":
+            loop = cell.annotations["loop"]
+            start = f"`@loop start_from={args['cell_id']}@iter={loop.start_from_iter}`"
+            return {
+                "unknown": f"{start} references a cell that does not exist in this notebook.",
+                "self": "`@loop start_from` must reference a different cell: "
+                "a loop cell cannot seed itself from its own iterations.",
+                "inactive": f"{start} references a variant that is not active, which does not run.",
+                "undefined": f"{start} references a cell that does not define the carry "
+                f"`{args['name']}`.",
+            }[args["reason"]]
+        case "variant_malformed":
+            return (
+                "`@variant` requires `group` and `name`, both Python identifiers: "
+                "`# @variant <group> <name>`."
+            )
+        case "variant_contract_mismatch":
+            own, theirs = set(args["defines"]), set(args["sibling_defines"])
+            diff = []
+            if theirs - own:
+                diff.append(f"missing {sorted(theirs - own)}")
+            if own - theirs:
+                diff.append(f"extra {sorted(own - theirs)}")
+            return (
+                f"Variant `{args['name']}` defines a different set of names than sibling "
+                f"`{args['sibling']}` in group `{args['group']}` ({', '.join(diff)}). All "
+                "variants in a group must share the same defines contract."
+            )
+        case "variant_mode_invalid":
+            return (
+                f"notebook.toml sets mode `{args['mode']}` for variant group "
+                f"`{args['group']}`, but only `switch` and `sweep` are valid. Treating it "
+                "as `switch`."
+            )
+        case "variant_active_redundant":
+            return (
+                f'Group `{args["group"]}` is in sweep mode, so `active = "{args["active"]}"` '
+                "is ignored: every variant runs and downstream consumes a {variant: value} "
+                "dict."
+            )
+        case "variant_active_unknown":
+            return (
+                f"notebook.toml selects variant `{args['active']}` for group "
+                f"`{args['group']}`, but no cell in the group has that name. Falling back "
+                "to the first variant in source order."
+            )
+        case "per_variant_on_variant_member":
+            return (
+                "`@per_variant` can't be combined with `@variant`: a cell can't both be a "
+                "variant and fan out over a sweep group."
+            )
+        case "per_variant_unknown_group":
+            return (
+                f"`@per_variant {args['group']}` names a group this cell doesn't read from "
+                "in sweep mode. Reference a variable produced by a sweep-mode variant group."
+            )
+        case "per_variant_no_sweep_source":
+            return (
+                "`@per_variant` requires the cell to reference a variable from a "
+                "sweep-mode variant group; none were found."
+            )
+        case "per_variant_ambiguous_group":
+            return (
+                "`@per_variant` is ambiguous: this cell reads from multiple sweep groups "
+                f"({', '.join(args['groups'])}). Name one explicitly: "
+                "`# @per_variant <group>`."
+            )
+        case "per_variant_group_of_one":
+            return (
+                f"Group `{args['group']}` has a single variant, so `@per_variant` runs this "
+                "cell once. The annotation is harmless but unnecessary here."
+            )
+    return d.message
 
 
 # --- language analyzers -------------------------------------------------------------

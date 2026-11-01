@@ -218,7 +218,7 @@ members = ["packages/strata-client", "packages/strata-pool"]
 [tool.uv.sources]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
-cellgraph = { git = "https://github.com/bearing-research/cellgraph", rev = "da34c665f569065621a6ba7207fb1500f0c9fbca" }
+cellgraph = { git = "https://github.com/bearing-research/cellgraph", rev = "4f498b18df62f11d1286704414d8e68fb4f99908" }
 
 [tool.uv.build-backend]
 # The distribution is strata-notebook; the import package is strata, under src/.
