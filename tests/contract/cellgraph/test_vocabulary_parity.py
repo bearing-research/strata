@@ -22,6 +22,17 @@ from tests.contract.cellgraph import replay  # noqa: E402
 CASES = {
     "output_schema_malformed": [("p", "prompt", "# @output_schema {not json\nhello", None)],
     "stochastic_every_line": [("s", "python", "# @stochastic maybe\n# @stochastic\nx = 1", None)],
+    "stochastic_then_nocache_off": [
+        ("s", "python", "# @stochastic\n# @nocache off\nx = 1", None),
+        ("d", "python", "print(x)", None),
+    ],
+    "nocache_off_then_stochastic": [("s", "r", "# @nocache off\n# @stochastic\nx <- 1", None)],
+    "nocache_off_then_on_with_stochastic": [
+        ("s", "python", "# @nocache off\n# @nocache\n# @stochastic\nx = 1", None)
+    ],
+    "stochastic_off_with_nocache_off": [
+        ("s", "python", "# @stochastic off\n# @nocache off\nx = 1", None)
+    ],
     "nocache_every_line": [("n", "python", "# @nocache maybe\n# @nocache\nx = 1", None)],
     "loop_carry_unknown_line": [("l", "python", "# @loop max_iter=3 carry=y\nx = 1", None)],
     "loop_every_problem": [("l", "python", "# @loop carry=x\n# @loop_until (\nx = 1", None)],
@@ -90,14 +101,22 @@ def test_cellgraph_reports_what_strata_reports(name, tmp_path):
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
     analysis = replay.analyze(parse_notebook(notebook_dir))
 
-    for cell in session.notebook_state.cells:
+    cells = {cell.id: cell for cell in session.notebook_state.cells}
+
+    def runs(cell_id):
+        # An error stops the cell, and Strata skips everything downstream of it.
+        cell = cells[cell_id]
+        if any(d.severity == DiagnosticSeverity.ERROR for d in cell.annotation_diagnostics):
+            return False
+        return all(runs(upstream) for upstream in cell.upstream_ids)
+
+    for cell in cells.values():
         strata = sorted((d.code, d.severity.value, d.line) for d in cell.annotation_diagnostics)
         ours = sorted(
             (d.code, d.severity.value, d.line) for d in analysis.cells[cell.id].diagnostics
         )
         assert ours == strata, cell.id
-        runs = not any(d.severity == DiagnosticSeverity.ERROR for d in cell.annotation_diagnostics)
-        assert analysis.cells[cell.id].plannable == runs, cell.id
+        assert analysis.cells[cell.id].plannable == runs(cell.id), cell.id
 
 
 def test_a_notebook_mount_shadowed_by_an_annotation(tmp_path):

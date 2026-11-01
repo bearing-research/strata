@@ -8,6 +8,12 @@ exhaustive commit history.
 ## Unreleased
 
 ### Changed
+- **`@stochastic` with `@nocache off` stops its cell.** `# @stochastic`
+  implies `# @nocache`, and an explicit `# @nocache off` in the same cell, in
+  either order, is now the error `stochastic_nocache_conflict` on the
+  `@nocache off` line, so the cell does not run and its dependents are
+  skipped. Before, a later `@nocache off` turned caching back on for a cell
+  whose runs are samples. No annotation keys change. (#1350)
 - **A `start_from` seed is the only input for a loop's carry.** A loop cell
   with `# @loop start_from=<cell>@iter=<k>` whose body also reads the carry
   was wired to the carry's latest ordinary producer as well as the seed, so
