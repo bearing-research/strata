@@ -1,0 +1,11 @@
+notebook_id = "cellgraph-markdown"
+name = "markdown"
+cells = [
+    { id = "p0", file = "p0.py", language = "python", order = 0 },
+    { id = "d1", file = "d1.md", language = "markdown", order = 1 },
+    { id = "d2", file = "d2.md", language = "markdown", order = 2 },
+    { id = "d3", file = "d3.md", language = "markdown", order = 3 },
+    { id = "p4", file = "p4.py", language = "python", order = 4 },
+]
+workers = []
+mounts = []

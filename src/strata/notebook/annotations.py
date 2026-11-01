@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 from strata.notebook.models import (
+    CellLanguage,
     DatasetSpec,
     FetchSpec,
     MountMode,
@@ -394,9 +395,19 @@ def unreadable_input_directives(source: str) -> list[tuple[int, str, str]]:
     return unreadable
 
 
-def parse_annotations(source: str) -> CellAnnotations:
-    """Extract annotations from the leading comment block of a cell."""
+# A markdown heading is a ``#`` line, so markdown reads only ``@app`` (the app view
+# and export match it themselves); every other ``# @`` line there is prose.
+MARKDOWN_DIRECTIVE_KEYS = frozenset({"app"})
+
+
+def parse_annotations(source: str, language: CellLanguage | str | None = None) -> CellAnnotations:
+    """Extract annotations from the leading comment block of a cell.
+
+    A markdown cell has none: ``@app``, the one key it reads, is not a field here.
+    """
     result = CellAnnotations()
+    if language == CellLanguage.MARKDOWN:
+        return result
 
     for _lineno, line in iter_annotation_block(source):
         parsed = parse_annotation_directive(line)

@@ -16,6 +16,12 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `@nocache off` line, so the cell does not run and its dependents are
   skipped. Before, a later `@nocache off` turned caching back on for a cell
   whose runs are samples. No annotation keys change. (#1350)
+- **A markdown cell reads only `@app`.** A markdown heading is a `#` line,
+  so `# @after <id>`, `# @variant <group> <name>` or `# @per_variant` at the
+  top of a markdown cell was applied: it added an ordering edge or put the
+  cell in a variant group. Every `# @` line there other than `# @app` is now
+  prose, with no effect and no diagnostic. `# @app hide` still keeps the cell
+  out of the app view. No annotation keys change. (#1349)
 - **A `start_from` seed is the only input for a loop's carry.** A loop cell
   with `# @loop start_from=<cell>@iter=<k>` whose body also reads the carry
   was wired to the carry's latest ordinary producer as well as the seed, so

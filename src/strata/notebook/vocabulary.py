@@ -36,6 +36,7 @@ from strata.notebook.annotation_validation import (
     _value_problem,
 )
 from strata.notebook.annotations import (
+    MARKDOWN_DIRECTIVE_KEYS,
     CellAnnotations,
     LoopAnnotation,
     _merge_loop_annotation,
@@ -373,6 +374,25 @@ def _validate_name(name: str, context: cg.ValidationContext) -> list[cg.Diagnost
     ]
 
 
+def _validate_app(value: str, context: cg.ValidationContext) -> list[cg.Diagnostic]:
+    """Every ``@app`` line must be ``hide``, except in markdown, where nothing is checked."""
+    cell = context.cell
+    if cell.language == CellLanguage.MARKDOWN.value:
+        return []
+    directives = [d for d in cg.GRAMMAR.directives(cell.source) if d.key == "app"]
+    return [
+        cg.Diagnostic(
+            error.code or "app_unreadable",
+            cg.Severity.ERROR,
+            str(error),
+            cell.id,
+            "app",
+            error.line,
+        )
+        for error in filter(None, map(_problem, directives))
+    ]
+
+
 def _validate_stochastic(on: bool, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     """``@stochastic`` with an explicit ``@nocache off``: the last readable line of each."""
     cell = context.cell
@@ -531,7 +551,7 @@ def _strata_annotations() -> list[cg.Annotation]:
             validate=_validate_loop,
         ),
         cg.Annotation("live", parse=_read(_flag), in_key=False),
-        cg.Annotation("app", parse=_last(str), in_key=False),
+        cg.Annotation("app", parse=lambda ds: ds[-1].value, in_key=False, validate=_validate_app),
     ]
 
 
@@ -606,10 +626,10 @@ class PromptAnalyzer:
 
 
 class NoNamesAnalyzer:
-    """Markdown: no names, no edges, and its ``# @`` lines are headings, not directives."""
+    """Markdown: no names, no edges, and its ``# @`` lines are headings, except ``@app``."""
 
     owns_key = True
-    directives = False
+    directives = MARKDOWN_DIRECTIVE_KEYS
 
     def analyze(self, cell: cg.Cell) -> cg.Analyzed:
         return cg.Analyzed()

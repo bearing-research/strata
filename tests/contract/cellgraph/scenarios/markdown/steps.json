@@ -1,0 +1,10 @@
+[
+  { "op": "validate" },
+  { "op": "run_all" },
+  {
+    "op": "edit_cell",
+    "cell": "d1",
+    "source": "# @after p4\n\nNotes on what p4 computes.\n"
+  },
+  { "op": "run_cell", "cell": "p4" }
+]
