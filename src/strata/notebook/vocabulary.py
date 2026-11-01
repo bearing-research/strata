@@ -15,17 +15,21 @@ than from the annotations: the hook merges the layers by name as
 in, as ``parse_notebook`` does, and ``notebook_mounts`` the notebook-level ones
 alone. The SQL analyzer reads both connection lists for its diagnostics.
 
-Strata reports every directive line it cannot read and keeps the lines it can, so
-the parsers here return ``cg.Partial`` for a mix of the two. Messages are Strata's
+Strata reports every directive line it cannot read, and its values read each line
+as ``parse_annotations`` does (``@nocache maybe`` is on), so the parsers here
+return ``cg.Partial`` with that value and the errors; ``annotations_from`` turns
+the values into ``CellAnnotations``. Messages are Strata's
 own: the vocabulary's checks word them as ``annotation_validation`` does, and
 ``strata_diagnostics`` words cellgraph's core checks (``@after``, seeds, variants,
-fan-out, unknown keys) from their ``args``.
+fan-out, unknown keys) from their ``args``, in ``validate_cell_annotations``'s order.
 """
 
 from __future__ import annotations
 
 import ast
+import copy
 import dataclasses
+import functools
 from collections.abc import Callable, Mapping
 from types import SimpleNamespace
 from typing import Any
@@ -47,6 +51,7 @@ from strata.notebook.annotations import (
     MARKDOWN_DIRECTIVE_KEYS,
     CellAnnotations,
     LoopAnnotation,
+    VariantAnnotation,
     _merge_loop_annotation,
     _parse_cache_annotation,
     _parse_dataset_annotation,
@@ -54,6 +59,7 @@ from strata.notebook.annotations import (
     _parse_mount_annotation,
     _parse_sql_annotation,
     _parse_table_annotation,
+    _parse_variant_annotation,
     _parse_write_table_annotation,
     parse_annotations,
 )
@@ -116,6 +122,66 @@ def _last(convert: Callable[[str], Any]) -> cg.Parser:
     return _read(lambda directives: convert(directives[-1].value))
 
 
+def _lenient(fold: Callable[[list[cg.Directive]], Any], stacked: bool = False) -> cg.Parser:
+    """*fold* over every line, as ``parse_annotations`` reads them; an unreadable line
+    is also an error, so the cell does not run whatever *fold* made of it."""
+
+    def parse(directives: list[cg.Directive]) -> Any:
+        errors = [e for e in map(_problem, directives) if e is not None]
+        return _partial(fold(directives), errors)
+
+    return cg.mark_stacked(parse) if stacked else parse
+
+
+def _last_value(directives: list[cg.Directive]) -> str | None:
+    return directives[-1].value or None
+
+
+def _last_number(kind: type) -> Callable[[list[cg.Directive]], Any]:
+    """The last line that converts to *kind*; any number, as ``parse_annotations`` keeps it."""
+
+    def fold(directives: list[cg.Directive]) -> Any:
+        number = None
+        for directive in directives:
+            try:
+                number = kind(directive.value)
+            except ValueError:
+                continue
+        return number
+
+    return fold
+
+
+def _last_named(directives: list[cg.Directive]) -> str | None:
+    return next((d.value for d in reversed(directives) if d.value), None)
+
+
+def _first_token(directives: list[cg.Directive]) -> str | None:
+    tokens = directives[-1].value.split()
+    return tokens[0] if tokens else None
+
+
+def _after_ids(directives: list[cg.Directive]) -> list[str]:
+    ids: list[str] = []
+    for directive in directives:
+        for token in directive.value.split():
+            token = token.strip().rstrip(",")
+            if token and token not in ids:
+                ids.append(token)
+    return ids
+
+
+def _parse_variant(directives: list[cg.Directive]) -> tuple[str, str]:
+    """The last ``@variant <group> <name>`` that parses; malformed only when none does."""
+    for directive in reversed(directives):
+        variant = _parse_variant_annotation(directive.value)
+        if variant is not None:
+            return variant.group, variant.name
+    raise cg.AnnotationError(
+        "`@variant` requires `group` and `name`", code="variant_malformed", line=directives[0].line
+    )
+
+
 _OFF = frozenset({"off", "false", "no", "0"})
 
 
@@ -168,13 +234,13 @@ def _parse_output_dirs(directives: list[cg.Directive]) -> Any:
 def _with_result(apply: Callable[[CellAnnotations, str], None], field: str) -> cg.Parser:
     """Fold every line into one ``CellAnnotations`` field, as ``parse_annotations`` does."""
 
-    def parse(directives: list[cg.Directive]) -> Any:
+    def fold(directives: list[cg.Directive]) -> Any:
         result = CellAnnotations()
         for directive in directives:
             apply(result, directive.value)
         return getattr(result, field)
 
-    return _read(parse)
+    return _lenient(fold)
 
 
 def _parse_loop(directives: list[cg.Directive]) -> Any:
@@ -483,8 +549,8 @@ def cell_effects(meta: Mapping[str, Any], parsed: Mapping[str, Any]) -> list[cg.
 
 def _strata_annotations() -> list[cg.Annotation]:
     return [
-        cg.Annotation("worker", parse=_last(str), in_key=False),
-        cg.Annotation("timeout", parse=_last(float), in_key=False),
+        cg.Annotation("worker", parse=_lenient(_last_value), in_key=False),
+        cg.Annotation("timeout", parse=_lenient(_last_number(float)), in_key=False),
         cg.Annotation("env", parse=_read(cg.mark_stacked(_parse_env)), in_key=False),
         cg.Annotation(
             "mount",
@@ -545,16 +611,16 @@ def _strata_annotations() -> list[cg.Annotation]:
         ),
         cg.Annotation(
             "stochastic",
-            parse=_read(_flag),
+            parse=_lenient(_flag),
             effects=lambda on: [cg.NoCache()] if on else [],
             in_key=False,
             validate=_validate_stochastic,
         ),
-        cg.Annotation("model", parse=_last(str), in_key=False),
-        cg.Annotation("temperature", parse=_last(float), in_key=False),
-        cg.Annotation("output", parse=_last(str), in_key=False),
-        cg.Annotation("max_tokens", parse=_last(int), in_key=False),
-        cg.Annotation("system", parse=_last(str), in_key=False),
+        cg.Annotation("model", parse=_lenient(_last_value), in_key=False),
+        cg.Annotation("temperature", parse=_lenient(_last_number(float)), in_key=False),
+        cg.Annotation("output", parse=_lenient(_last_value), in_key=False),
+        cg.Annotation("max_tokens", parse=_lenient(_last_number(int)), in_key=False),
+        cg.Annotation("system", parse=_lenient(_last_value), in_key=False),
         cg.Annotation("validate_retries", parse=_last(int), in_key=False),
         cg.Annotation(
             "output_schema", parse=_last(str), in_key=False, validate=_validate_output_schema
@@ -570,21 +636,97 @@ def _strata_annotations() -> list[cg.Annotation]:
             effects=_loop_effects,
             validate=_validate_loop,
         ),
-        cg.Annotation("live", parse=_read(_flag), in_key=False),
+        cg.Annotation("live", parse=_lenient(_flag), in_key=False),
         cg.Annotation("app", parse=lambda ds: ds[-1].value, in_key=False, validate=_validate_app),
     ]
 
 
+@functools.cache
 def strata_vocabulary() -> cg.Vocabulary:
     """Core plus Strata's own annotations, with Strata's checks on the core ones."""
     core = cg.Vocabulary.core()
-    # ``_value_problem`` checks every line of these, where core's parsers read one.
-    for key in ("name", "after", "nocache", "per_variant"):
-        core = core.replace(key, parse=_read(core[key].parse))
+    # Read as ``parse_annotations`` reads them, with ``_value_problem`` on every line.
+    core = (
+        core.replace("name", parse=_lenient(_last_named))
+        .replace("after", parse=_lenient(_after_ids, stacked=True))
+        .replace("nocache", parse=_lenient(_flag))
+        .replace("per_variant", parse=_lenient(_first_token))
+        .replace("variant", parse=_parse_variant)
+    )
     core = core.replace("name", validate=_validate_name).replace(
         "per_variant", validate=_validate_per_variant
     )
     return core | cg.Vocabulary(_strata_annotations(), cell_effects=cell_effects)
+
+
+# --- the parsed values as ``CellAnnotations`` -------------------------------------
+
+
+def parse_values(source: str, language: str) -> tuple[dict[str, Any], list[cg.Directive]]:
+    """Each present annotation's parsed value, and the directives the language reads.
+
+    The vocabulary's parsers alone, as cellgraph's parse phase runs them: no names,
+    no effects, no validators.
+    """
+    vocabulary = strata_vocabulary()
+    keys = cg.directive_keys(cg.get_language_analyzer(language))
+    directives = vocabulary.grammar.directives(source, keys=keys)
+    by_owner: dict[str, list[cg.Directive]] = {}
+    for directive in directives:
+        owner = vocabulary.owner(directive.key)
+        if owner is not None:
+            by_owner.setdefault(owner.key, []).append(directive)
+    values: dict[str, Any] = {}
+    for annotation in vocabulary:
+        found = by_owner.get(annotation.key)
+        if not found:
+            continue
+        try:
+            value = annotation.parse(found)
+        except (cg.AnnotationError, ExceptionGroup):
+            continue
+        values[annotation.key] = value.value if isinstance(value, cg.Partial) else value
+    return values, directives
+
+
+def annotations_from(values: dict[str, Any], directives: list[cg.Directive]) -> CellAnnotations:
+    """``parse_annotations``'s result, built from the vocabulary's parsed values."""
+    values = copy.deepcopy(values)
+    variant = values.get("variant")
+    # Each line sets ``nocache`` as it is read, and an ``@stochastic`` that is on turns it on.
+    nocache = False
+    for directive in directives:
+        if directive.key == "nocache":
+            nocache = _flag([directive])
+        elif directive.key == "stochastic" and _flag([directive]):
+            nocache = True
+    return CellAnnotations(
+        worker=values.get("worker"),
+        timeout=values.get("timeout"),
+        mounts=values.get("mount", []),
+        tables=values.get("table", []),
+        table_writes=values.get("write_table", []),
+        output_dirs=values.get("output_dir", []),
+        fetches=values.get("fetch", []),
+        datasets=values.get("dataset", []),
+        env=values.get("env", {}),
+        name=values.get("name"),
+        model=values.get("model"),
+        temperature=values.get("temperature"),
+        output_type=values.get("output"),
+        max_tokens=values.get("max_tokens"),
+        system_prompt=values.get("system"),
+        loop=values.get("loop"),
+        live=values.get("live", False),
+        sql=values.get("sql"),
+        cache=values.get("cache"),
+        stochastic=values.get("stochastic", False),
+        nocache=nocache,
+        variant=VariantAnnotation(group=variant[0], name=variant[1]) if variant else None,
+        per_variant="per_variant" in values,
+        per_variant_group=values.get("per_variant"),
+        after=values.get("after", []),
+    )
 
 
 # --- cellgraph's own checks, worded as Strata words them -------------------------
@@ -593,10 +735,56 @@ def strata_vocabulary() -> cg.Vocabulary:
 STRATA_CODES = {"seed_unknown_cell": "loop_start_from_unknown"}
 
 
-def strata_diagnostics(cell: cg.CellAnalysis) -> list[AnnotationDiagnostic]:
-    """The cell's diagnostics with Strata's codes and wording; structural ones are not here.
+_VARIANT_CODES = (
+    "variant_malformed",
+    "variant_contract_mismatch",
+    "variant_mode_invalid",
+    "variant_active_redundant",
+    "variant_active_unknown",
+)
+_PER_VARIANT_CODES = (
+    "per_variant_write_table_overwrite",
+    "per_variant_on_variant_member",
+    "per_variant_unknown_group",
+    "per_variant_no_sweep_source",
+    "per_variant_ambiguous_group",
+    "per_variant_group_of_one",
+)
+_INPUT_UNREADABLE = frozenset(
+    f"{key}_unreadable"
+    for key in ("mount", "table", "fetch", "dataset", "write_table", "output_dir")
+)
+_VALUE_CODES = frozenset(
+    {"timeout_not_numeric", "env_malformed", "cache_ttl_invalid", "cache_policy_unknown"}
+)
 
-    A cycle or a variant collision is the notebook's ``dag_error``, not a cell's.
+
+def _strata_order(d: cg.Diagnostic) -> tuple[int, int]:
+    """Where ``validate_cell_annotations`` puts the finding: its check, then the line for
+    the checks that scan line by line. Within a check cellgraph's order already agrees."""
+    line = d.line or 0
+    if d.code in _VARIANT_CODES:
+        return 0, 0
+    if d.code in _PER_VARIANT_CODES:
+        return 1, 0
+    if d.code in _INPUT_UNREADABLE:
+        return 2, line
+    if d.code.endswith("_unreadable") or d.code in _VALUE_CODES:
+        return 3, line
+    if d.code == "stochastic_nocache_conflict":
+        return 4, 0
+    if d.code == "annotation_unknown":
+        return 5, line
+    if d.code.startswith("after_"):
+        return 6, 0
+    return 7, 0
+
+
+def strata_diagnostics(cell: cg.CellAnalysis) -> list[AnnotationDiagnostic]:
+    """The cell's diagnostics as Strata reports them: its codes, wording and order.
+
+    Structural ones are not here: a cycle or a variant collision is the notebook's
+    ``dag_error``, not a cell's.
     """
     return [
         AnnotationDiagnostic(
@@ -605,7 +793,7 @@ def strata_diagnostics(cell: cg.CellAnalysis) -> list[AnnotationDiagnostic]:
             message=_strata_message(d, cell),
             line=d.line,
         )
-        for d in cell.diagnostics
+        for d in sorted(cell.diagnostics, key=_strata_order)
         if d.code not in cg.analysis.STRUCTURAL_CODES
     ]
 
