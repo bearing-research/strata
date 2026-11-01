@@ -499,6 +499,11 @@ wheels = [
 ]
 
 [[package]]
+name = "cellgraph"
+version = "0.1.0"
+source = { git = "https://github.com/bearing-research/cellgraph?rev=8ece49da08b80fc1afbbd4d84606351624c3484e#8ece49da08b80fc1afbbd4d84606351624c3484e" }
+
+[[package]]
 name = "certifi"
 version = "2025.11.12"
 source = { registry = "https://pypi.org/simple" }
@@ -4088,6 +4093,7 @@ dev = [
     { name = "adbc-driver-sqlite" },
     { name = "adlfs" },
     { name = "boto3" },
+    { name = "cellgraph" },
     { name = "datafusion" },
     { name = "gcsfs" },
     { name = "grandalf" },
@@ -4180,6 +4186,7 @@ dev = [
     { name = "adbc-driver-sqlite", specifier = ">=1.0.0" },
     { name = "adlfs", specifier = ">=2026.0.0" },
     { name = "boto3", specifier = ">=1.35.0" },
+    { name = "cellgraph", git = "https://github.com/bearing-research/cellgraph?rev=8ece49da08b80fc1afbbd4d84606351624c3484e" },
     { name = "datafusion", specifier = ">=50.1.0" },
     { name = "gcsfs", specifier = ">=2026.0.0" },
     { name = "grandalf", specifier = ">=0.8" },
