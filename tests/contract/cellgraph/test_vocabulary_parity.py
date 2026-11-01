@@ -2,7 +2,8 @@
 
 The traces cover what the scenarios exercise; these cells pin the checks they do
 not: each is opened by a real session and analyzed by cellgraph, and the two must
-agree on every diagnostic (code, severity, line) and on whether the cell runs.
+agree on every diagnostic (code, severity, line and message, in order) and on
+whether the cell runs.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ if os.name == "nt":
 from strata.notebook.annotation_validation import DiagnosticSeverity  # noqa: E402
 from strata.notebook.parser import parse_notebook  # noqa: E402
 from strata.notebook.session import NotebookSession  # noqa: E402
-from tests.contract.cellgraph import replay  # noqa: E402
+from strata.notebook.vocabulary import strata_diagnostics  # noqa: E402
+from tests.contract.cellgraph import record, replay  # noqa: E402
 
 CASES = {
     "output_schema_malformed": [("p", "prompt", "# @output_schema {not json\nhello", None)],
@@ -72,6 +74,100 @@ CASES = {
             None,
         )
     ],
+}
+
+_SWITCH = '\n[[variant_group]]\ngroup = "g"\nmode = "switch"\n'
+_SWEEP = '\n[[variant_group]]\ngroup = "g"\nmode = "sweep"\n'
+_SWEEPS = _SWEEP + '\n[[variant_group]]\ngroup = "h"\nmode = "sweep"\n'
+
+
+def _members(group="g", defines=("y", "y")):
+    return [
+        (f"v{i}", "python", f"# @variant {group} m{i}\n{name} = {i}", None)
+        for i, name in enumerate(defines, start=1)
+    ]
+
+
+# The checks cellgraph's core makes (after, seeds, variants, fan-out, unknown keys),
+# each with the notebook.toml it needs.
+CORE_CASES = {
+    "annotation_unknown": ([("w", "python", "# @wroker gpu\n# @zzz\nx = 1", None)], ""),
+    "after_each_line": (
+        [
+            ("a", "python", "x = 1", None),
+            ("c", "python", "# @after a\n# @after ghost c\nz = 1", None),
+        ],
+        "",
+    ),
+    "after_inactive_variant": (
+        [*_members(), ("d", "python", "# @after v2\nprint(1)", None)],
+        _SWITCH,
+    ),
+    "seed_unknown_cell": (
+        [("l", "python", "# @loop max_iter=3 carry=x start_from=ghost@iter=1\nx = 1", None)],
+        "",
+    ),
+    "seed_self": (
+        [("l", "python", "# @loop max_iter=3 carry=x start_from=l@iter=1\nx = 1", None)],
+        "",
+    ),
+    "seed_inactive_variant": (
+        [
+            *_members(defines=("x", "x")),
+            ("l", "python", "# @loop max_iter=3 carry=x start_from=v2@iter=1\nx = x + 1", None),
+        ],
+        _SWITCH,
+    ),
+    "seed_without_the_carry": (
+        [
+            ("s", "python", "y = 1", None),
+            ("l", "python", "# @loop max_iter=3 carry=x start_from=s@iter=1\nx = 1", None),
+        ],
+        "",
+    ),
+    "variant_malformed": ([("v", "python", "# @variant onlyone\nx = 1", None)], ""),
+    "variant_contract_mismatch": (_members(defines=("y", "z")), _SWITCH),
+    "variant_mode_invalid": (
+        _members(),
+        '\n[[variant_group]]\ngroup = "g"\nmode = "bogus"\n',
+    ),
+    "variant_active_redundant": (_members(), _SWEEP + 'active = "m2"\n'),
+    "variant_active_unknown": (_members(), _SWITCH + 'active = "nope"\n'),
+    "per_variant_on_variant_member": (
+        [("v", "python", "# @variant g m\n# @per_variant\ny = 1", None)],
+        _SWEEP,
+    ),
+    "per_variant_unknown_group": (
+        [*_members(), ("f", "python", "# @per_variant other\nz = y", None)],
+        _SWEEP,
+    ),
+    "per_variant_no_sweep_source": ([("f", "python", "# @per_variant\nz = 1", None)], ""),
+    "per_variant_ambiguous_group": (
+        [
+            *_members(),
+            ("h1", "python", "# @variant h n1\nw = 1", None),
+            ("h2", "python", "# @variant h n2\nw = 2", None),
+            ("f", "python", "# @per_variant\nz = y + w", None),
+        ],
+        _SWEEPS,
+    ),
+    "per_variant_group_of_one": (
+        [
+            ("v1", "python", "# @variant g m1\ny = 1", None),
+            ("f", "python", "# @per_variant\nz = y", None),
+        ],
+        _SWEEP,
+    ),
+}
+
+
+# The code a case exercises, where it is not the case's name.
+CORE_CODES = {
+    "after_each_line": "after_unknown_cell",
+    "seed_unknown_cell": "loop_start_from_unknown",
+    "seed_self": "loop_start_from_unknown",
+    "seed_inactive_variant": "loop_start_from_unknown",
+    "seed_without_the_carry": "loop_start_from_unknown",
 }
 
 
@@ -147,8 +243,12 @@ SQL_CASES = {
 }
 
 
+def _view(diagnostics):
+    return [(d.code, d.severity.value, d.line, d.message) for d in diagnostics]
+
+
 def _assert_parity(notebook_dir):
-    """Every cell's diagnostics (code, severity, line) and whether it runs agree."""
+    """Every cell's diagnostics and whether it runs agree."""
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
     analysis = replay.analyze(parse_notebook(notebook_dir))
     cells = {cell.id: cell for cell in session.notebook_state.cells}
@@ -161,12 +261,11 @@ def _assert_parity(notebook_dir):
         return all(runs(upstream) for upstream in cell.upstream_ids)
 
     for cell in cells.values():
-        strata = sorted((d.code, d.severity.value, d.line) for d in cell.annotation_diagnostics)
-        ours = sorted(
-            (d.code, d.severity.value, d.line) for d in analysis.cells[cell.id].diagnostics
-        )
-        assert ours == strata, cell.id
-        assert analysis.cells[cell.id].plannable == runs(cell.id), cell.id
+        ours = _view(strata_diagnostics(analysis.cells[cell.id]))
+        assert ours == _view(cell.annotation_diagnostics), cell.id
+        # A broken DAG is ``dag_error``: Strata has no graph to say what runs.
+        if session.dag_error is None:
+            assert analysis.cells[cell.id].plannable == runs(cell.id), cell.id
     return session, analysis
 
 
@@ -177,19 +276,36 @@ def test_cellgraph_reports_what_strata_reports(name, tmp_path):
     _assert_parity(notebook_dir)
 
 
+@pytest.mark.parametrize("name", sorted(CORE_CASES))
+def test_cellgraph_reports_its_core_checks_as_strata_does(name, tmp_path):
+    cells, extra_toml = CORE_CASES[name]
+    notebook_dir = tmp_path / name
+    _write(notebook_dir, cells, extra_toml=extra_toml)
+    session, _analysis = _assert_parity(notebook_dir)
+    codes = {d.code for cell in session.notebook_state.cells for d in cell.annotation_diagnostics}
+    assert CORE_CODES.get(name, name) in codes
+
+
 @pytest.mark.parametrize("name", sorted(SQL_CASES))
 def test_cellgraph_reports_the_sql_connection_as_strata_does(name, tmp_path):
     source, expected = SQL_CASES[name]
     notebook_dir = tmp_path / name
     cells = [("q", "sql", "# @name t\n" + source, None), ("d", "python", "print(t)", None)]
     _write(notebook_dir, cells, extra_toml=_CONNECTIONS)
-    session, analysis = _assert_parity(notebook_dir)
+    session, _analysis = _assert_parity(notebook_dir)
 
     sql, reader = session.notebook_state.cells
     assert [(d.code, d.severity.value, d.line) for d in sql.annotation_diagnostics] == expected
     assert reader.upstream_ids == ["q"]
-    ours = analysis.cells["q"].diagnostics
-    assert sorted(d.message for d in ours) == sorted(d.message for d in sql.annotation_diagnostics)
+
+
+@pytest.mark.parametrize("name", [n for n in record.scenario_names() if n not in record.REQUIRES])
+def test_every_scenario_step_reports_what_strata_reports(name, tmp_path):
+    """The traces record codes and lines; this holds messages, order and ``dag_error`` too."""
+    for _index, _step, _state in replay.notebooks(name, tmp_path):
+        session, analysis = _assert_parity(tmp_path / name)
+        structural = [d.message for d in analysis.structural_errors]
+        assert session.dag_error == (structural[0] if structural else None)
 
 
 def test_a_notebook_mount_shadowed_by_an_annotation(tmp_path):
@@ -204,5 +320,5 @@ def test_a_notebook_mount_shadowed_by_an_annotation(tmp_path):
     analysis = replay.analyze(parse_notebook(notebook_dir))
     (cell,) = session.notebook_state.cells
     strata = [(d.code, d.severity.value, d.line) for d in cell.annotation_diagnostics]
-    ours = [(d.code, d.severity.value, d.line) for d in analysis.cells["m"].diagnostics]
+    ours = [(d.code, d.severity.value, d.line) for d in strata_diagnostics(analysis.cells["m"])]
     assert ours == strata == [("mount_shadows_notebook", "info", 1)]

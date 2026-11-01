@@ -22,8 +22,6 @@ import cellgraph as cg
 from strata.notebook import vocabulary
 from tests.contract.cellgraph import record
 
-# cellgraph's codes for a check Strata names after its own annotation.
-CODE_IN_STRATA = {"seed_unknown_cell": "loop_start_from_unknown"}
 # Structural errors are compared through ``dag_error``, not per cell.
 STRUCTURAL = cg.analysis.STRUCTURAL_CODES
 
@@ -352,7 +350,7 @@ def replay(name: str, workdir: Path) -> Report:
                     miss(index, cell_id, f"analysis.{part}", expected["analysis"][part], actual)
 
             ours = sorted(
-                [CODE_IN_STRATA.get(d.code, d.code), d.severity.value, d.line]
+                [vocabulary.STRATA_CODES.get(d.code, d.code), d.severity.value, d.line]
                 for d in ca.diagnostics
                 if d.code not in STRUCTURAL
             )
