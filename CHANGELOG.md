@@ -132,7 +132,7 @@ exhaustive commit history.
   upstream outputs and a SQL cell's connection or a prompt cell's model are each
   named. An input that can't be read is reported as that. When nothing recorded
   explains the change, including a cell last run before this version, the
-  explanation says it is incomplete instead of guessing. (#PR)
+  explanation says it is incomplete instead of guessing. (#1369)
 - **A cell after a prompt cell reads the answer it just gave.** Under
   `strata run`, the cell was keyed without the prompt's answer, so after the
   notebook's `[ai]` model changed it was a cache hit and printed the old
