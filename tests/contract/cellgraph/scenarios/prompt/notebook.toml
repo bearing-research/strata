@@ -2,7 +2,7 @@ notebook_id = "cellgraph-prompt"
 name = "prompt"
 cells = [
     { id = "u1", file = "u1.py", language = "python", order = 0 },
-    { id = "p2", file = "p2.py", language = "prompt", order = 1.0 },
+    { id = "p2", file = "p2.prompt", language = "prompt", order = 1.0 },
     { id = "d3", file = "d3.py", language = "python", order = 2.0 },
 ]
 workers = []
