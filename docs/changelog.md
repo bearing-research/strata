@@ -140,6 +140,9 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A `@per_variant` cell ending in a displayed value no longer reruns every
+  variant.** The cache check looked for its displays where they are not stored,
+  so every variant missed. (#1372)
 - **A `merge` on two key columns no longer kills the server.** `@write_table
   ... merge on=a,b` with about 2,000 rows or more crashed the process in Arrow.
   A merge now also refuses a null or missing key column before writing. (#1371)

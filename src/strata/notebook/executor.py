@@ -2383,7 +2383,8 @@ class CellExecutor:
         # Display outputs share the provenance; without promoting them a reverted cell hits with
         # its plot gone. Restore the count the reverted run recorded (the current list holds the
         # later run's, or none after a failure); older displays use the current list.
-        if invalid is None:
+        # A fan-out instance's displays are not stored per variant, so they say nothing of it.
+        if invalid is None and variant is None:
             display_count = self._recorded_display_count(cell_id, provenance_hash, variant)
             if display_count is None:
                 display_count = current_display_count
@@ -2668,6 +2669,9 @@ class CellExecutor:
 
         if materialize_upstreams:
             await self._materialize_upstreams(cell_id)
+        # A release is one instance's, and the manifest's key does not carry a branch.
+        if cell_id in self._branch_inits:
+            return refused("Branching an @each cell from a release is not supported yet")
         annotations = parse_annotations(source)
         assert annotations.each is not None  # the cell is in the DAG's each_cells
         base = await self._compute_cell_provenance(cell_id, source)
@@ -2689,6 +2693,9 @@ class CellExecutor:
         ):
             return self._each_cached(cell_id, consumed, base, start_time)
 
+        # Each instance names itself the cell's output; a run with no manifest puts them back.
+        cell = self.session.notebook_state.get_cell(cell_id)
+        last_good = (dict(cell.artifact_uris), cell.artifact_uri) if cell is not None else None
         with output_dirs.assembling():
             try:
                 try:
@@ -2727,6 +2734,10 @@ class CellExecutor:
                     )
                 except (TableWriteError, each.EachError) as exc:
                     error = str(exc)
+            else:
+                error = "an item failed"
+        if error is not None and cell is not None and last_good is not None:
+            cell.artifact_uris, cell.artifact_uri = last_good
         return self._finish_fanout(cell_id, results, base, start_time, error=error)
 
     def _each_cached(
@@ -2792,6 +2803,7 @@ class CellExecutor:
                     prepared[source].local_path,
                     spec.get("glob"),
                     by_content=scheme != "file",
+                    versions=prepared[source].file_versions,
                 )
             )
             return items, base.over_mounts(prepared)
@@ -2866,7 +2878,10 @@ class CellExecutor:
                     manager.stage_cell_output(
                         cell_id=cell_id,
                         variable_name=var_name,
-                        blob_data=each.encode_manifest([(k, v.id, v.version) for k, v in versions]),
+                        blob_data=each.encode_manifest(
+                            manager.cell_artifact_id(cell_id, var_name),
+                            [(k, v.id, v.version) for k, v in versions],
+                        ),
                         content_type=each.CONTENT_TYPE,
                         provenance_hash=provenance,
                         input_versions=input_versions,
@@ -5909,16 +5924,19 @@ class CellExecutor:
                     ):
                         # An @each cell's output: the {key: value} dict of its manifest's items.
                         blob = artifact_mgr.load_artifact_data(artifact_id, latest.version)
-                        input_specs[var_name] = {
-                            "kind": "sweep_dict",
-                            "variants": {
-                                key: _load_versioned_spec(
-                                    f"strata://artifact/{instance_id}@v={version}",
-                                    f"{var_name}__{each.instance_name(key)}",
+                        items = {}
+                        for key, instance_id, version in each.manifest_refs(artifact_id, blob):
+                            item_spec = _load_versioned_spec(
+                                f"strata://artifact/{instance_id}@v={version}",
+                                f"{var_name}__{each.instance_name(key)}",
+                            )
+                            if item_spec is None:
+                                raise each.EachError(
+                                    f"`{var_name}`: item {key!r} is {instance_id}@v={version}, "
+                                    "which is gone"
                                 )
-                                for key, instance_id, version in each.manifest_refs(blob)
-                            },
-                        }
+                            items[key] = item_spec
+                        input_specs[var_name] = {"kind": "sweep_dict", "variants": items}
                         continue
 
                     spec = _load_artifact_spec(artifact_id, var_name)
@@ -5948,6 +5966,8 @@ class CellExecutor:
                         var_name,
                         artifact_id,
                     )
+                except each.EachError:
+                    raise  # a missing value would otherwise read as a NameError in the cell
                 except Exception:
                     logger.exception(
                         "Failed to load input %s from artifact store",

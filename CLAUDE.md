@@ -311,7 +311,8 @@ retry, store response as artifact. Provenance includes a schema fingerprint.
 `@each` cells (`each.py`): one instance per file or row, listed at run time, each keyed
 on its own content (`cg.Item`) with `@variant=each-<sha16>` artifacts. Nothing changed is
 one probe of the cell's key. When all succeed, a manifest per output (`each/manifest`,
-at the plain id) names the instance versions and requires them; consumers load it as
+at the plain id) names the instance versions, relative to its own id, and requires them;
+Python consumers load it as
 `{key: value}`, and `@write_table sync` writes once over every instance's rows.
 
 Loop cells (`@loop max_iter=N carry=var`): one harness subprocess per iteration,

@@ -665,12 +665,14 @@ to one item in each instance. What `<source>` is decides what an item is:
 
 | Source                      | One item per | Named by         | Runs again when         |
 | --------------------------- | ------------ | ---------------- | ----------------------- |
-| a mount, with an optional `glob=` | file   | its relative path | its size or mtime changes (a remote file: its content) |
+| a mount, with an optional `glob=` | file   | its relative path | its size or mtime changes (a remote file: its listed version) |
 | a dict from another cell    | entry        | its key          | its value changes       |
 | a list from another cell    | value        | the value itself | an edit is a new item   |
 | a table from another cell, with `key=` | row | the `key=` column | the row changes       |
 
-A file is bound as a `pathlib.Path`, and a row as a dict of JSON-safe values. A list
+A file is bound as a `pathlib.Path`, and a link to a file counts as a file. A mount
+that is itself one file is refused. A row is bound as a dict of JSON-safe values, with
+a null as `None`. A list
 item is named by its content, so inserting one does not run the ones after it, and a
 repeated value runs once. A table's key must not be null or repeat. The collection
 has to be a dict, a list or a table as stored: a pickled one is refused, because the
@@ -704,8 +706,10 @@ with no items refuses the run rather than delete every row. `append`, `merge` an
 **Limits.** Python cells on the local worker, read by Python cells. Instances run one at a time, a harness
 each, about half a second before the cell's own work, so plan on that for a first run
 of thousands of items. An `@each` cell cannot also be a `@loop`, `@per_variant` or
-`@variant` cell, or fan out over a sweep. Its cell tests and `@dataset` over its output
-are not supported yet.
+`@variant` cell, or fan out over a sweep. Cell tests, branching from a release,
+`@dataset`, `strata artifact pull` and a publication bundle over its output are not
+supported yet and are refused; a cell that reads the output can do the last three.
+A snapshot carries the output and every item it names.
 
 A prune keeps each instance a kept manifest names and drops the rest, so a removed
 item's value goes once no manifest left names it.

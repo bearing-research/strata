@@ -13,18 +13,17 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
-import logging
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import cellgraph as cg
 
-from strata.notebook.mounts import _file_states
+from strata.notebook.mounts import _sha256
 from strata.notebook.output_dirs import is_assembling
 from strata.notebook.serializer import to_serialization_safe
-
-logger = logging.getLogger(__name__)
 
 CONTENT_TYPE = "each/manifest"
 _INSTANCE_PREFIX = "each-"
@@ -101,54 +100,106 @@ def items_of_table(table: Any, key_column: str | None, name: str) -> list[EachIt
         key = str(row[key_column])
         if key in items:
             raise EachError(f"@each over `{name}`: two rows have the {key_column!r} {key!r}")
-        items[key] = _item(key, to_serialization_safe(row))
+        items[key] = _item(key, to_serialization_safe(row, keep_none=True))
     return list(items.values())
 
 
-def items_of_mount(root: Path, glob: str | None, *, by_content: bool) -> list[EachItem]:
+def _listed_files(root: Path) -> list[tuple[str, Path, int, int]]:
+    """``(relative path, path, size, mtime_ns)`` of what the mount's fingerprint counts.
+
+    A link to a file is a file, as in a Hugging Face cache or a DVC checkout.
+    """
+    if not root.is_dir():
+        raise EachError(f"@each over a mount needs a folder, and {root} is not one")
+    files = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            path = Path(dirpath) / filename
+            try:
+                state = path.stat()
+            except OSError:
+                continue  # a dangling link
+            relative = path.relative_to(root).as_posix()
+            files.append((relative, path, state.st_size, state.st_mtime_ns))
+    return sorted(files)
+
+
+def items_of_mount(
+    root: Path,
+    glob: str | None,
+    *,
+    by_content: bool,
+    versions: Mapping[str, str] | None = None,
+) -> list[EachItem]:
     """One item per file, named by its relative path.
 
     A local file's digest is its size and mtime, what the mount's fingerprint reads. A
-    remote mount's view is new for each listing, so its mtimes say nothing: by content.
+    remote mount's view is new for each listing, so its mtimes say nothing: the listing's
+    *versions*, or the file's content where the listing has none.
     """
     items = []
-    for relative, (size, mtime_ns) in sorted(_file_states(root).items()):
+    for relative, path, size, mtime_ns in _listed_files(root):
         if glob is not None and not fnmatch.fnmatch(relative, glob):
             continue
-        path = root / relative
-        if by_content:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        else:
+        if not by_content:
             digest = hashlib.sha256(f"{size}:{mtime_ns}".encode()).hexdigest()
+        elif versions is not None and relative in versions:
+            digest = versions[relative]
+        else:
+            with path.open("rb") as handle:
+                digest = _sha256(handle)
         items.append(EachItem(key=relative, digest=digest, path=path))
     return items
 
 
-def encode_manifest(entries: list[tuple[str, str, int]]) -> bytes:
-    """A manifest of ``(item key, instance's artifact id, version)``, by key."""
-    return _encoded({"items": [list(entry) for entry in sorted(entries)]})
+def instance_id(manifest_id: str, key: str) -> str:
+    """Where an item's value is stored: beside the manifest, whose id an import may rename."""
+    return f"{manifest_id.partition('@')[0]}@variant={instance_name(key)}"
 
 
-def manifest_refs(manifest: bytes) -> list[tuple[str, str, int]]:
+def encode_manifest(manifest_id: str, entries: list[tuple[str, str, int]]) -> bytes:
+    """A manifest of ``(item key, instance's artifact id, version)``, by key.
+
+    An entry names an id only when the value landed somewhere other than beside it.
+    """
+    return _encoded(
+        {
+            "items": [
+                [key, version]
+                if artifact_id == instance_id(manifest_id, key)
+                else [key, version, artifact_id]
+                for key, artifact_id, version in sorted(entries)
+            ]
+        }
+    )
+
+
+def manifest_refs(manifest_id: str, manifest: bytes) -> list[tuple[str, str, int]]:
     """A manifest's ``(item key, artifact id, version)``.
 
     Raises:
-        ValueError: it is not one, as an import can hold any bytes under this type.
+        EachError: it is not one, as an import can hold any bytes under this type.
     """
     try:
-        items = json.loads(manifest)["items"]
-        return [(str(key), str(artifact_id), int(version)) for key, artifact_id, version in items]
-    except (KeyError, TypeError) as exc:
-        raise ValueError(f"not an @each manifest: {exc}") from exc
+        refs = []
+        for key, version, *elsewhere in json.loads(manifest)["items"]:
+            artifact_id = str(elsewhere[0]) if elsewhere else instance_id(manifest_id, str(key))
+            refs.append((str(key), artifact_id, int(version)))
+        return refs
+    except (ValueError, KeyError, TypeError) as exc:
+        raise EachError(f"not an @each manifest: {exc}") from exc
 
 
-def relocate(manifest: bytes, landed: dict[tuple[str, int], tuple[str, int]]) -> bytes:
+def relocate(
+    manifest: bytes, manifest_id: str, landed: dict[tuple[str, int], tuple[str, int]]
+) -> bytes:
     """The manifest naming where each instance *landed* in another store."""
     return encode_manifest(
+        manifest_id,
         [
             (key, *landed.get((artifact_id, version), (artifact_id, version)))
-            for key, artifact_id, version in manifest_refs(manifest)
-        ]
+            for key, artifact_id, version in manifest_refs(manifest_id, manifest)
+        ],
     )
 
 

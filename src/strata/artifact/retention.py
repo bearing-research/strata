@@ -34,7 +34,7 @@ def requirements(
     data = blob.read_bytes() if isinstance(blob, Path) else blob
     if content_type == each.CONTENT_TYPE:
         try:
-            return [(instance_id, v) for _, instance_id, v in each.manifest_refs(data)]
+            return [(instance, v) for _, instance, v in each.manifest_refs(artifact_id, data)]
         except ValueError:
             logger.warning("%s is not a readable @each manifest; it keeps nothing", artifact_id)
             return []

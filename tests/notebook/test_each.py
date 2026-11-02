@@ -6,9 +6,11 @@ appends its item to a log file, so an item that did not run left no line.
 
 from __future__ import annotations
 
+import argparse
 import os
 import shutil
 import sys
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +18,8 @@ from types import SimpleNamespace
 import pytest
 from vestigo.store import ArtifactStore
 
+from strata.api.publication_bundle import _write_folder_files
+from strata.artifact.cli import cmd_pull
 from strata.artifact.transfer import copy_chain
 from strata.notebook import each, output_dirs
 from strata.notebook.datasets import DatasetError, content_type_of
@@ -23,8 +27,15 @@ from strata.notebook.executor import CellExecutor, is_cell_batchable
 from strata.notebook.models import CellStatus, WorkerBackendType, WorkerSpec
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
+from strata.notebook.snapshot import build_artifact_index, write_committed_files, write_snapshot
+from strata.notebook.snapshot_import import import_snapshot
 from strata.notebook.table_writes import TableWriteError
-from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from strata.notebook.writer import (
+    add_cell_to_notebook,
+    create_notebook,
+    set_variant_mode,
+    write_cell,
+)
 
 windows = pytest.mark.skipif(
     sys.platform == "win32", reason="pyiceberg's local warehouse paths fail on Windows"
@@ -76,7 +87,7 @@ class Notebook:
         latest = manager.artifact_store.get_latest_version(manager.cell_artifact_id(cell_id, var))
         assert latest.params["content_type"] == each.CONTENT_TYPE
         blob = manager.load_artifact_data(latest.id, latest.version)
-        return {key: (id_, v) for key, id_, v in each.manifest_refs(blob)}
+        return {key: (id_, v) for key, id_, v in each.manifest_refs(latest.id, blob)}
 
 
 def _logs(log: Path, expression: str) -> str:
@@ -174,6 +185,51 @@ class TestFiles:
 
         assert len(nb.ran()) == 3
         assert prepared.count("raw") == 1
+
+    @pytest.mark.parametrize("reader", [READER, None])
+    async def test_a_cell_ending_in_a_display_still_runs_a_changed_file_alone(
+        self, tmp_path, reader
+    ):
+        raw, source = _over_files(tmp_path, body="out = path.read_text().upper()\nout\n")
+        for name in ("one", "two", "three"):
+            _touch(raw / f"{name}.txt", name)
+        nb = Notebook(tmp_path, source, *([reader] if reader else []))
+        await nb.good("a")
+        assert len(nb.ran()) == 3
+
+        # The first in order: its new display is what the next item's check tripped on.
+        _touch(raw / "one.txt", "changed", tick=1)
+        await nb.good("a")
+
+        assert nb.ran() == ["one.txt"]
+
+    async def test_a_link_to_a_file_is_an_item(self, tmp_path):
+        raw, source = _over_files(tmp_path)
+        target = tmp_path / "blobs" / "abc"
+        target.parent.mkdir()
+        _touch(target, "linked")
+        (raw / "one.txt").symlink_to(target)
+        (raw / "gone.txt").symlink_to(tmp_path / "nothing")
+        nb = Notebook(tmp_path, source, READER + "print(seen)\n")
+
+        await nb.good("a")
+
+        assert "{'one.txt': 'LINKED'}" in (await nb.good("b")).stdout
+        # The link's target moved on, so the fingerprint and the item both did.
+        _touch(target, "changed", tick=1)
+        await nb.good("a")
+        assert "{'one.txt': 'CHANGED'}" in (await nb.good("b")).stdout
+
+    async def test_a_mount_of_one_file_is_refused_rather_than_empty(self, tmp_path):
+        target = tmp_path / "one.txt"
+        _touch(target, "a")
+        source = f"# @mount raw {target.as_uri()} ro\n# @each path in raw\nout = 1\n"
+        nb = Notebook(tmp_path, source, READER)
+
+        result = await nb.run("a")
+
+        assert not result.success
+        assert "needs a folder" in result.error
 
     async def test_a_new_file_runs_alone(self, tmp_path):
         raw, source = _over_files(tmp_path)
@@ -324,6 +380,22 @@ class TestVariables:
         assert nb.ran() == ["2"]
         assert "[('1', 10), ('2', 21)]" in (await nb.good("c")).stdout
 
+    async def test_a_null_reaches_the_cell_as_none_and_is_not_an_empty_string(self, tmp_path):
+        log = tmp_path / "ran.log"
+        table = 'import pyarrow as pa\nreadings = pa.table({"id": [1], "v": %s})\n'
+        nulls = table % "pa.array([None], pa.string())"
+        cell = "# @each row in readings key=id\n" + _logs(log, "row['v']") + "out = row['v']\n"
+        nb = Notebook(tmp_path, nulls, cell, READER + "print(seen)\n")
+        await nb.good("a")
+        await nb.good("b")
+        assert nb.ran() == ["None"]
+        assert "{'1': None}" in (await nb.good("c")).stdout
+
+        await nb.good("a", table % '[""]')
+        await nb.good("b")
+
+        assert nb.ran() == [""]
+
     async def test_another_input_recomputes_every_item(self, tmp_path):
         log = tmp_path / "ran.log"
         cell = "# @each item in samples\n" + _logs(log, "item") + "out = item * scale\n"
@@ -427,6 +499,27 @@ class TestFailure:
         assert nb.ran() == ["bad"]
         assert not (await nb.run("b")).success
         assert nb.ran() == ["bad"]
+
+    async def test_a_failed_item_leaves_the_cell_naming_its_manifest(self, tmp_path):
+        log = tmp_path / "ran.log"
+        cell = (
+            "# @each item in samples\n"
+            + _logs(log, "item")
+            + "if item == 'bad':\n    raise ValueError('no')\nout = item\n"
+        )
+        nb = Notebook(tmp_path, 'samples = ["good"]\n', cell, READER)
+        await nb.good("a")
+        await nb.good("b")
+        state = nb.session.notebook_state.get_cell("b")
+        before = dict(state.artifact_uris)
+        assert "@variant=" not in before["out"]
+
+        # The new item stores a value and the next fails: both name themselves meanwhile.
+        await nb.good("a", 'samples = ["new", "bad"]\n')
+        assert not (await nb.run("b")).success
+
+        assert state.artifact_uris == before
+        assert state.artifact_uri == before["out"]
 
     async def test_a_failed_item_keeps_the_last_manifest(self, tmp_path):
         log = tmp_path / "ran.log"
@@ -678,6 +771,67 @@ class TestSync:
         assert not nb.log.exists()
 
 
+class TestASnapshot:
+    @staticmethod
+    def _export(nb: Notebook, out: Path) -> Path:
+        with zipfile.ZipFile(out, "w") as archive:
+            write_committed_files(nb.session, archive)
+            write_snapshot(nb.session, archive, include="all")
+        return out
+
+    async def test_an_import_under_a_new_id_still_reads_every_item(self, tmp_path):
+        raw, source = _over_files(tmp_path)
+        _touch(raw / "one.txt", "a")
+        _touch(raw / "two.txt", "bb")
+        nb = Notebook(tmp_path, source, READER + "print(sorted(seen.items()))\n")
+        await nb.good("a")
+        await nb.good("b")
+        bundle = self._export(nb, tmp_path / "snap.zip")
+
+        imported = import_snapshot(
+            bundle, tmp_path / "dst", taken_ids={nb.session.notebook_state.id}
+        )
+        assert imported.replaced_id == nb.session.notebook_state.id
+
+        session = NotebookSession(parse_notebook(imported.notebook_dir), imported.notebook_dir)
+        session.refresh_environment_runtime()
+        manager = session.get_artifact_manager()
+        latest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "out"))
+        refs = each.manifest_refs(latest.id, manager.load_artifact_data(latest.id, latest.version))
+        assert all(
+            artifact_id.startswith(f"nb_{imported.notebook_id}_") for _, artifact_id, _ in refs
+        )
+        # What it requires is held under the new id, so a sweep keeps it.
+        manager.prune(keep_superseded=0, min_idle_seconds=0)
+
+        executor = CellExecutor(session)
+        result = await executor.execute_cell_force("b", session.notebook_state.get_cell("b").source)
+        assert result.success, result.error
+        assert "[('one.txt', 'A'), ('two.txt', 'BB')]" in result.stdout
+
+    async def test_it_carries_the_version_a_manifest_names_not_the_latest(self, tmp_path):
+        log = tmp_path / "ran.log"
+        cell = (
+            "# @each item in samples\n"
+            + _logs(log, "item")
+            + "if item == 'bad':\n    raise ValueError('no')\nout = item\n"
+        )
+        nb = Notebook(tmp_path, 'samples = {"x": "good", "y": "fine"}\n', cell, READER)
+        await nb.good("a")
+        await nb.good("b")
+        named = nb.manifest("b", "out")["x"]
+
+        # x stores a new version, and y's failure keeps the manifest naming the old one.
+        await nb.good("a", 'samples = {"x": "new", "y": "bad"}\n')
+        assert not (await nb.run("b")).success
+        store = nb.session.get_artifact_manager().artifact_store
+        assert store.get_latest_version(named[0]).version > named[1]
+
+        index = build_artifact_index(nb.session)
+
+        assert named in {(e["artifact_id"], e["version"]) for e in index["b"]}
+
+
 class TestAnotherStore:
     async def test_publishing_a_consumer_carries_every_item_with_it(self, tmp_path):
         raw, source = _over_files(tmp_path)
@@ -695,7 +849,7 @@ class TestAnotherStore:
         manifest_id = manager.cell_artifact_id("a", "out")
         manifest = central.get_latest_version(manifest_id)
         assert manifest is not None
-        refs = each.manifest_refs(central.read_blob(manifest.id, manifest.version))
+        refs = each.manifest_refs(manifest.id, central.read_blob(manifest.id, manifest.version))
         assert sorted(key for key, _, _ in refs) == ["one.txt", "two.txt"]
         for _key, artifact_id, version in refs:
             assert f"{artifact_id}@v={version}" in written
@@ -715,7 +869,7 @@ class TestAnotherStore:
         store = manager.artifact_store
         manifest = store.get_latest_version(manager.cell_artifact_id("a", "out"))
         _key, instance_id, version = each.manifest_refs(
-            store.read_blob(manifest.id, manifest.version)
+            manifest.id, store.read_blob(manifest.id, manifest.version)
         )[0]
         central = ArtifactStore(tmp_path / "central")
         # The target holds this computation under another id, so the value lands there.
@@ -728,10 +882,101 @@ class TestAnotherStore:
 
         landed = central.get_latest_version(manifest.id)
         [(_, landed_id, landed_version)] = each.manifest_refs(
-            central.read_blob(landed.id, landed.version)
+            landed.id, central.read_blob(landed.id, landed.version)
         )
         assert landed_id == "elsewhere"
         assert central.blob_exists(landed_id, landed_version)
+
+    async def test_a_cached_value_lands_with_the_collection_it_read(self, tmp_path):
+        log = tmp_path / "ran.log"
+        cell = "# @each item in samples\n" + _logs(log, "item") + "out = item\n"
+        nb = Notebook(tmp_path, 'samples = {"x": 1, "y": 2}\n', cell, READER)
+        await nb.good("a")
+        await nb.good("b")
+        manager = nb.session.get_artifact_manager()
+        store = manager.artifact_store
+        collection_id = manager.cell_artifact_id("a", "samples")
+        first = store.get_latest_version(collection_id).version
+        kept = nb.manifest("b", "out")["x"]
+
+        await nb.good("a", 'samples = {"x": 1, "y": 3}\n')
+        await nb.good("b")
+        assert nb.manifest("b", "out")["x"] == kept
+        central = ArtifactStore(tmp_path / "central")
+        manifest = store.get_latest_version(manager.cell_artifact_id("b", "out"))
+
+        copy_chain(store, central, manifest, 10)
+
+        # x kept reading the first collection, and its edge must not dangle.
+        assert central.get_artifact(collection_id, first) is not None
+
+    async def test_a_value_holding_a_folder_lands_with_its_files(self, tmp_path):
+        raw, _ = _over_files(tmp_path)
+        _touch(raw / "one.txt", "a")
+        source = (
+            f"# @mount raw {raw.as_uri()} ro\n# @each path in raw\n# @output_dir out\n"
+            "(out / 'copy.txt').write_text(path.read_text())\n"
+        )
+        nb = Notebook(tmp_path, source, READER)
+        await nb.good("a")
+        manager = nb.session.get_artifact_manager()
+        manifest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "out"))
+        central = ArtifactStore(tmp_path / "central")
+
+        copy_chain(manager.artifact_store, central, manifest, 10)
+
+        [(_, folder_id, folder_version)] = each.manifest_refs(
+            manifest.id, central.read_blob(manifest.id, manifest.version)
+        )
+        [(file_id, file_version, _)] = output_dirs.file_refs(
+            folder_id, central.read_blob(folder_id, folder_version)
+        )
+        assert central.blob_exists(file_id, file_version)
+
+    async def test_a_manifest_naming_a_gone_value_fails_its_reader_by_name(self, tmp_path):
+        raw, source = _over_files(tmp_path)
+        _touch(raw / "one.txt", "a")
+        nb = Notebook(tmp_path, source, READER)
+        await nb.good("a")
+        manager = nb.session.get_artifact_manager()
+        store = manager.artifact_store
+        manifest = store.get_latest_version(manager.cell_artifact_id("a", "out"))
+        store.write_blob(
+            manifest.id, manifest.version, each.encode_manifest(manifest.id, [("k", "nope", 1)])
+        )
+
+        result = await CellExecutor(nb.session).execute_cell_force("b", READER)
+
+        assert not result.success
+        assert "nope@v=1, which is gone" in result.error
+
+    async def test_a_pull_refuses_rather_than_write_a_manifest(self, tmp_path, capsys):
+        raw, source = _over_files(tmp_path)
+        _touch(raw / "one.txt", "a")
+        nb = Notebook(tmp_path, source, READER)
+        await nb.good("a")
+        manager = nb.session.get_artifact_manager()
+        manifest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "out"))
+        out = tmp_path / "pulled.arrow"
+
+        code = cmd_pull(
+            argparse.Namespace(
+                ref=f"{manifest.id}@v={manifest.version}",
+                artifact_dir=str(manager.artifact_dir),
+                to=str(out),
+                tenant=None,
+            )
+        )
+
+        assert code == 1
+        assert "@each" in capsys.readouterr().err
+        assert not out.exists()
+
+    def test_a_bundle_refuses_rather_than_archive_a_manifest(self, tmp_path):
+        record = SimpleNamespace(id="x", version=1)
+
+        with pytest.raises(ValueError, match="@each"):
+            _write_folder_files(SimpleNamespace(), record, each.CONTENT_TYPE, tmp_path)
 
     async def test_a_manifest_naming_a_gone_value_is_not_sent(self, tmp_path):
         raw, source = _over_files(tmp_path)
@@ -740,7 +985,7 @@ class TestAnotherStore:
         await nb.good("a")
         manager = nb.session.get_artifact_manager()
         manifest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("a", "out"))
-        forged = each.encode_manifest([("one.txt", "nope", 1)])
+        forged = each.encode_manifest(manifest.id, [("one.txt", "nope", 1)])
         manager.artifact_store.write_blob(manifest.id, manifest.version, forged)
         central = ArtifactStore(tmp_path / "central")
 
@@ -873,6 +1118,43 @@ class TestOtherSurfaces:
         assert result.errored == 1
         assert "not supported" in str(result)
 
+    async def test_a_branch_is_refused_and_writes_nothing(self, tmp_path):
+        raw, source = _over_files(tmp_path)
+        _touch(raw / "one.txt", "a")
+        nb = Notebook(tmp_path, source, READER)
+        await nb.good("a")
+        before = nb.manifest("a", "out")
+        nb.ran()
+
+        result = await CellExecutor(nb.session).execute_cell("a", source, init="a-release")
+
+        assert not result.success
+        assert "Branching" in result.error
+        assert nb.ran() == []
+        assert nb.manifest("a", "out") == before
+
+    async def test_a_per_variant_cell_ending_in_a_display_runs_a_changed_variant_alone(
+        self, tmp_path
+    ):
+        log = tmp_path / "ran.log"
+        nb = Notebook(
+            tmp_path,
+            "# @variant g one\nval = 1\n",
+            "# @variant g two\nval = 2\n",
+            "# @per_variant\n" + _logs(log, "val") + "out = val * 2\nout\n",
+            "seen = dict(out)\n",
+        )
+        set_variant_mode(nb.session.path, "g", "sweep")
+        nb.session = NotebookSession(parse_notebook(nb.session.path), nb.session.path)
+        nb.session.refresh_environment_runtime()
+        await nb.good("c")
+        assert nb.ran() == ["1", "2"]
+
+        await nb.good("a", "# @variant g one\nval = 10\n")
+        await nb.good("c")
+
+        assert nb.ran() == ["10"]
+
     async def test_a_remote_worker_is_refused(self, tmp_path):
         cell = "# @worker gpu\n# @each s in samples\nout = s\n"
         nb = Notebook(tmp_path, "samples = [1]\n", cell, READER)
@@ -918,21 +1200,54 @@ class TestListing:
         assert each.items_of_mount(tmp_path, None, by_content=False) != local
         assert each.items_of_mount(tmp_path, None, by_content=True) == remote
 
+    def test_a_remote_file_takes_the_listings_version_and_hashes_what_has_none(
+        self, tmp_path, monkeypatch
+    ):
+        _touch(tmp_path / "one.txt", "a")
+        _touch(tmp_path / "two.txt", "b")
+        hashed = []
+        sha256 = each._sha256
+
+        def counted(handle):
+            hashed.append(Path(handle.name).name)
+            return sha256(handle)
+
+        monkeypatch.setattr(each, "_sha256", counted)
+
+        items = each.items_of_mount(
+            tmp_path, None, by_content=True, versions={"one.txt": "listed-version"}
+        )
+
+        assert items[0].digest == "listed-version"
+        assert hashed == ["two.txt"]
+
     def test_a_list_holds_a_repeated_value_once(self):
         items = each.items_of_json(["p", "p", {"x": 1}, {"x": 1}], "samples")
 
         assert len(items) == 2
         assert items[0].key == "p"
 
-    def test_a_manifest_sorts_by_key_and_round_trips(self):
-        blob = each.encode_manifest([("b", "id-b", 2), ("a", "id-a", 1)])
+    def test_a_manifest_names_a_value_only_when_it_is_elsewhere(self):
+        beside = each.instance_id("nb_x_cell_a_var_out", "k")
 
-        assert each.manifest_refs(blob) == [("a", "id-a", 1), ("b", "id-b", 2)]
+        blob = each.encode_manifest("nb_x_cell_a_var_out", [("k", beside, 3)])
+
+        assert b"nb_x" not in blob
+        # A renamed manifest finds it beside itself; one suffixed on landing keeps its base.
+        assert each.manifest_refs("nb_y_cell_a_var_out", blob) == [
+            ("k", each.instance_id("nb_y_cell_a_var_out", "k"), 3)
+        ]
+        assert each.manifest_refs("nb_x_cell_a_var_out@import=ab", blob) == [("k", beside, 3)]
+
+    def test_a_manifest_sorts_by_key_and_round_trips(self):
+        blob = each.encode_manifest("m", [("b", "id-b", 2), ("a", "id-a", 1)])
+
+        assert each.manifest_refs("m", blob) == [("a", "id-a", 1), ("b", "id-b", 2)]
 
     @pytest.mark.parametrize("blob", [b'{"other": 1}', b"[1]", b'{"items": 3}'])
     def test_other_bytes_under_the_type_are_not_a_manifest(self, blob):
         with pytest.raises(ValueError, match="not an @each manifest"):
-            each.manifest_refs(blob)
+            each.manifest_refs("m", blob)
 
     def test_a_key_of_any_shape_makes_one_id(self):
         assert each.is_instance_id("x_var_y@variant=" + each.instance_name("a/b c" * 100))

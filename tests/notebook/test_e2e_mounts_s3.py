@@ -16,6 +16,7 @@ import docker
 import pytest
 from testcontainers.community.minio import MinioContainer
 
+from strata.notebook import each
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import MountMode, MountSpec
 from strata.notebook.mounts import MountCredentials
@@ -148,6 +149,7 @@ async def test_annotation_only_mount_reads_via_credentials_kwarg(
 @pytest.mark.asyncio
 async def test_each_over_a_bucket_runs_a_changed_object_alone(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     minio_container,
     s3_credentials: MountCredentials,
     fresh_bucket: str,
@@ -185,6 +187,8 @@ async def test_each_over_a_bucket_runs_a_changed_object_alone(
         return await prepare_mounts(specs, cell_id)
 
     executor._prepare_mounts = counted
+    # The listing says what changed: no object's bytes are read to find out.
+    monkeypatch.setattr(each, "_sha256", lambda _handle: pytest.fail("read an object to digest it"))
     assert (await executor.execute_cell("c1", source)).success
     assert ran() == ["one.txt"]
     assert prepared.count("data") <= 2  # the key's own listing is not this path's
