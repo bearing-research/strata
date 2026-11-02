@@ -3825,6 +3825,10 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell's keys come from cellgraph.</strong> A cell's provenance hash is now
+  computed by cellgraph, over the same inputs as before, so a cell that was
+  ready stays ready. One exception: a cell whose <code>@table</code> lines name the same
+  table twice counts it once, so it runs once more after the upgrade. (#1360)</li>
 <li><strong>The notebook's analysis runs on cellgraph.</strong> Annotations, the names each
   cell defines and reads, the DAG and annotation validation now come from
   <a href="https://github.com/bearing-research/cellgraph">cellgraph</a>, a new runtime
