@@ -249,6 +249,7 @@ async def execute_prompt_cell(
 
                 value = _parse_output(blob, content_type)
                 uri = f"strata://artifact/{canonical.id}@v={canonical.version}"
+                _publish(session, cell_id, output_name, uri)
 
                 preview = _preview(value)
                 display_entry = {
@@ -456,6 +457,7 @@ async def execute_prompt_cell(
             ]
         )
         artifact_uri = f"strata://artifact/{canonical_id}@v={version}"
+        _publish(session, cell_id, output_name, artifact_uri)
     except Exception as e:
         logger.error("Failed to store prompt cell artifact: %s", e)
         artifact_uri = None
@@ -507,6 +509,15 @@ async def execute_prompt_cell(
         "mutation_warnings": [],
         "validation_retries": validation_retries,
     }
+
+
+def _publish(session: NotebookSession, cell_id: str, output_name: str, uri: str) -> None:
+    """Put the answer on the cell, as other cells' outputs are, before anything downstream
+    is keyed: a cell run next in the same run reads its upstreams from there."""
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is not None:
+        cell.artifact_uris[output_name] = uri
+        cell.artifact_uri = uri
 
 
 async def _emit_delta(

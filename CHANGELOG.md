@@ -125,6 +125,10 @@ exhaustive commit history.
 
 ### Fixed
 
+- **A cell after a prompt cell reads the answer it just gave.** Under
+  `strata run`, the cell was keyed without the prompt's answer, so after the
+  notebook's `[ai]` model changed it was a cache hit and printed the old
+  model's answer. It now runs again on the new one. (#1363)
 - **A request refused for its Host counts as unmatched.** With the frontend
   installed, `/metrics/prometheus` counted a request the Host allowlist
   refused under the frontend's route, `/{full_path}`. It is now
