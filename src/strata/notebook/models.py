@@ -843,6 +843,11 @@ class CellState(BaseModel):
         exclude=True,
         description="Runtime-only environment hash from the last successful execution",
     )
+    last_key_parts: dict[str, Any] | None = Field(
+        default=None,
+        exclude=True,
+        description="Runtime-only parts the last successful execution's key was built from",
+    )
     widget_values: dict[str, Any] = Field(
         default_factory=dict,
         exclude=True,

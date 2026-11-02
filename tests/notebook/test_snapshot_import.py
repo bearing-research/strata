@@ -9,6 +9,7 @@ import zipfile
 import pytest
 
 from strata.notebook.parser import parse_notebook
+from strata.notebook.runtime_state import load_runtime_state
 from strata.notebook.session import NotebookSession
 from strata.notebook.snapshot import write_committed_files, write_snapshot
 from strata.notebook.snapshot_import import NotASnapshotError, import_snapshot
@@ -404,6 +405,40 @@ class TestABundleWritesOnlyIntoTheNotebook:
 
         with pytest.raises(NotASnapshotError, match="cannot write"):
             import_snapshot(evil, tmp_path / "dst" / "nb")
+
+    @pytest.mark.parametrize(
+        "parts",
+        [
+            "text",
+            {"upstream": [["a"]], "inputs": []},
+            {"inputs": []},
+            {"upstream": [], "inputs": [1]},
+        ],
+    )
+    def test_key_parts_of_another_shape_are_not_kept(self, ran, tmp_path, parts):
+        """The staleness walk reads them on every open, and an archive can hold anything."""
+        good = _export(ran, tmp_path / "snap.zip")
+        odd = tmp_path / "odd-parts.zip"
+        with zipfile.ZipFile(good) as src, zipfile.ZipFile(odd, "w") as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name == "artifacts.json":
+                    manifest = json.loads(data)
+                    for cell in manifest["cells"].values():
+                        cell["key_parts"] = parts
+                    data = json.dumps(manifest).encode()
+                dst.writestr(name, data)
+
+        imported = import_snapshot(odd, tmp_path / "dst" / "nb")
+
+        cells = load_runtime_state(imported.notebook_dir).cells.values()
+        assert all(c.last_key_parts is None for c in cells)
+
+    def test_key_parts_survive_an_import(self, ran, tmp_path):
+        imported = import_snapshot(_export(ran, tmp_path / "snap.zip"), tmp_path / "dst" / "nb")
+
+        kept = [c.last_key_parts for c in load_runtime_state(imported.notebook_dir).cells.values()]
+        assert kept and all(parts and parts["parts_schema"] == 1 for parts in kept)
 
     def test_an_artifact_id_that_is_a_path_is_refused(self, ran, tmp_path):
         """An artifact id becomes a blob key, so an id that is a path would write outside."""
@@ -853,8 +888,6 @@ class TestWidgetSelections:
 
     @pytest.mark.asyncio
     async def test_the_selection_survives_the_round_trip(self, swept, tmp_path):
-        from strata.notebook.runtime_state import load_runtime_state
-
         nb, session, executor = swept
         await executor.execute_cell("controls", session.notebook_state.get_cell("controls").source)
 

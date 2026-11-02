@@ -264,14 +264,13 @@
       {
        "cell_id": "w4",
        "cell_name": "note",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -574,31 +573,37 @@
     "m1": {
      "details": [
       {
-       "cell_id": "m1",
-       "cell_name": "from_notebook",
-       "from_package_version": null,
-       "from_version": null,
+       "cell_id": null,
+       "cell_name": null,
+       "input_kind": "mount",
+       "input_name": "src",
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "source_changed"
+       "type": "external_changed"
       }
      ],
-     "reason": "self"
+     "incomplete": null,
+     "reason": "external"
     },
     "r5": {
      "details": [
       {
        "cell_id": "w4",
        "cell_name": "note",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
+      },
+      {
+       "cell_id": null,
+       "cell_name": null,
+       "input_kind": "mount",
+       "input_name": "src",
+       "package": null,
+       "type": "external_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -867,14 +872,13 @@
       {
        "cell_id": "w4",
        "cell_name": "note",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -1177,31 +1181,37 @@
     "m1": {
      "details": [
       {
-       "cell_id": "m1",
-       "cell_name": "from_notebook",
-       "from_package_version": null,
-       "from_version": null,
+       "cell_id": null,
+       "cell_name": null,
+       "input_kind": "mount",
+       "input_name": "src",
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "source_changed"
+       "type": "external_changed"
       }
      ],
-     "reason": "self"
+     "incomplete": null,
+     "reason": "external"
     },
     "r5": {
      "details": [
       {
        "cell_id": "w4",
        "cell_name": "note",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
+      },
+      {
+       "cell_id": null,
+       "cell_name": null,
+       "input_kind": "mount",
+       "input_name": "src",
+       "package": null,
+       "type": "external_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -1470,14 +1480,13 @@
       {
        "cell_id": "w4",
        "cell_name": "note",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },

@@ -470,14 +470,13 @@
       {
        "cell_id": "v2",
        "cell_name": "m",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },
@@ -962,14 +961,21 @@
       {
        "cell_id": "v1",
        "cell_name": "m",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
+      },
+      {
+       "cell_id": "v2",
+       "cell_name": "m",
+       "input_kind": null,
+       "input_name": null,
+       "package": null,
+       "type": "unavailable"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },

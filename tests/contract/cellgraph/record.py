@@ -42,8 +42,6 @@ SCENARIOS = HERE / "scenarios"
 TRACES = HERE / "traces"
 TRACE_FORMAT = 1
 
-# Design 13.1 replaces the causality map, so the exact gate leaves it out.
-OUTSIDE_EXACT_GATE = "causality"
 
 # Not a temporary directory: its path differs by machine, and it would enter the keys.
 ROOT = Path("/tmp/strata-cellgraph")
@@ -96,11 +94,18 @@ class _Counter:
     def __init__(self, scenario: str) -> None:
         self._scenario = scenario
         self._nonces = itertools.count()
+        self._issued: list[str] = []
         self._snapshots = itertools.count(1)
 
     def nonce(self) -> str:
         n = next(self._nonces)
-        return hashlib.sha256(f"cellgraph:{self._scenario}:nonce:{n}".encode()).hexdigest()
+        value = hashlib.sha256(f"cellgraph:{self._scenario}:nonce:{n}".encode()).hexdigest()
+        self._issued.append(value)
+        return value
+
+    def is_unresolved(self, component: str) -> bool:
+        # The real check reads a marker these nonces leave out, so as not to move the keys.
+        return any(value[:32] in component for value in self._issued)
 
     def snapshot_id(self) -> int:
         return 1000 + next(self._snapshots)
@@ -205,6 +210,7 @@ def _recording(scenario: str, notebook_dir: Path, registry: Path) -> Iterator[_S
 
     patches = [
         mock.patch("strata.notebook.nonce.unresolved_nonce", counter.nonce),
+        mock.patch("strata.notebook.nonce.is_unresolved", counter.is_unresolved),
         mock.patch("pyiceberg.table.metadata._generate_snapshot_id", counter.snapshot_id),
         mock.patch.object(CellExecutor, "_harness_command", _harness_command),
         mock.patch.object(
@@ -614,7 +620,7 @@ def _snapshot(
         "dag": _dag(session),
         "dag_error": session.dag_error,
         "cells": cells,
-        OUTSIDE_EXACT_GATE: {
+        "causality": {
             cid: _plain(dataclasses.asdict(chain)) for cid, chain in session.causality_map.items()
         },
     }
@@ -704,14 +710,6 @@ def dumps(trace: dict[str, Any]) -> str:
     return json.dumps(trace, indent=1, sort_keys=True) + "\n"
 
 
-def without_ungated(trace: Any) -> Any:
-    """*trace* without the parts outside the exact gate."""
-    return {
-        **trace,
-        "steps": [{k: v for k, v in s.items() if k != OUTSIDE_EXACT_GATE} for s in trace["steps"]],
-    }
-
-
 def first_difference(expected: Any, actual: Any, path: str = "") -> str | None:
     """The path of the first place *actual* differs from *expected*, e.g. ``steps[3].cells``."""
     if isinstance(expected, dict) and isinstance(actual, dict):
@@ -752,7 +750,7 @@ def describe_difference(expected: dict[str, Any], actual: dict[str, Any]) -> str
     """The first gated difference, with both values; None when the traces match."""
     # Compared as written: a tuple is the list ``--update`` would write.
     actual = json.loads(dumps(actual))
-    path = first_difference(without_ungated(expected), without_ungated(actual))
+    path = first_difference(expected, actual)
     if path is None:
         return None
     return (

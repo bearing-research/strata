@@ -27,7 +27,6 @@ from vestigo.provenance import derive_subkey
 from strata.notebook import console_relay, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
-from strata.notebook.causality import CausalityChain, compute_causality_on_staleness, skip_none
 from strata.notebook.dag import NotebookDag
 from strata.notebook.dependencies import (
     DependencyChangeResult,
@@ -47,7 +46,7 @@ from strata.notebook.env import (
     narrow_env_for_provenance,
 )
 from strata.notebook.graph import analysis_with, analyze_notebook
-from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key
+from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key, input_parts
 from strata.notebook.models import (
     AnnotationDiagnostic,
     CellLanguage,
@@ -83,6 +82,12 @@ from strata.notebook.runtime_state import (
     persist_cell_execution_sample,
     persist_environment_synced_lockfile_hash,
     save_runtime_state,
+)
+from strata.notebook.staleness_explanations import (
+    CausalityChain,
+    StaleCell,
+    explain_staleness,
+    skip_none,
 )
 from strata.notebook.tables import without_empty_table_nonce
 from strata.notebook.timing import NotebookTimingRecorder
@@ -716,6 +721,7 @@ class NotebookSession:
             cell.last_provenance_hash = previous.last_provenance_hash
             cell.last_source_hash = previous.last_source_hash
             cell.last_env_hash = previous.last_env_hash
+            cell.last_key_parts = previous.last_key_parts
             cell.widget_values = dict(previous.widget_values)
 
     def _restore_alternate_scheme_outputs(self, cell: Any) -> None:
@@ -858,9 +864,7 @@ class NotebookSession:
     ) -> dict[str, CellStaleness]:
         staleness_map: dict[str, CellStaleness] = {}
         stale_cells: set[str] = set()  # for propagation
-        # Cells causality explains, with the provenance hash this walk computed (None
-        # when a stale upstream settled the cell first).
-        to_explain: dict[str, str | None] = {}
+        to_explain: dict[str, StaleCell] = {}
         test_inputs: dict[str, str] = {}
         if self.dag is None:
             for cell in self.notebook_state.cells:
@@ -896,7 +900,10 @@ class NotebookSession:
                 else:
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
-                to_explain[cell_id] = None
+                to_explain[cell_id] = StaleCell(
+                    self._parts_under_stale_upstream(cell, prefetched.get(cell_id)),
+                    tuple(uid for uid in cell.upstream_ids if uid in stale_cells),
+                )
                 continue
 
             effective_worker = self._effective_worker_name(cell)
@@ -1014,7 +1021,7 @@ class NotebookSession:
                         staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                         stale_cells.add(cell_id)
                 if cell_id in stale_cells:
-                    to_explain[cell_id] = provenance_hash
+                    to_explain[cell_id] = StaleCell(key.parts)
             else:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 for var_name, (artifact_id, version) in cached_outputs.items():
@@ -1027,9 +1034,33 @@ class NotebookSession:
         self._apply_staleness_map(staleness_map, executing)
         self._cell_test_inputs = test_inputs
 
-        self.causality_map = compute_causality_on_staleness(self, to_explain)
+        self.causality_map = explain_staleness(self, to_explain)
 
         return staleness_map
+
+    def _parts_under_stale_upstream(
+        self, cell: CellState, outside: _OutsideWorld | None
+    ) -> dict[str, Any] | None:
+        """The key parts that do not rest on upstream outputs, which are about to change."""
+        # A never-run cell has nothing to explain.
+        if cell.last_provenance_hash is None or self.analysis is None:
+            return None
+        analysis = analysis_with(cell, self.notebook_state, self.analysis)
+        parts: dict[str, Any] = {
+            "definition_key": analysis.cells[cell.id].definition_key,
+            "env_hash": self.cell_env_hash(cell),
+        }
+        # Missing only if the DAG moved meanwhile, and the next flush recomputes.
+        if outside is not None:
+            parts["inputs"] = input_parts(
+                {
+                    "mount": outside.mount_fingerprints,
+                    "table": outside.table_fingerprints,
+                    "fetch": outside.fetch_fingerprints,
+                    "dataset": outside.dataset_fingerprints,
+                }
+            )
+        return parts
 
     def _upstream_moved_under(self, cell: CellState, source_hash: str, env_hash: str) -> bool:
         """Whether *cell*'s last result is out of date only because an upstream got a newer version.
@@ -1258,6 +1289,7 @@ class NotebookSession:
         *,
         table_reads: list[dict[str, Any]],
         reads: dict[str, Any] | None,
+        key_parts: dict[str, Any] | None,
         writes: dict[str, Any] | None = None,
     ) -> None:
         """Persist the last successful execution provenance for uncached cells.
@@ -1277,6 +1309,7 @@ class NotebookSession:
         cell.last_provenance_hash = provenance_hash
         cell.last_source_hash = source_hash
         cell.last_env_hash = env_hash
+        cell.last_key_parts = key_parts
         # So a reopen compares like with like, not on a hash that never covered the
         # connection read or the model asked.
         cell.last_reopen_identity = self.reopen_identity(cell)
@@ -1287,6 +1320,7 @@ class NotebookSession:
             last_source_hash=source_hash,
             last_env_hash=env_hash,
             last_reopen_identity=cell.last_reopen_identity,
+            last_key_parts=key_parts,
         )
         live = [c.id for c in self.notebook_state.cells]
         table_index.record(self.path, cell_id, table_reads, live)

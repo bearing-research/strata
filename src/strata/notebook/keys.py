@@ -31,6 +31,8 @@ class CellKey:
 
     provenance_hash: str
     upstream: list[str]
+    # What it was built from, to explain a later change. None when nothing is wired.
+    parts: dict[str, Any] | None = None
 
 
 class _Lookups(Mapping[Any, Any]):
@@ -125,6 +127,15 @@ def _resolvers(fingerprints: Mapping[str, list[str]]) -> dict[str, cg.Resolver]:
     return {kind: resolver(kind) for kind in _PREFIX}
 
 
+def input_parts(fingerprints: Mapping[str, list[str]]) -> list[list[str]]:
+    """Each input as a key part, ``[kind, name, component]``. A component begins with its name."""
+    return sorted(
+        [kind, component.partition(":")[0], component]
+        for kind, components in fingerprints.items()
+        for component in components
+    )
+
+
 def cell_key(
     session: NotebookSession,
     analysis: cg.Analysis,
@@ -165,8 +176,9 @@ def cell_key(
     assert result.parts is not None
     upstream = [value for _address, value in result.parts["upstream"]]
     if isinstance(result, cg.Keyed):
-        return CellKey(result.digest, upstream)
-    # A prompt or SQL cell's generic hash, which it records beside its own key.
+        return CellKey(result.digest, upstream, result.parts)
+    # A prompt or SQL cell's generic hash, which it records beside its own key. Its parts
+    # have no inputs (they are the host's to key), so supply the ones this hash reads.
     digest = compute_provenance_hash(
         cell_provenance_inputs(upstream, mounts, tables, fetches, datasets),
         result.parts["definition_key"],
@@ -174,4 +186,5 @@ def cell_key(
     )
     if instance is not None:
         digest = cg.derive_subkey(digest, f"variant={instance}")
-    return CellKey(digest, upstream)
+    inputs = input_parts({"mount": mounts, "table": tables, "fetch": fetches, "dataset": datasets})
+    return CellKey(digest, upstream, {**result.parts, "inputs": inputs})

@@ -145,12 +145,14 @@ class TestPerCellState:
             last_provenance_hash="a1" * 32,
             last_source_hash="src",
             last_env_hash="env",
+            last_key_parts={"parts_schema": 1},
         )
         persist_cell_execution_sample(session.path, "rows", duration_ms=1234, cache_hit=False)
 
         manifest = _manifest(_bundle(session))
 
         assert manifest["cells"]["rows"]["provenance_hash"] == "a1" * 32
+        assert manifest["cells"]["rows"]["key_parts"] == {"parts_schema": 1}
         assert manifest["cells"]["rows"]["execution_samples"][-1]["duration_ms"] == 1234
 
 

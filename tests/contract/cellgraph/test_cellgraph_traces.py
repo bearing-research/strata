@@ -1,8 +1,8 @@
 """Strata still does what the cellgraph traces recorded, step by step.
 
-Each scenario is re-recorded and compared with ``traces/<name>.json``, exactly,
-except the causality map. A change here is a change in Strata's graph, keys, cache
-decisions or staleness: if it is intended, re-record with
+Each scenario is re-recorded and compared with ``traces/<name>.json``, exactly. A change
+here is a change in Strata's graph, keys, cache decisions, staleness or how it is
+explained: if it is intended, re-record with
 ``uv run python -m tests.contract.cellgraph.record --update <name>`` and say in the
 PR which behavior changed and why.
 """
@@ -73,7 +73,7 @@ def test_every_scenario_with_a_requirement_has_its_own_test():
         )
 
 
-def test_the_causality_map_is_outside_the_gate():
-    trace = {"steps": [{"cells": {}, record.OUTSIDE_EXACT_GATE: {"c1": "self"}}]}
-    moved = {"steps": [{"cells": {}, record.OUTSIDE_EXACT_GATE: {"c1": "upstream"}}]}
-    assert record.describe_difference(trace, moved) is None
+def test_a_moved_explanation_is_a_difference():
+    trace = {"steps": [{"cells": {}, "causality": {"c1": "self"}}]}
+    moved = {"steps": [{"cells": {}, "causality": {"c1": "upstream"}}]}
+    assert record.describe_difference(trace, moved) is not None

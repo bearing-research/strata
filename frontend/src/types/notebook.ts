@@ -409,23 +409,29 @@ export interface VariantProgress {
 
 /** Causality chain: explains why a cell is stale */
 export interface CausalityChain {
-  reason: StalenessReason
+  reason: 'self' | 'upstream' | 'external' | 'env' | 'unknown'
   details: CausalityDetail[]
+  /** There may be more than the details say: not everything could be compared */
+  incomplete?: boolean
 }
 
 export interface CausalityDetail {
-  type: 'source_changed' | 'input_changed' | 'env_changed'
+  type:
+    | 'source_changed'
+    | 'input_changed'
+    | 'env_changed'
+    | 'external_changed'
+    | 'identity_changed'
+    | 'unavailable'
   /** For source/input changes: which cell changed */
   cellId?: CellId
   /** Human-readable name of the changed cell */
   cellName?: string
-  /** For input_changed: old and new artifact versions */
-  fromVersion?: string
-  toVersion?: string
+  /** For external_changed and unavailable: a mount, table, fetch or dataset */
+  inputKind?: string
+  inputName?: string
   /** For env_changed: which package changed */
   package?: string
-  fromPackageVersion?: string
-  toPackageVersion?: string
 }
 
 /** Run impact preview: what will happen if a cell is executed */

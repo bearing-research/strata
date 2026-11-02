@@ -418,24 +418,32 @@ function cancelThisCell() {
   cancelCellWebSocket(props.cell.id)
 }
 
+const INCOMPLETE_EXPLANATION = "Strata can't tell what changed since the last run"
+
 /** Causality summary for tooltip */
 const causalityTooltip = computed(() => {
   const c = props.cell.causality
   if (!c) return ''
-  return c.details
-    .map((d) => {
-      switch (d.type) {
-        case 'source_changed':
-          return `source of "${d.cellName || d.cellId}" changed`
-        case 'input_changed':
-          return `upstream "${d.cellName || d.cellId}" changed`
-        case 'env_changed':
-          return `environment changed (${d.package || 'uv.lock'})`
-        default:
-          return d.type
-      }
-    })
-    .join('; ')
+  const reasons = c.details.map((d) => {
+    switch (d.type) {
+      case 'source_changed':
+        return `source of "${d.cellName || d.cellId}" changed`
+      case 'input_changed':
+        return `upstream "${d.cellName || d.cellId}" changed`
+      case 'env_changed':
+        return `environment changed (${d.package || 'uv.lock'})`
+      case 'external_changed':
+        return `${d.inputKind} "${d.inputName}" changed`
+      case 'identity_changed':
+        return 'its connection or model changed'
+      case 'unavailable':
+        return `"${d.inputName || d.cellName || d.cellId}" can't be read`
+      default:
+        return d.type
+    }
+  })
+  if (c.incomplete) reasons.push('there may be more')
+  return reasons.join('; ') || INCOMPLETE_EXPLANATION
 })
 
 function toggleCausality() {
@@ -1051,21 +1059,32 @@ function outputKey(output: CellOutput, index: number): string {
       <!-- Causality chain detail (expanded) -->
       <div v-if="showCausality && canExplainStaleness && cell.causality" class="causality-panel">
         <div class="causality-header">
-          Stale because: <span class="causality-reason">{{ cell.causality.reason }}</span>
+          <template v-if="cell.causality.details.length">
+            Stale because: <span class="causality-reason">{{ cell.causality.reason }}</span>
+          </template>
+          <template v-else>{{ INCOMPLETE_EXPLANATION }}</template>
         </div>
         <ul class="causality-details">
           <li v-for="(detail, i) in cell.causality.details" :key="i" class="causality-detail">
             <span v-if="detail.type === 'source_changed'" class="detail-icon">&#x270E;</span>
             <span v-else-if="detail.type === 'input_changed'" class="detail-icon">&#x2191;</span>
+            <span v-else-if="detail.type === 'external_changed'" class="detail-icon">&#x21E5;</span>
+            <span v-else-if="detail.type === 'unavailable'" class="detail-icon">&#x26A0;</span>
             <span v-else class="detail-icon">&#x2699;</span>
             <span v-if="detail.type === 'source_changed'">
               Source of <code>{{ detail.cellName || detail.cellId }}</code> changed
             </span>
             <span v-else-if="detail.type === 'input_changed'">
               Upstream <code>{{ detail.cellName || detail.cellId }}</code> changed
-              <span v-if="detail.fromVersion" class="version-change">
-                {{ detail.fromVersion }} &rarr; {{ detail.toVersion }}
-              </span>
+            </span>
+            <span v-else-if="detail.type === 'external_changed'">
+              {{ detail.inputKind }} <code>{{ detail.inputName }}</code> changed
+            </span>
+            <span v-else-if="detail.type === 'identity_changed'">
+              Its connection or model changed
+            </span>
+            <span v-else-if="detail.type === 'unavailable'">
+              <code>{{ detail.inputName || detail.cellName || detail.cellId }}</code> can't be read
             </span>
             <span v-else>
               Environment changed
@@ -1073,6 +1092,12 @@ function outputKey(output: CellOutput, index: number): string {
             </span>
           </li>
         </ul>
+        <p
+          v-if="cell.causality.incomplete && cell.causality.details.length"
+          class="causality-detail"
+        >
+          There may be more: the last run's record doesn't cover everything.
+        </p>
       </div>
 
       <!-- Folded summary -->
@@ -2060,11 +2085,6 @@ function outputKey(output: CellOutput, index: number): string {
   width: 16px;
   text-align: center;
 }
-.version-change {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
 /* Live streamed partial output (prompt cells) */
 .cell-stream {
   border-top: 1px solid var(--border-subtle);

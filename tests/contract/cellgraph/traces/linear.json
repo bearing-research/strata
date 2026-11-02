@@ -360,14 +360,13 @@
       {
        "cell_id": "b2",
        "cell_name": "y",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "source_changed"
       }
      ],
+     "incomplete": null,
      "reason": "self"
     },
     "c3": {
@@ -375,14 +374,13 @@
       {
        "cell_id": "b2",
        "cell_name": "y",
-       "from_package_version": null,
-       "from_version": null,
+       "input_kind": null,
+       "input_name": null,
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
        "type": "input_changed"
       }
      ],
+     "incomplete": null,
      "reason": "upstream"
     }
    },

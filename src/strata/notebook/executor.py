@@ -425,6 +425,8 @@ class _CellProvenance:
     table_fingerprints: list[str]
     table_snapshots: dict[str, int | None]
     provenance_hash: str
+    # What the key was built from, recorded with a good run to explain a later change.
+    key_parts: dict[str, Any] | None = None
     # ``@fetch`` inputs: what each name resolved to, and why any did not.
     fetch_fingerprints: list[str] = field(default_factory=list)
     fetched: dict[str, Path] = field(default_factory=dict)
@@ -479,7 +481,12 @@ class _CellProvenance:
             env_hash=changed.env_hash,
             instance=changed.instance,
         )
-        return replace(changed, provenance_hash=key.provenance_hash, input_hashes=key.upstream)
+        return replace(
+            changed,
+            provenance_hash=key.provenance_hash,
+            input_hashes=key.upstream,
+            key_parts=key.parts,
+        )
 
     def reads(
         self, mounts_moved: dict[str, int | None], tables_moved: dict[str, int]
@@ -1562,6 +1569,7 @@ class CellExecutor:
             table_fingerprints=table_fingerprints,
             table_snapshots=table_snapshots,
             provenance_hash=key.provenance_hash,
+            key_parts=key.parts,
             fetch_fingerprints=fetch_fingerprints,
             fetched=fetched,
             fetch_error=fetch_error,
@@ -1935,6 +1943,7 @@ class CellExecutor:
                         env_hash,
                         table_reads=prov.table_reads,
                         reads=prov.reads(*self._moved(cell_id)),
+                        key_parts=prov.key_parts,
                     )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -2548,6 +2557,7 @@ class CellExecutor:
                     base.env_hash,
                     table_reads=base.table_reads,
                     reads=base.reads(*self._moved(cell_id)),
+                    key_parts=base.key_parts,
                     writes=_writes_entry(writes),
                 )
             except Exception:
@@ -2775,6 +2785,7 @@ class CellExecutor:
                     env_hash,
                     table_reads=prov.table_reads,
                     reads=prov.reads(*self._moved(cell_id)),
+                    key_parts=prov.key_parts,
                 )
                 self.session.apply_execution_result_metadata(cell_id, cached_result)
                 return cached_result
@@ -5165,6 +5176,7 @@ class CellExecutor:
                 prov.env_hash,
                 table_reads=prov.table_reads,
                 reads=prov.reads(*self._moved(cell_id)),
+                key_parts=prov.key_parts,
             )
 
         return CellExecutionResult(
@@ -5224,6 +5236,7 @@ class CellExecutor:
                 prov.env_hash,
                 table_reads=prov.table_reads + result_dict.get("table_reads", []),
                 reads=prov.reads(*self._moved(cell_id)),
+                key_parts=prov.key_parts,
             )
             # Back the result-table preview with an artifact. Otherwise `save_cell_output` refuses
             # it, export drops it (``markdown_text`` is stripped at persist time and re-fetched
@@ -5314,6 +5327,7 @@ class CellExecutor:
                 prov.env_hash,
                 table_reads=prov.table_reads,
                 reads=prov.reads(*self._moved(cell_id)),
+                key_parts=prov.key_parts,
             )
 
         return CellExecutionResult(
@@ -6160,6 +6174,7 @@ class CellExecutor:
                 env_hash,
                 table_reads=prov.table_reads,
                 reads=prov.reads(*self._moved(cell_id)),
+                key_parts=prov.key_parts,
                 writes=_writes_entry(writes),
             )
         except (OSError, NotebookQuiesced):
@@ -6910,6 +6925,7 @@ class CellExecutor:
                     env_hash,
                     table_reads=prov.table_reads,
                     reads=prov.reads(*self._moved(cell_id)),
+                    key_parts=prov.key_parts,
                 )
                 return cached
 
@@ -7361,6 +7377,7 @@ class CellExecutor:
             env_hash,
             table_reads=prov.table_reads,
             reads=prov.reads(*self._moved(cell_id)),
+            key_parts=prov.key_parts,
         )
         raw_displays = final_result.get("displays") if final_result else None
         display_outputs = (
@@ -8287,6 +8304,7 @@ class CellExecutor:
             prov.env_hash,
             table_reads=prov.table_reads,
             reads=prov.reads(*self._moved(cell_id)),
+            key_parts=prov.key_parts,
         )
 
         return {
@@ -8419,6 +8437,7 @@ class CellExecutor:
                 env_hash,
                 table_reads=prov.table_reads,
                 reads=prov.reads(*self._moved(cell_id)),
+                key_parts=prov.key_parts,
             )
         except Exception:
             pass

@@ -76,6 +76,25 @@ class ImportedSnapshot:
     by_reference_cells: list[str] = field(default_factory=list)
 
 
+def _readable_key_parts(raw: Any) -> dict[str, Any] | None:
+    """A snapshot's key parts, if they have the shape the staleness walk reads.
+
+    An archive can hold anything. Without parts a cell's explanation is only incomplete.
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    def strings(rows: Any, width: int) -> bool:
+        return isinstance(rows, list) and all(
+            isinstance(row, list)
+            and len(row) == width
+            and all(isinstance(item, str) for item in row)
+            for row in rows
+        )
+
+    return raw if strings(raw.get("upstream"), 2) and strings(raw.get("inputs"), 3) else None
+
+
 def import_snapshot(
     bundle: Path | str,
     dest: Path | str,
@@ -581,6 +600,7 @@ def _write_runtime_state(
         entry.last_provenance_hash = cell.get("provenance_hash")
         entry.last_source_hash = cell.get("source_hash")
         entry.last_env_hash = cell.get("env_hash")
+        entry.last_key_parts = _readable_key_parts(cell.get("key_parts"))
         identity = cell.get("reopen_identity")
         entry.last_reopen_identity = identity if isinstance(identity, str) else None
         entry.execution_samples = list(cell.get("execution_samples") or [])

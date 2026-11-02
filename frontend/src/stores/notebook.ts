@@ -313,15 +313,14 @@ function parseBackendCausality(raw: any): Cell['causality'] | undefined {
   if (!raw) return undefined
   return {
     reason: raw.reason,
+    incomplete: raw.incomplete,
     details: (raw.details || []).map((d: Record<string, any>) => ({
       type: d.type,
       cellId: d.cell_id,
       cellName: d.cell_name,
-      fromVersion: d.from_version,
-      toVersion: d.to_version,
+      inputKind: d.input_kind,
+      inputName: d.input_name,
       package: d.package,
-      fromPackageVersion: d.from_package_version,
-      toPackageVersion: d.to_package_version,
     })),
   }
 }
@@ -1990,20 +1989,7 @@ function initializeWebSocket() {
       }
 
       if (cell && p.causality && supportsStalenessDetail(status)) {
-        const rawCausality = p.causality as Record<string, any>
-        cell.causality = {
-          reason: rawCausality.reason,
-          details: (rawCausality.details || []).map((d: Record<string, any>) => ({
-            type: d.type,
-            cellId: d.cell_id,
-            cellName: d.cell_name,
-            fromVersion: d.from_version,
-            toVersion: d.to_version,
-            package: d.package,
-            fromPackageVersion: d.from_package_version,
-            toPackageVersion: d.to_package_version,
-          })),
-        }
+        cell.causality = parseBackendCausality(p.causality)
       } else if (cell) {
         cell.causality = undefined
       }

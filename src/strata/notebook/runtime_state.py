@@ -32,6 +32,9 @@ class CellRuntime:
     last_provenance_hash: str | None = None
     last_source_hash: str | None = None
     last_env_hash: str | None = None
+    # What the key was built from, to explain a later change. Versioned by its own
+    # ``parts_schema``, apart from the hash above.
+    last_key_parts: dict[str, Any] | None = None
     # A language's own cache identity (a SQL cell's connection, a prompt
     # cell's model). The generic triplet above misses it, so a reopen comparing
     # only that would wrongly call the cell ready.
@@ -73,6 +76,7 @@ class CellRuntime:
             self.last_provenance_hash
             or self.last_source_hash
             or self.last_env_hash
+            or self.last_key_parts
             or self.last_reopen_identity
             or self.last_error
             or self.display_outputs
@@ -198,6 +202,7 @@ def persist_cell_provenance(
     last_source_hash: str | None,
     last_env_hash: str | None,
     last_reopen_identity: str | None = None,
+    last_key_parts: dict[str, Any] | None = None,
 ) -> None:
     """Persist the last successful execution provenance for a cell.
 
@@ -210,6 +215,7 @@ def persist_cell_provenance(
     entry.last_source_hash = last_source_hash or None
     entry.last_env_hash = last_env_hash or None
     entry.last_reopen_identity = last_reopen_identity
+    entry.last_key_parts = last_key_parts
     save_runtime_state(notebook_dir, state)
 
 

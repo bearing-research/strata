@@ -367,7 +367,7 @@ A cell is out of date when no stored result matches its current provenance. This
 
 A cell that still has a result and whose upstream moved reads **stale · upstream changed**. A cell whose own source, environment or declared outside input changed has nothing that matches, so it reads **idle** until it runs, and the cells downstream of it read stale. The `@fetch` and `@dataset` checks run at most once a minute while you edit, and always right before the cell runs; these lookups and the `@table` catalog read happen outside the lock that serializes the staleness walk, so one slow host does not stall the server.
 
-The **causality chain** explains why a cell is stale, tracing the change back to its root cause (e.g., "upstream cell X changed its source").
+The **causality chain** explains why a cell is stale. Each good run saves the parts its key was built from (source, environment, upstream outputs and outside inputs), and the chain lists the parts that differ now: "the source of X changed", "upstream X changed", "mount `raw` changed". An input that cannot be read now is reported as that. When the record cannot explain the change, for example a run from before parts were saved, the chain says it is incomplete rather than guessing.
 
 ## Cell Status Lifecycle
 

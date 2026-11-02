@@ -410,17 +410,16 @@
     "d3": {
      "details": [
       {
-       "cell_id": "d3",
-       "cell_name": "d3",
-       "from_package_version": null,
-       "from_version": null,
+       "cell_id": null,
+       "cell_name": null,
+       "input_kind": "dataset",
+       "input_name": "model",
        "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "source_changed"
+       "type": "external_changed"
       }
      ],
-     "reason": "self"
+     "incomplete": null,
+     "reason": "external"
     }
    },
    "cells": {

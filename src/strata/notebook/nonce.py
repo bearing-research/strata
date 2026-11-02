@@ -9,7 +9,16 @@ from __future__ import annotations
 import hashlib
 import os
 
+# Starts every nonce, so an explanation can tell an input that could not be resolved from
+# one that changed. Datasets keep the first 32 digits.
+_MARKER = "0a7e50150a7e5015"
+
 
 def unresolved_nonce() -> str:
     """64 hex digits no other call returns."""
-    return hashlib.sha256(os.urandom(32)).hexdigest()
+    return _MARKER + hashlib.sha256(os.urandom(32)).hexdigest()[len(_MARKER) :]
+
+
+def is_unresolved(component: str) -> bool:
+    """Whether this key component holds a nonce: its input could not be resolved."""
+    return _MARKER in component
