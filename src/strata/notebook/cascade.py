@@ -85,16 +85,14 @@ class CascadePlanner:
 
     def _build_plan(self, target_cell_id: str) -> CascadePlan | None:
         """Build a cascade plan for *target_cell_id*, or None if none is needed."""
-        if not self.session.dag:
+        dag = self.session.dag
+        if dag is None:
             return None
 
-        # Same helper as ``cascade_plan``, so both agree on "reachable upstream".
-        visited = self.session.dag.upstream_reachable(target_cell_id)
-
-        if self.session.dag.topological_order:
-            step_cells = [cid for cid in self.session.dag.topological_order if cid in visited]
-        else:
-            step_cells = list(visited)
+        # Not ``analysis.plan``: it drops ready cells, which stay here as skipped steps,
+        # and refuses a blocked target, whose upstreams still run.
+        reachable = dag.upstream_reachable(target_cell_id)
+        step_cells = [cid for cid in dag.topological_order if cid in reachable]
 
         steps: list[CascadeStep] = []
         for step_cell_id in step_cells:

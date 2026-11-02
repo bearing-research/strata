@@ -29,7 +29,7 @@ def _diagnostics(session: NotebookSession, cell_id: str) -> dict[str, str]:
     cell = session.notebook_state.get_cell(cell_id)
     return {
         d.code: d.severity
-        for d in validate_cell_annotations(cell, session.notebook_state, session.dag)
+        for d in validate_cell_annotations(cell, session.notebook_state, session.analysis)
     }
 
 

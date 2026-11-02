@@ -11,13 +11,10 @@ import shutil
 import subprocess
 from types import SimpleNamespace
 
+import cellgraph as cg
 import pytest
 
-from strata.notebook.languages import (
-    AnalyzedCell,
-    analyze_cell_by_language,
-    get_language_analyzer,
-)
+from strata.notebook.languages import AnalyzedCell
 from strata.notebook.languages.r import analyzer as r_analyzer
 from strata.notebook.languages.r.analyzer import (
     RscriptUnavailableError,
@@ -26,6 +23,7 @@ from strata.notebook.languages.r.analyzer import (
     _source_hash,
 )
 from strata.notebook.models import CellLanguage, CellState
+from strata.notebook.vocabulary import RAnalyzer
 from tests.notebook.conftest import skip_if_no_r as _skip_no_rscript
 
 
@@ -46,8 +44,7 @@ def _make_cell(source: str = "", language: CellLanguage = CellLanguage.R) -> Cel
 
 class TestRegistry:
     def test_r_is_registered(self):
-        analyzer = get_language_analyzer(CellLanguage.R)
-        assert isinstance(analyzer, _RAnalyzer)
+        assert isinstance(cg.get_language_analyzer(CellLanguage.R.value), RAnalyzer)
 
     def test_dispatch_routes_through_r_analyzer(self, monkeypatch):
         called_with: list[str] = []
@@ -57,8 +54,8 @@ class TestRegistry:
             return AnalyzedCell(defines=["routed"], references=[])
 
         monkeypatch.setattr(r_analyzer, "_run_rscript", fake_rscript)
-        cell = _make_cell("y <- 1")
-        result = analyze_cell_by_language(cell, session=SimpleNamespace())
+        cell = cg.Cell(id="r-cell-1", source="y <- 1", language=CellLanguage.R.value)
+        result = cg.get_language_analyzer(CellLanguage.R.value).analyze(cell)
         assert result.defines == ["routed"]
         assert called_with == ["y <- 1"]
 

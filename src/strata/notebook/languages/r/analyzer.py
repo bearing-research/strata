@@ -1,4 +1,4 @@
-"""``RLanguageAnalyzer``: defines/references for R cells.
+"""Defines/references for R cells, which ``vocabulary.RAnalyzer`` wraps.
 
 Pipes the cell source to ``Rscript`` running ``analyze_cell.R``
 (``codetools::findGlobals`` plus a top-level-assign scan) and parses its JSON.
@@ -16,11 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from strata.notebook.languages.analyzer import (
-    AnalyzedCell,
-    register_language_analyzer,
-)
-from strata.notebook.models import CellLanguage
+from strata.notebook.languages.analyzer import AnalyzedCell
 
 if TYPE_CHECKING:
     from strata.notebook.models import CellState
@@ -113,7 +109,7 @@ def _run_rscript(source: str) -> AnalyzedCell:
 
 
 class _RAnalyzer:
-    """Adapter that satisfies the ``LanguageAnalyzer`` protocol."""
+    """Rscript's analysis of one cell."""
 
     def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
         del session  # not consumed: R has no dialect-style runtime context.
@@ -141,6 +137,3 @@ class _RAnalyzer:
 
         _CACHE[key] = result
         return result
-
-
-register_language_analyzer(CellLanguage.R, _RAnalyzer())

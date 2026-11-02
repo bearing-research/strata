@@ -16,7 +16,6 @@ if os.name == "nt":
 
 import cellgraph as cg  # noqa: E402
 
-from strata.notebook.annotations import parse_annotations  # noqa: E402
 from strata.notebook.vocabulary import (  # noqa: E402
     annotations_from,
     parse_values,
@@ -24,6 +23,9 @@ from strata.notebook.vocabulary import (  # noqa: E402
 )
 from tests.contract.cellgraph import record, replay  # noqa: E402
 from tests.contract.cellgraph import test_vocabulary_parity as parity  # noqa: E402
+from tests.contract.cellgraph.legacy_annotations import (  # noqa: E402
+    legacy_parse_annotations as parse_annotations,
+)
 
 # Lines each key's parser must read as ``parse_annotations`` does, readable or not.
 EDGES = {

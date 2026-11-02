@@ -567,7 +567,7 @@ def validate_main(args: argparse.Namespace) -> int:
 
     if session is not None:
         for cell in session.notebook_state.cells:
-            diagnostics = validate_cell_annotations(cell, session.notebook_state, session.dag)
+            diagnostics = validate_cell_annotations(cell, session.notebook_state, session.analysis)
             for diag in diagnostics:
                 if diag.severity == DiagnosticSeverity.ERROR:
                     error_count += 1

@@ -73,7 +73,7 @@ def test_a_malformed_annotation_is_an_error_and_refuses_the_run(tmp_path, key):
     session = _session(tmp_path, {"c1": source})
     cell = session.notebook_state.get_cell("c1")
 
-    diagnostic = blocking_diagnostic(cell, session.notebook_state, session.dag)
+    diagnostic = blocking_diagnostic(cell, session.notebook_state, session.analysis)
     assert diagnostic is not None
     assert diagnostic.code == code
 
@@ -103,7 +103,7 @@ def test_every_run_mode_is_refused(tmp_path, mode):
 def test_a_flag_reads_each_documented_value(tmp_path, value):
     session = _session(tmp_path, {"c1": f"# @nocache {value}\nx = 1\n"})
     cell = session.notebook_state.get_cell("c1")
-    assert blocking_diagnostic(cell, session.notebook_state, session.dag) is None
+    assert blocking_diagnostic(cell, session.notebook_state, session.analysis) is None
 
 
 @pytest.mark.parametrize(
@@ -123,7 +123,7 @@ def test_a_flag_reads_each_documented_value(tmp_path, value):
 def test_a_well_formed_annotation_is_not_refused(tmp_path, directive):
     session = _session(tmp_path, {"c1": f"{directive}\nx = 1\n"})
     cell = session.notebook_state.get_cell("c1")
-    assert blocking_diagnostic(cell, session.notebook_state, session.dag) is None
+    assert blocking_diagnostic(cell, session.notebook_state, session.analysis) is None
 
 
 BLOCKED = "# @timeout soon\nx = 1\n"

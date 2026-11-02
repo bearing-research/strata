@@ -381,6 +381,12 @@ computes a topological order (Kahn), detects cycles, and tracks
 downstream cells reference. Only consumed variables are stored as artifacts.
 DAG rebuilds on every source change.
 
+The analysis runs on cellgraph (the `cellgraph` package from PyPI, its own
+repository `bearing-research/cellgraph`): `graph.py` calls `cellgraph.analyze`
+with Strata's annotation vocabulary (`vocabulary.py`) and keeps legacy-1
+normalization and digests, so keys match the ones from before cellgraph. The
+traces in `tests/contract/cellgraph` pin that behavior (re-record with `--update`).
+
 ### Source annotations
 
 `#` comments at the top of a cell, parsed by `annotations.py`. **Annotations

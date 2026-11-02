@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyio.to_thread
+import cellgraph as cg
 from vestigo.file_modes import PASS_THROUGH_DIR, private_dir, private_file
 from vestigo.provenance import derive_subkey
 
@@ -27,7 +28,7 @@ from strata.notebook import console_relay, output_file_relay
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.causality import CausalityChain, compute_causality_on_staleness, skip_none
-from strata.notebook.dag import CellAnalysisWithId, NotebookDag
+from strata.notebook.dag import NotebookDag
 from strata.notebook.dependencies import (
     DependencyChangeResult,
     EnvironmentOperationLog,
@@ -45,6 +46,7 @@ from strata.notebook.env import (
     compute_lockfile_hash,
     narrow_env_for_provenance,
 )
+from strata.notebook.graph import analyze_notebook
 from strata.notebook.models import (
     AnnotationDiagnostic,
     CellLanguage,
@@ -305,6 +307,8 @@ class NotebookSession:
         # cells do not run. Seeding it from an existing .venv would let a sync that
         # raises on open leave cells running in the old environment with no notice.
         self.venv_python: Path | None = None
+        # The last ``analyze_notebook`` of the notebook; the DAG is its graph.
+        self.analysis: cg.Analysis | None = None
         self.dag: NotebookDag | None = None
         # None when the build succeeded; consumers must tell "no dependencies" from
         # "could not be computed".
@@ -459,7 +463,7 @@ class NotebookSession:
             seen = (
                 previous.get(cell.id, []) if previous is not None else cell.annotation_diagnostics
             )
-            diagnostics = validate_cell_annotations(cell, self.notebook_state, self.dag)
+            diagnostics = validate_cell_annotations(cell, self.notebook_state, self.analysis)
             cell.annotation_diagnostics = diagnostics
             for d in diagnostics:
                 if d in seen:
@@ -659,132 +663,55 @@ class NotebookSession:
 
     def _analyze_and_build_dag(self) -> None:
         """Analyze all cells, build the DAG, and update each cell's DAG fields."""
-        from strata.notebook.languages import analyze_cell_by_language
-
-        cell_analyses = []
+        self.analysis = analyze_notebook(self.notebook_state)
         for cell in self.notebook_state.cells:
-            analyzed = analyze_cell_by_language(cell, self)
-            defines = list(analyzed.defines)
-            references = list(analyzed.references)
-            mutation_defines = list(analyzed.mutation_defines)
-
-            # Loop cells read the carry from upstream on iter 0 even though Python scoping
-            # sees it as local, so record it as a reference to wire the seeding upstream.
-            annotations = parse_annotations(cell.source, cell.language)
-            if (
-                annotations.loop is not None
-                and annotations.loop.carry
-                and annotations.loop.carry not in references
-                and annotations.loop.start_from_cell is None
-            ):
-                references = references + [annotations.loop.carry]
-
-            # ``# @output_dir`` folders are this cell's outputs, bound before it runs.
-            for name in annotations.output_dirs:
-                if name not in defines:
-                    defines.append(name)
-
-            loop = annotations.loop
-            seed_from = (
-                (loop.start_from_cell, loop.carry)
-                if loop is not None and loop.carry and loop.start_from_cell is not None
-                else None
-            )
-            if loop is not None and loop.until_expr:
-                # The predicate runs in the cell's namespace: a name the body doesn't bind
-                # (a tolerance set upstream) is an input like any other.
-                from strata.notebook.analyzer import analyze_cell
-
-                references = references + [
-                    name
-                    for name in analyze_cell(loop.until_expr).references
-                    if name not in defines and name not in references
-                ]
-
-            bound = set(annotations.output_dirs)
-            if cell.language in (CellLanguage.PYTHON, CellLanguage.R):
-                # The run binds these over any upstream value, so an edge carries nothing
-                # and would rerun the cell whenever the unrelated producer changed.
-                bound |= {
-                    *(
-                        mount.name
-                        for mount in resolve_cell_mounts([], cell.mounts, annotations.mounts)
-                    ),
-                    *(table.name for table in annotations.tables),
-                    *(f"{table.name}_snapshot" for table in annotations.tables),
-                    *(fetch.name for fetch in annotations.fetches),
-                    *(dataset.name for dataset in annotations.datasets),
-                }
-            # Both lists wire edges: a name shadowing a builtin (``input``) is in the second.
-            references = [name for name in references if name not in bound]
-            builtin_references = [name for name in analyzed.builtin_references if name not in bound]
-
-            variant_group = annotations.variant.group if annotations.variant is not None else None
-            variant_name = annotations.variant.name if annotations.variant is not None else None
-            cell_analyses.append(
-                CellAnalysisWithId(
-                    id=cell.id,
-                    defines=defines,
-                    references=references,
-                    builtin_references=builtin_references,
-                    after=list(annotations.after),
-                    variant_group=variant_group,
-                    variant_name=variant_name,
-                    per_variant=annotations.per_variant,
-                    per_variant_group=annotations.per_variant_group,
-                    seed_from=seed_from,
-                    kept=[write.variable for write in annotations.table_writes]
-                    + annotations.output_dirs,
-                )
-            )
-            cell.defines = defines
-            cell.references = references
-            cell.mutation_defines = mutation_defines
-            cell.builtin_references = builtin_references
-            cell.variant_group = variant_group
-            cell.variant_name = variant_name
+            ca = self.analysis.cells[cell.id]
+            variant = ca.annotations.get("variant")
+            cell.defines = list(ca.defines)
+            cell.references = list(ca.references)
+            cell.mutation_defines = list(ca.mutation_defines)
+            cell.builtin_references = list(ca.builtin_references)
+            cell.variant_group = variant[0] if variant is not None else None
+            cell.variant_name = variant[1] if variant is not None else None
             # Active until the DAG resolution proves otherwise.
             cell.variant_active = True
 
-        try:
-            self.dag_error = None
-            self.dag = NotebookDag.from_cells(
-                cell_analyses,
-                variant_active_selections=self.notebook_state.variant_active_selections,
-                variant_modes=self.notebook_state.variant_modes,
-            )
-
-            for cell in self.notebook_state.cells:
-                cell.upstream_ids = self.dag.cell_upstream.get(cell.id, [])
-                cell.downstream_ids = self.dag.cell_downstream.get(cell.id, [])
-                cell.is_leaf = cell.id in self.dag.leaves
-                cell.variant_active = cell.id not in self.dag.inactive_cells
-
-            self.notebook_state.variant_groups = [
-                VariantGroupState(
-                    group=group.group,
-                    active_name=group.active_name,
-                    active_cell_id=group.active_cell_id,
-                    mode=group.mode,
-                    members=[
-                        VariantMember(
-                            cell_id=cid,
-                            name=name,
-                            is_active=(cid == group.active_cell_id),
-                        )
-                        for cid, name in group.members
-                    ],
-                )
-                for group in self.dag.variant_groups
-            ]
-
-        except ValueError as e:
-            # Cycle or variant collision: log, don't crash. Keep the reason, since a None
-            # DAG otherwise reads as a notebook with no dependencies and "is this variable
-            # defined?" would answer a confident no.
-            logger.warning("DAG build failed: %s", e)
+        structural = self.analysis.structural_errors
+        if structural:
+            # Cycle or variant collision: keep the reason, since a None DAG otherwise
+            # reads as a notebook with no dependencies and "is this variable defined?"
+            # would answer a confident no.
+            error = next((d for d in structural if d.code == "variant_collision"), structural[0])
+            logger.warning("DAG build failed: %s", error.message)
             self.dag = None
-            self.dag_error = str(e)
+            self.dag_error = error.message
+            return
+
+        self.dag_error = None
+        self.dag = NotebookDag.of(self.analysis.graph)
+        for cell in self.notebook_state.cells:
+            cell.upstream_ids = self.dag.cell_upstream.get(cell.id, [])
+            cell.downstream_ids = self.dag.cell_downstream.get(cell.id, [])
+            cell.is_leaf = cell.id in self.dag.leaves
+            cell.variant_active = cell.id not in self.dag.inactive_cells
+
+        self.notebook_state.variant_groups = [
+            VariantGroupState(
+                group=group.group,
+                active_name=group.active_name,
+                active_cell_id=group.active_cell_id,
+                mode=group.mode,
+                members=[
+                    VariantMember(
+                        cell_id=cid,
+                        name=name,
+                        is_active=(cid == group.active_cell_id),
+                    )
+                    for cid, name in group.members
+                ],
+            )
+            for group in self.dag.variant_groups
+        ]
 
     def _restore_execution_history(self, previous_cells: dict[str, Any]) -> None:
         """Restore per-cell execution history that ``notebook.toml`` does not hold.
@@ -873,17 +800,8 @@ class NotebookSession:
 
     def re_analyze_cell(self, cell_id: str) -> None:
         """Re-analyze a single cell and rebuild the DAG."""
-        cell = self.notebook_state.get_cell(cell_id)
-        if not cell:
+        if not self.notebook_state.get_cell(cell_id):
             return
-
-        from strata.notebook.languages import analyze_cell_by_language
-
-        analyzed = analyze_cell_by_language(cell, self)
-        cell.defines = list(analyzed.defines)
-        cell.references = list(analyzed.references)
-        cell.builtin_references = list(analyzed.builtin_references)
-
         # One cell changed, so downstream may be affected.
         self._analyze_and_build_dag()
 
@@ -2959,7 +2877,6 @@ class NotebookSession:
 
     def _has_r_cells(self) -> bool:
         """Whether any cell in the notebook is an R cell."""
-        from strata.notebook.models import CellLanguage
 
         return any(cell.language == CellLanguage.R for cell in self.notebook_state.cells)
 

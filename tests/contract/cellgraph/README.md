@@ -24,7 +24,14 @@ test_cellgraph_r_directives_trace.py   the R scenario's guard and replay, apart 
 replay.py                  replays a trace through cellgraph
 test_replay.py             the replay of every other scenario
 test_vocabulary_parity.py  cellgraph's diagnostics against Strata's, on cells no scenario has
+diagnostics_corpus.py      every annotation line in a cell of every language
+diagnostics_oracle.json    what Strata's own validators reported on it, recorded once
+test_diagnostics_oracle.py validation on cellgraph against that oracle
+legacy_annotations.py      the parse_annotations cellgraph replaced, frozen
 ```
+
+The oracle and `legacy_annotations.py` hold the code validation and
+`parse_annotations` ran before cellgraph replaced it; neither is re-recorded.
 
 ```bash
 uv run python -m tests.contract.cellgraph.record            # compare every trace

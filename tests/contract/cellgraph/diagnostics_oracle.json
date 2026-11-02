@@ -1,0 +1,5312 @@
+{
+  "cycle-0": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": "Cycle detected in DAG: p \u2192 c \u2192 p",
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "cycle-1": {
+    "cells": {
+      "c": [],
+      "p": [
+        [
+          "per_variant_unreadable",
+          "error",
+          1,
+          "`@per_variant a b` could not be read (expected at most one group name, a Python identifier), so the cell does not run."
+        ]
+      ]
+    },
+    "dag_error": "Cycle detected in DAG: p \u2192 c \u2192 p",
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "cycle-2": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": "Cycle detected in DAG: p \u2192 c \u2192 p",
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "cycle-3": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": "Cycle detected in DAG: p \u2192 c \u2192 p",
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "prompt-00": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-01": {
+    "cells": {
+      "c": [
+        [
+          "worker_unreadable",
+          "error",
+          1,
+          "`@worker` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-02": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-03": {
+    "cells": {
+      "c": [
+        [
+          "timeout_not_numeric",
+          "error",
+          1,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-04": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-05": {
+    "cells": {
+      "c": [
+        [
+          "env_malformed",
+          "error",
+          1,
+          "`@env bad` could not be read (expected `@env KEY=value`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-06": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-07": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-08": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          1,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-09": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-10": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-11": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-12": {
+    "cells": {
+      "c": [
+        [
+          "fetch_unreadable",
+          "error",
+          1,
+          "`@fetch f` could not be read (expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-13": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-14": {
+    "cells": {
+      "c": [
+        [
+          "dataset_unreadable",
+          "error",
+          1,
+          "`@dataset` could not be read (expected `@dataset <var> <name>[@<alias>|@v=<n>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-15": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-16": {
+    "cells": {
+      "c": [
+        [
+          "write_table_unreadable",
+          "error",
+          1,
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-17": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-18": {
+    "cells": {
+      "c": [
+        [
+          "output_dir_unreadable",
+          "error",
+          1,
+          "`@output_dir` could not be read (expected `@output_dir <name>`, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-19": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-20": {
+    "cells": {
+      "c": [
+        [
+          "nocache_unreadable",
+          "error",
+          1,
+          "`@nocache maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-21": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-22": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_unreadable",
+          "error",
+          1,
+          "`@stochastic maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-23": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_nocache_conflict",
+          "error",
+          2,
+          "`@stochastic` runs the cell every time, so `@nocache off` cannot turn its cache back on; remove one of them."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-24": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-25": {
+    "cells": {
+      "c": [
+        [
+          "after_unknown_cell",
+          "error",
+          1,
+          "`@after ghost` names no cell in this notebook (it takes a cell id, not an `@name`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-26": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-27": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-28": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-29": {
+    "cells": {
+      "c": [
+        [
+          "loop_unreadable",
+          "error",
+          1,
+          "`@loop max_iter=abc carry=y` could not be read (expected `@loop max_iter=<N> carry=<var> [until=<expr>] [start_from=<cell>@iter=<k>]`, without spaces in a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-30": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-31": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-32": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-33": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-34": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-35": {
+    "cells": {
+      "c": [
+        [
+          "name_unreadable",
+          "error",
+          1,
+          "`@name 1bad` could not be read (a prompt cell's name is its output variable, so a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-36": {
+    "cells": {
+      "c": [
+        [
+          "name_unreadable",
+          "error",
+          1,
+          "`@name` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-37": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-38": {
+    "cells": {
+      "c": [
+        [
+          "temperature_unreadable",
+          "error",
+          1,
+          "`@temperature x` could not be read (expected a number, 0 or more), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-39": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-40": {
+    "cells": {
+      "c": [
+        [
+          "max_tokens_unreadable",
+          "error",
+          1,
+          "`@max_tokens -1` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-41": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-42": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-43": {
+    "cells": {
+      "c": [
+        [
+          "output_unreadable",
+          "error",
+          1,
+          "`@output xml` could not be read (expected json or text), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-44": {
+    "cells": {
+      "c": [
+        [
+          "prompt_output_schema_invalid",
+          "error",
+          1,
+          "Invalid JSON in @output_schema: Expecting property name enclosed in double quotes"
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-45": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-46": {
+    "cells": {
+      "c": [
+        [
+          "validate_retries_unreadable",
+          "error",
+          1,
+          "`@validate_retries x` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-47": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-48": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-49": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-50": {
+    "cells": {
+      "c": [
+        [
+          "cache_ttl_invalid",
+          "error",
+          1,
+          "`@cache ttl=x` could not be read (`ttl=` takes a positive integer (seconds)), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-51": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-52": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-53": {
+    "cells": {
+      "c": [
+        [
+          "live_unreadable",
+          "error",
+          1,
+          "`@live maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-54": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-55": {
+    "cells": {
+      "c": [
+        [
+          "app_unreadable",
+          "error",
+          1,
+          "`@app show` could not be read (expected `@app hide`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-56": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-57": {
+    "cells": {
+      "c": [
+        [
+          "variant_malformed",
+          "error",
+          1,
+          "`@variant` requires `group` and `name`, both Python identifiers: `# @variant <group> <name>`."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-58": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_no_sweep_source",
+          "warn",
+          1,
+          "`@per_variant` requires the cell to reference a variable from a sweep-mode variant group; none were found."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-59": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_unknown_group",
+          "warn",
+          1,
+          "`@per_variant a` names a group this cell doesn't read from in sweep mode. Reference a variable produced by a sweep-mode variant group."
+        ],
+        [
+          "per_variant_unreadable",
+          "error",
+          1,
+          "`@per_variant a b` could not be read (expected at most one group name, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-60": {
+    "cells": {
+      "c": [
+        [
+          "annotation_unknown",
+          "warn",
+          1,
+          "`@zzz` is not an annotation, so it is ignored."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-61": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          4,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ],
+        [
+          "timeout_not_numeric",
+          "error",
+          2,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-62": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-63": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "prompt-64": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-00": {
+    "cells": {
+      "c": [
+        [
+          "worker_unknown",
+          "warn",
+          1,
+          "`@worker gpu` is not a worker this notebook can use. Execution will fail until the worker is added."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-01": {
+    "cells": {
+      "c": [
+        [
+          "worker_unreadable",
+          "error",
+          1,
+          "`@worker` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-02": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-03": {
+    "cells": {
+      "c": [
+        [
+          "timeout_not_numeric",
+          "error",
+          1,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-04": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-05": {
+    "cells": {
+      "c": [
+        [
+          "env_malformed",
+          "error",
+          1,
+          "`@env bad` could not be read (expected `@env KEY=value`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-06": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-07": {
+    "cells": {
+      "c": [
+        [
+          "mount_uri_unsupported",
+          "warn",
+          1,
+          "`@mount d` uses unsupported URI scheme 'ftp'. Supported: az, azure, file, gcs, gs, s3."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-08": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          1,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-09": {
+    "cells": {
+      "c": [
+        [
+          "table_uri_malformed",
+          "warn",
+          1,
+          "`@table a` URI should be `<warehouse>#<namespace>.<table>`, `<catalog>:<namespace>.<table>` or `<namespace>.<table>` (e.g. file:///data/warehouse#nyc.trips)."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-10": {
+    "cells": {
+      "c": [
+        [
+          "table_duplicate_name",
+          "error",
+          1,
+          "`@table b` is declared more than once; each @table must have a unique name; the cell will fail to run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-11": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "python-12": {
+    "cells": {
+      "c": [
+        [
+          "fetch_unreadable",
+          "error",
+          1,
+          "`@fetch f` could not be read (expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-13": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-14": {
+    "cells": {
+      "c": [
+        [
+          "dataset_unreadable",
+          "error",
+          1,
+          "`@dataset` could not be read (expected `@dataset <var> <name>[@<alias>|@v=<n>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-15": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-16": {
+    "cells": {
+      "c": [
+        [
+          "write_table_unreadable",
+          "error",
+          1,
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-17": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-18": {
+    "cells": {
+      "c": [
+        [
+          "output_dir_unreadable",
+          "error",
+          1,
+          "`@output_dir` could not be read (expected `@output_dir <name>`, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-19": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-20": {
+    "cells": {
+      "c": [
+        [
+          "nocache_unreadable",
+          "error",
+          1,
+          "`@nocache maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-21": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-22": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_unreadable",
+          "error",
+          1,
+          "`@stochastic maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-23": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_nocache_conflict",
+          "error",
+          2,
+          "`@stochastic` runs the cell every time, so `@nocache off` cannot turn its cache back on; remove one of them."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-24": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-25": {
+    "cells": {
+      "c": [
+        [
+          "after_unknown_cell",
+          "error",
+          1,
+          "`@after ghost` names no cell in this notebook (it takes a cell id, not an `@name`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-26": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-27": {
+    "cells": {
+      "c": [
+        [
+          "loop_carry_unknown",
+          "warn",
+          1,
+          "`@loop carry=z` does not match any top-level assignment in the cell. The cell must rebind `z` each iteration for the loop to make progress."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-28": {
+    "cells": {
+      "c": [
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-29": {
+    "cells": {
+      "c": [
+        [
+          "loop_unreadable",
+          "error",
+          1,
+          "`@loop max_iter=abc carry=y` could not be read (expected `@loop max_iter=<N> carry=<var> [until=<expr>] [start_from=<cell>@iter=<k>]`, without spaces in a value), so the cell does not run."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-30": {
+    "cells": {
+      "c": [
+        [
+          "loop_until_syntax_error",
+          "error",
+          2,
+          "`@loop_until` expression is not a valid Python expression: invalid syntax."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-31": {
+    "cells": {
+      "c": [
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ],
+        [
+          "loop_missing_carry",
+          "error",
+          1,
+          "`@loop` requires `carry=<variable>`. The carry variable is threaded between iterations."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-32": {
+    "cells": {
+      "c": [
+        [
+          "loop_start_from_unknown",
+          "error",
+          1,
+          "`@loop start_from=zz@iter=1` references a cell that does not exist in this notebook."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-33": {
+    "cells": {
+      "c": [
+        [
+          "loop_carry_unknown",
+          "warn",
+          1,
+          "`@loop carry=x` does not match any top-level assignment in the cell. The cell must rebind `x` each iteration for the loop to make progress."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-34": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-35": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-36": {
+    "cells": {
+      "c": [
+        [
+          "name_unreadable",
+          "error",
+          1,
+          "`@name` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-37": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-38": {
+    "cells": {
+      "c": [
+        [
+          "temperature_unreadable",
+          "error",
+          1,
+          "`@temperature x` could not be read (expected a number, 0 or more), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-39": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-40": {
+    "cells": {
+      "c": [
+        [
+          "max_tokens_unreadable",
+          "error",
+          1,
+          "`@max_tokens -1` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-41": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-42": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-43": {
+    "cells": {
+      "c": [
+        [
+          "output_unreadable",
+          "error",
+          1,
+          "`@output xml` could not be read (expected json or text), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-44": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-45": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-46": {
+    "cells": {
+      "c": [
+        [
+          "validate_retries_unreadable",
+          "error",
+          1,
+          "`@validate_retries x` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-47": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-48": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-49": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-50": {
+    "cells": {
+      "c": [
+        [
+          "cache_ttl_invalid",
+          "error",
+          1,
+          "`@cache ttl=x` could not be read (`ttl=` takes a positive integer (seconds)), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-51": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-52": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-53": {
+    "cells": {
+      "c": [
+        [
+          "live_unreadable",
+          "error",
+          1,
+          "`@live maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-54": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-55": {
+    "cells": {
+      "c": [
+        [
+          "app_unreadable",
+          "error",
+          1,
+          "`@app show` could not be read (expected `@app hide`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-56": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-57": {
+    "cells": {
+      "c": [
+        [
+          "variant_malformed",
+          "error",
+          1,
+          "`@variant` requires `group` and `name`, both Python identifiers: `# @variant <group> <name>`."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-58": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_no_sweep_source",
+          "warn",
+          1,
+          "`@per_variant` requires the cell to reference a variable from a sweep-mode variant group; none were found."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-59": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_unknown_group",
+          "warn",
+          1,
+          "`@per_variant a` names a group this cell doesn't read from in sweep mode. Reference a variable produced by a sweep-mode variant group."
+        ],
+        [
+          "per_variant_unreadable",
+          "error",
+          1,
+          "`@per_variant a b` could not be read (expected at most one group name, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-60": {
+    "cells": {
+      "c": [
+        [
+          "annotation_unknown",
+          "warn",
+          1,
+          "`@zzz` is not an annotation, so it is ignored."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-61": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          4,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ],
+        [
+          "timeout_not_numeric",
+          "error",
+          2,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ],
+        [
+          "worker_unknown",
+          "warn",
+          1,
+          "`@worker gpu` is not a worker this notebook can use. Execution will fail until the worker is added."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          3,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-62": {
+    "cells": {
+      "c": [
+        [
+          "mount_uri_unsupported",
+          "warn",
+          2,
+          "`@mount d` uses unsupported URI scheme 'ftp'. Supported: az, azure, file, gcs, gs, s3."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "python-63": {
+    "cells": {
+      "c": [
+        [
+          "mount_uri_unsupported",
+          "warn",
+          3,
+          "`@mount d` uses unsupported URI scheme 'ftp'. Supported: az, azure, file, gcs, gs, s3."
+        ],
+        [
+          "loop_carry_unknown",
+          "warn",
+          1,
+          "`@loop carry=z` does not match any top-level assignment in the cell. The cell must rebind `z` each iteration for the loop to make progress."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "python-64": {
+    "cells": {
+      "c": [
+        [
+          "table_uri_malformed",
+          "warn",
+          2,
+          "`@table a` URI should be `<warehouse>#<namespace>.<table>`, `<catalog>:<namespace>.<table>` or `<namespace>.<table>` (e.g. file:///data/warehouse#nyc.trips)."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ],
+        [
+          "loop_start_from_unknown",
+          "error",
+          1,
+          "`@loop start_from=zz@iter=1` references a cell that does not exist in this notebook."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-00": {
+    "cells": {
+      "c": [
+        [
+          "worker_unknown",
+          "warn",
+          1,
+          "`@worker gpu` is not a worker this notebook can use. Execution will fail until the worker is added."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-01": {
+    "cells": {
+      "c": [
+        [
+          "worker_unreadable",
+          "error",
+          1,
+          "`@worker` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-02": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-03": {
+    "cells": {
+      "c": [
+        [
+          "timeout_not_numeric",
+          "error",
+          1,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-04": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-05": {
+    "cells": {
+      "c": [
+        [
+          "env_malformed",
+          "error",
+          1,
+          "`@env bad` could not be read (expected `@env KEY=value`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-06": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-07": {
+    "cells": {
+      "c": [
+        [
+          "mount_uri_unsupported",
+          "warn",
+          1,
+          "`@mount d` uses unsupported URI scheme 'ftp'. Supported: az, azure, file, gcs, gs, s3."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-08": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          1,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-09": {
+    "cells": {
+      "c": [
+        [
+          "table_uri_malformed",
+          "warn",
+          1,
+          "`@table a` URI should be `<warehouse>#<namespace>.<table>`, `<catalog>:<namespace>.<table>` or `<namespace>.<table>` (e.g. file:///data/warehouse#nyc.trips)."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-10": {
+    "cells": {
+      "c": [
+        [
+          "table_duplicate_name",
+          "error",
+          1,
+          "`@table b` is declared more than once; each @table must have a unique name; the cell will fail to run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-11": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "r-12": {
+    "cells": {
+      "c": [
+        [
+          "fetch_unreadable",
+          "error",
+          1,
+          "`@fetch f` could not be read (expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-13": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-14": {
+    "cells": {
+      "c": [
+        [
+          "dataset_unreadable",
+          "error",
+          1,
+          "`@dataset` could not be read (expected `@dataset <var> <name>[@<alias>|@v=<n>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-15": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-16": {
+    "cells": {
+      "c": [
+        [
+          "write_table_unreadable",
+          "error",
+          1,
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-17": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-18": {
+    "cells": {
+      "c": [
+        [
+          "output_dir_unreadable",
+          "error",
+          1,
+          "`@output_dir` could not be read (expected `@output_dir <name>`, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-19": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-20": {
+    "cells": {
+      "c": [
+        [
+          "nocache_unreadable",
+          "error",
+          1,
+          "`@nocache maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-21": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-22": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_unreadable",
+          "error",
+          1,
+          "`@stochastic maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-23": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_nocache_conflict",
+          "error",
+          2,
+          "`@stochastic` runs the cell every time, so `@nocache off` cannot turn its cache back on; remove one of them."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-24": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-25": {
+    "cells": {
+      "c": [
+        [
+          "after_unknown_cell",
+          "error",
+          1,
+          "`@after ghost` names no cell in this notebook (it takes a cell id, not an `@name`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-26": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-27": {
+    "cells": {
+      "c": [
+        [
+          "loop_carry_unknown",
+          "warn",
+          1,
+          "`@loop carry=z` does not match any top-level assignment in the cell. The cell must rebind `z` each iteration for the loop to make progress."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-28": {
+    "cells": {
+      "c": [
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-29": {
+    "cells": {
+      "c": [
+        [
+          "loop_unreadable",
+          "error",
+          1,
+          "`@loop max_iter=abc carry=y` could not be read (expected `@loop max_iter=<N> carry=<var> [until=<expr>] [start_from=<cell>@iter=<k>]`, without spaces in a value), so the cell does not run."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-30": {
+    "cells": {
+      "c": [
+        [
+          "loop_until_syntax_error",
+          "error",
+          2,
+          "`@loop_until` expression is not a valid Python expression: invalid syntax."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-31": {
+    "cells": {
+      "c": [
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ],
+        [
+          "loop_missing_carry",
+          "error",
+          1,
+          "`@loop` requires `carry=<variable>`. The carry variable is threaded between iterations."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-32": {
+    "cells": {
+      "c": [
+        [
+          "loop_start_from_unknown",
+          "error",
+          1,
+          "`@loop start_from=zz@iter=1` references a cell that does not exist in this notebook."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-33": {
+    "cells": {
+      "c": [
+        [
+          "loop_carry_unknown",
+          "warn",
+          1,
+          "`@loop carry=x` does not match any top-level assignment in the cell. The cell must rebind `x` each iteration for the loop to make progress."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-34": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-35": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-36": {
+    "cells": {
+      "c": [
+        [
+          "name_unreadable",
+          "error",
+          1,
+          "`@name` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-37": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-38": {
+    "cells": {
+      "c": [
+        [
+          "temperature_unreadable",
+          "error",
+          1,
+          "`@temperature x` could not be read (expected a number, 0 or more), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-39": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-40": {
+    "cells": {
+      "c": [
+        [
+          "max_tokens_unreadable",
+          "error",
+          1,
+          "`@max_tokens -1` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-41": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-42": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-43": {
+    "cells": {
+      "c": [
+        [
+          "output_unreadable",
+          "error",
+          1,
+          "`@output xml` could not be read (expected json or text), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-44": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-45": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-46": {
+    "cells": {
+      "c": [
+        [
+          "validate_retries_unreadable",
+          "error",
+          1,
+          "`@validate_retries x` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-47": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-48": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-49": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-50": {
+    "cells": {
+      "c": [
+        [
+          "cache_ttl_invalid",
+          "error",
+          1,
+          "`@cache ttl=x` could not be read (`ttl=` takes a positive integer (seconds)), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-51": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-52": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-53": {
+    "cells": {
+      "c": [
+        [
+          "live_unreadable",
+          "error",
+          1,
+          "`@live maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-54": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-55": {
+    "cells": {
+      "c": [
+        [
+          "app_unreadable",
+          "error",
+          1,
+          "`@app show` could not be read (expected `@app hide`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-56": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-57": {
+    "cells": {
+      "c": [
+        [
+          "variant_malformed",
+          "error",
+          1,
+          "`@variant` requires `group` and `name`, both Python identifiers: `# @variant <group> <name>`."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-58": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_no_sweep_source",
+          "warn",
+          1,
+          "`@per_variant` requires the cell to reference a variable from a sweep-mode variant group; none were found."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-59": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_unknown_group",
+          "warn",
+          1,
+          "`@per_variant a` names a group this cell doesn't read from in sweep mode. Reference a variable produced by a sweep-mode variant group."
+        ],
+        [
+          "per_variant_unreadable",
+          "error",
+          1,
+          "`@per_variant a b` could not be read (expected at most one group name, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-60": {
+    "cells": {
+      "c": [
+        [
+          "annotation_unknown",
+          "warn",
+          1,
+          "`@zzz` is not an annotation, so it is ignored."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-61": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          4,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ],
+        [
+          "timeout_not_numeric",
+          "error",
+          2,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ],
+        [
+          "worker_unknown",
+          "warn",
+          1,
+          "`@worker gpu` is not a worker this notebook can use. Execution will fail until the worker is added."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          3,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-62": {
+    "cells": {
+      "c": [
+        [
+          "mount_uri_unsupported",
+          "warn",
+          2,
+          "`@mount d` uses unsupported URI scheme 'ftp'. Supported: az, azure, file, gcs, gs, s3."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "r-63": {
+    "cells": {
+      "c": [
+        [
+          "mount_uri_unsupported",
+          "warn",
+          3,
+          "`@mount d` uses unsupported URI scheme 'ftp'. Supported: az, azure, file, gcs, gs, s3."
+        ],
+        [
+          "loop_carry_unknown",
+          "warn",
+          1,
+          "`@loop carry=z` does not match any top-level assignment in the cell. The cell must rebind `z` each iteration for the loop to make progress."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "r-64": {
+    "cells": {
+      "c": [
+        [
+          "table_uri_malformed",
+          "warn",
+          2,
+          "`@table a` URI should be `<warehouse>#<namespace>.<table>`, `<catalog>:<namespace>.<table>` or `<namespace>.<table>` (e.g. file:///data/warehouse#nyc.trips)."
+        ],
+        [
+          "loop_missing_max_iter",
+          "error",
+          1,
+          "`@loop` requires a positive `max_iter=<N>`. The loop cell must declare a safety bound on the iteration count."
+        ],
+        [
+          "loop_start_from_unknown",
+          "error",
+          1,
+          "`@loop start_from=zz@iter=1` references a cell that does not exist in this notebook."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "sql-00": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-01": {
+    "cells": {
+      "c": [
+        [
+          "worker_unreadable",
+          "error",
+          1,
+          "`@worker` could not be read (it needs a value), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-02": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-03": {
+    "cells": {
+      "c": [
+        [
+          "timeout_not_numeric",
+          "error",
+          1,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-04": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-05": {
+    "cells": {
+      "c": [
+        [
+          "env_malformed",
+          "error",
+          1,
+          "`@env bad` could not be read (expected `@env KEY=value`), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-06": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-07": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-08": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          1,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-09": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-10": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-11": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-12": {
+    "cells": {
+      "c": [
+        [
+          "fetch_unreadable",
+          "error",
+          1,
+          "`@fetch f` could not be read (expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-13": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-14": {
+    "cells": {
+      "c": [
+        [
+          "dataset_unreadable",
+          "error",
+          1,
+          "`@dataset` could not be read (expected `@dataset <var> <name>[@<alias>|@v=<n>]`), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-15": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-16": {
+    "cells": {
+      "c": [
+        [
+          "write_table_unreadable",
+          "error",
+          1,
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-17": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-18": {
+    "cells": {
+      "c": [
+        [
+          "output_dir_unreadable",
+          "error",
+          1,
+          "`@output_dir` could not be read (expected `@output_dir <name>`, a Python identifier), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-19": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-20": {
+    "cells": {
+      "c": [
+        [
+          "nocache_unreadable",
+          "error",
+          1,
+          "`@nocache maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-21": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-22": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_unreadable",
+          "error",
+          1,
+          "`@stochastic maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-23": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_nocache_conflict",
+          "error",
+          2,
+          "`@stochastic` runs the cell every time, so `@nocache off` cannot turn its cache back on; remove one of them."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-24": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "sql-25": {
+    "cells": {
+      "c": [
+        [
+          "after_unknown_cell",
+          "error",
+          1,
+          "`@after ghost` names no cell in this notebook (it takes a cell id, not an `@name`), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-26": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-27": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-28": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-29": {
+    "cells": {
+      "c": [
+        [
+          "loop_unreadable",
+          "error",
+          1,
+          "`@loop max_iter=abc carry=y` could not be read (expected `@loop max_iter=<N> carry=<var> [until=<expr>] [start_from=<cell>@iter=<k>]`, without spaces in a value), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-30": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-31": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-32": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-33": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "sql-34": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-35": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-36": {
+    "cells": {
+      "c": [
+        [
+          "name_unreadable",
+          "error",
+          1,
+          "`@name` could not be read (it needs a value), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-37": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-38": {
+    "cells": {
+      "c": [
+        [
+          "temperature_unreadable",
+          "error",
+          1,
+          "`@temperature x` could not be read (expected a number, 0 or more), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-39": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-40": {
+    "cells": {
+      "c": [
+        [
+          "max_tokens_unreadable",
+          "error",
+          1,
+          "`@max_tokens -1` could not be read (expected a positive integer), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-41": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-42": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-43": {
+    "cells": {
+      "c": [
+        [
+          "output_unreadable",
+          "error",
+          1,
+          "`@output xml` could not be read (expected json or text), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-44": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-45": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-46": {
+    "cells": {
+      "c": [
+        [
+          "validate_retries_unreadable",
+          "error",
+          1,
+          "`@validate_retries x` could not be read (expected a positive integer), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-47": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-48": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_unknown",
+          "warn",
+          1,
+          "`@sql connection=elsewhere` is not declared in this notebook. Add a `[connections.elsewhere]` block to notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-49": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          1,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-50": {
+    "cells": {
+      "c": [
+        [
+          "cache_ttl_invalid",
+          "error",
+          1,
+          "`@cache ttl=x` could not be read (`ttl=` takes a positive integer (seconds)), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-51": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-52": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-53": {
+    "cells": {
+      "c": [
+        [
+          "live_unreadable",
+          "error",
+          1,
+          "`@live maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-54": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-55": {
+    "cells": {
+      "c": [
+        [
+          "app_unreadable",
+          "error",
+          1,
+          "`@app show` could not be read (expected `@app hide`), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-56": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-57": {
+    "cells": {
+      "c": [
+        [
+          "variant_malformed",
+          "error",
+          1,
+          "`@variant` requires `group` and `name`, both Python identifiers: `# @variant <group> <name>`."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-58": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_no_sweep_source",
+          "warn",
+          1,
+          "`@per_variant` requires the cell to reference a variable from a sweep-mode variant group; none were found."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-59": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_unknown_group",
+          "warn",
+          1,
+          "`@per_variant a` names a group this cell doesn't read from in sweep mode. Reference a variable produced by a sweep-mode variant group."
+        ],
+        [
+          "per_variant_unreadable",
+          "error",
+          1,
+          "`@per_variant a b` could not be read (expected at most one group name, a Python identifier), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-60": {
+    "cells": {
+      "c": [
+        [
+          "annotation_unknown",
+          "warn",
+          1,
+          "`@zzz` is not an annotation, so it is ignored."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-61": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          4,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ],
+        [
+          "timeout_not_numeric",
+          "error",
+          2,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ],
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-62": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-63": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "sql-64": {
+    "cells": {
+      "c": [
+        [
+          "sql_connection_missing",
+          "error",
+          null,
+          "SQL cells require `# @sql connection=<name>`. The connection must match a `[connections.<name>]` block in notebook.toml."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-00": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-01": {
+    "cells": {
+      "c": [
+        [
+          "worker_unreadable",
+          "error",
+          1,
+          "`@worker` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-02": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-03": {
+    "cells": {
+      "c": [
+        [
+          "timeout_not_numeric",
+          "error",
+          1,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-04": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-05": {
+    "cells": {
+      "c": [
+        [
+          "env_malformed",
+          "error",
+          1,
+          "`@env bad` could not be read (expected `@env KEY=value`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-06": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-07": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-08": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          1,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-09": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-10": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-11": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-12": {
+    "cells": {
+      "c": [
+        [
+          "fetch_unreadable",
+          "error",
+          1,
+          "`@fetch f` could not be read (expected `@fetch <name> <url> [sha256=<hex>] [refetch=never|stale|always]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-13": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-14": {
+    "cells": {
+      "c": [
+        [
+          "dataset_unreadable",
+          "error",
+          1,
+          "`@dataset` could not be read (expected `@dataset <var> <name>[@<alias>|@v=<n>]`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-15": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-16": {
+    "cells": {
+      "c": [
+        [
+          "write_table_unreadable",
+          "error",
+          1,
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-17": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-18": {
+    "cells": {
+      "c": [
+        [
+          "output_dir_unreadable",
+          "error",
+          1,
+          "`@output_dir` could not be read (expected `@output_dir <name>`, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-19": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-20": {
+    "cells": {
+      "c": [
+        [
+          "nocache_unreadable",
+          "error",
+          1,
+          "`@nocache maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-21": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-22": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_unreadable",
+          "error",
+          1,
+          "`@stochastic maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-23": {
+    "cells": {
+      "c": [
+        [
+          "stochastic_nocache_conflict",
+          "error",
+          2,
+          "`@stochastic` runs the cell every time, so `@nocache off` cannot turn its cache back on; remove one of them."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-24": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "widget-25": {
+    "cells": {
+      "c": [
+        [
+          "after_unknown_cell",
+          "error",
+          1,
+          "`@after ghost` names no cell in this notebook (it takes a cell id, not an `@name`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-26": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-27": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-28": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-29": {
+    "cells": {
+      "c": [
+        [
+          "loop_unreadable",
+          "error",
+          1,
+          "`@loop max_iter=abc carry=y` could not be read (expected `@loop max_iter=<N> carry=<var> [until=<expr>] [start_from=<cell>@iter=<k>]`, without spaces in a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-30": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-31": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-32": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-33": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": ["p"],
+      "p": []
+    }
+  },
+  "widget-34": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-35": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-36": {
+    "cells": {
+      "c": [
+        [
+          "name_unreadable",
+          "error",
+          1,
+          "`@name` could not be read (it needs a value), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-37": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-38": {
+    "cells": {
+      "c": [
+        [
+          "temperature_unreadable",
+          "error",
+          1,
+          "`@temperature x` could not be read (expected a number, 0 or more), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-39": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-40": {
+    "cells": {
+      "c": [
+        [
+          "max_tokens_unreadable",
+          "error",
+          1,
+          "`@max_tokens -1` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-41": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-42": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-43": {
+    "cells": {
+      "c": [
+        [
+          "output_unreadable",
+          "error",
+          1,
+          "`@output xml` could not be read (expected json or text), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-44": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-45": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-46": {
+    "cells": {
+      "c": [
+        [
+          "validate_retries_unreadable",
+          "error",
+          1,
+          "`@validate_retries x` could not be read (expected a positive integer), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-47": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-48": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-49": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-50": {
+    "cells": {
+      "c": [
+        [
+          "cache_ttl_invalid",
+          "error",
+          1,
+          "`@cache ttl=x` could not be read (`ttl=` takes a positive integer (seconds)), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-51": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-52": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-53": {
+    "cells": {
+      "c": [
+        [
+          "live_unreadable",
+          "error",
+          1,
+          "`@live maybe` could not be read (expected nothing, or one of on, off, true, false, yes, no, 1, 0), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-54": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-55": {
+    "cells": {
+      "c": [
+        [
+          "app_unreadable",
+          "error",
+          1,
+          "`@app show` could not be read (expected `@app hide`), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-56": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-57": {
+    "cells": {
+      "c": [
+        [
+          "variant_malformed",
+          "error",
+          1,
+          "`@variant` requires `group` and `name`, both Python identifiers: `# @variant <group> <name>`."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-58": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_no_sweep_source",
+          "warn",
+          1,
+          "`@per_variant` requires the cell to reference a variable from a sweep-mode variant group; none were found."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-59": {
+    "cells": {
+      "c": [
+        [
+          "per_variant_unknown_group",
+          "warn",
+          1,
+          "`@per_variant a` names a group this cell doesn't read from in sweep mode. Reference a variable produced by a sweep-mode variant group."
+        ],
+        [
+          "per_variant_unreadable",
+          "error",
+          1,
+          "`@per_variant a b` could not be read (expected at most one group name, a Python identifier), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-60": {
+    "cells": {
+      "c": [
+        [
+          "annotation_unknown",
+          "warn",
+          1,
+          "`@zzz` is not an annotation, so it is ignored."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-61": {
+    "cells": {
+      "c": [
+        [
+          "mount_unreadable",
+          "error",
+          4,
+          "`@mount a` could not be read (expected `@mount <name> <uri> [ro|rw] [credential=<name>]`), so the cell does not run."
+        ],
+        [
+          "timeout_not_numeric",
+          "error",
+          2,
+          "`@timeout x` could not be read (expected a positive number of seconds), so the cell does not run."
+        ]
+      ],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-62": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-63": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  },
+  "widget-64": {
+    "cells": {
+      "c": [],
+      "p": []
+    },
+    "dag_error": null,
+    "upstream": {
+      "c": [],
+      "p": []
+    }
+  }
+}

@@ -278,8 +278,7 @@ class TestCycleDetection:
         ]
         dag = NotebookDag.from_cells(cells)
 
-        cycles = dag.detect_cycles([c.id for c in cells])
-        assert cycles == []
+        assert dag.topological_order == ["a", "b", "c"]
 
     def test_forward_reference_no_cycle(self):
         """A references y, defined later by B: no cycle and no edge.
@@ -332,12 +331,10 @@ class TestCascadePlan:
             CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
         ]
         dag = NotebookDag.from_cells(cells)
-        cell_ids = [c.id for c in cells]
 
-        # To run c, need a and b
-        plan = dag.cascade_plan("c", cell_ids)
-        assert set(plan) == {"a", "b"}
-        assert plan == ["a", "b"]  # In execution order
+        # To run c, need a and b, in execution order.
+        reach = dag.upstream_reachable("c")
+        assert [cid for cid in dag.topological_order if cid in reach] == ["a", "b", "c"]
 
     def test_cascade_diamond(self):
         cells = [
@@ -347,11 +344,9 @@ class TestCascadePlan:
             CellAnalysisWithId(id="d", defines=["w"], references=["y", "z"]),
         ]
         dag = NotebookDag.from_cells(cells)
-        cell_ids = [c.id for c in cells]
 
         # To run d, need a, b, c
-        plan = dag.cascade_plan("d", cell_ids)
-        assert set(plan) == {"a", "b", "c"}
+        assert dag.upstream_reachable("d") == {"a", "b", "c", "d"}
 
     def test_cascade_root_cell(self):
         """Cascade for root cell needs only itself."""
@@ -360,10 +355,8 @@ class TestCascadePlan:
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
         ]
         dag = NotebookDag.from_cells(cells)
-        cell_ids = [c.id for c in cells]
 
-        plan = dag.cascade_plan("a", cell_ids)
-        assert plan == ["a"]
+        assert dag.upstream_reachable("a") == {"a"}
 
     def test_cascade_no_deps(self):
         cells = [
@@ -371,10 +364,8 @@ class TestCascadePlan:
             CellAnalysisWithId(id="b", defines=["y"], references=[]),
         ]
         dag = NotebookDag.from_cells(cells)
-        cell_ids = [c.id for c in cells]
 
-        plan = dag.cascade_plan("b", cell_ids)
-        assert plan == ["b"]
+        assert dag.upstream_reachable("b") == {"b"}
 
 
 class TestRealWorldDAGs:

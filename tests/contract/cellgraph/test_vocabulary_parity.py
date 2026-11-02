@@ -3,7 +3,8 @@
 The traces cover what the scenarios exercise; these cells pin the checks they do
 not: each is opened by a real session and analyzed by cellgraph, and the two must
 agree on every diagnostic (code, severity, line and message, in order) and on
-whether the cell runs.
+whether the cell runs. Validation now runs on cellgraph, so the check against the
+validators it replaced is ``test_diagnostics_oracle.py``.
 """
 
 from __future__ import annotations
@@ -283,7 +284,11 @@ def _assert_parity(notebook_dir):
         return all(runs(upstream) for upstream in cell.upstream_ids)
 
     for cell in cells.values():
-        ours = _view(strata_diagnostics(analysis.cells[cell.id]))
+        ours = _view(
+            strata_diagnostics(
+                analysis.cells[cell.id], without_dag=bool(analysis.structural_errors)
+            )
+        )
         assert ours == _view(cell.annotation_diagnostics), cell.id
         # A broken DAG is ``dag_error``: Strata has no graph to say what runs.
         if session.dag_error is None:

@@ -500,8 +500,12 @@ wheels = [
 
 [[package]]
 name = "cellgraph"
-version = "0.1.0"
-source = { git = "https://github.com/bearing-research/cellgraph?rev=4f498b18df62f11d1286704414d8e68fb4f99908#4f498b18df62f11d1286704414d8e68fb4f99908" }
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/60/81/7e71808b7915e5129ac441a49aafdef912f91a68bc5cf6ee39b000eab133/cellgraph-0.2.0.tar.gz", hash = "sha256:b17a262c34fbc02f0c0e82e2da9e2b5a1f936d911255b499321cb31731272997", size = 36787, upload-time = "2026-11-02T03:47:51.694Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/8a/76b1d2591cc9232fded4a0fbb776a8087866a0b3df0a97e00b845b534080/cellgraph-0.2.0-py3-none-any.whl", hash = "sha256:42e73fc149b37f18f4de694858db12cbd372a11861eeb51fdde6a2f34742d430", size = 40918, upload-time = "2026-11-02T03:47:50.368Z" },
+]
 
 [[package]]
 name = "certifi"
@@ -4005,6 +4009,7 @@ version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
+    { name = "cellgraph" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "filelock" },
@@ -4093,7 +4098,6 @@ dev = [
     { name = "adbc-driver-sqlite" },
     { name = "adlfs" },
     { name = "boto3" },
-    { name = "cellgraph" },
     { name = "datafusion" },
     { name = "gcsfs" },
     { name = "grandalf" },
@@ -4136,6 +4140,7 @@ requires-dist = [
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
     { name = "azure-storage-blob", marker = "extra == 'azure'", specifier = ">=12.20.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.35.0" },
+    { name = "cellgraph", specifier = ">=0.2,<0.3" },
     { name = "cloudpickle", marker = "extra == 'notebook'", specifier = ">=3.0.0" },
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.5.0" },
@@ -4186,7 +4191,6 @@ dev = [
     { name = "adbc-driver-sqlite", specifier = ">=1.0.0" },
     { name = "adlfs", specifier = ">=2026.0.0" },
     { name = "boto3", specifier = ">=1.35.0" },
-    { name = "cellgraph", git = "https://github.com/bearing-research/cellgraph?rev=4f498b18df62f11d1286704414d8e68fb4f99908" },
     { name = "datafusion", specifier = ">=50.1.0" },
     { name = "gcsfs", specifier = ">=2026.0.0" },
     { name = "grandalf", specifier = ">=0.8" },
