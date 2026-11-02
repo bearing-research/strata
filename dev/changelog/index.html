@@ -3942,6 +3942,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A request refused for its Host counts as unmatched.</strong> With the frontend
+  installed, <code>/metrics/prometheus</code> counted a request the Host allowlist
+  refused under the frontend's route, <code>/{full_path}</code>. It is now
+  <code>route="unmatched"</code>, as without the frontend. (#1362)</li>
 <li><strong>A SQL cell's connection problem points at the line in force.</strong> With
   more than one <code># @sql</code> line, the later connection wins, but its
   diagnostics pointed at the first <code>@sql</code> line. They now point at the last
