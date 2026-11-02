@@ -34,6 +34,8 @@ dependencies = [
     # Its own repository (bearing-research/vestigo) releases it; the pin is exact
     # because the notebook's store schema and migrations track one version.
     "vestigo==0.3.1",
+    # The notebook's analysis: annotations, names, the DAG (bearing-research/cellgraph).
+    "cellgraph>=0.2,<0.3",
     "pyiceberg[sql-sqlite,sql-postgres]>=0.12.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",
@@ -148,9 +150,6 @@ dev = [
     "strata-client",
     # Dev-only too (for `ty` and the suite); the notebook must run without a pool.
     "strata-pool",
-    # Dev-only until Strata adopts it behind a facade: the vocabulary and the
-    # replay of the cellgraph traces need it, no runtime path does.
-    "cellgraph",
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -218,7 +217,6 @@ members = ["packages/strata-client", "packages/strata-pool"]
 [tool.uv.sources]
 strata-client = { workspace = true }
 strata-pool = { workspace = true }
-cellgraph = { git = "https://github.com/bearing-research/cellgraph", rev = "4f498b18df62f11d1286704414d8e68fb4f99908" }
 
 [tool.uv.build-backend]
 # The distribution is strata-notebook; the import package is strata, under src/.

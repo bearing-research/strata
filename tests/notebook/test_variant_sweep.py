@@ -112,34 +112,8 @@ def _variant_cell(name: str, cell_id: str) -> CellState:
     return cell
 
 
-def _dag_of(nb: NotebookState) -> NotebookDag | None:
-    """The DAG the session would build over *nb*'s analysed cells, None if it fails."""
-    analyses = []
-    for c in nb.cells:
-        ann = parse_annotations(c.source)
-        analyses.append(
-            CellAnalysisWithId(
-                id=c.id,
-                defines=list(c.defines),
-                references=list(c.references),
-                variant_group=c.variant_group,
-                variant_name=c.variant_name,
-                per_variant=ann.per_variant,
-                per_variant_group=ann.per_variant_group,
-            )
-        )
-    try:
-        return NotebookDag.from_cells(
-            analyses,
-            variant_active_selections=nb.variant_active_selections,
-            variant_modes=nb.variant_modes,
-        )
-    except ValueError:
-        return None
-
-
 def _codes(cell: CellState, nb: NotebookState) -> list[str]:
-    return [d.code for d in validate_cell_annotations(cell, nb, _dag_of(nb))]
+    return [d.code for d in validate_cell_annotations(cell, nb)]
 
 
 class TestSweepValidation:
@@ -177,7 +151,6 @@ class TestSweepDag:
     """DAG resolution in sweep mode: all variants run; downstream fans in."""
 
     def _cells(self):
-        from strata.notebook.dag import CellAnalysisWithId
 
         return [
             CellAnalysisWithId(id="load", defines=["X"], references=[]),
@@ -199,7 +172,6 @@ class TestSweepDag:
         ]
 
     def _sweep_dag(self):
-        from strata.notebook.dag import NotebookDag
 
         return NotebookDag.from_cells(self._cells(), variant_modes={"model": "sweep"})
 
@@ -237,7 +209,6 @@ class TestSweepDag:
         assert len(res.members) == 2
 
     def test_switch_mode_still_excludes_inactive(self):
-        from strata.notebook.dag import NotebookDag
 
         dag = NotebookDag.from_cells(self._cells(), variant_active_selections={"model": "rf"})
         assert dag.inactive_cells == {"m_logreg"}
@@ -807,13 +778,12 @@ class TestSweepDagReviewFixes:
     """Asymmetric defines across variants and intra-group self-reference."""
 
     def _dag(self, cells):
-        from strata.notebook.dag import NotebookDag
 
         return NotebookDag.from_cells(cells, variant_modes={"model": "sweep"})
 
     def test_asymmetric_defines_only_wire_defining_members(self):
         # vb also defines `extra`; a downstream of `extra` must fan in only to vb.
-        from strata.notebook.dag import CellAnalysisWithId, SweepProducer
+        from strata.notebook.dag import SweepProducer
 
         cells = [
             CellAnalysisWithId(id="load", defines=["X"], references=[]),
@@ -843,7 +813,6 @@ class TestSweepDagReviewFixes:
     def test_intra_group_self_reference_no_sibling_edges(self):
         # A refinement member references the group's own var; must not depend on
         # siblings (would otherwise wire spurious intra-group edges).
-        from strata.notebook.dag import CellAnalysisWithId
 
         cells = [
             CellAnalysisWithId(id="base", defines=["preds"], references=[]),
@@ -868,12 +837,16 @@ class TestSweepDagReviewFixes:
         assert "va" not in dag.cell_upstream["vb"]
 
 
-def test_sweep_cells_are_not_batchable(tmp_path):
+def test_sweep_cells_are_not_batchable(tmp_path, monkeypatch):
     """Sweep members and sweep consumers run single-cell, not batched."""
     from unittest.mock import MagicMock
 
+    from strata.notebook import executor as executor_module
     from strata.notebook.dag import SweepProducer
     from strata.notebook.executor import is_cell_batchable
+
+    # The mocked notebook has nothing to analyze; no cell here has an annotation error.
+    monkeypatch.setattr(executor_module, "blocking_diagnostic", lambda *args: None)
 
     executor = MagicMock()
     executor.session.notebook_state.variant_modes = {"model": "sweep"}
@@ -976,21 +949,18 @@ class TestSweepRestEndpoint:
 
 class TestPerVariantParsing:
     def test_bare_sets_flag_no_group(self):
-        from strata.notebook.annotations import parse_annotations
 
         ann = parse_annotations("# @per_variant\nscore = ev(preds)\n")
         assert ann.per_variant is True
         assert ann.per_variant_group is None
 
     def test_named_group(self):
-        from strata.notebook.annotations import parse_annotations
 
         ann = parse_annotations("# @per_variant model\nscore = ev(preds)\n")
         assert ann.per_variant is True
         assert ann.per_variant_group == "model"
 
     def test_absent(self):
-        from strata.notebook.annotations import parse_annotations
 
         ann = parse_annotations("score = ev(preds)\n")
         assert ann.per_variant is False
@@ -1119,7 +1089,6 @@ class TestPerVariantDag:
     """DAG fan-out: a @per_variant cell's outputs become a fan-out SweepProducer."""
 
     def _cells(self, *, per_variant_group=None, eval_refs=("preds",), extra=()):
-        from strata.notebook.dag import CellAnalysisWithId
 
         cells = [
             CellAnalysisWithId(id="load", defines=["X"], references=[]),
@@ -1149,7 +1118,6 @@ class TestPerVariantDag:
         return cells
 
     def _dag(self, **kw):
-        from strata.notebook.dag import NotebookDag
 
         return NotebookDag.from_cells(self._cells(**kw), variant_modes={"model": "sweep"})
 
@@ -1176,7 +1144,6 @@ class TestPerVariantDag:
 
     def test_a_plain_redefinition_before_the_cell_ends_the_fanout(self):
         """Each instance would read the plain value, so there is nothing to fan out over."""
-        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 
         cells = self._cells()
         cells.insert(3, CellAnalysisWithId(id="reset", defines=["preds"], references=[]))
@@ -1186,7 +1153,6 @@ class TestPerVariantDag:
         assert dag.cell_upstream["eval"] == ["reset"]
 
     def test_a_cell_that_defines_nothing_still_fans_out(self):
-        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 
         cells = self._cells()
         cells[-1] = CellAnalysisWithId(
@@ -1201,7 +1167,6 @@ class TestPerVariantDag:
         assert prod == "eval"
 
     def test_ambiguous_two_groups_stays_plain(self):
-        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 
         cells = [
             CellAnalysisWithId(id="load", defines=["X"], references=[]),
@@ -1231,7 +1196,6 @@ class TestPerVariantDag:
         assert dag.variable_producer["score"] == "eval"
 
     def test_collapse_consumer_sees_one_edge(self):
-        from strata.notebook.dag import CellAnalysisWithId
 
         dag = self._dag(
             extra=(CellAnalysisWithId(id="compare", defines=["report"], references=["score"]),)
@@ -1242,7 +1206,7 @@ class TestPerVariantDag:
         assert "score" in dag.consumed_variables["eval"]
 
     def test_chained_fanout_zips_through(self):
-        from strata.notebook.dag import CellAnalysisWithId, SweepProducer
+        from strata.notebook.dag import SweepProducer
 
         dag = self._dag(
             extra=(
