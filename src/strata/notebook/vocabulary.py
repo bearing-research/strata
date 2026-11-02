@@ -489,13 +489,26 @@ def _validate_app(value: str, context: cg.ValidationContext) -> list[cg.Diagnost
     ]
 
 
-def _validate_stochastic(on: bool, context: cg.ValidationContext) -> list[cg.Diagnostic]:
+def _parse_nocache(directives: list[cg.Directive]) -> Any:
+    """``@nocache`` and ``@stochastic`` in source order, as ``parse_annotations`` reads
+    them: each ``@nocache`` line sets it, and an ``@stochastic`` that is on turns it on."""
+    errors = [e for e in map(_problem, directives) if e is not None]
+    nocache = False
+    for directive in directives:
+        if directive.key == "nocache":
+            nocache = _flag([directive])
+        elif _flag([directive]):
+            nocache = True
+    return _partial(nocache, errors)
+
+
+def _validate_stochastic(_nocache: bool, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     """``@stochastic`` with an explicit ``@nocache off``: the last readable line of each."""
     cell = context.cell
-    nocache = [
-        d for d in cg.GRAMMAR.directives(cell.source) if d.key == "nocache" and _problem(d) is None
-    ]
-    if not on or not nocache or _flag(nocache):
+    directives = cg.GRAMMAR.directives(cell.source)
+    stochastic = [d for d in directives if d.key == "stochastic"]
+    nocache = [d for d in directives if d.key == "nocache" and _problem(d) is None]
+    if not stochastic or not _flag(stochastic) or not nocache or _flag(nocache):
         return []
     return [
         cg.Diagnostic(
@@ -621,13 +634,6 @@ def _strata_annotations() -> list[cg.Annotation]:
             in_key=True,
             effects=lambda names: [cg.Binds(names), cg.Defines(names), cg.Keeps(names)],
         ),
-        cg.Annotation(
-            "stochastic",
-            parse=_lenient(_flag),
-            effects=lambda on: [cg.NoCache()] if on else [],
-            in_key=False,
-            validate=_validate_stochastic,
-        ),
         cg.Annotation("model", parse=_lenient(_last_value), in_key=False),
         cg.Annotation("temperature", parse=_lenient(_last_number(float)), in_key=False),
         cg.Annotation("output", parse=_lenient(_last_value), in_key=False),
@@ -661,7 +667,13 @@ def strata_vocabulary() -> cg.Vocabulary:
     core = (
         core.replace("name", parse=_lenient(_last_named))
         .replace("after", parse=_lenient(_after_ids, stacked=True))
-        .replace("nocache", parse=_lenient(_flag))
+        # ``@stochastic`` is read with it: the two are one switch, set line by line.
+        .replace(
+            "nocache",
+            parse=_parse_nocache,
+            also_reads=("stochastic",),
+            validate=_validate_stochastic,
+        )
         .replace("per_variant", parse=_lenient(_first_token))
         .replace("variant", parse=_parse_variant)
     )
@@ -713,6 +725,7 @@ def _parsed_values(source: str, language: str) -> tuple[dict[str, Any], tuple[cg
 def annotations_from(values: dict[str, Any], directives: list[cg.Directive]) -> CellAnnotations:
     """``parse_annotations``'s result, built from the vocabulary's parsed values."""
     variant = values.get("variant")
+    stochastic = [d for d in directives if d.key == "stochastic"]
     # Each line sets ``nocache`` as it is read, and an ``@stochastic`` that is on turns it on.
     nocache = False
     for directive in directives:
@@ -740,7 +753,7 @@ def annotations_from(values: dict[str, Any], directives: list[cg.Directive]) -> 
         live=values.get("live", False),
         sql=values.get("sql"),
         cache=values.get("cache"),
-        stochastic=values.get("stochastic", False),
+        stochastic=_flag(stochastic) if stochastic else False,
         nocache=nocache,
         variant=VariantAnnotation(group=variant[0], name=variant[1]) if variant else None,
         per_variant="per_variant" in values,
@@ -1019,9 +1032,10 @@ class NoNamesAnalyzer:
 
 
 class WidgetAnalyzer:
-    """A widget cell: each control is a define."""
+    """A widget cell: each control is a define. Host-keyed: its generic hash covers
+    every fingerprint staleness draws for it, the notebook's default mounts among them."""
 
-    owns_key = True
+    owns_key = False
 
     def analyze(self, cell: cg.Cell) -> cg.Analyzed:
         return cg.Analyzed(defines=list(analyze_widget_cell(cell.source).defines))

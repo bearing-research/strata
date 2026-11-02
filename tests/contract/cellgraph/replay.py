@@ -291,8 +291,8 @@ def _expected_plan(recorded: dict[str, Any], target: str) -> list[str]:
 @dataclass
 class Report:
     mismatches: list[Mismatch]
-    # (step, cell): recorded keys of a cell cellgraph does not plan, so it gives none.
-    unplannable_with_keys: list[tuple[int, str]]
+    # (step, cell): recorded keys of a cell under a dag_error, which cellgraph refuses.
+    structural_with_keys: list[tuple[int, str]]
     keyed: int
     host_keyed: int
 
@@ -300,7 +300,7 @@ class Report:
 def replay(name: str, workdir: Path) -> Report:
     trace = json.loads((record.TRACES / f"{name}.json").read_text())
     mismatches: list[Mismatch] = []
-    unplannable_with_keys: list[tuple[int, str]] = []
+    structural_with_keys: list[tuple[int, str]] = []
     keyed = host_keyed = 0
     ledger = _Ledger()
 
@@ -371,17 +371,18 @@ def replay(name: str, workdir: Path) -> Report:
 
             if "keys" not in expected:
                 continue
-            if not ca.plannable:
-                # Strata keys a cell it will not run; cellgraph does not key it at all.
-                if not _strata_blocks(recorded, cell_id):
-                    miss(index, cell_id, "plannable", True, False)
-                unplannable_with_keys.append((index, cell_id))
-                continue
+            if not ca.plannable and not _strata_blocks(recorded, cell_id):
+                miss(index, cell_id, "plannable", True, False)
             keys = expected["keys"]
             if ca.definition_key != keys["definition_key"]:
                 miss(
                     index, cell_id, "keys.definition_key", keys["definition_key"], ca.definition_key
                 )
+            if recorded["dag_error"] is not None:
+                # Strata has no DAG to key the cell on; the recorder keys it without
+                # upstreams, and cellgraph refuses it.
+                structural_with_keys.append((index, cell_id))
+                continue
             resolver = _Resolver(expected["resolved"])
             resolve = dict.fromkeys(_KIND_RESOLVED, resolver)
             published = published_from(recorded, ledger)
@@ -430,7 +431,7 @@ def replay(name: str, workdir: Path) -> Report:
                 if not run["cache_hit"] and result.digest in seen_before and not ca.nocache:
                     miss(index, cell_id, "cache decision", "miss", "a key published before")
 
-    return Report(mismatches, unplannable_with_keys, keyed, host_keyed)
+    return Report(mismatches, structural_with_keys, keyed, host_keyed)
 
 
 def _compare_key(miss, index, cell_id, part, recorded_keys, result) -> None:

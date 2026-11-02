@@ -8,6 +8,7 @@ the DAG, and which cells can run. The session keeps the result
 from __future__ import annotations
 
 import dataclasses
+import functools
 
 import cellgraph as cg
 
@@ -74,16 +75,33 @@ def analysis_with(
     cell: CellState, state: NotebookState, analysis: cg.Analysis | None = None
 ) -> cg.Analysis:
     """*analysis* when it read *cell* as it is; otherwise the notebook analyzed again with
-    *cell* in place of its namesake (or after the others, when it has none)."""
+    *cell* in place of its namesake (or after the others, when it has none).
+
+    The source *analysis* read is checked, not the state's: a source set on the state
+    and not yet analyzed is the cell as it is.
+    """
     current = state.get_cell(cell.id)
-    if (
-        analysis is not None
-        and current is not None
-        and current.source == cell.source
-        and cell.id in analysis.cells
-    ):
+    read = analysis.cells.get(cell.id) if analysis is not None else None
+    if current is not None and read is not None and read.source == cell.source:
+        assert analysis is not None
         return analysis
     cells = [cell if c.id == cell.id else c for c in state.cells]
     if current is None:
         cells.append(cell)
     return analyze_notebook(state, cells)
+
+
+@functools.lru_cache(maxsize=4096)
+def definition_key(source: str) -> str:
+    """The definition key of a cell with *source*: its own lines decide it."""
+    cell = cg.Cell(id="cell", source=source, language="python", meta={"language": "python"})
+    analysis = cg.analyze(
+        [cell],
+        vocabulary.strata_vocabulary(),
+        normalization=cg.NORMALIZE_LEGACY_1,
+        digest=cg.DIGEST_LEGACY_1,
+        analyzers=_analyzers(),
+    )
+    key = analysis.cells[cell.id].definition_key
+    assert key is not None
+    return key

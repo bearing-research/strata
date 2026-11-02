@@ -46,7 +46,8 @@ from strata.notebook.env import (
     compute_lockfile_hash,
     narrow_env_for_provenance,
 )
-from strata.notebook.graph import analyze_notebook
+from strata.notebook.graph import analysis_with, analyze_notebook
+from strata.notebook.keys import CellKey, InputNotFingerprinted, cell_key
 from strata.notebook.models import (
     AnnotationDiagnostic,
     CellLanguage,
@@ -56,7 +57,6 @@ from strata.notebook.models import (
     CellStatus,
     DatasetSpec,
     InputWeight,
-    MountMode,
     NotebookState,
     StalenessReason,
     VariantGroupState,
@@ -159,39 +159,10 @@ def stored_display(artifact: ArtifactVersion) -> tuple[dict[str, Any], int] | No
     return json.loads(params["display"]), int(params["display_count"])
 
 
-def _value_outlives_provenance(cell: CellState) -> bool:
-    """Whether a cell's value can change while its provenance hash does not.
-
-    True for ``# @nocache`` cells and cells with a read-write mount; their
-    downstream cache keys follow the bytes rather than the hash. Everything else
-    stays keyed on provenance, since bytes can differ across machines for the same
-    result and keying on them would split the team cache.
-    """
-    annotations = parse_annotations(cell.source)
-    if annotations.nocache:
-        return True
-    mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
-    return any(mount.mode == MountMode.READ_WRITE for mount in mounts)
-
-
 def cell_test_input_fingerprint(inputs: list[str], env_hash: str) -> str:
     """Fingerprint of a cell's provenance inputs, for its test result's stale flag."""
     stable = [without_empty_table_nonce(fingerprint) for fingerprint in inputs]
     return compute_provenance_hash(stable, "", env_hash)
-
-
-@dataclass(frozen=True)
-class VariantRead:
-    """The variants of a sweep-produced variable that a cell reads from one upstream.
-
-    ``fanout`` names instances of a ``# @per_variant`` upstream (``@variant=``
-    artifacts) rather than member cells; ``scalar`` binds the value itself
-    rather than a ``{variant: value}`` dict.
-    """
-
-    variants: tuple[str, ...]
-    scalar: bool
-    fanout: bool
 
 
 @dataclass(frozen=True)
@@ -857,6 +828,20 @@ class NotebookSession:
             gathered[cell_id] = self._outside_world_for(cell)
         return gathered
 
+    def _cell_key(
+        self, analysis: cg.Analysis, cell_id: str, outside: _OutsideWorld, env_hash: str
+    ) -> CellKey:
+        return cell_key(
+            self,
+            analysis,
+            cell_id,
+            mounts=outside.mount_fingerprints,
+            tables=outside.table_fingerprints,
+            fetches=outside.fetch_fingerprints,
+            datasets=outside.dataset_fingerprints,
+            env_hash=env_hash,
+        )
+
     def _outside_world_for(self, cell: Any) -> _OutsideWorld:
         """One cell's outside-world fingerprints."""
         mount_fingerprints, has_rw_mount = self._collect_mount_fingerprints(cell)
@@ -924,19 +909,28 @@ class NotebookSession:
                 stale_cells.add(cell_id)
                 continue
 
-            source_hash = compute_source_hash(cell.source)
+            assert self.analysis is not None  # set with the DAG
+            # A source set and not yet analyzed is keyed as it is.
+            analysis = analysis_with(cell, self.notebook_state, self.analysis)
+            source_hash = analysis.cells[cell_id].definition_key
+            assert source_hash is not None
             env_hash = self.cell_env_hash(cell)
 
-            # Same per-variable artifact selection as execution.
-            input_hashes = self._collect_input_hashes(cell_id)
             # Missing only if the DAG moved meanwhile, a race this walk loses anyway (the
             # next flush recomputes), so read our own rather than skip the cell's mounts.
             outside = prefetched.get(cell_id)
             if outside is None:
                 outside = self._outside_world_for(cell)
+            # Same per-variable artifact selection as execution.
+            try:
+                key = self._cell_key(analysis, cell_id, outside, env_hash)
+            except InputNotFingerprinted:
+                # Prefetched before an edit added the input.
+                outside = self._outside_world_for(cell)
+                key = self._cell_key(analysis, cell_id, outside, env_hash)
 
             inputs = cell_provenance_inputs(
-                input_hashes,
+                key.upstream,
                 outside.mount_fingerprints,
                 outside.table_fingerprints,
                 outside.fetch_fingerprints,
@@ -949,7 +943,7 @@ class NotebookSession:
                 stale_cells.add(cell_id)
                 continue
 
-            provenance_hash = compute_provenance_hash(inputs, source_hash, env_hash)
+            provenance_hash = key.provenance_hash
 
             # Per-variable hashes: sha256(f"{provenance_hash}:{var_name}").
             cached_outputs = self._resolve_cached_outputs(cell_id, provenance_hash)
@@ -1976,166 +1970,6 @@ class NotebookSession:
         """The variables ``cell_id`` reads from ``upstream_id``, as the DAG wired them."""
         return self.dag.wired_variables(cell_id, upstream_id) if self.dag is not None else set()
 
-    def _shadowed_reads(self, cell: Any) -> set[str]:
-        """Names ``cell`` reads that some upstream defines but is not wired to feed it."""
-        reads = set(cell.references) | set(cell.builtin_references)
-        shadowed: set[str] = set()
-        for upstream_id in cell.upstream_ids:
-            upstream_cell = self.notebook_state.get_cell(upstream_id)
-            if upstream_cell is not None:
-                shadowed |= (reads & set(upstream_cell.defines)) - self.wired_variables(
-                    cell.id, upstream_id
-                )
-        return shadowed
-
-    def _collect_input_hashes(self, cell_id: str, *, variant: str | None = None) -> list[str]:
-        """Provenance hashes from upstream artifacts, with sweep refs grouped.
-
-        The executor's provenance and the causality explanations both use this, so a
-        sweep downstream's stored hash and its staleness recheck agree. A sweep-group
-        reference collapses to one deterministic ``sweep:<var>:<name>=<hash>;...``
-        string; otherwise the cell would be perpetually stale.
-
-        With ``variant`` set, a fan-out instance's scalar binds from its own group
-        (what ``_load_input_blobs`` binds) key on that variant alone, as
-        ``variant:<var>:<name>=<hash>``, so another variant's change leaves the
-        instance cached.
-        """
-        cell = self.notebook_state.get_cell(cell_id)
-        if cell is None or not cell.upstream_ids:
-            return []
-
-        hashes: list[str] = []
-        sweep_buckets: dict[str, list[tuple[str, str]]] = {}
-
-        store = self.artifact_manager.artifact_store
-
-        def _hash_from_uri(uri: str, *, by_content: bool) -> str | None:
-            try:
-                artifact_id, version = self._parse_artifact_uri(uri)
-            except ValueError:
-                return None
-            artifact = store.get_artifact(artifact_id, version)
-            if artifact is None:
-                return None
-            if not by_content:
-                return artifact.provenance_hash
-            # The producer's provenance hash is the same every run, so only the bytes say
-            # the value changed. Recorded at finalize; backfilled once if absent.
-            digest = artifact.content_sha256 or store.content_digest(artifact_id, version)
-            if digest is None:
-                return artifact.provenance_hash
-            return derive_subkey(artifact.provenance_hash, f"content={digest}")
-
-        # For a content-keyed producer only the variables this cell reads are inputs,
-        # so a changing sibling it never reads doesn't miss the cache. Provenance-keyed
-        # producers keep every variable: their hashes move together, and narrowing
-        # would rekey every existing downstream cell.
-        reads = set(cell.references) | set(cell.builtin_references)
-        # A shadowed name loads from its wired producer only; recording which one rekeys
-        # a cell that cached the shadowed value, and leaves every other key as it was.
-        shadowed = self._shadowed_reads(cell)
-
-        for upstream_id in cell.upstream_ids:
-            upstream_cell = self.notebook_state.get_cell(upstream_id)
-            if upstream_cell is None:
-                continue
-            by_content = _value_outlives_provenance(upstream_cell)
-            wired = self.wired_variables(cell_id, upstream_id) if shadowed else set()
-
-            uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
-            if not uri_items and upstream_cell.artifact_uri:
-                uri_items = [(None, upstream_cell.artifact_uri)]
-
-            for var_name, uri in uri_items:
-                if var_name is None:
-                    provenance_hash = _hash_from_uri(uri, by_content=by_content)
-                    if provenance_hash is not None:
-                        hashes.append(provenance_hash)
-                    continue
-                if by_content and var_name not in reads:
-                    continue
-                read = self._variant_read(cell_id, upstream_id, var_name, variant)
-                if read is not None and read.fanout:
-                    # A @per_variant cell keeps one URI per variable (last variant stored), so
-                    # key on the instances the cell reads.
-                    instances = []
-                    for variant_name in read.variants:
-                        instance = store.get_latest_version(
-                            self.artifact_manager.cell_artifact_id(
-                                upstream_id, var_name, variant=variant_name
-                            )
-                        )
-                        if instance is None:
-                            continue  # not run yet: the loader drops it too
-                        instance_hash = _hash_from_uri(
-                            f"strata://artifact/{instance.id}@v={instance.version}",
-                            by_content=by_content,
-                        )
-                        instances.append(f"{variant_name}={instance_hash}")
-                    prefix = "variant" if read.scalar else "fanout"
-                    hashes.append(f"{prefix}:{var_name}:{';'.join(sorted(instances))}")
-                    continue
-                if read is not None and not read.variants:
-                    continue  # another variant's cell: not worth a lookup, let alone a digest
-                provenance_hash = _hash_from_uri(uri, by_content=by_content)
-                if provenance_hash is None:
-                    continue
-                if read is not None:
-                    for variant_name in read.variants:
-                        if read.scalar:
-                            hashes.append(f"variant:{var_name}:{variant_name}={provenance_hash}")
-                        else:
-                            sweep_buckets.setdefault(var_name, []).append(
-                                (variant_name, provenance_hash)
-                            )
-                    continue
-                hashes.append(provenance_hash)
-                if var_name in shadowed and var_name in wired:
-                    hashes.append(f"wired:{var_name}={provenance_hash}")
-
-        for var_name, pairs in sweep_buckets.items():
-            joined = ";".join(f"{name}={h}" for name, h in sorted(pairs))
-            hashes.append(f"sweep:{var_name}:{joined}")
-
-        return hashes
-
-    def _fanout_group_of(self, cell_id: str) -> str | None:
-        """The sweep group ``cell_id`` fans out over, if it is a fan-out cell."""
-        fanout = self.dag.fanout_cells.get(cell_id) if self.dag else None
-        return fanout.group if fanout is not None else None
-
-    def _variant_read(
-        self, cell_id: str, upstream_id: str, var_name: str, variant: str | None = None
-    ) -> VariantRead | None:
-        """What ``cell_id`` (instance ``variant`` of a fan-out) reads of ``var_name`` from
-        ``upstream_id``, or None when no sweep produces it there.
-
-        The one place the binding rule lives: the loader, the input hashes and the
-        recorded inputs all follow it, so a cell's key, its inputs and its lineage agree.
-        An instance binds its own group as a scalar of its own variant (a chained fan-out
-        zips by name); every other sweep read is the whole ``{variant: value}`` dict.
-        """
-        from strata.notebook.dag import SweepProducer
-
-        producer = self.dag.read_producer(cell_id, var_name) if self.dag else None
-        if not isinstance(producer, SweepProducer):
-            return None
-        own = variant is not None and producer.group == self._fanout_group_of(cell_id)
-        if producer.fanout_cell is not None:
-            if producer.fanout_cell != upstream_id:
-                return None
-            names = (variant,) if own else tuple(name for name, _ in producer.variants)
-            return VariantRead(variants=names, scalar=own, fanout=True)
-        member = next((name for name, cid in producer.variants if cid == upstream_id), None)
-        if member is None:
-            return None
-        if own:
-            return VariantRead(
-                variants=(member,) if member == variant else (), scalar=True, fanout=False
-            )
-        return VariantRead(variants=(member,), scalar=False, fanout=False)
-
     def _collect_input_refs(self, cell_id: str, *, variant: str | None = None) -> dict[str, str]:
         """Upstream artifact refs in the form the lineage walk resolves.
 
@@ -2153,7 +1987,10 @@ class NotebookSession:
         if cell is None or not cell.upstream_ids:
             return {}
 
-        shadowed = self._shadowed_reads(cell)
+        analysis = self.analysis
+        if analysis is None:
+            return {}
+        shadowed = analysis.shadowed_reads(cell_id)
 
         refs: dict[str, str] = {}
         for upstream_id in cell.upstream_ids:
@@ -2167,7 +2004,7 @@ class NotebookSession:
             for var_name, uri in upstream_cell.artifact_uris.items():
                 if var_name in unread:
                     continue
-                read = self._variant_read(cell_id, upstream_id, var_name, variant)
+                read = analysis.variant_read(cell_id, upstream_id, var_name, variant)
                 if read is not None and read.fanout:
                     # A fan-out keeps one URI per variable (last variant stored); record the
                     # instances the cell read.

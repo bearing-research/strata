@@ -16,6 +16,7 @@ from strata.notebook.executor import CellExecutor
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+from tests.notebook.conftest import key_upstream
 
 # References are sorted, and ``upstream_ids`` follow them: with ``a`` c0 comes first, with
 # ``z`` c1 does. The old loaders kept the first (batch) or the last (single cell, SQL,
@@ -187,12 +188,12 @@ async def test_a_shadowed_read_keys_on_its_wired_producer(tmp_path: Path, other:
     session = _session(tmp_path, other, "python", f"out = state * 100 + {other}\n")
     await _run_upstreams(session, other)
 
-    hashes = session._collect_input_hashes("c2")
+    hashes = key_upstream(session, "c2")
     assert [h for h in hashes if h.startswith("wired:")] == [
         f"wired:state={_var_hash(session, 'c1', 'state')}"
     ]
     # c1 reads state from its only definer: no record, the key it always had.
-    assert sorted(session._collect_input_hashes("c1")) == sorted(
+    assert sorted(key_upstream(session, "c1")) == sorted(
         [_var_hash(session, "c0", "state"), _var_hash(session, "c0", other)]
     )
 
@@ -215,7 +216,7 @@ async def test_a_plain_chain_keeps_its_provenance(tmp_path: Path):
         assert (await executor.execute_cell(cell_id, source)).success
 
     x_hash = _var_hash(session, "c0", "x")
-    assert session._collect_input_hashes("c1") == [x_hash]
+    assert key_upstream(session, "c1") == [x_hash]
     cell = session.notebook_state.get_cell("c1")
     env_hash = compute_execution_env_hash(
         session.path,

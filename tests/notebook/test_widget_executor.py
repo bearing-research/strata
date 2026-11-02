@@ -16,6 +16,7 @@ from strata.notebook.parser import parse_notebook
 from strata.notebook.runtime_state import load_runtime_state, save_runtime_state
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import add_cell_to_notebook, create_notebook
+from tests.notebook.conftest import key_upstream
 
 _WIDGET_SRC = "alpha = slider(0, 1, default=0.5)\nmode = dropdown(['a', 'b'], default='b')"
 
@@ -145,7 +146,7 @@ def test_serialize_cell_no_widget_block_for_python(widget_session):
 async def test_widget_publishes_artifact_uris_for_downstream_provenance(widget_session):
     """A widget value change must reach downstream provenance.
 
-    Without each control's artifact on ``cell.artifact_uris``, ``_collect_input_hashes`` finds no
+    Without each control's artifact on ``cell.artifact_uris``, a downstream key finds no
     upstream artifact and the consumer cache-hits stale output when a slider moves.
     """
     from strata.notebook.runtime_state import persist_cell_widget_values
@@ -158,14 +159,14 @@ async def test_widget_publishes_artifact_uris_for_downstream_provenance(widget_s
     assert "mode" in controls.artifact_uris
 
     # The downstream consumer resolves the widget's value artifacts as inputs.
-    hashes_before = widget_session._collect_input_hashes("consume")
+    hashes_before = key_upstream(widget_session, "consume")
     assert hashes_before, "downstream saw no upstream widget artifacts"
 
     # Change the control value and re-materialize the widget cell.
     persist_cell_widget_values(widget_session.path, "controls", {"alpha": 0.9})
     await executor.execute_cell("controls", _WIDGET_SRC)
 
-    hashes_after = widget_session._collect_input_hashes("consume")
+    hashes_after = key_upstream(widget_session, "consume")
     assert hashes_after and hashes_after != hashes_before, (
         "downstream input hashes did not change when the widget value changed — "
         "its provenance would cache-hit the stale output"

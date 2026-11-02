@@ -54,6 +54,7 @@ from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv, uv_env
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
+from strata.notebook.graph import analysis_with
 from strata.notebook.harness_user import (
     HarnessUser,
     LocalExecutionRefused,
@@ -68,6 +69,7 @@ from strata.notebook.harness_user import (
     write_run_file,
 )
 from strata.notebook.immutability import MutationWarning
+from strata.notebook.keys import cell_key
 from strata.notebook.layout import WORK_DIR
 from strata.notebook.lifeline import lifeline_command, lifeline_handoff
 from strata.notebook.local_runs import (
@@ -115,8 +117,6 @@ from strata.notebook.process_tree import (
     terminate_subprocess_tree,
 )
 from strata.notebook.provenance import (
-    cell_provenance_inputs,
-    compute_provenance_hash,
     compute_source_hash,
     safe_filename_stem,
 )
@@ -170,6 +170,8 @@ from strata.observability.tracing import current_trace_context, trace_span
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
+    import cellgraph as cg
+
     from strata.notebook.datasets import DatasetInput
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.session import NotebookSession
@@ -406,6 +408,10 @@ class _CellProvenance:
     intermediates are kept so callers can reuse them.
     """
 
+    # What it is keyed by: the cell (an instance of it, for a fan-out) in an analysis.
+    session: NotebookSession
+    analysis: cg.Analysis
+    cell_id: str
     annotations: CellAnnotations
     source_hash: str
     runtime_env: dict[str, str]
@@ -435,10 +441,16 @@ class _CellProvenance:
     input_weights: list[InputWeight] = field(default_factory=list)
     # Whether a large read was confirmed (Amber item 90); ``None`` with no threshold set.
     read_confirmation: ReadConfirmation | None = None
+    # The fan-out instance this keys, whose key carries its ``variant=`` subkey.
+    instance: str | None = None
 
-    def over_inputs(self, input_hashes: list[str]) -> _CellProvenance:
-        """The same provenance over other input hashes: a fan-out instance's."""
-        return self._rehashed(input_hashes=input_hashes)
+    def for_instance(self, variant: str) -> _CellProvenance:
+        """The same provenance for one fan-out instance, over the inputs it reads."""
+        return self._rehashed(instance=variant)
+
+    def rekeyed(self) -> _CellProvenance:
+        """The same provenance over what the upstreams publish now."""
+        return self._rehashed()
 
     def over_mounts(self, prepared: Mapping[str, ResolvedMount]) -> _CellProvenance:
         """The same provenance over the mounts as a run prepared them, the listing it reads.
@@ -456,20 +468,18 @@ class _CellProvenance:
 
     def _rehashed(self, **changes: Any) -> _CellProvenance:
         changed = replace(self, **changes)
-        return replace(
-            changed,
-            provenance_hash=compute_provenance_hash(
-                cell_provenance_inputs(
-                    changed.input_hashes,
-                    changed.mount_fingerprints,
-                    changed.table_fingerprints,
-                    changed.fetch_fingerprints,
-                    changed.dataset_fingerprints,
-                ),
-                changed.source_hash,
-                changed.env_hash,
-            ),
+        key = cell_key(
+            changed.session,
+            changed.analysis,
+            changed.cell_id,
+            mounts=changed.mount_fingerprints,
+            tables=changed.table_fingerprints,
+            fetches=changed.fetch_fingerprints,
+            datasets=changed.dataset_fingerprints,
+            env_hash=changed.env_hash,
+            instance=changed.instance,
         )
+        return replace(changed, provenance_hash=key.provenance_hash, input_hashes=key.upstream)
 
     def reads(
         self, mounts_moved: dict[str, int | None], tables_moved: dict[str, int]
@@ -1381,6 +1391,17 @@ class CellExecutor:
             return cell_timeout_message(timeout_seconds, set_by="notebook")
         return cell_timeout_message(timeout_seconds)
 
+    def _analysis_for(self, cell_id: str, source: str) -> cg.Analysis:
+        """The session's analysis, or one that read *cell_id* as *source*."""
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            raise ValueError(f"Cell {cell_id} not found")
+        return analysis_with(
+            cell.model_copy(update={"source": source}),
+            self.session.notebook_state,
+            self.session.analysis,
+        )
+
     def _resolve_effective_runtime_env(
         self,
         cell_id: str,
@@ -1412,7 +1433,7 @@ class CellExecutor:
         recomputes; drifting any ingredient (runtime env, worker identity, mount
         fingerprints, env-key narrowing) leaves the cell stale forever. Optional
         precomputed arguments let callers skip resolving mounts again. A fan-out
-        instance's is this, ``over_inputs`` the inputs that instance reads.
+        instance's is this ``for_instance``.
         """
         if annotations is None:
             annotations = parse_annotations(source)
@@ -1438,10 +1459,14 @@ class CellExecutor:
         if machine_cache is None and listings:
             weights = await self._ask_worker_cache(effective_worker, mount_specs, weights, listings)
 
-        source_hash = compute_source_hash(source)
+        cell_state = self.session.notebook_state.get_cell(cell_id)
+        # Keyed on the source this run executes, which a run started before the editor's
+        # flush has and the session does not yet.
+        analysis = self._analysis_for(cell_id, source)
+        source_hash = analysis.cells[cell_id].definition_key
+        assert source_hash is not None  # every cell has one
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
         runtime_identity = worker_runtime_identity(self.session.notebook_state, effective_worker)
-        cell_state = self.session.notebook_state.get_cell(cell_id)
         declared_env_keys = set(annotations.env) | set(
             getattr(cell_state, "env_overrides", {}) or {}
         )
@@ -1456,7 +1481,6 @@ class CellExecutor:
             provenance_env,
             runtime_identity=runtime_identity,
         )
-        input_hashes = self._collect_input_hashes(cell_id)
         (
             config,
             table_fingerprints,
@@ -1510,32 +1534,34 @@ class CellExecutor:
                 config=self._lake_config(),
             ),
         )
-        provenance_hash = compute_provenance_hash(
-            cell_provenance_inputs(
-                input_hashes,
-                mount_fingerprints,
-                table_fingerprints,
-                fetch_fingerprints,
-                dataset_fingerprints,
-            ),
-            source_hash,
-            env_hash,
+        key = cell_key(
+            self.session,
+            analysis,
+            cell_id,
+            mounts=mount_fingerprints,
+            tables=table_fingerprints,
+            fetches=fetch_fingerprints,
+            datasets=dataset_fingerprints,
+            env_hash=env_hash,
         )
 
         return _CellProvenance(
+            session=self.session,
+            analysis=analysis,
+            cell_id=cell_id,
             annotations=annotations,
             source_hash=source_hash,
             runtime_env=runtime_env,
             effective_worker=effective_worker,
             runtime_identity=runtime_identity,
             env_hash=env_hash,
-            input_hashes=input_hashes,
+            input_hashes=key.upstream,
             mount_specs=mount_specs,
             mount_fingerprints=mount_fingerprints,
             has_rw_mount=has_rw_mount,
             table_fingerprints=table_fingerprints,
             table_snapshots=table_snapshots,
-            provenance_hash=provenance_hash,
+            provenance_hash=key.provenance_hash,
             fetch_fingerprints=fetch_fingerprints,
             fetched=fetched,
             fetch_error=fetch_error,
@@ -1642,9 +1668,7 @@ class CellExecutor:
             # instance keys on the inputs it reads.
             prov = cell_provenance or await self._compute_cell_provenance(cell_id, source)
             if fanout_variant is not None:
-                prov = prov.over_inputs(
-                    self._collect_input_hashes(cell_id, fanout_variant=fanout_variant)
-                )
+                prov = prov.for_instance(fanout_variant)
             source_hash = prov.source_hash
             runtime_env = prov.runtime_env
             effective_worker = prov.effective_worker
@@ -1655,10 +1679,8 @@ class CellExecutor:
             init = self._branch_inits.get(cell_id)
 
             def run_key(prov: _CellProvenance) -> str:
+                # An instance's key is scoped to its variant, so each caches independently.
                 key = prov.provenance_hash
-                # Scope provenance to this variant so each instance caches independently.
-                if fanout_variant is not None:
-                    key = derive_subkey(key, f"variant={fanout_variant}")
                 # A branch is a new computation: its initial state is bound, never defined.
                 if init is not None:
                     key = derive_subkey(key, f"init={init}")
@@ -5274,7 +5296,7 @@ class CellExecutor:
 
         if result_dict.get("success"):
             # Publish each control's value artifact onto ``artifact_uris``, as a Python cell does
-            # for its outputs. Otherwise downstream ``_collect_input_hashes`` sees no upstream
+            # for its outputs. Otherwise a downstream key sees no upstream
             # artifact and cache-hits the old output: dragging a slider never updates downstream.
             cell = self.session.notebook_state.get_cell(cell_id)
             if cell is not None:
@@ -5387,20 +5409,6 @@ class CellExecutor:
             )
 
     # ------------------------------------------------------------------
-    # ② Collect input hashes (upstream artifacts are guaranteed to exist)
-    # ------------------------------------------------------------------
-
-    def _collect_input_hashes(
-        self, cell_id: str, *, fanout_variant: str | None = None
-    ) -> list[str]:
-        """Provenance hashes from upstream artifacts, after ``_materialize_upstreams``.
-
-        Delegates to ``session._collect_input_hashes`` so the hash matches what
-        ``compute_staleness`` recomputes.
-        """
-        return self.session._collect_input_hashes(cell_id, variant=fanout_variant)
-
-    # ------------------------------------------------------------------
     # ④-a Load input blobs (guaranteed to exist after step ①)
     # ------------------------------------------------------------------
 
@@ -5413,9 +5421,9 @@ class CellExecutor:
     ) -> dict[str, Any]:
         """Write upstream variable blobs from the artifact store into *output_dir*.
 
-        Upstreams must already be materialized. A sweep read binds what
-        ``session._variant_read`` says: with ``fanout_variant`` set, the cell's own
-        group as that variant's scalar; every other sweep read as a
+        Upstreams must already be materialized. A sweep read binds what cellgraph's
+        ``variant_read`` says, the rule the key reads by: with ``fanout_variant`` set,
+        the cell's own group as that variant's scalar; every other sweep read as a
         ``{variant: value}`` dict.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
@@ -5489,6 +5497,8 @@ class CellExecutor:
             if resolved:
                 spec["injected"] = resolved
 
+        analysis = self.session.analysis
+        assert analysis is not None  # set with the DAG
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
@@ -5505,9 +5515,7 @@ class CellExecutor:
             for var_name in referenced_vars:
                 artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"
                 try:
-                    read = self.session._variant_read(
-                        cell_id, upstream_id, var_name, fanout_variant
-                    )
+                    read = analysis.variant_read(cell_id, upstream_id, var_name, fanout_variant)
                     if read is not None:
                         # Partial on a missing variant. A failed one never gets here:
                         # _materialize_upstreams raises first. A collapse of a fan-out binds
@@ -8140,8 +8148,7 @@ class CellExecutor:
                 "content_type": content_type,
                 "file": file_name,
             }
-            # Populate artifact_uris, as single-cell does, so later batch cells resolve via
-            # _collect_input_hashes.
+            # Populate artifact_uris, as single-cell does, so later batch cells key on them.
             uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
             cell.artifact_uris[var_name] = uri
             cell.artifact_uri = uri
@@ -8173,7 +8180,7 @@ class CellExecutor:
         try:
             # Over the inputs as they are now: the cells before it in the batch persisted.
             prov = (
-                base.over_inputs(self._collect_input_hashes(cell_id))
+                base.rekeyed()
                 if base is not None
                 else await self._compute_cell_provenance(cell_id, source)
             )
