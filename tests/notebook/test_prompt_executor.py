@@ -710,3 +710,55 @@ async def test_a_provider_timeout_names_itself(tmp_path):
 
     assert result["success"] is False
     assert result["error"] == "LLM call failed: ReadTimeout"
+
+
+@pytest.mark.asyncio
+async def test_a_cell_after_a_prompt_cell_reads_its_new_answer(tmp_path):
+    """``strata run`` keys a cell over the answer its prompt upstream just gave."""
+    import argparse
+    import contextlib
+    import io
+    import json
+    import shutil
+    from pathlib import Path
+
+    from strata.notebook import cli
+    from strata.notebook import prompt_executor as module
+    from strata.notebook.llm import LlmCompletionResult
+    from tests.conftest import prepared_venv
+
+    scenario = Path(__file__).parents[1] / "contract" / "cellgraph" / "scenarios" / "prompt"
+    nb_dir = tmp_path / "prompt"
+    shutil.copytree(scenario, nb_dir)
+    prepared_venv(nb_dir)
+
+    async def echo(config, messages, **kwargs):
+        content = f"[{config.model}] {messages[-1]['content']}"
+        return LlmCompletionResult(
+            content=content, input_tokens=1, output_tokens=1, model=config.model
+        )
+
+    async def echo_stream(config, messages, **kwargs):
+        yield {"type": "done", "result": await echo(config, messages)}
+
+    async def run() -> dict:
+        args = argparse.Namespace(
+            path=str(nb_dir), force=False, no_sync=True, timeout=None, format="json", quiet=True
+        )
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await cli._run_async(args)
+        return {cell["id"]: cell for cell in json.loads(out.getvalue())["cells"]}
+
+    with (
+        mock.patch.object(module, "chat_completion", echo),
+        mock.patch.object(module, "chat_completion_stream", echo_stream),
+    ):
+        first = await run()
+        toml = nb_dir / "notebook.toml"
+        toml.write_text(toml.read_text().replace('model = "m-one"', 'model = "m-two"'))
+        second = await run()
+
+    assert first["d3"]["stdout"] == "[m-one] Tell me about graphs.\n"
+    assert second["d3"]["cache_hit"] is False
+    assert second["d3"]["stdout"] == "[m-two] Tell me about graphs.\n"

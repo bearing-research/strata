@@ -20,15 +20,9 @@ from strata.notebook import vocabulary  # noqa: E402
 from strata.notebook.annotations import ANNOTATION_KEYS  # noqa: E402
 from tests.contract.cellgraph import record, replay  # noqa: E402
 
-# A Strata bug the prompt trace records: under `strata run` the executor keys a prompt
-# cell's downstream without the prompt's output, so after the [ai] model changes, d3 is
-# served its old answer as a hit. Staleness and cellgraph key it on the output, under a
-# key never published, so they cannot reproduce the hit. Fixing the executor
-# re-records the trace and empties this.
-KNOWN_RECORDED_BUGS = {
-    ("prompt", 3, "d3", "cache decision"),
-    ("prompt", 4, "d3", "cache decision"),
-}
+# What a trace records that is a Strata bug, as (scenario, step, cell, part): the replay
+# may differ there. Fixing the bug re-records the trace and removes its entry.
+KNOWN_RECORDED_BUGS: set[tuple[str, int, str, str]] = set()
 
 
 def assert_replays(name, tmp_path):

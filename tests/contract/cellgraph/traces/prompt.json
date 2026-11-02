@@ -159,23 +159,7 @@
    }
   },
   {
-   "causality": {
-    "d3": {
-     "details": [
-      {
-       "cell_id": "p2",
-       "cell_name": "answer",
-       "from_package_version": null,
-       "from_version": null,
-       "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "input_changed"
-      }
-     ],
-     "reason": "upstream"
-    }
-   },
+   "causality": {},
    "cells": {
     "d3": {
      "analysis": {
@@ -218,13 +202,13 @@
      },
      "run": {
       "cache_hit": false,
-      "provenance_hash": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "provenance_hash": "dd25ac7d35929d10da7951a6c4571a0d2f2c7e72dd35ad391434e5ccd43e6dc5",
       "status": "ok",
       "stdout": "[m-one] Tell me about graphs.\n"
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "ready"
      }
     },
     "p2": {
@@ -587,23 +571,7 @@
    }
   },
   {
-   "causality": {
-    "d3": {
-     "details": [
-      {
-       "cell_id": "p2",
-       "cell_name": "answer",
-       "from_package_version": null,
-       "from_version": null,
-       "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "input_changed"
-      }
-     ],
-     "reason": "upstream"
-    }
-   },
+   "causality": {},
    "cells": {
     "d3": {
      "analysis": {
@@ -645,14 +613,14 @@
       "tables": []
      },
      "run": {
-      "cache_hit": true,
-      "provenance_hash": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "cache_hit": false,
+      "provenance_hash": "1c9bb2ba2afcd568c3c30e3cd2a87a4fef80b6d35614a27ba845de21ac92022f",
       "status": "ok",
-      "stdout": "[m-one] Tell me about graphs.\n"
+      "stdout": "[m-two] Tell me about graphs.\n"
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "ready"
      }
     },
     "p2": {
@@ -813,23 +781,7 @@
    }
   },
   {
-   "causality": {
-    "d3": {
-     "details": [
-      {
-       "cell_id": "p2",
-       "cell_name": "answer",
-       "from_package_version": null,
-       "from_version": null,
-       "package": null,
-       "to_package_version": null,
-       "to_version": null,
-       "type": "input_changed"
-      }
-     ],
-     "reason": "upstream"
-    }
-   },
+   "causality": {},
    "cells": {
     "d3": {
      "analysis": {
@@ -872,13 +824,13 @@
      },
      "run": {
       "cache_hit": true,
-      "provenance_hash": "e7d3ac462516862e9f73a3326477e81761f727d51510e9ec533435b5083d765c",
+      "provenance_hash": "1c9bb2ba2afcd568c3c30e3cd2a87a4fef80b6d35614a27ba845de21ac92022f",
       "status": "ok",
-      "stdout": "[m-one] Tell me about graphs.\n"
+      "stdout": "[m-two] Tell me about graphs.\n"
      },
      "staleness": {
       "reasons": [],
-      "status": "idle"
+      "status": "ready"
      }
     },
     "p2": {
