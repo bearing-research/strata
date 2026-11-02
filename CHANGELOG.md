@@ -8,6 +8,11 @@ exhaustive commit history.
 ## Unreleased
 
 ### Changed
+- **The notebook's analysis runs on cellgraph.** Annotations, the names each
+  cell defines and reads, the DAG and annotation validation now come from
+  [cellgraph](https://github.com/bearing-research/cellgraph), a new runtime
+  dependency (`cellgraph>=0.2,<0.3`). The diagnostics, the DAG and every cell
+  key are the same as before. (#1358)
 - **Staleness is faster outside the server.** The CLI, the TUI and the MCP
   server read the config from disk, and a staleness pass read it twice for
   every cell. It is now read only for a cell with a mount, a table or SQL, so
