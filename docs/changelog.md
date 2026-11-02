@@ -127,6 +127,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **A request refused for its Host counts as unmatched.** With the frontend
+  installed, `/metrics/prometheus` counted a request the Host allowlist
+  refused under the frontend's route, `/{full_path}`. It is now
+  `route="unmatched"`, as without the frontend. (#1362)
 - **A SQL cell's connection problem points at the line in force.** With
   more than one `# @sql` line, the later connection wins, but its
   diagnostics pointed at the first `@sql` line. They now point at the last
