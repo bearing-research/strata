@@ -19,6 +19,7 @@ import pytest
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
+from strata.notebook import prewarm
 from strata.notebook.routes import get_session_manager
 from strata.notebook.routes import router as notebook_router
 from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
@@ -229,6 +230,18 @@ def create_test_app() -> FastAPI:
     app.include_router(notebook_router)
     app.include_router(notebook_ws_router)
     return app
+
+
+@contextmanager
+def serving_client(app: FastAPI):
+    """A client whose requests share one event loop, as a server's do.
+
+    A bare ``TestClient`` runs each request on its own loop, which cancels a pre-warm hint
+    the request left running, mid-connect.
+    """
+    with TestClient(app) as client:
+        yield client
+        client.portal.call(prewarm.settled)
 
 
 @pytest.fixture
