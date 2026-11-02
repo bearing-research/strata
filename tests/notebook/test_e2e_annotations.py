@@ -14,6 +14,7 @@ from tests.notebook.e2e_fixtures import (
     create_test_app,
     execute_cell_and_wait,
     open_notebook_session,
+    serving_client,
     ws_connect,
 )
 
@@ -21,9 +22,7 @@ from tests.notebook.e2e_fixtures import (
 @pytest.fixture
 def setup():
     """Create app, client, and temp directory."""
-    app = create_test_app()
-    client = TestClient(app)
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with serving_client(create_test_app()) as client, tempfile.TemporaryDirectory() as tmpdir:
         yield client, Path(tmpdir)
 
 
