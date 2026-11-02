@@ -2460,21 +2460,21 @@ class CellExecutor:
         ``{variant: value}`` dict. Succeeds iff every variant succeeds.
         Upstreams are materialised once, not per variant.
         """
-        # Each variant writes the same table: an overwrite would keep only the last variant's.
-        overwrites = [
-            spec.table
+        # Each variant writes the same table: an overwrite or sync would keep only the last's.
+        replacing = [
+            spec
             for spec in parse_annotations(source).table_writes
-            if spec.mode == "overwrite"
+            if spec.mode in ("overwrite", "sync")
         ]
-        if overwrites:
+        if replacing:
             return CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
                 error=(
-                    f"@write_table {overwrites[0]} overwrite is not supported on a @per_variant "
-                    "cell: each variant would replace the one before it. Append, merge on a "
-                    "column that tells the variants apart, or overwrite from a cell that reads "
-                    "the {variant: value} dict"
+                    f"@write_table {replacing[0].table} {replacing[0].mode} is not supported on "
+                    "a @per_variant cell: each variant would remove the rows of the one before "
+                    "it. Append, merge on a column that tells the variants apart, or write from "
+                    "a cell that reads the {variant: value} dict"
                 ),
                 execution_method="fanout",
             )

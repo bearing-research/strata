@@ -275,7 +275,7 @@
           "write_table_unreadable",
           "error",
           1,
-          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge|sync`, with `on=<col>,...` after merge or sync), so the cell does not run."
         ]
       ],
       "p": []
@@ -1226,7 +1226,7 @@
           "write_table_unreadable",
           "error",
           1,
-          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge|sync`, with `on=<col>,...` after merge or sync), so the cell does not run."
         ]
       ],
       "p": []
@@ -2274,7 +2274,7 @@
           "write_table_unreadable",
           "error",
           1,
-          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge|sync`, with `on=<col>,...` after merge or sync), so the cell does not run."
         ]
       ],
       "p": []
@@ -3400,7 +3400,7 @@
           "write_table_unreadable",
           "error",
           1,
-          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge|sync`, with `on=<col>,...` after merge or sync), so the cell does not run."
         ],
         [
           "sql_connection_missing",
@@ -4625,7 +4625,7 @@
           "write_table_unreadable",
           "error",
           1,
-          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge`, with `on=<col>,...` after merge), so the cell does not run."
+          "`@write_table bad` could not be read (expected `@write_table <var> <catalog>:<namespace>.<table> append|overwrite|merge|sync`, with `on=<col>,...` after merge or sync), so the cell does not run."
         ]
       ],
       "p": []

@@ -395,7 +395,7 @@ configuration surface.
 
 Python cells: `name`, `worker`, `timeout`, `env KEY=VALUE`,
 `mount <name> <uri> [ro|rw]`, `table`, `fetch`, `dataset`,
-`write_table <var> <table> append|overwrite|merge`, `output_dir <name>`,
+`write_table <var> <table> append|overwrite|merge|sync`, `output_dir <name>`,
 `nocache`, `stochastic`, `after`, `loop max_iter= carry= [start_from=]`,
 `loop_until <expr>`.
 

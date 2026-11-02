@@ -557,20 +557,20 @@ def _parse_table_annotation(value: str) -> TableSpec | None:
 
 
 def _parse_write_table_annotation(value: str) -> TableWriteSpec | None:
-    """Parse ``<variable> <table> append|overwrite|merge [on=<col>,...]``.
+    """Parse ``<variable> <table> append|overwrite|merge|sync [on=<col>,...]``.
 
     The mode is required, since append and overwrite differ in what they destroy; merge
-    needs ``on``.
+    and sync need ``on``.
     """
     parts = value.split()
-    if len(parts) < 3 or parts[2] not in ("append", "overwrite", "merge"):
+    if len(parts) < 3 or parts[2] not in ("append", "overwrite", "merge", "sync"):
         return None
     on: list[str] = []
     for extra in parts[3:]:
         if not extra.startswith("on="):
             return None
         on = [col for col in extra[len("on=") :].split(",") if col]
-    if (parts[2] == "merge") != bool(on):
+    if (parts[2] in ("merge", "sync")) != bool(on):
         return None
     try:
         return TableWriteSpec(variable=parts[0], table=parts[1], mode=parts[2], on=on)
