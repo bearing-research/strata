@@ -8,6 +8,10 @@ exhaustive commit history.
 ## Unreleased
 
 ### Changed
+- **A cell's keys come from cellgraph.** A cell's provenance hash is now
+  computed by cellgraph, over the same inputs as before, so a cell that was
+  ready stays ready. One exception: a cell whose `@table` lines name the same
+  table twice counts it once, so it runs once more after the upgrade. (#1360)
 - **The notebook's analysis runs on cellgraph.** Annotations, the names each
   cell defines and reads, the DAG and annotation validation now come from
   [cellgraph](https://github.com/bearing-research/cellgraph), a new runtime

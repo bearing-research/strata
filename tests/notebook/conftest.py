@@ -452,3 +452,20 @@ def r_notebook_renv(r_notebook):
         return notebook_dir, session
 
     return _make
+
+
+def key_upstream(session, cell_id: str) -> list[str]:
+    """The upstream components *cell_id*'s key covers."""
+    from strata.notebook.keys import cell_key
+
+    key = cell_key(
+        session,
+        session.analysis,
+        cell_id,
+        mounts=[],
+        tables=[],
+        fetches=[],
+        datasets=[],
+        env_hash="",
+    )
+    return key.upstream

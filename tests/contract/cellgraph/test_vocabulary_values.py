@@ -112,6 +112,7 @@ def test_every_scenario_cell_reads_as_parse_annotations(name, tmp_path):
 
 
 def test_the_edges_cover_every_key():
-    assert set(EDGES) | {"app", "validate_retries", "output_schema"} == {
-        a.key for a in strata_vocabulary()
-    }
+    # ``stochastic`` is read by ``nocache``'s annotation, ``loop_until`` by ``loop``'s.
+    assert set(EDGES) | {"app", "validate_retries", "output_schema", "loop_until"} == set(
+        strata_vocabulary().keys
+    )

@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from tests.notebook.conftest import key_upstream
+
 adbc_sqlite = pytest.importorskip("adbc_driver_sqlite")
 
 
@@ -516,7 +518,7 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
     assert sql_result.success, sql_result.error
 
     # The SQL cell's artifact must be discoverable from the upstream
-    # cell-state map; this is what ``_collect_input_hashes`` walks.
+    # cell-state map; this is what the downstream key reads.
     sql_cell = next(c for c in session.notebook_state.cells if c.id == "sql")
     assert sql_cell.artifact_uri, (
         "SQL cell artifact_uri must be set so downstream cells can find the upstream artifact"
@@ -525,7 +527,7 @@ async def test_sql_cell_artifact_uri_visible_to_downstream_python(tmp_path):
 
     # And the downstream Python cell's input hashes pick up the SQL artifact's
     # provenance hash.
-    input_hashes = session._collect_input_hashes("py")
+    input_hashes = key_upstream(session, "py")
     assert len(input_hashes) == 1, (
         f"downstream py cell should see 1 upstream input hash; got {input_hashes!r}"
     )
@@ -903,7 +905,7 @@ async def test_sql_write_cell_honors_at_name_for_artifact_key(tmp_path):
     # Analyzer-side defines list reflects the @name override.
     assert cell.defines == ["seed_status"]
     # Executor-side artifact map uses the same key so a downstream
-    # ``_collect_input_hashes`` walk lands on the right URI.
+    # key lands on the right URI.
     assert "seed_status" in cell.artifact_uris
     assert "result" not in cell.artifact_uris
 

@@ -491,11 +491,9 @@ def _keys(
     component is the one staleness drew. When it gathered nothing (no DAG), the cell's
     is read here, as staleness itself does for a cell it missed.
     """
-    from vestigo.provenance import derive_subkey
-
+    from strata.notebook.keys import cell_key
     from strata.notebook.provenance import (
         cell_provenance_inputs,
-        compute_provenance_hash,
         compute_source_hash,
     )
 
@@ -503,12 +501,12 @@ def _keys(
     env_hash = session.cell_env_hash(cell)
     if outside is None:
         outside = session._outside_world_for(cell)
-    external = [
-        outside.mount_fingerprints,
-        outside.table_fingerprints,
-        outside.fetch_fingerprints,
-        outside.dataset_fingerprints,
-    ]
+    fingerprints = {
+        "mounts": outside.mount_fingerprints,
+        "tables": outside.table_fingerprints,
+        "fetches": outside.fetch_fingerprints,
+        "datasets": outside.dataset_fingerprints,
+    }
     resolved = {
         "mounts": outside.mount_fingerprints,
         "has_rw_mount": outside.has_rw_mount,
@@ -517,31 +515,27 @@ def _keys(
         "datasets": outside.dataset_fingerprints,
     }
 
-    def key(upstream: list[str]) -> dict[str, Any]:
-        inputs = cell_provenance_inputs(upstream, *external)
+    def key(instance: str | None = None) -> dict[str, Any]:
+        found = cell_key(
+            session, session.analysis, cell.id, **fingerprints, env_hash=env_hash, instance=instance
+        )
+        upstream, digest = found.upstream, found.provenance_hash
         return {
             # As assembled, but sorted: their order follows set iteration, which varies
             # by process, and the key sorts them anyway.
             "upstream_hashes": sorted(upstream),
-            "input_hashes": sorted(inputs),
-            "execution_key": compute_provenance_hash(inputs, source_hash, env_hash),
+            "input_hashes": sorted(cell_provenance_inputs(upstream, *fingerprints.values())),
+            "execution_key": digest,
         }
 
     keys: dict[str, Any] = {
         "definition_key": source_hash,
         "source_hash": source_hash,
         "env_hash": env_hash,
-        **key(session._collect_input_hashes(cell.id)),
+        **key(),
     }
     if variants:
-        instances = {}
-        for variant in variants:
-            instance = key(session._collect_input_hashes(cell.id, variant=variant))
-            instance["execution_key"] = derive_subkey(
-                instance["execution_key"], f"variant={variant}"
-            )
-            instances[variant] = instance
-        keys["instances"] = instances
+        keys["instances"] = {variant: key(variant) for variant in variants}
     return keys, resolved
 
 

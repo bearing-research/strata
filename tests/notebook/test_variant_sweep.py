@@ -19,6 +19,7 @@ from strata.notebook.models import CellState, NotebookState, VariantGroupConfig
 from strata.notebook.parser import parse_notebook
 from strata.notebook.writer import create_notebook, set_variant_mode
 from tests.conftest import prepared_venv
+from tests.notebook.conftest import key_upstream
 
 
 class TestVariantGroupConfigMode:
@@ -603,8 +604,11 @@ class TestPerVariantInstanceKeys:
         assert resolved.count("ev") == 1
 
     def test_the_binding_rule(self, tmp_path):
-        """The loader, the input hashes and the recorded inputs all follow ``_variant_read``."""
-        from strata.notebook.session import NotebookSession, VariantRead
+        """The loader, the input hashes and the recorded inputs all follow cellgraph's
+        ``variant_read``."""
+        from cellgraph import VariantRead
+
+        from strata.notebook.session import NotebookSession
 
         nb = self._notebook(
             tmp_path,
@@ -621,7 +625,8 @@ class TestPerVariantInstanceKeys:
             ["g", "h"],
         )
         session = NotebookSession(parse_notebook(nb), nb)
-        read = session._variant_read
+        assert session.analysis is not None
+        read = session.analysis.variant_read
 
         assert read("ev", "k", "k", "a") is None
         # Its own group: a scalar of its own variant, and nothing of another's cell.
@@ -708,7 +713,7 @@ class TestSweepReadBeforeARedefinition:
         session.compute_staleness()
         assert session.notebook_state.get_cell("report").status == "ready"
         # Keyed on the group, and never batched, where the dict would not form.
-        assert any(h.startswith("sweep:val:") for h in session._collect_input_hashes("report"))
+        assert any(h.startswith("sweep:val:") for h in key_upstream(session, "report"))
         report = session.notebook_state.get_cell("report")
         assert is_cell_batchable(CellExecutor(session), report) is False
 

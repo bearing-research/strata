@@ -68,10 +68,10 @@ snapshot holds:
   diagnostics (code, severity, line); the DAG's edges, topological order, variant
   groups, inactive cells, fan-out cells, consumed variables, and `dag_error`;
 - **keys:** the definition key (`compute_source_hash`), and the execution key with
-  its parts (source hash, env hash, the upstream hashes as
-  `session._collect_input_hashes` assembles them, and the full sorted input list),
-  per cell and per fan-out instance (`instances`). The parts come from the calls
-  `compute_staleness` makes;
+  its parts (source hash, env hash, the upstream hashes as Strata assembled them,
+  and the full sorted input list), per cell and per fan-out instance (`instances`).
+  The parts come from the calls `compute_staleness` makes. Recorded by the code the
+  keys moved out of; re-recording now runs `strata.notebook.keys.cell_key`;
 - **host-keyed:** for SQL and prompt cells, on run steps, every
   `compute_sql_provenance_hash` / `compute_prompt_provenance_hash` call their
   executor made and its inputs, recorded by a spy that calls through. These keys
@@ -142,7 +142,7 @@ snapshot holds:
   `artifact_uri` is never written to disk, but a loop cell whose carry no cell reads
   keeps only its carry's cell-level `artifact_uri` (`executor.py`,
   `_set_loop_artifact_uris`), so its `@after` dependent's key takes the cell-level
-  branch of `_collect_input_hashes`. That record lives only in the session that ran,
+  branch of the upstream assembly. That record lives only in the session that ran,
   so it shows in run-step snapshots, not after a reopen.
 - **`prompt` uses a stub,** not a model: `chat_completion` and
   `chat_completion_stream` echo the model name and the rendered prompt, as the
