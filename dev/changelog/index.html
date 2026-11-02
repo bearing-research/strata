@@ -3942,6 +3942,10 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A cell after a prompt cell reads the answer it just gave.</strong> Under
+  <code>strata run</code>, the cell was keyed without the prompt's answer, so after the
+  notebook's <code>[ai]</code> model changed it was a cache hit and printed the old
+  model's answer. It now runs again on the new one. (#1363)</li>
 <li><strong>A request refused for its Host counts as unmatched.</strong> With the frontend
   installed, <code>/metrics/prometheus</code> counted a request the Host allowlist
   refused under the frontend's route, <code>/{full_path}</code>. It is now
