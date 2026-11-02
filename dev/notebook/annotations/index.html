@@ -3399,14 +3399,18 @@ the run fails with a clear error.</p>
 <h2 id="write_table">@write_table<a class="headerlink" href="#write_table" title="Permanent link">&para;</a></h2>
 <p>Write one of the cell's variables into an Iceberg table when the run succeeds:
 a cleaning cell that replaces a table, an ingest cell that appends each day's
-data, a cell that merges corrections by key.</p>
+data, a cell that merges corrections by key, a cell whose table should hold
+exactly what it produces.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># @write_table readings lake:lab.readings append</span>
 <a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">readings</span> <span class="o">=</span> <span class="n">load_today</span><span class="p">()</span>
 <a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
 <a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># @write_table fixes lake:lab.readings merge on=sample_id</span>
 <a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">fixes</span> <span class="o">=</span> <span class="n">corrections</span><span class="p">()</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="c1"># @write_table current lake:lab.current sync on=sample_id</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="n">current</span> <span class="o">=</span> <span class="n">latest_per_sample</span><span class="p">()</span>
 </code></pre></div>
-<p>Format: <code># @write_table &lt;var&gt; &lt;table&gt; append|overwrite|merge [on=&lt;col&gt;,...]</code>.
+<p>Format: <code># @write_table &lt;var&gt; &lt;table&gt; append|overwrite|merge|sync [on=&lt;col&gt;,...]</code>.
 The table is one of the forms <code>@table</code> takes, written with the server's
 catalogs and credentials (a catalog's <code>strata_credential</code> resolves against the
 notebook's environment first). The mode is required:</p>
@@ -3414,8 +3418,15 @@ notebook's environment first). The mode is required:</p>
 <li><code>append</code> adds the rows as a new snapshot;</li>
 <li><code>overwrite</code> replaces the table's contents;</li>
 <li><code>merge</code> upserts on the <code>on</code> columns: rows whose keys match are replaced, the
-  rest are added (pyiceberg's upsert, which commits more than one snapshot).</li>
+  rest are added;</li>
+<li><code>sync</code> merges on the <code>on</code> columns and deletes every row whose key the variable
+  no longer holds, so the table ends up holding what <code>overwrite</code> would leave, but
+  data files with no changed row stay. A table Strata did not write is refused,
+  as for <code>overwrite</code>.</li>
 </ul>
+<p>For <code>merge</code> and <code>sync</code> each row needs one key of its own, so a null or a repeated
+key fails the write. The change commits at once (as more than one snapshot, each
+naming the run), and nothing is committed when nothing differs.</p>
 <p>The variable must be an Arrow-representable table (a pandas, polars or pyarrow
 frame). A new table is created from its schema; an existing one gains new
 columns and widened types, and anything else is refused before writing.</p>
@@ -3431,13 +3442,14 @@ after each write. With several <code>@write_table</code> lines the tables are wr
 after another; if a later one fails, earlier ones keep their new snapshot and
 the next run writes them again.</p>
 <p><strong>Going back to earlier source</strong> (or inputs) is a cache hit for an <code>append</code>
-cell, which writes nothing. An <code>overwrite</code> or <code>merge</code> cell runs again instead,
-since the later run replaced or merged rows that only a write puts back; the
-table then holds what the cell shows.</p>
+cell, which writes nothing. An <code>overwrite</code>, <code>merge</code> or <code>sync</code> cell runs again
+instead, since the later run replaced, merged or deleted rows that only a write
+puts back; the table then holds what the cell shows.</p>
 <p>A <code># @loop</code> cell writes its final values once, after the last iteration, and
 not each iteration's. A <code># @per_variant</code> cell writes once per variant into the
-same table, so <code>overwrite</code> is refused there (each variant would replace the one
-before it); append, or merge on a column that tells the variants apart.</p>
+same table, so <code>overwrite</code> and <code>sync</code> are refused there (each variant would
+remove the rows of the one before it); append, or merge on a column that tells
+the variants apart.</p>
 <p>A cell should not also read the table it writes with <code>@table</code>: its own write
 changes the snapshot it read, so it would show out of date at once.</p>
 <p>A table Strata did not create (another writer's) is never overwritten, and is
