@@ -60,7 +60,7 @@ services:
 
   # Prometheus - Metrics collection
   prometheus:
-    image: prom/prometheus:v3.15.0
+    image: prom/prometheus:v3.15.1
     ports:
       - "9090:9090"
     volumes:
@@ -74,7 +74,7 @@ services:
 
   # Grafana - Dashboards and visualization
   grafana:
-    image: grafana/grafana:13.2.4
+    image: grafana/grafana:13.3.0
     ports:
       - "3000:3000"
     environment:
