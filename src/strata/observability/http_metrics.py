@@ -92,8 +92,11 @@ def _route_template(scope: Scope, match_scope: Scope, routes: Sequence[BaseRoute
 
     The router leaves an API route in the scope. Plain Starlette routes and mounts (the docs
     pages, ``/mcp``, the frontend's ``/assets``) leave none, or a mounted app's own inner
-    route, so those are matched again against the scope as it arrived.
+    route, so those are matched again against the scope as it arrived. A request answered
+    before routing (a refused Host) is unmatched, whatever the frontend's catch-all matches.
     """
+    if "router" not in scope:
+        return UNMATCHED_ROUTE
     route = scope.get("route")
     if isinstance(route, APIRoute) and scope.get("root_path", "") == match_scope["root_path"]:
         return route.path_format

@@ -131,6 +131,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `strata run`, the cell was keyed without the prompt's answer, so after the
   notebook's `[ai]` model changed it was a cache hit and printed the old
   model's answer. It now runs again on the new one. (#1363)
+- **A request refused for its Host counts as unmatched.** With the frontend
+  installed, `/metrics/prometheus` counted a request the Host allowlist
+  refused under the frontend's route, `/{full_path}`. It is now
+  `route="unmatched"`, as without the frontend. (#1362)
 - **A SQL cell's connection problem points at the line in force.** With
   more than one `# @sql` line, the later connection wins, but its
   diagnostics pointed at the first `@sql` line. They now point at the last

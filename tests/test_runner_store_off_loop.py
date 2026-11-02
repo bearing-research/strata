@@ -149,7 +149,9 @@ async def test_an_orphan_is_reclaimed_off_the_loop(runner, monkeypatch):
 
 async def test_the_heartbeat_renews_leases_off_the_loop(runner, monkeypatch):
     build_id, _ = _queue_build(runner)
-    assert runner.build_store.claim_build(build_id, runner._runner_id, lease_duration_seconds=1)
+    # Long enough not to lapse before the renewal (a lapsed lease is not renewed), and
+    # shorter than the runner's, so a renewal moves it.
+    assert runner.build_store.claim_build(build_id, runner._runner_id, lease_duration_seconds=30)
     before = runner.build_store.get_build(build_id).lease_expires_at
     runner._running_builds.add(build_id)
     gate = hold(monkeypatch, runner.build_store, "renew_lease")
