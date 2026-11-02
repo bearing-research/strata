@@ -525,18 +525,20 @@ def _validate_stochastic(_nocache: bool, context: cg.ValidationContext) -> list[
 
 def _validate_per_variant(group: Any, context: cg.ValidationContext) -> list[cg.Diagnostic]:
     source = context.cell.source
-    if not any(write.mode == "overwrite" for write in parse_annotations(source).table_writes):
+    writes = parse_annotations(source).table_writes
+    mode = next((w.mode for w in writes if w.mode in ("overwrite", "sync")), None)
+    if mode is None:
         return []
     return [
         cg.Diagnostic(
-            "per_variant_write_table_overwrite",
+            f"per_variant_write_table_{mode}",
             cg.Severity.ERROR,
-            "`@write_table ... overwrite` can't be combined with `@per_variant`: each variant "
-            "would replace the one before it. Append, merge on a column that tells the "
-            "variants apart, or overwrite from a cell that reads the {variant: value} dict.",
+            f"`@write_table ... {mode}` can't be combined with `@per_variant`: each variant "
+            f"would remove the rows of the one before it. Append, merge on a column that tells "
+            f"the variants apart, or {mode} from a cell that reads the {{variant: value}} dict.",
             context.cell.id,
             "per_variant",
-            _find_annotation_line(source, "write_table", "overwrite"),
+            _find_annotation_line(source, "write_table", mode),
         )
     ]
 
@@ -622,7 +624,7 @@ def _strata_annotations() -> list[cg.Annotation]:
                 _parse_write_table_annotation,
                 "write_table_unreadable",
                 "expected `@write_table <var> <catalog>:<namespace>.<table> "
-                "append|overwrite|merge`, with `on=<col>,...` after merge",
+                "append|overwrite|merge|sync`, with `on=<col>,...` after merge or sync",
             ),
             in_key=True,
             encode=lambda writes: [write.model_dump() for write in writes],
@@ -777,6 +779,7 @@ _VARIANT_CODES = (
 )
 _PER_VARIANT_CODES = (
     "per_variant_write_table_overwrite",
+    "per_variant_write_table_sync",
     "per_variant_on_variant_member",
     "per_variant_unknown_group",
     "per_variant_no_sweep_source",
@@ -818,7 +821,7 @@ def _strata_order(d: cg.Diagnostic) -> tuple[int, int]:
 
 
 # The group checks Strata skipped when the notebook had no DAG.
-_GROUP_CODES = frozenset(_PER_VARIANT_CODES[2:])
+_GROUP_CODES = frozenset(_PER_VARIANT_CODES[3:])
 
 
 def strata_diagnostics(

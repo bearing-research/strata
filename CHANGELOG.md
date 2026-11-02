@@ -7,6 +7,14 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Added
+- **`@write_table ... sync` keeps a table equal to what a cell produces.**
+  `# @write_table <var> <table> sync on=<col>,...` upserts on the key columns
+  and deletes the rows whose key the variable no longer holds. The table ends up
+  as an `overwrite` would leave it, but data files with no changed row stay, so
+  readers' cached row groups stay valid. Nothing is committed when nothing
+  differs. (#1371)
+
 ### Changed
 - **A cell's keys come from cellgraph.** A cell's provenance hash is now
   computed by cellgraph, over the same inputs as before, so a cell that was
@@ -124,6 +132,9 @@ exhaustive commit history.
   object-store backend against its emulator through Docker. (#1314)
 
 ### Fixed
+- **A `merge` on two key columns no longer kills the server.** `@write_table
+  ... merge on=a,b` with about 2,000 rows or more crashed the process in Arrow.
+  A merge now also refuses a null or missing key column before writing. (#1371)
 
 - **A stale cell says what really changed.** Change a file in a mounted folder
   and the cell no longer says its source changed: it says mount `data` changed.

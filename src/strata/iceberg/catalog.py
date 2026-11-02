@@ -15,8 +15,9 @@ import pyarrow as pa
 from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError, ValidationError
+from pyiceberg.expressions import And, BooleanExpression
 from pyiceberg.schema import Schema
-from pyiceberg.table import Table
+from pyiceberg.table import Table, upsert_util
 from pyiceberg.table.snapshots import Operation, Snapshot
 from vestigo.blob_store import azure_account_url
 
@@ -522,6 +523,81 @@ def _last_strata_write(table: Table) -> Snapshot | None:
     return max(written, key=lambda s: s.timestamp_ms)
 
 
+def _check_keys(data: pa.Table, on: Sequence[str], ref: str) -> None:
+    """A merge or sync compares rows by key, so every row needs one key of its own."""
+    missing = [column for column in on if column not in data.column_names]
+    if missing:
+        raise ValueError(f"{ref} has no key column {missing[0]!r}")
+    keys = data.select(list(on))
+    if any(column.null_count for column in keys.columns):
+        raise ValueError(f"{ref} has a null in its key columns {list(on)}")
+    if upsert_util.has_duplicate_rows(keys, list(on)):
+        raise ValueError(f"{ref} has two rows with one key on {list(on)}")
+
+
+def _covering(keys: pa.Table, on: list[str]) -> BooleanExpression:
+    """A filter matching every row with one of *keys*, and maybe others.
+
+    One ``In`` per column. An exact filter on two columns is an ``Or`` per key, and Arrow
+    dies (SIGILL) evaluating a few thousand of those, taking the server with it.
+    """
+    terms = [upsert_util.create_match_filter(keys, [column]) for column in on]
+    return terms[0] if len(terms) == 1 else And(*terms)
+
+
+def _by_key(rows: pa.Table, keys: pa.Table, on: list[str], join_type: str) -> pa.Table:
+    """*rows* with a key in *keys* (``left semi``) or without one (``left anti``).
+
+    Joins positions, since a join cannot carry the complex columns a row may have.
+    """
+    positions = rows.select(on).append_column(
+        "__strata_row", pa.array(range(rows.num_rows), pa.int64())
+    )
+    kept = positions.join(
+        keys.select(on).cast(rows.select(on).schema), keys=on, join_type=join_type
+    )
+    return rows.take(kept["__strata_row"])
+
+
+def _write_keyed(
+    table: Table,
+    data: pa.Table,
+    on: list[str],
+    properties: dict[str, str],
+    *,
+    delete_missing: bool,
+    table_uri: str,
+) -> None:
+    """Upsert *data* on *on*, deleting the rows it lacks if asked, in one commit.
+
+    Rows that did not change are not rewritten, nor are data files holding none that did.
+    """
+    current = table.scan(row_filter=_covering(data, on)).to_arrow()
+    matched = _by_key(current, data, on, "left semi")
+    updates = upsert_util.get_rows_to_update(data, matched.select(data.column_names), on)
+    inserts = _by_key(data, current, on, "left anti")
+
+    affected = updates.select(on).cast(current.select(on).schema)
+    if delete_missing:
+        existing = table.scan(selected_fields=tuple(on)).to_arrow().select(on)
+        if any(column.null_count for column in existing.columns):
+            raise ValueError(f"{table_uri} holds rows with a null in the key columns {on}")
+        affected = pa.concat_tables([affected, _by_key(existing, data, on, "left anti")])
+
+    with table.transaction() as tx:
+        if affected.num_rows:
+            # The covering filter can reach rows that are not changing: they go back as they were.
+            touched = _covering(affected, on)
+            kept = _by_key(table.scan(row_filter=touched).to_arrow(), affected, on, "left anti")
+            rewrite = pa.concat_tables([kept, updates], promote_options="permissive")
+            if rewrite.num_rows:
+                tx.overwrite(rewrite, overwrite_filter=touched, snapshot_properties=properties)
+            else:
+                tx.delete(touched, snapshot_properties=properties)
+        if inserts.num_rows:
+            tx.append(inserts, snapshot_properties=properties)
+
+
 class IcebergWriter:
     """Writes artifacts into Iceberg tables as snapshots that name them.
 
@@ -564,16 +640,17 @@ class IcebergWriter:
         promoted_by: str | None,
         alias: str | None = None,
         tenant: str | None = None,
-        mode: Literal["overwrite", "append", "merge"] = "overwrite",
+        mode: Literal["overwrite", "append", "merge", "sync"] = "overwrite",
         on: Sequence[str] = (),
         allow_foreign: bool = False,
     ) -> TableWrite:
-        """Write *data* into the table: as its current snapshot, appended, or merged on *on*.
+        """Write *data* into the table: as its current snapshot, appended, merged on *on*,
+        or synced on *on* (merged, and every row whose key *data* lacks deleted).
 
         ``tenant`` is the tenant the write is scoped to (None: unscoped, as in personal
         mode or for an admin). A scoped write may only change a table whose latest
         Strata write was for the same tenant. A table Strata never wrote is overwritten
-        never, and appended to or merged into only with ``allow_foreign``.
+        or synced never, and appended to or merged into only with ``allow_foreign``.
 
         Raises:
             TableOfAnotherTenant: The table's latest export belongs to another tenant.
@@ -592,6 +669,8 @@ class IcebergWriter:
         # Schema metadata is the writer's (pandas index layout, Strata's shape
         # tags) and means nothing to a table.
         data = data.replace_schema_metadata(None)
+        if mode in ("merge", "sync"):
+            _check_keys(data, on, f"{artifact_id}@v={version}")
 
         created = False
         try:
@@ -607,7 +686,7 @@ class IcebergWriter:
         else:
             last_write = _last_strata_write(table)
             if last_write is None:
-                if mode == "overwrite":
+                if mode in ("overwrite", "sync"):
                     raise ValueError(
                         f"{table_uri} holds data Strata did not write, and a later "
                         f"write replaces the table's contents -- refusing to "
@@ -636,7 +715,14 @@ class IcebergWriter:
             elif mode == "append":
                 table.append(data, snapshot_properties=properties)
             else:
-                table.upsert(data, join_cols=list(on), snapshot_properties=properties)
+                _write_keyed(
+                    table,
+                    data,
+                    list(on),
+                    properties,
+                    delete_missing=mode == "sync",
+                    table_uri=table_uri,
+                )
 
         snapshot = table.current_snapshot()
         assert snapshot is not None

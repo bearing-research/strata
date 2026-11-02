@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pytest
+from pyiceberg.exceptions import NoSuchTableError
 
 from strata.iceberg.catalog import SUMMARY_ARTIFACT_ID, SUMMARY_PROVENANCE, SUMMARY_VERSION
 from strata.notebook.annotations import parse_annotations
@@ -82,6 +83,10 @@ class TestTheAnnotation:
                 TableWriteSpec(variable="rows", table="lake:lab.readings", mode="append"),
             ),
             (
+                "now lake:lab.readings sync on=id",
+                TableWriteSpec(variable="now", table="lake:lab.readings", mode="sync", on=["id"]),
+            ),
+            (
                 "fixes lake:lab.readings merge on=id,day",
                 TableWriteSpec(
                     variable="fixes", table="lake:lab.readings", mode="merge", on=["id", "day"]
@@ -99,6 +104,7 @@ class TestTheAnnotation:
             "rows lake:lab.readings upsert",
             "rows lake:lab.readings merge",  # merge needs keys
             "rows lake:lab.readings append on=id",  # keys mean merge
+            "rows lake:lab.readings sync",  # sync needs keys
             "2rows lake:lab.readings append",
         ],
     )
@@ -408,6 +414,262 @@ class TestARevert:
 
 
 @windows
+class TestASyncedTable:
+    """The table ends up holding what the cell produced, by key, changing only what differs."""
+
+    @staticmethod
+    def _sync(uri: str, rows: str, on: str = "id") -> str:
+        return _source(uri, rows, "sync", f" on={on}")
+
+    async def test_a_row_the_cell_no_longer_produces_is_deleted(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1, 2, 3], "v": [10, 20, 30]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        second = self._sync(uri, '{"id": [2, 3, 4], "v": [20, 33, 40]}')
+        result = await _run(session, second)
+
+        assert result.success, result.error
+        assert _rows(warehouse) == [(2, 20), (3, 33), (4, 40)]
+        manager = session.get_artifact_manager()
+        artifact_id = manager.cell_artifact_id("w", "rows")
+        latest = manager.artifact_store.get_latest_version(artifact_id)
+        snapshots = list(_load(warehouse).snapshots())
+        summary = snapshots[-1].summary
+        assert summary.get(SUMMARY_VERSION) == str(latest.version)
+        assert summary.get(SUMMARY_PROVENANCE) == latest.provenance_hash
+        # Every snapshot of the commit names the run, the delete as well as the upsert.
+        assert {s.summary.get(SUMMARY_ARTIFACT_ID) for s in snapshots} == {artifact_id}
+
+    async def test_a_cell_producing_no_rows_empties_the_table(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1, 2], "v": [10, 20]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        empty = _source(
+            uri,
+            '{"id": pa.array([], pa.int64()), "v": pa.array([], pa.int64())}',
+            "sync",
+            " on=id",
+        )
+        result = await _run(session, empty)
+
+        assert result.success, result.error
+        assert _rows(warehouse) == []
+        manager = session.get_artifact_manager()
+        latest = manager.artifact_store.get_latest_version(manager.cell_artifact_id("w", "rows"))
+        summary = _load(warehouse).current_snapshot().summary
+        assert summary.get(SUMMARY_VERSION) == str(latest.version)
+
+    async def test_untouched_rows_keep_their_data_file(self, tmp_path):
+        """What sets it apart from overwrite: a reader's cached row groups stay valid."""
+        warehouse, uri = _warehouse(tmp_path)
+        first = _source(uri, '{"id": [1, 2], "v": [10, 20]}', "append")
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+        other = _source(uri, '{"id": [3], "v": [30]}', "append")
+        assert (await _run(session, other)).success
+        files = {task.file.file_path for task in _load(warehouse).scan().plan_files()}
+
+        changed = self._sync(uri, '{"id": [1, 2, 3], "v": [10, 20, 33]}')
+        assert (await _run(session, changed)).success
+
+        after = {task.file.file_path for task in _load(warehouse).scan().plan_files()}
+        assert _rows(warehouse) == [(1, 10), (2, 20), (3, 33)]
+        assert len(files & after) == 1
+        assert len(after - files) == 1
+
+    async def test_the_same_rows_commit_nothing(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1, 2], "v": [10, 20]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+        before = _load(warehouse).current_snapshot().snapshot_id
+
+        # New source, same rows: the cell runs, and the table has nothing to change.
+        same = first + "unrelated = 1\n"
+        result = await _run(session, same)
+
+        assert result.success, result.error
+        assert not result.cache_hit
+        assert _load(warehouse).current_snapshot().snapshot_id == before
+
+    async def test_a_composite_key_deletes_only_its_own_rows(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1, 1, 2], "day": [1, 2, 1], "v": [1, 2, 3]}', "id,day")
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        second = self._sync(uri, '{"id": [1, 2], "day": [1, 1], "v": [1, 3]}', "id,day")
+        result = await _run(session, second)
+
+        assert result.success, result.error
+        table = _load(warehouse).scan().to_arrow().sort_by("id")
+        assert table["id"].to_pylist() == [1, 2]
+        assert table["day"].to_pylist() == [1, 1]
+
+    async def test_a_row_its_changed_neighbours_share_key_values_with_stays(self, tmp_path):
+        """(1, 2) and (2, 1) are within the ``In`` filter of the two deleted keys, and stay."""
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(
+            uri,
+            '{"id": [1, 1, 2, 2], "day": [1, 2, 1, 2], "v": [11, 12, 21, 22], '
+            '"tags": [[11], [12], [21], [22]]}',
+            "id,day",
+        )
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        second = self._sync(
+            uri, '{"id": [1, 2], "day": [2, 1], "v": [12, 21], "tags": [[12], [21]]}', "id,day"
+        )
+        result = await _run(session, second)
+
+        assert result.success, result.error
+        table = _load(warehouse).scan().to_arrow().sort_by("v")
+        assert table.to_pylist() == [
+            {"id": 1, "day": 2, "v": 12, "tags": [12]},
+            {"id": 2, "day": 1, "v": 21, "tags": [21]},
+        ]
+
+    @pytest.mark.parametrize("mode", ["merge", "sync"])
+    async def test_thousands_of_composite_keys_do_not_kill_the_process(self, tmp_path, mode):
+        """An exact filter over this many pairs is a SIGILL in Arrow; a test fails by dying."""
+        warehouse, uri = _warehouse(tmp_path)
+        pairs = '"id": list(range(5000)), "day": list(range(5000))'
+        first = _source(uri, f'{{{pairs}, "v": [0] * 5000}}', mode, " on=id,day")
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        second = _source(uri, f'{{{pairs}, "v": [1] * 5000}}', mode, " on=id,day")
+        result = await _run(session, second)
+
+        assert result.success, result.error
+        assert set(_load(warehouse).scan().to_arrow()["v"].to_pylist()) == {1}
+
+    @pytest.mark.parametrize("mode", ["merge", "sync"])
+    @pytest.mark.parametrize(
+        ("rows", "message"),
+        [
+            ('{"id": [5, 5], "v": [1, 2]}', "two rows with one key"),
+            ('{"id": [5, None], "v": [1, 2]}', "null in its key columns"),
+            ('{"other": [5], "v": [1]}', "no key column 'id'"),
+        ],
+    )
+    async def test_rows_without_a_key_of_their_own_keep_the_table(
+        self, tmp_path, mode, rows, message
+    ):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1], "v": [10]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        result = await _run(session, _source(uri, rows, mode, " on=id"))
+
+        assert not result.success
+        assert message in result.error
+        assert _rows(warehouse) == [(1, 10)]
+
+    async def test_the_first_write_refuses_a_repeated_key_too(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        source = self._sync(uri, '{"id": [5, 5], "v": [1, 2]}')
+
+        result = await _run(_session(tmp_path, source), source)
+
+        assert not result.success
+        assert "two rows with one key" in result.error
+        with pytest.raises(NoSuchTableError):
+            _load(warehouse)
+
+    async def test_a_null_key_already_in_the_table_is_refused(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        first = _source(uri, '{"id": [1, None], "v": [10, 20]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        result = await _run(session, self._sync(uri, '{"id": [1], "v": [10]}'))
+
+        assert not result.success
+        assert "holds rows with a null in the key columns" in result.error
+        assert len(_rows(warehouse)) == 2
+
+    async def test_a_key_of_a_narrower_type_still_matches_its_rows(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1, 2], "v": [10, 20]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        narrower = self._sync(uri, '{"id": pa.array([2], pa.int32()), "v": [22]}')
+        result = await _run(session, narrower)
+
+        assert result.success, result.error
+        assert _rows(warehouse) == [(2, 22)]
+
+    async def test_a_table_strata_did_not_write_is_refused_even_when_foreign_writes_are_on(
+        self, tmp_path, monkeypatch
+    ):
+        from pyiceberg.catalog.sql import SqlCatalog
+
+        from strata.config import StrataConfig
+
+        warehouse, uri = _warehouse(tmp_path)
+        warehouse.mkdir()
+        catalog = SqlCatalog(
+            "strata", uri=f"sqlite:///{warehouse / 'catalog.db'}", warehouse=str(warehouse)
+        )
+        catalog.create_namespace("lab")
+        catalog.create_table(
+            "lab.readings", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())])
+        ).append(pa.table({"id": [7], "v": [70]}))
+        monkeypatch.setattr(
+            CellExecutor,
+            "_lake_config",
+            lambda self: StrataConfig(notebook_table_writes_foreign=True),
+        )
+        source = self._sync(uri, '{"id": [1], "v": [10]}')
+
+        result = await _run(_session(tmp_path, source), source)
+
+        assert not result.success
+        assert "did not write" in result.error
+        assert _rows(warehouse) == [(7, 70)]
+
+    async def test_a_merge_keeps_the_rows_it_does_not_name_and_commits_nothing_new_for_none(
+        self, tmp_path
+    ):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1, 2], "v": [10, 20]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+
+        merge = _source(uri, '{"id": [2, 3], "v": [22, 30]}', "merge", " on=id")
+        assert (await _run(session, merge)).success
+        assert _rows(warehouse) == [(1, 10), (2, 22), (3, 30)]
+        before = _load(warehouse).current_snapshot().snapshot_id
+
+        again = _source(uri, '{"id": [2, 3], "v": [22, 30]}', "merge", " on=id") + "other = 1\n"
+        result = await _run(session, again)
+
+        assert result.success, result.error
+        assert _load(warehouse).current_snapshot().snapshot_id == before
+
+    async def test_a_revert_puts_the_deleted_rows_back(self, tmp_path):
+        warehouse, uri = _warehouse(tmp_path)
+        first = self._sync(uri, '{"id": [1, 2], "v": [10, 20]}')
+        session = _session(tmp_path, first)
+        assert (await _run(session, first)).success
+        assert (await _run(session, self._sync(uri, '{"id": [2], "v": [20]}'))).success
+        assert _rows(warehouse) == [(2, 20)]
+
+        reverted = await _run(session, first)
+
+        assert reverted.success, reverted.error
+        assert _rows(warehouse) == [(1, 10), (2, 20)]
+
+
+@windows
 class TestAPerVariantCell:
     """Every variant writes the same table."""
 
@@ -439,6 +701,13 @@ class TestAPerVariantCell:
 
         assert not result.success
         assert result.error_code == "per_variant_write_table_overwrite"
+        assert not (warehouse / "catalog.db").exists()
+
+    async def test_a_sync_is_refused_before_any_variant_runs(self, tmp_path):
+        warehouse, result = await self._fanout(tmp_path, "sync on=id")
+
+        assert not result.success
+        assert result.error_code == "per_variant_write_table_sync"
         assert not (warehouse / "catalog.db").exists()
 
     async def test_an_append_keeps_every_variants_rows(self, tmp_path):

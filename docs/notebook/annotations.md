@@ -471,7 +471,8 @@ the run fails with a clear error.
 
 Write one of the cell's variables into an Iceberg table when the run succeeds:
 a cleaning cell that replaces a table, an ingest cell that appends each day's
-data, a cell that merges corrections by key.
+data, a cell that merges corrections by key, a cell whose table should hold
+exactly what it produces.
 
 ```python
 # @write_table readings lake:lab.readings append
@@ -479,9 +480,12 @@ readings = load_today()
 
 # @write_table fixes lake:lab.readings merge on=sample_id
 fixes = corrections()
+
+# @write_table current lake:lab.current sync on=sample_id
+current = latest_per_sample()
 ```
 
-Format: `# @write_table <var> <table> append|overwrite|merge [on=<col>,...]`.
+Format: `# @write_table <var> <table> append|overwrite|merge|sync [on=<col>,...]`.
 The table is one of the forms `@table` takes, written with the server's
 catalogs and credentials (a catalog's `strata_credential` resolves against the
 notebook's environment first). The mode is required:
@@ -489,7 +493,15 @@ notebook's environment first). The mode is required:
 - `append` adds the rows as a new snapshot;
 - `overwrite` replaces the table's contents;
 - `merge` upserts on the `on` columns: rows whose keys match are replaced, the
-  rest are added (pyiceberg's upsert, which commits more than one snapshot).
+  rest are added;
+- `sync` merges on the `on` columns and deletes every row whose key the variable
+  no longer holds, so the table ends up holding what `overwrite` would leave, but
+  data files with no changed row stay. A table Strata did not write is refused,
+  as for `overwrite`.
+
+For `merge` and `sync` each row needs one key of its own, so a null or a repeated
+key fails the write. The change commits at once (as more than one snapshot, each
+naming the run), and nothing is committed when nothing differs.
 
 The variable must be an Arrow-representable table (a pandas, polars or pyarrow
 frame). A new table is created from its schema; an existing one gains new
@@ -508,14 +520,15 @@ after another; if a later one fails, earlier ones keep their new snapshot and
 the next run writes them again.
 
 **Going back to earlier source** (or inputs) is a cache hit for an `append`
-cell, which writes nothing. An `overwrite` or `merge` cell runs again instead,
-since the later run replaced or merged rows that only a write puts back; the
-table then holds what the cell shows.
+cell, which writes nothing. An `overwrite`, `merge` or `sync` cell runs again
+instead, since the later run replaced, merged or deleted rows that only a write
+puts back; the table then holds what the cell shows.
 
 A `# @loop` cell writes its final values once, after the last iteration, and
 not each iteration's. A `# @per_variant` cell writes once per variant into the
-same table, so `overwrite` is refused there (each variant would replace the one
-before it); append, or merge on a column that tells the variants apart.
+same table, so `overwrite` and `sync` are refused there (each variant would
+remove the rows of the one before it); append, or merge on a column that tells
+the variants apart.
 
 A cell should not also read the table it writes with `@table`: its own write
 changes the snapshot it read, so it would show out of date at once.
