@@ -2,7 +2,7 @@ notebook_id = "cellgraph-sql"
 name = "sql"
 cells = [
     { id = "u1", file = "u1.py", language = "python", order = 0 },
-    { id = "s2", file = "s2.py", language = "sql", order = 1.0 },
+    { id = "s2", file = "s2.sql", language = "sql", order = 1.0 },
     { id = "d3", file = "d3.py", language = "python", order = 2.0 },
 ]
 workers = []
